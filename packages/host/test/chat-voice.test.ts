@@ -194,10 +194,7 @@ describe('chat voice glue', () => {
       },
     });
     expect(messages(events).map((m) => [m.role, m.content])).toEqual([
-      [
-        'system',
-        '[call] Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out',
-      ],
+      ['system', '[call] Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out'],
     ]);
     const t = ledger.totals(Date.UTC(2026, 9, 10));
     expect(t.monthCalls).toBe(1);

@@ -1192,14 +1192,15 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'feed.follow': { type: 'feed.follow', follow: [{ chatId: 'c1', after: -1 }] },
   'feed.reset': { type: 'feed.reset', feedPos: 12 },
   'host.reconciled': { type: 'host.reconciled', hostId: 'd1' },
-  'host.manager_adopt': {
-    type: 'host.manager_adopt',
+  'host.manager_handover': {
+    type: 'host.manager_handover',
     hostId: 'd1',
     epoch: 2,
-    handoff: 'user: hello',
     nextSeq: 7,
+    fromHostName: 'Laptop',
+    toHostName: 'Server',
+    message: 'user: hello',
   },
-  'host.manager_release': { type: 'host.manager_release', hostId: 'd1', epoch: 3 },
   'patch.chat_history.request': {
     type: 'patch.chat_history.request',
     requestId: 'ch1',

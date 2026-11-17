@@ -7141,33 +7141,25 @@ export const HostOutboxAckEvent = z
 export type HostOutboxAckEvent = z.infer<typeof HostOutboxAckEvent>;
 
 /**
- * Server -> host: this host runs the Manager now, because its previous host has
- * been offline for a while (spec/06 § Manager failover). `handoff` is the
- * recent conversation as the server holds it, given to the Manager with its
- * next message; `nextSeq` is where the Manager's own numbering carries on, so
- * the thread keeps one sequence across hosts. `epoch` counts takeovers, so a
- * host that is told the same one twice acts on it once.
+ * Server -> host: the user made this host the Manager's home (spec/06 § Changing
+ * home). The host continues the thread's record from `nextSeq` under the same
+ * chat id, marks the handover in the transcript naming both hosts, and sends
+ * `message` (the summary the user approved; empty when they cleared it) as an
+ * ordinary message. `epoch` counts changes, so a host told the same one twice
+ * acts on it once.
  */
-export const HostManagerAdoptEvent = z
+export const HostManagerHandoverEvent = z
   .object({
-    type: z.literal('host.manager_adopt'),
+    type: z.literal('host.manager_handover'),
     hostId: z.string().min(1),
-    epoch: z.number().int().nonnegative(),
-    handoff: z.string(),
+    epoch: z.number().int().positive(),
     nextSeq: z.number().int().nonnegative(),
+    fromHostName: z.string().min(1),
+    toHostName: z.string().min(1),
+    message: z.string(),
   })
   .strict();
-export type HostManagerAdoptEvent = z.infer<typeof HostManagerAdoptEvent>;
-
-/** Server -> host: the Manager has moved to another host; stop running it here. */
-export const HostManagerReleaseEvent = z
-  .object({
-    type: z.literal('host.manager_release'),
-    hostId: z.string().min(1),
-    epoch: z.number().int().nonnegative(),
-  })
-  .strict();
-export type HostManagerReleaseEvent = z.infer<typeof HostManagerReleaseEvent>;
+export type HostManagerHandoverEvent = z.infer<typeof HostManagerHandoverEvent>;
 
 /** Host -> server: "what is waiting for this chat?", asked at a tool boundary. */
 export const PatchQueuePullRequestEvent = z
@@ -10070,8 +10062,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   FeedFollowEvent,
   FeedResetEvent,
   HostReconciledEvent,
-  HostManagerAdoptEvent,
-  HostManagerReleaseEvent,
+  HostManagerHandoverEvent,
   PatchQueuePullRequestEvent,
   PatchQueuePullResponseEvent,
   PatchChatHistoryRequestEvent,
@@ -10401,8 +10392,7 @@ export const EVENT_SCHEMAS = {
   'feed.follow': FeedFollowEvent,
   'feed.reset': FeedResetEvent,
   'host.reconciled': HostReconciledEvent,
-  'host.manager_adopt': HostManagerAdoptEvent,
-  'host.manager_release': HostManagerReleaseEvent,
+  'host.manager_handover': HostManagerHandoverEvent,
   'patch.queue_pull.request': PatchQueuePullRequestEvent,
   'patch.queue_pull.response': PatchQueuePullResponseEvent,
   'patch.chat_history.request': PatchChatHistoryRequestEvent,

@@ -302,79 +302,79 @@ describe('delivery of what the server holds (spec/04 server-run queue)', () => {
   });
 });
 
-describe('standing in for the Manager (spec/06 § Manager failover)', () => {
-  it('numbers the thread on from the given seq and gives the handoff once, with the next message', async () => {
+describe("changing the Manager's home (spec/06 § Changing home)", () => {
+  const okBackend = (prompts: string[]): SdkBackend => ({
+    async *run(opts): AsyncIterable<{ type: string; [k: string]: unknown }> {
+      prompts.push(opts.prompt);
+      yield { type: 'result', sessionId: 'sess' };
+      yield { type: 'assistant', content: 'ok', sessionId: 'sess' };
+    },
+  });
+
+  it('continues the numbering, marks the handover, and sends the approved summary as an ordinary message', async () => {
     const prompts: string[] = [];
-    const backend: SdkBackend = {
-      async *run(opts): AsyncIterable<{ type: string; [k: string]: unknown }> {
-        prompts.push(opts.prompt);
-        yield { type: 'result', sessionId: 'sess' };
-        yield { type: 'assistant', content: 'ok', sessionId: 'sess' };
-      },
-    };
-    const consumed: string[] = [];
-    const { daemon, events, folder } = setup(backend, {
-      onHandoffConsumed: (id) => consumed.push(id),
-    });
+    const { daemon, events, folder } = setup(okBackend(prompts));
     const chatId = await daemon.spawnChat({ folder });
-    daemon.adoptThread(chatId, { nextSeq: 40, handoff: 'You are the Manager. user: hello' });
+    await daemon.handOverThread(chatId, {
+      nextSeq: 40,
+      fromHostName: 'Laptop',
+      toHostName: 'Server',
+      message: 'Recent conversation: user: hello',
+    });
 
-    await daemon.sendInput({ chatId, message: 'first', localId: 'L1' });
-    await daemon.sendInput({ chatId, message: 'second', localId: 'L2' });
+    const messages = events.filter((e) => e.type === 'chat.message') as Array<{
+      seq: number;
+      role: string;
+      content: string;
+      systemContext?: unknown;
+    }>;
+    expect(Math.min(...messages.map((m) => m.seq))).toBeGreaterThanOrEqual(40);
+    expect(messages.find((m) => m.role === 'system')?.content).toBe(
+      'Home moved · Laptop to Server',
+    );
+    // An ordinary visible message, not a hidden system reminder.
+    const user = messages.find((m) => m.role === 'user');
+    expect(user?.content).toBe('Recent conversation: user: hello');
+    expect(user?.systemContext).toBeUndefined();
+    expect(prompts[0]).not.toContain('<system-reminder>');
 
-    expect(prompts[0]).toContain('You are the Manager. user: hello');
-    expect(prompts[0]).toContain('first');
-    expect(prompts[1]).not.toContain('You are the Manager');
-    expect(consumed).toEqual([chatId]);
+    // Nothing is carried into later messages.
+    await daemon.sendInput({ chatId, message: 'next', localId: 'L2' });
+    expect(prompts[1]).not.toContain('Recent conversation');
+  });
 
-    const seqs = events
-      .filter((e) => e.type === 'chat.message')
-      .map((e) => (e as { seq: number }).seq);
-    expect(Math.min(...seqs)).toBeGreaterThanOrEqual(40);
-    // The handoff is disclosed as context, not typed into the user's own message.
-    const firstUser = events.find(
-      (e) => e.type === 'chat.message' && (e as { role: string }).role === 'user',
-    ) as { content: string; systemContext?: unknown[] };
-    expect(firstUser.content).toBe('first');
-    expect(JSON.stringify(firstUser.systemContext)).toContain('You are the Manager');
+  it('sends no message when the user cleared the summary', async () => {
+    const prompts: string[] = [];
+    const { daemon, events, folder } = setup(okBackend(prompts));
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.handOverThread(chatId, {
+      nextSeq: 5,
+      fromHostName: 'A',
+      toHostName: 'B',
+      message: '   ',
+    });
+    expect(prompts).toEqual([]);
+    expect(
+      events.filter((e) => e.type === 'chat.message').map((e) => (e as { role: string }).role),
+    ).toEqual(['system']);
   });
 
   it('never lowers the numbering it already has', async () => {
-    const backend: SdkBackend = {
-      async *run(): AsyncIterable<{ type: string; [k: string]: unknown }> {
-        yield { type: 'result', sessionId: 's' };
-        yield { type: 'assistant', content: 'ok', sessionId: 's' };
-      },
-    };
-    const { daemon, events, folder } = setup(backend);
+    const { daemon, events, folder } = setup(okBackend([]));
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'a', localId: 'A' });
-    const before = Math.max(
-      ...events.filter((e) => e.type === 'chat.message').map((e) => (e as { seq: number }).seq),
-    );
-    daemon.adoptThread(chatId, { nextSeq: 1, handoff: 'h' });
-    await daemon.sendInput({ chatId, message: 'b', localId: 'B' });
-    const after = Math.max(
-      ...events.filter((e) => e.type === 'chat.message').map((e) => (e as { seq: number }).seq),
-    );
-    expect(after).toBeGreaterThan(before);
-  });
-
-  it('forgets a handoff when the Manager goes back to its Manager host', async () => {
-    const prompts: string[] = [];
-    const backend: SdkBackend = {
-      async *run(opts): AsyncIterable<{ type: string; [k: string]: unknown }> {
-        prompts.push(opts.prompt);
-        yield { type: 'result', sessionId: 's' };
-        yield { type: 'assistant', content: 'ok', sessionId: 's' };
-      },
-    };
-    const { daemon, folder } = setup(backend);
-    const chatId = await daemon.spawnChat({ folder });
-    daemon.adoptThread(chatId, { nextSeq: 0, handoff: 'stale handoff' });
-    daemon.dropThreadHandoff(chatId);
-    await daemon.sendInput({ chatId, message: 'hi', localId: 'L1' });
-    expect(prompts[0]).not.toContain('stale handoff');
+    const maxSeq = (): number =>
+      Math.max(
+        ...events.filter((e) => e.type === 'chat.message').map((e) => (e as { seq: number }).seq),
+      );
+    const before = maxSeq();
+    await daemon.handOverThread(chatId, {
+      nextSeq: 1,
+      fromHostName: 'A',
+      toHostName: 'B',
+      message: '',
+    });
+    expect(maxSeq()).toBeGreaterThan(before);
   });
 });
 

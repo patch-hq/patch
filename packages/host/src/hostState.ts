@@ -34,12 +34,10 @@ const HostStateFile = z
     /** Does the server have this host running the Manager (`host.set_manager`)? */
     runsManager: z.boolean().optional(),
     /**
-     * The last Manager takeover this host acted on (`host.manager_adopt` /
-     * `host.manager_release`), so the same one told twice is acted on once.
+     * The last change of the Manager's home this host acted on
+     * (`host.manager_handover`), so the same one told twice is acted on once.
      */
     managerEpoch: z.number().int().nonnegative().optional(),
-    /** What the Manager is to be told with its next message, until it has been. */
-    managerHandoff: z.string().optional(),
     /**
      * The model this host's next model-less spawn runs on — the ACCOUNT's
      * `defaultModel`, mirrored down by the server (`host.settings`).

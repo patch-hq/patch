@@ -48,7 +48,7 @@ import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
 import { ChatLogStore } from './chat-log-store.js';
 import { CommitAcks } from './commit-acks.js';
 import { LogSync } from './log-sync.js';
-import { ManagerFailover } from './manager-failover.js';
+import { ManagerHome, ManagerHomeError } from './manager-home.js';
 import { HeldInputStore } from './held-input-store.js';
 import { QueueTracker } from './queue-tracker.js';
 import { ServerQueue } from './server-queue.js';
@@ -155,8 +155,6 @@ export interface BuildOptions {
   dataDir?: string;
   /** The one auto-update switch (update-control.ts); a held-open default in tests. */
   updateControl?: UpdateControl;
-  /** How long the Manager host must be offline before another takes over (tests shorten it). */
-  managerFailoverGraceMs?: number;
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
   hostOfflineGraceMs?: number;
   /** How long a mismatch between a host's log and the server's must last before it is acted on (tests shorten it). */
@@ -502,7 +500,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       managerHostId: () => registry.managerHostId(),
       registeredHostIds: () => registry.registeredHostIds(),
       hostName: (hostId: string) => registry.hostName(hostId),
-      specialThreadHost: () => managerFailover.specialThreadHost(),
       ...(opts.unknownChatHostWaitMs !== undefined
         ? { unknownChatHostWaitMs: opts.unknownChatHostWaitMs }
         : {}),
@@ -567,6 +564,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (manager !== null) {
         hostLink.sendTo(hostId, '_server', { type: 'host.set_manager', hostId: manager });
       }
+      // A change of home made while this host was away is told again; it acts on each once.
+      const handover = managerHome.pendingFor(hostId);
+      if (handover) hostLink.sendTo(hostId, '_server', handover);
     }
   });
   // A host asks at a tool boundary what is waiting.
@@ -629,29 +629,16 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   app.addHook('onClose', async () => logSync.stop());
 
-  // Manager failover (spec/06 § Manager failover).
-  const managerFailover = new ManagerFailover({
-    managerHostId: () => registry.managerHostId(),
-    setManagerHostId: (hostId) => registry.setManagerHostId(hostId),
-    onMoved: (hostId) => {
-      for (const id of registry.registeredHostIds()) {
-        hostLink.sendTo(id, '_server', { type: 'host.set_manager', hostId });
-      }
-      wsHub.republishAllHosts();
-    },
-    registeredHostIds: () => registry.registeredHostIds(),
-    isOnline: (hostId) => hostLink.isOnline(hostId),
-    onHostStatus: (handler) => hostLink.onHostStatus(handler),
-    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
+  // The Manager's home host: the user's choice, changed only by them (spec/06 § Changing home).
+  const managerHome = new ManagerHome({
+    registry,
     log: chatLogStore,
     contextWindow: () => DEFAULT_SHARED_SETTINGS.managerContextWindow,
-    ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
-    logger: log.child({ component: 'manager-failover' }),
-    ...(opts.managerFailoverGraceMs !== undefined ? { graceMs: opts.managerFailoverGraceMs } : {}),
+    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
+    registeredHostIds: () => registry.registeredHostIds(),
+    onChanged: () => wsHub.republishAllHosts(),
   });
-  managerFailover.start();
-  app.addHook('onClose', async () => managerFailover.stop());
-  const specialThreadHost = (): string | null => managerFailover.specialThreadHost();
+  const specialThreadHost = (): string | null => registry.managerHostId();
 
   // Durable copy of message text so an offline host's chats stay searchable.
   const chatMirror = registry.dataDir
@@ -661,6 +648,52 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       })
     : undefined;
   if (chatMirror) hostLink.onEvent((event) => chatMirror.observe(event));
+
+  // The Manager's home host (spec/06 § Where special threads run, § Changing home).
+  app.get('/api/manager/home', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    return { hostId: managerHome.current() };
+  });
+  // The summary shown to the user, to edit or clear, before they change home.
+  app.get('/api/manager/home/draft', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const hostId = (req.query as { hostId?: unknown } | null)?.hostId;
+    if (typeof hostId !== 'string' || hostId === '') {
+      return reply.code(400).send({ error: 'hostId is required' });
+    }
+    try {
+      return { message: managerHome.draft(hostId) };
+    } catch (e) {
+      if (e instanceof ManagerHomeError)
+        return reply.code(409).send({ error: e.code, message: e.message });
+      throw e;
+    }
+  });
+  app.put('/api/manager/home', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const body = req.body as { hostId?: unknown; message?: unknown } | null;
+    if (typeof body?.hostId !== 'string' || body.hostId === '') {
+      return reply.code(400).send({ error: 'hostId is required' });
+    }
+    if (typeof body.message !== 'string') {
+      return reply.code(400).send({ error: 'message is required (empty to send none)' });
+    }
+    try {
+      managerHome.change(body.hostId, body.message);
+    } catch (e) {
+      if (e instanceof ManagerHomeError)
+        return reply.code(409).send({ error: e.code, message: e.message });
+      throw e;
+    }
+    log.info({ hostId: body.hostId }, 'manager home changed');
+    return { hostId: body.hostId };
+  });
 
   // The user's own messages (`patch_activity`, spec/06 § Cross-chat toolset),
   // read through every host's chat logs.
@@ -971,7 +1004,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     serverQueue,
     chatLogStore,
     commitAcks,
-    managerFailover,
     composerDrafts,
     viewPosition,
     newChatDrafts,

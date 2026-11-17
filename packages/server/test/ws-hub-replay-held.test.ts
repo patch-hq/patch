@@ -127,30 +127,4 @@ describe("answering a replay from the server's log", () => {
     t.replay('nope');
     expect(t.sent).toEqual([]);
   });
-
-  it("adds the Manager's missing stretch even while the host is online", () => {
-    const gap = [say('thread_manager', 5), say('thread_manager', 6)];
-    const t = setup({
-      chatLogStore: storeOf(gap) as never,
-      managerFailover: {
-        gapEvents: (from: number) => gap.filter((e) => (e as { seq: number }).seq > from),
-      } as never,
-    });
-    t.replay('thread_manager', { fromSeq: 5 });
-    expect(t.sent.map((e) => (e as { seq: number }).seq)).toEqual([6]);
-  });
-
-  it('adds nothing for the Manager without a failover, and nothing for another chat with one', () => {
-    const gap = [say('thread_manager', 5)];
-    const without = setup({ chatLogStore: storeOf(gap) as never });
-    without.replay('thread_manager');
-    expect(without.sent).toEqual([]);
-
-    const withFailover = setup({
-      chatLogStore: storeOf(gap) as never,
-      managerFailover: { gapEvents: () => gap } as never,
-    });
-    withFailover.replay('c1');
-    expect(withFailover.sent).toEqual([]);
-  });
 });

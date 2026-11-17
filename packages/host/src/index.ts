@@ -3028,29 +3028,29 @@ async function startHost(
         sender(describeHost());
         return;
       }
-      if (event.type === 'host.manager_adopt') {
-        // spec/06 § Manager failover — this host runs the Manager for now, or is
-        // told what was said while it was away. Acted on once per takeover.
+      if (event.type === 'host.manager_handover') {
+        // spec/06 § Changing home — the user made this host the Manager's home.
+        // Acted on once per change, even if the server tells it again.
         if (!isForThisHost(event.hostId, event.type)) return;
         if (event.epoch <= (hostStateStore.get().managerEpoch ?? -1)) return;
+        hostStateStore.update({ managerEpoch: event.epoch });
+        if (!runsManager) {
+          runsManager = true;
+          hostStateStore.update({ runsManager: true });
+        }
         createSpecialThreads();
         for (const state of daemon.list()) {
           if (isReservedSpecialThread(state.chatId)) announceChat(state);
         }
-        daemon.adoptThread('thread_manager', {
-          nextSeq: event.nextSeq,
-          handoff: event.handoff,
-        });
-        hostStateStore.update({ managerEpoch: event.epoch, managerHandoff: event.handoff });
-        logger.info({ epoch: event.epoch, nextSeq: event.nextSeq }, 'manager: adopted');
-        return;
-      }
-      if (event.type === 'host.manager_release') {
-        if (!isForThisHost(event.hostId, event.type)) return;
-        if (event.epoch <= (hostStateStore.get().managerEpoch ?? -1)) return;
-        daemon.dropThreadHandoff('thread_manager');
-        hostStateStore.update({ managerEpoch: event.epoch, managerHandoff: undefined });
-        logger.info({ epoch: event.epoch }, 'manager: released');
+        daemon
+          .handOverThread('thread_manager', {
+            nextSeq: event.nextSeq,
+            fromHostName: event.fromHostName,
+            toHostName: event.toHostName,
+            message: event.message,
+          })
+          .catch((err) => logger.error({ err }, 'manager: handover failed'));
+        logger.info({ epoch: event.epoch, nextSeq: event.nextSeq }, 'manager: home moved here');
         return;
       }
       if (event.type === 'host.set_manager') {
@@ -4437,7 +4437,6 @@ async function startHost(
   const daemon: Daemon = new Daemon({
     ...(durableTurns ? { durableTurns } : {}),
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),
-    onHandoffConsumed: () => hostStateStore.update({ managerHandoff: undefined }),
     hostId: selfHostId,
     // spec/04 § Spawn — a spawn naming no model takes THIS host's last-used
     // model, and every spawn that names one sets it.
@@ -4985,12 +4984,6 @@ async function startHost(
     applySpecialThreadModel();
   }
   if (runsManager) createSpecialThreads();
-  // A Manager handoff that was waiting when this host last stopped.
-  const waitingHandoff = hostStateStore.get().managerHandoff;
-  if (waitingHandoff !== undefined && daemon.chatState.has('thread_manager')) {
-    daemon.restoreThreadHandoff('thread_manager', waitingHandoff);
-  }
-
   /** Tell the server about one chat: that it exists, and its current state. */
   function announceChat(state: ReturnType<typeof daemon.list>[number]): void {
     forward({

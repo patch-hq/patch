@@ -37,7 +37,7 @@ server accepts entries for them from no other host (one writer,
 `patch_history` addressed to a special thread reach it through the server,
 whichever host the caller is on.
 
-The threads never move host by themselves. While the home host is offline both threads show that
+The threads never move host by themselves: there is no failover (§ Changing home). While the home host is offline both threads show that
 status (`12-error-and-offline.md`), stay readable from the server's record, and
 take messages, which the server holds and delivers when the home host returns.
 
@@ -225,6 +225,26 @@ This is the equivalent of "reply-all goes to the sender" in email. It removes th
 | -------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Manager  | Yes — text + tap-to-talk | Primary actively-driven thread                                                                                                                                               |
 | Speakers | No                       | Read-only transcript; ingress is audio from physical devices. Smart-home control from a desk is a regular pinned chat (see Smart-home control from a desk), not this thread. |
+
+## Changing home
+
+Changing the home host is a visible handover, made only by the user. The surface
+asks the server for a draft (`GET /api/manager/home/draft?hostId=`): the thread's
+recent conversation, the last `managerContextWindow` messages, which the user
+edits or clears before confirming (`PUT /api/manager/home` `{hostId, message}`).
+
+The server records the change, sends `host.set_manager` naming the new home to
+every host, and sends the new home `host.manager_handover`. The new home creates
+the threads, carries the record on from the server's highest stored `seq` under
+the same chat id, writes a divider ("Home moved · A to B") into the transcript,
+and sends `message` as an ordinary message in the thread. The provider session
+stays on the old host, so the new one starts fresh and nothing reaches the model
+unseen. A host that was away when told is told again when it attaches and acts on
+each change once (`epoch`). The old home stops writing the threads, or does when
+it next attaches, and keeps its copy of the thread folders where they were.
+
+A replay of the Manager is answered from the server's record; nothing stitches
+stretches that different hosts ran.
 
 ## Disabled
 

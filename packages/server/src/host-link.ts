@@ -142,11 +142,6 @@ export interface InboundHostLinkOptions {
   /** A person's message to this chat is now held for its offline host (spec/12 § Chat status). */
   onHeld?: (chatId: string) => void;
   /**
-   * The host that runs the Manager and Speakers right now. The server moves it to
-   * another host when the one running it has been offline a while.
-   */
-  specialThreadHost?: () => string | null;
-  /**
    * Which host a chat lives on (the server's ChatRegistry mirror). A frame
    * that names no host but names a chat belongs to that chat's host —
    * routing it to "whichever host is attached" is the exact bug host
@@ -308,7 +303,7 @@ export class InboundHostLink implements HostLink {
   private isStraySpecialThreadEvent(event: WireEvent, fromHostId: string): boolean {
     const chatId = (event as { chatId?: unknown }).chatId;
     if (typeof chatId !== 'string' || !isReservedSpecialThread(chatId)) return false;
-    const manager = this.opts.specialThreadHost?.() ?? this.opts.managerHostId?.() ?? null;
+    const manager = this.opts.managerHostId?.() ?? null;
     return manager !== null && manager !== fromHostId;
   }
 
