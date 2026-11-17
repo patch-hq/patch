@@ -130,6 +130,8 @@ export interface InstallerContext {
   provisionSandbox?: (platform: NodeJS.Platform, io: { out(line: string): void }) => Promise<void>;
   /** Login-shell PATH override — test hook, so a unit test runs no shell. */
   loginShellPath?: () => string;
+  /** Delay between service-state polls — test hook, so a dead service does not make a unit test wait ~20s. */
+  runStatePollMs?: number;
 }
 
 /** How many installed versions to keep: the new one and the one still running. */
@@ -827,7 +829,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     // reporting "service started" here told the user the install had worked
     // while the host crash-looped forever. Verify the job is actually up,
     // and if it is not, say so with the host's own last words.
-    const state = await settledRunState(ops, def);
+    const state = await settledRunState(ops, def, undefined, ctx.runStatePollMs);
     if (!state.running) {
       io.err('patch install: the service was started but is not running.');
       io.err(`  ${state.detail}`);
