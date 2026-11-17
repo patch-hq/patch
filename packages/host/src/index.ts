@@ -2,7 +2,9 @@ import { cutoffMs } from './cleanup.js';
 import { applyClaudeProviderSettings } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
-import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
+import { HARNESS_TRAITS } from './harnesses.js';
+import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
+import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
@@ -11,7 +13,6 @@ import {
   LOCAL_BACKEND_ID,
   LocalBackend,
   LocalModels,
-  isLocalModel,
   localHistoryDir,
   localSessionDir,
 } from './localModels.js';
@@ -793,12 +794,7 @@ async function startHost(
     localSessionDir(config.patchHome),
   );
   const routedBackend: SdkBackend = {
-    run: (opts) =>
-      isCodexModel(opts.model)
-        ? codexBackend.run(opts)
-        : isLocalModel(opts.model)
-          ? localBackend.run(opts)
-          : sdkBackend.run(opts),
+    run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
   };
 
   /**
@@ -1246,9 +1242,7 @@ async function startHost(
 
   /** The accounts this host holds for the backend `model` runs on, in the shared order. */
   const heldAccountsFor = (model: string | undefined): Array<{ id: string; label: string }> =>
-    isCodexModel(model)
-      ? (codexAccounts.report().accounts ?? []).map((a) => ({ id: a.id, label: a.label }))
-      : (readPatchStore(oauthOpts)?.accounts ?? []).map((a) => ({ id: a.id, label: a.label }));
+    adapterForModel(providerAdapters, model).heldAccounts();
 
   /**
    * This host's `host.host` self-description, rebuilt from live state each
@@ -3765,9 +3759,7 @@ async function startHost(
           return;
         }
         if (preferredAccountId !== null) {
-          const held = isCodexModel(chat.model)
-            ? (codexAccounts.report().accounts?.map((a) => a.id) ?? [])
-            : (readPatchStore(oauthOpts)?.accounts.map((a) => a.id) ?? []);
+          const held = heldAccountsFor(chat.model).map((a) => a.id);
           if (!held.includes(preferredAccountId)) {
             refuse(
               'account_not_found',
@@ -3811,10 +3803,7 @@ async function startHost(
       }
       void handleServerEvent(event, daemon, sender, logger, {
         buildAccountReport,
-        heldAccounts: (model) =>
-          isCodexModel(model)
-            ? (codexAccounts.report().accounts?.map((a) => a.id) ?? [])
-            : (readPatchStore(oauthOpts)?.accounts.map((a) => a.id) ?? []),
+        heldAccounts: (model) => heldAccountsFor(model).map((a) => a.id),
         meetings,
         speechSetUp: () =>
           voiceConfig.meeting !== 'local' ||
@@ -4228,6 +4217,94 @@ async function startHost(
     return result.ok && effective !== undefined ? { ...result, accountId: effective } : result;
   };
 
+  // One adapter per provider (spec/02 § Provider adapters): what the host does
+  // per provider lives here, so the wiring never asks which provider a model
+  // belongs to.
+  const providerAdapters: ProviderAdapters = {
+    claude: {
+      run: (opts) => sdkBackend.run(opts),
+      resolveCredential: (_model, turn) => resolveOAuthWithCredit(turn),
+      heldAccounts: () =>
+        (readPatchStore(oauthOpts)?.accounts ?? []).map((a) => ({ id: a.id, label: a.label })),
+      accountLabel: (accountId) =>
+        readPatchStore(oauthOpts)?.accounts.find((a) => a.id === accountId)?.label,
+      accountSpent: (fromAccountId) => {
+        if (!accountRotation.isExhausted(fromAccountId)) return { spent: false };
+        const until = accountRotation.exhaustedUntil(fromAccountId);
+        return { spent: true, ...(until !== undefined ? { until } : {}) };
+      },
+      nextAccountAfterExhausted: (chatId, id, message, limit) =>
+        failoverAccount(chatId, id, message, limit),
+      accountRouting: () => {
+        const store = readPatchStore(oauthOpts);
+        if (!store) return undefined;
+        const out = store.accounts.filter((a) => accountRotation.isExhausted(a.id));
+        const returns = out
+          .map((a) => ({ label: a.label, at: accountRotation.exhaustedUntil(a.id) }))
+          .filter((r): r is { label: string; at: number } => r.at !== undefined)
+          .sort((x, y) => x.at - y.at);
+        const next = returns[0];
+        return {
+          strategy: accountStrategy.claude,
+          accounts: store.accounts.length,
+          exhausted: out.length,
+          ...(next !== undefined
+            ? { nextResetsAt: next.at, ...(next.label ? { nextLabel: next.label } : {}) }
+            : {}),
+        };
+      },
+    },
+    codex: {
+      run: (opts) => codexBackend.run(opts),
+      resolveCredential: async (model, turn) => {
+        try {
+          const account = await codexAccounts.resolve(
+            {
+              strategy: accountStrategy.codex,
+              ...(turn?.preferredAccountId ? { preferred: turn.preferredAccountId } : {}),
+              ...(turn ? { starting: true } : {}),
+            },
+            true,
+            model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt',
+          );
+          return { ok: true, accessToken: '', accountId: account.accountId };
+        } catch (error) {
+          return { ok: false, reason: (error as Error).message };
+        }
+      },
+      heldAccounts: () =>
+        (codexAccounts.report().accounts ?? []).map((a) => ({ id: a.id, label: a.label })),
+      accountLabel: (accountId) =>
+        codexAccounts.report().accounts?.find((a) => a.id === accountId)?.label,
+      accountSpent: (fromAccountId) => {
+        const info = codexAccounts.limitInfo(fromAccountId);
+        const spent = info?.scope !== undefined;
+        return {
+          spent,
+          ...(spent && info?.resetsAt !== undefined ? { until: info.resetsAt } : {}),
+        };
+      },
+      nextAccountAfterExhausted: (_chatId, id) => codexAccounts.markExhausted(id),
+      accountRouting: () => undefined,
+    },
+    // A local endpoint has no account, no quota and no status model of its own.
+    local: {
+      run: (opts) => localBackend.run(opts),
+      resolveCredential: async () =>
+        localModels.configured
+          ? { ok: true, accessToken: '' }
+          : {
+              ok: false,
+              reason: 'No local model endpoint is set. Add its URL under Settings → Providers.',
+            },
+      heldAccounts: () => [],
+      accountLabel: () => undefined,
+      accountSpent: () => ({ spent: false }),
+      nextAccountAfterExhausted: () => undefined,
+      accountRouting: () => undefined,
+    },
+  };
+
   /**
    * Model-aware credential gate (spec/10-auth.md § Backend credentials): a
    * Codex-prefixed model resolves against the Codex account store, everything
@@ -4242,28 +4319,7 @@ async function startHost(
   ): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {
-    if (isLocalModel(model))
-      return localModels.configured
-        ? { ok: true, accessToken: '' }
-        : {
-            ok: false,
-            reason: 'No local model endpoint is set. Add its URL under Settings → Providers.',
-          };
-    if (!isCodexModel(model)) return resolveOAuthWithCredit(turn);
-    try {
-      const account = await codexAccounts.resolve(
-        {
-          strategy: accountStrategy.codex,
-          ...(turn?.preferredAccountId ? { preferred: turn.preferredAccountId } : {}),
-          ...(turn ? { starting: true } : {}),
-        },
-        true,
-        model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt',
-      );
-      return { ok: true, accessToken: '', accountId: account.accountId };
-    } catch (error) {
-      return { ok: false, reason: (error as Error).message };
-    }
+    return adapterForModel(providerAdapters, model).resolveCredential(model, turn);
   };
 
   /**
@@ -4537,29 +4593,14 @@ async function startHost(
     // then on `resolveOAuthWithCredit` routes the rest without any of them
     // failing (spec/10-auth.md § Backend credentials).
     accountLabel: (model, accountId) =>
-      isLocalModel(model)
-        ? undefined
-        : isCodexModel(model)
-          ? codexAccounts.report().accounts?.find((a) => a.id === accountId)?.label
-          : readPatchStore(oauthOpts)?.accounts.find((a) => a.id === accountId)?.label,
-    accountSpent: (model, fromAccountId) => {
-      if (isLocalModel(model)) return { spent: false };
-      if (isCodexModel(model)) {
-        const info = codexAccounts.limitInfo(fromAccountId);
-        const spent = info?.scope !== undefined;
-        return {
-          spent,
-          ...(spent && info?.resetsAt !== undefined ? { until: info.resetsAt } : {}),
-        };
-      }
-      if (!accountRotation.isExhausted(fromAccountId)) return { spent: false };
-      const until = accountRotation.exhaustedUntil(fromAccountId);
-      return { spent: true, ...(until !== undefined ? { until } : {}) };
-    },
+      adapterForModel(providerAdapters, model).accountLabel(accountId),
+    accountSpent: (model, fromAccountId) =>
+      adapterForModel(providerAdapters, model).accountSpent(fromAccountId),
     nextAccountAfterExhausted: (chatId, id, message, limit) =>
-      isCodexModel(daemon.chatState.get(chatId)?.model)
-        ? codexAccounts.markExhausted(id)
-        : failoverAccount(chatId, id, message, limit),
+      adapterForModel(
+        providerAdapters,
+        daemon.chatState.get(chatId)?.model,
+      ).nextAccountAfterExhausted(chatId, id, message, limit),
     /**
      * Has this host nowhere to run a turn — every stored key recorded spent?
      *
@@ -4581,25 +4622,7 @@ async function startHost(
     },
     // The strategy and how many held keys are out, so a blocked chat says
     // "Round robin — all 3 accounts out" and not just one account's countdown.
-    accountRouting: (model) => {
-      if (isCodexModel(model) || isLocalModel(model)) return undefined;
-      const store = readPatchStore(oauthOpts);
-      if (!store) return undefined;
-      const out = store.accounts.filter((a) => accountRotation.isExhausted(a.id));
-      const returns = out
-        .map((a) => ({ label: a.label, at: accountRotation.exhaustedUntil(a.id) }))
-        .filter((r): r is { label: string; at: number } => r.at !== undefined)
-        .sort((x, y) => x.at - y.at);
-      const next = returns[0];
-      return {
-        strategy: accountStrategy.claude,
-        accounts: store.accounts.length,
-        exhausted: out.length,
-        ...(next !== undefined
-          ? { nextResetsAt: next.at, ...(next.label ? { nextLabel: next.label } : {}) }
-          : {}),
-      };
-    },
+    accountRouting: (model) => adapterForModel(providerAdapters, model).accountRouting(),
     /**
      * What is actually true of the account a blocked turn ran on, so the chat
      * can say which pool refused rather than replaying Anthropic's sentence.
@@ -7390,7 +7413,7 @@ export async function handleServerEvent(
           // it resolves them in order and takes the first that works — so it is
           // the host that is disconnected, not one row of it.
           const report: import('@patch/wire').HostAccountEvent =
-            accounts && spawnProvider.id === 'claude'
+            accounts && HARNESS_TRAITS[providerForModel(event.model)].buildsAccountReport
               ? accounts.buildAccountReport({ connected: false })
               : {
                   type: 'host.account',
@@ -7412,7 +7435,7 @@ export async function handleServerEvent(
               // Short and actionable. This lands in a toast and in the chat, so
               // dumping the provider's raw OAuth JSON at a person tells them
               // nothing they can act on — the reason goes to the log instead.
-              message: `${spawnProvider.id === 'local' ? spawnAuth.reason : `${host} isn't signed in to ${spawnProvider.label}. Sign in from Settings → Hosts.`}`,
+              message: `${spawnProvider.accountsKey === null ? spawnAuth.reason : `${host} isn't signed in to ${spawnProvider.label}. Sign in from Settings → Hosts.`}`,
             },
             seq: OUT_OF_BAND_SEQ,
           });
@@ -7424,7 +7447,7 @@ export async function handleServerEvent(
         if (event.preferredAccountId !== undefined) {
           const held = accounts?.heldAccounts(event.model) ?? [];
           if (!held.includes(event.preferredAccountId)) {
-            const problem = `preferred account ${event.preferredAccountId} is not one of ${daemon.hostId}'s ${isCodexModel(event.model) ? 'Codex' : 'Claude'} accounts (holds: ${held.join(', ') || 'none'})`;
+            const problem = `preferred account ${event.preferredAccountId} is not one of ${daemon.hostId}'s ${providerDescriptor(providerForModel(event.model)).label} accounts (holds: ${held.join(', ') || 'none'})`;
             logger.error({ op, folder: event.folder }, `chat.spawn_request refused: ${problem}`);
             sender({
               type: 'chat.error',
