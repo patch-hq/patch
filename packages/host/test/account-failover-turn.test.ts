@@ -9,6 +9,7 @@
 // that has credit. So what a failure has to name is the key the turn RAN on,
 // which arrives on the credential itself — nothing is stamped on the chat.
 
+import { transcriptFor } from './helpers/chatTranscript.js';
 import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -181,7 +182,7 @@ describe('a spent account moves the chat on and the turn runs again', () => {
   });
 
   it("hands the host the limit's OWN reset instant, not just the sentence", async () => {
-    // The reset the host records is what arms the retry for the whole machine.
+    // The reset the host records is what arms the retry for the whole host.
     // Claude Code states it twice — as an exact epoch in `quotaLimits.resetsAt`
     // and, sometimes, as prose ("resets 8pm (UTC)") — and the host was reading
     // only the prose. A refusal that carries the structured field and no
@@ -382,7 +383,11 @@ describe('an account switch carries the conversation over', () => {
               account = 'a2';
               throw limitError(SPEND_LIMIT);
             }
-            yield { type: 'assistant', content: 'reply', raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } } };
+            yield {
+              type: 'assistant',
+              content: 'reply',
+              raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } },
+            };
             yield { type: 'result', sessionId: 'sess-a', content: 'reply', raw: {} };
           }
           return gen();
@@ -406,7 +411,7 @@ describe('an account switch carries the conversation over', () => {
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
     const rerun = seen[2]!;
-    expect(rerun.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+    expect(transcriptFor(rerun).length).toBeGreaterThan(0);
     // The message is folded into its original bubble, not drawn a second time.
     const userMsgs = events.filter(
       (e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'second question',
@@ -433,7 +438,11 @@ describe('an account switch on a chat with no recorded session id', () => {
           seen.push(opts);
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             // The first turn answers but the provider never hands back a session id.
-            yield { type: 'assistant', content: 'reply', raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } } };
+            yield {
+              type: 'assistant',
+              content: 'reply',
+              raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } },
+            };
             yield { type: 'result', content: 'reply', raw: {} };
           }
           return gen();
@@ -452,7 +461,7 @@ describe('an account switch on a chat with no recorded session id', () => {
     account = 'a2';
     await daemon.sendInput({ chatId, message: 'follow up', localId: 'l2' });
     await vi.waitFor(() => expect(seen.length).toBe(2));
-    expect(seen[1]!.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+    expect(transcriptFor(seen[1]!).length).toBeGreaterThan(0);
   });
 });
 
