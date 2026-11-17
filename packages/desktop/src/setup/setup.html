@@ -394,6 +394,7 @@
         stepsEl.hidden = false;
         choose.hidden = true;
         join.hidden = true;
+        nameForm.hidden = true;
       }
       function step(id) {
         const name =
@@ -434,6 +435,7 @@
       $('retry').addEventListener('click', () => {
         error.hidden = true;
         resetSteps();
+        nameForm.hidden = true;
         choose.hidden = false;
         busy(false);
       });
