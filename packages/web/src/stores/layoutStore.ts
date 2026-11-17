@@ -548,6 +548,16 @@ export function lastClosedChatId(): string | null {
   return lastClosedChat;
 }
 
+let emptiedByClose = false;
+/** True once, right after a close left the lone group with no tabs. A route that
+ *  mounts the layout empty and opens its own tab a moment later (Settings) must
+ *  not be mistaken for a close, so only a close arms this. */
+export function takeEmptiedByClose(): boolean {
+  const v = emptiedByClose;
+  emptiedByClose = false;
+  return v;
+}
+
 function emptyGroup(): Group {
   const root = defaultRoot();
   return { id: genId('group'), chatId: null, root, activePaneId: root.id, layouts: {}, size: 1 };
@@ -1003,6 +1013,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       if (tabs.length === 0) {
         // Closing the last tab closes the pane (spec/14 § Panes and tabs) —
         // unless it's the only pane left, which has nowhere to collapse into.
+        if (pane.id === state.root.id) emptiedByClose = true;
         root =
           pane.id === state.root.id
             ? { ...pane, tabs: [], activeTabId: null }
@@ -1033,6 +1044,10 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       if (pane.id === state.root.id && state.groups.length > 1) {
         get().closeGroup(state.focusedGroupId);
         return;
+      }
+      if (pane.id === state.root.id) {
+        lastClosedChat = null;
+        emptiedByClose = true;
       }
       const root =
         pane.id === state.root.id

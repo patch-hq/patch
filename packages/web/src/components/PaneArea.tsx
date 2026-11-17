@@ -49,6 +49,7 @@ import {
   firstLeaf,
   isTabDirty,
   lastClosedChatId,
+  takeEmptiedByClose,
   useLayoutStore,
   type Group,
   type LeafPane,
@@ -688,6 +689,8 @@ function Pane({ pane }: { pane: LeafPane }): JSX.Element {
 function LeaveEmptyGroup(): JSX.Element | null {
   const navigate = useNavigate();
   useEffect(() => {
+    // Mounted empty without a close (a route about to open its own tab): leave it be.
+    if (!takeEmptiedByClose()) return;
     const recent = Object.values(useChatStore.getState().chats)
       .filter((c) => c.status !== 'archived' && c.chatId !== lastClosedChatId())
       .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
