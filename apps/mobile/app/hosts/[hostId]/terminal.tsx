@@ -205,9 +205,22 @@ function TerminalSession({
   const hostOnline = usePresenceStore((s) => s.hosts[hostId]?.online === true);
   const reopen = session?.reopen === 'now';
   React.useEffect(() => {
-    if (reopen && connection === 'connected' && hostOnline) restart();
-    // restart only swaps the session id; the three inputs are what say it is time.
+    if (reopen && connection === 'connected' && hostOnline) resume();
+    // resume asks again under the same id; the three inputs are what say it is time.
   }, [reopen, connection, hostOnline]);
+
+  // The host handed back the same shell and its whole scrollback: what is drawn
+  // is replaced by it.
+  const epoch = session?.epoch ?? 0;
+  const seenEpoch = React.useRef(0);
+  React.useEffect(() => {
+    if (epoch === seenEpoch.current) return;
+    seenEpoch.current = epoch;
+    inject(pageCall('reset'));
+    drawn.current = 0;
+    drawNew();
+    // drawNew reads the store directly.
+  }, [epoch]);
 
   const sendInput = (data: string): void => {
     if (!live || data === '') return;
@@ -278,6 +291,20 @@ function TerminalSession({
     sendInput(keySequence(key, { appCursor: appCursor.current, ctrl }));
     setCtrl(false);
     inject(pageCall('focus'));
+  };
+
+  /** Ask the host for this session again, by id (spec/02 — Surviving a host restart). */
+  const resume = (): void => {
+    const pty = size.current;
+    if (pty === null) return;
+    useTerminalStore.getState().resume(sessionId);
+    try {
+      getWs().send({ type: 'patch.terminal.open', sessionId, hostId, folder, pty });
+    } catch (e) {
+      useTerminalStore
+        .getState()
+        .fail(sessionId, `Could not reach the server: ${(e as Error).message}`);
+    }
   };
 
   const restart = (): void => {

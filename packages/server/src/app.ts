@@ -159,6 +159,7 @@ export interface BuildOptions {
   managerFailoverGraceMs?: number;
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
   hostOfflineGraceMs?: number;
+  terminalLossWindowMs?: number;
   /** How long a mismatch between a host's log and the server's must last before it is acted on (tests shorten it). */
   logSyncDelayMs?: number;
   /** Inject a registry directly (tests); otherwise loaded from dataDir. */
@@ -966,6 +967,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     activity: activityLog,
     ...(opts.hostOfflineGraceMs !== undefined
       ? { hostOfflineGraceMs: opts.hostOfflineGraceMs }
+      : {}),
+    ...(opts.terminalLossWindowMs !== undefined
+      ? { terminalLossWindowMs: opts.terminalLossWindowMs }
       : {}),
     queueTracker,
     serverQueue,

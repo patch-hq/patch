@@ -32,7 +32,10 @@ class FakeSocket extends EventEmitter {
   }
 }
 
-function makeHub(): { hub: WsHub; link: InProcessHostLink } {
+function makeHub(extra: { terminalLossWindowMs?: number } = {}): {
+  hub: WsHub;
+  link: InProcessHostLink;
+} {
   const registry = Registry.load(mkdtempSync(join(tmpdir(), 'patch-wshub-term-')));
   const account = registry.bootstrapAccount();
   // `patch.terminal.open` names a host, and the hub refuses one that is not
@@ -47,6 +50,7 @@ function makeHub(): { hub: WsHub; link: InProcessHostLink } {
     chatRegistry: new ChatRegistry(),
     idGenerator: () => 'id-1',
     helloTimeoutMs: 60_000,
+    ...extra,
   });
   return { hub, link };
 }
@@ -139,5 +143,83 @@ describe('WsHub — terminal frames', () => {
     expect(
       b.sent.map((m) => decode(Buffer.from(m))).filter((e) => e.type === 'patch.terminal.exit'),
     ).toHaveLength(0);
+  });
+
+  describe('a PTY session across its host going away', () => {
+    const exitsOf = (sock: FakeSocket) =>
+      sock.sent.map((m) => decode(Buffer.from(m))).filter((e) => e.type === 'patch.terminal.exit');
+    const openPty = (hub: WsHub, sock: FakeSocket): void => {
+      // @ts-expect-error — private map, seeded directly
+      hub['surfaces'].set('srf-A', new Set([conn('srf-A', sock)]));
+      // @ts-expect-error — private method, direct unit coverage
+      hub['handleSurfaceEvent'](
+        conn('srf-A', sock),
+        { type: 'patch.terminal.open', hostId: 'd1', sessionId: 't1', pty: { cols: 80, rows: 24 } },
+        silentLogger,
+      );
+    };
+    const goOffline = (hub: WsHub): void => {
+      // @ts-expect-error — private method, direct unit coverage
+      hub['announceHostStatus']('d1', 'offline');
+    };
+
+    it('keeps its route and tells the surface nothing while the host is away', () => {
+      const { hub } = makeHub();
+      const a = new FakeSocket();
+      openPty(hub, a);
+      goOffline(hub);
+      expect(exitsOf(a)).toEqual([]);
+      expect(hub['terminalSessionHost'].get('t1')).toBe('d1');
+      // The surface can still address it: its keystrokes are not refused.
+      // @ts-expect-error — private method, direct unit coverage
+      hub['handleSurfaceEvent'](
+        conn('srf-A', a),
+        { type: 'patch.terminal.input', sessionId: 't1', data: 'ls\r' },
+        silentLogger,
+      );
+      const errors = a.sent
+        .map((m) => decode(Buffer.from(m)))
+        .filter((e) => e.type === 'patch.terminal.error');
+      expect(errors).toEqual([]);
+    });
+
+    it('a host that returns inside the window keeps the session, and no loss is ever reported', async () => {
+      const { hub, link } = makeHub({ terminalLossWindowMs: 40 });
+      const a = new FakeSocket();
+      openPty(hub, a);
+      goOffline(hub);
+      link.addOnlineHost('d1');
+      await new Promise((r) => setTimeout(r, 120));
+      expect(exitsOf(a)).toEqual([]);
+      expect(hub['terminalSessionHost'].get('t1')).toBe('d1');
+    });
+
+    it('is reported lost only once the host has stayed away past the window', async () => {
+      const { hub } = makeHub({ terminalLossWindowMs: 40 });
+      const a = new FakeSocket();
+      openPty(hub, a);
+      goOffline(hub);
+      expect(exitsOf(a)).toEqual([]);
+      await new Promise((r) => setTimeout(r, 120));
+      expect(exitsOf(a)).toMatchObject([
+        { sessionId: 't1', code: null, reason: 'daemon_shutdown' },
+      ]);
+      expect(hub['terminalSessionHost'].has('t1')).toBe(false);
+    });
+
+    it('a pipe shell on the same host still ends at once, because it died with the host', () => {
+      const { hub } = makeHub();
+      const a = new FakeSocket();
+      openPty(hub, a);
+      // @ts-expect-error — private method, direct unit coverage
+      hub['handleSurfaceEvent'](
+        conn('srf-A', a),
+        { type: 'patch.terminal.open', hostId: 'd1', sessionId: 'pipe1' },
+        silentLogger,
+      );
+      goOffline(hub);
+      expect(exitsOf(a)).toMatchObject([{ sessionId: 'pipe1', reason: 'daemon_shutdown' }]);
+      expect(hub['terminalSessionHost'].get('t1')).toBe('d1');
+    });
   });
 });
