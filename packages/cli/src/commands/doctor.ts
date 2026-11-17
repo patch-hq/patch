@@ -36,6 +36,7 @@ interface ChatRow {
   name?: string | null;
   activity?: string;
   status?: string;
+  hostId?: string | null;
   lastError?: { code: string; message: string; at: number } | null;
 }
 
@@ -188,35 +189,47 @@ export function registerDoctorCommand(program: Command): void {
           checks['hosts'] = `error: ${(err as Error).message}`;
         }
 
-        // --- errored-chat count ---
+        // --- errored-chat count (account-wide) ---
+        // The REST listing covers every host on the account; the local socket's
+        // /chats covers this machine only, which made doctor report 0 while
+        // other hosts had errored chats.
         try {
-          const t = buildTransport(config);
-          const path = t.kind === 'uds' ? '/chats' : '/api/chats';
-          const res = await t.get<{
-            chats: ChatRow[];
-            unreadable?: Array<{ chatId: string; path: string; error: string }>;
-          }>(path);
+          const t = buildTransport(config, { forceRest: true });
+          const res = await t.get<{ chats: ChatRow[] }>('/api/chats');
           // An errored chat is one whose persisted LIFECYCLE status is
           // 'errored' (survives restart, visible in `threads list`/`chats get`),
           // NOT the transient `activity` field (which settles back to 'idle'
-          // after the failed turn). Counting `activity === 'errored'` made every
-          // restored errored thread invisible to diagnostics — the d6 defect.
+          // after the failed turn).
           const errored = res.chats.filter((c) => c.status === 'errored');
           checks['erroredChats'] = errored.length;
+          checks['erroredChatsScope'] = 'account-wide (all hosts)';
           // Dedicated field so the user can SEE which chats errored and why,
           // rather than just a count. lastError is the persisted error detail.
           checks['erroredChatDetails'] = errored.map((c) => ({
             chatId: c.chatId,
             name: c.name ?? null,
+            hostId: c.hostId ?? null,
             lastError: c.lastError ?? null,
           }));
-          // Chats the host could not load at all: their meta.json failed to
-          // read or parse, so they are absent from `chats` above. Only the
-          // local socket reports them; the server route does not carry it.
-          checks['unreadableChats'] =
-            res.unreadable ?? 'unknown: only reported over the local host socket';
         } catch (err) {
           checks['erroredChats'] = `error: ${(err as Error).message}`;
+        }
+
+        // Chats the host could not load at all: their meta.json failed to
+        // read or parse. Only the local socket reports them (this host only).
+        if (config.hostSocket !== null && config.daemonLocalKey !== null) {
+          try {
+            const t = buildTransport(config);
+            const res = await t.get<{
+              unreadable?: Array<{ chatId: string; path: string; error: string }>;
+            }>(t.kind === 'uds' ? '/chats' : '/api/chats');
+            checks['unreadableChats'] =
+              res.unreadable ?? 'unknown: only reported over the local host socket';
+          } catch (err) {
+            checks['unreadableChats'] = `error: ${(err as Error).message}`;
+          }
+        } else {
+          checks['unreadableChats'] = 'unknown: only reported over the local host socket';
         }
 
         // --- macOS folder permissions (the host process's own access) ---

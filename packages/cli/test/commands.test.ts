@@ -826,6 +826,41 @@ test('doctor --json: reports per-host status from /api/hosts', async () => {
   );
 });
 
+test('doctor --json: erroredChats counts errored chats on every host (account-wide)', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
+      if (req.url === '/api/daemon/healthz') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/chats')
+        return {
+          status: 200,
+          body: {
+            chats: [
+              { chatId: 'a', status: 'errored', hostId: 'remote-host' },
+              { chatId: 'b', status: 'errored', hostId: 'remote-host' },
+              { chatId: 'c', status: 'idle', hostId: 'local-host' },
+            ],
+          },
+        };
+      if (req.url === '/api/auth/me') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/hosts') return { status: 200, body: { hosts: [] } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['doctor', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as {
+        erroredChats: number;
+        erroredChatsScope: string;
+        erroredChatDetails: Array<{ hostId: string }>;
+      };
+      assert.equal(parsed.erroredChats, 2);
+      assert.match(parsed.erroredChatsScope, /account-wide/);
+      assert.equal(parsed.erroredChatDetails[0]?.hostId, 'remote-host');
+    },
+  );
+});
+
 // C2-d1: notify delivery failures are logged to <dataDir>/undelivered.jsonl
 // (spec/09 L113 & L221: "Failures … logged to /data/undelivered.jsonl and
 // surfaced via patch doctor"). `patch doctor` must read that file from
