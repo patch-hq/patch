@@ -13,6 +13,8 @@ import { CodexHistory } from './codexHistory.js';
 import type { CodexNotification, RpcObject } from './codexClient.js';
 import { discoverSkills, skillCatalogueText } from './projectSkills.js';
 import { toResponsesItems, type TrackEntry } from './nativeReconstruct.js';
+import { DurableCodexProcess } from './codexDurable.js';
+import { keepRunnerLog, retireTurn, turnDirFor } from './durableTurn.js';
 
 /**
  * Whether a `thread/inject_items` failure is the injected track not fitting
@@ -198,6 +200,37 @@ export class CodexBackend implements SdkBackend {
     private accounts: CodexAccounts,
     readonly history: CodexHistory,
   ) {}
+  /**
+   * The runner this turn goes under, or undefined when the host has none
+   * configured. A reattach that cannot be carried on (the thread or turn was
+   * never recorded) is dropped loudly and the turn starts fresh, which is
+   * what a turn that never began is owed.
+   */
+  private durableFor(opts: SdkRunOptions, accountId: string): DurableCodexProcess | undefined {
+    const req = opts.durableTurn;
+    if (!req) return undefined;
+    let attach = req.attach;
+    if (attach) {
+      const probe = DurableCodexProcess.attachable(req)
+        ? new DurableCodexProcess({ ...req, accountId })
+        : undefined;
+      const r = probe?.recovered;
+      if (!r?.threadId || !r.turnId) {
+        req.log.warn(
+          { chatId: req.chatId, hasThread: Boolean(r?.threadId), hasTurn: Boolean(r?.turnId) },
+          'durable codex turn: the previous turn never recorded its thread or turn; starting it again',
+        );
+        keepRunnerLog(turnDirFor(req.config, req.chatId), 'unrecoverable');
+        retireTurn(turnDirFor(req.config, req.chatId));
+        attach = undefined;
+      }
+    }
+    return new DurableCodexProcess({
+      ...req,
+      accountId,
+      attach: attach,
+    });
+  }
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     const policy = codexPermission(opts.permissionMode);
     const { unsupported } = codexDisabledMcpTools(opts.disabledTools);
@@ -210,7 +243,15 @@ export class CodexBackend implements SdkBackend {
       .catch((error: Error) => {
         throw new CodexTurnError(error.message, true);
       });
-    const client = await this.accounts.turnClient(accountId);
+    const durable = this.durableFor(opts, accountId);
+    const attached = durable?.attaching ? durable.recovered : undefined;
+    let client: Awaited<ReturnType<CodexAccounts['turnClient']>>;
+    try {
+      client = await this.accounts.turnClient(accountId, durable);
+    } catch (error) {
+      durable?.release();
+      throw error;
+    }
     // Codex fixes its approval policy when the turn starts, so a mode chosen
     // mid-turn is honoured here: bypass answers approval requests itself.
     const tracked =
@@ -255,19 +296,25 @@ export class CodexBackend implements SdkBackend {
                 ? { lastTurnId: point.slice(8) }
                 : {}),
           };
-      const response = await client.request(
-        fresh ? 'thread/start' : opts.fork ? 'thread/fork' : 'thread/resume',
-        params,
-      );
+      // A turn the previous host left running is already on its thread, which
+      // that host started or resumed, injected into and sent the prompt to.
+      const response: RpcObject = attached
+        ? { thread: { id: attached.threadId, path: attached.threadPath } }
+        : await client.request(
+            fresh ? 'thread/start' : opts.fork ? 'thread/fork' : 'thread/resume',
+            params,
+          );
       const threadId: string = response.thread.id;
       const sessionId = 'codex-' + threadId;
       this.history.begin(sessionId, response.thread.path);
-      if (codexPrior && point) this.history.fork(codexPrior, sessionId, point);
+      if (!attached && codexPrior && point) this.history.fork(codexPrior, sessionId, point);
       // spec/04 § History — preserve the cached prefix: `codexReseed` rebuilds
       // a fresh thread from the whole track (no prior session on this
       // harness); `codexAppendItems` hands over only the delta into a thread
       // that was just RESUMED above, riding its own existing prompt cache.
-      const appendEvents = opts.codexReseed?.events ?? opts.codexAppendItems?.events;
+      const appendEvents = attached
+        ? undefined
+        : (opts.codexReseed?.events ?? opts.codexAppendItems?.events);
       let seedTrim = 0;
       if (appendEvents && opts.handoffStrict) {
         // A budgeted handoff is never trimmed to fit: an over-window rejection
@@ -301,8 +348,10 @@ export class CodexBackend implements SdkBackend {
           wake?.();
         }
       });
-      let turnId: string | undefined;
-      let toolsStarted = false;
+      let turnId: string | undefined = attached?.turnId;
+      // A turn reattached after a restart may have run anything: never re-plan it.
+      let toolsStarted = Boolean(attached);
+      let consumedOffset: number | undefined;
       // Any assistant output at all: past this, a failure is surfaced, never re-planned.
       let outputBegan = false;
       let interruption: Promise<void> | undefined;
@@ -335,7 +384,7 @@ export class CodexBackend implements SdkBackend {
       };
       opts.abortController.signal.addEventListener('abort', interrupt, { once: true });
       try {
-        const pending = this.history.pending(sessionId);
+        const pending = attached ? null : this.history.pending(sessionId);
         let previous: RpcObject | undefined;
         if (pending) {
           const snapshot = await client.request('thread/read', { threadId, includeTurns: true });
@@ -444,6 +493,10 @@ export class CodexBackend implements SdkBackend {
           wake = undefined;
           const message = queue.shift();
           if (!message) continue;
+          // The message before this one has been handled in full, and
+          // delivered by the consumer, so a restart now resumes after it.
+          if (consumedOffset !== undefined) durable?.noteConsumed(consumedOffset);
+          consumedOffset = message.offset;
           if (message.params.turnId && message.params.turnId !== turnId) continue;
           if (message.method === 'patch/processFailed') throw new Error(message.params.message);
           if (message.id !== undefined) {

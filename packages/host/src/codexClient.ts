@@ -6,6 +6,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { createInterface } from 'node:readline';
 import { mkdirSync } from 'node:fs';
 import { promisify } from 'node:util';
+import type { DurableCodexProcess } from './codexDurable.js';
 
 export type RpcObject = Record<string, any>;
 
@@ -17,7 +18,13 @@ export function redactCodexLine(line: string): string {
     .replace(/\b(sk|rt|sess)-[\w-]{10,}/g, '[redacted-key]')
     .trim();
 }
-export type CodexNotification = { method: string; params: RpcObject; id?: string | number };
+export type CodexNotification = {
+  method: string;
+  params: RpcObject;
+  id?: string | number;
+  /** Set on a turn that runs under a durable runner: where this message ends in its output. */
+  offset?: number;
+};
 
 /** One isolated Codex process. Never logs protocol payloads: login contains secrets. */
 export class CodexClient {
@@ -33,10 +40,14 @@ export class CodexClient {
   >();
   private listeners = new Set<(message: CodexNotification) => void>();
   private started: Promise<void> | undefined;
+  /** Messages that arrived on a reattached turn before anyone subscribed. */
+  private held: CodexNotification[] | undefined;
+  private durableExited = false;
   get processId(): number | undefined {
-    return this.child?.pid;
+    return this.options.durable ? this.options.durable.codexPid() : this.child?.pid;
   }
   get alive(): boolean {
+    if (this.options.durable) return !this.durableExited && !this.options.durable.exited;
     return !!this.child && this.child.exitCode === null && !this.child.killed;
   }
   constructor(
@@ -48,6 +59,11 @@ export class CodexClient {
       externalAuth?: () => { accessToken: string; chatgptAccountId: string };
       /** Each stderr line, ANSI-stripped and with token-shaped strings redacted. */
       onStderr?: (line: string) => void;
+      /**
+       * Run app-server under a detached runner so the turn outlives a host
+       * restart (spec/02 § Host restarts), or reattach to one that already is.
+       */
+      durable?: DurableCodexProcess;
     },
   ) {}
 
@@ -83,7 +99,7 @@ export class CodexClient {
       this.options.executable ??
       process.env['PATCH_CODEX_EXECUTABLE'] ??
       (await new CodexRuntime(join(homedir(), '.patch/backends/codex')).ensure());
-    const launch = inWorkSlice(executable, [
+    const appArgs = [
       'app-server',
       '--stdio',
       ...(this.options.externalAuth
@@ -91,62 +107,52 @@ export class CodexClient {
         : this.options.credentialStore === 'existing'
           ? []
           : ['-c', `cli_auth_credentials_store="${this.options.credentialStore ?? 'keyring'}"`]),
-    ]);
-    const child = spawn(launch.command, launch.args, {
-      env,
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    this.child = child;
-    // Always drain stderr so its pipe never fills; hand lines on only redacted.
-    const onStderr = this.options.onStderr;
-    if (onStderr)
-      createInterface({ input: child.stderr }).on('line', (line) => {
-        const clean = redactCodexLine(line);
-        if (clean) onStderr(clean);
+    ];
+    const durable = this.options.durable;
+    if (durable) {
+      // The runner is itself started in the work slice, so app-server is not wrapped again.
+      const handlers = {
+        onLine: (line: string, end: number) => this.onLine(line, end),
+        onExit: (reason: string) => {
+          this.durableExited = true;
+          this.reportDurableStderr(durable);
+          this.fail(new Error(reason));
+        },
+      };
+      if (durable.attaching) {
+        // Carry on the ids the previous host used, so a replayed answer can never meet a new waiter.
+        this.nextId = durable.recovered?.maxRequestId ?? 0;
+        this.held = [];
+        durable.attach(handlers);
+        // The turn was initialised, and signed in, by the host that started it.
+        return;
+      }
+      durable.start({ command: executable, args: appArgs, cwd: homedir(), env }, handlers);
+    } else {
+      const launch = inWorkSlice(executable, appArgs);
+      const child = spawn(launch.command, launch.args, {
+        env,
+        detached: process.platform !== 'win32',
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
-    else child.stderr.resume();
-    child.stdin.on('error', (error) => this.fail(error));
-    child.on('error', (error) => this.fail(error));
-    child.on('exit', (code, signal) =>
-      this.fail(new Error(`Codex process exited (${signal ?? code})`)),
-    );
-    const lines = createInterface({ input: child.stdout });
-    lines.on('line', (line) => {
-      let msg: RpcObject;
-      try {
-        msg = JSON.parse(line);
-      } catch {
-        this.fail(new Error('Codex returned invalid JSON'));
-        this.signal(child, 'SIGTERM');
-        return;
-      }
-      if (typeof msg.method === 'string') {
-        if (msg.method === 'account/chatgptAuthTokens/refresh' && this.options.externalAuth) {
-          try {
-            this.respond(msg.id, this.options.externalAuth());
-          } catch (error) {
-            this.respond(msg.id, undefined, (error as Error).message);
-          }
-          return;
-        }
-        // JSON-RPC makes `params` optional, so a notification can arrive
-        // without one. CodexNotification declares it as always present and
-        // every subscriber reads it straight off, so an absent `params` threw
-        // out of this handler. Absent means "no parameters": `{}` is that.
-        const notification = { ...msg, params: msg.params ?? {} } as CodexNotification;
-        for (const listener of this.listeners) listener(notification);
-        if (msg.id !== undefined && this.listeners.size === 0)
-          this.respond(msg.id, undefined, 'No handler for Codex request');
-        return;
-      }
-      const waiter = this.pending.get(msg.id);
-      if (!waiter) return;
-      clearTimeout(waiter.timer);
-      this.pending.delete(msg.id);
-      if (msg.error) waiter.reject(new Error(`Codex RPC ${msg.error.code}: ${msg.error.message}`));
-      else waiter.resolve(msg.result ?? {});
-    });
+      this.child = child;
+      // Always drain stderr so its pipe never fills; hand lines on only redacted.
+      const onStderr = this.options.onStderr;
+      if (onStderr)
+        createInterface({ input: child.stderr }).on('line', (line) => {
+          const clean = redactCodexLine(line);
+          if (clean) onStderr(clean);
+        });
+      else child.stderr.resume();
+      child.stdin.on('error', (error) => this.fail(error));
+      child.on('error', (error) => this.fail(error));
+      child.on('exit', (code, signal) =>
+        this.fail(new Error(`Codex process exited (${signal ?? code})`)),
+      );
+      createInterface({ input: child.stdout }).on('line', (line) =>
+        this.onLine(line, undefined, child),
+      );
+    }
     await this.request('initialize', {
       clientInfo: { name: 'patch', version: '0.1.0' },
       capabilities: { experimentalApi: true },
@@ -158,6 +164,58 @@ export class CodexClient {
         ...this.options.externalAuth(),
       });
     }
+  }
+  private reportDurableStderr(durable: DurableCodexProcess): void {
+    const onStderr = this.options.onStderr;
+    if (!onStderr) return;
+    for (const line of durable.stderrTail()) {
+      const clean = redactCodexLine(line);
+      if (clean) onStderr(clean);
+    }
+  }
+  private onLine(line: string, offset?: number, child?: ChildProcessWithoutNullStreams): void {
+    let msg: RpcObject;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      this.fail(new Error('Codex returned invalid JSON'));
+      if (child) this.signal(child, 'SIGTERM');
+      else this.options.durable?.kill('SIGTERM');
+      return;
+    }
+    if (typeof msg.method === 'string') {
+      if (msg.method === 'account/chatgptAuthTokens/refresh' && this.options.externalAuth) {
+        try {
+          this.respond(msg.id, this.options.externalAuth());
+        } catch (error) {
+          this.respond(msg.id, undefined, (error as Error).message);
+        }
+        return;
+      }
+      // JSON-RPC makes `params` optional, so a notification can arrive
+      // without one. CodexNotification declares it as always present and
+      // every subscriber reads it straight off, so an absent `params` threw
+      // out of this handler. Absent means "no parameters": `{}` is that.
+      const notification = {
+        ...msg,
+        params: msg.params ?? {},
+        ...(offset !== undefined ? { offset } : {}),
+      } as CodexNotification;
+      if (this.held) {
+        this.held.push(notification);
+        return;
+      }
+      for (const listener of this.listeners) listener(notification);
+      if (msg.id !== undefined && this.listeners.size === 0)
+        this.respond(msg.id, undefined, 'No handler for Codex request');
+      return;
+    }
+    const waiter = this.pending.get(msg.id);
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    this.pending.delete(msg.id);
+    if (msg.error) waiter.reject(new Error(`Codex RPC ${msg.error.code}: ${msg.error.message}`));
+    else waiter.resolve(msg.result ?? {});
   }
   request(
     method: string,
@@ -182,6 +240,12 @@ export class CodexClient {
   }
   subscribe(listener: (message: CodexNotification) => void): () => void {
     this.listeners.add(listener);
+    // A reattached turn's replay waits for its first subscriber.
+    const held = this.held;
+    if (held) {
+      this.held = undefined;
+      for (const m of held) listener(m);
+    }
     return () => {
       this.listeners.delete(listener);
     };
@@ -190,6 +254,11 @@ export class CodexClient {
     this.write(error ? { id, error: { code: -32601, message: error } } : { id, result });
   }
   private write(message: RpcObject): void {
+    if (this.options.durable) {
+      if (this.durableExited) throw new Error('Codex is not running');
+      this.options.durable.write(JSON.stringify(message));
+      return;
+    }
     if (!this.child || this.child.exitCode !== null || this.child.stdin.destroyed)
       throw new Error('Codex is not running');
     this.child.stdin.write(JSON.stringify(message) + '\n');
@@ -200,8 +269,10 @@ export class CodexClient {
       waiter.reject(error);
     }
     this.pending.clear();
-    for (const listener of this.listeners)
-      listener({ method: 'patch/processFailed', params: { message: error.message } });
+    const failure = { method: 'patch/processFailed', params: { message: error.message } };
+    // On a reattached turn nobody has subscribed yet: the failure waits behind the replay.
+    if (this.held) this.held.push(failure);
+    for (const listener of this.listeners) listener(failure);
   }
   private signal(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
     try {
@@ -212,13 +283,14 @@ export class CodexClient {
     }
   }
   async descendants(): Promise<number[]> {
-    if (!this.child?.pid || process.platform === 'win32') return [];
+    const root = this.processId;
+    if (!root || process.platform === 'win32') return [];
     const { stdout } = await promisify(execFile)('ps', ['-axo', 'pid=,ppid=']);
     const rows = stdout
       .trim()
       .split('\n')
       .map((line) => line.trim().split(/\s+/).map(Number));
-    const owned = new Set([this.child.pid]);
+    const owned = new Set([root]);
     let changed = true;
     while (changed) {
       changed = false;
@@ -228,7 +300,7 @@ export class CodexClient {
           changed = true;
         }
     }
-    owned.delete(this.child.pid);
+    owned.delete(root);
     return [...owned].reverse();
   }
   terminateDescendants(pids: number[]): void {
@@ -241,6 +313,19 @@ export class CodexClient {
     }
   }
   async close(): Promise<void> {
+    const durable = this.options.durable;
+    if (durable) {
+      // The host going down lets the turn carry on under the next one; only a
+      // turn that is over, or abandoned, ends its app-server.
+      if (durable.letGo) return;
+      this.fail(
+        new Error(
+          'The ChatGPT session was closed while this turn was running, usually because the Patch host restarted',
+        ),
+      );
+      durable.release();
+      return;
+    }
     this.fail(
       new Error(
         'The ChatGPT session was closed while this turn was running, usually because the Patch host restarted',

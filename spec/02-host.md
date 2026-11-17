@@ -98,6 +98,18 @@ been silent for 30 minutes ends it, so an orphaned turn finishes as failed
 instead of holding its chat running. An install never prunes a version folder a
 live runner started from.
 
+A Codex turn is no different. Its `codex app-server` process (one per turn) runs
+under the same runner, which records app-server's JSON-RPC lines in both
+directions. The thread and turn ids are read back from that record, so a
+reattached turn neither resumes the thread nor sends the prompt again; a turn whose
+thread or turn was never recorded had not begun, and starts again as a new turn.
+What app-server said after the point the previous host had handled is replayed,
+along with each request of its (an approval, a question) that no host had answered,
+so the user is asked again. Responses to the previous host's own requests are not
+replayed, and the new host's request ids continue past the highest the old one
+used. A replayed item the chat's log already holds, found by its item id, is not
+logged again.
+
 A turn's identity for reattachment is its turn id. A turn that arrives without
 one (a spawn prompt, so every job-fired chat's first turn) is given one when it
 starts.

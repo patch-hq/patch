@@ -7445,7 +7445,7 @@ export class Daemon {
     localId: string | undefined,
   ): Pick<SdkRunOptions, 'durableTurn'> {
     const config = this.opts.durableTurns;
-    if (!config || harness !== 'claude') return {};
+    if (!config || (harness !== 'claude' && harness !== 'codex')) return {};
     const attach = this.takeDurableAttach(chatId, localId);
     this.durableAttach.delete(chatId);
     return {
