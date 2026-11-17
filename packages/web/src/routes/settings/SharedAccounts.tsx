@@ -8,7 +8,7 @@
 // because an account belongs to nobody's host.
 
 import type { JSX, ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   accountStateRunnable,
   describeAccountState,
@@ -22,8 +22,6 @@ import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { formatAgo, formatResetLocal } from '../../lib/usage.js';
-import { sortHosts } from './hostScope.js';
-import { sendToHost } from './hostWrite.js';
 import { writeShared } from './sharedWrite.js';
 import { AccountRow, RankedList, UsageBars, type MenuItem } from './accountList.js';
 import { Note, Pills, Row } from './ui.js';
