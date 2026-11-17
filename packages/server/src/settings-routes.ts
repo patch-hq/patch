@@ -380,14 +380,9 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
   /** A finished sign-in carries the committed state, so a surface needs no second read. */
   const settledBody = (settled: NonNullable<ChatGPTSignIn['settled']>) => {
     if (settled.status !== 'complete') return settled;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping `type` from the broadcast event shape, not using it
     const { type: _type, ...state } = shared.changedEvent();
     return { status: 'complete' as const, state };
   };
-  const SignInStartBody = z
-    .object({ accountId: z.string().min(1).optional(), label: z.string().min(1).optional() })
-    .strict();
-
   app.post('/api/accounts/codex/signin', async (req, reply) => {
     if (!(await authed(req, reply))) return reply;
     const body = SignInStartBody.safeParse(req.body ?? {});
