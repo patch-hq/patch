@@ -113,6 +113,19 @@ test.describe('first run', () => {
     ]);
   });
 
+  test('"Connect to an existing Patch" is its own choice and sends the pasted code', async ({
+    page,
+  }) => {
+    await open(page);
+    await page.getByTestId('choose-existing').click();
+    await expect(page.getByRole('heading', { name: 'Connect to an existing Patch' })).toBeVisible();
+    await page.getByTestId('pairing-code').fill('patch-pair://?nonce=abc&relay=wss%3A%2F%2Fr');
+    await page.getByTestId('connect').click();
+    expect(await chosen(page)).toEqual([
+      { kind: 'remote', input: 'patch-pair://?nonce=abc&relay=wss%3A%2F%2Fr' },
+    ]);
+  });
+
   test('an empty code is turned back on the page without bothering the shell', async ({ page }) => {
     await open(page);
     await page.getByTestId('choose-remote').click();

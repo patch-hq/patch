@@ -92,6 +92,21 @@ describe('LinkDeviceQr', () => {
     expect(screen.queryByTestId('link-device-render-error')).toBeNull();
   });
 
+  it('shows the whole pairing code as text and copies it, for a computer that cannot scan', async () => {
+    const uri = 'patch-pair://?nonce=n9&relay=wss%3A%2F%2Frelay.example.com&ch=chan&pk=key';
+    vi.mocked(api.surfacePairStart).mockResolvedValue({ nonce: 'n9', expiresAt: 1, uri });
+    vi.spyOn(QRCode, 'toCanvas').mockImplementation(
+      (_c: unknown, _t: unknown, _o: unknown, cb: unknown) =>
+        (cb as (e: Error | null) => void)(null),
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    renderWithClient();
+    await waitFor(() => expect(screen.getByTestId('link-device-nonce')).toHaveTextContent(uri));
+    screen.getByTestId('link-device-copy').click();
+    expect(writeText).toHaveBeenCalledWith(uri);
+  });
+
   // spec/05 § Canonical QR payload — the code is the server's to make: it knows
   // whether a new device reaches it by address or through a relay.
   it('draws the code the server issued, which may name a relay', async () => {

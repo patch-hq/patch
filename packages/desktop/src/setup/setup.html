@@ -275,10 +275,16 @@
             <span class="choice-title">My own server</span>
             <span class="choice-hint">Paste the pairing code it printed</span>
           </button>
+          <button type="button" class="choice" id="existing" data-testid="choose-existing">
+            <span class="choice-title">Connect to an existing Patch</span>
+            <span class="choice-hint">
+              Paste a pairing code from Patch on another computer, to join the same account
+            </span>
+          </button>
         </div>
       </div>
       <form id="join" hidden data-testid="join-form">
-        <h1>Connect to your server</h1>
+        <h1 id="join-title">Connect to your server</h1>
         <label for="code">Pairing code</label>
         <textarea
           id="code"
@@ -427,12 +433,15 @@
       });
 
       $('local').addEventListener('click', () => pick({ kind: 'local' }));
-      $('remote').addEventListener('click', () => {
+      function showJoin(title) {
+        $('join-title').textContent = title;
         error.hidden = true;
         choose.hidden = true;
         join.hidden = false;
         $('code').focus();
-      });
+      }
+      $('remote').addEventListener('click', () => showJoin('Connect to your server'));
+      $('existing').addEventListener('click', () => showJoin('Connect to an existing Patch'));
       $('back').addEventListener('click', () => {
         error.hidden = true;
         join.hidden = true;
@@ -441,7 +450,7 @@
       join.addEventListener('submit', (e) => {
         e.preventDefault();
         const input = $('code').value.trim();
-        if (input === '') return fail('Paste the pairing code your server printed.');
+        if (input === '') return fail('Paste the pairing code.');
         pick({ kind: 'remote', input });
       });
 

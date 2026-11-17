@@ -104,9 +104,19 @@ export function LinkDeviceQr({ onClose }: { onClose: () => void }): JSX.Element 
             </p>
           ) : (
             <code className="set-code" data-testid="link-device-nonce">
-              {data.nonce}
+              {payload}
             </code>
           )}
+          {payload ? (
+            <button
+              type="button"
+              className="set-btn"
+              data-testid="link-device-copy"
+              onClick={() => void navigator.clipboard.writeText(payload)}
+            >
+              Copy code
+            </button>
+          ) : null}
         </div>
       )}
       {close}
