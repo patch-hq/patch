@@ -99,4 +99,14 @@ describe('launchd update keeps running chats alive', () => {
     expect(ks).toBeDefined();
     expect(ks).toContain('-k');
   });
+
+  it('start right after a fresh registration kickstarts with -k and never signals the starting host', async () => {
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    await launchdOps.register(def).catch(() => undefined);
+    expect(launchctlVerbs()).toContain('bootstrap');
+    await launchdOps.start(def);
+    expect(kill).not.toHaveBeenCalled();
+    const ks = calls.find((c) => c.includes('kickstart'));
+    expect(ks).toContain('-k');
+  });
 });
