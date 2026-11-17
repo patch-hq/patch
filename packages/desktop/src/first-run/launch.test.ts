@@ -100,7 +100,7 @@ test('"on this Mac" brings up the local server and host, and opens the server on
     ...base(),
     ui: asked.impl,
     startLocal: async (existing, progress) => {
-      progress('Starting the server…');
+      progress('server');
       const saved = {
         connection: { mode: 'local' as const, port: 41999 },
         credential: 'local.jwt.value',
@@ -116,7 +116,7 @@ test('"on this Mac" brings up the local server and host, and opens the server on
   assert.equal(launch.appUrl, 'http://127.0.0.1:41999/app/#credential=local.jwt.value');
   assert.equal(launch.firstRun, true);
   assert.equal(launch.mode, 'local');
-  assert.deepEqual(asked.log, ['progress:Starting the server…']);
+  assert.deepEqual(asked.log, ['progress:server']);
   await launch.stop();
   assert.deepEqual(stopped, ['server']);
 });

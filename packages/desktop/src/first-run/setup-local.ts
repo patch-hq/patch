@@ -17,7 +17,7 @@ export interface LocalDeps {
     body: unknown,
     bearer?: string,
   ): Promise<{ status: number; json: { credential?: string; nonce?: string; error?: string } }>;
-  /** Whether this Mac already runs a host. */
+  /** Whether this computer already runs a host. */
   hostInstalled(): boolean;
   installHost(
     origin: string,
@@ -30,7 +30,8 @@ export interface LocalDeps {
    * the account up instead of being refused a second one.
    */
   recover(): SavedConnection | null;
-  progress(message: string): void;
+  /** Which setup step has started: 'server' | 'account' | 'host' | 'connect'. The page words it. */
+  progress(step: string): void;
   /** What the server calls this app in its device list. */
   label: string;
 }
@@ -42,12 +43,12 @@ export async function bringUpLocal(
   existing ??= d.recover();
   const port =
     existing?.connection.mode === 'local' ? existing.connection.port : await d.freePort();
-  d.progress('Starting the server…');
+  d.progress('server');
   const server = await d.startServer({ port });
   try {
     let saved = existing;
     if (saved === null) {
-      d.progress('Setting up your account…');
+      d.progress('account');
       const made = await d.call(server.origin, '/api/auth/account', {
         clientType: 'surface-desktop',
         devicePublicKey: generateUserKeypair().publicKey,
@@ -55,7 +56,7 @@ export async function bringUpLocal(
       });
       if (made.status === 409) {
         throw new Error(
-          'This Mac’s Patch server already has an account that this app does not hold the key to. Delete the server folder (Patch → Show server data) to start over.',
+          'This computer’s Patch server already has an account that this app does not hold the key to. Delete the server folder (Patch → Show server data) to start over.',
         );
       }
       if (made.status !== 200 || !made.json.credential) {
@@ -67,7 +68,7 @@ export async function bringUpLocal(
       d.save(saved);
     }
     if (!d.hostInstalled()) {
-      d.progress('Setting up this Mac as a host…');
+      d.progress('host');
       const started = await d.call(
         server.origin,
         '/api/auth/daemon/pair/start',
@@ -76,7 +77,7 @@ export async function bringUpLocal(
       );
       if (started.status !== 200 || !started.json.nonce) {
         throw new Error(
-          `The server gave no pairing code for this Mac: ${started.json.error ?? `HTTP ${started.status}`}`,
+          `The server gave no pairing code for this computer: ${started.json.error ?? `HTTP ${started.status}`}`,
         );
       }
       const installed = await d.installHost(server.origin, started.json.nonce);
@@ -86,6 +87,7 @@ export async function bringUpLocal(
         );
       }
     }
+    d.progress('connect');
     return { saved, server };
   } catch (e) {
     await server.stop();

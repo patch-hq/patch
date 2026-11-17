@@ -187,6 +187,65 @@
         font-size: 14px;
         color: var(--ink-3);
       }
+      #steps {
+        list-style: none;
+        margin: 20px 0 0;
+        padding: 0;
+        display: grid;
+        gap: 12px;
+      }
+      #steps li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--ink-3);
+      }
+      #steps li[data-state='active'] {
+        color: var(--ink);
+      }
+      #steps li[data-state='done'] {
+        color: var(--ink-3);
+      }
+      #steps li[data-state='failed'] {
+        color: var(--danger);
+      }
+      .mark {
+        width: 18px;
+        height: 18px;
+        flex: none;
+        border-radius: 50%;
+        border: 2px solid var(--line);
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        line-height: 1;
+      }
+      li[data-state='active'] .mark {
+        border-color: var(--line);
+        border-top-color: var(--accent);
+        animation: spin 0.8s linear infinite;
+      }
+      li[data-state='done'] .mark {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--on-accent);
+      }
+      li[data-state='failed'] .mark {
+        background: var(--danger);
+        border-color: var(--danger);
+        color: var(--on-accent);
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        li[data-state='active'] .mark {
+          animation: none;
+          border-color: var(--accent);
+        }
+      }
       #error {
         margin: 0;
         font-size: 14px;
@@ -233,8 +292,12 @@
           <button type="button" class="ghost" id="back" data-testid="back">Back</button>
         </div>
       </form>
+      <ol id="steps" hidden data-testid="steps" aria-live="polite"></ol>
       <p id="status" role="status" data-testid="status"></p>
       <p id="error" role="alert" data-testid="error" hidden></p>
+      <div class="row" id="retry-row" hidden>
+        <button type="button" class="primary" id="retry" data-testid="retry">Try again</button>
+      </div>
     </main>
     <script>
       const $ = (id) => document.getElementById(id);
@@ -251,14 +314,97 @@
       function say(message) {
         status.textContent = message;
       }
+      // What setup does, in order; the shell reports which has started.
+      const FLOWS = {
+        local: [
+          ['server', 'Starting Patch'],
+          ['account', 'Creating your account'],
+          ['host', 'Setting up this computer'],
+          ['connect', 'Connecting'],
+        ],
+        remote: [
+          ['pair', 'Pairing with your server'],
+          ['connect', 'Connecting'],
+        ],
+      };
+      const stepsEl = $('steps');
+      const retryRow = $('retry-row');
+      let flow = null;
+      let current = null;
+
+      function mark(li, state) {
+        li.dataset.state = state;
+        li.querySelector('.mark').textContent =
+          state === 'done' ? '✓' : state === 'failed' ? '✕' : '';
+      }
+      function lis() {
+        return [...stepsEl.children];
+      }
+      function showSteps(name) {
+        flow = name;
+        stepsEl.replaceChildren(
+          ...FLOWS[name].map(([id, label]) => {
+            const li = document.createElement('li');
+            li.dataset.step = id;
+            const m = document.createElement('span');
+            m.className = 'mark';
+            m.setAttribute('aria-hidden', 'true');
+            const t = document.createElement('span');
+            t.textContent = label;
+            li.append(m, t);
+            mark(li, 'pending');
+            return li;
+          }),
+        );
+        stepsEl.hidden = false;
+        choose.hidden = true;
+        join.hidden = true;
+      }
+      function step(id) {
+        const name =
+          FLOWS.local.some(([k]) => k === id) && id !== 'connect'
+            ? 'local'
+            : id === 'pair'
+              ? 'remote'
+              : (flow ?? 'local');
+        if (flow !== name) showSteps(name);
+        const at = lis().findIndex((li) => li.dataset.step === id);
+        lis().forEach((li, i) => mark(li, i < at ? 'done' : i === at ? 'active' : 'pending'));
+        current = id;
+      }
+      function progress(message) {
+        if (Object.values(FLOWS).some((f) => f.some(([k]) => k === message))) {
+          say('');
+          return step(message);
+        }
+        say(message);
+      }
+      function resetSteps() {
+        stepsEl.hidden = true;
+        retryRow.hidden = true;
+        flow = null;
+        current = null;
+      }
       function fail(message) {
         busy(false);
         say('');
         error.hidden = false;
         error.textContent = message;
+        if (flow !== null) {
+          const li = lis().find((l) => l.dataset.step === current);
+          if (li) mark(li, 'failed');
+          retryRow.hidden = false;
+        }
       }
+      $('retry').addEventListener('click', () => {
+        error.hidden = true;
+        resetSteps();
+        choose.hidden = false;
+        busy(false);
+      });
       function pick(choice) {
         error.hidden = true;
+        resetSteps();
         busy(true);
         window.patchSetup.choose(choice);
       }
@@ -299,7 +445,7 @@
         pick({ kind: 'remote', input });
       });
 
-      window.patchSetup.onProgress(say);
+      window.patchSetup.onProgress(progress);
       window.patchSetup.onFail(fail);
     </script>
   </body>

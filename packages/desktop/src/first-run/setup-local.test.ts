@@ -52,9 +52,10 @@ test('a first run starts the server, makes the account, remembers it, then sets 
       'install:http://127.0.0.1:40123:hostCode0123456789hostCode0123456789',
     ],
   );
-  assert.ok(
-    calls.some((c) => c.startsWith('say:')),
-    'it tells the page what it is doing',
+  assert.deepEqual(
+    calls.filter((c) => c.startsWith('say:')),
+    ['say:server', 'say:account', 'say:host', 'say:connect'],
+    'it tells the page each step as it starts',
   );
 });
 

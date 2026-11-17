@@ -18,7 +18,8 @@ export type Choice = { kind: 'local' } | { kind: 'remote'; input: string };
 export interface SetupUi {
   /** Show the choice; resolves with what the user picked. */
   choose(): Promise<Choice>;
-  progress(message: string): void;
+  /** A setup step has started (`server`, `account`, `host`, `connect`, `pair`); the page words it. */
+  progress(step: string): void;
   /** Say why that did not work; `choose` is called again. */
   fail(message: string): void;
 }
@@ -106,7 +107,7 @@ export async function launchPatch(opts: LaunchOptions): Promise<Launch> {
           stop: () => server.stop(),
         };
       }
-      opts.ui.progress('Pairing with your server…');
+      opts.ui.progress('pair');
       const joined = await joinServer(choice.input, { label: opts.label });
       writeSaved(opts.file, joined);
       return { ...(await resume(joined, opts)), firstRun: true };
