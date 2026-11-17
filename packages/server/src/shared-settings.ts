@@ -51,6 +51,8 @@ import {
   type AccountState,
   type WireEvent,
   accountsKeyForBackend,
+  PROVIDERS,
+  type ProviderDescriptor,
   isAnthropicApiKey,
   type ProviderBackendId,
 } from '@patch/wire';
@@ -878,6 +880,23 @@ export class SharedSettingsService {
       if (!modes) throw new SettingsError(400, 'invalid_input', `unknown provider: ${id}`);
       if (!modes.includes(mode)) {
         throw new SettingsError(400, 'invalid_input', `${id} cannot run permission mode ${mode}`);
+      }
+    }
+    for (const [id, chosen] of Object.entries(parsed.data.providerSettings ?? {})) {
+      const declared = (PROVIDERS as readonly ProviderDescriptor[]).find((p) => p.id === id);
+      if (!declared) throw new SettingsError(400, 'invalid_input', `unknown provider: ${id}`);
+      for (const [key, value] of Object.entries(chosen)) {
+        const setting = declared.settings.find((d) => d.key === key);
+        if (!setting) {
+          throw new SettingsError(400, 'invalid_input', `${id} has no setting ${key}`);
+        }
+        if (!Number.isInteger(value) || value < setting.min || value > setting.max) {
+          throw new SettingsError(
+            400,
+            'invalid_input',
+            `${setting.label} must be a whole number from ${setting.min} to ${setting.max}`,
+          );
+        }
       }
     }
     this.settings = { ...this.settings, ...parsed.data };

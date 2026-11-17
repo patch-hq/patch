@@ -1,4 +1,5 @@
 import { cutoffMs } from './cleanup.js';
+import { applyClaudeProviderSettings } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
@@ -1930,6 +1931,16 @@ async function startHost(
       );
     }
     daemon.setProviderPermissionDefaults(shared.providerPermissionDefaults);
+    try {
+      // spec/10 § Provider settings: write what the user chose for Claude Code's own settings.
+      const written = applyClaudeProviderSettings(claudeHome, shared.providerSettings);
+      if (written.length > 0) {
+        logger.info({ written }, 'Claude Code settings written from Settings');
+        emit({ type: 'claude_settings.updated', hostId: selfHostId, ...claudeSettingsSnapshot() });
+      }
+    } catch (err) {
+      logger.error({ err }, 'Claude Code settings not written: settings.json cannot be edited');
+    }
     localModels.setBaseUrl(shared.localModelBaseUrl);
     setDefaultModel(shared.defaultModel);
     if (shared.specialThreadModel !== specialThreadModel) {

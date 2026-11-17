@@ -29,6 +29,7 @@ import { SettingsSection } from '../SettingsSection';
 import { agoLabel, sendToHost } from './hostSend';
 import { NoticeRow, hostName, sortedHosts } from './HostSwitcher';
 import { ClaudeSettingsRow } from './ClaudeSettingsSection';
+import { ProviderOwnSettings } from './ProviderOwnSettings';
 import { SecretsSection } from './SecretsSection';
 import { PROVIDERS } from './providers';
 import { SettingsPage } from './SettingsPage';
@@ -680,6 +681,7 @@ export function ProvidersPage(): React.ReactElement {
   return (
     <SettingsPage title="Providers" testID="settings-page-providers">
       <ProviderKeys />
+      <ProviderOwnSettings />
       <LocalModelEndpoint />
       <SecretsSection />
     </SettingsPage>

@@ -5,7 +5,14 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { providerKeyCheckText, providerKeyInfo, type ProviderKeyId } from '@patch/wire';
+import {
+  PROVIDERS,
+  providerDescriptor,
+  providerKeyCheckText,
+  providerKeyInfo,
+  type ProviderKeyId,
+  type ProviderSettingDescriptor,
+} from '@patch/wire';
 import { isSubmitChord } from '../../lib/submitChord.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
 import { sendToHost } from './hostWrite.js';
@@ -13,7 +20,7 @@ import { api, type SharedState } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
-import { hostLabel } from './hostScope.js';
+import { hostLabel, sortHosts } from './hostScope.js';
 import { patchShared, problemText, writeShared } from './sharedWrite.js';
 import { Group, Note, Row, SettingsPage } from './ui.js';
 
@@ -26,9 +33,105 @@ export function ProvidersPage(): JSX.Element {
         </div>
         <ProviderKeys />
       </section>
+      <ProviderOwnSettings />
       <LocalModelEndpoint />
       <Secrets />
     </SettingsPage>
+  );
+}
+
+/**
+ * Each provider's own settings (spec/10 § Provider settings), from the
+ * provider registry: a provider with none shows no group. The value shown is
+ * the user's choice if there is one, else what a host's own configuration for
+ * the provider holds, else the provider's default; Patch writes nothing until
+ * the user chooses.
+ */
+export function ProviderOwnSettings(): JSX.Element {
+  return (
+    <>
+      {PROVIDERS.filter((p) => p.settings.length > 0).map((p) => (
+        <Group key={p.id} label={`${p.label} settings`} testid={`provider-settings-${p.id}`}>
+          {p.settings.map((setting) => (
+            <ProviderSettingRow key={setting.key} providerId={p.id} setting={setting} />
+          ))}
+        </Group>
+      ))}
+    </>
+  );
+}
+
+function ProviderSettingRow({
+  providerId,
+  setting,
+}: {
+  providerId: string;
+  setting: ProviderSettingDescriptor;
+}): JSX.Element {
+  const chosen = usePreferencesStore(
+    (s) => s.preferences.providerSettings[providerId]?.[setting.key],
+  );
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const hosts = usePresenceStore((s) => s.hosts);
+  let value = setting.providerDefault;
+  let source = `${providerDescriptor(providerId).label}'s own default`;
+  let problem: string | null = null;
+  if (chosen !== undefined) {
+    value = chosen;
+    source = 'Chosen here';
+  } else if (providerId === 'claude') {
+    // Claude Code's own file is the one configuration a host reports.
+    for (const h of sortHosts(Object.values(hosts))) {
+      const text = h.claudeSettings?.settingsJson ?? '';
+      if (text.trim() === '') continue;
+      try {
+        const own = (JSON.parse(text) as Record<string, unknown>)[setting.key];
+        if (typeof own === 'number') {
+          value = own;
+          source = `Set in ${hostLabel(h)}'s own settings.json`;
+          break;
+        }
+      } catch {
+        problem = `${hostLabel(h)}'s settings.json is not valid JSON, so its value cannot be shown.`;
+      }
+    }
+  }
+  function commit(raw: string): void {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n === value) return;
+    void patchShared(setting.label.toLowerCase(), {
+      providerSettings: {
+        ...usePreferencesStore.getState().preferences.providerSettings,
+        [providerId]: {
+          ...usePreferencesStore.getState().preferences.providerSettings[providerId],
+          [setting.key]: n,
+        },
+      },
+    });
+  }
+  return (
+    <Row
+      title={setting.label}
+      sub={problem ?? `${source}. ${setting.description}`}
+      testid={`provider-setting-${providerId}-${setting.key}`}
+    >
+      <input
+        type="number"
+        min={setting.min}
+        max={setting.max}
+        className="set-num"
+        aria-label={`${providerDescriptor(providerId).label}: ${setting.label}`}
+        data-testid={`provider-setting-${providerId}-${setting.key}-input`}
+        key={value}
+        defaultValue={value}
+        disabled={!loaded}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit((e.target as HTMLInputElement).value);
+        }}
+      />
+      <span className="set-unit">days</span>
+    </Row>
   );
 }
 
