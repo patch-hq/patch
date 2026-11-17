@@ -204,7 +204,9 @@ test('a relaunch from a different app location replaces a leftover server of ano
   });
   const fresh = await startLocalServer({ ...opts(root), port });
   try {
-    const health = (await (await fetch(`${fresh.origin}/api/healthz`)).json()) as { gitSha: string };
+    const health = (await (await fetch(`${fresh.origin}/api/healthz`)).json()) as {
+      gitSha: string;
+    };
     assert.equal(health.gitSha, 'abc1234');
   } finally {
     await fresh.stop();

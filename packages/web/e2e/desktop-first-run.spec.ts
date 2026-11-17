@@ -46,9 +46,42 @@ test.describe('first run', () => {
     await expect(page.getByTestId('choose-local')).toBeDisabled();
     await expect(page.getByTestId('choose-remote')).toBeDisabled();
     await page.evaluate(() =>
-      (window as never as { __progress(m: string): void }).__progress('Starting the server…'),
+      (window as never as { __progress(m: string): void }).__progress('server'),
     );
-    await expect(page.getByTestId('status')).toHaveText('Starting the server…');
+    const steps = page.getByTestId('steps').locator('li');
+    await expect(steps).toHaveText([
+      'Starting Patch',
+      'Creating your account',
+      'Setting up this computer',
+      'Connecting',
+    ]);
+    await expect(steps.nth(0)).toHaveAttribute('data-state', 'active');
+    await page.evaluate(() =>
+      (window as never as { __progress(m: string): void }).__progress('host'),
+    );
+    await expect(steps.nth(0)).toHaveAttribute('data-state', 'done');
+    await expect(steps.nth(1)).toHaveAttribute('data-state', 'done');
+    await expect(steps.nth(2)).toHaveAttribute('data-state', 'active');
+    await expect(steps.nth(3)).toHaveAttribute('data-state', 'pending');
+  });
+
+  test('a failed step is marked, the error is plain, and Try again returns to the choice', async ({
+    page,
+  }) => {
+    await open(page);
+    await page.getByTestId('choose-local').click();
+    await page.evaluate(() => {
+      const w = window as never as { __progress(m: string): void; __fail(m: string): void };
+      w.__progress('host');
+      w.__fail('Installing the host failed (1):\ncurl: (7)');
+    });
+    const steps = page.getByTestId('steps').locator('li');
+    await expect(steps.nth(2)).toHaveAttribute('data-state', 'failed');
+    await expect(steps.nth(1)).toHaveAttribute('data-state', 'done');
+    await expect(page.getByTestId('error')).toContainText('curl: (7)');
+    await page.getByTestId('retry').click();
+    await expect(page.getByTestId('steps')).toBeHidden();
+    await expect(page.getByTestId('choose-local')).toBeEnabled();
   });
 
   test('a failure is shown, the page unlocks, and it can be tried again', async ({ page }) => {
