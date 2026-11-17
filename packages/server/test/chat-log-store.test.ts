@@ -179,6 +179,18 @@ describe('ChatLogStore', () => {
     ).toHaveLength(1);
   });
 
+  test('load target: the last screen of a long chat is answered well within a second (spec/19)', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    for (let seq = 0; seq < 20_000; seq++) store.commit(message('c1', seq));
+    const fresh = new ChatLogStore({ dataDir: dir, logger });
+    const started = performance.now();
+    const page = fresh.page('c1', { limit: 100 });
+    const tookMs = performance.now() - started;
+    expect(page.entries).toHaveLength(100);
+    expect(page.more).toBe(true);
+    expect(tookMs).toBeLessThan(1000);
+  });
+
   test('highWater is the highest seq held, or -1 for a chat it holds nothing for', () => {
     const store = new ChatLogStore({ logger });
     expect(store.highWater('c1')).toBe(-1);

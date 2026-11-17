@@ -17,7 +17,7 @@ import {
   restartingVersion,
   type WireEvent,
 } from '@patch/wire';
-import { clearCredential, loadCredential } from '../lib/credential';
+import { clearCredential, loadCredential, store as feedStore } from '../lib/credential';
 import { useChatStore } from '../stores/chatStore';
 import {
   heldCursor,
@@ -212,6 +212,77 @@ export class PatchWs {
    * without the transcript to match, and `fromSeq` is EXCLUSIVE, so asking from
    * it would skip history this surface has never seen.
    */
+  /** The server answers history and runs the account feed (spec/05 § Loading); from `auth.ok`. */
+  private accountFeed = false;
+  private readonly historyAsks = new Map<
+    string,
+    { chatId: string; kind: 'last' | 'before' | 'after' }
+  >();
+  private historySeq = 0;
+
+  /** Ask the server for a page of a chat (spec/03 § Chat history). */
+  private askHistory(chatId: string, at: { after?: number; before?: number }): void {
+    const requestId = `h${++this.historySeq}`;
+    const kind = at.after !== undefined ? 'after' : at.before !== undefined ? 'before' : 'last';
+    this.historyAsks.set(requestId, { chatId, kind });
+    this.ws?.send(
+      JSON.stringify({
+        type: 'chat.history_request',
+        requestId,
+        chatId,
+        ...at,
+        limit: kind === 'after' ? 500 : HISTORY_PAGE,
+      }),
+    );
+  }
+
+  /** The page before the earliest entry shown, as the reader scrolls up. */
+  loadEarlier(chatId: string): void {
+    if (!this.accountFeed || !this.ws || this.ws.readyState !== 1) return;
+    const store = useChatStore.getState();
+    if (store.historyLoadingEarlier[chatId] || store.historyMore[chatId] !== true) return;
+    this.flushStoreQueue();
+    const earliest = (store.timelines[chatId] ?? []).reduce(
+      (min, e) => (e.seq >= 0 && e.seq < min ? e.seq : min),
+      Number.POSITIVE_INFINITY,
+    );
+    if (!Number.isFinite(earliest)) return;
+    store.setHistoryLoadingEarlier(chatId, true);
+    this.askHistory(chatId, { before: earliest });
+  }
+
+  /**
+   * After every connect to a server that runs the feed: the last feed position
+   * this phone holds, and the chats it follows with the position held in each
+   * — the chat on screen, every chat in the offline copy, and the most recent
+   * on the list (spec/03 § Account feed).
+   */
+  private resumeFeed(): void {
+    this.flushStoreQueue();
+    const { chats, timelines, activeChatId } = useChatStore.getState();
+    const follow = new Map<string, number>();
+    const cursorOf = (chatId: string): number =>
+      (timelines[chatId]?.length ?? 0) > 0 ? this.replayCursor(chatId) : heldCursor(chatId);
+    if (activeChatId !== null) follow.set(activeChatId, cursorOf(activeChatId));
+    const recent = Object.values(chats)
+      .sort((a, b) => b.lastUpdated - a.lastUpdated)
+      .slice(0, FEED_RECENT_CHATS);
+    for (const row of recent) follow.set(row.chatId, cursorOf(row.chatId));
+    for (const chatId of Object.keys(chats)) {
+      const held = cursorOf(chatId);
+      if (held >= 0) follow.set(chatId, held);
+    }
+    for (const [chatId, after] of follow) this.lastReplayCursor.set(chatId, after);
+    const after = loadFeedPos();
+    this.ws?.send(
+      JSON.stringify({
+        type: 'feed.resume',
+        ...(after !== null ? { after } : {}),
+        follow: [...follow].map(([chatId, a]) => ({ chatId, after: a })),
+      }),
+    );
+  }
+
   private replayCursor(chatId: string): number {
     // Committed store state only — anything still inside the batch window has
     // to land first or the cursor is computed against a transcript missing
@@ -248,6 +319,15 @@ export class PatchWs {
    */
   requestReplay(chatId: string, opts?: { force?: boolean }): void {
     if (!this.ws || this.ws.readyState !== 1) return;
+    if (this.accountFeed) {
+      if (opts?.force === true) this.lastReplayCursor.delete(chatId);
+      const after = this.replayCursor(chatId);
+      if (this.lastReplayCursor.get(chatId) === after) return;
+      this.lastReplayCursor.set(chatId, after);
+      this.askHistory(chatId, after >= 0 ? { after } : {});
+      useChatStore.getState().setReplaying(chatId, true);
+      return;
+    }
     // Someone opening a chat takes it over from the background fetch: the
     // answer now belongs on screen as well as in the cache.
     if (this.prefetching?.chatId === chatId) this.endPrefetch(false);
@@ -272,6 +352,9 @@ export class PatchWs {
    * phone never receives a whole library as one burst.
    */
   syncTranscripts(): void {
+    // The account feed keeps the chats this phone follows current (spec/05 §
+    // Loading); nothing is fetched chat by chat from a server that runs it.
+    if (this.accountFeed) return;
     const { chats, activeChatId } = useChatStore.getState();
     pruneTranscripts(new Set(Object.keys(chats)));
     const hosts = usePresenceStore.getState().hosts;
@@ -442,6 +525,9 @@ export class PatchWs {
       // treated as "this surface can't connect at all".
       usePresenceStore.getState().noteWsOpen(this.url);
 
+      // A server that ran the account feed last time is resumed from auth.ok
+      // instead (spec/03 § Account feed): nothing is asked chat by chat.
+      if (loadLastAccountFeed()) return;
       // Replay missed events for the chat the surface has OPEN, plus any chat
       // whose transcript it already holds (spec/12 § When a surface requests a
       // replay).
@@ -717,6 +803,8 @@ export class PatchWs {
       // server's cached reports, so the phone's Hosts list is complete from the
       // first frame — asleep hosts included.
       usePresenceStore.getState().setHosts(event.hosts);
+      this.accountFeed = event.accountFeed === true;
+      saveLastAccountFeed(this.accountFeed);
       // spec/14 § Composer — push every draft the server never confirmed
       // (typed while offline, or a save that failed mid-flight) now that the
       // link is back.
@@ -728,6 +816,12 @@ export class PatchWs {
       if (this.greeted) void refreshRoster();
       else this.syncTranscripts();
       this.greeted = true;
+      if (this.accountFeed) {
+        this.resumeFeed();
+        deliveryTracker.onReconnect();
+        permissionDeliveryTracker.onReconnect();
+        if (this.currentAppState === 'active') this.startHeartbeat();
+      }
       return;
     }
     if (event.type === 'auth.revoked') {
@@ -984,6 +1078,45 @@ export class PatchWs {
     // — same events, same order, same reducer — and commit at once: there is
     // nothing still to come that it could coalesce with, and asking for a
     // batch was exactly so the transcript paints once instead of arriving.
+    if (event.type === 'chat.history') {
+      const ask = this.historyAsks.get(event.requestId);
+      this.historyAsks.delete(event.requestId);
+      const store = useChatStore.getState();
+      // A followed chat nobody has open goes to the offline copy; one on
+      // screen, or already in the store, goes to the store as well.
+      const shown =
+        store.activeChatId === event.chatId || (store.timelines[event.chatId]?.length ?? 0) > 0;
+      if (shown || ask !== undefined) {
+        for (const inner of event.entries) this.dispatch(inner as WireEvent);
+      } else {
+        this.cacheOnly(event.entries as WireEvent[]);
+      }
+      for (const inner of event.pending) this.dispatch(inner as WireEvent);
+      for (const inner of event.queued) this.dispatch(inner as WireEvent);
+      this.flushStoreQueue();
+      store.setReplaying(event.chatId, false);
+      if (ask?.kind === 'before') {
+        store.orderTimelineBySeq(event.chatId);
+        store.setHistoryLoadingEarlier(event.chatId, false);
+      }
+      if (ask?.kind === 'last' || ask?.kind === 'before')
+        store.setHistoryMore(event.chatId, event.more);
+      if ((ask?.kind === 'after' || event.requestId === 'feed') && event.more && shown) {
+        this.askHistory(event.chatId, { after: this.replayCursor(event.chatId) });
+      }
+      return;
+    }
+    if (event.type === 'feed.reset') {
+      saveFeedPos(event.feedPos);
+      void refreshRoster();
+      return;
+    }
+    if (
+      (event.type === 'chat.state' || event.type === 'chat.spawned') &&
+      event.feedPos !== undefined
+    ) {
+      noteFeedPos(event.feedPos);
+    }
     if (event.type === 'chat.replay_batch' && this.prefetching?.chatId === event.chatId) {
       // Background fetch for the offline cache: straight to disk, not the store.
       this.cacheOnly(event.events as WireEvent[]);
@@ -1090,4 +1223,36 @@ export function getWs(): PatchWs {
 export function resetWs(): void {
   _singleton?.close();
   _singleton = null;
+}
+
+/** A page of history when opening a chat or scrolling up (spec/05 § Loading). */
+const HISTORY_PAGE = 100;
+/** How many of the most recently active chats the phone follows besides its offline copy. */
+const FEED_RECENT_CHATS = 30;
+const FEED_POS_KEY = 'patch.feedPos';
+const ACCOUNT_FEED_KEY = 'patch.accountFeed';
+
+function loadFeedPos(): number | null {
+  const raw = feedStore().getString(FEED_POS_KEY);
+  if (raw === undefined) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+function saveFeedPos(pos: number): void {
+  feedStore().set(FEED_POS_KEY, String(pos));
+}
+
+function noteFeedPos(pos: number): void {
+  const held = loadFeedPos();
+  if (held === null || pos > held) saveFeedPos(pos);
+}
+
+/** Whether the server ran the account feed when this phone last connected. */
+function loadLastAccountFeed(): boolean {
+  return feedStore().getString(ACCOUNT_FEED_KEY) === '1';
+}
+
+function saveLastAccountFeed(on: boolean): void {
+  feedStore().set(ACCOUNT_FEED_KEY, on ? '1' : '0');
 }

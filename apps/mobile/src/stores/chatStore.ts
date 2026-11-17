@@ -418,6 +418,14 @@ interface ChatState {
   /** Chats whose transcript has been asked for and not yet fully delivered. */
   replaying: Record<string, true>;
   setReplaying(chatId: string, on: boolean): void;
+  /** Older entries remain on the server above what this chat shows (spec/05 § Loading). */
+  historyMore: Record<string, boolean>;
+  setHistoryMore(chatId: string, more: boolean): void;
+  /** An older page is on its way for this chat. */
+  historyLoadingEarlier: Record<string, true>;
+  setHistoryLoadingEarlier(chatId: string, on: boolean): void;
+  /** Committed entries back in record order once an older page has landed after them. */
+  orderTimelineBySeq(chatId: string): void;
   /** Nothing in flight any more — the socket that carried the asks is gone. */
   clearReplaying(): void;
   removeLocalMessage(chatId: string, localId: string): void;
@@ -742,6 +750,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   delegateUpdates: {},
   branchGraphs: {},
   replaying: {},
+  historyMore: {},
+  historyLoadingEarlier: {},
   sideThreadPermissions: {},
   rosterGeneration: 0,
 
@@ -2020,6 +2030,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ timelines: { ...s.timelines, [chatId]: [] } }));
   },
 
+  setHistoryMore(chatId, more) {
+    set((s) =>
+      (s.historyMore[chatId] ?? false) === more
+        ? s
+        : { historyMore: { ...s.historyMore, [chatId]: more } },
+    );
+  },
+
+  setHistoryLoadingEarlier(chatId, on) {
+    set((s) => {
+      if ((s.historyLoadingEarlier[chatId] === true) === on) return s;
+      const next = { ...s.historyLoadingEarlier };
+      if (on) next[chatId] = true;
+      else delete next[chatId];
+      return { historyLoadingEarlier: next };
+    });
+  },
+
+  orderTimelineBySeq(chatId) {
+    set((s) => {
+      const cur = s.timelines[chatId];
+      if (!cur || cur.length < 2) return s;
+      const committed = cur.filter((e) => e.seq >= 0);
+      const rest = cur.filter((e) => e.seq < 0);
+      return {
+        timelines: {
+          ...s.timelines,
+          [chatId]: [...[...committed].sort((a, b) => a.seq - b.seq), ...rest],
+        },
+      };
+    });
+  },
+
   setReplaying(chatId, on) {
     set((s) => {
       if ((s.replaying[chatId] === true) === on) return s;
@@ -2097,6 +2140,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       delegateUpdates: {},
       branchGraphs: {},
       replaying: {},
+      historyMore: {},
+      historyLoadingEarlier: {},
       sideThreadPermissions: {},
     });
   },
