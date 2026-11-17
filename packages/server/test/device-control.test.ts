@@ -272,9 +272,13 @@ describe('voice device control on the server', () => {
 
   it('a named speaker is matched by its label; a muted one is skipped', async () => {
     await start({ managerChat: true });
+    // Await each open right after connecting: minting the second JWT is async,
+    // so the first socket can already be open by the time a later listener
+    // would be attached, and that listener would never fire.
     const k = connect(await deviceJwt('dev-k'));
+    await new Promise<void>((r) => k.ws.once('open', () => r()));
     const b = connect(await deviceJwt('dev-b'));
-    await Promise.all([k, b].map((d) => new Promise<void>((r) => d.ws.once('open', () => r()))));
+    await new Promise<void>((r) => b.ws.once('open', () => r()));
     hello(k.ws, 'dev-k');
     b.ws.send(
       JSON.stringify({ type: 'hello', deviceId: 'dev-b', fwVersion: '0.1.0', muted: true }),
