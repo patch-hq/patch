@@ -69,8 +69,6 @@ function preflight(): void {
     missing.push('the server build: pnpm --filter @patch/server build');
   if (!existsSync(VAD_MODEL)) missing.push(`the Silero VAD model (${VAD_MODEL})`);
   if (!kokoroAvailable()) missing.push('Kokoro (~/.patch/components/kokoro)');
-  if ((process.env['WHISPER_BACKEND'] ?? 'local') !== 'local')
-    missing.push('WHISPER_BACKEND=local (meetings use local Whisper)');
   if (!process.env['WHISPER_MODEL_PATH'] && !process.env['WHISPER_LOCAL_SIDECAR_URL']) {
     missing.push('WHISPER_MODEL_PATH or WHISPER_LOCAL_SIDECAR_URL (local Whisper)');
   }
@@ -125,6 +123,8 @@ async function bootStack(work: string): Promise<Stack> {
   const dataDir = join(work, 'data');
   const patchHome = join(dataDir, 'home');
   mkdirSync(patchHome, { recursive: true });
+  // Meetings use local Whisper: the host's own state names it, as the speech setting would.
+  writeFileSync(join(patchHome, 'host.json'), JSON.stringify({ speechBackend: 'local' }));
   const env = { ...process.env, PATCH_DATA_DIR: dataDir, PATCH_INTERNAL_TOKEN: INTERNAL_TOKEN };
   const credential = join(dataDir, 'web-credential.json');
   // Mint before the server boots: it loads its registry once, at start.
@@ -185,7 +185,6 @@ async function bootStack(work: string): Promise<Stack> {
       PATCH_DAEMON_HEALTHZ_PORT: String(HEALTHZ_PORT),
       PATCH_DAEMON_AUDIO_PORT: String(AUDIO_PORT),
       SDK_BACKEND: 'real',
-      WHISPER_BACKEND: 'local',
       // mock-check:allow the host's voice stack is irrelevant to a meeting; Whisper (local) and the analysis model are real
       KOKORO_BACKEND: 'mock',
       // The meeting drops clips the VAD does not hear speech in, so it must be the real one.

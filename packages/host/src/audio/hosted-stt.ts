@@ -110,7 +110,7 @@ export class DeepgramTranscribeBackend implements WhisperBackend {
 }
 
 export interface DictationTranscribers {
-  /** The host's Whisper (`WHISPER_BACKEND`). */
+  /** The host's Whisper (the speech setting). */
   local: WhisperBackend;
   /** Present only while this host holds a Deepgram key. */
   deepgram?: WhisperBackend | undefined;

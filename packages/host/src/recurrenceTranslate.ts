@@ -38,7 +38,7 @@ export interface MakeRecurrenceTranslatorOptions {
    */
   runOnAccountWithCredit: RunOnAccountWithCredit;
   /** The set model and its failovers (smallJobModels.ts). */
-  smallJobModels: readonly string[];
+  smallJobModels: () => readonly string[];
   logger?: Logger;
 }
 

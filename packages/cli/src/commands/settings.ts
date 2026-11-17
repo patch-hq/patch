@@ -51,6 +51,8 @@ const SETTING_KEYS: Record<string, string> = {
   'dictation-pause': 'dictationPauseSeconds',
   'turn-detection': 'dictationTurnDetection',
   memory: 'harnessMemoryEnabled',
+  'small-job-models': 'smallJobModels',
+  'speech-backend': 'speechBackend',
 };
 
 /** A value as typed: JSON where it parses (true, 60, "x"), else the text itself. */
@@ -60,6 +62,13 @@ function parseValue(raw: string): unknown {
   } catch {
     return raw;
   }
+}
+
+/** The small-job models as typed: a JSON array, or a comma-separated list (set model first). */
+export function parseModelList(raw: string): string[] {
+  const v = parseValue(raw);
+  if (Array.isArray(v)) return v.map(String);
+  return raw.split(',').map((m) => m.trim());
 }
 
 const BOOLEAN_WORDS: Record<string, boolean> = {
@@ -178,7 +187,9 @@ export function registerSettingsCommands(program: Command): void {
         const next =
           typeof current.settings[field] === 'boolean'
             ? parseBooleanValue(key, value)
-            : parseValue(value);
+            : field === 'smallJobModels'
+              ? parseModelList(value)
+              : parseValue(value);
         const res = await server(opts).patch<unknown>('/api/settings', { [field]: next });
         if (opts.json) emitJson(res);
         else emitText(`${field}: ${value}`);

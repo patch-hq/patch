@@ -162,6 +162,14 @@ const HostStateFile = z
     harnessToolsPrompt: z.string().optional(),
     /** Edits of Patch tools' descriptions (`shared` → `toolPromptOverrides`). */
     toolPromptOverrides: z.record(z.string(), z.string()).optional(),
+    /** The small-job model list (shared `smallJobModels`); absent until the first snapshot. */
+    smallJobModels: z.array(z.string().min(1)).min(1).optional(),
+    /**
+     * The speech-to-text engine (shared `speechBackend`). Absent means `auto`:
+     * an installed local model, else a Groq key, else none. `mock` is not a
+     * user choice: only a test fixture writes it.
+     */
+    speechBackend: z.enum(['off', 'groq', 'elevenlabs', 'local', 'parakeet', 'mock']).optional(),
     /**
      * Per-host skills to enable on every turn (`skills` SDK option). `'all'`
      * enables every discovered skill; an array enables only the named skills.

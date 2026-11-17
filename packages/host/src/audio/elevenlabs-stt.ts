@@ -3,7 +3,7 @@
 // Two shapes, both on the same key (`ELEVEN_LABS_API_KEY`):
 //   - ElevenLabsScribeBackend — a WhisperBackend. One request per clip
 //     (`POST /v1/speech-to-text`, scribe_v2). Selected for the local voice tier
-//     with WHISPER_BACKEND=elevenlabs, and used to read a voice-note clip when
+//     with the speech setting `elevenlabs`, and used to read a voice-note clip when
 //     dictation is on the `elevenlabs` engine. It also offers `openLiveStream`,
 //     so the voice tier's live words stream instead of re-reading the prefix
 //     (re-reading would bill the growing prefix again every second).

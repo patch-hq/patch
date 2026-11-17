@@ -218,6 +218,8 @@ if [[ "$WITH_DAEMON" == 1 ]]; then
   # GROQ_API_KEY, the Kokoro sidecar and the silero model before the page loads.
   # SDK_BACKEND stays parameterised ($SDK_MODE) precisely so a real turn IS one
   # flag away.
+  # The mock speech engine is a fixture only the host's own state can name.
+  mkdir -p "$DAEMON_HOME" && echo '{"speechBackend":"mock"}' > "$DAEMON_HOME/host.json"
   # mock-check:allow dev stack for the web surface; voice off so the page comes up without credentials, SDK still selectable via $SDK_MODE
   PATCH_HOME="$DAEMON_HOME" \
     PATCH_SERVER_WS_URL="ws://127.0.0.1:$SERVER_PORT/ws" \
@@ -227,7 +229,7 @@ if [[ "$WITH_DAEMON" == 1 ]]; then
     PATCH_DAEMON_HEALTHZ_PORT="$DAEMON_HEALTHZ_PORT" \
     PATCH_DAEMON_AUDIO_PORT="$DAEMON_AUDIO_PORT" \
     PATCH_MOCK_TURN_DELAY_MS="${PATCH_MOCK_TURN_DELAY_MS:-2500}" \
-    SDK_BACKEND="$SDK_MODE" WHISPER_BACKEND=mock KOKORO_BACKEND=mock VAD_BACKEND=mock \
+    SDK_BACKEND="$SDK_MODE" KOKORO_BACKEND=mock VAD_BACKEND=mock \
     nohup pnpm --filter @patch/host dev > "$HOST_LOG" 2>&1 &
   echo "$!" >> "$PID_FILE"
   wait_for "http://127.0.0.1:$DAEMON_HEALTHZ_PORT/healthz" "daemon"

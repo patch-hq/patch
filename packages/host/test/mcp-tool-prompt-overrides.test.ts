@@ -52,11 +52,11 @@ describe('tool prompt overrides', () => {
     expect(Object.values(defaults).every((d) => d.length > 0)).toBe(true);
   });
 
-  it('parses the launch env and refuses a malformed one', () => {
-    expect(parseToolPromptOverrides(undefined)).toEqual({});
-    expect(parseToolPromptOverrides('{"a":"b"}')).toEqual({ a: 'b' });
-    expect(() => parseToolPromptOverrides('[]')).toThrow(/NO FALLBACK/);
-    expect(() => parseToolPromptOverrides('{"a":1}')).toThrow(/NO FALLBACK/);
-    expect(() => parseToolPromptOverrides('{nope')).toThrow();
+  it("accepts the host's answer and refuses a malformed one", () => {
+    expect(parseToolPromptOverrides({})).toEqual({});
+    expect(parseToolPromptOverrides({ a: 'b' })).toEqual({ a: 'b' });
+    expect(() => parseToolPromptOverrides(undefined)).toThrow(/not an object/);
+    expect(() => parseToolPromptOverrides([])).toThrow(/not an object/);
+    expect(() => parseToolPromptOverrides({ a: 1 })).toThrow(/not a string/);
   });
 });

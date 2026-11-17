@@ -114,13 +114,12 @@ services:
       # host's audio WSS at :3003 comes up and links to the server. It proves
       # nothing about transcription, speech or Claude, and must not be read as if
       # it did; those are exercised for real in the integration round against a
-      # real-voice stack. The four mocks below are what let the container come up
+      # real-voice stack. The mocks below are what let the container come up
       # without GROQ_API_KEY, the Python sidecars, or the silero model (which the
       # host would otherwise abort on, since silero is its default).
-      # Production sets WHISPER_BACKEND=groq + GROQ_API_KEY, KOKORO_BACKEND=real
-      # + the sidecar, VAD_BACKEND=silero + the model.
-      # mock-check:allow link-only stack; voice+SDK proven for real in the integration round
-      WHISPER_BACKEND: mock
+      # Production sets KOKORO_BACKEND=real + the sidecar, VAD_BACKEND=silero +
+      # the model; its speech engine is the in-app speech setting. No speech
+      # engine is set here, so transcription is off in this stack.
       # mock-check:allow link-only stack; real Kokoro sidecar is not in this image
       KOKORO_BACKEND: mock
       # mock-check:allow link-only stack; silero model is not in this image

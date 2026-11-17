@@ -1,7 +1,7 @@
 """patch faster-whisper STT sidecar.
 
 A long-running process the patch host spawns once at boot when
-``WHISPER_BACKEND=local`` (``uv run python -m patch_whisper_sidecar``). It loads
+the speech setting ``local`` (``uv run python -m patch_whisper_sidecar``). It loads
 ``faster-whisper medium.en`` from ``WHISPER_MODEL_PATH`` and serves STT over a
 WebSocket using the wire protocol the daemon's ``PersistentWsClient`` /
 ``LocalWhisperBackend`` expects:

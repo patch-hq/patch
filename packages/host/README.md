@@ -120,10 +120,9 @@ surface ──── WSS /audio/<sessionId> ────▶ patch host
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `PATCH_DAEMON_AUDIO_PORT`      | TCP port for the audio WSS                                                                                                                                                                                                      | `3003`    |
 | `PATCH_DAEMON_AUDIO_HOST`      | Bind host                                                                                                                                                                                                                       | `0.0.0.0` |
-| `WHISPER_BACKEND`              | `groq` \| `local` \| `parakeet` \| `mock`                                                                                                                                                                                       | `groq`    |
 | `PARAKEET_STREAMING_MODEL_DIR` | Enables the `On this host` dictation engine: the extracted `sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-480ms-int8` dir (~105 MB), loaded at boot. Needs `PARAKEET_MODEL_DIR` too, for the accurate per-phrase read | _unset_   |
-| `PARAKEET_MODEL_DIR`           | Required when `WHISPER_BACKEND=parakeet`: the extracted `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` dir (~650 MB; needs `ffmpeg` for m4a clips)                                                                                | _unset_   |
-| `GROQ_API_KEY`                 | Required when `WHISPER_BACKEND=groq` — **lazy-checked**: missing-key fails the first session, not boot                                                                                                                          | _unset_   |
+| `PARAKEET_MODEL_DIR`           | Required when the speech setting is `parakeet`: the extracted `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` dir (~650 MB; needs `ffmpeg` for m4a clips)                                                                          | _unset_   |
+| `GROQ_API_KEY`                 | Needed when the speech setting is `groq` (or `auto` with no local model); set it in Settings → Providers too                                                                                                                    | _unset_   |
 | `WHISPER_LOCAL_SIDECAR_URL`    | faster-whisper Python sidecar WS URL (when backend=local)                                                                                                                                                                       | _unset_   |
 | `KOKORO_BACKEND`               | `real` \| `mock`                                                                                                                                                                                                                | `real`    |
 | `KOKORO_SIDECAR_URL`           | Kokoro Python sidecar WS URL (real backend)                                                                                                                                                                                     | _unset_   |
@@ -135,7 +134,7 @@ surface ──── WSS /audio/<sessionId> ────▶ patch host
 `@patch/host` spawns two Python sidecars at runtime when the matching
 backend is selected:
 
-- **faster-whisper** (`WHISPER_BACKEND=local`) — model `medium.en`, served
+- **faster-whisper** (speech setting `local`) — model `medium.en`, served
   via WS. Spawn command: `uv run python -m patch_whisper_sidecar`. Host
   restarts on death.
 - **Kokoro TTS** (`KOKORO_BACKEND=real`) — `uv run python -m patch_kokoro_sidecar`.

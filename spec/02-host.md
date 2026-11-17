@@ -236,7 +236,7 @@ unprovisioned keeps running chats on the others.
 
 ## Small jobs
 
-Chat titles, status lines, tool-run labels, branch send-back summaries, link summaries and recurrence translation are small one-shot model queries. They share one ordered model list: the first entry is the set model, and each later entry is tried in order when the one before it fails. The default is `claude-haiku-4-5-20251001` then `claude-sonnet-4-5`; `PATCH_SMALL_JOB_MODELS` (comma-separated, set model first) replaces it for the host. An empty entry or a model named twice aborts startup.
+Chat titles, status lines, tool-run labels, branch send-back summaries, link summaries and recurrence translation are small one-shot model queries. They share one ordered model list: the first entry is the set model, and each later entry is tried in order when the one before it fails. The default is `claude-haiku-4-5-20251001` then `claude-sonnet-4-5`. The list is the shared setting `smallJobModels` (`01-server.md` § Settings), changed with `patch settings set small-job-models a,b` (set model first), and applies to every host from its next job. An empty list, an empty entry or a model named twice is refused when the setting is written. `PATCH_SMALL_JOB_MODELS` is not read.
 
 This is separate from account choice (`10-auth.md` § Choosing an account): the account is chosen first, then the models are walked on it. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps, rotation digests) and Codex chats, which run on their own model, are not part of this list.
 
@@ -457,7 +457,7 @@ Each host advertises the components it has. A surface disables an affordance
 whose component is missing and names what is needed. An interrupted download
 resumes, and a component counts as installed once its size and digest verify.
 
-Remote backends install nothing: with `WHISPER_BACKEND=groq`, STT is a cloud
+Remote backends install nothing: with the speech engine set to Groq, STT is a cloud
 call.
 
 ### Speech set-up
@@ -477,9 +477,20 @@ Either way the refused meeting starts again by itself once the route works: on
 the key being saved, or on the Whisper component verifying as installed. The
 host switches engine in place when a key or component arrives, with no restart.
 An installed local model wins over a key, because it costs nothing. A host whose
-environment names a backend (`WHISPER_BACKEND`) or an account whose meeting engine is a hosted one already counts as
+speech setting names an engine (below) or an account whose meeting engine is a hosted one already counts as
 set up. There is no fallback: with no route chosen, transcription refuses rather
 than returning a stub, and no key is spent unless the user added it.
+
+The engine is the shared setting `speechBackend` (`01-server.md` § Settings),
+changed in Settings or with `patch settings set speech-backend <value>`: `auto`
+(the default) follows what the host has, as above; `off`, `groq`, `elevenlabs`,
+`local` or `parakeet` name one engine on every host. Each host saves the value in
+its own state and switches engine in place, with no restart. A named engine
+whose credential or model is missing is refused where the setting is applied:
+that host reports which value is missing and where to set it, keeps its current
+engine, and still applies the rest of the same settings update. A `mock` engine exists for
+test fixtures only and can be named only in a host's own state file, never by
+the setting.
 
 ## Browser
 
@@ -811,7 +822,7 @@ the same operations (§ Control IPC).
 
 The paid services the host itself calls each need an API key: Gemini
 (`GEMINI_API_KEY`) and OpenAI Realtime (`OPENAI_REALTIME_API_KEY`) for hosted
-voice, Groq (`GROQ_API_KEY`) for Whisper when `WHISPER_BACKEND=groq`
+voice, Groq (`GROQ_API_KEY`) for Whisper when the speech engine is Groq
 (`07-voice-app.md` § Voice is a config matrix), and Deepgram
 (`DEEPGRAM_API_KEY`) for live dictation (`07-voice-app.md` § Dictation engines). These are the host's own
 keys, not the agent's (the agent's credentials are its provider's, `10-auth.md`),
@@ -834,7 +845,7 @@ Settings → Providers and used by every host.
   surface now without its key.
 - Set takes a value of at least 16 characters with no whitespace (a pasted
   value is trimmed); anything else is refused as `invalid_value`.
-- The Groq key cannot be revoked while any host runs `WHISPER_BACKEND=groq`
+- The Groq key cannot be revoked while any host's speech setting names Groq
   with none in its environment (`required`, naming the host): that host
   refuses to start without it, and would not come back up to be given
   another. Replace it instead.

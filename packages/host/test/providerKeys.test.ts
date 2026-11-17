@@ -172,7 +172,7 @@ describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', 
   });
 
   it('refuses a snapshot without the key this host needs to start, changing nothing', () => {
-    const s = store({}, { requiredToStart: { groq: 'This host runs WHISPER_BACKEND=groq' } });
+    const s = store({}, { requiredToStart: { groq: 'This host transcribes with Groq' } });
     s.set('groq', UI_GROQ);
     expect(() => s.replaceAll({})).toThrow(ProviderKeyError);
     expect(s.get('groq')).toBe(UI_GROQ);

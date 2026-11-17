@@ -1,6 +1,6 @@
 // Whisper STT backend (group 13).
 //
-// Pluggable per `WHISPER_BACKEND` env var:
+// Pluggable per the speech setting (spec/02 § Speech set-up):
 //   - 'groq'  (default): direct REST POST to Groq's transcribe endpoint.
 //   - 'local': spawn faster-whisper as a long-running Python sidecar
 //              (`uv run` → WS in/transcript out).
@@ -10,7 +10,7 @@
 //              utterance — keeps docker-compose.test.yml viable without
 //              shipping API keys.
 //
-// NO FALLBACK: if WHISPER_BACKEND=groq and GROQ_API_KEY is missing the host
+// NO FALLBACK: if the speech setting is groq and no Groq key is set the host
 // ABORTS at startup (see validateWhisperCredentials below, wired from
 // index.ts). The deployment contract (spec/11-deployment.md § Env, group H1)
 // requires the credential to be validated "before any attempt to serve
@@ -66,8 +66,8 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
     case 'elevenlabs':
       if (!config.elevenlabsApiKey || config.elevenlabsApiKey.length === 0) {
         throw new Error(
-          'WHISPER_BACKEND=elevenlabs but ELEVEN_LABS_API_KEY is missing. ' +
-            'Set ELEVEN_LABS_API_KEY, or switch WHISPER_BACKEND. ' +
+          'The speech setting is elevenlabs but no ElevenLabs key is set. ' +
+            'Add it in Settings → Providers, or choose another speech engine. ' +
             'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
         );
       }
@@ -78,7 +78,7 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
       // Either connect to an external sidecar (URL) OR spawn one (model path).
       if (!hasUrl && !hasModel) {
         throw new Error(
-          'WHISPER_BACKEND=local but neither WHISPER_LOCAL_SIDECAR_URL nor WHISPER_MODEL_PATH is set. ' +
+          'The speech setting is local but neither WHISPER_LOCAL_SIDECAR_URL nor WHISPER_MODEL_PATH is set. ' +
             'Set WHISPER_MODEL_PATH to the faster-whisper medium.en dir (the host will spawn the ' +
             'sidecar), or WHISPER_LOCAL_SIDECAR_URL to an external sidecar. ' +
             'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
@@ -279,7 +279,7 @@ export class UnconfiguredWhisperBackend implements WhisperBackend {
   readonly supportsLivePartials = false;
   private refuse(): never {
     throw new Error(
-      'Speech-to-text is turned off on this host (WHISPER_BACKEND=off, or no speech model installed). ' +
+      'Speech-to-text is turned off on this host (the speech setting is off, or no speech model installed). ' +
         'Refusing to return a fabricated transcript.',
     );
   }
@@ -591,7 +591,7 @@ export class LocalWhisperBackend implements WhisperBackend {
     const modelPath = this.modelPath !== '' ? this.modelPath : this.opts.localModelPath;
     if (!modelPath) {
       throw new Error(
-        'WHISPER_BACKEND=local with no URL requires WHISPER_MODEL_PATH to spawn the sidecar (NO FALLBACKS).',
+        'The speech setting local with no URL requires WHISPER_MODEL_PATH to spawn the sidecar (NO FALLBACKS).',
       );
     }
     if (this.modelPath !== '' && !existsSyncFs(modelPath)) {
@@ -733,16 +733,16 @@ export class LocalWhisperBackend implements WhisperBackend {
    * faster-whisper sidecar takes raw PCM16 only and the host bundles no
    * AAC/m4a decoder, so an m4a upload is refused with a typed error rather
    * than faked or dropped. The mobile voice-note upload path therefore
-   * requires `WHISPER_BACKEND=groq` (the production default). NO FALLBACK.
+   * requires the speech setting to be groq. NO FALLBACK.
    */
   async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     if (format === 'wav') {
       return this.transcribe(pcmFromWav(audio), opts?.prompt ? { prompt: opts.prompt } : undefined);
     }
     throw new UnsupportedClipFormatError(
-      `WHISPER_BACKEND=local (faster-whisper) cannot transcribe an uploaded ${format} clip: ` +
+      `The speech setting local (faster-whisper) cannot transcribe an uploaded ${format} clip: ` +
         'the sidecar accepts PCM16 samples only and the host bundles no AAC/m4a decoder. ' +
-        'Use WHISPER_BACKEND=groq (the production default) for the mobile voice-note upload path.',
+        'Set the speech engine to groq (Settings) for the mobile voice-note upload path.',
     );
   }
   async close(): Promise<void> {

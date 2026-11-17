@@ -85,6 +85,8 @@ up() {
   # A throwaway sandbox for driving the CLI: it needs a host on the other end
   # of the socket, not a working Claude or a working microphone — and a real turn
   # would spend real tokens on every sandbox boot.
+  # The mock speech engine is a fixture only the host's own state can name.
+  mkdir -p "$HOME_DIR" && echo '{"speechBackend":"mock"}' > "$HOME_DIR/host.json"
   # mock-check:allow CLI sandbox; the host is only a socket peer here, and a real turn would spend tokens on every boot
   PATCH_HOME="$HOME_DIR" \
     PATCH_SERVER_WS_URL="ws://127.0.0.1:$SERVER_PORT/ws" \
@@ -94,7 +96,7 @@ up() {
     PATCH_DAEMON_HEALTHZ_PORT="$DAEMON_HEALTHZ_PORT" \
     PATCH_DAEMON_AUDIO_PORT="$DAEMON_AUDIO_PORT" \
     PATCH_MOCK_TURN_DELAY_MS=1500 \
-    SDK_BACKEND=mock WHISPER_BACKEND=mock KOKORO_BACKEND=mock \
+    SDK_BACKEND=mock KOKORO_BACKEND=mock \
     nohup pnpm --filter @patch/host dev > "$HOST_LOG" 2>&1 &
   echo "$!" >> "$PID_FILE"
   wait_for "http://127.0.0.1:$DAEMON_HEALTHZ_PORT/healthz" "daemon"

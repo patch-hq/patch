@@ -41,7 +41,7 @@ export interface MakeTitleGeneratorOptions {
    */
   runOnAccountWithCredit: RunOnAccountWithCredit;
   /** The set model and its failovers (smallJobModels.ts). */
-  smallJobModels: readonly string[];
+  smallJobModels: () => readonly string[];
   /**
    * How a Codex (ChatGPT) chat is titled: on ITS OWN model through the routed
    * backend and the model-aware credential gate, because a Codex-only host has

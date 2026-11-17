@@ -1,6 +1,5 @@
 // Host env config. NO FALLBACKS for required keys.
 
-import { parseSmallJobModels } from './smallJobModels.js';
 import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -73,13 +72,6 @@ export interface HostConfig {
    * through the server registry.
    */
   hostName: string;
-  /**
-   * The model the small one-shot jobs (titles, status lines, tool-run labels,
-   * send-back and link summaries, recurrence translation) run on, then the
-   * failovers tried in order. PATCH_SMALL_JOB_MODELS, comma-separated, set
-   * model first (spec/02-host.md § Small jobs).
-   */
-  smallJobModels: readonly string[];
   /** Home directory for ~/.patch state. PATCH_HOME override, otherwise ~/.patch. */
   patchHome: string;
   /** Unix domain socket path the local control HTTP listens on. */
@@ -135,13 +127,15 @@ export interface HostConfig {
     host: string;
     /** `host.host.audioRelayHost` — see `loadConfig`'s comment above. */
     relayHost: string | undefined;
-    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
+    whisperBackend: HostSpeechBackend;
+    /** True when no engine is named: the engine follows the installed model or the Groq key. */
+    speechAuto: boolean;
     /**
      * GROQ_API_KEY from the environment (required for whisperBackend='groq'
      * unless one is set from Settings → Hosts → Keys, which wins).
      */
     groqApiKey: string | undefined;
-    /** ELEVEN_LABS_API_KEY — ElevenLabs Scribe: the elevenlabs dictation engine, or WHISPER_BACKEND=elevenlabs. */
+    /** ELEVEN_LABS_API_KEY — ElevenLabs Scribe: the elevenlabs dictation engine, or the speech setting `elevenlabs`. */
     elevenlabsApiKey: string | undefined;
     /** DEEPGRAM_API_KEY — needed only while dictation is on the deepgram engine. */
     deepgramApiKey: string | undefined;
@@ -247,8 +241,22 @@ function strRequired(name: string, env: NodeJS.ProcessEnv): string {
   return v;
 }
 
+/** The speech engine a host's own state names; absent from host.json means `auto`. */
+export type HostSpeechBackend = 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
+
 export interface LoadConfigOptions {
   env?: NodeJS.ProcessEnv;
+  /**
+   * The speech engine saved in this host's state (`host.json` → `speechBackend`,
+   * set from the `speechBackend` setting). Undefined is `auto`: an installed
+   * local model, else a Groq key, else none (spec/02 § Speech set-up).
+   */
+  speechBackend?: HostSpeechBackend | undefined;
+}
+
+/** Where this host keeps its state: `PATCH_HOME`, else `~/.patch`. */
+export function patchHomeFrom(env: NodeJS.ProcessEnv): string {
+  return env['PATCH_HOME'] ?? join(homedir(), '.patch');
 }
 
 /**
@@ -265,7 +273,7 @@ export function defaultSocketPath(patchHome: string, platform = process.platform
 export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   const env = opts.env ?? process.env;
 
-  const patchHome = env['PATCH_HOME'] ?? join(homedir(), '.patch');
+  const patchHome = patchHomeFrom(env);
   const socketPath =
     env['PATCH_HOST_SOCKET'] ?? env['PATCH_DAEMON_SOCKET'] ?? defaultSocketPath(patchHome);
 
@@ -316,19 +324,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   // runs on a host carrying only an OS". Unset therefore means 'off' — the
   // component is not installed — NOT a quiet downgrade to a stub. Naming a
   // backend without its credential still aborts loudly below.
-  const whisperBackendRaw = env['WHISPER_BACKEND'] ?? 'off';
-  if (
-    whisperBackendRaw !== 'off' &&
-    whisperBackendRaw !== 'groq' &&
-    whisperBackendRaw !== 'elevenlabs' &&
-    whisperBackendRaw !== 'local' &&
-    whisperBackendRaw !== 'parakeet' &&
-    whisperBackendRaw !== 'mock'
-  ) {
-    throw new Error(
-      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock')`,
-    );
-  }
+  const whisperBackendRaw: HostSpeechBackend = opts.speechBackend ?? 'off';
   const kokoroBackendRaw = env['KOKORO_BACKEND'] ?? 'off';
   if (kokoroBackendRaw !== 'off' && kokoroBackendRaw !== 'real' && kokoroBackendRaw !== 'mock') {
     throw new Error(
@@ -350,7 +346,6 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   );
 
   return {
-    smallJobModels: parseSmallJobModels(env['PATCH_SMALL_JOB_MODELS']),
     hostName:
       env['PATCH_HOST_NAME'] !== undefined && env['PATCH_HOST_NAME'] !== ''
         ? env['PATCH_HOST_NAME']
@@ -376,6 +371,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       host: audioHost,
       relayHost: audioRelayHost,
       whisperBackend: whisperBackendRaw,
+      speechAuto: opts.speechBackend === undefined,
       groqApiKey: env['GROQ_API_KEY'],
       deepgramApiKey: env['DEEPGRAM_API_KEY'],
       assemblyaiApiKey: env['ASSEMBLYAI_API_KEY'],
