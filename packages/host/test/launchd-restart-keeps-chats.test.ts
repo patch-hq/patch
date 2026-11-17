@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  LEGACY_SERVICE_LABELS,
   launchdOps,
   launchdPlist,
   launchdPlistPath,
@@ -59,7 +60,10 @@ afterEach(() => {
 
 const launchctlVerbs = () =>
   calls
-    .filter((c) => c[0] === 'launchctl' && !(c[2] ?? '').includes('patch-daemon'))
+    .filter(
+      (c) =>
+        c[0] === 'launchctl' && !LEGACY_SERVICE_LABELS.some((l) => (c[2] ?? '').endsWith(`/${l}`)),
+    )
     .map((c) => c[1]);
 
 describe('launchd update keeps running chats alive', () => {
