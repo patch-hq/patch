@@ -18,7 +18,15 @@
 // exactly the thing that runs once and is gone at the next reboot.
 
 import { execFile } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { installerLog } from './runLog.js';
@@ -35,7 +43,10 @@ export const SYSTEMD_UNIT = 'patch-host.service';
  * The names a host installed before the host rename carries. Registering
  * the new service removes these; they go with the rename's final phase.
  */
-export const LEGACY_SERVICE_LABELS = ['me.tomchambers.patch-daemon', 'me.tomchambers.patch-host'] as const;
+export const LEGACY_SERVICE_LABELS = [
+  'me.tomchambers.patch-daemon',
+  'me.tomchambers.patch-host',
+] as const;
 export const LEGACY_SYSTEMD_UNIT = 'patch-daemon.service';
 
 export interface ServiceDefinition {
@@ -225,6 +236,8 @@ export interface ServiceRunState {
   pid?: number;
   /** The service manager's own words — printed verbatim when it is not up. */
   detail: string;
+  /** Not up yet, but the manager says it is mid-launch (launchd `spawn`). */
+  starting?: boolean;
 }
 
 export interface ServiceOps {
@@ -505,6 +518,7 @@ export const launchdOps: ServiceOps = {
     const running = state === 'running' && pid !== undefined;
     return {
       running,
+      ...(state === 'spawn' ? { starting: true } : {}),
       ...(pid !== undefined ? { pid: Number(pid) } : {}),
       detail: `launchd state=${state ?? 'unknown'}${
         lastExit !== undefined ? `, last exit code=${lastExit}` : ''

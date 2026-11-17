@@ -81,10 +81,20 @@ async function settledRunState(
   delayMs = 500,
 ): Promise<ServiceRunState> {
   let last: ServiceRunState = { running: false, detail: 'service never reported a state' };
+  // A slow machine (a CI runner) can still be launching the job after the first
+  // checks. Keep waiting while the manager says "starting", within a bounded
+  // budget, so a job that never gets going is still reported.
+  let startingLeft = 30;
   for (let i = 0; i < attempts; i++) {
     await new Promise((r) => setTimeout(r, delayMs));
     last = await ops.runState(def);
-    if (!last.running) return last;
+    if (!last.running) {
+      if (last.starting && startingLeft-- > 0) {
+        i = -1;
+        continue;
+      }
+      return last;
+    }
   }
   return last;
 }
