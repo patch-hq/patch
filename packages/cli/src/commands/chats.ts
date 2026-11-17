@@ -334,8 +334,7 @@ export function registerChatsCommands(program: Command): void {
         const t = getTransport(opts);
         const id = await resolveChatId(t, rawId);
         const hidden = opts.show !== true;
-        const body: Record<string, unknown> = { hidden };
-        if (opts.untilComplete) body['untilComplete'] = true;
+        const body = { hidden };
         const path = pickPath(t, `/chats/${id}/hide`, `/api/chats/${id}/hide`);
         const res = await t.post<{ ok: true }>(path, body);
         if (opts.json) emitJson(res);
