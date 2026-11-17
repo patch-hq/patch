@@ -15,7 +15,6 @@ import { api, ApiError } from '../api/rest.js';
 import { reportAccounts, reportHost } from './presenceHelpers.js';
 import { setActiveWs } from '../api/ws.js';
 import {
-  fakeWs,
   makeFetch,
   preferencesServer,
   renderSettings,
