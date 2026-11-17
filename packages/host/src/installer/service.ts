@@ -486,6 +486,22 @@ export const launchdOps: ServiceOps = {
       } catch (err) {
         throw new ServiceRegistrationError(`signalling host pid ${state.pid}`, detail(err));
       }
+      // launchd throttles a respawn after an exit (10s by default), which is
+      // longer than the installer waits before judging the service dead — a
+      // fresh install SIGTERMs the host launchd just started and then reports
+      // "started but is not running". Wait for the replacement; if it is
+      // being held back, a plain `kickstart` (no -k, so nothing is killed)
+      // starts it now.
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        const next = await launchdOps.runState(def);
+        if (next.running && next.pid !== undefined && next.pid !== state.pid) return;
+      }
+      try {
+        await mode.launchctl(['kickstart', mode.target]);
+      } catch (err) {
+        throw new ServiceRegistrationError('launchctl kickstart', detail(err));
+      }
       return;
     }
     try {
