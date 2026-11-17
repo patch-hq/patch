@@ -18892,6 +18892,6 @@ a.drop-target {
    entries are on their way (spec/05 § Loading). Quiet: text only. */
 .catching-up {
   padding: 8px 14px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--ink-3);
 }
