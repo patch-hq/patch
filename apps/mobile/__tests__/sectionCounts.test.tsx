@@ -5,6 +5,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { actAsync, actSync, renderRN } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
+import { usePresenceStore } from '../src/stores/presenceStore';
+import { useUiStore } from '../src/stores/uiStore';
 import { toChatListRow } from '../src/lib/chatListRow';
 import type { SectionCounts } from '../src/lib/sectionCounts';
 
@@ -86,5 +88,32 @@ describe('useSectionCounts', () => {
       first.resolve({ archived: 0, hidden: 0 });
     });
     expect(seen).toEqual({ archived: 1, hidden: 0 });
+  });
+
+  it('a failure while reconnecting raises no error, and the counts are fetched again on reconnect', async () => {
+    usePresenceStore.getState().setConnection('reconnecting');
+    const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    chatSectionCounts.mockRejectedValueOnce(new Error('Network request failed'));
+    mount();
+    await actAsync(async () => undefined);
+    expect(pushError).not.toHaveBeenCalled();
+    expect(seen).toEqual({ archived: null, hidden: null });
+
+    chatSectionCounts.mockResolvedValueOnce({ archived: 3, hidden: 1 });
+    await actAsync(async () => {
+      usePresenceStore.getState().setConnection('connected');
+    });
+    expect(seen).toEqual({ archived: 3, hidden: 1 });
+    pushError.mockRestore();
+  });
+
+  it('a failure on a link that claims to be connected still raises the error', async () => {
+    usePresenceStore.getState().setConnection('connected');
+    const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    chatSectionCounts.mockRejectedValueOnce(new Error('boom'));
+    mount();
+    await actAsync(async () => undefined);
+    expect(pushError).toHaveBeenCalledWith('failed to load section counts: boom');
+    pushError.mockRestore();
   });
 });
