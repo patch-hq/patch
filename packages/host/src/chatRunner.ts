@@ -195,7 +195,7 @@ import {
   type ManagerSweepCandidate,
   type ManagerSweepResultEvent,
 } from '@patch/wire';
-import { modelHasCapability } from '@patch/wire';
+import { modelHasCapability, patchToolsOmittedFor } from '@patch/wire';
 import type { SweepDecisionResult } from './managerSweepGen.js';
 import { countMessages, windowTrack } from './managerContext.js';
 import { permissionModeChangeLine } from './permissionMode.js';
@@ -9157,7 +9157,12 @@ export class Daemon {
     const mcpServer = this.opts.mcpServer
       ? {
           ...this.opts.mcpServer,
-          env: { ...this.opts.mcpServer.env, PATCH_CHAT_ID: chatId, PATCH_BRANCH_ID: branchId },
+          env: {
+            ...this.opts.mcpServer.env,
+            PATCH_CHAT_ID: chatId,
+            PATCH_BRANCH_ID: branchId,
+            PATCH_OMIT_TOOLS: patchToolsOmittedFor(state.model).join(','),
+          },
         }
       : undefined;
     const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
@@ -10542,7 +10547,11 @@ export class Daemon {
     const mcpServer = this.opts.mcpServer
       ? {
           ...this.opts.mcpServer,
-          env: { ...this.opts.mcpServer.env, PATCH_CHAT_ID: chatId },
+          env: {
+            ...this.opts.mcpServer.env,
+            PATCH_CHAT_ID: chatId,
+            PATCH_OMIT_TOOLS: patchToolsOmittedFor(state.model).join(','),
+          },
         }
       : undefined;
     // The mode the turn runs under: the chat's own, stamped when it was created

@@ -299,6 +299,32 @@ export function modelHasCapability(
   return providerCapabilities(model)[capability];
 }
 
+/**
+ * The Patch tools that replace something a provider also offers natively:
+ * subagents (`patch_agent`), self-wakes and loops, and goals (principles.md
+ * § Patch-owned state). A chat gets one version of each, never both.
+ */
+export const PATCH_TOOLS_REPLACING_NATIVE: readonly string[] = [
+  'patch_agent',
+  'patch_wake_me',
+  'patch_loop',
+  'patch_wake_status',
+  'patch_cancel_wake',
+  'patch_goal_set',
+  'patch_goal_get',
+  'patch_goal_clear',
+];
+
+/**
+ * The Patch tools withheld from a chat on this model. Where the provider can
+ * switch its native equivalents off (`disableNativeTools`) Patch's versions are
+ * offered; where it cannot, the native ones stay and Patch's are withheld so the
+ * agent never sees two tools that do the same thing.
+ */
+export function patchToolsOmittedFor(model: string | null | undefined): readonly string[] {
+  return modelHasCapability(model, 'disableNativeTools') ? [] : PATCH_TOOLS_REPLACING_NATIVE;
+}
+
 /** Does the model's provider honour the reasoning-effort control? */
 export function modelSupportsEffort(model: string | null | undefined): boolean {
   return providerDescriptor(providerForModel(model)).supportsEffort;
