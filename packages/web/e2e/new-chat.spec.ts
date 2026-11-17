@@ -510,6 +510,15 @@ test.describe('new chat header', () => {
     // broke it while the app did nothing wrong.
     await expect(composer).toHaveValue('');
     await expect(page.locator('.msg-user')).toContainText(TEXT);
+    // Let two more frames paint so the sampler has recorded the one that
+    // shows the message, even when the runner is too loaded to have painted
+    // since the assertion above passed.
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => done())),
+        ),
+    );
     const frames = await page.evaluate(
       () =>
         (window as unknown as { __frames: Array<{ inComposer: boolean; inTranscript: boolean }> })
