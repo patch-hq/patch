@@ -12,8 +12,7 @@ import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { OAuthCheckResult } from './chatRunner.js';
-import { isCodexModel } from './codexAccounts.js';
-import { isLocalModel } from './localModels.js';
+import { providerForModel, type HarnessId } from '@patch/wire';
 import type { Logger } from 'pino';
 import { cutAt, stripWrappingQuotes } from './textClean.js';
 
@@ -154,11 +153,13 @@ export function makeTitleGenerator(
   opts: MakeTitleGeneratorOptions,
 ): (input: GenerateTitleInput) => Promise<string | null> {
   return async function generateTitle(input: GenerateTitleInput): Promise<string | null> {
-    const own = isCodexModel(input.chatModel)
-      ? { dep: opts.codex, name: 'Codex' }
-      : isLocalModel(input.chatModel)
-        ? { dep: opts.local, name: 'local model' }
-        : undefined;
+    // A provider with its own title route runs titles on the chat's own model.
+    const ownByProvider: Record<HarnessId, { dep: typeof opts.codex; name: string } | undefined> = {
+      claude: undefined,
+      codex: { dep: opts.codex, name: 'Codex' },
+      local: { dep: opts.local, name: 'local model' },
+    };
+    const own = ownByProvider[providerForModel(input.chatModel)];
     if (own) {
       const model = input.chatModel!;
       if (!own.dep) {

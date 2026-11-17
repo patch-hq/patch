@@ -41,6 +41,8 @@ export interface HarnessTraits {
   readonly hostCreditAggregate: boolean;
   /** Can a chat's session move to another host with the chat? */
   readonly sessionMovable: boolean;
+  /** Does the host build this provider's account report itself, rather than a bare connected flag? */
+  readonly buildsAccountReport: boolean;
   /** The run option that carries a reseed of Patch's history into a fresh session; null = none. */
   readonly reseedOption: 'codexReseed' | 'localReseed' | null;
   /** The run option that appends items to an existing session on a provider switch; null = none. */
@@ -62,6 +64,7 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     detachedTurnRunner: true,
     hostCreditAggregate: true,
     sessionMovable: true,
+    buildsAccountReport: true,
     reseedOption: null,
     appendOption: null,
     signedOutMessage: (hostId) =>
@@ -79,6 +82,7 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     detachedTurnRunner: true,
     hostCreditAggregate: false,
     sessionMovable: false,
+    buildsAccountReport: false,
     reseedOption: 'codexReseed',
     appendOption: 'codexAppendItems',
     signedOutMessage: (_hostId, reason) => reason,
@@ -96,6 +100,7 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     detachedTurnRunner: false,
     hostCreditAggregate: false,
     sessionMovable: false,
+    buildsAccountReport: false,
     reseedOption: 'localReseed',
     appendOption: null,
     signedOutMessage: (_hostId, reason) => reason,
