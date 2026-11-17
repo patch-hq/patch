@@ -41,6 +41,5 @@ export function useInstallPickedProviders(): void {
         requestInstall(host, backendId);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 }
