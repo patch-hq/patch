@@ -467,6 +467,31 @@ describe('an install whose service does not stay up', () => {
     // It must not claim the host is ready to use.
     expect(streams(ctx).out).not.toContain('It appears under Settings → Hosts');
   });
+
+  // launchd reports state=spawn while it is still launching the job; a slow CI
+  // runner sat there past the first checks and the install was failed.
+  it('waits while the manager says the job is still starting', async () => {
+    const home = mkTmp('patch-home-');
+    const ops = recordingOps(true);
+    let calls = 0;
+    ops.runState = async () => {
+      calls += 1;
+      return calls < 4
+        ? { running: false, detail: 'launchd state=spawn' }
+        : { running: true, pid: 4242, detail: 'launchd state=running' };
+    };
+    const ctx = makeCtx({
+      home,
+      serviceOps: ops,
+      argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't', '--code', 'c'],
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ daemonKey: 'k' }), {
+          status: 200,
+        })) as unknown as typeof fetch,
+    });
+    const res = await runInstaller(ctx);
+    expect(res.code).toBe(0);
+  }, 20_000);
 });
 
 describe('what the install puts on the host', () => {
