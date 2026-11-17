@@ -9,6 +9,7 @@ import type { ChatRow } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { api } from '../api/rest';
+import { navigateAfterSnooze } from './snoozeNav';
 
 export function newSnoozeSetId(): string {
   return `set-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -49,6 +50,8 @@ export function applySnoozeSet(opts: {
   const running = targets.filter((c) => c.activity === 'running').length;
   const previous = new Map(targets.map((c) => [c.chatId, c.snoozedUntil]));
 
+  // Resolved before the flip, while the chats are still in the list.
+  navigateAfterSnooze(targets.map((c) => c.chatId));
   for (const c of targets) useChatStore.getState().setSnoozed(c.chatId, until);
   const revert = (c: ChatRow, e: Error): void => {
     useChatStore.getState().setSnoozed(c.chatId, previous.get(c.chatId) ?? null);
