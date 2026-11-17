@@ -165,6 +165,10 @@ function UsageCard({
             }
             const state = rateLimitWindowState(scope, win);
             const pct = Math.round((win.utilization ?? 0) * 100);
+            const barPct =
+              state === 'blocked' && win.utilization === undefined
+                ? 100
+                : Math.min(100, Math.max(0, pct));
             const figure =
               win.utilization === undefined
                 ? win.status === 'rejected'
@@ -177,7 +181,7 @@ function UsageCard({
               <Fragment key={scope}>
                 <span className="new-chat-usage-label">{label}</span>
                 <span className={`new-chat-usage-bar ${state}`} aria-hidden="true">
-                  <i style={{ width: `${pct}%` }} />
+                  <i style={{ width: `${barPct}%` }} />
                 </span>
                 <span
                   className="new-chat-usage-fig"
