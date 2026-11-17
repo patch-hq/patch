@@ -437,21 +437,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // to the live default), and then the folder is another machine's: it is
   // dropped rather than sent to a host where it does not exist.
   const [folderHostId, setFolderHostId] = useState<string | null>(chosenHostId);
-  // With nothing to remember — no new chat made yet, no project chat, no
-  // draft or shortcut — the chosen host's first project folder is the
-  // default, so a first chat starts without a decision nobody has explained
-  // (a fresh host makes `~/Patch` its first, spec/04 § Folders). Seeded once,
-  // as the host's folders arrive; clearing it afterwards is the user's choice.
-  const firstRoot =
-    pickerHostId === null ? undefined : presenceHosts[pickerHostId]?.folders?.roots?.[0];
-  const seededFirstRoot = useRef(false);
-  useEffect(() => {
-    if (seededFirstRoot.current || mruPair !== null || draftFolder || folderParam) return;
-    if (firstRoot === undefined || folder !== '') return;
-    seededFirstRoot.current = true;
-    setFolder(firstRoot);
-    setFolderHostId(pickerHostId);
-  }, [firstRoot, mruPair, draftFolder, folderParam, folder, pickerHostId]);
   // `null` = no host recorded for it (a bare `?folder=` naming no known host),
   // which belongs to whichever host is selected.
   const folderOnOtherHost =

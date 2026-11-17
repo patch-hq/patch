@@ -1370,21 +1370,13 @@ describe('/chats/new', () => {
     expect(pillLabel()).toBe('bravo');
   });
 
-  it('a first chat, with nothing to remember, defaults to the host’s first project folder', async () => {
+  it('a first chat, with nothing to remember, has no folder chosen', async () => {
     useChatStore.setState({ chats: {} });
     usePresenceStore.getState().setHostFolders('d1', ['/Users/new/Patch'], []);
     stubPickerFetch({ folders: [] });
     renderPicker();
-    await waitFor(() => expect(chosenFolderLabel()).toBe('Patch'));
-  });
-
-  it('the first-folder default never overrides a remembered project', async () => {
-    usePresenceStore.getState().setHostFolders('d1', ['/Users/new/Patch'], []);
-    useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
-    stubPickerFetch({ folders: [] });
-    renderPicker();
     await screen.findByTestId('folder-quick-/Users/new/Patch');
-    expect(chosenFolderLabel()).toBe('alpha');
+    expect(chosenFolderLabel()).not.toBe('Patch');
   });
 
   it("offers a host's own registered roots once it is chosen", async () => {

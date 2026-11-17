@@ -438,9 +438,8 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await skipAi(welcome);
   await permissions(welcome);
 
-  // A brand-new host has a project folder for its first chat, named as the
-  // person's own starting folder rather than after Patch.
-  expect(existsSync(join(ACCOUNT_HOME, 'My first project'))).toBe(true);
+  // A brand-new host invents no folder: the person chooses one.
+  expect(existsSync(join(ACCOUNT_HOME, 'My first project'))).toBe(false);
 
   // Keep running: both on by default, remembered.
   await expect(welcome.getByTestId('welcome-keep-running')).toBeVisible();
@@ -455,11 +454,9 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await phone(welcome);
   await firstChat(welcome);
   await newcomerSidebar(welcome);
-  // With a host: the first chat's folder is the new starting folder, and the
-  // model reads by the name setup used, never as an id.
-  const first = welcome.getByTestId(`folder-quick-${join(ACCOUNT_HOME, 'My first project')}`);
-  await expect(first).toHaveAttribute('aria-pressed', 'true');
-  await expect(first).toHaveText('My first project');
+  // With a host: no folder is chosen for the first chat, and the model reads
+  // by the name setup used, never as an id.
+  await expect(welcome.getByTestId('new-chat-folder-path')).toHaveCount(0);
   await expect(welcome.getByTestId('new-chat-setup')).not.toContainText('claude-');
   await shot(welcome, 'new-chat-this-computer');
 
