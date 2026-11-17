@@ -116,6 +116,20 @@ export function buildServerRelease({ root, info, out, reuseServer = null, log = 
     // pnpm hoists a link to the package itself pointing back into the tree it
     // was deployed from. Nothing imports @patch/server by name.
     rmSync(join(dir, 'server/node_modules/.pnpm/node_modules/@patch/server'), { force: true });
+    // deploy copies the package folder, not just what runs: the Dockerfile, the
+    // tests, a coverage report and probe scripts have no business in a release.
+    for (const f of [
+      'Dockerfile',
+      'fcm-probe.mjs',
+      'fcm-probe.mjs.bak',
+      'stryker.config.json',
+      'vitest.config.ts',
+      'test',
+      'coverage',
+      'artifacts',
+    ]) {
+      rmSync(join(dir, 'server', f), { recursive: true, force: true });
+    }
     server = {
       version: info.version,
       gitSha: info.gitSha,

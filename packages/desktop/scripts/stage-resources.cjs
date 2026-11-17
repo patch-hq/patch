@@ -12,7 +12,7 @@
 //
 // Exported for the test: stage({ repoRoot, desktopDir, buildServer, target }).
 
-const { cpSync, existsSync, mkdirSync, readdirSync, rmSync } = require('node:fs');
+const { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync } = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -24,6 +24,49 @@ function targetFor(platform = process.platform, arch = process.arch) {
 /** The host files the app needs: the manifest, the installer, and the build for `target`. */
 const wanted = (name, target = 'darwin-arm64') =>
   !/\.tar\.gz(\.sig)?$/.test(name) || name.includes(`-${target}.`);
+
+/**
+ * sharp ships one libvips and one binding per platform (`@img/sharp-darwin-x64`,
+ * `@img/sharp-libvips-linuxmusl-arm64`, …) and the release is built with all of
+ * them so it can run anywhere. The app runs on one, so the others are ~90 MB of
+ * dead weight. Anything that is not an os-arch build (the wasm fallback) stays.
+ */
+const SHARP_PLATFORM = /^(?:@img\+)?sharp-(?:libvips-)?((?:darwin|linux|linuxmusl|win32)-[a-z0-9]+)$/;
+
+/** Remove the sharp builds for platforms other than `target`; returns how many. */
+function pruneNativeModules(serverDir, target) {
+  const pnpmDir = path.join(serverDir, 'node_modules', '.pnpm');
+  if (!existsSync(pnpmDir)) return 0;
+  // Packages live as .pnpm/@img+sharp-*@ver and are linked from every @img
+  // directory beside them; both the package and its links go.
+  const scopes = [pnpmDir, path.join(serverDir, 'node_modules', '@img')];
+  const hoisted = path.join(pnpmDir, 'node_modules', '@img');
+  scopes.push(hoisted);
+  for (const entry of readdirSync(pnpmDir)) {
+    const inner = path.join(pnpmDir, entry, 'node_modules', '@img');
+    if (lstatExists(inner)) scopes.push(inner);
+  }
+  let removed = 0;
+  for (const scope of scopes) {
+    if (!lstatExists(scope)) continue;
+    for (const name of readdirSync(scope)) {
+      const m = SHARP_PLATFORM.exec(name.replace(/@[^@+]+$/, ''));
+      if (!m || m[1] === target) continue;
+      rmSync(path.join(scope, name), { recursive: true, force: true });
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function lstatExists(p) {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function stage({ repoRoot, desktopDir, buildServer, target = targetFor() }) {
   const staged = path.join(desktopDir, 'build', 'staged');
@@ -40,6 +83,9 @@ function stage({ repoRoot, desktopDir, buildServer, target = targetFor() }) {
   let carried = 0;
   for (const name of readdirSync(hostOut)) {
     if (!wanted(name, target)) continue;
+    // The host build also leaves the folder the tarball was made from beside it.
+    // Nothing reads it, and it is three times the size of the tarball.
+    if (!statSync(path.join(hostOut, name)).isFile()) continue;
     cpSync(path.join(hostOut, name), path.join(staged, 'host', name), { recursive: true });
     if (name.endsWith(`-${target}.tar.gz`)) carried++;
   }
@@ -54,6 +100,7 @@ function stage({ repoRoot, desktopDir, buildServer, target = targetFor() }) {
 
   const release = buildServer(path.join(staged, 'server-build'));
   cpSync(release, path.join(staged, 'server'), { recursive: true, verbatimSymlinks: true });
+  pruneNativeModules(path.join(staged, 'server'), target);
   rmSync(path.join(staged, 'server-build'), { recursive: true, force: true });
   return staged;
 }
@@ -69,7 +116,7 @@ function buildServerRelease(out) {
   return path.join(out, dirs[0]);
 }
 
-module.exports = { stage, wanted, targetFor };
+module.exports = { stage, wanted, pruneNativeModules, targetFor };
 
 if (require.main === module) {
   const desktopDir = path.resolve(__dirname, '..');

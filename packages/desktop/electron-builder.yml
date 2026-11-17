@@ -32,6 +32,14 @@ extraResources:
   - from: build/staged/host
     to: host
 mac:
+  # sherpa-onnx ships one addon per platform and pnpm installs them all (the
+  # release host job needs that). This app runs on arm64 macOS only; the rest
+  # were ~106 MB of unreadable binaries.
+  files:
+    - '!node_modules/sherpa-onnx-linux-x64/**'
+    - '!node_modules/sherpa-onnx-linux-arm64/**'
+    - '!node_modules/sherpa-onnx-darwin-x64/**'
+    - '!node_modules/sherpa-onnx-win32-*/**'
   extraResources:
     # Meeting mode's native audio helper (scripts/build-native.cjs): system audio via
     # a Core Audio tap, and noticing which apps have the mic open. macOS only.
@@ -93,6 +101,11 @@ publish:
   url: https://updates.invalid/api/desktop/
   channel: latest
 linux:
+  # As for the Mac: only the x86_64 Linux addon runs here.
+  files:
+    - '!node_modules/sherpa-onnx-linux-arm64/**'
+    - '!node_modules/sherpa-onnx-darwin-*/**'
+    - '!node_modules/sherpa-onnx-win32-*/**'
   # One x86_64 AppImage: electron-updater replaces it in place from latest-linux.yml.
   target:
     - target: AppImage
