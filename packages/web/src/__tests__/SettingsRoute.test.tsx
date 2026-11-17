@@ -1439,6 +1439,17 @@ describe('Settings → Agent', () => {
       fireEvent.click(toggle);
       await waitFor(() => expect(server.writes).toEqual([{ suppressProviderSwitchWarning: true }]));
     });
+
+    // spec/12 § Continue — off by default; turning it on is one preference write.
+    it('the automatic-continue toggle is off by default and writes autoContinueInterrupted', async () => {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      renderSettings('/settings/agent');
+      const toggle = (await screen.findByTestId('auto-continue-interrupted')) as HTMLInputElement;
+      expect(toggle.checked).toBe(false);
+      fireEvent.click(toggle);
+      await waitFor(() => expect(server.writes).toEqual([{ autoContinueInterrupted: true }]));
+    });
   });
 });
 

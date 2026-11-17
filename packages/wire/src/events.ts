@@ -1773,6 +1773,13 @@ export const ChatStateEvent = z
      */
     rateLimitResumingAt: z.number().int().nullable().optional(),
     /**
+     * Host fact: the chat's last turn was cut off because its process died with
+     * the machine, and the host is back without it (spec/12 § Continue). The
+     * server turns it into the `interrupted` status; Continue
+     * (`chat.continue_request`) clears it. Absent means no turn was cut off.
+     */
+    interrupted: z.boolean().optional(),
+    /**
      * Distinguishes the reason for an auto-resume pause: `'rate_limit'` for a
      * 429/usage-limit block (resumes at a known `resetsAt`), `'overloaded'`
      * for a transient 529 overload (resumes after a short backoff). Absent when
@@ -2434,6 +2441,11 @@ export const SharedSettings = z
     snoozeEveningHour: z.number().int().min(0).max(23),
     autoResumeRateLimit: z.boolean(),
     /**
+     * Whether an interrupted turn is continued as soon as its host is back,
+     * without waiting for the Continue action (spec/12 § Continue). Off by default.
+     */
+    autoContinueInterrupted: z.boolean(),
+    /**
      * Whether hosts install a published host build on their own (spec/02 §
      * Self-update). Off: a host stays on its build until someone presses Update
      * for it (or Update all) in Settings → Updates.
@@ -2535,6 +2547,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   rotationEnabled: true,
   rotationTime: '02:00',
   suppressProviderSwitchWarning: false,
+  autoContinueInterrupted: false,
   providerContextVerbosity: 'summary',
   // Every surface starts on the free, self-hosted pipeline talking straight to
   // Manager; each hosted cell is a deliberate opt-in.
@@ -3760,6 +3773,19 @@ export const ChatSettingsEvent = z
   })
   .strict();
 export type ChatSettingsEvent = z.infer<typeof ChatSettingsEvent>;
+
+/**
+ * Surface → server → host: Continue on an interrupted turn (spec/12 §
+ * Continue). The host carries the turn on through a visible message in the
+ * chat; nothing is added to it unseen.
+ */
+export const ChatContinueRequestEvent = z
+  .object({
+    type: z.literal('chat.continue_request'),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type ChatContinueRequestEvent = z.infer<typeof ChatContinueRequestEvent>;
 
 export const ChatStopRequestEvent = z
   .object({
@@ -5356,6 +5382,20 @@ export const HostStageEvent = z
   })
   .strict();
 export type HostStageEvent = z.infer<typeof HostStageEvent>;
+
+/**
+ * Host → server, just before a planned restart (a self-update, a service
+ * restart). The server shows that host's working chats as host restarting until
+ * the host reattaches, or host offline once two minutes pass (spec/12 § Chat
+ * status).
+ */
+export const HostRestartingEvent = z
+  .object({
+    type: z.literal('host.restarting'),
+    ...hostIdField,
+  })
+  .strict();
+export type HostRestartingEvent = z.infer<typeof HostRestartingEvent>;
 
 /** Surface → host: designate a project root on that host (spec/04 § Folders). */
 export const HostFolderAddEvent = z
@@ -9843,6 +9883,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostComponentProgressEvent,
   HostUpdateEvent,
   HostStageEvent,
+  HostRestartingEvent,
   HostFolderAddEvent,
   HostFolderRemoveEvent,
   HostClaudeMemoryDeleteEvent,
@@ -9864,6 +9905,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatPermissionResponseEvent,
   ChatSpawnRequestEvent,
   ChatStopRequestEvent,
+  ChatContinueRequestEvent,
   ChatToolCancelRequestEvent,
   ChatUnqueueRequestEvent,
   ChatResumeNowRequestEvent,
@@ -10172,6 +10214,7 @@ export const EVENT_SCHEMAS = {
   'host.component_progress': HostComponentProgressEvent,
   'host.update': HostUpdateEvent,
   'host.stage': HostStageEvent,
+  'host.restarting': HostRestartingEvent,
   'host.folder_add': HostFolderAddEvent,
   'host.folder_remove': HostFolderRemoveEvent,
   'host.claude_memory_delete': HostClaudeMemoryDeleteEvent,
@@ -10192,6 +10235,7 @@ export const EVENT_SCHEMAS = {
   'chat.permission_response': ChatPermissionResponseEvent,
   'chat.spawn_request': ChatSpawnRequestEvent,
   'chat.stop_request': ChatStopRequestEvent,
+  'chat.continue_request': ChatContinueRequestEvent,
   'chat.tool_cancel_request': ChatToolCancelRequestEvent,
   'chat.unqueue_request': ChatUnqueueRequestEvent,
   'chat.resume_now_request': ChatResumeNowRequestEvent,

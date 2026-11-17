@@ -936,6 +936,8 @@ describe('patch_delegate across a host restart', () => {
     sdk.enqueue([{ type: 'assistant', content: 'all done' }, { type: 'result' }]);
     const { daemon, events } = host(home, sdk);
     daemon.hydrate();
+    // The cut-off subagent is Interrupted until it is continued (spec/12 § Continue).
+    await daemon.continueChat(childId);
     await flushUntil(() =>
       messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${childId}`)),
     );
@@ -981,6 +983,7 @@ describe('patch_delegate across a host restart', () => {
     sdk.enqueue([{ type: 'assistant', content: 'mid relays leaf finished' }, { type: 'result' }]);
     const { daemon, events } = host(home, sdk);
     daemon.hydrate();
+    await daemon.continueChat(leafId);
     await flushUntil(() =>
       messagesOn(events, topId).some((m) => m.content.includes('mid relays leaf finished')),
     );

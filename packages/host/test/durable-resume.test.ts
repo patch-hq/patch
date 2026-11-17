@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { Daemon, INTERRUPTED_TURN_REMINDER, interruptedTurnResend } from '../src/chatRunner.js';
+import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { DurableTurnConfig } from '../src/durableTurn.js';
 import type { SdkBackend, SdkRunOptions } from '../src/sdkBackend.js';
@@ -68,6 +68,12 @@ function leaveTurn(
   return dir;
 }
 
+function lastState(events: unknown[], chatId: string): Record<string, unknown> | undefined {
+  return (events as Array<Record<string, unknown>>)
+    .filter((e) => e['type'] === 'chat.state' && e['chatId'] === chatId)
+    .at(-1);
+}
+
 async function interruptedChat(
   state: 'live' | 'exited' | 'lost',
   beforeSecondHost?: (cfg: DurableTurnConfig, chatId: string) => void,
@@ -119,7 +125,6 @@ describe('resuming a turn that outlived the host', () => {
       const { seen, chatId, cfg } = await interruptedChat(state);
       expect(seen).toHaveLength(1);
       expect(seen[0]?.prompt).toBe('running');
-      expect(seen[0]?.prompt).not.toBe(interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'running'));
       expect(seen[0]?.durableTurn).toMatchObject({
         chatId,
         localId: 'L1',
@@ -207,10 +212,11 @@ describe('resuming a turn that outlived the host', () => {
   });
 
   it('cuts a turn off when its runner is gone, and clears the directory', async () => {
-    const { seen, dir } = await interruptedChat('lost');
-    expect(seen).toHaveLength(1);
-    expect(seen[0]?.prompt).toBe(interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'running'));
-    expect(seen[0]?.durableTurn?.attach).toBeUndefined();
+    const { seen, dir, chatId, secondEvents } = await interruptedChat('lost');
+    // Not re-sent under a hidden reminder: the chat is Interrupted and waits for
+    // Continue (spec/12 § Continue).
+    expect(seen).toHaveLength(0);
+    expect(lastState(secondEvents, chatId)).toMatchObject({ activity: 'idle', interrupted: true });
     expect(existsSync(dir)).toBe(false);
   });
 
@@ -291,14 +297,13 @@ describe('a corrupt durable turn file', () => {
   it("treats that chat's turn as cut off, logging chatId and path", async () => {
     const { lines, logger } = capture();
     // 'lost': retiring a 'live' fixture would SIGTERM this test process.
-    const { seen, chatId } = await interruptedChat(
+    const { seen, chatId, secondEvents } = await interruptedChat(
       'lost',
       (cfg, id) => writeFileSync(join(cfg.turnsDir, id, 'turn.json'), '{trunc'),
       logger,
     );
-    expect(seen).toHaveLength(1);
-    expect(seen[0]?.prompt).toBe(interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'running'));
-    expect(seen[0]?.durableTurn?.attach).toBeUndefined();
+    expect(seen).toHaveLength(0);
+    expect(lastState(secondEvents, chatId)).toMatchObject({ interrupted: true });
     expect(lines.some((l) => l.chatId === chatId && String(l.dir).includes(chatId))).toBe(true);
   });
 });

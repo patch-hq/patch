@@ -165,6 +165,14 @@ export function AgentPage(): React.ReactElement {
                 value={!data.preferences.suppressProviderSwitchWarning}
                 onChange={(next) => writePreferences({ suppressProviderSwitchWarning: !next })}
               />
+              {/* spec/12 § Continue — a turn cut off by its machine going down
+                  waits for Continue unless this is on. */}
+              <ToggleRow
+                label="Continue interrupted turns automatically"
+                testID="auto-continue-interrupted"
+                value={data.preferences.autoContinueInterrupted}
+                onChange={(next) => writePreferences({ autoContinueInterrupted: next })}
+              />
               {/* Default expand state of a chat's provider-level context bar
                   (spec/02 § Provider-level context). The per-turn
                   <system-reminder> rows stay collapsed regardless. */}

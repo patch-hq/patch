@@ -182,6 +182,8 @@ export interface BuildOptions {
   relay?: RelayService;
   /** Override clock for tests. */
   nowMs?: () => number;
+  /** How long a host that announced a restart has to reattach (default 2 minutes). */
+  hostRestartWindowMs?: number;
   helloTimeoutMs?: number;
   /** Test hook: deterministic ULID generator. */
   idGenerator?: () => string;
@@ -978,6 +980,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     getAppVersion: () => readServedBundleVersion?.() ?? appBundleVersion,
     serverVersion: VERSION,
     autoUpdateHosts: () => updateControl.mayUpdate(),
+    autoContinueInterrupted: () =>
+      (accountSettings?.current() ?? DEFAULT_SETTINGS).autoContinueInterrupted,
+    ...(opts.hostRestartWindowMs !== undefined
+      ? { hostRestartWindowMs: opts.hostRestartWindowMs }
+      : {}),
     // Read per connect, not cached: a deploy publishes the host and restarts
     // this server in one run, but a hand-published host must count too. A
     // missing or unreadable manifest is null — "nothing published", which the

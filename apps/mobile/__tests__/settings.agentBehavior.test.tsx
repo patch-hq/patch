@@ -289,6 +289,21 @@ describe('Agent page: Chats', () => {
     expect(get(r, 'provider-switch-warning').props.value).toBe(false);
   });
 
+  // spec/12 § Continue — off by default; one preference write turns it on.
+  it('Continue interrupted turns automatically is off by default and writes autoContinueInterrupted', async () => {
+    seedSettings({
+      preferences: { ...settingsFixture().preferences, autoContinueInterrupted: false },
+    });
+    const r = await renderAgent();
+    expect(get(r, 'auto-continue-interrupted').props.value).toBe(false);
+    await actAsync(async () => {
+      get(r, 'auto-continue-interrupted').props.onValueChange(true);
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ autoContinueInterrupted: true });
+    expect(get(r, 'auto-continue-interrupted').props.value).toBe(true);
+  });
+
   // spec/15 § Settings tab — the same account preference web's Chats group
   // writes: the provider-level context bar's default expand state.
   it('Provider-level context shows the saved choice and writes a new one', async () => {

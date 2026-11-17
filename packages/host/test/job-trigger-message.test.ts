@@ -136,7 +136,7 @@ describe('job trigger turn (spec/08 § Action, spec/14 § Job trigger turn)', ()
     expect(msgs[1]?.jobTrigger).toBe(true);
   });
 
-  it('a jobTrigger turn interrupted by a host restart is resumed still carrying jobTrigger', async () => {
+  it('a jobTrigger turn interrupted by a host restart is not re-sent: the chat shows Interrupted', async () => {
     const { backend } = recordingBackend();
     const { metaStore, folder } = setup(backend);
 
@@ -186,12 +186,11 @@ describe('job trigger turn (spec/08 § Action, spec/14 § Job trigger turn)', ()
     reborn.hydrate();
     await tick(200);
 
-    // The resumed turn's content is the host's own interrupted-turn reminder
-    // (see `resumeInterruptedTurns` — "Carry on"), not the original text; what
-    // matters here is that jobTrigger rode along, same as `origin` does.
-    const msgs = userMessages(events, chatId);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]?.jobTrigger).toBe(true);
+    // Nothing is re-sent, with a hidden reminder or otherwise (spec/12 §
+    // Continue): the cut-off tick is reported as a fact and waits for Continue.
+    expect(userMessages(events, chatId)).toHaveLength(0);
+    const states = events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    expect(states.at(-1)).toMatchObject({ interrupted: true });
   });
 });
 
