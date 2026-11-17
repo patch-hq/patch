@@ -140,11 +140,23 @@ A stop (SIGTERM, a self-update, `POST /stop`) takes seconds, however many chats 
 ### Chat loading
 
 At start the host loads only the chats with live or owed work: a turn to
-reattach, a queued or held message, a pending wake, a running watch or run.
-It keeps a list of those chats so start-up reads no others. Every other chat is
-loaded when something names it: an input, a surface's action on it, a
-cross-chat tool. Loading a chat never blocks a surface, which reads only from the
-server (`01-server.md`).
+reattach, a queued or held message, a pending wake, a running watch or run, an
+armed or just-ended snooze, a turn parked on credit. It keeps a list of those
+chats so start-up reads no others. A chat joins the list the moment it gains
+work and leaves it only after the host has found it idle, so a crash never loses
+a chat's work. A host with no list (its first start with this behaviour) builds
+one from a single scan of its chats; a list that cannot be read is an error.
+
+Every other chat is loaded when something names it: an input, a surface's action
+on it, a cross-chat tool. A loaded chat stays loaded. Loading is what checks a
+chat's folder (`04-chats-and-folders.md` § Resume) and repairs its log. A listing
+or search that must cover every chat reads their records without loading them.
+Loading a chat never blocks a surface, which reads only from the server
+(`01-server.md`).
+
+On connect the host announces the chats it has loaded in full and names every
+other chat's id (`03-wire-protocol.md`), so the server keeps the chats it holds
+for this host and drops only those the host no longer has.
 
 ### Desktop app and the local host
 
