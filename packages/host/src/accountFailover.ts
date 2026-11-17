@@ -333,6 +333,8 @@ interface Exhaustion {
   /** When it becomes eligible again. Undefined = until something clears it. */
   until: number | undefined;
   reason: string;
+  /** `out` is billing or credit that needs the user; `limit` clears on its own. */
+  kind: 'limit' | 'out';
   /**
    * When this was recorded.
    *
@@ -409,9 +411,21 @@ export class AccountRotation {
 
   constructor(
     private readonly now: () => number = () => Date.now(),
-    initial: readonly { accountId: string; until?: number; reason: string; at?: number }[] = [],
+    initial: readonly {
+      accountId: string;
+      until?: number;
+      reason: string;
+      kind?: 'limit' | 'out';
+      at?: number;
+    }[] = [],
     private readonly onChange?: (
-      entries: readonly { accountId: string; until?: number; reason: string; at: number }[],
+      entries: readonly {
+        accountId: string;
+        until?: number;
+        reason: string;
+        kind: 'limit' | 'out';
+        at: number;
+      }[],
     ) => void,
   ) {
     for (const entry of initial) {
@@ -419,6 +433,7 @@ export class AccountRotation {
       this.exhausted.set(entry.accountId, {
         until: entry.until,
         reason: entry.reason,
+        kind: entry.kind ?? 'limit',
         at: entry.at ?? this.now(),
       });
     }
@@ -429,12 +444,18 @@ export class AccountRotation {
   }
 
   /** Record that an account has no credit, and when it comes back if known. */
-  markExhausted(accountId: string, reason: string, until?: number, at?: number): void {
+  markExhausted(
+    accountId: string,
+    reason: string,
+    until?: number,
+    at?: number,
+    kind: 'limit' | 'out' = 'limit',
+  ): void {
     // A refusal that states no reset must not erase one an earlier refusal did
     // state: with no instant the account arms no retry, and waits on a probe.
     const known = this.exhausted.get(accountId)?.until;
     const kept = until ?? (known !== undefined && known > this.now() ? known : undefined);
-    this.exhausted.set(accountId, { until: kept, reason, at: at ?? this.now() });
+    this.exhausted.set(accountId, { until: kept, reason, kind, at: at ?? this.now() });
     this.changed();
   }
 
@@ -455,8 +476,9 @@ export class AccountRotation {
     accountId: string,
     reason: string,
     until?: number,
+    kind: 'limit' | 'out' = 'limit',
   ): string[] {
-    this.markExhausted(accountId, reason, until);
+    this.markExhausted(accountId, reason, until, undefined, kind);
     const org = accounts.find((a) => a.id === accountId)?.organizationId;
     const marked = [accountId];
     if (org === undefined) return marked;
@@ -466,6 +488,8 @@ export class AccountRotation {
         sibling.id,
         `shares a Claude account with the key that ran out: ${reason}`,
         until,
+        undefined,
+        kind,
       );
       marked.push(sibling.id);
     }
@@ -682,10 +706,22 @@ export class AccountRotation {
   }
 
   /** For logs and the host report: what is currently sidelined and why. */
-  snapshot(): { accountId: string; until: number | undefined; reason: string }[] {
+  snapshot(): {
+    accountId: string;
+    until: number | undefined;
+    reason: string;
+    kind: 'limit' | 'out';
+    at: number;
+  }[] {
     return [...this.exhausted.entries()]
       .filter(([id]) => this.isExhausted(id))
-      .map(([accountId, e]) => ({ accountId, until: e.until, reason: e.reason }));
+      .map(([accountId, e]) => ({
+        accountId,
+        until: e.until,
+        reason: e.reason,
+        kind: e.kind,
+        at: e.at,
+      }));
   }
 }
 

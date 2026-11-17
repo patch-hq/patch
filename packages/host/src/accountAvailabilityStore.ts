@@ -5,6 +5,7 @@ export interface PersistedAccountExhaustion {
   accountId: string;
   until?: number;
   reason: string;
+  kind?: 'limit' | 'out';
   at: number;
 }
 

@@ -11,9 +11,10 @@
 
 import React from 'react';
 import { Alert, View } from 'react-native';
-import type { AccountStrategy, HostAccountSummary } from '@patch/wire';
+import { describeAccountState, type AccountStrategy, type HostAccountSummary } from '@patch/wire';
 import { api, type SharedBackendId } from '../../api/rest';
 import { space } from '../../lib/theme';
+import { formatReset } from '../../lib/usage';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { AnchoredMenuItem } from '../AnchoredMenu';
@@ -200,7 +201,7 @@ function AccountRow({
         );
   const subtitle = [
     row.email ?? null,
-    row.connected ? null : 'Signed out',
+    row.state ? describeAccountState(row.state, formatReset) : null,
     'kind' in row && row.kind === 'apiKey' ? 'API key' : null,
   ]
     .filter((x): x is string => x !== null)

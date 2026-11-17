@@ -141,6 +141,17 @@ describe('CodexAccounts — the list is the server’s (spec/01 § Settings)', (
     await accounts.close();
   });
 
+  it('reports a turn that met the limit as a refusal for the server to derive from', async () => {
+    const { accounts } = boot();
+    await accounts.applyShared([{ id: 'a', label: 'A', kind: 'chatgpt', authJson: login('ta') }]);
+    expect(accounts.report().accounts?.[0]?.refusal).toBeUndefined();
+    accounts.markExhausted('a');
+    const refusal = accounts.report().accounts?.[0]?.refusal;
+    expect(refusal).toMatchObject({ kind: 'limit', message: 'ChatGPT usage limit reached' });
+    expect(refusal?.at).toBeGreaterThan(0);
+    await accounts.close();
+  });
+
   it('hands up a login Codex refreshed on this host, once', async () => {
     const { accounts, root } = boot();
     await accounts.applyShared([{ id: 'a', label: 'A', kind: 'chatgpt', authJson: login('old') }]);

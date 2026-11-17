@@ -417,7 +417,7 @@ describe('SharedSettingsService', () => {
     const acct = await service.addClaude(TOKEN_A, 'A');
     service.disconnect('claude-code', acct.id);
     expect(service.secretsSummary().claude).toEqual([
-      { id: acct.id, label: 'A', connected: false },
+      { id: acct.id, label: 'A', connected: false, state: { state: 'signed_out' } },
     ]);
     service.remove('claude-code', acct.id);
     expect(service.secretsSummary().claude).toEqual([]);

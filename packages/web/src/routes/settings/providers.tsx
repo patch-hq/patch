@@ -8,6 +8,7 @@
 // branch in the page.
 
 import type { JSX } from 'react';
+import type { AccountState } from '@patch/wire';
 import type { SharedBackendId, SharedState } from '../../api/rest.js';
 import { EXTRA_USAGE_URL, type UsageScope } from '../../lib/usage.js';
 import { AddChatGPTAccount, AddClaudeAccount } from './SharedAccounts.js';
@@ -20,6 +21,8 @@ export interface SharedRow {
   email?: string;
   organizationId?: string;
   kind?: 'chatgpt' | 'apiKey';
+  /** The account's one state, from the server (spec/10 § Account states). */
+  state?: AccountState;
 }
 
 export interface ProviderSpec {
