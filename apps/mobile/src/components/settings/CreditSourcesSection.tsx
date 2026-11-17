@@ -30,6 +30,7 @@ import {
 } from './accountRows';
 import { NoticeRow } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
+import { ChatGPTSignInFlow, ClaudeSignInFlow } from './SignInFlows';
 import { UsageHistorySection } from './UsageHistorySection';
 import { PROVIDERS, type ProviderSpec, type SharedRow } from './providers';
 import { patchShared, writeShared } from './sharedWrite';
@@ -215,6 +216,16 @@ function AccountRow({
       detail: 'Change the name shown in the list',
       testID: `account-${id}-rename`,
     },
+    ...(backendId === 'codex' && !('kind' in row && row.kind === 'apiKey')
+      ? [
+          {
+            id: 'connect',
+            label: row.connected ? 'Sign in again' : 'Sign in',
+            detail: 'Sign in with ChatGPT using a code you approve on any device',
+            testID: `account-${id}-connect`,
+          },
+        ]
+      : []),
     ...(provider.pasteToken
       ? [
           {
@@ -320,7 +331,13 @@ function AccountRow({
           }}
         />
       ) : null}
-      {connecting ? (
+      {connecting && backendId === 'codex' ? (
+        <ChatGPTSignInFlow accountId={row.id} onDone={() => setConnecting(false)} />
+      ) : null}
+      {connecting && provider.pasteToken ? (
+        <ClaudeSignInFlow accountId={row.id} onDone={() => setConnecting(false)} />
+      ) : null}
+      {connecting && provider.pasteToken ? (
         <TokenEntry
           testID={`account-${id}-token`}
           placeholder="sk-ant-oat01-…"

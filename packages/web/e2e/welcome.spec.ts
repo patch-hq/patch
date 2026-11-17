@@ -291,13 +291,25 @@ test('own server: no keep-running step, and the AI step can be skipped', async (
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
 });
 
-test('ChatGPT sign-in runs on the online host, from the welcome step', async ({ page }) => {
+test('ChatGPT sign-in from the welcome step shows the server’s device code', async ({ page }) => {
   await stub(page);
+  await page.route('**/api/accounts/codex/signin', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        signInId: 's1',
+        userCode: 'ABCD-1234',
+        url: 'https://auth.openai.com/codex/device',
+        intervalSeconds: 60,
+        expiresAt: Date.now() + 900_000,
+      }),
+    }),
+  );
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
   await page.getByTestId('chatgpt-signin').click();
-  expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([
-    expect.objectContaining({ backendId: 'codex', authMethod: 'device' }),
-  ]);
+  await expect(page.getByTestId('chatgpt-login-pending')).toContainText('ABCD-1234');
+  expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([]);
 });
 
 test('a host installing Claude Code says so, and a failed install shows why', async ({ page }) => {

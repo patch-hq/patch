@@ -2,25 +2,25 @@
 // credentials). Providers.tsx points at these; the Usage page never does.
 
 import React from 'react';
-import { Linking, View } from 'react-native';
+import { View } from 'react-native';
 import { api } from '../../api/rest';
 import { space } from '../../lib/theme';
-import { usePresenceStore } from '../../stores/presenceStore';
-import { NoticeRow } from './HostSwitcher';
-import { sendToHost } from './hostSend';
+import { ChatGPTSignInFlow, ClaudeSignInFlow } from './SignInFlows';
 import { TokenEntry } from './accountRows';
 import { writeShared } from './sharedWrite';
-import { ButtonRow, ErrorLine, Muted, SettingsButton } from './ui';
+import { ButtonRow, SettingsButton } from './ui';
 
 /** Add a Claude account from a pasted token. */
 export function AddClaude(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   return (
     <View style={{ gap: space.sm }}>
+      <ClaudeSignInFlow />
       <ButtonRow>
         <SettingsButton
           testID="add-claude-account"
-          label="Add account"
+          label="Paste a token"
+          variant="quiet"
           onPress={() => setOpen(true)}
         />
       </ButtonRow>
@@ -45,41 +45,15 @@ export function AddClaude(): React.ReactElement {
 }
 
 /**
- * Add a ChatGPT account: a device sign-in (run on whichever host is online —
- * its login goes to the server) or an API key added straight to the server.
+ * Add a ChatGPT account: a device sign-in the server runs, or an API key added
+ * straight to the server. No host is involved in either.
  */
 export function AddChatGPT(): React.ReactElement {
-  const hosts = usePresenceStore((s) => s.hosts);
-  const online = Object.values(hosts).filter((h) => h.online);
-  const [hostId, setHostId] = React.useState<string | null>(null);
   const [keyOpen, setKeyOpen] = React.useState(false);
-  const host = online.find((h) => h.hostId === hostId) ?? online[0] ?? null;
-  const login = host?.accounts['codex']?.login;
-  const pending = login?.status === 'pending';
-  const signIn = (authMethod: 'device' | 'cancel', requestId?: string): void => {
-    if (!host) return;
-    setHostId(host.hostId);
-    sendToHost(
-      host.hostId,
-      {
-        type: 'host.backend_add_account',
-        hostId: host.hostId,
-        backendId: 'codex',
-        authMethod,
-        requestId: requestId ?? `signin-${Date.now()}`,
-      },
-      'Sign in',
-    );
-  };
   return (
     <View style={{ gap: space.sm }} testID="add-chatgpt">
+      <ChatGPTSignInFlow />
       <ButtonRow>
-        <SettingsButton
-          testID="chatgpt-signin"
-          label="Sign in with ChatGPT"
-          disabled={host === null || pending}
-          onPress={() => signIn('device')}
-        />
         <SettingsButton
           testID="chatgpt-add-api-key"
           label="Add API key"
@@ -87,9 +61,6 @@ export function AddChatGPT(): React.ReactElement {
           onPress={() => setKeyOpen(true)}
         />
       </ButtonRow>
-      {host === null ? (
-        <NoticeRow testID="chatgpt-no-host" text="Nothing is online to sign in with" />
-      ) : null}
       {keyOpen ? (
         <TokenEntry
           testID="chatgpt-api-key"
@@ -104,30 +75,6 @@ export function AddChatGPT(): React.ReactElement {
             );
           }}
         />
-      ) : null}
-      {pending && login && host ? (
-        <View testID="chatgpt-login-pending" style={{ gap: space.xs }}>
-          <Muted>Waiting for sign-in…</Muted>
-          {login.code ? <Muted testID="chatgpt-login-code">{login.code}</Muted> : null}
-          <ButtonRow>
-            {login.url ? (
-              <SettingsButton
-                testID="chatgpt-login-open"
-                label="Open sign-in"
-                onPress={() => void Linking.openURL(login.url!)}
-              />
-            ) : null}
-            <SettingsButton
-              testID="chatgpt-login-cancel"
-              label="Cancel sign-in"
-              variant="quiet"
-              onPress={() => signIn('cancel', login.requestId)}
-            />
-          </ButtonRow>
-        </View>
-      ) : null}
-      {login?.status === 'failed' && login.error ? (
-        <ErrorLine testID="chatgpt-login-error" message={login.error} />
       ) : null}
     </View>
   );

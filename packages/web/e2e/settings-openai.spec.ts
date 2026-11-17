@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
   reportHost,
   setHostAccount,
@@ -8,13 +8,26 @@ import {
 } from './settingsHarness.js';
 
 // Settings → Usage → ChatGPT: the shared ChatGPT accounts (spec/01 § Settings),
-// their usage as a host reads it, and the one flow that runs on a host — a
-// ChatGPT sign-in, which Codex does as a device flow on an online host and
-// whose login then goes to the server.
+// their usage as a host reads it, and the ChatGPT sign-in, a device code the
+// server runs and any surface shows (spec/10 § Signing in).
 
-test('a ChatGPT account shows its usage, and a sign-in on a host shows its code', async ({
-  page,
-}) => {
+const stubChatGPTSignIn = async (page: Page): Promise<void> => {
+  await page.route('**/api/accounts/codex/signin', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        signInId: 's1',
+        userCode: 'ABCD-1234',
+        url: 'https://auth.openai.com/codex/device',
+        intervalSeconds: 60,
+        expiresAt: Date.now() + 900_000,
+      }),
+    }),
+  );
+};
+
+test('a ChatGPT account shows its usage', async ({ page }) => {
   await stubSettingsApi(page, {
     secrets: { codex: [{ id: 'a1', label: 'Personal ChatGPT', kind: 'chatgpt', connected: true }] },
   });
@@ -23,12 +36,6 @@ test('a ChatGPT account shows its usage, and a sign-in on a host shows its code'
     hostId: 'd1',
     backendId: 'codex',
     connected: true,
-    login: {
-      requestId: 'r1',
-      status: 'pending',
-      url: 'https://auth.openai.com/codex/device',
-      code: 'ABCD-1234',
-    },
     accounts: [
       {
         id: 'a1',
@@ -42,6 +49,15 @@ test('a ChatGPT account shows its usage, and a sign-in on a host shows its code'
   const session = page.getByTestId('account-usage-session-codex-a1');
   await expect(session).toContainText('5-hour');
   await expect(session).toContainText('25%');
+});
+
+test('Sign in with ChatGPT shows the code the server holds, with no host involved', async ({
+  page,
+}) => {
+  await stubSettingsApi(page);
+  await stubChatGPTSignIn(page);
+  await page.goto(settingsUrl('usage'));
+  await page.getByTestId('chatgpt-signin').click();
   const pending = page.getByTestId('chatgpt-login-pending');
   await expect(pending).toContainText('ABCD-1234');
   await expect(pending.getByRole('link', { name: 'Open sign-in' })).toHaveAttribute(
@@ -49,15 +65,7 @@ test('a ChatGPT account shows its usage, and a sign-in on a host shows its code'
     'https://auth.openai.com/codex/device',
   );
   await expect(pending.getByRole('button', { name: 'Cancel sign-in' })).toBeVisible();
-});
-
-test('Sign in with ChatGPT runs the device flow on the online host', async ({ page }) => {
-  await stubSettingsApi(page);
-  await page.goto(settingsUrl('usage'));
-  await page.getByTestId('chatgpt-signin').click();
-  expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([
-    expect.objectContaining({ backendId: 'codex', authMethod: 'device', hostId: 'd1' }),
-  ]);
+  expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([]);
 });
 
 test('API keys are added through the server and no host setup controls are shown', async ({
@@ -76,7 +84,7 @@ test('API keys are added through the server and no host setup controls are shown
   expect(await wsSent(page)).toEqual([]);
 });
 
-test('with no host online there is nowhere to sign in, and it says so', async ({ page }) => {
+test('with no host online, ChatGPT sign-in is still available', async ({ page }) => {
   await stubSettingsApi(page);
   await page.goto(settingsUrl('usage'));
   await page.evaluate(() =>
@@ -88,8 +96,8 @@ test('with no host online there is nowhere to sign in, and it says so', async ({
       .getState()
       .setHostOnline('d1', false),
   );
-  await expect(page.getByTestId('chatgpt-no-host')).toBeVisible();
-  await expect(page.getByTestId('chatgpt-signin')).toBeDisabled();
+  await expect(page.getByTestId('chatgpt-no-host')).toHaveCount(0);
+  await expect(page.getByTestId('chatgpt-signin')).toBeEnabled();
 });
 
 test('a signed-out Claude host can select ChatGPT and enable the new-chat composer', async ({
@@ -115,10 +123,11 @@ test('a signed-out Claude host can select ChatGPT and enable the new-chat compos
   await expect(page.locator('textarea').first()).toBeEnabled();
 });
 
-test('Codex sign-in on Hosts opens Usage with that host chosen for the ChatGPT sign-in', async ({
+test('Codex sign-in on Hosts opens Usage, where the ChatGPT sign-in runs on the server', async ({
   page,
 }) => {
   await stubSettingsApi(page);
+  await stubChatGPTSignIn(page);
   await page.goto(settingsUrl('hosts'));
   await reportHost(page, {
     backends: [{ id: 'codex', label: 'Codex', version: '0.154.0', state: 'logged-out' }],
@@ -128,7 +137,5 @@ test('Codex sign-in on Hosts opens Usage with that host chosen for the ChatGPT s
   await expect(page.getByTestId('settings-nav-usage')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByText(/Paste a token from.*claude setup-token/)).toBeHidden();
   await page.getByTestId('chatgpt-signin').click();
-  expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([
-    expect.objectContaining({ backendId: 'codex', authMethod: 'device', hostId: 'd1' }),
-  ]);
+  await expect(page.getByTestId('chatgpt-login-pending')).toContainText('ABCD-1234');
 });

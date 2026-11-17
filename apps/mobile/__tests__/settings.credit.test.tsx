@@ -39,6 +39,11 @@ vi.mock('../src/api/rest', () => ({
     setAccountStrategy: vi.fn(),
     adoptAccount: vi.fn(),
     usageReport: vi.fn(),
+    chatgptSignInStart: vi.fn(),
+    chatgptSignInStatus: vi.fn(),
+    chatgptSignInCancel: vi.fn(),
+    claudeSignInStart: vi.fn(),
+    claudeSignInComplete: vi.fn(),
   },
 }));
 
@@ -292,25 +297,28 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     for (const p of PROVIDERS) expect(query(r, `accounts-${p.id}`)).not.toBeNull();
   });
 
-  it('runs a ChatGPT sign-in on an online host, and says when none is online', async () => {
-    const r1 = await render();
-    expect(query(r1, 'chatgpt-no-host')).not.toBeNull();
-    expect(get(r1, 'chatgpt-signin').props.disabled).toBe(true);
-    reportHost('h1', { hostName: 'hetzner' });
-    reportHost('h2', { hostName: 'mac' });
-    const r2 = await render();
-    expect(query(r2, 'chatgpt-signin-host')).toBeNull();
-    expect(query(r2, 'adopt-codex-h1')).toBeNull();
-    expect(query(r2, 'adopt-codex-h2')).toBeNull();
-    await actAsync(() => get(r2, 'chatgpt-signin').props.onPress());
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'host.backend_add_account',
-        hostId: 'h1',
-        backendId: 'codex',
-        authMethod: 'device',
-      }),
-    );
+  it('signs in to ChatGPT through the server with no host online, and shows the code', async () => {
+    vi.mocked(api.chatgptSignInStart).mockResolvedValue({
+      signInId: 's1',
+      userCode: 'ABCD-1234',
+      url: 'https://auth.openai.com/codex/device',
+      intervalSeconds: 60,
+      expiresAt: Date.now() + 900_000,
+    });
+    const r = await render();
+    expect(query(r, 'chatgpt-no-host')).toBeNull();
+    expect(get(r, 'chatgpt-signin').props.disabled).toBeFalsy();
+    await actAsync(() => get(r, 'chatgpt-signin').props.onPress());
+    expect(api.chatgptSignInStart).toHaveBeenCalledWith({});
+    expect(send).not.toHaveBeenCalled();
+    expect(textOf(get(r, 'chatgpt-login-code'))).toBe('ABCD-1234');
+    expect(query(r, 'chatgpt-login-cancel')).not.toBeNull();
+  });
+
+  it('offers Claude sign-in from the phone, beside pasting a token', async () => {
+    const r = await render();
+    expect(query(r, 'claude-signin-start')).not.toBeNull();
+    expect(query(r, 'add-claude-account')).not.toBeNull();
   });
 
   it('auto-resume reads and writes the shared setting', async () => {

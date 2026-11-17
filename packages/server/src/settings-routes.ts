@@ -15,11 +15,18 @@ import {
   SharedSettingsPatch,
 } from '@patch/wire';
 import {
+  CHATGPT_VERIFICATION_URL,
+  ChatGPTSignInError,
+  chatgptLoginFromTokens,
   ClaudeSignInError,
+  exchangeChatGPTDeviceCode,
   exchangeClaudeSignInCode,
   listenForClaudeSignIn,
   parseClaudeSignInCode,
+  pollChatGPTDeviceCode,
+  requestChatGPTDeviceCode,
   startClaudeSignIn,
+  type ChatGPTDeviceCode,
 } from '@patch/auth';
 import type { Registry } from './registry.js';
 import { requireAuth } from './folder-routes.js';
@@ -32,11 +39,19 @@ export interface SettingsRoutesDeps {
   exchangeClaudeCode?: typeof exchangeClaudeSignInCode;
   /** Listens for claude.ai's redirect on this machine; tests stand in for the browser. */
   listenForClaudeSignIn?: typeof listenForClaudeSignIn;
+  /** The ChatGPT device-code calls; tests stand in for OpenAI. */
+  chatgptDevice?: {
+    request: typeof requestChatGPTDeviceCode;
+    poll: typeof pollChatGPTDeviceCode;
+    exchange: typeof exchangeChatGPTDeviceCode;
+  };
   now?: () => number;
 }
 
 /** How long a started Claude sign-in waits for its code. */
 export const CLAUDE_SIGNIN_TTL_MS = 15 * 60_000;
+/** How long a ChatGPT device code is good for (OpenAI's own limit). */
+export const CHATGPT_SIGNIN_TTL_MS = 15 * 60_000;
 /** Started sign-ins kept at once; the oldest goes first. */
 const CLAUDE_SIGNIN_MAX = 20;
 
@@ -333,6 +348,135 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
       drop(body.signInId);
     }),
   );
+
+  // ---- Signing in to ChatGPT from a surface (spec/10 § Signing in) ----
+  // The server holds the device code and does the polling on behalf of whoever
+  // asks; the surface shows `userCode` and `url` and reads `status`.
+  type ChatGPTSignIn = {
+    code: ChatGPTDeviceCode;
+    at: number;
+    lastPoll: number;
+    accountId?: string;
+    label?: string;
+    settled?: { status: 'complete' } | { status: 'failed'; error: string; code: string };
+  };
+  const chatgpt = new Map<string, ChatGPTSignIn>();
+  const device = deps.chatgptDevice ?? {
+    request: requestChatGPTDeviceCode,
+    poll: pollChatGPTDeviceCode,
+    exchange: exchangeChatGPTDeviceCode,
+  };
+  const authed = async (req: FastifyRequest, reply: FastifyReply): Promise<boolean> => {
+    try {
+      await requireAuth(req, deps.registry);
+      return true;
+    } catch (e) {
+      void reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+      return false;
+    }
+  };
+  /** A finished sign-in carries the committed state, so a surface needs no second read. */
+  const settledBody = (settled: NonNullable<ChatGPTSignIn['settled']>) => {
+    if (settled.status !== 'complete') return settled;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping `type` from the broadcast event shape, not using it
+    const { type: _type, ...state } = shared.changedEvent();
+    return { status: 'complete' as const, state };
+  };
+  const SignInStartBody = z
+    .object({ accountId: z.string().min(1).optional(), label: z.string().min(1).optional() })
+    .strict();
+
+  app.post('/api/accounts/codex/signin', async (req, reply) => {
+    if (!(await authed(req, reply))) return reply;
+    const body = SignInStartBody.safeParse(req.body ?? {});
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: body.error.message });
+    }
+    for (const [id, s] of chatgpt) if (now() - s.at > CHATGPT_SIGNIN_TTL_MS) chatgpt.delete(id);
+    while (chatgpt.size >= CLAUDE_SIGNIN_MAX) chatgpt.delete(chatgpt.keys().next().value as string);
+    try {
+      const code = await device.request();
+      const signInId = randomUUID();
+      chatgpt.set(signInId, {
+        code,
+        at: now(),
+        lastPoll: 0,
+        ...(body.data.accountId ? { accountId: body.data.accountId } : {}),
+        ...(body.data.label ? { label: body.data.label } : {}),
+      });
+      return reply.code(200).send({
+        signInId,
+        userCode: code.userCode,
+        url: CHATGPT_VERIFICATION_URL,
+        intervalSeconds: code.intervalSeconds,
+        expiresAt: now() + CHATGPT_SIGNIN_TTL_MS,
+      });
+    } catch (e) {
+      if (e instanceof ChatGPTSignInError) {
+        return reply.code(e.kind === 'rejected' ? 400 : 502).send({
+          error: e.kind === 'rejected' ? 'credential_rejected' : 'credential_unreachable',
+          message: e.message,
+        });
+      }
+      throw e;
+    }
+  });
+
+  app.get('/api/accounts/codex/signin/:signInId', async (req, reply) => {
+    if (!(await authed(req, reply))) return reply;
+    const id = (req.params as { signInId: string }).signInId;
+    const s = chatgpt.get(id);
+    if (!s) {
+      return reply
+        .code(410)
+        .send({ error: 'signin_expired', message: 'That sign-in has expired. Start it again.' });
+    }
+    if (s.settled) return reply.code(200).send(settledBody(s.settled));
+    if (now() - s.at > CHATGPT_SIGNIN_TTL_MS) {
+      chatgpt.delete(id);
+      return reply
+        .code(410)
+        .send({ error: 'signin_expired', message: 'That sign-in has expired. Start it again.' });
+    }
+    // OpenAI asks for a gap between looks; a surface asking faster gets the last answer.
+    if (s.lastPoll !== 0 && now() - s.lastPoll < s.code.intervalSeconds * 1000) {
+      return reply.code(200).send({ status: 'pending' });
+    }
+    s.lastPoll = now();
+    try {
+      const polled = await device.poll(s.code);
+      if (polled.status === 'pending') return reply.code(200).send({ status: 'pending' });
+      const tokens = await device.exchange(polled);
+      const login = chatgptLoginFromTokens(tokens);
+      shared.signInChatGPT(login, {
+        ...(s.accountId ? { accountId: s.accountId } : {}),
+        ...(s.label ? { label: s.label } : {}),
+      });
+      s.settled = { status: 'complete' };
+    } catch (e) {
+      if (e instanceof ChatGPTSignInError && e.kind === 'unreachable') {
+        // Nothing was spent: the person can still approve and the next look can succeed.
+        return reply.code(200).send({ status: 'pending', warning: e.message });
+      }
+      const failure =
+        e instanceof ChatGPTSignInError
+          ? { code: 'credential_rejected', error: e.message }
+          : e instanceof SettingsError
+            ? { code: e.code, error: e.message }
+            : null;
+      if (!failure) throw e;
+      s.settled = { status: 'failed', ...failure };
+    }
+    return reply.code(200).send(settledBody(s.settled));
+  });
+
+  app.delete('/api/accounts/codex/signin/:signInId', async (req, reply) => {
+    if (!(await authed(req, reply))) return reply;
+    chatgpt.delete((req.params as { signInId: string }).signInId);
+    return reply.code(200).send({ ok: true });
+  });
 
   app.patch(
     '/api/accounts/:backendId/:accountId',

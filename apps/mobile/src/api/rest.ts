@@ -354,6 +354,18 @@ export interface NotificationsResponse {
   unread: number;
 }
 
+export interface ChatGPTSignInStarted {
+  signInId: string;
+  userCode: string;
+  url: string;
+  intervalSeconds: number;
+  expiresAt: number;
+}
+export type ChatGPTSignInStatus =
+  | { status: 'pending'; warning?: string }
+  | { status: 'complete'; state: SharedState }
+  | { status: 'failed'; error: string; code: string };
+
 export const api = {
   getNotifications: () => request<NotificationsResponse>('/api/notifications'),
   markNotificationsRead: (target: { ids: string[] } | { all: true }) =>
@@ -1001,6 +1013,26 @@ export const api = {
     backendId: SharedBackendId,
     body: { token?: string; apiKey?: string; label?: string },
   ) => request<SharedState>(`/api/accounts/${backendId}`, { method: 'POST', body }),
+  /** Start a Claude sign-in; the server keeps the secret (spec/10 § Signing in). */
+  claudeSignInStart: () =>
+    request<{ signInId: string; url: string }>('/api/accounts/claude-code/signin', {
+      method: 'POST',
+    }),
+  claudeSignInComplete: (body: {
+    signInId: string;
+    code: string;
+    label?: string;
+    accountId?: string;
+  }) => request<SharedState>('/api/accounts/claude-code/signin/complete', { method: 'POST', body }),
+  /** Start a ChatGPT device sign-in; the server holds the code. */
+  chatgptSignInStart: (body: { accountId?: string; label?: string } = {}) =>
+    request<ChatGPTSignInStarted>('/api/accounts/codex/signin', { method: 'POST', body }),
+  chatgptSignInStatus: (signInId: string) =>
+    request<ChatGPTSignInStatus>(`/api/accounts/codex/signin/${encodeURIComponent(signInId)}`),
+  chatgptSignInCancel: (signInId: string) =>
+    request<{ ok: true }>(`/api/accounts/codex/signin/${encodeURIComponent(signInId)}`, {
+      method: 'DELETE',
+    }),
   updateAccount: (
     backendId: SharedBackendId,
     accountId: string,

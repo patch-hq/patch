@@ -15,9 +15,9 @@ import {
   type AccountStrategy,
   type HostAccountSummary,
 } from '@patch/wire';
+import { ChatGPTSignIn } from '../../components/ChatGPTSignIn.js';
 import { ClaudeSignIn } from '../../components/ClaudeSignIn.js';
 import { api, type SharedBackendId } from '../../api/rest.js';
-import { getActiveWs } from '../../api/ws.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
@@ -211,6 +211,16 @@ function AccountEntry({
             },
           ]
         : []),
+    ...(backendId === 'codex' && row.kind !== 'apiKey'
+      ? [
+          {
+            label: row.connected ? 'Sign in again' : 'Sign in',
+            detail: 'Sign in with ChatGPT using a code you approve on any device',
+            testid: `account-connect-${id}`,
+            onSelect: () => setSigningIn(true),
+          },
+        ]
+      : []),
     ...(row.connected
       ? [
           {
@@ -288,7 +298,11 @@ function AccountEntry({
           {reading.error}
         </p>
       ) : null}
-      {signingIn ? <ClaudeSignIn accountId={row.id} onDone={() => setSigningIn(false)} /> : null}
+      {signingIn && backendId === 'codex' ? (
+        <ChatGPTSignIn accountId={row.id} onDone={() => setSigningIn(false)} />
+      ) : signingIn ? (
+        <ClaudeSignIn accountId={row.id} onDone={() => setSigningIn(false)} />
+      ) : null}
       <UsageBars
         usage={reading?.usage}
         windows={provider.windows}
@@ -358,52 +372,14 @@ export function AddClaudeAccount(): JSX.Element {
 }
 
 /**
- * Add a ChatGPT account. A ChatGPT sign-in has to run on a host — Codex
- * does the device flow — so one online host runs it and sends the login to
- * the server; which host is not the user's concern. An API key is added
- * straight to the server.
+ * Add a ChatGPT account: a device sign-in the server runs, or an API key added
+ * straight to the server. No host is involved in either.
  */
 export function AddChatGPTAccount(): JSX.Element {
-  const hosts = usePresenceStore((s) => s.hosts);
-  const requested = useUiStore((s) => s.codexSignInHost);
-  const online = sortHosts(Object.values(hosts)).filter((h) => h.online);
-  const [hostId, setHostId] = useState<string | null>(null);
-  useEffect(() => {
-    if (requested !== null) setHostId(requested);
-  }, [requested]);
-  const host = online.find((h) => h.hostId === hostId) ?? online[0] ?? null;
-  const login = host?.accounts['codex']?.login;
-  const pending = login?.status === 'pending';
-
-  const send = (authMethod: 'device' | 'browser' | 'cancel', requestId?: string): void => {
-    if (!host) return;
-    setHostId(host.hostId);
-    const ws = getActiveWs();
-    if (!ws) {
-      useUiStore.getState().pushError('sign in: this surface has no link to the server');
-      return;
-    }
-    sendToHost(host, {
-      type: 'host.backend_add_account',
-      hostId: host.hostId,
-      backendId: 'codex',
-      authMethod,
-      requestId: requestId ?? `signin-${Date.now()}`,
-    });
-  };
-
   return (
     <div className="set-add-bar start stack" data-testid="add-chatgpt-account">
       <div className="set-inline">
-        <button
-          type="button"
-          className="set-btn"
-          data-testid="chatgpt-signin"
-          disabled={host === null || pending}
-          onClick={() => send('device')}
-        >
-          Sign in with ChatGPT
-        </button>
+        <ChatGPTSignIn />
         <button
           type="button"
           className="set-btn ghost"
@@ -426,34 +402,6 @@ export function AddChatGPTAccount(): JSX.Element {
           Add API key
         </button>
       </div>
-      {host === null ? <Note testid="chatgpt-no-host">Connect a host to sign in</Note> : null}
-      {pending && login ? (
-        <div className="set-inline" role="status" data-testid="chatgpt-login-pending">
-          <span className="set-row-title">
-            {login.code
-              ? 'Open the sign-in page, enter this code, and come back here.'
-              : 'Finish signing in on the page that opened.'}
-          </span>
-          {login.code ? <code className="set-code">{login.code}</code> : null}
-          {login.url ? (
-            <a className="set-btn" href={login.url} target="_blank" rel="noreferrer">
-              Open sign-in
-            </a>
-          ) : null}
-          <button
-            type="button"
-            className="set-btn ghost"
-            onClick={() => send('cancel', login.requestId)}
-          >
-            Cancel sign-in
-          </button>
-        </div>
-      ) : null}
-      {login?.status === 'failed' && login.error ? (
-        <p className="set-error" role="alert">
-          {login.error}
-        </p>
-      ) : null}
     </div>
   );
 }

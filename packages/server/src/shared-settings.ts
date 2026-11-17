@@ -1002,6 +1002,55 @@ export class SharedSettingsService {
     );
   }
 
+  /**
+   * Store a ChatGPT login the server obtained itself (spec/10 § Signing in). A new
+   * sign-in is a new account and cannot repeat one already connected; Sign in
+   * again on a row replaces its credential and keeps its id, label and place.
+   */
+  signInChatGPT(
+    login: { authJson: string; identity: string; email?: string },
+    target: { accountId?: string; label?: string } = {},
+  ): SharedCodexAccount {
+    this.requireSecrets();
+    const clash = this.secrets.codex.find(
+      (a) => a.identity === login.identity && a.id !== target.accountId,
+    );
+    if (clash && clash.authJson !== null) {
+      throw new SettingsError(
+        409,
+        'duplicate_account',
+        `This login is the same ChatGPT account as ${clash.label}`,
+      );
+    }
+    const row = target.accountId
+      ? this.secrets.codex.find((a) => a.id === target.accountId)
+      : clash;
+    if (target.accountId && !row) {
+      throw new SettingsError(404, 'account_not_found', `No codex account ${target.accountId}`);
+    }
+    if (row) {
+      // A disconnected row for the same login is signed in again, not duplicated.
+      row.kind = 'chatgpt';
+      row.authJson = login.authJson;
+      row.identity = login.identity;
+      if (login.email) row.email = login.email;
+      this.renewalErrors.delete(row.id);
+      this.commit({ secrets: true });
+      return row;
+    }
+    return this.addCodexAccount(
+      {
+        id: randomUUID(),
+        label: target.label?.trim() || login.email || `ChatGPT ${this.secrets.codex.length + 1}`,
+        kind: 'chatgpt',
+        ...(login.email ? { email: login.email } : {}),
+        identity: login.identity,
+        authJson: login.authJson,
+      },
+      'device sign-in',
+    );
+  }
+
   private addCodexAccount(account: SharedCodexAccount, how: string): SharedCodexAccount {
     this.requireSecrets();
     const clash = this.secrets.codex.find(
