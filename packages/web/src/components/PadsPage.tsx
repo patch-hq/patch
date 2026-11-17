@@ -95,7 +95,6 @@ export function PadsPage(): JSX.Element {
       <header className="route-head">
         <div className="route-head-title">
           <NavHistoryControls />
-          <h1 className="display">Pads</h1>
         </div>
         <input
           type="search"

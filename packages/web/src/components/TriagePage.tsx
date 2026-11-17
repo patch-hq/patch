@@ -50,7 +50,6 @@ export function TriagePage({ ws }: { ws: PatchWs | null }): JSX.Element {
       <header className="route-head">
         <div className="route-head-title">
           <NavHistoryControls />
-          <h1 className="display">Triage</h1>
         </div>
         <span className="triage-count" data-testid="triage-count">
           {queue.length} waiting

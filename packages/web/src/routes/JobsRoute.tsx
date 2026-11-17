@@ -219,7 +219,6 @@ export function JobsRoute(): JSX.Element {
       <header className="route-head">
         <div className="route-head-title">
           <NavHistoryControls />
-          <h1 className="display">Jobs</h1>
         </div>
         {!isLoading && jobs.length > 0 ? (
           <>

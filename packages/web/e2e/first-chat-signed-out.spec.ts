@@ -125,8 +125,9 @@ test('a newcomer’s app: Manager says what it is, and nothing empty or unexplai
   await shot(page, '10-manager-newcomer');
 });
 
-test('Settings in a group of its own is titled Settings, not Empty group', async ({ page }) => {
+test('Settings in a group of its own is named once, by its tab', async ({ page }) => {
   await page.goto('/app/dev-harness.html?route=/settings/usage');
   await expect(page.getByTestId('settings-usage')).toBeVisible();
-  await expect(page.getByTestId('group-title')).toHaveText('Settings');
+  await expect(page.getByTestId('group-title')).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Settings' })).toBeVisible();
 });

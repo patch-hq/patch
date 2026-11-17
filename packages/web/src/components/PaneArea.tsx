@@ -467,7 +467,7 @@ function GroupCard({
           onClose: cards ? () => closeGroup(group.id) : null,
         }}
       />
-    ) : (
+    ) : group.chatId === null && !cards ? null : (
       <header className="group-head" data-testid="group-head">
         <span className="group-name">
           {cards ? (
@@ -475,9 +475,11 @@ function GroupCard({
               {index + 1}
             </span>
           ) : null}
-          <span className="group-title" data-testid="group-title">
-            {group.chatId === null ? pageGroupTitle(group) : chatTitle(group.chatId, undefined)}
-          </span>
+          {group.chatId === null ? null : (
+            <span className="group-title" data-testid="group-title">
+              {chatTitle(group.chatId, undefined)}
+            </span>
+          )}
         </span>
         {cards ? (
           <button

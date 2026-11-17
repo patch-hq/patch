@@ -8912,6 +8912,20 @@ button.view-file-download {
   margin: 0;
   font-size: 24px;
 }
+/* Pages named by their tab carry no heading of their own: the head is a compact
+   toolbar (history arrows, search/filters, primary action) on the same 28px
+   edge as the content below. The arrows' -12px pull-back is for chat heads
+   and would leave them out of line here. */
+.jobs-route .route-head,
+.pads-route .route-head {
+  height: auto;
+  min-height: 52px;
+  padding-block: 10px;
+}
+.jobs-route .route-head .nav-history,
+.pads-route .route-head .nav-history {
+  margin-left: 0;
+}
 /* Groups the Back/Forward history controls with the page title as one zone,
    so `.route-head`'s own `space-between` treats them as a single flex-start
    item instead of spreading the arrows away from the title they sit next to. */
@@ -9175,7 +9189,7 @@ button.view-file-download {
    heads (Recurring, One-off), with its own chevron in place of the browser's
    triangle. */
 .job-defaults {
-  padding: 18px 28px 0;
+  padding: 12px 28px 0;
 }
 .job-defaults > summary {
   display: flex;

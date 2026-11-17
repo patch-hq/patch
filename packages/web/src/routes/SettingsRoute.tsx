@@ -199,7 +199,6 @@ function SettingsNav({
     <nav className="set-nav" data-testid="settings-nav" aria-label="Settings">
       <div className="route-head-title">
         <NavHistoryControls />
-        <h1 className="display">Settings</h1>
       </div>
       {visibleSettingsPages(experimental).map((p) => {
         const heading =
