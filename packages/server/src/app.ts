@@ -15,6 +15,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'pino';
 import {
   canonicalizeHostNames,
+  decode,
   DEFAULT_SHARED_SETTINGS,
   signInQuestion,
   type ChatInputEvent,
@@ -575,6 +576,30 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(opts.logSyncDelayMs !== undefined ? { delayMs: opts.logSyncDelayMs } : {}),
   });
   hostLink.onEvent((event) => logSync.observe(event));
+  // History the record did not keep before it kept everything, sent once per
+  // chat by each host (spec/01 § Chat record): taken in, never broadcast.
+  hostLink.onEvent((event, fromHostId) => {
+    if (event.type !== 'host.record_import') return;
+    for (const inner of event.events) {
+      let parsed: WireEvent;
+      try {
+        parsed = decode(JSON.stringify(inner));
+      } catch (err) {
+        log.warn(
+          { chatId: event.chatId, err: (err as Error).message },
+          'record import: an event is not a valid frame; skipped',
+        );
+        continue;
+      }
+      chatLogStore.observe(parsed);
+    }
+    if (event.done && fromHostId !== null) {
+      hostLink.sendTo(fromHostId, '_server', {
+        type: 'host.record_import_ack',
+        chatId: event.chatId,
+      });
+    }
+  });
   app.addHook('onClose', async () => logSync.stop());
 
   // Manager failover (spec/06 § Manager failover).

@@ -1140,6 +1140,24 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     done: false,
   },
   'chat.committed': { type: 'chat.committed', chatId: 'c1', through: 41 },
+  'host.record_import': {
+    type: 'host.record_import',
+    chatId: 'c1',
+    events: [
+      {
+        type: 'chat.artifact',
+        chatId: 'c1',
+        artifactId: 'a',
+        title: 't',
+        url: '/a',
+        path: 'p',
+        updatedAt: 1,
+        seq: 4,
+      },
+    ],
+    done: true,
+  },
+  'host.record_import_ack': { type: 'host.record_import_ack', chatId: 'c1' },
   'host.reconciled': { type: 'host.reconciled', hostId: 'd1' },
   'host.manager_adopt': {
     type: 'host.manager_adopt',

@@ -150,7 +150,7 @@ describe('LogSync', () => {
     expect(sent).toEqual([]);
   });
 
-  test('takes the events a host sends back as live events, transcript only', () => {
+  test('takes the events a host sends back as live events, record events only', () => {
     sync.observe({
       type: 'patch.log_sync.batch',
       chatId: 'c1',
@@ -161,7 +161,7 @@ describe('LogSync', () => {
       ],
       done: true,
     } as WireEvent);
-    expect(injected.map((e) => e.type)).toEqual(['chat.message']);
+    expect(injected.map((e) => e.type)).toEqual(['chat.message', 'chat.tool_run_summary']);
   });
 
   test("a turn's closing summary, which the server does not keep, is not asked about after every reconnect", () => {
