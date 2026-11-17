@@ -144,6 +144,21 @@ describe('meta store', () => {
     expect(store.unreadable()).toEqual([]);
   });
 
+  it('read() serves an unchanged file from cache but sees a hand edit and a mutated result does not leak', () => {
+    const store = createMetaStore(home);
+    store.write(makeMeta({ chatId: 'c1', folder: home, name: 'first' }));
+    const a = store.read('c1')!;
+    a.name = 'mutated by a caller';
+    expect(store.read('c1')!.name).toBe('first');
+    const path = join(home, 'chats', 'c1', 'meta.json');
+    writeFileSync(
+      path,
+      JSON.stringify(makeMeta({ chatId: 'c1', folder: home, name: 'edited by hand!' })),
+    );
+    expect(store.read('c1')!.name).toBe('edited by hand!');
+    expect(store.list().map((m) => m.name)).toEqual(['edited by hand!']);
+  });
+
   it('refuses to rewind nextSeq', () => {
     const store = createMetaStore(home);
     store.write(makeMeta({ chatId: 'c1', nextSeq: 5 }));
