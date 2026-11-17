@@ -134,6 +134,8 @@ export interface InboundHostLinkOptions {
    * does not lose it. Absent keeps such messages in memory only.
    */
   heldInputs?: HeldInputStore;
+  /** A person's message to this chat is now held for its offline host (spec/12 § Chat status). */
+  onHeld?: (chatId: string) => void;
   /**
    * The host that runs the Manager and Speakers right now. The server moves it to
    * another host when the one running it has been offline a while.
@@ -576,7 +578,10 @@ export class InboundHostLink implements HostLink {
       link.buffers.set(surfaceId, buf);
     }
     buf.push(event);
-    if (event.type === 'chat.input') this.opts.heldInputs?.add(hostId, surfaceId, event);
+    if (event.type === 'chat.input') {
+      this.opts.heldInputs?.add(hostId, surfaceId, event);
+      this.opts.onHeld?.(event.chatId);
+    }
     if (buf.length > PER_SURFACE_BUFFER_CAP) {
       const dropped = buf.shift();
       this.opts.logger.warn(

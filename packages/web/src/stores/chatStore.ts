@@ -1192,6 +1192,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
       const runningAgents =
         r.runningAgents !== undefined ? r.runningAgents : (existing?.runningAgents ?? null);
+      // The status the server derived (spec/05 § Chat status); absent from an
+      // older server, which keeps what this row already had.
+      const chatStatus = r.chatStatus !== undefined ? r.chatStatus : existing?.chatStatus;
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
@@ -1243,6 +1246,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           runningAgents,
+          ...(chatStatus ? { chatStatus } : {}),
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1278,6 +1282,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           runningAgents,
+          ...(chatStatus ? { chatStatus } : {}),
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1372,6 +1377,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
       const runningAgents =
         r.runningAgents !== undefined ? r.runningAgents : (existing?.runningAgents ?? null);
+      // The status the server derived (spec/05 § Chat status); absent from an
+      // older server, which keeps what this row already had.
+      const chatStatus = r.chatStatus !== undefined ? r.chatStatus : existing?.chatStatus;
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
@@ -1411,6 +1419,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           runningAgents,
+          ...(chatStatus ? { chatStatus } : {}),
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1446,6 +1455,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           runningAgents,
+          ...(chatStatus ? { chatStatus } : {}),
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1930,6 +1940,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             runningAgents:
               event.runningAgents !== undefined ? event.runningAgents : (row.runningAgents ?? null),
             context: event.context !== undefined ? event.context : (row.context ?? null),
+            ...((event.chatStatus ?? row.chatStatus)
+              ? { chatStatus: event.chatStatus ?? row.chatStatus }
+              : {}),
           };
           // The host is speaking for this chat again. If it reports anything
           // other than `errored`, the host-link-lost notice the SERVER raised

@@ -21,9 +21,12 @@
 import { parsePersisted } from './persisted-json.js';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { Logger } from 'pino';
+import { isAllowedTransition, nextStatus, statusFromHostState } from './chat-status.js';
 import type {
   ChatErrorCode,
   ChatStateEvent,
+  ChatStatusInfo,
+  ChatStatusState,
   EffortLevel,
   PendingWake,
   TodoItem,
@@ -212,6 +215,11 @@ export interface ChatSummary {
   /** Latest host-reported branch graph, retained for server-copy takeover. */
   branches: ChatBranch[];
   activeBranchId: string | null;
+  /**
+   * The chat's status as this server derives it (spec/12 § Chat status).
+   * Optional only so a registry file written before it existed still loads.
+   */
+  chatStatus?: ChatStatusInfo;
 }
 
 export interface ChatRegistryOptions {
@@ -401,6 +409,7 @@ export class ChatRegistry {
         context: null,
         branches: [],
         activeBranchId: null,
+        chatStatus: { state: 'idle', since: this.now() },
       });
       return;
     }
@@ -540,6 +549,7 @@ export class ChatRegistry {
               : (existing?.lastError ?? null),
         branches: existing?.branches ?? [],
         activeBranchId: existing?.activeBranchId ?? null,
+        chatStatus: this.advance(event.chatId, existing?.chatStatus, statusFromHostState(event)),
       };
       this.chats.set(event.chatId, next);
       this.unconfirmed.delete(event.chatId);
@@ -619,6 +629,44 @@ export class ChatRegistry {
    * never arrive, so they can be resolved to `errored` rather than left
    * spinning forever (spec/12 — NO FALLBACK / fail loud).
    */
+  /**
+   * Move a chat's status on to what the latest fact says. A host's report of
+   * its own state is a fact and always wins; a change outside the allowed ones
+   * is logged as a fault so it is found, not hidden.
+   */
+  private advance(
+    chatId: string,
+    prev: ChatStatusInfo | undefined,
+    target: Omit<ChatStatusInfo, 'since'> & { state: ChatStatusState },
+  ): ChatStatusInfo {
+    if (prev && !isAllowedTransition(prev.state, target.state)) {
+      this.logger?.warn(
+        { chatId, from: prev.state, to: target.state },
+        'chat-registry: a status change outside the allowed transitions',
+      );
+    }
+    return nextStatus(prev ?? null, target, this.now());
+  }
+
+  /**
+   * The server holds a message for this chat's offline host (spec/12 § Chat
+   * status). Returns the `chat.state` to broadcast, or null when the chat is
+   * unknown or its status does not change for it (a chat mid-turn keeps its own).
+   */
+  markQueued(chatId: string): ChatStateEvent | null {
+    const existing = this.chats.get(chatId);
+    if (!existing) return null;
+    const from = existing.chatStatus?.state ?? 'idle';
+    if (from === 'queued_offline' || !isAllowedTransition(from, 'queued_offline')) return null;
+    const next: ChatSummary = {
+      ...existing,
+      chatStatus: nextStatus(existing.chatStatus ?? null, { state: 'queued_offline' }, this.now()),
+    };
+    this.chats.set(chatId, next);
+    this.markDirty();
+    return this.stateEventOf(next);
+  }
+
   inFlightChatIds(): string[] {
     const ids: string[] = [];
     for (const c of this.chats.values()) {
@@ -645,18 +693,31 @@ export class ChatRegistry {
     // `lastUpdated` is host-owned and clients drop any chat.state older than the
     // one they hold. Stamping the server clock here would outrank every frame
     // the host sends once it recovers, leaving the errored badge stuck for good.
+    const lastError = { code: error.code, message: error.message, at };
     const next: ChatSummary = {
       ...existing,
       activity: 'errored',
-      lastError: { code: error.code, message: error.message, at },
+      lastError,
+      chatStatus: this.advance(
+        chatId,
+        existing.chatStatus,
+        error.code === 'daemon_unavailable'
+          ? { state: 'host_offline' }
+          : { state: 'failed', reason: error.code, message: error.message },
+      ),
     };
     this.chats.set(chatId, next);
     this.markDirty();
+    return { ...this.stateEventOf(next), activity: 'errored', lastError };
+  }
+
+  /** The `chat.state` a surface needs to draw this row as the server holds it. */
+  private stateEventOf(next: ChatSummary): ChatStateEvent {
     return {
       type: 'chat.state',
-      chatId,
+      chatId: next.chatId,
       hostId: next.hostId,
-      activity: 'errored',
+      activity: next.activity,
       permissionMode: next.permissionMode,
       status: next.status,
       lastUpdated: next.lastUpdated,
@@ -675,7 +736,8 @@ export class ChatRegistry {
       snoozeRecords: next.snoozeRecords,
       runningSince: next.runningSince,
       hidden: next.hidden,
-      lastError: { code: error.code, message: error.message, at },
+      ...(next.lastError ? { lastError: next.lastError as ChatStateEvent['lastError'] } : {}),
+      ...(next.chatStatus ? { chatStatus: next.chatStatus } : {}),
     };
   }
 

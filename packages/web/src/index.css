@@ -3024,6 +3024,10 @@ button.nav-row {
    strongest "happening right now" signal in the list, and giving it to a quiet
    background job that needs no attention until it reports back would make it
    compete with `working` for the eye instead of sitting calmly below it. */
+.badge.badge-paused,
+.badge.badge-away,
+.badge.badge-interrupted,
+.badge.badge-signin,
 .badge.badge-background,
 .badge.badge-agents {
   background: none;
@@ -3036,6 +3040,14 @@ button.nav-row {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+/* The server's held and cut-off states (spec/14 § Status badges): `paused` and
+   `host away` grey like `background`, `interrupted` orange, `sign-in` indigo. */
+.badge.badge-interrupted {
+  color: var(--waiting);
+}
+.badge.badge-signin {
+  color: var(--permission);
 }
 /* A self-wake armed (`patch_wake_me`): the agent has nothing more to say right
    now and will check back on its own. Same grey, static treatment as

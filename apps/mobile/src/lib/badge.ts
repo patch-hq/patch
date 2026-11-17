@@ -18,6 +18,12 @@ export function badgeColor(b: DisplayBadge, colors: ThemeColors): string {
       return colors.waiting;
     case 'errored':
       return colors.red;
+    case 'interrupted':
+      return colors.waiting;
+    case 'signin':
+      return colors.waiting;
+    case 'paused':
+    case 'away':
     case 'agents':
     case 'background':
     case 'monitoring':

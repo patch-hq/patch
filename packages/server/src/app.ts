@@ -459,6 +459,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Forward-declared: the link routes a chat-scoped frame to the host that
   // chat lives on, and the mirror that knows is built just below.
   let chatRegistryRef: ChatRegistry | undefined;
+  let wsHubRef: WsHub | undefined;
   const hostLink: HostLink =
     opts.hostLink ??
     new InboundHostLink({
@@ -470,6 +471,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         logger: log.child({ component: 'held-input' }),
       }),
       resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.hostId ?? null,
+      onHeld: (chatId: string) => {
+        const state = chatRegistryRef?.markQueued(chatId);
+        if (state) wsHubRef?.broadcastChatState(state);
+      },
       managerHostId: () => registry.managerHostId(),
       registeredHostIds: () => registry.registeredHostIds(),
       hostName: (hostId: string) => registry.hostName(hostId),
@@ -896,7 +901,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     hostHealth.observe({ type: status === 'online' ? 'host.online' : 'host.offline', hostId });
   });
 
-  const wsHub = new WsHub({
+  const wsHub = (wsHubRef = new WsHub({
     hostOfflineReason: (hostId) => hostHealth.offlineReason(hostId),
     onHostSleep: (hostId, asleep) => hostHealth.noteAsleep(hostId, asleep),
     logger: log.child({ component: 'ws-hub' }),
@@ -950,7 +955,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       : {}),
     ...(opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: opts.helloTimeoutMs } : {}),
     onCallResponse: (surfaceId, event) => callOrchestrator.handleResponse(surfaceId, event),
-  });
+  }));
   broadcastSettings = (event) => void wsHub.sendToAll(event);
   broadcastNotifications = (unread) =>
     void wsHub.sendToAll({ type: 'notifications.changed', unread });

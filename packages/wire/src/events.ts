@@ -1335,6 +1335,43 @@ export type ReminderEvery = z.infer<typeof ReminderEvery>;
 export const AccountStrategy = z.enum(['priority', 'round-robin', 'soonest-reset', 'least-used']);
 export type AccountStrategy = z.infer<typeof AccountStrategy>;
 
+/** The statuses a chat can have (spec/12 § Chat status). */
+export const CHAT_STATUS_STATES = [
+  'idle',
+  'running',
+  'waiting_for_user',
+  'queued_offline',
+  'host_restarting',
+  'host_offline',
+  'interrupted',
+  'paused',
+  'waiting_for_sign_in',
+  'failed',
+] as const;
+export type ChatStatusState = (typeof CHAT_STATUS_STATES)[number];
+
+/**
+ * A chat's status as the server derives it (spec/12 § Chat status). `state` is
+ * open on the wire: a reader shows a value it does not know as an unknown
+ * status of its own, never as a neighbour.
+ */
+export const ChatStatusInfo = z
+  .object({
+    state: z.string().min(1),
+    /** ms-epoch the chat entered this state. */
+    since: z.number().int().nonnegative(),
+    /** Why: the limit's scope, the failure's code, `session_gone`. */
+    reason: z.string().min(1).optional(),
+    /** The provider's or host's own words, for Details. */
+    message: z.string().optional(),
+    /** ms-epoch a pause lifts, when stated. */
+    resetsAt: z.number().int().optional(),
+    /** The account a pause or sign-in is about. */
+    accountId: z.string().min(1).optional(),
+  })
+  .strict();
+export type ChatStatusInfo = z.infer<typeof ChatStatusInfo>;
+
 export const ChatStateEvent = z
   .object({
     type: z.literal('chat.state'),
@@ -1689,6 +1726,12 @@ export const ChatStateEvent = z
      * 'errored'; surfaces show this in the chat row. Cleared (null) when
      * the chat returns to 'idle' or 'running'.
      */
+    /**
+     * The chat's status, derived by the server alone and added to every
+     * `chat.state` it sends surfaces (spec/12 § Chat status). A host never
+     * sends it. Absent from an older server.
+     */
+    chatStatus: ChatStatusInfo.optional(),
     lastError: z
       .object({
         code: ChatErrorCode,

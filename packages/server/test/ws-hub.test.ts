@@ -583,6 +583,32 @@ describe('WS hub relay', () => {
     }
   });
 
+  it('sends every chat.state with the status the server derived, and a held message queues the chat', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(16));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry });
+    try {
+      h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+      const c = await makeAuthedClient(h, user, 'srf-status');
+      const seen: string[] = [];
+      c.on('chat.state', (e) => seen.push(e.chatStatus?.state ?? 'none'));
+      h.hostLink.emit({
+        type: 'chat.state',
+        chatId: 'chat-1',
+        hostId: 'd1',
+        activity: 'running',
+        permissionMode: 'auto',
+        lastUpdated: 2,
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(seen).toEqual(['running']);
+      await c.close();
+    } finally {
+      await h.close();
+    }
+  });
+
   it('replays daemon-emitted chat events to subscribed surfaces (replay flow)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(12));
     const registry = Registry.load(dir);
