@@ -13,6 +13,30 @@
 
 import type { PermissionMode } from './events.js';
 
+/**
+ * What a provider can do natively through its official interface (spec/02
+ * § Provider adapters). A feature whose capability is not declared is absent for
+ * the provider's chats; nothing outside the adapters branches on a provider name.
+ */
+export interface ProviderCapabilities {
+  /** Continue a conversation from the provider's own saved session. */
+  readonly resume: boolean;
+  /** Replace a user message and re-run from it (edit forks at that message). */
+  readonly editAtMessage: boolean;
+  /** Rewind the conversation to an earlier message in place. */
+  readonly rewind: boolean;
+  /** Branch a new session at a turn boundary (also what side threads use). */
+  readonly branchAtTurn: boolean;
+  /** Switch off the provider's native tools that Patch replaces (subagents, cron). */
+  readonly disableNativeTools: boolean;
+  /** Interrupt a running turn. */
+  readonly interrupt: boolean;
+  /** Add input to a turn that is already running. */
+  readonly steer: boolean;
+}
+
+export type ProviderCapability = keyof ProviderCapabilities;
+
 export interface ProviderDescriptor {
   /** Stable id; persisted in history logs, so never renamed. */
   readonly id: string;
@@ -45,6 +69,8 @@ export interface ProviderDescriptor {
    * `/goal`, which Patch handles before the provider sees them.
    */
   readonly builtinCommands: readonly string[];
+  /** What the provider supports natively; features follow this (spec/02 § Provider adapters). */
+  readonly capabilities: ProviderCapabilities;
 }
 
 // `as const satisfies` keeps the ids as literals so HarnessId is derived from
@@ -93,6 +119,15 @@ export const PROVIDERS = [
       'usage',
       'vim',
     ],
+    capabilities: {
+      resume: true,
+      editAtMessage: true,
+      rewind: true,
+      branchAtTurn: true,
+      disableNativeTools: true,
+      interrupt: true,
+      steer: false,
+    },
   },
   {
     id: 'codex',
@@ -122,6 +157,15 @@ export const PROVIDERS = [
       'status',
       'undo',
     ],
+    capabilities: {
+      resume: true,
+      editAtMessage: true,
+      rewind: false,
+      branchAtTurn: true,
+      disableNativeTools: false,
+      interrupt: true,
+      steer: true,
+    },
   },
   {
     id: 'local',
@@ -136,6 +180,15 @@ export const PROVIDERS = [
     supportsEffort: false,
     loginRequiredCode: 'local_endpoint_missing',
     builtinCommands: [],
+    capabilities: {
+      resume: true,
+      editAtMessage: false,
+      rewind: false,
+      branchAtTurn: false,
+      disableNativeTools: false,
+      interrupt: true,
+      steer: false,
+    },
   },
 ] as const satisfies readonly ProviderDescriptor[];
 
@@ -195,6 +248,19 @@ export function providerByName(name: string): ProviderId {
 /** The backend id a model's chats sign in with. */
 export function backendIdForModel(model: string | null | undefined): ProviderBackendId {
   return providerDescriptor(providerForModel(model)).backendId as ProviderBackendId;
+}
+
+/** The capabilities the model's provider declares. */
+export function providerCapabilities(model: string | null | undefined): ProviderCapabilities {
+  return providerDescriptor(providerForModel(model)).capabilities;
+}
+
+/** Does the model's provider declare this capability? */
+export function modelHasCapability(
+  model: string | null | undefined,
+  capability: ProviderCapability,
+): boolean {
+  return providerCapabilities(model)[capability];
 }
 
 /** Does the model's provider honour the reasoning-effort control? */

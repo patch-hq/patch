@@ -21,6 +21,7 @@ vi.mock('../api/rest.js', () => ({
   api: {
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getChatHistory: vi.fn().mockResolvedValue({ events: [] }),
+    models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
     uploadAttachment: vi.fn(),
     detachAttachments: vi.fn().mockResolvedValue({ ok: true }),
   },
@@ -103,6 +104,18 @@ describe('editing a user turn forks a track', () => {
     ]);
     renderChat('c-fork');
     expect(screen.getAllByTestId('msg-edit')).toHaveLength(1);
+  });
+
+  it('offers no edit affordance on a provider that does not declare editAtMessage', () => {
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    useChatStore.setState((s) => ({
+      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'local/qwen' } },
+    }));
+    renderChat('c-fork');
+    expect(screen.queryAllByTestId('msg-edit')).toHaveLength(0);
   });
 
   const WS = () =>

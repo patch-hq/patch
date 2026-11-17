@@ -329,6 +329,7 @@ export const ChatErrorCode = z.enum([
   // context window, once again after one tighter re-plan. Same recovery actions.
   'handoff_overflow',
   'fork_empty_message',
+  'capability_unsupported',
 ]);
 export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
 
