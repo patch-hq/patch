@@ -2132,15 +2132,18 @@ a.ch-row:hover {
    order is the filled segment. Same pill outline as the view trigger beside it. */
 .sidebar-sort-seg {
   display: flex;
-  /* Tabs wrap rather than clip when the sidebar is narrow ("Name" read "Nar"). */
-  flex-wrap: wrap;
-  flex: 1 1 0;
+  /* Each group takes its own row and never wraps mid-group; the buttons share
+     the row equally ("Manual" used to drop under the others at default width). */
+  flex: 1 1 100%;
   min-width: 0;
   padding: 0;
   border: none;
 }
 .sidebar-sort-seg button {
-  flex: 1 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 3px 4px;
   color: var(--ink-3);
   font-size: var(--text-min);

@@ -136,4 +136,13 @@ describe('Sidebar selection tracks the page you are actually on', () => {
     expect(pane.tabs.map((t) => t.descriptor)).toContainEqual({ kind: 'page', page: 'host-files' });
     expect(screen.getByTestId('nav-files')).toHaveClass('active');
   });
+
+  it('lights only the focused tab even when the URL is still /pads', () => {
+    useChatStore.getState().hydrate([rowFixture({ chatId: 'r1' })]);
+    renderAt('/pads');
+    expect(screen.getByTestId('nav-pads')).toHaveClass('active');
+    fireEvent.click(screen.getByTestId('nav-files'));
+    expect(screen.getByTestId('nav-files')).toHaveClass('active');
+    expect(screen.getByTestId('nav-pads')).not.toHaveClass('active');
+  });
 });
