@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
+import WebSocket from 'ws';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,4 +32,19 @@ describe('server shutdown', () => {
     await app.close();
     expect(Date.now() - started).toBeLessThan(3_000);
   });
+
+  it('cuts a socket that never answers the going-away notice', async () => {
+    const app = await build({ registry: Registry.load(dir), hostLink: new InProcessHostLink() });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const { port } = app.server.address() as AddressInfo;
+    const client = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    client.on('error', () => {});
+    await new Promise<void>((resolve) => client.once('open', () => resolve()));
+    // A phone asleep: it never reads the close frame, so it never answers it.
+    (client as unknown as { _socket: { pause(): void } })._socket.pause();
+    const started = Date.now();
+    await app.close();
+    expect(Date.now() - started).toBeLessThan(6_000);
+    client.terminate();
+  }, 40_000);
 });
