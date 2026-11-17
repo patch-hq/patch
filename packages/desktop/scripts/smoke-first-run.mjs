@@ -100,6 +100,8 @@ await shot(setup, '1-first-run');
 
 if (firstRun) {
   await setup.getByTestId('choose-local').click();
+  // Choosing it opens the name step; Continue keeps the suggested name.
+  await setup.getByTestId('start').click();
   // The shell replaces the setup window with Patch itself, served by the
   // server it just started on loopback.
   const main = await until('Patch served by this computer', 240_000, async () => {

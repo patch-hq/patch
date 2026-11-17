@@ -400,6 +400,7 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   const app = await launch(computer);
   const setup = await windowAt(app, /setup\.html/);
   await setup.getByTestId('choose-local').click();
+  await setup.getByTestId('start').click();
 
   const welcome = await windowAt(app, /\/app\/welcome\?machine=local/, 10 * 60_000);
   await expect(welcome.getByTestId('welcome-providers')).toBeVisible();
