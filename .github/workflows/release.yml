@@ -375,6 +375,12 @@ jobs:
           ls "$APP/Contents/Resources/host/"patch-host-*-darwin-arm64.tar.gz
           PATCH_REAL_DESKTOP=1 PATCH_TEST_DESKTOP_BINARY="$PWD/$APP/Contents/MacOS/Patch" \
             node --test packages/desktop/scripts/single-instance.test.cjs
+      - name: Size budget
+        if: steps.scope.outputs.build == 'true'
+        # Installed ~950 MB once (the host carried twice, every platform's native
+        # modules). The budget is a ceiling above the measured size; lower it when
+        # the app shrinks, never raise it to get a release through.
+        run: node scripts/check-app-size.mjs packages/desktop/release/mac-arm64/Patch.app 720
       - name: Notarise the disk image
         if: steps.scope.outputs.build == 'true'
         env:
@@ -553,6 +559,9 @@ jobs:
           # unprivileged users; neither applies to what is being checked here.
           APPIMAGE_EXTRACT_AND_RUN=1 PATCH_SMOKE_HOME="$RUNNER_TEMP/smoke-home" \
             xvfb-run -a node packages/desktop/scripts/smoke-first-run.mjs "$IMAGE" --no-sandbox
+      - name: Size budget
+        if: steps.scope.outputs.build == 'true'
+        run: node scripts/check-app-size.mjs packages/desktop/release/linux-unpacked 720
       - name: Collect the Linux desktop release
         if: steps.scope.outputs.build == 'true'
         run: |

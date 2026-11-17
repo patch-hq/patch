@@ -1,10 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdirSync, mkdtempSync, readdirSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { readFileSync } = require('node:fs');
-const { stage, wanted } = require('./stage-resources.cjs');
+const { stage, wanted, pruneNativeModules } = require('./stage-resources.cjs');
 
 function repo(files) {
   const root = mkdtempSync(path.join(tmpdir(), 'patch-stage-'));
@@ -97,4 +97,44 @@ test('wanted() keeps non-tarballs and darwin-arm64 tarballs', () => {
   assert.equal(wanted('x-linux-x64.tar.gz'), false);
   assert.equal(wanted('x-linux-x64.tar.gz', 'linux-x64'), true);
   assert.equal(wanted('x-linux-arm64.tar.gz', 'linux-x64'), false);
+});
+
+test('does not carry the folder the host tarball was made from', () => {
+  const r = repo(['host-latest.json', 'install.sh', 'patch-host-1-darwin-arm64.tar.gz']);
+  mkdirSync(path.join(r.repoRoot, 'dist', 'host', 'patch-host-1-darwin-arm64', 'node_modules'), { recursive: true });
+  const staged = stage({ ...r, buildServer: fakeRelease, target: 'darwin-arm64' });
+  assert.deepEqual(readdirSync(path.join(staged, 'host')).sort(), [
+    'host-latest.json',
+    'install.sh',
+    'patch-host-1-darwin-arm64.tar.gz',
+  ]);
+});
+
+test('prunes sharp builds for other platforms, with their links, and keeps this one', () => {
+  const server = mkdtempSync(path.join(tmpdir(), 'patch-prune-'));
+  const pnpm = path.join(server, 'node_modules', '.pnpm');
+  const names = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linuxmusl-arm64'];
+  mkdirSync(path.join(pnpm, 'node_modules', '@img'), { recursive: true });
+  mkdirSync(path.join(pnpm, 'sharp@1', 'node_modules', '@img'), { recursive: true });
+  for (const n of names) {
+    for (const pkg of ['sharp', 'sharp-libvips']) {
+      const real = path.join(pnpm, `@img+${pkg}-${n}@1`);
+      mkdirSync(real, { recursive: true });
+      writeFileSync(path.join(real, 'x.node'), 'x');
+      symlinkSync(real, path.join(pnpm, 'sharp@1', 'node_modules', '@img', `${pkg}-${n}`));
+    }
+  }
+  mkdirSync(path.join(pnpm, '@img+sharp-wasm32@1'));
+  const removed = pruneNativeModules(server, 'darwin-arm64');
+  assert.equal(removed, 12);
+  assert.deepEqual(readdirSync(pnpm).filter((n) => n.startsWith('@img')).sort(), [
+    '@img+sharp-darwin-arm64@1',
+    '@img+sharp-libvips-darwin-arm64@1',
+    '@img+sharp-wasm32@1',
+  ]);
+  assert.deepEqual(readdirSync(path.join(pnpm, 'sharp@1', 'node_modules', '@img')).sort(), [
+    'sharp-darwin-arm64',
+    'sharp-libvips-darwin-arm64',
+  ]);
+  assert.equal(existsSync(path.join(pnpm, '@img+sharp-darwin-arm64@1', 'x.node')), true);
 });
