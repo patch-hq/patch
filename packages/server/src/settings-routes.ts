@@ -136,8 +136,11 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     handle(AddBody, async (req, body) => {
       const backend = backendOf(req);
       if (backend === 'claude-code') {
-        if (!body.token) throw new SettingsError(400, 'invalid_input', 'A token is required');
-        await shared.addClaude(body.token, body.label);
+        const credential = body.apiKey ?? body.token;
+        if (!credential) {
+          throw new SettingsError(400, 'invalid_input', 'A token or an API key is required');
+        }
+        await shared.addClaude(credential, body.label);
       } else {
         if (!body.apiKey) {
           throw new SettingsError(

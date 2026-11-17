@@ -41,7 +41,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir, platform } from 'node:os';
 import { join, dirname } from 'node:path';
 import { ClaudeOAuthMissingError, ClaudeOAuthMalformedError } from './errors.js';
-import { ORGANIZATION_HEADER } from './claude-usage.js';
+import { ORGANIZATION_HEADER, anthropicAuthHeaders } from './claude-usage.js';
 
 /**
  * Which physical store the credential came from. Needed so a refresh writes the
@@ -914,6 +914,7 @@ export async function refreshClaudeOAuth(
 export const ANTHROPIC_API_VERSION = '2023-06-01';
 /** Beta header that lets an OAuth bearer token (not an API key) authenticate. */
 export const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
+
 /** The cheapest authenticated endpoint: auth-only, no inference, no model id. */
 export const ANTHROPIC_VALIDATE_URL = 'https://api.anthropic.com/v1/models?limit=1';
 
@@ -965,9 +966,8 @@ export async function validateClaudeOAuthToken(
   try {
     res = await fetchImpl(url, {
       headers: {
-        authorization: `Bearer ${accessToken}`,
+        ...anthropicAuthHeaders(accessToken),
         'anthropic-version': ANTHROPIC_API_VERSION,
-        'anthropic-beta': ANTHROPIC_OAUTH_BETA,
       },
     });
   } catch (err) {

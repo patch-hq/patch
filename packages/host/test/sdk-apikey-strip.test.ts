@@ -65,4 +65,26 @@ describe('H1-6: host strips ANTHROPIC_API_KEY before the SDK query', () => {
     // process.env itself is untouched — the strip is on the copy only.
     expect(process.env.ANTHROPIC_API_KEY).toBe('sk-ant-host-inherited-should-never-reach-sdk');
   });
+
+  it('an Anthropic API key account runs on that key, with no OAuth token', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'host-oauth-should-not-reach-sdk';
+    try {
+      const { createRealSdkBackend } = await import('../src/sdkBackend.js');
+      const stream = createRealSdkBackend().run({
+        prompt: 'hello',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'sk-ant-api03-account-key',
+      });
+      for await (const _ of stream) void _;
+      const env = queryCalls[queryCalls.length - 1]!.options.env as Record<
+        string,
+        string | undefined
+      >;
+      expect(env.ANTHROPIC_API_KEY).toBe('sk-ant-api03-account-key');
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    } finally {
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+  });
 });

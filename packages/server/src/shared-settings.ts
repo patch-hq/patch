@@ -50,6 +50,7 @@ import {
   type SharedSecretsSummary,
   type WireEvent,
   accountsKeyForBackend,
+  isAnthropicApiKey,
   type ProviderBackendId,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
@@ -385,6 +386,9 @@ export class SharedSettingsService {
         label: a.label,
         connected: a.credential !== null,
         ...(a.credential?.email ? { email: a.credential.email } : {}),
+        ...(a.credential && isAnthropicApiKey(a.credential.accessToken)
+          ? { kind: 'apiKey' as const }
+          : {}),
         ...(a.credential?.organizationId ? { organizationId: a.credential.organizationId } : {}),
       })),
       codex: this.secrets.codex.map((a) => ({
@@ -858,7 +862,12 @@ export class SharedSettingsService {
     }
     const account: SharedClaudeAccount = {
       id: randomUUID(),
-      label: label?.trim() || credential.email || `Claude ${this.secrets.claude.length + 1}`,
+      label:
+        label?.trim() ||
+        credential.email ||
+        (isAnthropicApiKey(credential.accessToken)
+          ? 'Claude API (paid)'
+          : `Claude ${this.secrets.claude.length + 1}`),
       credential: { ...credential, ...(organizationId ? { organizationId } : {}) },
     };
     this.secrets.claude.push(account);

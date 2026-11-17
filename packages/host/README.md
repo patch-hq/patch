@@ -319,8 +319,9 @@ The host never writes the Claude Code credential. It loads
 `$CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → the macOS Keychain
 (`Claude Code-credentials`), in that order. (It is NOT in `~/.claude.json`, which
 holds only account metadata.) Under `SDK_BACKEND=real` the host passes the
-resolved token to the SDK as `CLAUDE_CODE_OAUTH_TOKEN` and strips
-`ANTHROPIC_API_KEY` — never an API key. If no credential resolves, the host
+resolved token to the SDK as `CLAUDE_CODE_OAUTH_TOKEN`; an account holding an
+Anthropic API key (`sk-ant-api…`) passes it as `ANTHROPIC_API_KEY` instead. The
+host's own `ANTHROPIC_API_KEY` never reaches the SDK. If no credential resolves, the host
 still boots `/healthz` + the WS link, but every `query()` is refused and the
 host emits `host.unauthenticated` upstream so a surface can prompt the user
 to run `claude login` on the host. (`SDK_BACKEND=mock` — unit-test / normal

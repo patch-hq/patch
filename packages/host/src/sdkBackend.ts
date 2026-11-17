@@ -13,6 +13,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
+  isAnthropicApiKey,
   taskNotificationSummary,
   type EffortLevel,
   type MessageCompaction,
@@ -1069,8 +1070,13 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   mcpServers: Record<string, StdioMcpServerConfig> | undefined;
 } {
   const env: Record<string, string | undefined> = { ...process.env };
+  // The account's own credential decides: an Anthropic API key account runs on
+  // that key, a sign-in account on its token. Whatever the host's own
+  // environment holds never reaches the SDK (spec/10 § Backend credentials).
   delete env['ANTHROPIC_API_KEY'];
-  env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
+  delete env['CLAUDE_CODE_OAUTH_TOKEN'];
+  if (isAnthropicApiKey(opts.oauthAccessToken)) env['ANTHROPIC_API_KEY'] = opts.oauthAccessToken;
+  else env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
   if (opts.claudeConfigDir !== undefined) env['CLAUDE_CONFIG_DIR'] = opts.claudeConfigDir;
   // An unattended agent must not reach the 1Password desktop app: with the
   // integration on, every `op` call raises a macOS "would like to access data

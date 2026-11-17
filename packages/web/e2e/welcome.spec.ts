@@ -73,9 +73,8 @@ test('this computer: every step, each choice written where Settings writes it', 
   // and the model step joins once an AI is connected.
   await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
   await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(1);
-  await expect(page.getByTestId('welcome-claude-plans')).toHaveText(
-    'Works with a Claude Pro, Max, Team or Enterprise plan.',
-  );
+  await expect(page.getByTestId('welcome-claude-plans')).toHaveCount(0);
+  await expect(page.getByTestId('claude-add-api-key')).toBeVisible();
   await shot(page, '2-providers');
   const opened = page.context().waitForEvent('page');
   await page.getByTestId('claude-signin-start').click();

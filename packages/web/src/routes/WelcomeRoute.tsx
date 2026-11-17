@@ -23,6 +23,7 @@ import {
 } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ClaudeSignIn } from '../components/ClaudeSignIn.js';
+import { AddClaudeApiKey } from './settings/SharedAccounts.js';
 import { ErrorDetail } from '../components/ErrorDetail.js';
 import { PERMISSION_MODES } from '../components/Composer.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
@@ -217,10 +218,10 @@ export function ProviderCards(): JSX.Element {
         </div>
         {claude.length === 0 ? (
           <>
-            <p className="welcome-note" data-testid="welcome-claude-plans">
-              Works with a Claude Pro, Max, Team or Enterprise plan.
-            </p>
-            <ClaudeSignIn primary />
+            <div className="set-inline">
+              <ClaudeSignIn primary />
+              <AddClaudeApiKey />
+            </div>
           </>
         ) : null}
         {installing ? (
@@ -250,9 +251,6 @@ export function ProviderCards(): JSX.Element {
         </div>
         {chatgpt.length === 0 ? (
           <>
-            <p className="welcome-note" data-testid="welcome-chatgpt-plans">
-              Works with a ChatGPT plan or an OpenAI API key.
-            </p>
             <AddChatGPTAccount />
           </>
         ) : null}

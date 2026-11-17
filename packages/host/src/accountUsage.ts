@@ -24,7 +24,7 @@ import {
   type PoolForecast,
   type UsageSample,
 } from './usageForecast.js';
-import { rateLimitWindowsBlocked } from '@patch/wire';
+import { isAnthropicApiKey, rateLimitWindowsBlocked } from '@patch/wire';
 import {
   fetchClaudeUsage,
   type ClaudeUsageReading,
@@ -314,6 +314,8 @@ export class AccountUsageTracker {
       return;
     }
     if (token === undefined) return;
+    // An API key has no subscription windows, and a probe would be a paid call.
+    if (isAnthropicApiKey(token)) return;
 
     const result = await (this.opts.probe ?? fetchClaudeUsage)(token);
     if (result.kind !== 'ok') {

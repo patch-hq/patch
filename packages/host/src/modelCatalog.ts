@@ -13,7 +13,7 @@
 // returned — serving that past its TTL when a refresh fails is a cache, not a
 // fallback, and it is flagged `stale` so the surface can say so.
 
-import { ANTHROPIC_API_VERSION, ANTHROPIC_OAUTH_BETA } from '@patch/auth';
+import { ANTHROPIC_API_VERSION, anthropicAuthHeaders } from '@patch/auth';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import type { ModelLimits } from './handoffRun.js';
 
@@ -25,7 +25,6 @@ const MODELS_URL = 'https://api.anthropic.com/v1/models?limit=100';
 // definition of "how patch authenticates to Anthropic with an OAuth token".
 const ANTHROPIC_VERSION = ANTHROPIC_API_VERSION;
 // OAuth (not x-api-key) access to the Messages/Models API requires this beta.
-const OAUTH_BETA = ANTHROPIC_OAUTH_BETA;
 
 export interface ModelOption {
   /** SDK `options.model` value. */
@@ -133,9 +132,8 @@ export class ModelCatalog {
     const res = await this.fetchImpl(MODELS_URL, {
       method: 'GET',
       headers: {
-        authorization: `Bearer ${accessToken}`,
+        ...anthropicAuthHeaders(accessToken),
         'anthropic-version': ANTHROPIC_VERSION,
-        'anthropic-beta': OAUTH_BETA,
       },
     });
     if (!res.ok) {
