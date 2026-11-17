@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { LogRecord, type LoggedEvent, type WireEvent } from '@patch/wire';
 import { ChatLog, BLOB_INLINE_LIMIT_BYTES, type ChatLogFs } from '../src/chatLog.js';
-import { Daemon } from '../src/chatRunner.js';
+import { Daemon, CONTINUE_MESSAGE } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type MockSdkBackend } from '../src/sdkBackend.js';
 
@@ -559,7 +559,7 @@ describe('Host → history log', () => {
     expect([...turnIds][0]).toBeTruthy();
   });
 
-  it('remembers accepted localIds across a restart; the restart re-send still runs under its original id', async () => {
+  it('remembers accepted localIds across a restart; Continue after a cut-off turn runs under a new id', async () => {
     const home = tmp('chatlog-ids-');
     const folder = tmp('chatlog-ids-folder-');
     {
@@ -611,18 +611,21 @@ describe('Host → history log', () => {
       sdk.enqueue([{ type: 'assistant', content: 'two again', sessionId: 'S' }]);
       daemon.hydrate();
       await new Promise((r) => setTimeout(r, 30));
-      // The restart resend does not carry the original turn's own text (that's
-      // already in the resumed session's history) — just the reminder + a short
-      // 'Carry on' nudge. Confirms the resend actually reached the SDK.
-      expect(sdk.lastOptions()?.prompt).toContain('Carry on');
+      // The cut-off turn is not re-sent (spec/12 § Continue); Continue is an
+      // ordinary visible message under a new id.
+      expect(sdk.lastOptions()).toBeUndefined();
+      await daemon.continueChat('ids');
+      await new Promise((r) => setTimeout(r, 30));
+      expect(sdk.lastOptions()?.prompt).toBe(CONTINUE_MESSAGE);
       daemon.shutdown();
     }
     const starts = lines(home, 'ids').filter((r) => r.rec.k === 'turn.start');
     expect(starts.map((r) => (r.rec as { localId?: string }).localId)).toEqual([
       'L-first',
       'L-second',
-      'L-second',
+      expect.any(String),
     ]);
+    expect((starts[2]!.rec as { localId?: string }).localId).not.toBe('L-second');
   });
 
   it('fails the turn loudly with history_write_failed when an append fails — and does not show what it could not record', async () => {

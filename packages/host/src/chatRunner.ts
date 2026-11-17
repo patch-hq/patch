@@ -153,8 +153,6 @@ import {
   persistPendingDecision,
   clearPendingDecision,
   clearAllPendingDecisions,
-  readPendingDecisions,
-  type PendingDecisionRecord,
 } from './pendingDecisions.js';
 import {
   buildGoalSystemReminder,
@@ -1060,24 +1058,13 @@ const TITLE_GEN_ATTEMPTS = 5;
 const TITLE_GEN_RETRY_DELAY_MS = 3_000;
 
 /**
- * Prefixed onto a turn that a host restart cut in half, when `hydrate` puts it
- * back (see `resumeInterruptedTurns`). A leading `<system-reminder>` block is
- * stripped by `persistedUserContent`, so this reaches the agent as context and
- * never appears in the chat as text the user appears to have typed — what DOES
- * appear is just `'Carry on'`, not the original turn's own text (see
- * `resumeInterruptedTurns`).
- *
- * It matters that this says "continue" rather than nothing at all: the turn is
- * re-sent against the same Claude session, so the agent can see whatever it had
- * already done before it was killed, and re-running that work from scratch is
- * both wasteful and — for anything it already wrote — wrong.
+ * What Continue sends when a turn was cut off (spec/12 § Continue). An ordinary
+ * message in the chat, visible to the user and the agent alike: nothing is added
+ * to the turn unseen, and the cut-off turn's own text is not re-sent. A provider
+ * whose adapter declares a resume of its own would continue without a message;
+ * none does yet, so every chat takes this one.
  */
-export const INTERRUPTED_TURN_REMINDER =
-  '<system-reminder>\n' +
-  'This turn was already running when the host restarted, so it was cut off partway ' +
-  'through. Check what you had already done before you continue — carry on from there ' +
-  'rather than starting the whole request again.\n' +
-  '</system-reminder>\n\n';
+export const CONTINUE_MESSAGE = 'Carry on from where you were cut off.';
 
 /**
  * Folded into a turn the reader moved to another model with Retry. The turn did
@@ -1165,14 +1152,6 @@ export function interruptedTurnResend(reminder: string, turnMessage: string): st
 }
 
 /**
- * One pending decision (pendingDecisions.ts), described for a human/agent to
- * read rather than as raw args — `AskUserQuestion`'s actual question text when
- * we can find it, else the permission's own description, else the bare tool
- * call. Best-effort: args are opaque `Record<string, unknown>` from the SDK,
- * so a shape this doesn't recognise falls back to a truncated JSON dump rather
- * than throwing.
- */
-/**
  * Folded into a voice hand-off's turn: the request was spoken to the call's fast voice
  * and relayed here, and the answer is read aloud to the person on the call.
  */
@@ -1188,45 +1167,6 @@ export const VOICE_HANDOFF_REMINDER =
 /** A spoken message's `[voice • …]` / `[voice hand-off • …]` tag, removed. */
 export function stripVoiceTag(text: string): string {
   return text.replace(/^\[voice(?: hand-off)?(?: •[^\]]*)?\]\s*/, '');
-}
-
-function describePendingDecision(rec: PendingDecisionRecord): string {
-  if (rec.tool === ASK_USER_QUESTION && Array.isArray(rec.args['questions'])) {
-    const texts = (rec.args['questions'] as unknown[])
-      .map((q) =>
-        q && typeof q === 'object' && typeof (q as { question?: unknown }).question === 'string'
-          ? (q as { question: string }).question
-          : null,
-      )
-      .filter((q): q is string => q !== null);
-    if (texts.length > 0) return `asked: ${texts.join(' / ')}`;
-  }
-  if (rec.description) return `${rec.tool}: ${rec.description}`;
-  const argsStr = JSON.stringify(rec.args);
-  return `${rec.tool}(${argsStr.length > 200 ? argsStr.slice(0, 200) + '…' : argsStr})`;
-}
-
-/**
- * Like `INTERRUPTED_TURN_REMINDER`, but for a turn that was also blocked on a
- * permission/question when the restart hit (pendingDecisions.ts). The plain
- * reminder alone leaves the resumed agent with no memory a question was ever
- * asked, so it either silently re-derives from scratch or — worse — assumes
- * something was approved that never was. `armAnswerExpiry`'s timeout already
- * denies a request left unanswered too long; this covers the much larger
- * window before that timeout fires, or one disabled entirely (question
- * expiry can be turned off host-wide).
- */
-function interruptedTurnReminderWithPendingDecisions(pending: PendingDecisionRecord[]): string {
-  const asks = pending.map(describePendingDecision).join('; ');
-  return (
-    '<system-reminder>\n' +
-    'This turn was already running when the host restarted, so it was cut off partway ' +
-    `through. Before the restart it had ${asks}, and was waiting for an answer — no answer was ` +
-    'recorded, because a restart discards it even if the user answered right before the crash. ' +
-    'Check what you had already done, then decide whether to ask again or proceed without it. ' +
-    'Do NOT assume it was approved.\n' +
-    '</system-reminder>\n\n'
-  );
 }
 
 /** One appended attachment line: `- <kind>: <abs path> (<display name>)`. */
@@ -2411,6 +2351,8 @@ export class Daemon {
   private readonly hydratedFromDisk = new Set<string>();
   /** Chats whose log held a turn the previous process never ended (closed `interrupted` at hydrate). */
   private readonly interruptedAtHydrate = new Set<string>();
+  /** Chats whose last turn was cut off and not yet continued (`markInterrupted`). */
+  private readonly interruptedChats = new Set<string>();
   /**
    * Chats being moved to another host (spec/04 § Moving a chat to another
    * host): exported, and not yet retired or released. A new turn is refused
@@ -3483,6 +3425,13 @@ export class Daemon {
     lastTurnLocalIdByChatId: Map<string, string | undefined>,
   ): void {
     const owned = metas.filter((m) => this.chatState.has(m.chatId));
+    // A chat cut off before an earlier restart is still interrupted until its
+    // user continues it.
+    for (const m of owned) {
+      if (m.interrupted !== true) continue;
+      this.interruptedChats.add(m.chatId);
+      this.emitState(m.chatId);
+    }
     this.hideArchivedWithLiveWork(owned);
     // Interrupted turns first: re-sending (or reattaching) one marks the chat
     // busy synchronously, so an overdue wake loaded after it is held until that
@@ -3528,12 +3477,64 @@ export class Daemon {
     for (const m of metas) {
       if (!interrupted.has(m.chatId) || m.status === 'deleted') continue;
       if (this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId)) continue;
-      this.failPreflight(
-        m.chatId,
-        'sdk_error',
-        'This chat was stopped partway by a restart and its last turn was not resumed. Send a message to carry on.',
-      );
+      // Known loss, said so (spec/12 § Continue): Interrupted with a Continue
+      // action, not a failure and not an idle chat that reads as done.
+      this.markInterrupted(m.chatId);
     }
+  }
+
+  /**
+   * The chat's last turn was cut off because its process died with the machine
+   * (spec/12 § Continue). Said in the chat as an inline line where the turn
+   * stopped, kept across further restarts, and reported to the server as a
+   * fact on `chat.state` so it shows Interrupted with a Continue action.
+   */
+  private markInterrupted(chatId: string): void {
+    if (this.interruptedChats.has(chatId)) return;
+    this.interruptedChats.add(chatId);
+    this.opts.metaStore.update(chatId, (meta) => ({ ...meta, interrupted: true }));
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: RESTART_INTERRUPTION_MARKER,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
+    this.emitState(chatId);
+    this.opts.logger.info({ chatId }, 'resume: the turn was cut off; the chat is interrupted');
+  }
+
+  private clearInterrupted(chatId: string): void {
+    if (!this.interruptedChats.delete(chatId)) return;
+    this.opts.metaStore.update(chatId, (meta) => {
+      const { interrupted: _gone, ...rest } = meta;
+      return rest;
+    });
+  }
+
+  /**
+   * Continue on an interrupted chat (`chat.continue_request`, spec/12 §
+   * Continue): a visible message asking the agent to carry on, which reads in
+   * the chat like any other message. A chat that is not interrupted (already
+   * continued from another surface, or the turn was resumed) is left alone.
+   */
+  async continueChat(chatId: string): Promise<boolean> {
+    if (!this.interruptedChats.has(chatId)) {
+      this.opts.logger.info({ chatId }, 'continue: the chat is not interrupted; ignored');
+      return false;
+    }
+    // Not awaited: `sendInput` settles when the whole turn does, and Continue
+    // has done its part once the message is in. A start that fails is said in
+    // the chat, not only in the log (spec/12 § No fallbacks).
+    void this.sendInput({ chatId, message: CONTINUE_MESSAGE, localId: randomUUID() }).catch(
+      (err: unknown) => {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.opts.logger.error({ chatId, err }, 'continue: the turn could not be started');
+        this.failPreflight(chatId, 'sdk_error', `Continue could not start the turn: ${reason}`);
+      },
+    );
+    return true;
   }
 
   /**
@@ -3556,6 +3557,9 @@ export class Daemon {
         return (
           this.owedResend.has(id) ||
           this.parkedTurns.has(id) ||
+          // Cut off and waiting for Continue: the turn the snooze waits on is
+          // still coming back (spec/12 § Continue).
+          this.interruptedChats.has(id) ||
           (wake !== null && wake.every === undefined) ||
           this.aggregateActivity(id) === 'running'
         );
@@ -3789,12 +3793,10 @@ export class Daemon {
         { chatId: m.chatId, turns: pending.length },
         'resume: re-sending turns interrupted by the previous host',
       );
-      // pendingDecisions.ts: a turn cut off while blocked on a permission or
-      // AskUserQuestion needs a richer reminder than "you were cut off" — see
-      // interruptedTurnReminderWithPendingDecisions. Read once per chat, fold
-      // into the first resumed turn, then clear: the text is now IN the
-      // conversation, so a stale on-disk copy would only mislead a later
-      // restart into repeating context the agent has already seen.
+      // pendingDecisions.ts: a question or permission the cut-off turn was
+      // blocked on died with its process. The record is cleared, not turned
+      // into hidden text for the agent (spec/12 § Continue): nothing is added to
+      // a turn unseen, and the user sees the turn stopped where it did.
       const chatDir = dirname(this.opts.metaStore.pathFor(m.chatId));
       // spec/02 § Turns outlive the host — the head turn may still be running
       // under its runner. Then it is carried on, not cut off: it goes back
@@ -3841,8 +3843,7 @@ export class Daemon {
           );
         }
       }
-      const pendingDecisions = reattach ? [] : readPendingDecisions(chatDir);
-      if (pendingDecisions.length > 0 || reattach) clearAllPendingDecisions(chatDir);
+      clearAllPendingDecisions(chatDir);
       // `pending[0]` is the genuinely-interrupted head only when the chat log
       // shows no terminal outcome at all for the last turn — a crash really
       // did cut it off mid-flight. Whenever the log instead shows the last
@@ -3853,30 +3854,18 @@ export class Daemon {
       // verbatim, not with the cut-off framing.
       const headIsInterrupted = !settledTerminally && waitingHead !== 'retry' && !reattach;
       for (const [i, turn] of pending.entries()) {
-        const reminder =
-          pendingDecisions.length > 0
-            ? interruptedTurnReminderWithPendingDecisions(pendingDecisions)
-            : INTERRUPTED_TURN_REMINDER;
-        const message =
-          i === 0 && headIsInterrupted
-            ? interruptedTurnResend(reminder, turn.message)
-            : turn.message;
+        // The cut-off turn is not re-sent, with a hidden reminder or otherwise:
+        // the chat shows it Interrupted and the user (or the automatic
+        // setting) continues it with a visible message (spec/12 § Continue).
+        if (i === 0 && headIsInterrupted) {
+          this.markInterrupted(m.chatId);
+          continue;
+        }
+        const message = turn.message;
         // Deliberately not awaited, and deliberately issued in one synchronous
         // pass: `sendInput` sets the chat's `pumping` guard before its first
         // await, so the second and later turns here see a live pump and queue
         // behind the first in their original order — exactly where they were.
-        if (i === 0 && headIsInterrupted) {
-          // Said in the chat history, not only the log: a reader needs to know
-          // why the turn started over (spec/12 § Restart interruptions).
-          this.emit({
-            type: 'chat.message',
-            chatId: m.chatId,
-            role: 'system',
-            content: RESTART_INTERRUPTION_MARKER,
-            seq: this.bumpSeq(m.chatId),
-            createdAt: this.opts.now(),
-          });
-        }
         this.owedResend.add(m.chatId);
         this.interruptedResend.add(m.chatId);
         if (i === 0) {
@@ -3905,9 +3894,7 @@ export class Daemon {
           // choosing to re-run a turn. Folding a restart's re-send into the
           // original bubble hid everything between attempts behind the pager
           // (spec/12 § Restart interruptions), so it draws as its own message.
-          ...(turn.retryOfSeq !== undefined && !(i === 0 && headIsInterrupted)
-            ? { retryOfSeq: turn.retryOfSeq }
-            : {}),
+          ...(turn.retryOfSeq !== undefined ? { retryOfSeq: turn.retryOfSeq } : {}),
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
@@ -6279,6 +6266,8 @@ export class Daemon {
     return (
       this.aggregateActivity(chatId) === 'running' ||
       this.failoverRerunPending.has(chatId) ||
+      // Cut off and waiting for Continue: the turn is still coming back.
+      this.interruptedChats.has(chatId) ||
       state?.turnRetrying === true ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
@@ -10354,6 +10343,7 @@ export class Daemon {
 
     // The re-run (if any) has begun: from here activity itself says it is working.
     this.failoverRerunPending.delete(chatId);
+    this.clearInterrupted(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
     if (state.goalProgress?.pausedByStop)
@@ -17014,6 +17004,9 @@ export class Daemon {
       // whole": the active branch's own activity, raised by any OTHER branch
       // currently running or awaiting permission (`aggregateActivity`).
       activity: this.aggregateActivity(chatId),
+      // spec/12 § Continue — a fact for the server: the last turn's process died
+      // with the machine and nothing has continued it yet.
+      ...(this.interruptedChats.has(chatId) ? { interrupted: true } : {}),
       // spec/09 § Whose turn it was — who started the turn this state belongs
       // to. Carried on every emit, not just the settling one, so a surface (or
       // the server) that joins mid-turn already knows what the idle frame will

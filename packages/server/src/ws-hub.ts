@@ -145,6 +145,12 @@ const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   'meeting.state',
 ]);
 
+/** How long a host that announced a restart has to reattach (spec/12 § Chat status). */
+const HOST_RESTART_WINDOW_MS = 2 * 60_000;
+
+/** The surface id the server's own automatic Continue is sent as. */
+const AUTO_CONTINUE_SURFACE_ID = 'server-auto-continue';
+
 export interface WsHubDeps {
   logger: Logger;
   /** The shared settings as a surface may see them, sent in every greeting. */
@@ -173,6 +179,17 @@ export interface WsHubDeps {
    * running → errored → running, and the host is not announced offline. Default 5000.
    */
   hostOfflineGraceMs?: number;
+  /**
+   * How long a host that announced a restart (`host.restarting`) may take to
+   * reattach before its working chats read Host offline instead of Host
+   * restarting (spec/12 § Chat status). Default 2 minutes.
+   */
+  hostRestartWindowMs?: number;
+  /**
+   * Whether an interrupted turn continues by itself as soon as its host is
+   * back (Settings → Agent behavior, off by default; spec/12 § Continue).
+   */
+  autoContinueInterrupted?: () => boolean;
   /** Why a host that is down went down (`describeHostOffline`), if known. */
   hostOfflineReason?: (hostId: string) => string | undefined;
   /** A surface on a host's own host said the host is going to sleep, or is awake. */
@@ -458,6 +475,8 @@ export class WsHub {
 
   /** Pending grace timers, per host, before its in-flight chats are errored. */
   private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Hosts that announced a restart and have not reattached; the timer ends the wait. */
+  private readonly restartingHosts = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Hosts whose socket is being replaced by a new one right now (see the offline handler). */
   private readonly replacingHosts = new Set<string>();
@@ -526,7 +545,10 @@ export class WsHub {
     // unsticks and the user can retry. Only chats on the host that went
     // away: another host's turns are unaffected. NO FALLBACK. spec/12 +
     // spec/04.
-    this.resolveInFlightChatsOnHostOffline(hostId);
+    // A host that announced a restart is the planned gap: its chats read Host
+    // restarting, and only the restart window running out makes them Host
+    // offline (`beginHostRestart`).
+    if (!this.restartingHosts.has(hostId)) this.resolveInFlightChatsOnHostOffline(hostId);
     // Every shell on that host died with it. Drop the routes so a
     // surface still holding those ids is told `unknown_session` instead of
     // having its keystrokes buffered for a shell that no longer exists.
@@ -642,7 +664,13 @@ export class WsHub {
     // changed, so a surface can never mistake one host going offline for
     // another's. NO unaddressed presence frame is ever sent.
     this.hostStatusUnsub = deps.hostLink.onHostStatus((hostId, status) => {
-      if (status === 'online') this.hostLastSeenAt.set(hostId, Date.now());
+      if (status === 'online') {
+        this.hostLastSeenAt.set(hostId, Date.now());
+        // Reattached: the chats it reports from here say what became of them.
+        const restarting = this.restartingHosts.get(hostId);
+        if (restarting) clearTimeout(restarting);
+        this.restartingHosts.delete(hostId);
+      }
       // A link that drops and returns inside the grace window is a network
       // blip, not an outage: nobody is told it went offline, so surfaces do
       // not flash "offline" for the second or two the host takes to redial.
@@ -741,6 +769,25 @@ export class WsHub {
    * pull-to-refresh) agree with the live stream. On reconnect the host
    * remains source of truth: a retried turn drives the chat back to `running`.
    */
+  /**
+   * `host.restarting` (spec/12 § Chat status): the host's running and waiting
+   * chats read Host restarting until it reattaches, or Host offline once the
+   * restart window passes without it.
+   */
+  private beginHostRestart(hostId: string): void {
+    const prior = this.restartingHosts.get(hostId);
+    if (prior) clearTimeout(prior);
+    const timer = setTimeout(() => {
+      this.restartingHosts.delete(hostId);
+      if (!this.deps.hostLink.isOnline(hostId)) this.resolveInFlightChatsOnHostOffline(hostId);
+    }, this.deps.hostRestartWindowMs ?? HOST_RESTART_WINDOW_MS);
+    timer.unref?.();
+    this.restartingHosts.set(hostId, timer);
+    for (const event of this.deps.chatRegistry.markHostRestarting(hostId)) {
+      this.broadcastChatState(event);
+    }
+  }
+
   private resolveInFlightChatsOnHostOffline(hostId: string): void {
     const inFlight = this.deps.chatRegistry
       .inFlightChatIds()
@@ -783,6 +830,8 @@ export class WsHub {
   shutdown(restartTarget: string | null = null): void {
     for (const t of this.offlineTimers.values()) clearTimeout(t);
     this.offlineTimers.clear();
+    for (const t of this.restartingHosts.values()) clearTimeout(t);
+    this.restartingHosts.clear();
     this.hostEventUnsub?.();
     this.hostStatusUnsub?.();
     this.composerDraftsUnsub?.();
@@ -1720,6 +1769,7 @@ export class WsHub {
       }
       case 'chat.permission_response':
       case 'chat.stop_request':
+      case 'chat.continue_request':
       case 'chat.tool_cancel_request':
       case 'chat.unqueue_request':
       case 'chat.resume_now_request':
@@ -1992,6 +2042,10 @@ export class WsHub {
   // ---- host → surfaces ----
 
   private onHostEvent(event: WireEvent): void {
+    if (event.type === 'host.restarting') {
+      this.beginHostRestart(event.hostId);
+      return;
+    }
     // The server is the log of record (spec/01 § Message log): a finished event
     // is written before anything is broadcast, so what a surface sees live is
     // already on the server's disk. A resend of one it holds is not broadcast
@@ -2128,8 +2182,24 @@ export class WsHub {
     // already derived it from this very frame.
     if (event.type === 'chat.state') {
       const row = this.deps.chatRegistry.get(event.chatId);
-      if (row?.chatStatus) event = { ...event, chatStatus: row.chatStatus };
+      const chatStatus = row?.chatStatus;
+      if (chatStatus) event = { ...event, chatStatus };
       if (row?.feedPos !== undefined) event = { ...event, feedPos: row.feedPos };
+      // spec/12 § Continue: with automatic continue on, an interrupted turn
+      // carries on as soon as the host reports it.
+      if (
+        chatStatus?.state === 'interrupted' &&
+        event.interrupted === true &&
+        this.deps.autoContinueInterrupted?.() === true
+      ) {
+        const hostId = this.deps.chatRegistry.get(event.chatId)?.hostId;
+        if (hostId !== undefined) {
+          this.deps.hostLink.sendTo(hostId, AUTO_CONTINUE_SURFACE_ID, {
+            type: 'chat.continue_request',
+            chatId: event.chatId,
+          });
+        }
+      }
     }
     // The latest subagent status of each chat, so a page of history can restate
     // the strip a reload would otherwise lose (spec/03 § Chat history).

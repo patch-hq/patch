@@ -13,13 +13,10 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
-import { Daemon, INTERRUPTED_TURN_REMINDER, interruptedTurnResend } from '../src/chatRunner.js';
+import { Daemon, CONTINUE_MESSAGE } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
 import { entryText, transcriptFor } from './helpers/chatTranscript.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
-
-/** What the head turn 'running' is re-sent as. */
-const RESENT = interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'running');
 
 const silent = pino({ level: 'silent' });
 
@@ -126,6 +123,10 @@ describe('resuming turns a host restart interrupted', () => {
     };
     const second = hostOver(home, secondBackend, 'account-b');
     second.daemon.hydrate();
+    await tick(50);
+    // Nothing is sent until the user continues the interrupted turn.
+    expect(seenResumeIds).toHaveLength(0);
+    await second.daemon.continueChat(chatId);
     await tick(50);
 
     expect(seenResumeIds).toHaveLength(1);
@@ -253,12 +254,9 @@ describe('resuming turns a host restart interrupted', () => {
     expect(second.daemon.chatState.get(chatId)?.activity).toBe('running');
   });
 
-  // live (30 Oct, a chat given four 'Carry on' re-sends 22:01-22:13 and then
-  // left idle for ~43h): the resume clears `pendingTurns` before re-sending, and
-  // the re-sent turn only recorded itself again once `runQuery` got past its
-  // awaited start-up (session load, a dark-wake hold, credentials). A host
-  // killed in that window left nothing on disk saying the turn was owed.
-  it('keeps a re-sent turn recorded as owed while it is still starting up', async () => {
+  // The turn a restart cut off is not owed any more: it is recorded as
+  // interrupted, and stays so across further restarts until it is continued.
+  it('records a cut-off turn as interrupted, not owed, and keeps it so across restarts', async () => {
     const g = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g.backend);
@@ -269,32 +267,32 @@ describe('resuming turns a host restart interrupted', () => {
       { message: 'running', localId: 'L1', retryOfSeq: 2 },
     ]);
 
-    // The restarted host is in a dark wake, so the re-sent turn is held before it runs.
     const g2 = gatedBackend();
-    const metaStore = createMetaStore(home);
-    const daemon = new Daemon({
-      hostId: 'd1',
-      metaStore,
-      sdkBackend: g2.backend,
-      oauthAccessToken: 'fake-token',
-      sleepWatch: {
-        check: () => undefined,
-        sleptSince: () => false,
-        isFullyAwake: () => false,
-        dispose: () => undefined,
-      },
-      emit: () => undefined,
-      logger: silent,
-      now: () => 1_700_000_000_000,
-      generateChatId: () => 'chat-x',
-    });
-    daemon.hydrate();
+    const second = hostOver(home, g2.backend);
+    second.daemon.hydrate();
     await tick();
-
     expect(g2.prompts).toEqual([]);
-    expect(pendingOf(metaStore, chatId)).toEqual([
-      { message: 'running', localId: 'L1', retryOfSeq: 2 },
-    ]);
+    expect(pendingOf(second.metaStore, chatId)).toEqual([]);
+    expect(second.metaStore.read(chatId)?.interrupted).toBe(true);
+
+    // Killed again before anyone pressed Continue: still interrupted.
+    const g3 = gatedBackend();
+    const third = hostOver(home, g3.backend);
+    third.daemon.hydrate();
+    await tick();
+    expect(g3.prompts).toEqual([]);
+    const states = third.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    expect(states.at(-1)).toMatchObject({ activity: 'idle', interrupted: true });
+    // The line in the chat is said once, not once per restart.
+    const lines = (h: typeof second): number =>
+      h.events.filter(
+        (e) =>
+          e.type === 'chat.message' &&
+          e.role === 'system' &&
+          e.content === 'Turn interrupted by restart',
+      ).length;
+    expect(lines(second)).toBe(1);
+    expect(lines(third)).toBe(0);
   });
 
   // A turn parked for a stated rate limit closes its failed attempt with
@@ -451,7 +449,7 @@ describe('resuming turns a host restart interrupted', () => {
     ]);
   });
 
-  it('hydrate re-sends the interrupted turns, telling the agent to continue', async () => {
+  it('hydrate does not re-send the cut-off turn: it is interrupted, and queued turns go back verbatim', async () => {
     const g1 = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g1.backend);
@@ -468,32 +466,18 @@ describe('resuming turns a host restart interrupted', () => {
     second.daemon.hydrate();
     await tick();
 
-    // The turn that was mid-flight goes back first, prefixed with the reminder
-    // that it was cut off (a leading <system-reminder> is stripped from the
-    // persisted transcript, so this is agent context, not chat text) — but its
-    // OWN original text ('running') is not resent: the resumed session already
-    // has it, so only a short 'Carry on' nudge goes out with the reminder.
-    expect(g2.prompts).toEqual([RESENT]);
-    expect(second.daemon.chatState.get(chatId)?.activity).toBe('running');
-    // It resumes the SAME Claude session, which is what lets the agent see its
-    // own half-finished work instead of starting over.
-    expect(second.daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess');
-
-    // The queued one never began, so it goes back verbatim — and behind the
-    // head turn, where it was.
-    g2.releaseNext();
-    await tick();
-    expect(g2.prompts).toEqual([RESENT, 'queued-a']);
-
+    // The turn that was mid-flight is NOT sent again, with a hidden reminder or
+    // without one (spec/12 § Continue). The one queued behind it never began, so
+    // it goes out as it was.
+    expect(g2.prompts).toEqual(['queued-a']);
+    expect(g2.prompts.join('')).not.toContain('system-reminder');
     await g2.drain();
     expect(pendingOf(second.metaStore, chatId)).toEqual([]);
   });
 
-  // spec/02 § System-reminder disclosure — the re-send is ONE chat.message that
-  // both names the bubble it folds into and carries the restart reminder out of
-  // band. A surface folding on `retryOfSeq` must find the reminder right there
-  // on the same event; it is nowhere else.
-  it('emits the re-send without retryOfSeq, with the restart reminder as systemContext', async () => {
+  // spec/12 § Continue — Interrupted is reported to the server as a host fact on
+  // `chat.state`, and Continue is an ordinary visible message.
+  it('shows an interrupted turn as such, and Continue sends one visible message', async () => {
     const g1 = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g1.backend);
@@ -506,84 +490,45 @@ describe('resuming turns a host restart interrupted', () => {
     second.daemon.hydrate();
     await tick();
 
-    const resent = second.events.filter(
+    expect(g2.prompts).toEqual([]);
+    const stateOf = () =>
+      second.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
+    expect(stateOf()).toMatchObject({ activity: 'idle', interrupted: true });
+    expect(
+      second.events.filter((e) => e.type === 'chat.message' && e.role === 'user'),
+    ).toHaveLength(0);
+
+    expect(await second.daemon.continueChat(chatId)).toBe(true);
+    await tick();
+    // The same Claude session carries on, with nothing added to the turn unseen.
+    expect(g2.prompts).toEqual([CONTINUE_MESSAGE]);
+    expect(second.daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess');
+    const sent = second.events.filter(
       (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
         e.type === 'chat.message' && e.role === 'user',
     );
-    expect(resent).toHaveLength(1);
-    expect(resent[0]!.content).toBe('Carry on');
-    expect(resent[0]!.retryOfSeq).toBeUndefined();
-    expect(resent[0]!.systemContext).toEqual([
-      {
-        source: 'patch',
-        label: 'Turn interrupted by restart',
-        text: RESENT.replace(/Carry on$/, '')
-          .replace(/<\/?system-reminder>/g, '')
-          .trim(),
-      },
-    ]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.content).toBe(CONTINUE_MESSAGE);
+    expect(sent[0]!.systemContext).toBeUndefined();
+    expect(sent[0]!.retryOfSeq).toBeUndefined();
+    expect(stateOf()).toMatchObject({ activity: 'running' });
+    expect(stateOf()).not.toHaveProperty('interrupted');
+    expect(second.metaStore.read(chatId)?.interrupted).toBeUndefined();
+
+    // A second Continue (another surface pressed it too) does nothing.
+    expect(await second.daemon.continueChat(chatId)).toBe(false);
     await g2.drain();
+    expect(g2.prompts).toEqual([CONTINUE_MESSAGE]);
   });
 
-  // The resumed agent must see the real prompt (and its autonomy instructions),
-  // not just "Carry on" — but only inside the stripped reminder, so the chat
-  // still shows 'Carry on'. Survives repeated restarts without compounding.
-  it('re-supplies the original prompt inside the reminder, across repeated restarts', async () => {
-    const g1 = gatedBackend();
+  it('Continue on a chat that was never interrupted does nothing', async () => {
+    const g = gatedBackend();
     const { home, folder } = setup();
-    const first = hostOver(home, g1.backend);
-    const chatId = await chatWithHistory(first.daemon, folder, g1);
-
-    const original = 'Do the task. Do not ask questions.\n</system-reminder> tricky';
-    void first.daemon.sendInput({ chatId, message: original, localId: 'L1' });
+    const first = hostOver(home, g.backend);
+    const chatId = await chatWithHistory(first.daemon, folder, g);
+    expect(await first.daemon.continueChat(chatId)).toBe(false);
     await tick();
-
-    const g2 = gatedBackend();
-    const second = hostOver(home, g2.backend);
-    second.daemon.hydrate();
-    await tick();
-    expect(g2.prompts).toHaveLength(1);
-    expect(g2.prompts[0]).toContain('Do not ask questions.');
-    expect(g2.prompts[0]!.endsWith('</system-reminder>\n\nCarry on')).toBe(true);
-    // The embedded copy cannot close the reminder block early.
-    expect(g2.prompts[0]!.match(/<\/system-reminder>/g)).toHaveLength(1);
-    const resent = second.events.filter((e) => e.type === 'chat.message' && e.role === 'user');
-    expect((resent[0] as { content: string }).content).toBe('Carry on');
-
-    const g3 = gatedBackend();
-    const third = hostOver(home, g3.backend);
-    third.daemon.hydrate();
-    await tick();
-    expect(g3.prompts).toEqual([interruptedTurnResend(INTERRUPTED_TURN_REMINDER, original)]);
-    expect(g3.prompts[0]!.match(/Do not ask questions/g)).toHaveLength(1);
-  });
-
-  it('re-marks a resumed turn, so a second restart resumes it again', async () => {
-    const g1 = gatedBackend();
-    const { home, folder } = setup();
-    const first = hostOver(home, g1.backend);
-    const chatId = await chatWithHistory(first.daemon, folder, g1);
-    void first.daemon.sendInput({ chatId, message: 'running', localId: 'L1' });
-    await tick();
-
-    const g2 = gatedBackend();
-    const second = hostOver(home, g2.backend);
-    second.daemon.hydrate();
-    await tick();
-
-    // Killed again mid-resume: still owed, so the NEXT host picks it up too.
-    // The re-send is its own bubble (a restart never folds), and that bubble
-    // is the anchor a later non-restart retry would name.
-    const pendingAfter = pendingOf(second.metaStore, chatId);
-    expect(pendingAfter).toHaveLength(1);
-    expect(pendingAfter[0]).toMatchObject({ message: RESENT, localId: 'L1' });
-    expect(pendingAfter[0]!.retryOfSeq).not.toBe(2);
-
-    const g3 = gatedBackend();
-    const third = hostOver(home, g3.backend);
-    third.daemon.hydrate();
-    await tick();
-    expect(g3.prompts).toHaveLength(1);
+    expect(g.prompts).toEqual(['first']);
   });
 
   it('drops the interrupted turns of a chat that was deleted meanwhile', async () => {
@@ -608,7 +553,7 @@ describe('resuming turns a host restart interrupted', () => {
     expect(pendingOf(second.metaStore, chatId)).toEqual([]);
   });
 
-  it('shows a chat cut off with no owed turn as errored, not idle (done)', async () => {
+  it('shows a chat cut off with no owed turn as interrupted, not idle (done)', async () => {
     const g1 = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g1.backend);
@@ -624,9 +569,9 @@ describe('resuming turns a host restart interrupted', () => {
     await tick();
 
     expect(g2.prompts).toEqual([]);
-    expect(second.metaStore.read(chatId)?.lastError?.message).toContain('stopped partway');
     const states = second.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
-    expect(states.at(-1)).toMatchObject({ activity: 'errored' });
+    expect(states.at(-1)).toMatchObject({ activity: 'idle', interrupted: true });
+    expect(second.metaStore.read(chatId)?.lastError ?? null).toBeNull();
   });
 
   it('a chat that was idle at the restart is not given a turn it never had', async () => {
@@ -652,7 +597,7 @@ describe('resuming turns a host restart interrupted', () => {
 // common wait (up to the 1h approval timeout, or unbounded for a question with
 // expiry turned off) than a turn merely mid-tool-execution.
 describe('a turn cut off while awaiting a permission/question decision', () => {
-  it('tells the resumed agent what it had asked, and clears the persisted record', async () => {
+  it('is interrupted like any other cut-off turn, adds nothing hidden, and clears the persisted record', async () => {
     const { home, folder } = setup();
     const metaStore = createMetaStore(home);
     const events: WireEvent[] = [];
@@ -676,42 +621,20 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
     const decisionsFile = join(chatDir, 'pending-decisions.json');
     expect(existsSync(decisionsFile)).toBe(true);
 
-    // Killed here — no answer was ever given, exactly the case
-    // INTERRUPTED_TURN_REMINDER alone leaves the agent blind to.
+    // Killed here — no answer was ever given.
     const g2 = gatedBackend();
     const second = hostOver(home, g2.backend);
     second.daemon.hydrate();
     await tick();
 
-    expect(g2.prompts).toHaveLength(1);
-    const resent = g2.prompts[0]!;
-    // Names what was actually asked (the mock's [[bash-permission]] trigger's
-    // own description), not just "you were cut off".
-    expect(resent).toContain('Run: echo hi');
-    expect(resent).toContain('no answer was recorded');
-    expect(resent).toContain('Do NOT assume it was approved');
-
-    // spec/02 § System-reminder disclosure — the surface gets that same block
-    // out of band on the re-send's chat.message, labelled as the
-    // pending-decision variant, and never inlined into the bubble's text.
-    const resentMsgs = second.events.filter(
-      (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
-        e.type === 'chat.message' && e.role === 'user',
-    );
-    expect(resentMsgs).toHaveLength(1);
-    expect(resentMsgs[0]!.content).not.toContain('<system-reminder>');
-    expect(resentMsgs[0]!.content).not.toContain('Run: echo hi');
-    expect(resentMsgs[0]!.systemContext).toEqual([
-      {
-        source: 'patch',
-        label: 'Turn interrupted by restart (pending decision)',
-        text: expect.stringContaining('Run: echo hi'),
-      },
-    ]);
-    await g2.drain();
-
-    // Folded into the resumed turn's context now, so the on-disk copy would
-    // only mislead a LATER restart into repeating context already delivered.
+    // Nothing is sent, and nothing about the question reaches the agent as
+    // hidden text: the user continues, and the agent is told in a visible
+    // message like any other.
+    expect(g2.prompts).toEqual([]);
+    expect(
+      second.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1),
+    ).toMatchObject({ interrupted: true });
+    // The answer died with the process; a stale record would only mislead a later restart.
     expect(existsSync(decisionsFile)).toBe(false);
   });
 
@@ -832,6 +755,8 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       const second = hostWith(home, r2.backend);
       second.daemon.hydrate();
       await tick();
+      await second.daemon.continueChat(chatId);
+      await tick();
 
       expect(r2.runs).toHaveLength(1);
       expect(r2.runs[0]!.prompt.endsWith('Carry on')).toBe(true);
@@ -842,7 +767,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       await r2.drain();
     });
 
-    it('repeated reboot: every restart carries the full history, before and after an id exists', async () => {
+    it('repeated reboot: the chat stays interrupted, and Continue carries the full history', async () => {
       const r1 = recordingBackend(null);
       const { home, folder } = setup();
       const first = hostWith(home, r1.backend);
@@ -850,16 +775,19 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       void first.daemon.sendInput({ chatId, message: 'original ask', localId: 'L1' });
       await tick();
 
-      // Reboot 1 (no id yet), killed again before the provider answers.
+      // Reboot 1 (no id yet): nothing is sent.
       const r2 = recordingBackend(null);
       hostWith(home, r2.backend).daemon.hydrate();
       await tick();
-      expect(r2.runs[0]!.resumeSessionId).toBeUndefined();
-      expect(reseededTexts(r2.runs[0]!)).toEqual([]);
+      expect(r2.runs).toEqual([]);
 
-      // Reboot 2: the log now also holds the first resend.
+      // Reboot 2: still interrupted; Continue now.
       const r3 = recordingBackend('sess-3');
-      hostWith(home, r3.backend).daemon.hydrate();
+      const third = hostWith(home, r3.backend);
+      third.daemon.hydrate();
+      await tick();
+      expect(r3.runs).toEqual([]);
+      await third.daemon.continueChat(chatId);
       await tick();
       expect(r3.runs).toHaveLength(1);
       expect(r3.runs[0]!.resumeSessionId).toBeUndefined();
@@ -868,8 +796,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       expect(r3.runs[0]!.prompt.match(/<\/system-reminder>/g)).toHaveLength(1);
       await r3.drain();
 
-      // Reboot 3, after a session id was captured and the turn settled: a plain
-      // resume with nothing pending reseeds nothing.
+      // Reboot 3, after the turn settled: a plain resume with nothing pending.
       const r4 = recordingBackend('sess-3');
       hostWith(home, r4.backend).daemon.hydrate();
       await tick();
@@ -893,6 +820,8 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       const g2 = recordingBackend('sess-new');
       const second = hostWith(home, g2.backend, { sdkBackendKind: 'real' });
       second.daemon.hydrate();
+      await tick();
+      await second.daemon.continueChat(chatId);
       await tick();
 
       expect(g2.runs).toHaveLength(1);
@@ -924,6 +853,8 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       });
       second.daemon.hydrate();
       await tick();
+      await second.daemon.continueChat(chatId);
+      await tick();
 
       expect(g2.runs).toHaveLength(1);
       const events = (g2.runs[0]!.codexReseed ?? g2.runs[0]!.codexAppendItems)?.events ?? [];
@@ -938,7 +869,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
 });
 
 describe('a restart says so in the chat', () => {
-  it('records a system line when an interrupted turn is re-sent', async () => {
+  it('records a system line when a turn is found interrupted', async () => {
     const g = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g.backend);
@@ -959,9 +890,7 @@ describe('a restart says so in the chat', () => {
     expect(lines).toHaveLength(1);
   });
 
-  // spec/12 § Restart interruptions — a restart's re-send is its own message,
-  // never an attempt folded into the original bubble.
-  it('draws the re-send as its own message, not a retry of the original', async () => {
+  it('says the turn was interrupted once, and the Continue message follows it as its own message', async () => {
     const g = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g.backend);
@@ -972,13 +901,8 @@ describe('a restart says so in the chat', () => {
     const second = hostOver(home, createMockSdkBackend());
     second.daemon.hydrate();
     await tick(50);
-
-    const users = second.events.filter(
-      (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
-        e.type === 'chat.message' && e.role === 'user',
-    );
-    expect(users.length).toBeGreaterThan(0);
-    for (const u of users) expect(u.retryOfSeq).toBeUndefined();
+    await second.daemon.continueChat(chatId);
+    await tick(50);
 
     const replayed: WireEvent[] = [];
     second.daemon.replayChat(chatId, 0, (ev) => replayed.push(ev));
@@ -987,6 +911,6 @@ describe('a restart says so in the chat', () => {
       .map((e) => `${(e as { role: string }).role}:${(e as { content: string }).content}`);
     const marker = order.indexOf('system:Turn interrupted by restart');
     expect(marker).toBeGreaterThan(-1);
-    expect(order[marker + 1]).toBe('user:Carry on');
+    expect(order[marker + 1]).toBe(`user:${CONTINUE_MESSAGE}`);
   });
 });

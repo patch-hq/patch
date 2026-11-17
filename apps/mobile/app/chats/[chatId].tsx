@@ -2827,6 +2827,42 @@ function AgentReturnItem({ agentReturn }: { agentReturn: AgentReturn }): React.R
   );
 }
 
+/** The line the host writes where a restart cut a turn off (spec/12 § Continue). */
+const INTERRUPTION_LINE = 'Turn interrupted by restart';
+
+/**
+ * Where a turn was cut off because its machine went down. The newest such line
+ * carries Continue while the server says the chat is Interrupted; it sends
+ * `chat.continue_request` and the host carries on with a visible message.
+ */
+function CutOffLine({ chatId, seq }: { chatId: string; seq: number }): React.ReactElement {
+  const colors = useTheme();
+  const canContinue = useChatStore((s) => {
+    if (s.chats[chatId]?.chatStatus?.state !== 'interrupted') return false;
+    const lines = (s.timelines[chatId] ?? []).filter(
+      (e) => e.kind === 'message' && e.role === 'system' && e.content === INTERRUPTION_LINE,
+    );
+    return lines.at(-1)?.seq === seq;
+  });
+  return (
+    <View
+      testID="turn-cut-off"
+      style={{ flexDirection: 'row', gap: space.sm, marginBottom: space.sm, alignItems: 'center' }}
+    >
+      <Text style={{ fontSize: textMin, color: colors.ink3 }}>Turn interrupted</Text>
+      {canContinue ? (
+        <Pressable
+          testID="turn-cut-off-continue"
+          accessibilityRole="button"
+          onPress={() => getWs().send({ type: 'chat.continue_request', chatId })}
+        >
+          <Text style={{ color: colors.ink, textDecorationLine: 'underline' }}>Continue</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 // Memoised for the same reason as ToolGroupItem: entries are immutable, so a
 // row only needs to re-render when its own entry object is replaced.
 /** spec/04 § Handoff budget — the divider row; a link row opens the chat it names. */
@@ -2924,6 +2960,9 @@ const TimelineItem = React.memo(function TimelineItem({
         {`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
       </Text>
     );
+  }
+  if (entry.kind === 'message' && entry.role === 'system' && entry.content === INTERRUPTION_LINE) {
+    return <CutOffLine chatId={chatId} seq={entry.seq} />;
   }
   if (
     entry.kind === 'message' &&

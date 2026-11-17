@@ -414,7 +414,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     }
   });
 
-  it('a turn interrupted by a host restart is resumed with the origin it had', async () => {
+  it('a machine turn interrupted by a host restart is reported interrupted, not run again unseen', async () => {
     const b = recordingBackend();
     const { metaStore, folder } = setup(b.backend);
 
@@ -470,6 +470,10 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     reborn.hydrate();
     await tick(200);
 
-    expect(settledOrigins(events, chatId)).toEqual(['machine']);
+    // A turn cut off is not re-run behind anyone's back (spec/12 § Continue):
+    // nothing settles, and the chat waits as Interrupted for Continue.
+    expect(settledOrigins(events, chatId)).toEqual([]);
+    const states = events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    expect(states.at(-1)).toMatchObject({ interrupted: true });
   });
 });

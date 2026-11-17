@@ -35,6 +35,8 @@ describe('statusFromHostState', () => {
     ],
     [{ activity: 'errored', lastError: { code: 'sdk_error', message: 'boom', at: 1 } }, 'failed'],
     [{ activity: 'errored', lastError: null }, 'failed'],
+    // spec/12 § Continue: the host is back and the turn's process is gone.
+    [{ activity: 'idle', interrupted: true }, 'interrupted'],
   ] as const)('%j → %s', (over, expected) => {
     expect(statusFromHostState(state(over as Partial<ChatStateEvent>)).state).toBe(expected);
   });
@@ -128,5 +130,42 @@ describe('ChatRegistry status', () => {
     expect(warnings).toContainEqual(
       expect.objectContaining({ from: 'queued_offline', to: 'failed' }),
     );
+  });
+
+  test('a planned restart moves running and waiting chats on that host to host restarting, and no others', () => {
+    const { reg } = make();
+    for (const [chatId, hostId] of [
+      ['run', 'h1'],
+      ['wait', 'h1'],
+      ['idle', 'h1'],
+      ['other', 'h2'],
+    ] as const) {
+      reg.observe({ type: 'chat.spawned', chatId, hostId, folder: '/w' });
+    }
+    reg.observe(state({ chatId: 'run', activity: 'running' }));
+    reg.observe(state({ chatId: 'wait', activity: 'awaiting-permission' }));
+    reg.observe(state({ chatId: 'other', hostId: 'h2', activity: 'running' }));
+    const events = reg.markHostRestarting('h1');
+    expect(events.map((e) => [e.chatId, e.chatStatus?.state]).sort()).toEqual([
+      ['run', 'host_restarting'],
+      ['wait', 'host_restarting'],
+    ]);
+    expect(reg.get('idle')?.chatStatus?.state).toBe('idle');
+    expect(reg.get('other')?.chatStatus?.state).toBe('running');
+  });
+
+  test('a restarting host that reattaches takes each chat back to what the host reports', () => {
+    const { reg, warnings } = make();
+    reg.observe(spawned);
+    reg.observe(state({ activity: 'running' }));
+    reg.markHostRestarting('h1');
+    reg.observe(state({ activity: 'running' }));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+    reg.markHostRestarting('h1');
+    reg.observe(state({ activity: 'idle', interrupted: true }));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('interrupted');
+    reg.observe(state({ activity: 'running' }));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+    expect(warnings).toEqual([]);
   });
 });

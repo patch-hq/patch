@@ -1654,6 +1654,16 @@ export function ChatRoute({
     sendMessage(chatId, 'Continue', [], { send: (e) => ws.send(e) });
   }, [ws, chatId, pushError]);
 
+  // spec/12 § Continue — Continue on an interrupted chat is its own request, not
+  // a typed message: the host decides how the turn carries on.
+  const handleContinueInterrupted = useCallback((): void => {
+    if (!ws) {
+      pushError('not connected');
+      return;
+    }
+    ws.send({ type: 'chat.continue_request', chatId });
+  }, [ws, chatId, pushError]);
+
   // spec/04 § Branching — one stable TrackNav per fork point, rebuilt only when
   // the graph itself changes so the transcript's memoisation survives.
   const baseTrackNav = useMemo(
@@ -2183,6 +2193,16 @@ export function ChatRoute({
   // controls): the marker sits before the next turn's user message, or at the
   // end of the live transcript, so it reads as "the agent stopped HERE". A turn
   // that also failed keeps its failed line on the message instead.
+  // The Continue action sits on the newest interruption line, and only while the
+  // server says the chat is Interrupted (spec/12 § Continue).
+  const interruptedLineSeq =
+    row.chatStatus?.state === 'interrupted'
+      ? [...timeline]
+          .reverse()
+          .find(
+            (e) => e.kind === 'message' && e.role === 'system' && e.content === INTERRUPTION_LINE,
+          )?.seq
+      : undefined;
   const stopMarkerAt = new Map<number, ChatEventEntry[]>();
   timeline.forEach((e, idx) => {
     if (e.kind !== 'message' || e.role !== 'user' || e.queued) return;
@@ -2365,6 +2385,9 @@ export function ChatRoute({
           onRetryDelivery={handleRetryDelivery}
           onRetryTurn={handleRetryTurn}
           onContinueTurn={handleContinueTurn}
+          {...(interruptedLineSeq !== undefined && entry.seq === interruptedLineSeq
+            ? { onContinueInterrupted: handleContinueInterrupted }
+            : {})}
           onEditTurn={handleEditTurn}
           {...(turnEdit?.seq === entry.seq && !entry.queued ? { editAnchor: true } : {})}
           onSwitchTrack={handleSwitchTrack}
@@ -2676,6 +2699,7 @@ const TimelineEntry = memo(function TimelineEntry({
   onRetryDelivery,
   onRetryTurn,
   onContinueTurn,
+  onContinueInterrupted,
   onEditTurn,
   editAnchor,
   onSwitchTrack,
@@ -2686,6 +2710,8 @@ const TimelineEntry = memo(function TimelineEntry({
 }: {
   entry: ChatEventEntry;
   chatId: string;
+  /** spec/12 § Continue — set on the newest interruption line of an Interrupted chat. */
+  onContinueInterrupted?(): void;
   /** spec/08 § Action — this is the job-spawned chat's trigger turn (see `firstUserSeq` above). */
   isJobTrigger?: boolean;
   /** spec/07 § The fast voice and the chat's agent — a hand-off the agent has not answered yet. */
@@ -2745,6 +2771,25 @@ const TimelineEntry = memo(function TimelineEntry({
     // spec/02 § Per-turn process / warm sessions — a reply Claude Code wrote
     // itself, not the agent. A muted line that says whose words they are.
     if (entry.synthetic) return <SyntheticNoticeLine entry={entry} />;
+    // spec/12 § Continue — where a turn was cut off because its machine went
+    // down, with Continue on every surface while the chat is Interrupted.
+    if (entry.content === INTERRUPTION_LINE) {
+      return (
+        <div className="delivery-status interrupted turn-stop-marker" data-testid="turn-cut-off">
+          <span>Turn interrupted</span>
+          {onContinueInterrupted ? (
+            <button
+              type="button"
+              className="delivery-retry"
+              data-testid="turn-cut-off-continue"
+              onClick={() => onContinueInterrupted()}
+            >
+              Continue
+            </button>
+          ) : null}
+        </div>
+      );
+    }
     // spec/10 § Backend credentials — a turn that moved to another account is
     // a status note, the same quiet line as a call's cost.
     if (entry.accountSwitch) {
@@ -3787,6 +3832,9 @@ function MessageReadButton({ readKey, text }: { readKey: string; text: string })
  * whatever the agent had produced), not under the user's message that started
  * it. Muted, not the danger colour: neither is an error.
  */
+/** The line the host writes where a restart cut a turn off (spec/12 § Continue). */
+const INTERRUPTION_LINE = 'Turn interrupted by restart';
+
 function TurnStopMarker({
   entry,
   onContinueTurn,

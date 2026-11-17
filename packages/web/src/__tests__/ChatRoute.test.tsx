@@ -1702,6 +1702,39 @@ describe('ChatRoute regression', () => {
     expect(send).toHaveBeenCalledWith({ type: 'chat.stop_request', chatId: 'c-stop' });
   });
 
+  // spec/12 § Continue — the interruption line carries Continue while the server
+  // says the chat is Interrupted, and the click is a chat.continue_request.
+  it('the interrupted line has a Continue that sends chat.continue_request, only while Interrupted', () => {
+    const send = vi.fn();
+    seedChat('c-cut', [
+      { seq: 1, kind: 'message', role: 'user', content: 'go', at: 0 },
+      { seq: 2, kind: 'message', role: 'system', content: 'Turn interrupted by restart', at: 1 },
+    ]);
+    const setStatus = (state: string): void =>
+      useChatStore.setState((s) => ({
+        chats: {
+          ...s.chats,
+          ['c-cut']: {
+            ...s.chats['c-cut']!,
+            chatStatus: { state, since: 1 } as never,
+          },
+        },
+      }));
+    setStatus('interrupted');
+    const { unmount } = renderChat('c-cut', { send, requestReplay() {} } as unknown as Parameters<
+      typeof ChatRoute
+    >[0]['ws']);
+    expect(screen.getByTestId('turn-cut-off')).toHaveTextContent('Turn interrupted');
+    fireEvent.click(screen.getByTestId('turn-cut-off-continue'));
+    expect(send).toHaveBeenCalledWith({ type: 'chat.continue_request', chatId: 'c-cut' });
+    unmount();
+
+    setStatus('running');
+    renderChat('c-cut');
+    expect(screen.getByTestId('turn-cut-off')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-cut-off-continue')).not.toBeInTheDocument();
+  });
+
   it('Stop with no connected ws surfaces "not connected"', () => {
     seedChat('c-stop-nows', [{ seq: 1, kind: 'message', role: 'user', content: 'go', at: 0 }]);
     useChatStore.setState((s) => ({

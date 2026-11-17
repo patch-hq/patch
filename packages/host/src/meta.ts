@@ -305,6 +305,13 @@ export const ChatMeta = z
      * killed chat can carry on instead of sitting `errored` with
      * "Connection to the host was lost. Message will resend."
      */
+    /**
+     * The chat's last turn was cut off because its process died with the
+     * machine, and no turn has started since (spec/12 § Continue). Reported on
+     * `chat.state` so the server shows Interrupted with a Continue action;
+     * cleared when the next turn starts.
+     */
+    interrupted: z.boolean().optional(),
     pendingTurns: z
       .array(
         z

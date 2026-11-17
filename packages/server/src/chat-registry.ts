@@ -771,6 +771,33 @@ export class ChatRegistry {
     return this.stateEventOf(next);
   }
 
+  /**
+   * The host announced a planned restart (`host.restarting`, spec/12 § Chat
+   * status): its running and waiting chats read Host restarting until it
+   * reattaches. Returns the `chat.state` of each chat that changed, for the
+   * caller to broadcast. Chats with nothing in flight keep their status.
+   */
+  markHostRestarting(hostId: string): ChatStateEvent[] {
+    const events: ChatStateEvent[] = [];
+    for (const [chatId, existing] of this.chats) {
+      if (existing.hostId !== hostId) continue;
+      const from = existing.chatStatus?.state;
+      if (from !== 'running' && from !== 'waiting_for_user') continue;
+      const next: ChatSummary = {
+        ...existing,
+        chatStatus: nextStatus(
+          existing.chatStatus ?? null,
+          { state: 'host_restarting' },
+          this.now(),
+        ),
+      };
+      this.chats.set(chatId, next);
+      events.push(this.stateEventOf(next));
+    }
+    if (events.length > 0) this.markDirty();
+    return events;
+  }
+
   inFlightChatIds(): string[] {
     const ids: string[] = [];
     for (const c of this.chats.values()) {

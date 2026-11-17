@@ -287,6 +287,16 @@ function ChatsGroup(): JSX.Element {
           testid="provider-switch-warning"
         />
       </Row>
+      {/* spec/12 § Continue — a turn cut off by its machine going down waits for
+          Continue unless this is on. */}
+      <Row title="Continue interrupted turns automatically">
+        <Toggle
+          checked={preferences.autoContinueInterrupted}
+          disabled={!loaded}
+          onChange={(next) => write({ autoContinueInterrupted: next })}
+          testid="auto-continue-interrupted"
+        />
+      </Row>
       {/* Default expand state a chat's provider-level context panel opens with
           (spec/02-host.md § Provider-level context). Does not touch Patch's
           own `<system-reminder>` disclosures, which stay collapsed regardless. */}

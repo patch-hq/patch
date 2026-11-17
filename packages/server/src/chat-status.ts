@@ -47,6 +47,9 @@ export function statusFromHostState(event: ChatStateEvent): Target {
     }
     case 'idle':
     default:
+      // The host is back and the turn's process died with its machine
+      // (spec/12 § Continue).
+      if (event.interrupted === true) return { state: 'interrupted' };
       // A turn parked until a stated limit lifts.
       if (typeof event.rateLimitResumingAt === 'number') {
         return {

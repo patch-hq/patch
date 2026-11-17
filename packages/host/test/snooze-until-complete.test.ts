@@ -159,7 +159,7 @@ describe('Snooze until complete', () => {
     second.daemon.shutdown();
   });
 
-  it('a host restart keeps it while the interrupted turn is resumed, then wakes when that returns', async () => {
+  it('a host restart keeps it while the turn is interrupted and continued, then wakes when that returns', async () => {
     const first = gated();
     const a = setup(first.backend);
     const id = await a.daemon.spawnChat({ folder: a.folder });
@@ -175,6 +175,9 @@ describe('Snooze until complete', () => {
     expect(b.daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
     expect(b.metaStore.read(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
 
+    // The cut-off turn comes back when it is continued (spec/12 § Continue).
+    await b.daemon.continueChat(id);
+    await sleep(20);
     second.release();
     await sleep(60);
     expect(b.daemon.chatState.get(id)?.snoozedUntil ?? null).toBe(null);

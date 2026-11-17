@@ -5933,6 +5933,10 @@ async function startHost(
 
   // 9. Graceful shutdown.
   const shutdown = async (): Promise<void> => {
+    // spec/12 § Chat status — every stop of the host is one it chose (a
+    // self-update, a service restart, a signal), so the server hears it first
+    // and shows this host's working chats as Host restarting, not Host offline.
+    link.send({ type: 'host.restarting', hostId: selfHostId });
     // Turns outlive the host (spec/02): let go of each one's runner first, so
     // nothing below ends a turn that is meant to carry on under the next host.
     clearInterval(healthTimer);
@@ -7429,6 +7433,13 @@ export async function handleServerEvent(
         // which ends every branch's turn.
         if (event.branchId !== undefined) daemon.stopBranch(event.chatId, event.branchId);
         else await daemon.stopAllBranches(event.chatId);
+        return;
+      }
+      case 'chat.continue_request': {
+        // spec/12 § Continue — the user pressed Continue on an interrupted turn
+        // (or the setting did it for them). A visible message, sent like any
+        // other.
+        await daemon.continueChat(event.chatId);
         return;
       }
       case 'chat.tool_cancel_request': {
