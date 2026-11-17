@@ -115,17 +115,17 @@ jobs:
       # tests keep credentials in the native keyring (Secret Service over D-Bus).
       - name: Install Xvfb and the keyring
         run: |
-          for attempt in 1 2; do
+          for attempt in 1 2 3; do
             sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 \
               xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
-            [ "$attempt" = 2 ] && break
+            [ "$attempt" = 3 ] && break
             wait=$((30 + RANDOM % 31))
             echo "::warning::apt-get install: attempt $attempt failed; retrying in ${wait}s"
             sleep "$wait"
             # A 404 means the runner package index is stale: refresh it.
             sudo apt-get update -qq || true
           done
-          echo "::error::apt-get install: failed after 2 attempts"
+          echo "::error::apt-get install: failed after 3 attempts"
           exit 1
       # Some suites run against built output (the server serves the web build).
       # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
