@@ -542,7 +542,7 @@ describe('WS hub relay', () => {
     }
   });
 
-  it("answers a replay itself, from what passed through it, while the chat's host is offline", async () => {
+  it("answers a replay itself from its record, whether or not the chat's host is online", async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(14));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -559,13 +559,16 @@ describe('WS hub relay', () => {
         });
       }
 
-      // Host online: the host answers, the server adds nothing of its own.
+      // Host online: the server answers the history; the host is asked only for
+      // what follows the record.
       const online = await makeAuthedClient(h, user, 'srf-online');
       const fromOnline: number[] = [];
       online.on('chat.message', (e) => fromOnline.push(e.seq));
       online.replay('chat-1', -1);
       await new Promise((r) => setTimeout(r, 50));
-      expect(fromOnline).toEqual([]);
+      expect(fromOnline).toEqual([1, 2, 3]);
+      const asked = h.hostLink.sent.filter((s) => s.event.type === 'chat.replay');
+      expect(asked.map((s) => (s.event as { fromSeq: number }).fromSeq)).toEqual([3]);
 
       // Host offline: the server answers from its own copy, after the seq asked for.
       const offline = await makeAuthedClient(h, user, 'srf-offline');
@@ -609,6 +612,60 @@ describe('WS hub relay', () => {
     }
   });
 
+  it("takes a host's record import into the record without broadcasting it, and acknowledges it", async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(15));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry });
+    try {
+      h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+      h.hostLink.emit({
+        type: 'chat.message',
+        chatId: 'chat-1',
+        role: 'user',
+        content: 'go',
+        seq: 0,
+      });
+      const watcher = await makeAuthedClient(h, user, 'srf-watch');
+      const live: string[] = [];
+      watcher.on('chat.artifact', (e) => live.push(e.type));
+      h.hostLink.emit({
+        type: 'host.record_import',
+        chatId: 'chat-1',
+        events: [
+          {
+            type: 'chat.artifact',
+            chatId: 'chat-1',
+            artifactId: 'a1',
+            title: 'Report',
+            url: '/a/1',
+            path: 'r.html',
+            updatedAt: 1,
+            seq: 1,
+          },
+        ],
+        done: true,
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(live).toEqual([]);
+      expect(h.hostLink.sent.map((s) => s.event)).toContainEqual({
+        type: 'host.record_import_ack',
+        chatId: 'chat-1',
+      });
+
+      const reader = await makeAuthedClient(h, user, 'srf-read');
+      const replayed: string[] = [];
+      reader.on('chat.artifact', (e) => replayed.push(e.artifactId));
+      reader.replay('chat-1', -1);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(replayed).toEqual(['a1']);
+      await watcher.close();
+      await reader.close();
+    } finally {
+      await h.close();
+    }
+  });
+
   it('replays daemon-emitted chat events to subscribed surfaces (replay flow)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(12));
     const registry = Registry.load(dir);
@@ -631,39 +688,35 @@ describe('WS hub relay', () => {
         });
       }
 
-      // Connect a second surface, request replay from seq=2 — host should
-      // see the replay request relayed upstream.
+      // Connect a second surface and replay from seq=2: the server answers 3-5
+      // from its record and relays the request upstream for what follows 5.
       const c2 = await makeAuthedClient(h, user, 'srf-2');
+      const got: number[] = [];
+      const unsub = c2.on('chat.message', (e) => got.push(e.seq));
       c2.replay('chat-1', 2);
       await new Promise((r) => setTimeout(r, 50));
+      expect(got).toEqual([3, 4, 5]);
 
       const replayRequests = h.hostLink.sent.filter((s) => s.event.type === 'chat.replay');
       expect(replayRequests).toHaveLength(1);
       const replayEvent = replayRequests[0]?.event;
-      expect(replayEvent?.type).toBe('chat.replay');
       if (replayEvent && replayEvent.type === 'chat.replay') {
         expect(replayEvent.chatId).toBe('chat-1');
-        expect(replayEvent.fromSeq).toBe(2);
+        expect(replayEvent.fromSeq).toBe(5);
       }
 
-      // Host replays events 3,4,5 — the hub should fan those out to c2.
-      const got: number[] = [];
-      const unsub = c2.on('chat.message', (e) => got.push(e.seq));
-      // A replay is addressed to the surface that asked for it; a live resend of
-      // what the server already holds is not broadcast again.
-      for (const seq of [3, 4, 5]) {
-        h.hostLink.emit({
-          type: 'chat.message',
-          chatId: 'chat-1',
-          role: 'assistant',
-          content: `m${seq}`,
-          seq,
-          forSurfaceId: 'srf-2',
-        });
-      }
+      // What the host adds past the record (seq 6) reaches the surface that asked.
+      h.hostLink.emit({
+        type: 'chat.message',
+        chatId: 'chat-1',
+        role: 'assistant',
+        content: 'm6',
+        seq: 6,
+        forSurfaceId: 'srf-2',
+      });
       await new Promise((r) => setTimeout(r, 50));
       unsub();
-      expect(got).toEqual([3, 4, 5]);
+      expect(got).toEqual([3, 4, 5, 6]);
 
       await c1.close();
       await c2.close();

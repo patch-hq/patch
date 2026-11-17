@@ -64,8 +64,8 @@ describe('Manager failover through the hub', () => {
       await wait();
       expect(link.sent.some((s) => s.event.type === 'host.manager_release')).toBe(true);
 
-      // A surface opens the Manager. The new host answers from its own log; the
-      // server adds the stretch that log is missing (what 'home' ran).
+      // A surface opens the Manager. The server's record answers the whole of
+      // it, both hosts' stretches, without waiting on either.
       registry.upsertSurface({ surfaceId: 'srf-1', surfaceKind: 'web', label: 'b', issuedAt: 1 });
       const jwt = await mintSurfaceCredential({
         userPrivateKey: user.privateKey,
@@ -81,7 +81,7 @@ describe('Manager failover through the hub', () => {
       client.on('chat.message', (e) => got.push(e.seq));
       client.replay('thread_manager', -1);
       await wait();
-      expect(got).toEqual([0, 1]);
+      expect(got).toEqual([0, 1, 2, 3]);
       await client.close();
     } finally {
       await built.app.close();

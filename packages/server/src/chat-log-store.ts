@@ -70,11 +70,18 @@ export function isTranscriptEvent(event: WireEvent): boolean {
     case 'chat.tool_result':
     case 'chat.provider_context':
     case 'chat.error':
+    case 'chat.artifact':
       return true;
+    // A summary marked `live` is a running label, replaced by the final one.
+    case 'chat.tool_run_summary':
+      return event.live !== true;
     default:
       return false;
   }
 }
+
+/** The tool whose question the user answers in a card rather than approves (spec/04 § Questions). */
+export const QUESTION_TOOL = 'AskUserQuestion';
 
 /**
  * What an event IS, apart from its content: two different things at one seq is
@@ -88,6 +95,10 @@ function identityOf(event: WireEvent): string {
     case 'chat.tool_call':
     case 'chat.tool_result':
       return `${event.type} ${event.callId}`;
+    case 'chat.artifact':
+      return `${event.type} ${event.artifactId}`;
+    case 'chat.tool_run_summary':
+      return `${event.type} ${event.callIds.join(',')}`;
     default:
       return event.type;
   }
@@ -125,6 +136,17 @@ export class ChatLogStore {
    * sync asks the host about every one of them again on each reconnect.
    */
   private readonly reach = new Map<string, number>();
+  /**
+   * The questions asked in each chat and how each was answered, by request id.
+   * A question is history: a reload draws its card, greyed out or with the
+   * picks marked, rather than two bare tool rows. Kept beside the log rather
+   * than in it, so a question asked again after a host restart is never
+   * refused or swallowed as a duplicate of the first asking.
+   */
+  private readonly questions = new Map<
+    string,
+    Map<string, { request: WireEvent; response?: WireEvent }>
+  >();
 
   constructor(opts: ChatLogStoreOptions) {
     this.logger = opts.logger;
@@ -185,7 +207,76 @@ export class ChatLogStore {
       for (const inner of event.events) this.observe(inner as WireEvent);
       return;
     }
+    this.notePermission(event);
     this.commit(event);
+  }
+
+  /**
+   * Keep a question and its answer (spec/01 § Chat record). Takes any event and
+   * ignores everything but a question's request and the response to one; never
+   * changes what is broadcast.
+   */
+  notePermission(event: WireEvent): void {
+    if (event.type === 'chat.permission_request') {
+      if (event.request.tool !== QUESTION_TOOL) return;
+      const { forSurfaceId: _route, ...whole } = event as WireEvent & { forSurfaceId?: string };
+      void _route;
+      const asked = this.questionsOf(event.chatId);
+      const held = asked.get(event.requestId);
+      if (held && JSON.stringify(held.request) === JSON.stringify(whole)) return;
+      asked.set(event.requestId, { ...held, request: whole as WireEvent });
+      this.append(event.chatId, JSON.stringify({ question: whole }), false);
+      return;
+    }
+    if (event.type === 'chat.permission_response' && typeof event.chatId === 'string') {
+      const asked = this.questionsOf(event.chatId);
+      const held = asked.get(event.requestId);
+      if (!held) return;
+      const { forSurfaceId: _route, ...whole } = event as WireEvent & { forSurfaceId?: string };
+      void _route;
+      if (held.response && JSON.stringify(held.response) === JSON.stringify(whole)) return;
+      held.response = whole as WireEvent;
+      this.append(event.chatId, JSON.stringify({ answer: whole }), false);
+    }
+  }
+
+  /**
+   * The chat's record with `seq > fromSeq` as a surface replays it: the log in
+   * seq order, with each question placed at its own seq and followed by its
+   * answer once it has one. A question with no answer yet is the host's to
+   * show: it restates the questions it is still waiting on.
+   */
+  replay(chatId: string, fromSeq: number): WireEvent[] {
+    const events = this.read(chatId, fromSeq);
+    const asked = [...this.questionsOf(chatId).values()]
+      .filter(
+        (q): q is { request: WireEvent; response: WireEvent } =>
+          q.response !== undefined && (q.request as { seq: number }).seq > fromSeq,
+      )
+      .sort((a, b) => (a.request as { seq: number }).seq - (b.request as { seq: number }).seq);
+    if (asked.length === 0) return events;
+    const out: WireEvent[] = [];
+    let i = 0;
+    for (const e of events) {
+      const seq = (e as { seq: number }).seq;
+      while (i < asked.length && (asked[i]!.request as { seq: number }).seq <= seq) {
+        out.push(asked[i]!.request, asked[i]!.response);
+        i += 1;
+      }
+      out.push(e);
+    }
+    for (; i < asked.length; i += 1) out.push(asked[i]!.request, asked[i]!.response);
+    return out;
+  }
+
+  private questionsOf(chatId: string): Map<string, { request: WireEvent; response?: WireEvent }> {
+    this.load(chatId);
+    let asked = this.questions.get(chatId);
+    if (!asked) {
+      asked = new Map();
+      this.questions.set(chatId, asked);
+    }
+    return asked;
   }
 
   /**
@@ -326,9 +417,18 @@ export class ChatLogStore {
         const event = JSON.parse(line) as WireEvent;
         const seq = (event as { seq?: unknown }).seq;
         const reach = (event as { reach?: unknown }).reach;
+        const rec = event as { question?: WireEvent; answer?: WireEvent };
         // A torn last line from a crash, or a record that is not an event, is skipped.
         if (typeof seq === 'number') log.set(seq, event);
-        else if (typeof reach === 'number' && reach > (this.reach.get(chatId) ?? -1)) {
+        else if (rec.question?.type === 'chat.permission_request') {
+          const q = rec.question;
+          const asked = this.questions.get(chatId) ?? new Map();
+          this.questions.set(chatId, asked);
+          asked.set(q.requestId, { ...asked.get(q.requestId), request: q });
+        } else if (rec.answer?.type === 'chat.permission_response') {
+          const held = this.questions.get(chatId)?.get(rec.answer.requestId);
+          if (held) held.response = rec.answer;
+        } else if (typeof reach === 'number' && reach > (this.reach.get(chatId) ?? -1)) {
           this.reach.set(chatId, reach);
         }
       } catch {

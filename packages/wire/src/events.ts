@@ -6988,6 +6988,31 @@ export const ChatCommittedEvent = z
 export type ChatCommittedEvent = z.infer<typeof ChatCommittedEvent>;
 
 /**
+ * Host -> server: the history of one chat that a server's record did not keep
+ * before it kept everything (artifacts, tool-run summaries, answered
+ * questions), sent once per chat (spec/01 § Chat record). Taken into the record
+ * without being broadcast; `done` closes the chat and is acknowledged with
+ * `host.record_import_ack`. Sent only to a server whose `auth.ok` carried
+ * `recordImport: true`.
+ */
+export const HostRecordImportEvent = z
+  .object({
+    type: z.literal('host.record_import'),
+    chatId: z.string().min(1),
+    /** Shallow like `chat.replay_batch`; the server validates each as a frame of its own. */
+    events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
+    done: z.boolean(),
+  })
+  .strict();
+export type HostRecordImportEvent = z.infer<typeof HostRecordImportEvent>;
+
+/** Server -> host: the record holds what `host.record_import` sent for this chat. */
+export const HostRecordImportAckEvent = z
+  .object({ type: z.literal('host.record_import_ack'), chatId: z.string().min(1) })
+  .strict();
+export type HostRecordImportAckEvent = z.infer<typeof HostRecordImportAckEvent>;
+
+/**
  * Server -> host: this host runs the Manager now, because its previous host has
  * been offline for a while (spec/06 § Manager failover). `handoff` is the
  * recent conversation as the server holds it, given to the Manager with its
@@ -9515,6 +9540,11 @@ export const AuthOkEvent = z
      * changed it (spec/14 § Live updates). Absent when no SPA is mounted.
      */
     webBundleHash: z.string().optional(),
+    /**
+     * Sent to a host by a server that takes `host.record_import` (spec/01 §
+     * Chat record). Absent: the host sends none.
+     */
+    recordImport: z.literal(true).optional(),
   })
   .strict();
 export type AuthOkEvent = z.infer<typeof AuthOkEvent>;
@@ -9775,6 +9805,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchLogSyncBatchEvent,
   PatchLogRestoreEvent,
   ChatCommittedEvent,
+  HostRecordImportEvent,
+  HostRecordImportAckEvent,
   HostReconciledEvent,
   HostManagerAdoptEvent,
   HostManagerReleaseEvent,
@@ -10093,6 +10125,8 @@ export const EVENT_SCHEMAS = {
   'patch.log_sync.batch': PatchLogSyncBatchEvent,
   'patch.log_restore': PatchLogRestoreEvent,
   'chat.committed': ChatCommittedEvent,
+  'host.record_import': HostRecordImportEvent,
+  'host.record_import_ack': HostRecordImportAckEvent,
   'host.reconciled': HostReconciledEvent,
   'host.manager_adopt': HostManagerAdoptEvent,
   'host.manager_release': HostManagerReleaseEvent,

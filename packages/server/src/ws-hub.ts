@@ -1223,6 +1223,7 @@ export class WsHub {
         accountId: account.accountId,
         surfaceId: claims.daemon_id,
         hosts: this.hostRoster(),
+        ...(this.deps.chatLogStore ? { recordImport: true as const } : {}),
       }),
     );
 
@@ -1746,12 +1747,20 @@ export class WsHub {
         return;
       }
       case 'chat.replay': {
-        // Replay is per-surface: tag with the surfaceId so the host can
-        // direct the stream back to this surface only.
         conn.watchedChats.add(event.chatId);
-        const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
+        // The server's record answers the history (spec/01 § History reads);
+        // the host is asked only for what follows it, which is how a surface
+        // also gets what is live on the host right now (questions it is waiting
+        // on, running subagents, the chat's state). Replay is per-surface: tag
+        // with the surfaceId so the host directs that back to this one only.
+        const answered = this.replayFromRecord(conn, event);
+        const tagged: WireEvent = {
+          ...event,
+          ...(answered !== null && answered > event.fromSeq ? { fromSeq: answered } : {}),
+          forSurfaceId: conn.surfaceId,
+        };
         this.deps.hostLink.send(conn.surfaceId, tagged);
-        this.replayHeldTranscript(conn, event);
+        if (answered === null) this.replayHeldTranscript(conn, event);
         for (const queued of this.deps.queueTracker?.snapshot(event.chatId) ?? []) {
           conn.socket.send(encode(queued));
         }
@@ -1769,6 +1778,39 @@ export class WsHub {
         return;
       }
     }
+  }
+
+  /**
+   * Answer a surface's replay from the server's record, and say how far it
+   * reaches: null when the record cannot answer it (a branch other than the
+   * active one, which only its host can lay out, or a chat the server holds
+   * nothing of).
+   */
+  private replayFromRecord(
+    conn: { socket: { send(data: string): void } },
+    request: Extract<WireEvent, { type: 'chat.replay' }>,
+  ): number | null {
+    const store = this.deps.chatLogStore;
+    if (!store || request.branchId !== undefined || !store.has(request.chatId)) return null;
+    const events = store.replay(request.chatId, request.fromSeq);
+    const reach = Math.max(request.fromSeq, store.highWater(request.chatId));
+    if (request.batch !== true) {
+      for (const e of events) conn.socket.send(encode(e));
+      return reach;
+    }
+    // Always at least one frame, so the surface's loading state ends here
+    // even when it already had everything.
+    for (let i = 0; i === 0 || i < events.length; i += REPLAY_CHUNK_EVENTS) {
+      conn.socket.send(
+        encode({
+          type: 'chat.replay_batch',
+          chatId: request.chatId,
+          events: events.slice(i, i + REPLAY_CHUNK_EVENTS),
+          done: i + REPLAY_CHUNK_EVENTS >= events.length,
+        }),
+      );
+    }
+    return reach;
   }
 
   /**
@@ -1831,6 +1873,7 @@ export class WsHub {
       if (replay) {
         this.deps.chatLogStore.observe(event);
       } else {
+        this.deps.chatLogStore.notePermission(event);
         const outcome = this.deps.chatLogStore.commit(event);
         if (outcome === 'duplicate') return;
         if (outcome === 'conflict') {
@@ -1881,6 +1924,8 @@ export class WsHub {
       event.type === 'patch.queue_pull.request' ||
       // What the server asked a host to resend is taken into the log, not shown to surfaces.
       event.type === 'patch.log_sync.batch' ||
+      // History the record lacked, sent once: kept, never shown as new.
+      event.type === 'host.record_import' ||
       // Shared settings (spec/03 § Settings): consumed by the settings service.
       // `settings.secret_update`, `settings.adopt.response` and
       // `settings.account_signed_in` carry credential values; surfaces learn the

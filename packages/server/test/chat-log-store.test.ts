@@ -188,20 +188,79 @@ describe('ChatLogStore', () => {
     expect(store.highWater('c1')).toBe(9);
   });
 
-  test('history it does not keep still raises the high-water mark, and a restart remembers it', () => {
+  test("a turn's closing summary and an artifact are kept; a running label is not", () => {
     const store = new ChatLogStore({ dataDir: dir, logger });
     store.commit(message('c1', 1));
-    const summary = {
-      type: 'chat.tool_run_summary',
+    const summary = (seq: number, live?: true) =>
+      ({
+        type: 'chat.tool_run_summary',
+        chatId: 'c1',
+        callIds: ['t1'],
+        summary: 's',
+        seq,
+        ...(live ? { live } : {}),
+      }) as WireEvent;
+    expect(store.commit(summary(2, true))).toBe('ignored');
+    expect(store.commit(summary(2))).toBe('new');
+    const artifact = {
+      type: 'chat.artifact',
       chatId: 'c1',
-      callIds: [],
-      summary: 's',
-      seq: 2,
+      artifactId: 'a1',
+      title: 'Report',
+      url: '/a/1',
+      path: 'r.html',
+      updatedAt: 5,
+      seq: 3,
     } as WireEvent;
-    expect(store.commit(summary)).toBe('ignored');
-    expect(store.highWater('c1')).toBe(2);
-    expect(store.read('c1', -1)).toHaveLength(1);
-    expect(new ChatLogStore({ dataDir: dir, logger }).highWater('c1')).toBe(2);
+    expect(store.commit(artifact)).toBe('new');
+    expect(store.commit({ ...artifact, updatedAt: 6 } as WireEvent)).toBe('updated');
+    expect(new ChatLogStore({ dataDir: dir, logger }).read('c1', -1).map((e) => e.type)).toEqual([
+      'chat.message',
+      'chat.tool_run_summary',
+      'chat.artifact',
+    ]);
+  });
+
+  test("a question and its answer replay at the question's seq; an open one is left to the host", () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(message('c1', 1));
+    store.commit(message('c1', 4));
+    const ask = (requestId: string, seq: number) =>
+      ({
+        type: 'chat.permission_request',
+        chatId: 'c1',
+        requestId,
+        request: { tool: 'AskUserQuestion', args: { questions: [] } },
+        seq,
+      }) as WireEvent;
+    store.notePermission(ask('q1', 2));
+    store.notePermission(ask('q2', 3));
+    store.notePermission({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      requestId: 'p1',
+      request: { tool: 'Bash', args: {} },
+      seq: 3,
+    } as WireEvent);
+    store.notePermission({
+      type: 'chat.permission_response',
+      chatId: 'c1',
+      requestId: 'q1',
+      approve: true,
+      decision: 'approve_with_edits',
+      answers: { pick: 'A' },
+    } as WireEvent);
+    const shape = (s: ChatLogStore) =>
+      s.replay('c1', -1).map((e) => `${e.type}:${(e as { seq?: number }).seq ?? '-'}`);
+    const expected = [
+      'chat.message:1',
+      'chat.permission_request:2',
+      'chat.permission_response:-',
+      'chat.message:4',
+    ];
+    expect(shape(store)).toEqual(expected);
+    expect(shape(new ChatLogStore({ dataDir: dir, logger }))).toEqual(expected);
+    expect(store.replay('c1', 2).map((e) => e.type)).toEqual(['chat.message']);
   });
 
   test('a reach is only noted for a chat it holds, and never lowers the mark', () => {

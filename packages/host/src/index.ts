@@ -206,6 +206,7 @@ import {
 } from './host.js';
 import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
+import { RecordImport } from './recordImport.js';
 import { createHealthSampler } from './healthReport.js';
 import { checkLaunchPath } from './launchPath.js';
 import { handleJobExec } from './jobExec.js';
@@ -2338,6 +2339,9 @@ async function startHost(
   const healthTimer = setInterval(() => void reportHealth(), HOST_HEALTH_INTERVAL_MS);
   healthTimer.unref();
 
+  // The one-off send of what the server's record lacks (spec/01 § Chat record).
+  // Built once the chats are loaded, below; started by a server that takes it.
+  let recordImport: RecordImport | undefined;
   const link = createServerLink({
     url: config.serverWsUrl,
     daemonKey,
@@ -2417,6 +2421,7 @@ async function startHost(
       // spec/15 § Secrets: publish the host-owned secret set so every
       // surface's editor is populated from the same source on (re)connect.
       sender({ type: 'secrets.list', secrets: secretsStore.list() });
+      if (greeting.recordImport === true) recordImport?.start();
     },
     onFrame: async (event, sender) => {
       // Host addressing, checked once for the whole inbound stream: ANY frame
@@ -2497,6 +2502,10 @@ async function startHost(
         } catch (err) {
           logger.warn({ chatId: event.chatId, err }, 'log restore: could not write the chat');
         }
+        return;
+      }
+      if (event.type === 'host.record_import_ack') {
+        recordImport?.onAck(event.chatId);
         return;
       }
       if (event.type === 'chat.committed') {
@@ -3715,6 +3724,7 @@ async function startHost(
     },
     onDisconnected: () => {
       linkOnline = false;
+      recordImport?.stop();
       serverEventsClient.endAll('host→server link dropped');
       artifactPublisher.failAll(
         'artifact publish: host→server link dropped before the server answered',
@@ -4638,6 +4648,13 @@ async function startHost(
     // spawn's `accountId` against what this host actually has stored. Reads
     // the store fresh each call (not cached) so an account added/removed
     // between spawns is reflected immediately.
+  });
+  recordImport = new RecordImport({
+    path: join(config.patchHome, 'record-import.json'),
+    logger,
+    listChats: () => daemon.list().map((c) => c.chatId),
+    replayChat: (chatId, emit) => daemon.replayChat(chatId, -1, emit),
+    send: (event) => link.send(event),
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
   // Meeting mode (meeting.ts). Local Whisper unless the account's meeting engine
