@@ -618,6 +618,8 @@ export const ChatSpawnedEvent = z
     ...hostIdField,
     folder: z.string().min(1),
     parentChatId: z.string().min(1).optional(),
+    /** Position in the account feed; set by the server on what it sends surfaces. */
+    feedPos: z.number().int().nonnegative().optional(),
     ...forSurfaceIdField,
     /**
      * The job whose `spawn` action created this chat (spec/08 § Action), or
@@ -1732,6 +1734,8 @@ export const ChatStateEvent = z
      * sends it. Absent from an older server.
      */
     chatStatus: ChatStatusInfo.optional(),
+    /** Position in the account feed (spec/03 § Account feed); set by the server. */
+    feedPos: z.number().int().nonnegative().optional(),
     lastError: z
       .object({
         code: ChatErrorCode,
@@ -9370,6 +9374,87 @@ export const AckEvent = z
   .strict();
 export type AckEvent = z.infer<typeof AckEvent>;
 
+/** One chat a device follows in the account feed (spec/03 § Account feed). */
+export const FeedFollow = z
+  .object({
+    chatId: z.string().min(1),
+    /** The highest `seq` the device holds for the chat; -1 when it holds none. */
+    after: z.number().int().gte(-1),
+    branchId: z.string().min(1).optional(),
+  })
+  .strict();
+export type FeedFollow = z.infer<typeof FeedFollow>;
+
+/**
+ * Surface -> server: a page of a chat's record (spec/03 § Chat history). Only
+ * the server answers. At most one of `after` and `before`; neither asks for
+ * the chat's last `limit` entries. Sent only to a server whose `auth.ok`
+ * carried `accountFeed: true`.
+ */
+export const ChatHistoryRequestEvent = z
+  .object({
+    type: z.literal('chat.history_request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    branchId: z.string().min(1).optional(),
+    after: z.number().int().gte(-1).optional(),
+    before: z.number().int().nonnegative().optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  })
+  .strict();
+export type ChatHistoryRequestEvent = z.infer<typeof ChatHistoryRequestEvent>;
+
+/** Server -> surface: the page asked for (spec/03 § Chat history). */
+export const ChatHistoryEvent = z
+  .object({
+    type: z.literal('chat.history'),
+    /** The request answered; `feed` for entries the account feed sent unasked. */
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    branchId: z.string().min(1).optional(),
+    /** In seq order; each is a frame in its own right. */
+    entries: z.array(z.object({ type: z.string().min(1) }).passthrough()),
+    /** Entries remain in the direction asked. */
+    more: z.boolean(),
+    /** The chat's latest `seq` on the server; -1 when it holds none. */
+    through: z.number().int().gte(-1),
+    /** Every question still unresolved on the chat, whatever range was asked. */
+    pending: z.array(z.object({ type: z.string().min(1) }).passthrough()),
+    /** The chat's waiting messages. */
+    queued: z.array(z.object({ type: z.string().min(1) }).passthrough()),
+  })
+  .strict();
+export type ChatHistoryEvent = z.infer<typeof ChatHistoryEvent>;
+
+/**
+ * Surface -> server, after `hello` on every connect (spec/03 § Account feed).
+ * `after` is the last `feedPos` the device holds, absent when it holds none.
+ */
+export const FeedResumeEvent = z
+  .object({
+    type: z.literal('feed.resume'),
+    after: z.number().int().nonnegative().optional(),
+    follow: z.array(FeedFollow),
+  })
+  .strict();
+export type FeedResumeEvent = z.infer<typeof FeedResumeEvent>;
+
+/** Surface -> server: replaces the device's followed chats. */
+export const FeedFollowEvent = z
+  .object({ type: z.literal('feed.follow'), follow: z.array(FeedFollow) })
+  .strict();
+export type FeedFollowEvent = z.infer<typeof FeedFollowEvent>;
+
+/**
+ * Server -> surface: the device's `after` is not one this feed can continue
+ * from (it holds none, or the server's feed is behind it). Reload the chat
+ * index, then continue from `feedPos`.
+ */
+export const FeedResetEvent = z
+  .object({ type: z.literal('feed.reset'), feedPos: z.number().int().nonnegative() })
+  .strict();
+export type FeedResetEvent = z.infer<typeof FeedResetEvent>;
+
 export const ChatReplayEvent = z
   .object({
     type: z.literal('chat.replay'),
@@ -9568,6 +9653,12 @@ export const AuthOkEvent = z
      * outbox (`host.outbox`, spec/01 § Host outbox). Absent: send them bare.
      */
     hostOutbox: z.literal(true).optional(),
+    /**
+     * Sent to a surface by a server that answers `chat.history_request` and runs
+     * the account feed (`feed.resume`, spec/03 § Account feed). Absent: use
+     * `chat.replay`.
+     */
+    accountFeed: z.literal(true).optional(),
   })
   .strict();
 export type AuthOkEvent = z.infer<typeof AuthOkEvent>;
@@ -9830,6 +9921,11 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostRecordImportAckEvent,
   HostOutboxEvent,
   HostOutboxAckEvent,
+  ChatHistoryRequestEvent,
+  ChatHistoryEvent,
+  FeedResumeEvent,
+  FeedFollowEvent,
+  FeedResetEvent,
   HostReconciledEvent,
   HostManagerAdoptEvent,
   HostManagerReleaseEvent,
@@ -10151,6 +10247,11 @@ export const EVENT_SCHEMAS = {
   'host.record_import_ack': HostRecordImportAckEvent,
   'host.outbox': HostOutboxEvent,
   'host.outbox_ack': HostOutboxAckEvent,
+  'chat.history_request': ChatHistoryRequestEvent,
+  'chat.history': ChatHistoryEvent,
+  'feed.resume': FeedResumeEvent,
+  'feed.follow': FeedFollowEvent,
+  'feed.reset': FeedResetEvent,
   'host.reconciled': HostReconciledEvent,
   'host.manager_adopt': HostManagerAdoptEvent,
   'host.manager_release': HostManagerReleaseEvent,
