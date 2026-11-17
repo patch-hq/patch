@@ -131,7 +131,11 @@ export function ClaudeSettingsEditor({ host }: { host: HostPresence }): JSX.Elem
           <div className="set-row-text">
             <span className="set-row-title">{hostLabel(host)}</span>
             <span className="set-sub">
-              {report === null ? 'Not reported yet' : value?.trim() === '' ? 'None' : 'Set'}
+              {report === null
+                ? 'Not reported yet'
+                : value?.trim() === ''
+                  ? 'No custom settings'
+                  : 'Set'}
             </span>
           </div>
           {draft === null ? (
