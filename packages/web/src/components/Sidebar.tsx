@@ -48,6 +48,7 @@ import {
   SNOOZE_UNTIL_COMPLETE,
 } from '@patch/wire';
 import { StatusBadge } from './StatusBadge.js';
+import { CONNECT_PATH } from './ClaudeDisconnectedBanner.js';
 import { ProjectSnoozeMenu } from './ProjectSnoozeMenu.js';
 import { SidebarViewMenu } from './SidebarViewMenu.js';
 import { SidebarSortMenu } from './SidebarSortMenu.js';
@@ -2589,6 +2590,23 @@ const ChatRowView = memo(function ChatRowView({
       >
         {special ? (
           <Compass className="manager-glyph" data-testid="manager-glyph" size={16} aria-hidden />
+        ) : badge === 'signin' ? (
+          // Waiting for sign-in carries its Sign in action on the row too
+          // (spec/05 § Chat status): the badge itself goes to the sign-in,
+          // so the row keeps its three-column shape.
+          <button
+            type="button"
+            className="row-signin"
+            data-testid={`row-signin-${row.chatId}`}
+            aria-label="Sign in"
+            title="Sign in"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(CONNECT_PATH);
+            }}
+          >
+            <StatusBadge badge={badge} pendingWake={null} failureReason={null} />
+          </button>
         ) : (
           <StatusBadge
             badge={badge}

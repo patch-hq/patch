@@ -91,6 +91,7 @@ import { ThreadsStrip } from '../components/ThreadsStrip.js';
 /** What the Manager is, said where a newcomer first meets it: its empty chat. */
 export const MANAGER_EMPTY_LINE = 'Ask about any of your chats, or have it message them for you.';
 import { CONNECT_PATH, ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
+import { ChatSignInBanner } from '../components/ChatSignInBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
@@ -2429,6 +2430,7 @@ export function ChatRoute({
       <SnoozedBanner row={row} />
       {/* Provider accounts are shared by every host (spec/10): no host is named. */}
       <ClaudeDisconnectedBanner model={row.model ?? undefined} />
+      <ChatSignInBanner status={row.chatStatus} model={row.model ?? undefined} />
       {/* And so is credit. Every chat on a spent host says so, because the
           per-chat bubble only reaches whichever chat you happen to have open —
           it cannot tell you that the other twenty are stuck too. */}

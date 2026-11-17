@@ -289,7 +289,22 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
           accessibilityRole="button"
           accessibilityLabel={`Open chat ${deriveChatTitle(row)}`}
         >
-          <StatusBadge badge={badge} />
+          {badge === 'signin' ? (
+            // Waiting for sign-in carries its Sign in action on the row too
+            // (spec/05 § Chat status): the badge goes to Settings, where the
+            // sign-in is.
+            <Pressable
+              testID={`row-signin-${row.chatId}`}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in"
+              hitSlop={8}
+              onPress={() => router.push('/(tabs)/settings')}
+            >
+              <StatusBadge badge={badge} />
+            </Pressable>
+          ) : (
+            <StatusBadge badge={badge} />
+          )}
           <View style={{ flex: 1, marginLeft: space.md }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               {row.pinned ? (

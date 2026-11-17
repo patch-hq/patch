@@ -11174,6 +11174,11 @@ main.empty-state p {
   font-size: var(--text-min);
   border-bottom: 1px solid var(--line-soft);
 }
+.row-signin {
+  all: unset;
+  display: inline-flex;
+  cursor: pointer;
+}
 .claude-disconnected-banner a {
   color: inherit;
   text-decoration: underline;

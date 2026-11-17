@@ -383,3 +383,43 @@ describe('Claude disconnected bar', () => {
     expect(queryHost(r.root, byTestId('claude-disconnected-bar'))).toBeNull();
   });
 });
+
+describe('Chat sign-in bar', () => {
+  function connected(claude: boolean[]): void {
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: claude.map((c, i) => ({ id: `c${i}`, label: `c${i}`, connected: c })),
+            codex: [],
+            providerKeys: [],
+          },
+          hosts: [],
+        },
+      } as never,
+    });
+  }
+
+  it('a chat waiting for sign-in carries a Sign in action that goes to Settings', () => {
+    connected([true, false]);
+    seed({ chatStatus: { state: 'waiting_for_sign_in', since: 1 } });
+    const r = renderRN(<Harness />);
+    expect(hasText(findHost(r.root, byTestId('chat-signin-bar')), 'Signed out of Claude')).toBe(
+      true,
+    );
+    findHost(r.root, byTestId('chat-signin-action')).props.onPress();
+    expect(routerMock.push).toHaveBeenCalledWith('/(tabs)/settings');
+  });
+
+  it('is absent on a chat in any other state, and when the not-signed-in bar already speaks', () => {
+    connected([true]);
+    seed({ chatStatus: { state: 'idle', since: 1 } });
+    const r = renderRN(<Harness />);
+    expect(queryHost(r.root, byTestId('chat-signin-bar'))).toBeNull();
+    seed({ chatStatus: { state: 'waiting_for_sign_in', since: 1 } });
+    actSync(() => connected([false]));
+    expect(queryHost(r.root, byTestId('chat-signin-bar'))).toBeNull();
+  });
+});

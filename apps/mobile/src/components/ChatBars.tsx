@@ -20,6 +20,7 @@ import { ReminderBar } from './chatBars/ReminderBar';
 import { ProviderContextBar } from './chatBars/ProviderContextBar';
 import { HiddenBar } from './chatBars/HiddenBar';
 import { ArchivedBar } from './chatBars/ArchivedBar';
+import { ChatSignInBar } from './chatBars/ChatSignInBar';
 import { ClaudeDisconnectedBar } from './chatBars/ClaudeDisconnectedBar';
 import { ArtifactBar } from './chatBars/ArtifactBar';
 import { BrowserHandoffBar } from './chatBars/BrowserHandoffBar';
@@ -58,6 +59,7 @@ export function ChatBars({
       {/* Credentials are per host: this speaks only for the host THIS chat
           runs on. */}
       {row ? <ClaudeDisconnectedBar model={row.model} /> : null}
+      {row ? <ChatSignInBar status={row.chatStatus} model={row.model} /> : null}
     </>
   );
 }
