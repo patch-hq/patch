@@ -64,7 +64,8 @@ test('job editor text is at least 15px', async ({ page }) => {
   await stub(page);
   await page.goto(`/app/dev-harness.html?route=/jobs/${JOB_ID}`);
   await expect(page.getByTestId('job-name')).toHaveValue(JOB.name, { timeout: 15_000 });
-  expect(await smallText(page, '.job-editor', JOB_PAGE_MIN_PX)).toEqual([]);
+  // Poll: the stylesheet can land a beat after the rows render on a loaded runner.
+  await expect.poll(() => smallText(page, '.job-editor', JOB_PAGE_MIN_PX)).toEqual([]);
 });
 
 test('jobs list text is at least 15px', async ({ page }) => {
@@ -72,5 +73,6 @@ test('jobs list text is at least 15px', async ({ page }) => {
   await page.goto('/app/dev-harness.html?route=/jobs');
   await expect(page.getByTestId('jobs-route')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.job-row').first()).toBeVisible();
-  expect(await smallText(page, '.jobs-route', JOB_PAGE_MIN_PX)).toEqual([]);
+  // Poll: the stylesheet can land a beat after the rows render on a loaded runner.
+  await expect.poll(() => smallText(page, '.jobs-route', JOB_PAGE_MIN_PX)).toEqual([]);
 });
