@@ -1338,7 +1338,26 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       if (!auth.ok) return reply.code(401).send({ error: auth.reason });
       if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
       const state = opts.daemon.chatState.resolve(req.params.id);
-      if (!state) return reply.code(404).send({ error: 'not found' });
+      if (!state) {
+        // Not on this machine: the server knows the owner and forwards. A full
+        // id only — a prefix cannot be resolved without the owner's chat list.
+        if (opts.serverApi) {
+          try {
+            const ans = await opts.serverApi({
+              method: 'POST',
+              path: `/api/chats/${encodeURIComponent(req.params.id)}/archive`,
+              body: { archived: req.body?.archived ?? true },
+            });
+            return reply.code(ans.status).send(ans.body ?? '');
+          } catch (err) {
+            const code = err instanceof AccountsRpcError ? err.code : 'internal';
+            return reply
+              .code(code === 'link_offline' ? 503 : code === 'timeout' ? 504 : 500)
+              .send({ error: code, message: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        return reply.code(404).send({ error: 'not found' });
+      }
       const archived = req.body?.archived ?? true;
       try {
         await opts.daemon.setArchived(state.chatId, archived);
