@@ -398,9 +398,9 @@ describe('SpawnAction.permissionMode (spec/08 § Action)', () => {
     expect(JobAction.safeParse({ ...base, permissionMode: true }).success).toBe(false);
   });
 
-  test('rejected on ensure and message — spawn-only, same reasoning as `hidden`', () => {
+  test('accepted on continue (it may create the chat), rejected on message', () => {
     expect(JobAction.safeParse({ ...base, type: 'continue', permissionMode: 'plan' }).success).toBe(
-      false,
+      true,
     );
     expect(
       JobAction.safeParse({ type: 'message', chatId: 'c1', skill: 'foo', permissionMode: 'plan' })

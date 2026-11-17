@@ -1,4 +1,4 @@
-package io.github.tomchambers2.patch
+package dev.patchhq.app
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

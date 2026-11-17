@@ -100,8 +100,13 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     const workflow = read('.github/workflows/release.yml');
     // Nothing is published unless every surface built and this commit's test
     // run (test.yml) passed; the tests are not re-run here, they run alongside...
-    expect(workflow).toMatch(/needs: \[tests, server, host, mac, android, mobile-update\]/);
+    expect(workflow).toMatch(
+      /needs: \[tests, server, host, mac, linux-desktop, android, mobile-update\]/,
+    );
     expect(workflow).not.toMatch(/PATCH_BROWSER_SHARD/);
+    // The first-run screenshots are an artifact for reading a failed run, never a release file.
+    expect(workflow).not.toMatch(/merge-multiple: true/);
+    expect(workflow).toMatch(/mac-first-run\) echo "not published/);
     const tests = read('.github/workflows/test.yml');
     // ...the cheap layers on every PR and the full gate, four shards, in the merge
     // queue, behind one required check. Nothing re-runs on main: the queue moves
@@ -132,14 +137,18 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(
       /--delete-branch|--rebase|\s-d\s/,
     );
-    expect(read('.github/workflows/pr-conflicts.yml')).toMatch(/needs-rebase/);
-    // GitHub owns a PR from green to merged: nothing re-queues an ejected PR.
-    // The dequeued event goes to a Patch job (scripts/merge-queue-dequeue.mjs).
-    expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
-    expect(read('scripts/merge-queue-dequeue.mjs')).not.toMatch(/enqueuePullRequest/);
-    expect(read('.github/workflows/test-retry.yml')).toMatch(
-      /github\.event\.workflow_run\.event == 'pull_request'/,
+    // Failures and conflicts go to Patch as a webhook, never a label or a sweep.
+    expect(read('.github/workflows/pr-conflicts.yml')).toMatch(
+      /needs-attention\.mjs --kind pr-conflict/,
     );
+    expect(read('.github/workflows/pr-conflicts.yml')).not.toMatch(/needs-rebase/);
+    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/schedule:|sweep/);
+    // GitHub owns a PR from green to merged: nothing re-queues an ejected PR.
+    // A failure goes to a fresh Patch chat (scripts/needs-attention.mjs).
+    expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
+    expect(read('scripts/needs-attention.mjs')).not.toMatch(/enqueuePullRequest/);
+    expect(existsSync(join(repoRoot, '.github/workflows/test-retry.yml'))).toBe(false);
+    expect(read('.github/workflows/needs-attention.yml')).toMatch(/merge-queue-failed/);
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
     // (spec/11 § Mobile updates).
@@ -219,7 +228,7 @@ describe('the docker build context', () => {
 // to the local host's :3003 (what this installer and prod's Caddy once did)
 // sends a session for a chat on another host to a host that has never
 // heard of it: "session_not_found: chat not found: <id>". `/device/*` is the
-// one path that does belong to the local host.
+// server's too: voice devices connect to the server (spec/16).
 describe('H1 deploy artifacts — the installer Caddyfile routes the audio plane', () => {
   const printed = execFileSync(
     'sh',
@@ -238,7 +247,8 @@ describe('H1 deploy artifacts — the installer Caddyfile routes the audio plane
     for (const line of audioMatcher) expect(line).not.toContain('/audio/');
   });
 
-  it('still sends /device/* to the local host', () => {
-    expect(printed).toMatch(/@\w+ path \/device\/\*\n\treverse_proxy @\w+ 127\.0\.0\.1:3003/);
+  it('sends /device/* to the server too: voice devices connect there', () => {
+    expect(printed).not.toContain('/device/');
+    expect(printed).not.toContain('3003');
   });
 });

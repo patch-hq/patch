@@ -156,7 +156,7 @@ describe('a message into an archived chat starts it again, where it was', () => 
     expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
   });
 
-  it("a sibling agent's patch_send_to is delivered but leaves an archived chat archived", async () => {
+  it("a sibling agent's patch_send_to un-archives the chat", async () => {
     const { daemon, prompts, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.setArchived(chatId, true);
@@ -167,10 +167,9 @@ describe('a message into an archived chat starts it again, where it was', () => 
       localId: 'L1',
       origin: 'machine',
       fromAgent: true,
-      fromSibling: true,
     });
 
-    expect(daemon.chatState.get(chatId)?.status).toBe('archived');
+    expect(daemon.chatState.get(chatId)?.status).toBe('active');
     expect(prompts).toEqual(['ping from sibling']);
   });
 

@@ -106,19 +106,15 @@ describe('Sidebar — snoozed chats', () => {
 
   it('an un-snoozed chat is not in the Snoozed section', async () => {
     seed(null);
-    // The 0 on the toggle is the server's total (spec/04 § Section counts), not
-    // a measurement of the rendered list — it is on the row before it is opened.
+    // The count is the server's total (spec/04 § Section counts), not a
+    // measurement of the rendered list. Another snoozed chat keeps the icon.
     useChatStore
       .getState()
-      .setSectionCounts({ hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 });
+      .setSectionCounts({ hidden: 0, archived: 0, snoozed: 1, deleted: 0, automations: 0 });
     renderSidebar();
-    // Empty reads as a 0 in the toggle's tooltip, with no body below it
-    // (spec/14 §6).
-    expect(screen.getByTestId('snoozed-toggle')).toHaveAttribute('title', 'Snoozed · 0');
     fireEvent.click(screen.getByTestId('snoozed-toggle'));
     const section = await screen.findByTestId('snoozed-section');
-    expect(screen.getByTestId('snoozed-toggle')).toHaveAttribute('title', 'Snoozed · 0');
-    expect(section.querySelectorAll('[data-testid^="chat-row-"]')).toHaveLength(0);
+    expect(section.querySelector('[data-testid="chat-row-c1"]')).toBeNull();
   });
 });
 

@@ -51,7 +51,7 @@ export function LinkPreview({
 type State =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; summary: string };
+  | { kind: 'done'; title?: string; summary: string };
 
 function LinkSummaryCard({
   url,
@@ -67,7 +67,13 @@ function LinkSummaryCard({
     let live = true;
     setState({ kind: 'loading' });
     getLinkSummary(url, prompt).then(
-      (data) => live && setState({ kind: 'done', summary: data.summary }),
+      (data) =>
+        live &&
+        setState({
+          kind: 'done',
+          ...(data.title ? { title: data.title } : {}),
+          summary: data.summary,
+        }),
       (e: Error) => live && setState({ kind: 'error', message: e.message }),
     );
     return () => {
@@ -108,6 +114,14 @@ function LinkSummaryCard({
             {state.kind === 'error' ? (
               <Text testID="link-summary-error" style={{ ...text, color: colors.red }}>
                 {state.message}
+              </Text>
+            ) : null}
+            {state.kind === 'done' && state.title ? (
+              <Text
+                testID="link-summary-title"
+                style={{ ...text, color: colors.ink, fontFamily: fonts.bodyBold }}
+              >
+                {state.title}
               </Text>
             ) : null}
             {state.kind === 'done' ? (

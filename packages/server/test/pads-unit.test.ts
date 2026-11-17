@@ -260,7 +260,7 @@ describe('message', () => {
         { n: 2, problem: 'boom' },
       ],
     });
-    expect(text).toContain('[Pad] Tom sent 2 changes on "Settings" (pad id: settings)');
+    expect(text).toContain('[Pad] The user sent 2 changes on "Settings" (pad id: settings)');
     expect(text).toContain('Screen "Home" (index.html):');
     expect(text).toContain('picture: https://x/p1.png');
     expect(text).toContain('no picture: boom');

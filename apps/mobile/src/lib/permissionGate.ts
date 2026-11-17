@@ -9,9 +9,10 @@
 import { Audio } from 'expo-av';
 import * as Notifications from 'expo-notifications';
 import { Camera } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { create } from 'zustand';
 
-export type PermissionKind = 'microphone' | 'camera' | 'notifications';
+export type PermissionKind = 'microphone' | 'camera' | 'notifications' | 'photos';
 
 export const PERMISSION_EXPLAINERS: Record<PermissionKind, { title: string; body: string }> = {
   microphone: {
@@ -21,6 +22,10 @@ export const PERMISSION_EXPLAINERS: Record<PermissionKind, { title: string; body
   camera: {
     title: 'Camera access',
     body: 'Patch needs the camera to take a photo to attach to a message, or to scan a pairing QR code.',
+  },
+  photos: {
+    title: 'Photo library access',
+    body: 'Patch needs your photo library so you can pick images to attach to a message.',
   },
   notifications: {
     title: 'Notifications',
@@ -48,6 +53,8 @@ async function isGranted(kind: PermissionKind): Promise<boolean> {
       return (await Camera.getCameraPermissionsAsync()).granted;
     case 'notifications':
       return (await Notifications.getPermissionsAsync()).granted;
+    case 'photos':
+      return (await ImagePicker.getMediaLibraryPermissionsAsync()).granted;
   }
 }
 
@@ -59,6 +66,8 @@ async function requestOs(kind: PermissionKind): Promise<boolean> {
       return (await Camera.requestCameraPermissionsAsync()).granted;
     case 'notifications':
       return (await Notifications.requestPermissionsAsync()).granted;
+    case 'photos':
+      return (await ImagePicker.requestMediaLibraryPermissionsAsync()).granted;
   }
 }
 

@@ -1,4 +1,4 @@
-package io.github.tomchambers2.patch
+package dev.patchhq.app
 
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo

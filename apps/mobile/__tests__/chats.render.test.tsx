@@ -32,6 +32,9 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import { __clearAllMmkv } from './stubs/mmkv';
 import { lightColors } from '../src/lib/theme';
+import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { seedSettings } from './testUtils/settingsFixtures';
+import { useSettingsStore } from '../src/stores/settingsStore';
 
 const { startVoiceNoteSpy, releaseVoiceNoteIfHeldSpy } = vi.hoisted(() => ({
   startVoiceNoteSpy: vi.fn(),
@@ -59,6 +62,7 @@ vi.mock('../src/api/rest', () => ({
 
 beforeEach(() => {
   __clearAllMmkv();
+  seedSettings({ preferences: { ...DEFAULT_SHARED_SETTINGS, experimentalFeatures: true } });
   useChatStore.getState()._reset();
   usePresenceStore.setState({
     connection: 'connecting',
@@ -116,6 +120,26 @@ describe('ChatsScreen — header', () => {
 });
 
 describe('ChatsScreen — ManagerRow', () => {
+  it('has no Manager row while experimental features are off', () => {
+    useSettingsStore.getState()._reset();
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'thread_manager',
+        name: 'My manager',
+        folder: '',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+      },
+    ]);
+    const r = renderRN(<ChatsScreen />);
+    const flatList = r.root.findByType(RNFlatList as unknown as React.ComponentType);
+    expect((flatList.props.data as { kind: string }[]).map((i) => i.kind)).not.toContain('manager');
+    expect(hasText(r.root, 'My manager')).toBe(false);
+  });
+
   it('has no "Manager" section header above it — the row is the list\'s first item', () => {
     useChatStore.getState().hydrate([
       {
@@ -326,14 +350,40 @@ describe('ChatsScreen — ChannelRow', () => {
 });
 
 describe('ChatsScreen — Channels section (empty state + collapse toggle)', () => {
-  it('shows the channels empty state when expanded with no channel chats hydrated', () => {
+  it('starts closed, with no empty state, when no channel chats are hydrated', () => {
     const r = renderRN(<ChatsScreen />);
+    expect(hasText(r.root, 'Channels ▸')).toBe(true);
+    expect(hasText(r.root, 'No channels yet')).toBe(false);
+  });
+
+  it('opening the empty Channels section shows the channels empty state', () => {
+    const r = renderRN(<ChatsScreen />);
+    const header = findAllHost(r.root, byType('Pressable')).find((p) => hasText(p, 'Channels'))!;
+    actSync(() => header.props.onPress());
     expect(hasText(r.root, 'Channels ▾')).toBe(true);
     expect(hasText(r.root, 'No channels yet')).toBe(true);
   });
 
+  it('opens by default once a channel chat exists', () => {
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'thread_speakers',
+        name: null,
+        folder: '',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+      },
+    ]);
+    const r = renderRN(<ChatsScreen />);
+    expect(hasText(r.root, 'Channels ▾')).toBe(true);
+  });
+
   it('collapsing the Channels header hides the empty state, expanding again shows it', () => {
     const r = renderRN(<ChatsScreen />);
+    actSync(() => findAllHost(r.root, byType('Pressable')).find((p) => hasText(p, 'Channels'))!.props.onPress());
     // The header row is a Pressable wrapping the "Channels ▾/▸" Text — pick it
     // out by its text content rather than index (there are several headers).
     const headerPressable = (): ReturnType<typeof findHost> =>

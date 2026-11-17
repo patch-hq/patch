@@ -122,8 +122,6 @@ export interface HostDescriptionInput {
   patchMcpEnabled?: boolean | undefined;
   /** Always true now: the shipped Manager/Speakers CLAUDE.md always loads. */
   harnessClaudeMdEnabled: boolean;
-  /** Battery state (`host.host.power`); absent when the host has no readable battery. */
-  power?: { onBattery: boolean; percent: number } | undefined;
   /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
   lastDisconnect?: LinkDrop | undefined;
 }
@@ -196,7 +194,6 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     harnessMcpServers: input.harnessMcpServers,
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
-    ...(input.power !== undefined ? { power: input.power } : {}),
     ...(input.lastDisconnect !== undefined ? { lastDisconnect: input.lastDisconnect } : {}),
   };
 }
@@ -211,20 +208,30 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
  */
 export function claudeBackendEntry(input: {
   executableResolved: boolean;
+  /** Where installing a missing Claude Code stands, when the host is doing it. */
+  provision?: { state: 'present' | 'installing' | 'absent' | 'failed'; error?: string };
   version: string | null;
   credentialOk: boolean;
   error?: string | undefined;
 }): HostBackend {
-  const state: HostBackend['state'] = !input.executableResolved
-    ? 'absent'
-    : input.credentialOk
-      ? 'present'
-      : 'logged-out';
+  const provisioning = input.provision?.state;
+  const state: HostBackend['state'] =
+    provisioning === 'installing' || provisioning === 'failed'
+      ? provisioning
+      : !input.executableResolved
+        ? 'absent'
+        : input.credentialOk
+          ? 'present'
+          : 'logged-out';
+  const error =
+    state === 'installing' || state === 'failed' || state === 'absent'
+      ? input.provision?.error
+      : input.error;
   return {
     id: CLAUDE_BACKEND_ID,
     label: CLAUDE_BACKEND_LABEL,
     version: input.version,
     state,
-    ...(input.error !== undefined ? { error: input.error } : {}),
+    ...(error !== undefined ? { error } : {}),
   };
 }

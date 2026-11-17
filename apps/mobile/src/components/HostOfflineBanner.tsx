@@ -8,6 +8,7 @@ import { Pressable, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { describeHostOffline } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useUiStore } from '../stores/uiStore';
 import { hostOfflineBannerText } from '../lib/connection';
 import { radii, space, textMin, typography, useTheme } from '../lib/theme';
@@ -26,7 +27,14 @@ export function HostOfflineBanner(): React.ReactElement | null {
       )
       .join('. '),
   );
-  const text = hostOfflineBannerText(daemon);
+  const autoUpdate = useSettingsStore((st) => st.data?.preferences.autoUpdateHosts !== false);
+  // Every host that is down is mid-update (the server restarted into a new build): not an outage.
+  const updating = usePresenceStore((st) => {
+    const down = Object.values(st.hosts).filter((h) => !h.online);
+    return autoUpdate && down.length > 0 && down.every((h) => h.hostId in st.hostsUpdating);
+  });
+  const text =
+    updating && daemon === 'offline' ? 'Host is being updated' : hostOfflineBannerText(daemon);
   if (text === null) return null;
   return (
     <Pressable
@@ -45,34 +53,38 @@ export function HostOfflineBanner(): React.ReactElement | null {
       }}
     >
       <Text style={{ color: colors.waiting, ...typography.meta }}>{text}</Text>
-      {why !== '' ? (
+      {updating ? null : why !== '' ? (
         <Text style={{ color: colors.waiting, fontSize: textMin, marginTop: space.xs }}>
           {why}.
         </Text>
       ) : null}
-      <Text style={{ color: colors.waiting, fontSize: textMin, marginTop: space.xs }}>
-        Tap for Settings → Hosts.
-      </Text>
-      {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
+      {updating ? null : (
+        <>
+          <Text style={{ color: colors.waiting, fontSize: textMin, marginTop: space.xs }}>
+            Tap for Settings → Hosts.
+          </Text>
+          {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
           overlay (spec/12 § Connection diagnostics screen). The app stays
           navigable — a daemon-offline surface is never blocked. */}
-      <Pressable
-        testID="daemon-offline-diagnose"
-        accessibilityRole="button"
-        accessibilityLabel="Diagnose the connection"
-        onPress={() => setDiagnosticsOpen(true)}
-      >
-        <Text
-          style={{
-            color: colors.waiting,
-            fontSize: textMin,
-            marginTop: space.xs,
-            textDecorationLine: 'underline',
-          }}
-        >
-          Diagnose
-        </Text>
-      </Pressable>
+          <Pressable
+            testID="daemon-offline-diagnose"
+            accessibilityRole="button"
+            accessibilityLabel="Diagnose the connection"
+            onPress={() => setDiagnosticsOpen(true)}
+          >
+            <Text
+              style={{
+                color: colors.waiting,
+                fontSize: textMin,
+                marginTop: space.xs,
+                textDecorationLine: 'underline',
+              }}
+            >
+              Diagnose
+            </Text>
+          </Pressable>
+        </>
+      )}
     </Pressable>
   );
 }

@@ -230,6 +230,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'file_path: string',
   },
   {
+    name: patchToolId('link_file'),
+    label: 'link_file',
+    category: 'patch',
+    description:
+      'Points at a file or folder anywhere on the host disk, with buttons to open it or reveal it in the file manager.',
+    params: 'file_path: string',
+  },
+  {
     name: patchToolId('patch_wake_me'),
     label: 'patch_wake_me',
     category: 'patch',
@@ -298,8 +306,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_goal_set',
     category: 'patch',
     description:
-      "Sets this chat's goal — the same mechanism as the composer's /goal — so Patch's evaluator judges it after every turn.",
-    params: 'condition: string',
+      "Sets this chat's goal — the same mechanism as the composer's /goal — so Patch's evaluator judges it after every turn, optionally with goals to follow and a cadence to restate it and check progress.",
+    params: 'condition: string, then?: string[], remindEvery?: object, checkInEvery?: object',
   },
   {
     name: patchToolId('patch_goal_get'),
@@ -323,7 +331,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     description:
       'Runs a shell command as a durable background task the host itself owns, holds a real pid for, and can kill.',
     params:
-      'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number',
+      'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number, wakeOnMatch?: string',
   },
   {
     name: patchToolId('patch_watch_list'),

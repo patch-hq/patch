@@ -15,8 +15,9 @@
 
 import { expandHome } from './expandHome.js';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, extname, resolve, join, sep } from 'node:path';
+import { readdirSync, readFileSync, statSync, type Stats } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, extname, isAbsolute, resolve, join, sep } from 'node:path';
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -25,7 +26,12 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import { imageSize } from './imageSize.js';
-import { BACKEND_IDS, MeetingAgentNotesEdit } from '@patch/wire';
+import {
+  BACKEND_IDS,
+  MeetingAgentNotesEdit,
+  ReminderEvery,
+  isReservedSpecialThread,
+} from '@patch/wire';
 import type {
   HostAccountEvent,
   ClaudeMemoryEntry,
@@ -85,7 +91,6 @@ import {
   UserHandedBackError,
 } from './browser.js';
 import { RateLimiter } from './rate-limit.js';
-import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cascade.js';
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
 import { buildPeekResult, stripBinaryPayloads } from './peek.js';
@@ -140,22 +145,6 @@ export interface BuildOptions {
   localKey?: string;
   /** Jobs store backing patch_job_*. Production: RemoteJobsStore. Tests: MemoryJobsStore. */
   jobs?: AsyncJobsInterface;
-  /**
-   * Backs `patch_list_devices` (spec/06 § Cross-chat toolset, spec/16
-   * § Outbound routing). Returns the registered voice devices combined with
-   * live presence: `{ deviceId, name, online, muted, lastUsedAt }`. Production
-   * wires this to `PresenceRegistry.enumerate(DeviceRegistry.list())`; when
-   * unset the endpoint 503s. NO FALLBACK — an unwired registry is a config
-   * error, surfaced loudly rather than returning a fake empty list.
-   */
-  listDevices?: () => {
-    deviceId: string;
-    name: string;
-    online: boolean;
-    muted: boolean;
-    lastUsedAt: number;
-    fwVersion?: string;
-  }[];
   /** Optional upstream emit hook — used to surface cross-chat tool events for audit. */
   emitWire?: (event: WireEvent) => void;
   /**
@@ -257,6 +246,13 @@ export interface BuildOptions {
    * has ever reported that chat, or the host that owns it is offline. When
    * unset, a chat not found locally 404s exactly as before this existed.
    */
+  /**
+   * Whether this host runs the Manager. When it does not, a local copy of a
+   * reserved special thread is stale (the Manager moved), so patch_send_to /
+   * patch_peek / patch_history addressed to one skip it and relay to the host
+   * that does run it. Unset means "do not special-case".
+   */
+  runsManager?: () => boolean;
   peekRemoteChat?: (req: {
     sourceChatId: string;
     targetChatId: string;
@@ -372,12 +368,6 @@ export interface BuildOptions {
     };
     /** Apply an available host update (spec/02 § Self-update). */
     update: () => Promise<{ applied: boolean; message: string; deferred?: boolean }>;
-    /**
-     * Open the five-minute voice-device adoption window (spec/16). Optional
-     * because device adoption itself is not implemented yet — the route says
-     * so plainly rather than handing back a window nothing honours.
-     */
-    pairDevice?: () => { opensAt: number; expiresAt: number };
   };
   /**
    * Live host→server link diagnostics + the spec/12 link-drop control
@@ -401,15 +391,6 @@ export interface BuildOptions {
      */
     floodBuffer: (chatId: string, count: number) => number;
   };
-  /**
-   * Backs the `patch_speak` device-resolution
-   * cascade (spec/09 § `### speakers`, spec/16 § Outbound routing). Composes
-   * the live `PresenceRegistry` primitives + the push fallback. When unset,
-   * a speakers notify still emits its wire event + writes the sidecar but
-   * does not ring any device — the in-process control smoke tests have no
-   * presence registry. Production always wires this.
-   */
-  speakers?: SpeakerCascadeDeps;
   /**
    * Speak a `patch_call` message into an app voice call that is already open,
    * returning false when none is (spec/07 § Agent-initiated voice). Unset in
@@ -536,6 +517,9 @@ const GoalSetBody = z
   .object({
     chatId: z.string().min(1),
     goal: z.string().min(1).nullable(),
+    then: z.array(z.string().min(1)).max(50).optional(),
+    remindEvery: ReminderEvery.nullable().optional(),
+    checkInEvery: ReminderEvery.nullable().optional(),
   })
   .strict();
 
@@ -548,6 +532,7 @@ const WatchStartBody = z
     description: z.string().min(1),
     timeoutSec: z.number().int().positive(),
     checkInSec: z.number().int().positive().optional(),
+    wakeOnMatch: z.string().min(1).optional(),
     cwd: z.string().min(1).optional(),
   })
   .strict();
@@ -991,11 +976,7 @@ const CallBody = z
     /** When omitted, the calling chat is the call target. */
     chatId: z.string().min(1).optional(),
     message: z.string().min(1).optional(),
-    /**
-     * Optional physical voice device to ring (spec/16 § Outbound routing — the
-     * agent picks a candidate device). When omitted, the speakers cascade
-     * resolves the most-recently-active device.
-     */
+    /** Accepted for older callers; voice devices are not rung for calls. */
     deviceId: z.string().min(1).optional(),
     callerChatId: z.string().min(1),
   })
@@ -1034,6 +1015,16 @@ const ViewFileBody = z
   })
   .strict();
 
+// link_file: a pointer to a file anywhere on this host's disk. Unlike view_file
+// nothing is read or published, so there is no chat-folder boundary: the card
+// only offers to open it on the machine the host runs on.
+const LinkFileBody = z
+  .object({
+    file_path: z.string().min(1),
+    callerChatId: z.string().min(1),
+  })
+  .strict();
+
 // patch_history: the 200 hard cap is a CLAMP, not a rejection (mirrors the
 // job-runs route). A caller asking for limit:5000 must get the newest 200
 // events, not a 400. The real ceiling is enforced in Daemon.readHistory.
@@ -1058,7 +1049,19 @@ interface ErrorEnvelope {
   message: string;
 }
 
+const NOT_DELIVERED_SNOOZED = {
+  ok: true,
+  delivered: false,
+  reason: 'chat is snoozed',
+} as const;
+
+function isSnoozedNow(state: { snoozedUntil: number | null } | undefined): boolean {
+  return state?.snoozedUntil != null && state.snoozedUntil > Date.now();
+}
+
 export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInstance> {
+  const isForeignSpecialThread = (chatId: string): boolean =>
+    opts.runsManager !== undefined && !opts.runsManager() && isReservedSpecialThread(chatId);
   const app = Fastify({ logger: opts.logger ?? false });
 
   // Normalize fastify's OWN errors (e.g. a malformed/empty JSON body, which
@@ -1101,6 +1104,13 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // (send_to / spawn / stop). Read-only tools (peek/history/list/job_list)
   // skip this gate.
   const limiter = opts.rateLimiter ?? new RateLimiter({ windowMs: 60_000, max: 60 });
+  // patch_send_to with no caller-supplied localId gets a fresh random one per
+  // call, so a retried tool call (client timeout, transport replay) was
+  // delivered to the recipient again and again. Remember what each caller just
+  // sent each target and answer an identical repeat inside the window without
+  // delivering it a second time.
+  const SEND_TO_DEDUPE_MS = 30_000;
+  const recentSendTos = new Map<string, number>();
   const toolLog = opts.toolLogger ?? ((): void => undefined);
 
   // Centralized 429: emit a Retry-After header (seconds until a slot frees) plus
@@ -1183,7 +1193,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
 
   // GET /chats/folders?path=<partial> — host-mediated folder discovery for
   // the CLI's interactive picker and `--folder` tab-completion (spec/13: "Lists
-  // recent folders on the Hetzner box"; "Tab-completion for --folder is
+  // recent folders on the host machine"; "Tab-completion for --folder is
   // host-mediated — the CLI asks the host what's there"). The listing is
   // sourced from THIS (host) box's filesystem, independent of where the CLI
   // runs. Returns:
@@ -1851,22 +1861,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return { ok: true, message: result.message };
   });
 
-  // POST /pair-device — open the five-minute voice-device adoption window.
-  // Local-only by design: the host adopts the device itself, so this has no
-  // wire frame (spec/02 § Control IPC, spec/16).
-  app.post('/pair-device', async (req, reply) => {
-    const host = hostGate(req, reply);
-    if (!host) return;
-    if (!host.pairDevice) {
-      return reply.code(501).send({
-        error: 'not_implemented',
-        message:
-          'voice-device adoption is not implemented on this host yet — no adoption window to open',
-      });
-    }
-    return { ok: true, ...host.pairDevice() };
-  });
-
   // POST /stop — shut the host down.
   app.post('/stop', async (req, reply) => {
     const auth = checkAuth(req);
@@ -1985,7 +1979,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // chat's own state, so they are true whether or not the ring is warm:
       // `eventCount: 23, hasClaudeSession: false` is the whole diagnosis of a
       // chat whose session has been lost, in the first thing an agent looks at.
-      const local = buildPeekResult(opts.daemon!, req.params.id, limit);
+      const local = isForeignSpecialThread(req.params.id)
+        ? undefined
+        : buildPeekResult(opts.daemon!, req.params.id, limit);
       if (!local) {
         // Not on THIS host — spec/03 § Cross-chat tools: relayed to whichever
         // host the server's chat mirror says owns it, resolved from a bare
@@ -2059,6 +2055,29 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // still reveals, same safe default as before.
     const revealTarget = opts.daemon!.chatState.get(callerChatId)?.hidden !== true;
     const localId = parsed.data.localId ?? randomUUID();
+    const dedupeKey = JSON.stringify([
+      callerChatId,
+      chatId,
+      voicePrefix ?? '',
+      message,
+      goal ?? '',
+    ]);
+    // Prune on every call, including ones that carry a localId, so the map
+    // cannot grow unbounded when callers always pass one.
+    const now = Date.now();
+    for (const [k, at] of recentSendTos) if (now - at >= SEND_TO_DEDUPE_MS) recentSendTos.delete(k);
+    if (parsed.data.localId === undefined) {
+      if (recentSendTos.has(dedupeKey)) {
+        toolLog({
+          tool: 'patch_send_to',
+          callerChatId,
+          targetChatId: chatId,
+          durationMs: Date.now() - start,
+          ok: true,
+        });
+        return { ok: true, queued: true, duplicate: true };
+      }
+    }
     if (!limiter.check(`send_to:${callerChatId}`)) {
       toolLog({
         tool: 'patch_send_to',
@@ -2070,10 +2089,22 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
       return sendRateLimited(reply, `send_to:${callerChatId}`);
     }
+    // Claimed BEFORE the awaits: the retry this guard exists for arrives while
+    // the first call is still in flight. Released on any failure so a genuine
+    // retry after an error still goes through.
+    const dedupeClaimed = parsed.data.localId === undefined;
+    if (dedupeClaimed) recentSendTos.set(dedupeKey, Date.now());
+    const releaseClaim = () => {
+      if (dedupeClaimed) recentSendTos.delete(dedupeKey);
+    };
     try {
       // Armed before the message lands so the evaluator judges the very turn
       // this message starts. A chat that is not on this host throws
       // ChatNotFoundError here and is refused below (NO FALLBACK).
+      if (isForeignSpecialThread(chatId)) throw new ChatNotFoundError(chatId);
+      // Read before the send: delivering un-archives the target, and the sender
+      // is told it was archived (spec/04 § Lifecycle).
+      const targetWasArchived = opts.daemon!.chatState.get(chatId)?.status === 'archived';
       if (goal !== undefined) await opts.daemon!.setGoal(chatId, goal);
       // Accepted, not finished: the sender is inside its own turn and must not
       // wait out the target's.
@@ -2090,7 +2121,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         // Visible agent-to-agent handoff brings the target into the list. Hidden
         // automation-to-automation traffic leaves the target hidden.
         fromAgent: revealTarget,
-        fromSibling: true,
       });
       if (opts.emitWire) {
         opts.emitWire({
@@ -2108,7 +2138,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      return { ok: true, queued: true };
+      return targetWasArchived
+        ? {
+            ok: true,
+            queued: true,
+            targetWasArchived: true,
+            note: 'The target chat was archived. The message un-archived it and it is running again.',
+          }
+        : { ok: true, queued: true };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
       // Not on THIS host — spec/03 § Cross-chat tools, same relay
@@ -2117,6 +2154,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // error naming why it couldn't — never a silent 404 for a chat that
       // does exist, just not here.
       if (code === 'chat_not_found' && goal !== undefined) {
+        releaseClaim();
         toolLog({
           tool: 'patch_send_to',
           callerChatId,
@@ -2148,6 +2186,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           });
           return { ok: true, queued: true };
         } catch (remoteErr) {
+          releaseClaim();
           const remoteCode = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
           toolLog({
             tool: 'patch_send_to',
@@ -2163,6 +2202,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           });
         }
       }
+      releaseClaim();
       toolLog({
         tool: 'patch_send_to',
         callerChatId,
@@ -2456,10 +2496,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, goal } = parsed.data;
+    const { chatId, goal, then, remindEvery, checkInEvery } = parsed.data;
     const tool = goal === null ? 'patch_goal_clear' : 'patch_goal_set';
     try {
-      await opts.daemon!.setGoal(chatId, goal);
+      await opts.daemon!.setGoal(chatId, goal, {
+        ...(then !== undefined ? { then } : {}),
+        ...(remindEvery !== undefined ? { remindEvery } : {}),
+        ...(checkInEvery !== undefined ? { checkInEvery } : {}),
+      });
       toolLog({ tool, callerChatId: chatId, durationMs: Date.now() - start, ok: true });
       return { ok: true, goal };
     } catch (err) {
@@ -2486,6 +2530,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return {
       ok: true,
       goal: state.goal,
+      goalQueue: state.goalQueue,
+      goalReminderEvery: state.goalReminderEvery,
+      goalCheckInEvery: state.goalCheckInEvery,
       goalProgress: state.goalProgress,
       lastGoal: state.lastGoal,
     };
@@ -2499,7 +2546,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, command, description, timeoutSec, checkInSec, cwd } = parsed.data;
+    const { chatId, command, description, timeoutSec, checkInSec, wakeOnMatch, cwd } = parsed.data;
     if (!limiter.check(`watch:${chatId}`)) {
       toolLog({
         tool: 'patch_watch',
@@ -2516,6 +2563,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         description,
         timeoutSec,
         ...(checkInSec !== undefined ? { checkInSec } : {}),
+        ...(wakeOnMatch !== undefined ? { wakeOnMatch } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
       toolLog({
@@ -2863,6 +2911,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     daemon().browserViewport(tabId, req),
   );
 
+  // A caller blocked on a subagent (`wait: true`) whose connection dies before
+  // the result arrives (the host or its tool bridge restarted under it) will
+  // never read the answer. Stop waiting for it, so the result is delivered into
+  // the parent as a turn instead of being resolved into a dead socket.
+  const abandonDelegateWaitOnClose = (reply: FastifyReply, id: string): void => {
+    reply.raw.once('close', () => {
+      if (!reply.raw.writableFinished) opts.daemon!.abandonDelegateWait(id);
+    });
+  };
+
   // patch_delegate — create a durable subagent chat under the caller.
   app.post('/internal/delegate', async (req, reply) => {
     const start = Date.now();
@@ -2899,7 +2957,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      if (result) return { id, label, ...(await result) };
+      if (result) {
+        abandonDelegateWaitOnClose(reply, id);
+        return { id, label, ...(await result) };
+      }
       return { id, label };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'invalid_input';
@@ -2931,7 +2992,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         message,
         ...(wait ? { wait } : {}),
       });
-      if (result) return { id, ...(await result) };
+      if (result) {
+        abandonDelegateWaitOnClose(reply, id);
+        return { id, ...(await result) };
+      }
       return { id };
     } catch (err) {
       return reply.code(400).send({
@@ -3182,6 +3246,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(400).send({ error: 'invalid_input', message: q.error.message });
     }
     try {
+      if (isForeignSpecialThread(params.data.id)) throw new ChatNotFoundError(params.data.id);
       const slice = opts.daemon!.readHistory({
         chatId: params.data.id,
         ...(q.data.fromSeq !== undefined ? { fromSeq: q.data.fromSeq } : {}),
@@ -3305,7 +3370,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(503).send({ error: 'chat search not configured' });
     }
     try {
-      const result = await opts.searchAccountChats(q.data.callerChatId, q.data.query, q.data.limit);
+      const answer = await opts.searchAccountChats(q.data.callerChatId, q.data.query, q.data.limit);
+      // The agent finds a chat by its chatId and reads it with patch_peek /
+      // patch_history, which route to the owning machine themselves. Naming the
+      // machine here only invites the agent to reason about hosts.
+      const result = {
+        ...answer,
+        results: (answer.results as Array<Record<string, unknown>>).map(
+          ({ hostId: _hostId, ...rest }) => rest,
+        ),
+      };
       toolLog({
         tool: 'patch_search_chats',
         callerChatId: q.data.callerChatId,
@@ -3370,17 +3444,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         message: err instanceof Error ? err.message : String(err),
       });
     }
-  });
-
-  // patch_list_devices — registered voice devices + live presence.
-  app.get('/internal/devices', async (_req, reply) => {
-    const start = Date.now();
-    if (!opts.listDevices) {
-      return reply.code(503).send({ error: 'devices not configured' });
-    }
-    const devices = opts.listDevices();
-    toolLog({ tool: 'patch_list_devices', durationMs: Date.now() - start, ok: true });
-    return { devices };
   });
 
   // patch_stop.
@@ -3882,6 +3945,72 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     };
   });
 
+  // link_file — point the USER at a file that lives on this host's disk, wherever
+  // it is. Nothing is read, copied or published: the ack is the name, absolute
+  // path and size, and the desktop app opens it from there (open file / show in
+  // folder) when its own host owns the chat. A missing path is a loud 404.
+  app.post('/internal/link_file', async (req, reply) => {
+    const start = Date.now();
+    if (require503(reply)) return;
+    const parsed = LinkFileBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const { file_path: filePath, callerChatId } = parsed.data;
+    if (!opts.daemon!.chatState.get(callerChatId)) {
+      return reply.code(404).send({
+        error: 'chat_not_found',
+        message: `chat not found: ${callerChatId}`,
+      } satisfies ErrorEnvelope);
+    }
+    const expanded =
+      filePath === '~' || filePath.startsWith('~/') ? join(homedir(), filePath.slice(1)) : filePath;
+    if (!isAbsolute(expanded)) {
+      toolLog({
+        tool: 'link_file',
+        callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'invalid_input',
+      });
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: `link_file needs an absolute path (or one starting with ~/): ${filePath}`,
+      } satisfies ErrorEnvelope);
+    }
+    const absPath = resolve(expanded);
+    let stat: Stats;
+    try {
+      stat = statSync(absPath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const notFound = code === 'ENOENT' || code === 'ENOTDIR';
+      toolLog({
+        tool: 'link_file',
+        callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: notFound ? 'not_found' : 'invalid_input',
+      });
+      return reply.code(notFound ? 404 : 400).send({
+        error: notFound ? 'link_file_not_found' : 'invalid_input',
+        message: notFound
+          ? `nothing at ${absPath}`
+          : `cannot read ${absPath}: ${err instanceof Error ? err.message : String(err)}`,
+      } satisfies ErrorEnvelope);
+    }
+    toolLog({ tool: 'link_file', callerChatId, durationMs: Date.now() - start, ok: true });
+    return {
+      ok: true,
+      linked: true,
+      kind: 'link',
+      name: basename(absPath),
+      absPath,
+      isDirectory: stat.isDirectory(),
+      ...(stat.isFile() ? { size: stat.size } : {}),
+    };
+  });
+
   // patch_notify.
   app.post('/internal/notify', async (req, reply) => {
     const start = Date.now();
@@ -3935,27 +4064,18 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (opts.onBroadcast && channel !== undefined) {
       opts.onBroadcast({ channel, message, sourceChatId: callerChatId });
     }
-    // Speakers channel: run the device-resolution cascade (spec/09
-    // § `### speakers`). Resolves which physical device to ring (explicit →
-    // most-recently-active → all-low-volume → push fallback), skipping muted
-    // devices at every step, and emits the one-way `ring` frame.
-    if (channel === 'speakers' && opts.speakers) {
-      resolveSpeakers(
-        {
-          chatId: callerChatId,
-          message,
-          ...(deviceId !== undefined ? { deviceId } : {}),
-          now: Date.now(),
-        },
-        opts.speakers,
-      );
-    }
+    // A speakers notify needs nothing more here: the server speaks it on a
+    // connected voice device, or pushes it (spec/09 § speakers, spec/16).
     toolLog({
       tool: 'patch_notify',
       callerChatId,
       durationMs: Date.now() - start,
       ok: true,
     });
+    // A snoozed chat is silent on every channel (spec/09 § Snoozed chats): the
+    // server drops the event above. Say so, or the agent believes the user was
+    // asked and waits for a reply nobody was prompted to give.
+    if (isSnoozedNow(opts.daemon!.chatState.get(callerChatId))) return NOT_DELIVERED_SNOOZED;
     return { ok: true };
   });
 
@@ -4014,6 +4134,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     app.log.info({ chatId: callerChatId, task, why }, 'patch_ask_human: blocked on the user');
     toolLog({ tool: 'patch_ask_human', callerChatId, durationMs: Date.now() - start, ok: true });
+    if (isSnoozedNow(state)) return NOT_DELIVERED_SNOOZED;
     return { ok: true };
   });
 
@@ -4099,25 +4220,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(parsed.data.message !== undefined ? { message: parsed.data.message } : {}),
       };
       opts.emitWire(event);
-    }
-    // patch_call also rings any connected physical voice device as a CALL
-    // (spec/16 § Patch-initiated calls). Unlike patch_notify(speakers) — a
-    // one-way announcement — this is a conversational ring: on ring_accepted
-    // the host opens a session that stays open for the user's reply. Runs the
-    // same device-resolution cascade (explicit deviceId → most-recently-active
-    // → all-low-volume → push fallback) with conversational:true so a speaker
-    // can be CALLED, not just notified.
-    if (opts.speakers && !spokenIntoOpenCall) {
-      resolveSpeakers(
-        {
-          chatId: targetChatId,
-          message: parsed.data.message ?? '',
-          ...(parsed.data.deviceId !== undefined ? { deviceId: parsed.data.deviceId } : {}),
-          now: Date.now(),
-          conversational: true,
-        },
-        opts.speakers,
-      );
     }
     toolLog({
       tool: 'patch_call',

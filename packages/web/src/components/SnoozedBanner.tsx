@@ -37,7 +37,7 @@ export function SnoozedBanner({ row }: { row: ChatRow }): JSX.Element | null {
     <div className="archived-banner" data-testid="snoozed-banner" role="status">
       <span className="archived-banner-label">
         <Clock size={14} aria-hidden />
-        Snoozed until {formatWakeTime(row.snoozedUntil!)}
+        Snoozed until {formatWakeTime(row.snoozedUntil!, row.goal !== null)}
       </span>
       <button
         type="button"

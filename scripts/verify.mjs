@@ -129,7 +129,7 @@ const SKIP_BROWSER_GATE_TEMP = process.env['PATCH_RUN_BROWSER_GATE'] !== '1';
 if (SKIP_BROWSER_GATE_TEMP) {
   console.warn(
     '\n!!! verify: skipping the browser/e2e layer UNCONDITIONALLY (box-size workaround, ' +
-      'Tom approved 2026-09-17, widened 2026-09-18 — the box cannot reliably run this suite ' +
+      'maintainer approved 2026-09-17, widened 2026-09-18 — the box cannot reliably run this suite ' +
       "at all right now). Whatever is broken in the browser layer ships without being caught. " +
       'Set PATCH_RUN_BROWSER_GATE=1 to run it anyway for one invocation. Remove this flag and ' +
       'this block once the box is upgraded. !!!\n',

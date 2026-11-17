@@ -2,6 +2,7 @@
 // share the same call shape. NO FALLBACK — any non-2xx is thrown.
 
 import { assertVersionReport } from '@patch/wire';
+import type { GoalPlan } from '../stores/types';
 import type {
   SnoozeRecord,
   DocAction,
@@ -21,6 +22,7 @@ import type {
   StatusKind,
   TodoItem,
   WatchTaskRow,
+  StrayProcessRow,
   UsageSample,
   ChatTokenUsage,
 } from '@patch/wire';
@@ -201,6 +203,9 @@ export interface ChatListEntry {
   statusDeclared?: boolean | null;
   /** The chat's goal (`/goal`), or `null`. Optional: an older server omits it. */
   goal?: string | null;
+  goalQueue?: string[];
+  goalReminderEvery?: ReminderEvery | null;
+  goalCheckInEvery?: ReminderEvery | null;
   /** The chat's reminder (`/remind`), or `null`. Optional, as `goal`. */
   reminder?: string | null;
   reminderEvery?: ReminderEvery | null;
@@ -307,6 +312,7 @@ export interface PadCreateBody {
 /** POST /api/link-summary — a model's summary of a link in a message. */
 export interface LinkSummaryData {
   url: string;
+  title?: string;
   summary: string;
 }
 
@@ -521,6 +527,16 @@ export const api = {
     request<{ output: string }>(
       `/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/output?tail=${tail}`,
     ),
+  // Processes the chat started outside Patch's tracked tools (a `nohup … &`),
+  // running or recently ended (spec/15 § Chat detail — Stray process bar).
+  // A 501 means the host cannot detect them.
+  strayProcesses: (chatId: string) =>
+    request<{ processes: StrayProcessRow[] }>(`/api/chats/${chatId}/stray-processes`),
+  strayProcessStop: (chatId: string, pid: number) =>
+    request<{ processes: StrayProcessRow[]; stopped: boolean }>(
+      `/api/chats/${chatId}/stray-processes/${pid}/stop`,
+      { method: 'POST' },
+    ),
   // POST /api/chats/:id/snooze — `snoozedUntil` is ABSOLUTE ms epoch, resolved
   // from a preset delta on this surface (spec/04 § Snooze); `null` unsnoozes.
   // The server rejects a past timestamp with 400 and that rejection is left to
@@ -552,8 +568,8 @@ export const api = {
   rotateChat: (chatId: string) =>
     request<{ ok: true }>(`/api/chats/${chatId}/rotate`, { method: 'POST' }),
   // `/goal` — set (or clear, with null) the chat's goal (same route as web).
-  setGoal: (chatId: string, goal: string | null) =>
-    request<unknown>(`/api/chats/${chatId}/goal`, { method: 'POST', body: { goal } }),
+  setGoal: (chatId: string, goal: string | null, plan: GoalPlan = {}) =>
+    request<unknown>(`/api/chats/${chatId}/goal`, { method: 'POST', body: { goal, ...plan } }),
   // spec/02 § Task list — replace the chat's task list with `todos` (the WHOLE list).
   setTodos: (chatId: string, todos: TodoItem[]) =>
     request<unknown>(`/api/chats/${chatId}/todos`, { method: 'POST', body: { todos } }),

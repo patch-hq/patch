@@ -752,7 +752,7 @@ describe('WS hub relay', () => {
       h.hostLink.setStatus('offline');
       expect(await offlinePromise).toMatchObject({
         hostId: 'd1',
-        reason: 'battery',
+        reason: 'unresponsive',
       });
       await client.close();
     } finally {

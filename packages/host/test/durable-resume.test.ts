@@ -172,6 +172,33 @@ describe('resuming a turn that outlived the host', () => {
     },
   );
 
+  // 2026-11-12: an overdue wake loaded before the resend started its own turn
+  // first, took the reattach marker and killed the surviving runner.
+  it('reattaches the live turn first and fires an overdue wake after it, not before', async () => {
+    const { seen, chatId, cfg } = await interruptedChat('live', (_cfg, id) => {
+      const home = join(_cfg.turnsDir, '..');
+      writeFileSync(
+        join(home, 'chats', id, 'wake.json'),
+        JSON.stringify({
+          chatId: id,
+          message: 'check in',
+          fireAt: 1_700_000_000_000 - 13 * 60_000,
+          createdAt: 0,
+        }),
+      );
+    });
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen[0]?.prompt).toBe('running');
+    expect(seen[0]?.durableTurn).toMatchObject({
+      chatId,
+      localId: 'L1',
+      attach: { consumed: { offset: 42, envelopes: 2 } },
+    });
+    expect(seen[0]?.durableTurn?.config).toBe(cfg);
+    expect(seen.length).toBe(2);
+    expect(seen[1]?.prompt).toContain('check in');
+  });
+
   it('cuts a turn off when its runner is gone, and clears the directory', async () => {
     const { seen, dir } = await interruptedChat('lost');
     expect(seen).toHaveLength(1);

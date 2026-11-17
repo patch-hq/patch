@@ -3,7 +3,7 @@
 // host said it was going to sleep, is what explains a `host.offline`.
 // Nothing here warns anyone that a host is merely busy.
 
-import { BATTERY_FLAT_PERCENT, type HostHealthEvent, type WireEvent } from '@patch/wire';
+import { type HostHealthEvent, type WireEvent } from '@patch/wire';
 
 /** A sleep report this close to (or after) the last heartbeat explains the host dropping off. */
 const SLEEP_SLACK_MS = 30_000;
@@ -62,11 +62,7 @@ export class HostHealthTracker {
     if (rec === undefined) return; // never reported: nothing to explain it with
     const slept = this.asleepAt.get(hostId);
     const reason =
-      rec.report.power?.onBattery && rec.report.power.percent <= BATTERY_FLAT_PERCENT
-        ? 'battery'
-        : slept !== undefined && slept >= rec.lastReportAt - SLEEP_SLACK_MS
-          ? 'asleep'
-          : 'unresponsive';
+      slept !== undefined && slept >= rec.lastReportAt - SLEEP_SLACK_MS ? 'asleep' : 'unresponsive';
     this.offlineReasons.set(hostId, reason);
   }
 }

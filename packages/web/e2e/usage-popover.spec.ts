@@ -122,7 +122,7 @@ test.describe('usage popover', () => {
     await expect(ring.getByTestId('context-ring-label')).toHaveText('?');
     await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
     await seed(page, null);
-    await expect(ring.getByTestId('context-ring-label')).toHaveText('–');
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('Context –');
     await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
   });
 

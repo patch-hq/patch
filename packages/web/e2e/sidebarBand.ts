@@ -26,6 +26,8 @@ export const SHORT_ROSTER = [
     hostId: 'd1',
     permissionMode: 'auto',
     name: 'speakers',
+    // Spoken to, so the sidebar draws Channels (it stays out of the way until used).
+    preview: 'turn the kitchen lights off',
     folder: '/home/tom/.patch/threads/speakers',
     activity: 'idle',
     status: 'active',

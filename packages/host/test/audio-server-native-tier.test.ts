@@ -4,7 +4,7 @@
 // `geminiWsCtor` test hook), not just gemini-live.ts's own unit tests.
 //
 //   - call surface, backend='gemini'          -> GeminiLiveSession (dials "Gemini")
-//   - device surface, backend='gemini'        -> voice_config_not_implemented (not a silent fallback)
+//   - device surface, backend='gemini'        -> GeminiLiveSession too (a device is a surface like any other)
 //   - dictation: the phone and the computer each run their own engine; Deepgram with no key -> voice_key_missing
 //   - call surface, backend='gemini', no key  -> audio.error{voice_key_missing}
 //   - call surface, backend='openai', no key  -> audio.error{openai_unavailable}
@@ -175,7 +175,7 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("device surface, backend='gemini' refuses — not implemented, NOT a silent fallback", async () => {
+  test("device surface, backend='gemini' dials Gemini Live like any other surface", async () => {
     server = await startServer({
       voiceConfig: { device: { backend: 'gemini', layer: 'light' } },
       geminiApiKey: 'test-key',
@@ -200,10 +200,8 @@ describe('audio server — voice config matrix selection', () => {
         surfaceHasAec: false,
       }),
     );
-    const msg = await recvOne(ws);
-    expect(msg.type).toBe('audio.error');
-    if (msg.type === 'audio.error') expect(msg.code).toBe('voice_config_not_implemented');
-    expect(instances.length).toBe(0);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(instances.length).toBe(1);
     ws.close();
   });
 

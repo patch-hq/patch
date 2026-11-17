@@ -22,14 +22,17 @@ export function OfflineBanner(): JSX.Element | null {
           ? `Restarting${autoUpdate && restarting.version ? ` into ${restarting.version}` : ''}`
           : 'Reconnecting…'}
       </span>
-      <button
-        type="button"
-        className="banner-diagnose"
-        data-testid="offline-diagnose"
-        onClick={() => setDiagnosticsOpen(true)}
-      >
-        Diagnose
-      </button>
+      {/* A server restart is expected and resolves itself: nothing to diagnose. */}
+      {restarting ? null : (
+        <button
+          type="button"
+          className="banner-diagnose"
+          data-testid="offline-diagnose"
+          onClick={() => setDiagnosticsOpen(true)}
+        >
+          Diagnose
+        </button>
+      )}
     </div>
   );
 }

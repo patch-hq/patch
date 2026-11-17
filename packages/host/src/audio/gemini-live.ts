@@ -238,8 +238,11 @@ const WAIT_RULE =
 /** The async variant: the call is answered at once and the result arrives later as a message. */
 const ASYNC_WAIT_RULE =
   `${DISPATCH_TOOL_NAME} answers at once with "started": the agent is working in the background. ` +
-  'Say once, in a few words, that you have passed it on, then carry on the conversation normally — ' +
-  'answer anything else the user says. Never say "still working on it", "waiting" or anything ' +
+  'Say once, in a few words, that you have passed it on (for example "Right, I\'ve asked that — now ' +
+  'on to the rest of your question"), then carry straight on with the rest of what the user said ' +
+  'in the same breath: answer every other part yourself, and never stop to wait for the agent. ' +
+  "Only hold back a part that genuinely depends on the agent's result, and say that part will " +
+  'follow. Then carry on the conversation normally — answer anything else the user says. Never say "still working on it", "waiting" or anything ' +
   'like it unless the user asks how it is going. When the agent finishes, its result arrives as a ' +
   'message from the agent: tell the user the answer in one or two short sentences, never the ' +
   'whole text, and let them ask for more. Several ' +
@@ -261,6 +264,11 @@ const GENERAL_QUESTION_RULE =
   'chat history or a "knowledge base", never ask the user for more context before trying, and ' +
   'never ask whether they want you to look it up or pass it to the agent — just do one. If a ' +
   'request is already with the agent, do not offer or ask about handing it off again.\n\n';
+
+const CAN_LOG_TASKS =
+  'The agent can log tasks, including Patch tasks (bugs and features for Patch itself), so when ' +
+  `the user asks you to log, add or note a task, call ${DISPATCH_TOOL_NAME} with it — never say you ` +
+  'cannot do that. ';
 
 const NEVER_GUESS =
   'Never guess. Anything about their files, folders, tasks, calendar, devices or any other ' +
@@ -310,6 +318,7 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
     return (
       VOICE_PREAMBLE +
       agent +
+      CAN_LOG_TASKS +
       `You do not answer anything yourself. Whatever the user asks or says, call ${DISPATCH_TOOL_NAME} ` +
       'with a clear description of what they said and what they want, then speak only what the ' +
       'agent returns. ' +
@@ -321,6 +330,7 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
   return (
     VOICE_PREAMBLE +
     agent +
+    CAN_LOG_TASKS +
     'Answer yourself from the conversation when you can. Never say you do not know or ask the ' +
     'user for a manual or document: anything you are not sure of, including general factual ' +
     'questions, product details and anything that needs looking up, goes to the agent, which can ' +
@@ -338,16 +348,17 @@ export const HOSTED_VOICE_INSTRUCTION = hostedVoiceInstruction('auto');
 
 /** The dispatch tool's description for a hand-off mode (`never` has no tool). */
 export const DISPATCH_TOOL_DESCRIPTION =
-  "Call this for ANYTHING needing the user's actual data, tasks, calendar, smart " +
+  "Call this for ANYTHING needing the user's actual data, tasks (including logging a task, Patch tasks too), calendar, smart " +
   'home, or any action — you have no access to any of that yourself. Say at most one ' +
   'brief acknowledgement, then stay silent until the result returns; never ' +
   'answer from a guess.';
 
 /** The same, for a session where the call is answered at once and the result comes later. */
 export const ASYNC_DISPATCH_TOOL_DESCRIPTION =
-  "Call this for ANYTHING needing the user's actual data, tasks, calendar, smart " +
+  "Call this for ANYTHING needing the user's actual data, tasks (including logging a task, Patch tasks too), calendar, smart " +
   'home, or any action — you have no access to any of that yourself. It answers "started" ' +
-  'at once and the result arrives later as a message; meanwhile keep talking normally. ' +
+  'at once and the result arrives later as a message; meanwhile carry on with the rest of the ' +
+  "user's question rather than waiting. " +
   'Never answer from a guess.';
 
 function buildSetupMessage(
@@ -1255,7 +1266,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
                   result: 'started',
                   note:
                     'The agent has the request and is working on it in the background. Tell the user once, in a few ' +
-                    'words, that you have passed it on, then carry on the conversation. Its result ' +
+                    'words, that you have passed it on, then carry straight on with the rest of ' +
+                    'what they asked, answering the other parts yourself. Its result ' +
                     'will arrive as a message; do not wait for it or keep mentioning it.',
                   scheduling: 'WHEN_IDLE',
                 },

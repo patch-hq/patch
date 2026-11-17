@@ -47,7 +47,7 @@ describe('ToolsList', () => {
     // Exact count, not "some", so a catalog edit that quietly drops a tool
     // from the sheet is caught here. Dropped from 64 to 55 when the job and
     // device tools moved to the CLI.
-    expect(switches.length).toBe(55);
+    expect(switches.length).toBe(56);
   });
 });
 

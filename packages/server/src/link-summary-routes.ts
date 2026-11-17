@@ -15,7 +15,7 @@ import type { SharedSettings, WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import { requireAuth } from './folder-routes.js';
-import { extractReadableText, isBlockedHost } from './link-preview-routes.js';
+import { extractPageMeta, extractReadableText, isBlockedHost } from './link-preview-routes.js';
 
 export interface LinkSummaryRoutesDeps {
   logger: Logger;
@@ -32,6 +32,9 @@ export const LINK_SUMMARY_MAX_CHARS = 24_000;
 export const LINK_SUMMARY_TIMEOUT_MS = 60_000;
 
 const MAX_REDIRECTS = 5;
+
+/** Below this much body text, a page that loads a script bundle is an app shell, not a document. */
+const SHELL_TEXT_CHARS = 200;
 
 /** A redirect the summary refuses to follow; `status` is what the route answers. */
 class RedirectRefused extends Error {
@@ -146,6 +149,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     }
 
     let text: string;
+    let title: string | undefined;
     const controller = new AbortController();
     const fetchTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
@@ -167,9 +171,37 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
           .send({ error: 'unsupported_content_type', message: contentType || 'unknown' });
       }
       const body = await res.text();
-      text = contentType.includes('text/plain')
-        ? body.replace(/\s+/g, ' ').trim()
-        : extractReadableText(body);
+      if (contentType.includes('text/plain')) {
+        text = body.replace(/\s+/g, ' ').trim();
+      } else {
+        const meta = extractPageMeta(body);
+        title = meta.title;
+        const readable = extractReadableText(body);
+        // A page that is a script bundle and a stub (Todoist, Jira, most web
+        // apps, a sign-in wall) has no document to summarise: the model would
+        // describe the stub ("couldn't load the required files") as if it were
+        // the page. Say so instead.
+        if (
+          meta.description === undefined &&
+          readable.length < SHELL_TEXT_CHARS &&
+          /<script[^>]+\bsrc=/i.test(body)
+        ) {
+          return reply.code(422).send({
+            error: 'needs_javascript',
+            message:
+              'this page is an app that needs JavaScript or a sign-in, so it has no text to summarise',
+          });
+        }
+        // The title and description lead the text: they name the page even
+        // when the body opens with a screenful of site navigation.
+        text = [
+          meta.title !== undefined ? `Title: ${meta.title}` : '',
+          meta.description !== undefined ? `Description: ${meta.description}` : '',
+          readable,
+        ]
+          .filter((part) => part !== '')
+          .join('\n\n');
+      }
     } catch (e) {
       if (e instanceof RedirectRefused) {
         return reply.code(e.status).send({ error: e.code, message: e.message });
@@ -211,6 +243,10 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
         message: result.error ?? 'the host returned no summary',
       });
     }
-    return reply.code(200).send({ url: target.toString(), summary: result.summary });
+    return reply.code(200).send({
+      url: target.toString(),
+      ...(title !== undefined ? { title } : {}),
+      summary: result.summary,
+    });
   });
 }

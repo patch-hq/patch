@@ -70,3 +70,21 @@ test('Switch Server… is in the app menu and asks the shell to switch', () => {
   item.click?.();
   assert.equal(switched, 1);
 });
+
+test('on Linux, File holds Switch Server… and Quit, since there is no app menu', () => {
+  let switched = 0;
+  const template = buildAppMenuTemplate('Patch', {
+    ...deps,
+    platform: 'linux',
+    switchServer: () => switched++,
+  });
+  assert.equal(template[0]?.label, 'File');
+  const items = template[0]?.submenu as Array<{
+    label?: string;
+    role?: string;
+    click?: () => void;
+  }>;
+  items.find((i) => i.label === 'Switch Server…')?.click?.();
+  assert.equal(switched, 1);
+  assert.ok(items.some((i) => i.role === 'quit'));
+});

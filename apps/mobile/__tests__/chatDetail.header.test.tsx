@@ -826,10 +826,10 @@ describe('chat-detail — KeyboardAvoidingView behavior prop (iOS vs Android)', 
   });
 });
 
-describe('chat-detail swipe to change chat', () => {
-  function seedThree(): void {
+describe('chat-detail has no swipe to change chat', () => {
+  it('the screen surface takes no pan gestures', () => {
     useChatStore.getState().hydrate(
-      ['c1', 'c2', 'c3'].map((id, i) => ({
+      ['c1', 'c2'].map((id, i) => ({
         chatId: id,
         name: id,
         folder: '~/project',
@@ -841,72 +841,9 @@ describe('chat-detail swipe to change chat', () => {
         lastUserActivity: 10 - i,
       })),
     );
-  }
-  function surface(r: ReturnType<typeof renderRN>): ReturnType<typeof findHost> {
-    return findHost(r.root, byTestId('chat-swipe-surface'));
-  }
-  const g = (dx: number, dy = 0, vx = 0): { dx: number; dy: number; vx: number } => ({
-    dx,
-    dy,
-    vx,
-  });
-
-  it('swiping right opens the previous chat, left the next', () => {
-    seedThree();
-    __setLocalSearchParams({ chatId: 'c2' });
-    const s = surface(renderRN(<ChatDetailScreen />));
-    s.props['onPanResponderRelease']({}, g(120));
-    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c1');
-    s.props['onPanResponderRelease']({}, g(-120));
-    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c3');
-  });
-
-  it('does nothing past the end of the list or for a short swipe', () => {
-    seedThree();
     __setLocalSearchParams({ chatId: 'c1' });
-    const s = surface(renderRN(<ChatDetailScreen />));
-    s.props['onPanResponderRelease']({}, g(120));
-    s.props['onPanResponderRelease']({}, g(-30));
-    expect(routerMock.replace).not.toHaveBeenCalled();
-  });
-
-  it('a medium drag or a quick short flick changes chat; a slow short one does not', () => {
-    seedThree();
-    __setLocalSearchParams({ chatId: 'c2' });
-    const s = surface(renderRN(<ChatDetailScreen />));
-    s.props['onPanResponderRelease']({}, g(-60));
-    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c3');
-    routerMock.replace.mockClear();
-    s.props['onPanResponderRelease']({}, g(30, 0, 0.8));
-    expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c1');
-    routerMock.replace.mockClear();
-    s.props['onPanResponderRelease']({}, g(30, 0, 0.1));
-    expect(routerMock.replace).not.toHaveBeenCalled();
-  });
-
-  it('ignores a release that ended mostly vertical', () => {
-    seedThree();
-    __setLocalSearchParams({ chatId: 'c2' });
-    const s = surface(renderRN(<ChatDetailScreen />));
-    s.props['onPanResponderRelease']({}, g(70, 90));
-    expect(routerMock.replace).not.toHaveBeenCalled();
-  });
-
-  it('claims in the capture phase so the message list cannot take the drag first', () => {
-    seedThree();
-    __setLocalSearchParams({ chatId: 'c2' });
-    const s = surface(renderRN(<ChatDetailScreen />));
-    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(30, 15))).toBe(true);
-    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(15, 40))).toBe(false);
-    expect(s.props['onPanResponderTerminationRequest']({})).toBe(false);
-  });
-
-  it('only claims a clearly horizontal drag', () => {
-    seedThree();
-    __setLocalSearchParams({ chatId: 'c2' });
-    const s = surface(renderRN(<ChatDetailScreen />));
-    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(40, 5))).toBe(true);
-    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(40, 40))).toBe(false);
-    expect(s.props['onMoveShouldSetPanResponderCapture']({}, g(5, 0))).toBe(false);
+    const s = findHost(renderRN(<ChatDetailScreen />).root, byTestId('chat-surface'));
+    expect(s.props['onPanResponderRelease']).toBeUndefined();
+    expect(s.props['onMoveShouldSetPanResponderCapture']).toBeUndefined();
   });
 });

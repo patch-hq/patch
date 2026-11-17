@@ -42,6 +42,7 @@ import { useUiStore } from '../stores/uiStore';
 import { startVoiceNote } from '../lib/voiceNote';
 import { showSnoozeSheet } from './SnoozeSheet';
 import { api } from '../api/rest';
+import { planOf, writeGoal } from '../lib/chatMeta';
 import { fonts, radii, space, typography, useTheme } from '../lib/theme';
 
 interface SheetState {
@@ -98,14 +99,16 @@ export function renameChatRow(chatId: string, raw: string): void {
 
 /** Optimistic goal set/clear (the same mechanism as `/goal`), with an honest revert. Empty clears. */
 export function setChatGoal(chatId: string, raw: string): void {
-  const previous = useChatStore.getState().chats[chatId]?.goal ?? null;
+  const current = useChatStore.getState().chats[chatId];
+  const previous = current?.goal ?? null;
   const next = raw.trim() === '' ? null : raw.trim();
   if (next === previous) return;
-  useChatStore.getState().setGoal(chatId, next);
-  void api.setGoal(chatId, next).catch((e: Error) => {
-    useChatStore.getState().setGoal(chatId, previous);
-    useUiStore.getState().pushError(`setting goal failed: ${e.message}`);
-  });
+  // Rewording a goal keeps the goals queued after it and its cadences.
+  const kept = current ? planOf(current) : null;
+  const hasPlan =
+    kept !== null &&
+    (kept.then.length > 0 || kept.remindEvery !== null || kept.checkInEvery !== null);
+  void writeGoal(chatId, next, next !== null && hasPlan ? kept : {});
 }
 
 function GoalPage({ row, onDone }: { row: ChatRowT; onDone: () => void }): React.ReactElement {

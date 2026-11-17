@@ -653,21 +653,23 @@ describe('NewChat — folder picker sheet, several hosts', () => {
     });
   });
 
-  it("lists every host's recents under All, with a host tag, and a chip per host narrows it", async () => {
+  it("lists only the current host's folders, never another host's, and a chip switches host", async () => {
     const r = await renderReady();
     await openSheet(r);
-    expect(sheetRows(r)).toEqual(['/p/one', '/p/other']);
-    expect(hasText(findHost(r.root, byTestId('folder-sheet-row-/p/other')), 'd2-box')).toBe(true);
+    expect(sheetRows(r)).toEqual(['/p/one']);
+    expect(findAllHost(r.root, byTestId('folder-sheet-host-all'))).toHaveLength(0);
     await press(r, `folder-sheet-host-${OTHER}`);
     expect(sheetRows(r)).toEqual(['/p/other']);
-    await press(r, 'folder-sheet-host-all');
-    expect(sheetRows(r)).toEqual(['/p/one', '/p/other']);
+    expect(hasText(findHost(r.root, byTestId('folder-sheet-row-/p/other')), 'd2-box')).toBe(true);
+    await press(r, `folder-sheet-host-${HOST}`);
+    expect(sheetRows(r)).toEqual(['/p/one']);
   });
 
   it('picking a folder picks its host, and drops the model and mode chosen on the old one', async () => {
     const r = await renderReady();
     await pickModel(r, 'claude-sonnet-5');
     await openSheet(r);
+    await press(r, `folder-sheet-host-${OTHER}`);
     await press(r, 'folder-sheet-row-/p/other');
     expect(pillText(r)).toBe('other · d2-box');
     typeText(r, 'go');
@@ -681,6 +683,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
     });
     const r = await renderReady();
     await openSheet(r);
+    await press(r, `folder-sheet-host-${OTHER}`);
     await press(r, 'folder-sheet-row-/p/other');
     expect(pillText(r)).toBe('one · d1-box');
     expect(useUiStore.getState().errors[0]?.message).toContain('d2-box is offline');

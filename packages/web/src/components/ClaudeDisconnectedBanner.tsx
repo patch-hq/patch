@@ -12,11 +12,21 @@
 // names a host.
 //
 // This is the case where text IS the feature — the state is otherwise invisible —
-// so it says what's wrong and where to fix it, and nothing else.
+// so it says what's wrong and where to fix it, and nothing else. "Sign in" goes
+// straight to signing in (routes/ConnectRoute), never to a settings page with
+// the button somewhere below.
 
 import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
+
+/** Where every "Sign in" for a chat that can't run goes. */
+export const CONNECT_PATH = '/connect';
+
+/** Which provider a model needs, by the name its sign-in uses. */
+export function providerNameForModel(model: string | null | undefined): string {
+  return model?.startsWith('openai/') ? 'Codex' : 'Claude';
+}
 
 export function ClaudeDisconnectedBanner({ model }: { model?: string }): JSX.Element | null {
   // The accounts are the server's, shared by every host, so no host is named.
@@ -31,8 +41,8 @@ export function ClaudeDisconnectedBanner({ model }: { model?: string }): JSX.Ele
     >
       <span className="dot" aria-hidden />
       <span>
-        Not signed in to {model?.startsWith('openai/') ? 'Codex' : 'Claude'}. Chats can’t run.{' '}
-        <Link to="/settings/usage">Sign in</Link>
+        Not signed in to {providerNameForModel(model)}. Chats can’t run.{' '}
+        <Link to={CONNECT_PATH}>Sign in</Link>
       </span>
     </div>
   );

@@ -26,8 +26,12 @@ export interface ProviderDescriptor {
   readonly permissionModes: 'all' | readonly PermissionMode[];
   /** The backend id the provider's credentials and account reports are keyed by (`claude-code`). */
   readonly backendId: string;
-  /** The key of the provider's list in the shared settings (`secrets.<key>`, `strategy.<key>`). */
-  readonly accountsKey: string;
+  /**
+   * The key of the provider's list in the shared settings (`secrets.<key>`,
+   * `strategy.<key>`). `null` for a provider with no accounts to sign in to
+   * (a local model server): it has no credential store, strategy or usage.
+   */
+  readonly accountsKey: string | null;
   /** Other names the CLI accepts for it (`openai` for codex). */
   readonly aliases: readonly string[];
   /** Does the provider honour the per-chat reasoning-effort control? */
@@ -119,6 +123,20 @@ export const PROVIDERS = [
       'undo',
     ],
   },
+  {
+    id: 'local',
+    label: 'Local model',
+    modelPrefix: 'local/',
+    sessionIdPrefix: 'local-',
+    // No classifier-driven approval, so no `auto` (openaiCompatPermission refuses it).
+    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    backendId: 'local',
+    accountsKey: null,
+    aliases: ['ollama', 'llamacpp', 'lmstudio'],
+    supportsEffort: false,
+    loginRequiredCode: 'local_endpoint_missing',
+    builtinCommands: [],
+  },
 ] as const satisfies readonly ProviderDescriptor[];
 
 export type ProviderId = (typeof PROVIDERS)[number]['id'];
@@ -185,15 +203,23 @@ export function modelSupportsEffort(model: string | null | undefined): boolean {
 }
 
 export type ProviderBackendId = (typeof PROVIDERS)[number]['backendId'];
-export type ProviderAccountsKey = (typeof PROVIDERS)[number]['accountsKey'];
+export type AccountBackendId = (typeof ACCOUNT_PROVIDERS)[number]['backendId'];
+export type ProviderAccountsKey = Exclude<(typeof PROVIDERS)[number]['accountsKey'], null>;
+
+/** The providers that have accounts (a sign-in, a quota); everything account-shaped iterates these. */
+export const ACCOUNT_PROVIDERS = PROVIDERS.filter(
+  (p): p is Extract<(typeof PROVIDERS)[number], { accountsKey: string }> => p.accountsKey !== null,
+);
 
 /** Where the provider's accounts and strategy sit in the shared settings. */
 export function accountsKeyForBackend(backendId: string): ProviderAccountsKey {
-  return providerDescriptor(providerForBackendId(backendId)).accountsKey as ProviderAccountsKey;
+  const key = providerDescriptor(providerForBackendId(backendId)).accountsKey;
+  if (key === null) throw new Error(`${backendId} has no accounts`);
+  return key as ProviderAccountsKey;
 }
 
-/** Every backend id, for schemas that list them. */
-export const BACKEND_IDS = PROVIDERS.map((p) => p.backendId) as unknown as [
-  ProviderBackendId,
-  ...ProviderBackendId[],
+/** Every backend id that holds accounts, for schemas that list them. */
+export const BACKEND_IDS = ACCOUNT_PROVIDERS.map((p) => p.backendId) as unknown as [
+  AccountBackendId,
+  ...AccountBackendId[],
 ];

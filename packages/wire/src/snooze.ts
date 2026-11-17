@@ -9,11 +9,16 @@ import { z } from 'zod';
 export const SnoozeOutcomeKind = z.enum(['finished', 'waiting', 'errored', 'running', 'none']);
 export type SnoozeOutcomeKind = z.infer<typeof SnoozeOutcomeKind>;
 
+export const SnoozeError = z.object({ code: z.string(), message: z.string() }).strict();
+export type SnoozeError = z.infer<typeof SnoozeError>;
+
 export const SnoozeOutcome = z
   .object({
     kind: SnoozeOutcomeKind,
     /** ms epoch the outcome happened (finished/errored) or began (waiting). Absent for running/none. */
     at: z.number().int().optional(),
+    /** What failed, for an `errored` outcome: the chat's `lastError` when the turn failed. */
+    error: SnoozeError.optional(),
   })
   .strict();
 export type SnoozeOutcome = z.infer<typeof SnoozeOutcome>;
@@ -34,6 +39,8 @@ export const SnoozeRecord = z
     /** Tracking for `outcome`: last turn finish, last error, when it began waiting on a person. */
     finishedAt: z.number().int().optional(),
     erroredAt: z.number().int().optional(),
+    /** The error behind `erroredAt`. */
+    error: SnoozeError.optional(),
     waitingSince: z.number().int().optional(),
     /** The Back state has been dismissed for this set; the divider stays. */
     backCleared: z.boolean(),
@@ -80,6 +87,7 @@ export interface SnoozeOutcomeInput {
   askingQuestion: boolean;
   finishedAt?: number | undefined;
   erroredAt?: number | undefined;
+  error?: SnoozeError | undefined;
   waitingSince?: number | undefined;
   /** Used when the chat is waiting/errored but no moment was tracked. */
   now: number;
@@ -90,7 +98,11 @@ export function deriveSnoozeOutcome(i: SnoozeOutcomeInput): SnoozeOutcome {
   if (i.activity === 'awaiting-permission' || i.askingQuestion) {
     return { kind: 'waiting', at: i.waitingSince ?? i.now };
   }
-  if (i.activity === 'errored') return { kind: 'errored', at: i.erroredAt ?? i.now };
+  if (i.activity === 'errored') {
+    return i.error
+      ? { kind: 'errored', at: i.erroredAt ?? i.now, error: i.error }
+      : { kind: 'errored', at: i.erroredAt ?? i.now };
+  }
   if (i.activity === 'running') return { kind: 'running' };
   if (i.finishedAt !== undefined) return { kind: 'finished', at: i.finishedAt };
   return { kind: 'none' };

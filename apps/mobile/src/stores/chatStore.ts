@@ -19,6 +19,7 @@ import {
   type ChatListRow,
   type ChatRow,
   type DisplayBadge,
+  type GoalPlan,
   type PendingPermission,
   type ProviderContextEntry,
 } from './types';
@@ -46,8 +47,10 @@ export interface DelegateUpdateInfo {
   status: ChatDelegateUpdateEvent['status'];
   /** Set while the subagent is parked on a usage limit; `resetsAt` is when it resumes. */
   outOfCredit?: { resetsAt?: number };
-  /** Epoch ms this surface first saw the subagent — the running-time clock. */
+  /** Epoch ms the current run began — the running-time clock. The host's `runStartedAt`; the time this surface first saw it only against a host that sends none. */
   since: number;
+  /** The current run is a follow-up wake of a settled subagent. */
+  followUp?: boolean;
 }
 
 export interface ChatEventEntry {
@@ -85,6 +88,8 @@ export interface ChatEventEntry {
   tool?: string;
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** The result came back as an error (`chat.tool_result.isError`). */
+  toolIsError?: boolean;
   callId?: string;
   requestId?: string;
   permissionDescription?: string;
@@ -353,7 +358,7 @@ interface ChatState {
   /** Local optimistic update for hide / Show (spec/04 § Hidden). */
   setHidden(chatId: string, hidden: boolean): void;
   /** Optimistic goal write (goal bar); reverted by the caller on failure. */
-  setGoal(chatId: string, goal: string | null): void;
+  setGoal(chatId: string, goal: string | null, plan?: GoalPlan): void;
   /** Optimistic reminder write (reminder bar). */
   setReminder(chatId: string, reminder: string | null, every?: ReminderEvery | null): void;
   /** Optimistic task-list write (task bar) — always the WHOLE list. */
@@ -510,6 +515,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     snoozedUntil: null,
     hidden: false,
     backgroundTasks: null,
+    runningAgents: null,
     context: null,
     // Unknown until the roster or `chat.spawned` names it.
     model: null,
@@ -519,6 +525,9 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     statusKind: null,
     statusDeclared: null,
     goal: null,
+    goalQueue: [],
+    goalReminderEvery: null,
+    goalCheckInEvery: null,
     reminder: null,
     reminderEvery: null,
     todos: [],
@@ -553,6 +562,10 @@ function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatR
     statusKind: r.statusKind !== undefined ? r.statusKind : base.statusKind,
     statusDeclared: r.statusDeclared !== undefined ? r.statusDeclared : base.statusDeclared,
     goal: r.goal !== undefined ? r.goal : base.goal,
+    goalQueue: r.goalQueue !== undefined ? r.goalQueue : base.goalQueue,
+    goalReminderEvery:
+      r.goalReminderEvery !== undefined ? r.goalReminderEvery : base.goalReminderEvery,
+    goalCheckInEvery: r.goalCheckInEvery !== undefined ? r.goalCheckInEvery : base.goalCheckInEvery,
     reminder: r.reminder !== undefined ? r.reminder : base.reminder,
     reminderEvery: r.reminderEvery !== undefined ? r.reminderEvery : base.reminderEvery,
     todos: r.todos !== undefined ? r.todos : base.todos,
@@ -563,6 +576,7 @@ function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatR
     runningSince: r.runningSince !== undefined ? r.runningSince : base.runningSince,
     hidden: r.hidden !== undefined ? r.hidden : base.hidden,
     backgroundTasks: r.backgroundTasks !== undefined ? r.backgroundTasks : base.backgroundTasks,
+    runningAgents: r.runningAgents !== undefined ? r.runningAgents : base.runningAgents,
     context: r.context !== undefined ? r.context : base.context,
   };
 }
@@ -612,6 +626,9 @@ function rowsToRecord(
             statusKind: prior.statusKind,
             statusDeclared: prior.statusDeclared,
             goal: prior.goal,
+            goalQueue: prior.goalQueue,
+            goalReminderEvery: prior.goalReminderEvery,
+            goalCheckInEvery: prior.goalCheckInEvery,
             reminder: prior.reminder,
             reminderEvery: prior.reminderEvery,
             todos: prior.todos,
@@ -674,6 +691,7 @@ function toListRow(row: ChatRow): ChatListRow {
     ...(row.runningSince !== undefined ? { runningSince: row.runningSince } : {}),
     hidden: row.hidden,
     backgroundTasks: row.backgroundTasks,
+    runningAgents: row.runningAgents,
     context: row.context,
     model: row.model,
     jobId: row.jobId,
@@ -681,6 +699,9 @@ function toListRow(row: ChatRow): ChatListRow {
     statusKind: row.statusKind,
     statusDeclared: row.statusDeclared,
     goal: row.goal,
+    goalQueue: row.goalQueue,
+    goalReminderEvery: row.goalReminderEvery,
+    goalCheckInEvery: row.goalCheckInEvery,
     reminder: row.reminder,
     reminderEvery: row.reminderEvery,
     todos: row.todos,
@@ -926,6 +947,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.backgroundTasks !== undefined
                 ? event.backgroundTasks
                 : (row.backgroundTasks ?? null),
+            runningAgents:
+              event.runningAgents !== undefined ? event.runningAgents : (row.runningAgents ?? null),
             context: event.context !== undefined ? event.context : (row.context ?? null),
             // spec/04 § Model — the model the next turn runs on. Also the
             // acknowledgement of a `chat.model_request` from ANY surface. An
@@ -945,6 +968,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // unchanged" rule — an explicit `null` (or `[]`) clears, an absent
             // field is a `chat.state` about something else. Mirrors web.
             goal: event.goal !== undefined ? event.goal : row.goal,
+            goalQueue: event.goalQueue !== undefined ? event.goalQueue : row.goalQueue,
+            goalReminderEvery:
+              event.goalReminderEvery !== undefined
+                ? event.goalReminderEvery
+                : row.goalReminderEvery,
+            goalCheckInEvery:
+              event.goalCheckInEvery !== undefined ? event.goalCheckInEvery : row.goalCheckInEvery,
             reminder: event.reminder !== undefined ? event.reminder : row.reminder,
             reminderEvery:
               event.reminderEvery !== undefined ? event.reminderEvery : row.reminderEvery,
@@ -1387,6 +1417,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             kind: 'tool_result',
             tool: event.tool,
             toolResult: event.result,
+            ...(event.isError === true ? { toolIsError: true } : {}),
             callId: event.callId,
             at: Date.now(),
           });
@@ -1583,7 +1614,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
               label: event.label,
               status: event.status,
               ...(event.outOfCredit ? { outOfCredit: event.outOfCredit } : {}),
-              since: delegateUpdates[event.chatId]?.[event.delegateId]?.since ?? Date.now(),
+              since:
+                event.runStartedAt ??
+                delegateUpdates[event.chatId]?.[event.delegateId]?.since ??
+                Date.now(),
+              ...(event.followUp ? { followUp: true } : {}),
             },
           };
           break;
@@ -1773,10 +1808,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     saveCachedChatList(Object.values(get().chats).map(toListRow));
   },
 
-  setGoal(chatId, goal) {
+  setGoal(chatId, goal, plan = {}) {
     const row = get().chats[chatId];
     if (!row) return;
-    set({ chats: { ...get().chats, [chatId]: { ...row, goal } } });
+    set({
+      chats: {
+        ...get().chats,
+        [chatId]: {
+          ...row,
+          goal,
+          goalQueue: goal === null ? [] : (plan.then ?? []),
+          goalReminderEvery: goal === null ? null : (plan.remindEvery ?? null),
+          goalCheckInEvery: goal === null ? null : (plan.checkInEvery ?? null),
+        },
+      },
+    });
   },
 
   setReminder(chatId, reminder, every = null) {

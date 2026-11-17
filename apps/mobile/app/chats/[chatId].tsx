@@ -4,7 +4,7 @@ import { isDictatedSend } from '../../src/lib/dictatedSends';
 import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
-import { formatElapsed as formatToolElapsed } from '../../src/lib/backgroundTasks';
+import { formatElapsed as formatToolElapsed, turnStartOf } from '../../src/lib/backgroundTasks';
 import {
   ActivityIndicator,
   Animated,
@@ -28,8 +28,6 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
-import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
-import { horizontalScrollTouchActive } from '../../src/lib/horizontalScrollTouch';
 import * as Clipboard from 'expo-clipboard';
 import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
 import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStore';
@@ -47,7 +45,15 @@ import {
   Clock,
   CloudOff,
 } from 'lucide-react-native';
-import { ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hand } from 'lucide-react-native';
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Copy,
+  Hand,
+} from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
   folderName,
@@ -63,6 +69,8 @@ import {
 import { apiUrl, getRoute } from '../../src/config';
 import { loadTranscript, dropTranscript, setBranch } from '../../src/lib/transcriptCache';
 import { api } from '../../src/api/rest';
+import { editRoute } from '../../src/lib/hostFiles';
+import { resolveSkillEditTarget } from '../../src/lib/jobEditor';
 import { sendQuestionActivity } from '../../src/lib/questionActivity';
 import {
   isLocalIdSettled,
@@ -196,6 +204,12 @@ import { QuestionCard } from '../../src/components/QuestionCard';
 // anchoring to the DOM element at the top edge; a FlatList has no DOM to
 // re-measure, so `onViewableItemsChanged` + `scrollToIndex` — the same
 // primitive the search-jump feature already uses — stand in for that here).
+// True while a question card's free-text answer box has focus. Re-pinning to
+// the newest message then (keyboard opening, the box growing as you type)
+// scrolls the box itself out of view, so both re-pins stand down. Module
+// level because the card is rendered by a row component, not the screen.
+const answerInputFocusedRef = { current: false };
+
 const chatScrollMemory = new Map<
   string,
   { offset: number; atBottom: boolean; anchorSeq: number | null }
@@ -205,6 +219,9 @@ const chatScrollMemory = new Map<
 // grows or streams (see the block comment above), so this alone is a reliable
 // test — no content-size/viewport comparison needed.
 const AT_BOTTOM_SLOP = 24;
+// Scrolled this far (px) from the newest message, a "go to beginning" button
+// appears: a long transcript is otherwise a long drag back to the first message.
+const SHOW_TO_BEGINNING_OFFSET = 3000;
 
 // Hoisted so the style object identity is stable — an inline literal here is a
 // new prop on every render, which defeats FlatList's own bail-outs.
@@ -252,12 +269,6 @@ export default function ChatDetailScreen(): React.ReactElement {
   );
 }
 
-// A drag of SWIPE_MIN_DX commits on its own; a quicker flick commits from
-// SWIPE_FLICK_DX (a thumb on a phone rarely travels 80px).
-const SWIPE_MIN_DX = 48;
-const SWIPE_FLICK_DX = 24;
-const SWIPE_FLICK_VX = 0.5;
-
 function ChatDetailBody(): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
@@ -273,32 +284,6 @@ function ChatDetailBody(): React.ReactElement {
   const row = useChatStore((s) => s.chats[chatId]);
   useLeaveWhenArchivedElsewhere(chatId, router, '/(tabs)/chats');
   useMarkChatNotificationsRead(chatId);
-  // Swipe sideways to step to the neighbouring chat in the Chats tab's order.
-  // Claimed in the capture phase: the message list is a scroll view that would
-  // otherwise take any slightly diagonal drag before this surface is asked.
-  // The claim still has to be clearly horizontal, so vertical scrolling wins,
-  // and a drag that starts on an overflowing table scrolls the table instead.
-  // Read the store at release rather than subscribing: the list moving under a
-  // finger must not re-render this screen.
-  const swipe = React.useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (_e, g) =>
-        !horizontalScrollTouchActive() &&
-        Math.abs(g.dx) > 14 &&
-        Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderRelease: (_e, g) => {
-        const adx = Math.abs(g.dx);
-        if (adx <= Math.abs(g.dy)) return;
-        const flick = adx >= SWIPE_FLICK_DX && Math.abs(g.vx) >= SWIPE_FLICK_VX;
-        if (adx < SWIPE_MIN_DX && !flick) return;
-        const { prev, next } = swipeNeighbours(useChatStore.getState().chats, chatIdRef.current);
-        // Finger moving right drags the previous chat in from the left.
-        const target = g.dx > 0 ? prev : next;
-        if (target) routerRef.current.replace(`/chats/${target}`);
-      },
-    }),
-  ).current;
   const chatIdRef = React.useRef(chatId);
   chatIdRef.current = chatId;
   const routerRef = React.useRef(router);
@@ -559,6 +544,7 @@ function ChatDetailBody(): React.ReactElement {
   // Mirrors `followRef` into React state so the floating "scroll to bottom"
   // button can react to it — the ref alone doesn't trigger a re-render.
   const [showScrollToBottom, setShowScrollToBottom] = React.useState(false);
+  const [showToBeginning, setShowToBeginning] = React.useState(false);
   // True between the user putting a finger on the list and the resulting
   // momentum settling. Follow mode is turned off ONLY inside that window — a
   // drag is a real, unambiguous signal of intent, so use it rather than
@@ -896,7 +882,7 @@ function ChatDetailBody(): React.ReactElement {
       return;
     }
     if (tryJump()) return;
-    if (followRef.current) scrollToNewest(false);
+    if (followRef.current && !answerInputFocusedRef.current) scrollToNewest(false);
   }, [chatId, scrollToNewest, armSettleTimer, tryJump]);
 
   const onScroll = React.useCallback(
@@ -915,6 +901,7 @@ function ChatDetailBody(): React.ReactElement {
       // message?", true however the list got there (a drag, or the keyboard
       // shrinking the list under a reader who is not following).
       setShowScrollToBottom(!atNewest);
+      setShowToBeginning(contentOffset.y > SHOW_TO_BEGINNING_OFFSET);
       if (draggingRef.current) {
         followRef.current = atNewest;
         // Only remember a position the user actually chose. Recording our own
@@ -1034,7 +1021,7 @@ function ChatDetailBody(): React.ReactElement {
   // user reading history (not following) is left where they are.
   React.useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => {
-      if (followRef.current) scrollToNewest(true);
+      if (followRef.current && !answerInputFocusedRef.current) scrollToNewest(true);
     });
     return () => sub.remove();
   }, [scrollToNewest]);
@@ -1078,9 +1065,8 @@ function ChatDetailBody(): React.ReactElement {
 
   return (
     <View
-      testID="chat-swipe-surface"
+      testID="chat-surface"
       style={{ flex: 1, backgroundColor: colors.paper }}
-      {...swipe.panHandlers}
     >
       <View
         testID="chat-header"
@@ -1424,6 +1410,36 @@ function ChatDetailBody(): React.ReactElement {
             <ChevronDown size={20} color={colors.ink} />
           </Pressable>
         ) : null}
+        {showToBeginning ? (
+          <Pressable
+            testID="scroll-to-beginning"
+            accessibilityRole="button"
+            accessibilityLabel="Go to beginning of chat"
+            onPress={() => {
+              followRef.current = false;
+              listRef.current?.scrollToEnd({ animated: true });
+            }}
+            style={{
+              position: 'absolute',
+              right: space.md,
+              bottom: space.xl * 2 + 48,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: colors.paperRaised,
+              borderWidth: 1,
+              borderColor: colors.divider,
+              alignItems: 'center',
+              justifyContent: 'center',
+              elevation: 4,
+              shadowColor: fixed.shadow,
+              shadowOpacity: 0.15,
+              shadowRadius: 4,
+            }}
+          >
+            <ChevronUp size={20} color={colors.ink} />
+          </Pressable>
+        ) : null}
         {readOnlyMirror ? (
           <View
             testID="composer-readonly"
@@ -1548,8 +1564,57 @@ function PermissionOutcome({
   );
 }
 
+/** Calls the user asked to cancel; the chip shows only once the call comes back as an error. */
+const cancelRequested = new Set<string>();
+
+/** Icon-only cancel for one running Bash command. 44px, the touch minimum. */
+function CancelCommandButton({
+  chatId,
+  callId,
+}: {
+  chatId: string;
+  callId: string;
+}): React.ReactElement {
+  const colors = useTheme();
+  const [asked, setAsked] = React.useState(false);
+  return (
+    <Pressable
+      testID="tool-cancel"
+      accessibilityRole="button"
+      accessibilityLabel="Cancel this command"
+      disabled={asked}
+      onPress={() => {
+        setAsked(true);
+        cancelRequested.add(callId);
+        getWs().send({ type: 'chat.tool_cancel_request', chatId, callId });
+      }}
+      style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: radii.md,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.diffDel,
+          opacity: asked ? 0.5 : 1,
+        }}
+      >
+        <X size={16} color={colors.red} />
+      </View>
+    </Pressable>
+  );
+}
+
 /** A running call's elapsed time, from the host's start stamp. Display only. */
-function ToolElapsed({ since }: { since: number }): React.ReactElement {
+function ToolElapsed({
+  since,
+  turnSince,
+}: {
+  since: number;
+  turnSince?: number | undefined;
+}): React.ReactElement {
   const colors = useTheme();
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -1562,7 +1627,103 @@ function ToolElapsed({ since }: { since: number }): React.ReactElement {
       style={{ ...typography.meta, color: colors.ink3, marginLeft: space.sm }}
     >
       {formatToolElapsed(since, now)}
+      {turnSince !== undefined ? (
+        <Text testID="tool-running-turn"> · working for {formatToolElapsed(turnSince, now)}</Text>
+      ) : null}
     </Text>
+  );
+}
+
+/**
+ * The row for a `Skill` tool call: tapping it opens the skill's SKILL.md in the
+ * file editor. NO FALLBACK: a skill the host can't point at, or a failed lookup,
+ * says why on the row rather than rendering a dead link.
+ */
+function SkillToolCallItem({
+  chatId,
+  skill,
+  entry,
+  result,
+}: {
+  chatId: string;
+  skill: string;
+  entry: ChatEventEntry;
+  result?: ChatEventEntry;
+}): React.ReactElement {
+  const colors = useTheme();
+  const router = useRouter();
+  const folder = useChatStore((s) => s.chats[chatId]?.folder ?? '');
+  const hostId = useChatStore((s) => s.chats[chatId]?.hostId ?? '');
+  const [paths, setPaths] = React.useState<Record<string, string> | undefined>(undefined);
+  const [error, setError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (folder.trim() === '' || hostId.trim() === '') return;
+    let live = true;
+    api
+      .skills(folder, hostId)
+      .then((r) => {
+        if (live) setPaths(r.paths);
+      })
+      .catch((e: unknown) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [folder, hostId]);
+  const phrase = toolCallSummary(entry.tool, entry.toolArgs);
+  const summary = result ? `${phrase} →` : phrase;
+  const target = resolveSkillEditTarget({ skill, paths, hostId });
+  // Until the lookup answers there is neither a link nor a reason to show.
+  const pending = paths === undefined && error === null && hostId.trim() !== '';
+  const reason =
+    error !== null
+      ? `couldn't look up skill: ${error}`
+      : target && 'reason' in target
+        ? target.reason
+        : null;
+  const link = target && 'path' in target && error === null ? target : null;
+  return (
+    <View
+      style={{
+        backgroundColor: colors.paperRaised,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        borderRadius: radii.md,
+        borderWidth: 1,
+        borderColor: colors.lineSoft,
+        marginBottom: space.sm,
+      }}
+    >
+      {link ? (
+        <Pressable
+          testID="tool-call-skill-link"
+          onPress={() => router.push(editRoute(link.hostId, link.path))}
+          accessibilityLabel={`Open skill ${skill}`}
+          style={{ flexDirection: 'row', alignItems: 'center' }}
+        >
+          <ExternalLink size={13} color={colors.leaf} />
+          <Text
+            style={{ ...typography.meta, color: colors.leaf, marginLeft: space.xs, flexShrink: 1 }}
+            numberOfLines={1}
+          >
+            {summary}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={{ ...typography.meta, color: colors.ink2 }} numberOfLines={1}>
+          {summary}
+        </Text>
+      )}
+      {!pending && reason ? (
+        <Text
+          testID="tool-call-skill-unavailable"
+          style={{ ...typography.meta, color: colors.ink3, marginTop: space.xs }}
+        >
+          {reason}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -1608,6 +1769,14 @@ function ToolCallItem({
       ? parseAskHuman(entry.toolArgs)
       : null;
   if (askHuman) return <AskHumanCard task={askHuman.task} why={askHuman.why} />;
+  // A `Skill` call names the skill and opens its SKILL.md on tap (mirrors web).
+  const skillName =
+    entry.tool === 'Skill' && entry.toolArgs && typeof entry.toolArgs === 'object'
+      ? (entry.toolArgs as Record<string, unknown>)['skill']
+      : undefined;
+  if (typeof skillName === 'string' && skillName !== '') {
+    return <SkillToolCallItem chatId={chatId} skill={skillName} entry={entry} result={result} />;
+  }
   const colors = useTheme();
   const [expanded, setExpanded] = React.useState(false);
   const diff = diffFromToolCall(entry.tool, entry.toolArgs);
@@ -1626,6 +1795,8 @@ function ToolCallItem({
   const summary = result ? `${phrase} →` : phrase;
   const chatRunning = useChatStore((s) => s.chats[chatId]?.activity === 'running');
   const runningSince = !result && chatRunning ? entry.startedAt : undefined;
+  // The whole turn's clock beside the call's own, which restarts with every call.
+  const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));
   // patch_notify calls carrying a deepLink render a tappable link row on the
   // collapsed summary itself — same tap-target the push notification itself
   // opens (spec/09 § `### push`, spec/15 § Chat detail) — rather than
@@ -1649,26 +1820,46 @@ function ToolCallItem({
         marginBottom: space.sm,
       }}
     >
-      <Pressable
-        onPress={() => setExpanded((v) => !v)}
-        onLongPress={() => showMessageActions(copyableText(entry) ?? '')}
-        delayLongPress={350}
-        style={{ flexDirection: 'row', alignItems: 'center' }}
-        accessibilityLabel={`Tool call ${entry.tool ?? ''} — tap to ${expanded ? 'collapse' : 'expand'}`}
-      >
-        {expanded ? (
-          <ChevronDown size={14} color={colors.ink3} />
-        ) : (
-          <ChevronRight size={14} color={colors.ink3} />
-        )}
-        <Text
-          style={{ ...typography.meta, color: colors.ink2, marginLeft: space.xs, flexShrink: 1 }}
-          numberOfLines={1}
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Pressable
+          onPress={() => setExpanded((v) => !v)}
+          onLongPress={() => showMessageActions(copyableText(entry) ?? '')}
+          delayLongPress={350}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+          accessibilityLabel={`Tool call ${entry.tool ?? ''} — tap to ${expanded ? 'collapse' : 'expand'}`}
         >
-          {summary}
-        </Text>
-        {runningSince !== undefined ? <ToolElapsed since={runningSince} /> : null}
-      </Pressable>
+          {expanded ? (
+            <ChevronDown size={14} color={colors.ink3} />
+          ) : (
+            <ChevronRight size={14} color={colors.ink3} />
+          )}
+          <Text
+            style={{ ...typography.meta, color: colors.ink2, marginLeft: space.xs, flexShrink: 1 }}
+            numberOfLines={1}
+          >
+            {summary}
+          </Text>
+          {runningSince !== undefined ? (
+            <ToolElapsed since={runningSince} turnSince={turnSince} />
+          ) : null}
+        </Pressable>
+        {runningSince !== undefined && entry.tool === 'Bash' && entry.callId ? (
+          <CancelCommandButton chatId={chatId} callId={entry.callId} />
+        ) : null}
+        {result?.toolIsError && entry.callId && cancelRequested.has(entry.callId) ? (
+          <View
+            testID="tool-cancelled"
+            style={{
+              borderRadius: 999,
+              paddingHorizontal: space.sm,
+              paddingVertical: 2,
+              backgroundColor: colors.diffDel,
+            }}
+          >
+            <Text style={{ ...typography.meta, color: colors.red }}>Cancelled by you</Text>
+          </View>
+        ) : null}
+      </View>
       {deepLink ? (
         <Pressable
           onPress={() => void Linking.openURL(deepLink)}
@@ -2177,6 +2368,9 @@ function DelegateToolCallItem({
 
   const status = live?.status ?? 'running';
   const label = live?.label ?? ack.label;
+  // With the call's result in, the card records the spawn only: a later run of
+  // the same child must not re-colour it (the Agents bar carries live state).
+  const spawned = resultAck !== null;
 
   return (
     <View
@@ -2211,7 +2405,7 @@ function DelegateToolCallItem({
             paddingHorizontal: space.sm,
             paddingVertical: 1,
             borderRadius: 999,
-            backgroundColor: delegateStatusColor(status, colors),
+            backgroundColor: spawned ? colors.ink3 : delegateStatusColor(status, colors),
           }}
         >
           <Text
@@ -2222,7 +2416,7 @@ function DelegateToolCallItem({
               color: colors.onAccent,
             }}
           >
-            {DELEGATE_STATUS_LABEL[status]}
+            {spawned ? 'Started' : DELEGATE_STATUS_LABEL[status]}
           </Text>
         </View>
       </Pressable>
@@ -3149,6 +3343,9 @@ const TimelineItem = React.memo(function TimelineItem({
       return (
         <QuestionCard
           entry={entry}
+          onInputFocusChange={(focused) => {
+            answerInputFocusedRef.current = focused;
+          }}
           onAnswer={(requestId, answers) => {
             // Routed through `permissionDeliveryTracker`, not a bare
             // `getWs().send` — a phone answering a question is usually doing

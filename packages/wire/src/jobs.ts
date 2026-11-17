@@ -379,6 +379,9 @@ export const ContinueAction = z
     // when a KEYED `continue` creates a new subject's chat.
     ...jobActionGoalField,
     ...jobActionLoopField,
+    // Same creation-time rule and same field as on `spawn`: applied when this
+    // fire creates the durable chat.
+    permissionMode: PermissionMode.optional(),
     /**
      * Mustache template naming the SUBJECT this fire is about, turning the
      * job's one durable chat into one durable chat PER SUBJECT (spec/08 ##

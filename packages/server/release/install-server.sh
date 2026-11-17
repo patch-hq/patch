@@ -92,11 +92,8 @@ caddyfile() {
   [ -z "${EMAIL}" ] || printf '\temail %s\n' "${EMAIL}"
   printf '}\n\n%s {\n' "${DOMAIN}"
   printf '\tencode zstd gzip\n'
-  # /audio/* is the SERVER's (it relays the session to the chat's own host);
-  # only /device/* belongs to this box's host (spec/07 § Reaching a non-home
-  # host's audio WSS).
-  printf '\t@device path /device/*\n'
-  printf '\treverse_proxy @device 127.0.0.1:3003\n'
+  # Everything is the server's: /audio/* (it relays the session to the chat's
+  # own host) and /device/* (voice devices connect to the server, spec/16).
   if [ -n "${SOCKET}" ]; then
     printf '\treverse_proxy unix/%s\n' "${SOCKET}"
   else
@@ -134,7 +131,8 @@ if [ "${USER_MODE}" = 1 ]; then
   : "${HOME_DIR:=${HOME}/.patch-server}"
 else
   [ "$(id -u)" = 0 ] || die "this needs root. Run:  curl -fsSL <url>/install.sh | sudo sh   (or add --user-mode to try it as yourself)"
-  command -v systemctl >/dev/null || die "systemd is needed (no systemctl here); use --user-mode ... or install by hand (spec/11)"
+  # --no-service lays the release out for a box without systemd: nothing below asks it.
+  [ "${SERVICE}" = 0 ] || command -v systemctl >/dev/null || die "systemd is needed (no systemctl here); use --user-mode, --no-service, or install by hand (spec/11)"
   SERVER_USER=patch
   : "${HOME_DIR:=/var/lib/patch-server}"
 fi

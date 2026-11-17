@@ -7,6 +7,7 @@
 import type { JSX } from 'react';
 import { describeHostOffline } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
 // With `hostId` the banner is scoped to that one host (a chat on it): it
@@ -26,6 +27,11 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
   const offlineReason = usePresenceStore((s) =>
     hostId === undefined ? undefined : (s.hosts[hostId]?.offlineReason ?? undefined),
   );
+  const updatingTo = usePresenceStore((s) =>
+    hostId === undefined ? undefined : s.hostsUpdating[hostId],
+  );
+  const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
+  const updating = autoUpdate && updatingTo !== undefined;
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
   const hostsSeeded = usePresenceStore((s) => s.hostsSeeded);
   // Until the auth.ok greeting seeds the roster, hostOnline is unknown, not false.
@@ -37,21 +43,25 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
     <div className="daemon-offline-banner" data-testid="daemon-offline-banner" role="status">
       <span className="dot" aria-hidden />
       <span>
-        {hostId === undefined
-          ? 'Agent offline. Messages are queued and sent when it reconnects.'
-          : `${describeHostOffline(hostName, offlineReason)}. Messages to this chat are queued and sent when it reconnects.`}
+        {updating
+          ? `${hostName} is being updated to ${updatingTo}. Messages to this chat are queued and sent when it is back.`
+          : hostId === undefined
+            ? 'Agent offline. Messages are queued and sent when it reconnects.'
+            : `${describeHostOffline(hostName, offlineReason)}. Messages to this chat are queued and sent when it reconnects.`}
       </span>
       {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
           overlay (spec/12 § Connection diagnostics screen). The app stays
           navigable — a daemon-offline surface is never blocked. */}
-      <button
-        type="button"
-        className="banner-diagnose"
-        data-testid="daemon-offline-diagnose"
-        onClick={() => setDiagnosticsOpen(true)}
-      >
-        Diagnose
-      </button>
+      {updating ? null : (
+        <button
+          type="button"
+          className="banner-diagnose"
+          data-testid="daemon-offline-diagnose"
+          onClick={() => setDiagnosticsOpen(true)}
+        >
+          Diagnose
+        </button>
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ export const PARTICIPANTS = {
   priya: 'Priya Nair',
   marcus: 'Marcus Webb',
 } as const;
-export const OWNER_LABEL = 'Tom Chambers';
+export const OWNER_LABEL = 'Sam Owner';
 /** The call app whose mic use the scripted detector events imitate. */
 export const CALL_APP_BUNDLE = 'com.microsoft.teams2';
 export const CALL_APP_NAME = 'Microsoft Teams';
@@ -65,7 +65,7 @@ export const SCRIPT: Step[] = [
   {
     kind: 'line',
     who: 'priya',
-    text: 'Tom, please book the venue for the launch party before the end of this week.',
+    text: 'Sam, please book the venue for the launch party before the end of this week.',
   },
   { kind: 'line', who: 'owner', text: 'Yes, I will book the venue by Thursday.' },
   {
@@ -96,7 +96,7 @@ export const EXPECTED_TOPICS: { name: string; pattern: RegExp }[] = [
 /** Actions the analysis must propose (title or reason). */
 export const EXPECTED_ACTIONS: { name: string; pattern: RegExp }[] = [
   { name: 'Marcus sends the test plan', pattern: /test plan/i },
-  { name: 'Tom books the venue', pattern: /venue/i },
+  { name: 'Sam books the venue', pattern: /venue/i },
 ];
 
 /** Gap between consecutive steps, seconds. Long enough for the 6 s clip to close on a line. */

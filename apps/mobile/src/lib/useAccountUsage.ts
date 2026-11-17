@@ -4,7 +4,7 @@
 // menu is open, so merely having a composer never asks a host for usage.
 
 import React from 'react';
-import { PROVIDERS, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
+import { ACCOUNT_PROVIDERS, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import { getWs } from '../api/ws';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
@@ -26,7 +26,7 @@ export function useAccountUsage(): AccountUsageRow[] {
   const hosts = usePresenceStore((s) => s.hosts);
   const asked = React.useRef(new Set<string>());
   const rows: AccountUsageRow[] = [];
-  for (const { backendId, accountsKey } of PROVIDERS) {
+  for (const { backendId, accountsKey } of ACCOUNT_PROVIDERS) {
     const accounts = secrets ? secrets[accountsKey] : [];
     for (const a of accounts) {
       if (!a.connected || ('kind' in a && a.kind === 'apiKey')) continue;

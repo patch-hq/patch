@@ -12,7 +12,7 @@
 // fetch (Sidebar.tsx flashes empty until it lands) — the exact ambush the
 // desktop shell's own auto-restart was fixed for in 659ef37e, just never
 // applied here. So: mirror that fix. Record that an update is staged
-// (webUpdateStore) and let WebUpdateBanner ask, the same escalating
+// (webUpdateStore) and let UpdateBanner ask, the same escalating
 // quiet→due→overdue "no dismiss, no timer" contract as the desktop banner.
 // Reloading is now ALWAYS a user action (reloadNow, wired to that banner's
 // button) — Patch ships ~20 times a day, so staying a few deploys behind
@@ -52,7 +52,7 @@ function updateDesktopShell(): void {
 
 /**
  * Handle the server-reported bundle version (from `auth.ok`). Stages the
- * update (WebUpdateBanner picks it up) iff it differs from the running
+ * update (UpdateBanner picks it up) iff it differs from the running
  * bundle. A no-op in dev (no hashed bundle) or when the versions already
  * match.
  */
@@ -64,7 +64,7 @@ export function onServerVersion(deployedBundle: string | null | undefined): void
   useWebUpdateStore.getState().setAvailable(deployedBundle);
 }
 
-/** WebUpdateBanner's Reload button — the only path that ever reloads the SPA. */
+/** UpdateBanner's Reload button — the only path that ever reloads the SPA. */
 export function reloadNow(deps: { reload?: () => void } = {}): void {
   const reload = deps.reload ?? ((): void => window.location.reload());
   // A page holding unsaved edits vetoes the unload with `beforeunload`, which

@@ -12,7 +12,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decodePng, alphaOf, renderTrayTemplate, type RasterImage } from './tray-icon';
+import {
+  decodePng,
+  alphaOf,
+  renderTrayTemplate,
+  renderTrayWorking,
+  WORKING_ORANGE,
+  type RasterImage,
+} from './tray-icon';
 
 const DESKTOP = join(__dirname, '..');
 const REPO = join(__dirname, '..', '..', '..');
@@ -118,4 +125,35 @@ test('mobile adaptive icon is the cream "p" on brand green', () => {
   }
   assert.ok(green / n > 0.7, `expected mostly brand green, got ${(green / n).toFixed(3)}`);
   assert.ok(cream / n > 0.02, `expected a cream "p", got ${(cream / n).toFixed(3)}`);
+});
+
+// ── Working (orange) tray image ────────────────────────────────────────────
+
+for (const [file, size] of [
+  ['trayIconWorking.png', 16],
+  ['trayIconWorking@2x.png', 32],
+] as const) {
+  test(`menu-bar ${file} is the orange "p" as a coloured ${size}px image`, () => {
+    const committed = decodePng(readFileSync(join(DESKTOP, 'build', file)));
+    assert.equal(committed.width, size);
+    assert.equal(committed.channels, 4, 'working image must be coloured, not a template');
+    assert.deepEqual(Array.from(committed.data), Array.from(renderTrayWorking(size).data));
+    let inked = 0;
+    for (let i = 0; i < size * size; i++) {
+      if (committed.data[i * 4 + 3]! > 250) {
+        inked++;
+        assert.deepEqual(
+          [committed.data[i * 4], committed.data[i * 4 + 1], committed.data[i * 4 + 2]],
+          [WORKING_ORANGE.r, WORKING_ORANGE.g, WORKING_ORANGE.b],
+        );
+      }
+    }
+    assert.ok(inked > 0, 'glyph must have opaque pixels');
+  });
+}
+
+test('web working favicon is the idle favicon recoloured orange', () => {
+  const idle = readFileSync(join(WEB, 'public', 'favicon.svg'), 'utf8');
+  const working = readFileSync(join(WEB, 'public', 'favicon-working.svg'), 'utf8');
+  assert.equal(working, idle.replace(BRAND_GREEN, '#e8873a'));
 });

@@ -40,7 +40,7 @@ trigger (one of):
 
 action (one of; all but script need a prompt, a skill, or both):
   {type:"spawn", hostId, folder, prompt?, skill?, model?, permissionMode?, startHidden?, notifyOnComplete?, includePayload?, goal?}
-  {type:"continue", hostId, folder, prompt?, skill?, key?, model?, startHidden?, notifyOnComplete?, includePayload?, goal?}
+  {type:"continue", hostId, folder, prompt?, skill?, key?, model?, permissionMode?, startHidden?, notifyOnComplete?, includePayload?, goal?}
       Messages ONE durable chat, created on the first fire; key is a mustache
       template ("{{payload.event_data.id}}") giving each subject its own chat.
   {type:"message", chatId, prompt?, skill?, includePayload?}

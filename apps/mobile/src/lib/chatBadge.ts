@@ -9,7 +9,8 @@ import { deriveBadge, type ChatRow, type DisplayBadge } from '../stores/types';
 
 /** Only the quiet states lift; a decision, a failure or a running turn outranks an unread entry. */
 export function liftForUnreadNotification(badge: DisplayBadge, hasUnread: boolean): DisplayBadge {
-  return hasUnread && (badge === 'read' || badge === 'background' || badge === 'monitoring')
+  return hasUnread &&
+    (badge === 'read' || badge === 'agents' || badge === 'background' || badge === 'monitoring')
     ? 'done'
     : badge;
 }

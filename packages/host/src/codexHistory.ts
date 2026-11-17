@@ -18,11 +18,16 @@ import type { SdkEnvelope } from './sdkBackend.js';
 
 type Entry = { turnId: string; event: WireEvent };
 export class CodexHistory implements HistoryReader {
-  constructor(private root: string) {
+  /** `prefix` is the harness's session-id prefix without the dash (`codex`, `local`). */
+  constructor(
+    private root: string,
+    private prefix = 'codex',
+  ) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
   }
   private path(id: string): string {
-    if (!/^codex-[a-zA-Z0-9-]+$/.test(id)) throw new Error('Invalid Codex session id');
+    if (!id.startsWith(`${this.prefix}-`) || !/^[a-zA-Z0-9-]+$/.test(id))
+      throw new Error(`Invalid ${this.prefix} session id`);
     return join(this.root, id + '.jsonl');
   }
   begin(id: string, providerPath?: string): void {

@@ -18,10 +18,10 @@ test('callingAppsIn names calling apps, via helper bundle IDs, and ignores Patch
     [
       proc('com.google.Chrome.helper', 1),
       proc('us.zoom.xos', 2),
-      proc('io.github.tomchambers2.patch.helper', 3),
+      proc('dev.patchhq.app.helper', 3),
       proc('com.spotify.client', 4),
     ],
-    'io.github.tomchambers2.patch',
+    'dev.patchhq.app',
   );
   assert.deepEqual(apps, ['Chrome call', 'Zoom']);
 });

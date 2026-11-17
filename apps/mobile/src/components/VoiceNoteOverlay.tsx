@@ -8,8 +8,8 @@
 //               itself after a pause long enough to read it, unless the user
 //               scrolls it, which hands it over to them to close
 //
-// A note is uploaded whole rather than streamed, so there are no words while
-// the user talks — the timer and the pulse are what say the mic is alive.
+// The clip is uploaded whole, but a live preview session runs beside it, so
+// the words so far show under the timer while the user talks.
 //
 // Mounted at the root layout so it persists across tab switches. The store
 // decides whether it's visible.
@@ -38,6 +38,7 @@ export function VoiceNoteOverlay(): React.ReactElement | null {
   const chatId = useVoiceStore((s) => s.voiceNoteChatId);
   const transcript = useVoiceStore((s) => s.voiceNoteTranscript);
   const state = useVoiceStore((s) => s.voiceNoteState);
+  const partial = useVoiceStore((s) => s.voiceNotePartial);
   const startedAt = useVoiceStore((s) => s.voiceNoteStartedAt);
   const recording = chatId !== null && state === 'recording';
   const now = useNow(recording);
@@ -140,6 +141,15 @@ export function VoiceNoteOverlay(): React.ReactElement | null {
         >
           {title}
         </Text>
+        {recording && partial.length > 0 ? (
+          <Text
+            testID="voice-note-partial"
+            numberOfLines={3}
+            style={{ color: fixed.onShade, fontSize: 16, lineHeight: 22, marginTop: space.xs }}
+          >
+            {partial}
+          </Text>
+        ) : null}
         {/* The whole transcript, not a two-line teaser: it is the user's own
             words, and a clipped copy is exactly what they cannot check. */}
         {done ? (

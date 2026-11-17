@@ -134,16 +134,10 @@ describe('mobile Settings → Hosts → the list', () => {
     expect(textOf(findHost(r.root, byTestId('host-box-status')))).toBe('Linux · seen 3h ago');
   });
 
-  it('subtitles a host that reports a battery with its charge and power source', () => {
+  it('leaves battery out of the subtitle, even when an older host reports it', () => {
     reportHost('mac', { platform: 'darwin', power: { onBattery: true, percent: 12 } });
-    reportHost('desk', { platform: 'darwin', power: { onBattery: false, percent: 80 } });
     const r = render(<HostsSection />);
-    expect(textOf(findHost(r.root, byTestId('host-mac-status')))).toBe(
-      'macOS · online · 12% on battery',
-    );
-    expect(textOf(findHost(r.root, byTestId('host-desk-status')))).toBe(
-      'macOS · online · 80% plugged in',
-    );
+    expect(textOf(findHost(r.root, byTestId('host-mac-status')))).toBe('macOS · online');
   });
 
   it('hostSubtitle / platformLabel read the reported platform plainly', () => {

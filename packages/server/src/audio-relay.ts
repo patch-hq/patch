@@ -70,6 +70,12 @@ export interface AudioRelayDeps {
   hostLink: Pick<HostLink, 'isOnline' | 'sendTo' | 'onEvent' | 'onHostStatus'>;
   /** `WsHub.audioRelayHost` — where the server can reach a host's own audio WSS DIRECTLY, if it has declared one. Absent is normal; the tunnelled path needs nothing declared. */
   audioRelayHostFor: (hostId: string) => string | undefined;
+  /**
+   * Text the host should speak as soon as this session starts (a device
+   * announcement, device-control.ts). Taken once; sent to the host as an
+   * `audio.speak` frame right after the device's own `audio.session_start`.
+   */
+  takeSpeech?: (sessionId: string) => string | undefined;
   /** Test seam: substitute the upstream WebSocket client (direct-dial path only). */
   wsCtor?: new (url: string) => WebSocket;
 }
@@ -111,7 +117,7 @@ function sendAudioError(socket: RelaySocket, code: string, message: string): voi
 }
 
 /** Pipe every frame from `a` to `b` verbatim (binary stays binary, text stays text) once `b` is open. */
-function pipeOnceOpen(a: RelaySocket, b: RelaySocket): void {
+function pipeOnceOpen(a: RelaySocket, b: RelaySocket, afterFirst?: string): void {
   // The surface sends `audio.session_start` the instant its own WSS opens
   // (`audioSession.ts`) — before this relay's own upstream leg has finished
   // its own handshake to the host, which is now a real network hop rather
@@ -127,13 +133,21 @@ function pipeOnceOpen(a: RelaySocket, b: RelaySocket): void {
       pending.length = 0;
     });
   }
+  let extra = afterFirst;
   a.on('message', (data, isBinary) => {
-    if (!open) {
-      pending.push({ data, isBinary });
-      return;
+    const frames: Array<{ data: Buffer | string; isBinary: boolean }> = [{ data, isBinary }];
+    if (extra !== undefined) {
+      frames.push({ data: extra, isBinary: false });
+      extra = undefined;
     }
-    if (b.readyState !== WebSocket.OPEN) return;
-    b.send(isBinary ? data : data.toString('utf8'));
+    for (const f of frames) {
+      if (!open) {
+        pending.push(f);
+        continue;
+      }
+      if (b.readyState !== WebSocket.OPEN) return;
+      b.send(f.isBinary ? f.data : f.data.toString('utf8'));
+    }
   });
 }
 
@@ -194,15 +208,28 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     tunnelled.clear();
   });
 
-  function relayTunnelled(socket: RelaySocket, sessionId: string, hostId: string): void {
+  function relayTunnelled(
+    socket: RelaySocket,
+    sessionId: string,
+    hostId: string,
+    afterFirst?: string,
+  ): void {
     tunnelled.set(sessionId, { socket, hostId });
-    socket.on('message', (data, isBinary) => {
+    let extra = afterFirst;
+    const forward = (data: Buffer, isBinary: boolean): void => {
       sendToHost(hostId, {
         type: 'patch.audio_relay.frame',
         sessionId,
         data: data.toString('base64'),
         binary: isBinary,
       } as PatchAudioRelayFrameEvent);
+    };
+    socket.on('message', (data, isBinary) => {
+      forward(data, isBinary);
+      if (extra !== undefined) {
+        forward(Buffer.from(extra, 'utf8'), false);
+        extra = undefined;
+      }
     });
     const closeTunnel = (): void => {
       if (!tunnelled.delete(sessionId)) return;
@@ -232,12 +259,17 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
         sendAudioError(socket, 'host_unreachable', `${hostId} is offline`);
         return;
       }
+      const speech = deps.takeSpeech?.(sessionId);
+      const speakFrame =
+        speech === undefined
+          ? undefined
+          : JSON.stringify({ type: 'audio.speak', sessionId, text: speech });
       const relayHost = deps.audioRelayHostFor(hostId);
       if (!relayHost) {
         // No direct address declared (the common case — see the module
         // comment's path 2): tunnel the session over this host's existing
         // outbound link instead of refusing it.
-        relayTunnelled(socket, sessionId, hostId);
+        relayTunnelled(socket, sessionId, hostId, speakFrame);
         return;
       }
       const upstream = new WsCtor(`ws://${relayHost}/audio/${sessionId}`) as unknown as RelaySocket;
@@ -259,7 +291,7 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       upstream.on('close', () => socket.close());
       socket.on('close', () => upstream.close());
       socket.on('error', () => upstream.close());
-      pipeOnceOpen(socket, upstream);
+      pipeOnceOpen(socket, upstream, speakFrame);
       pipeOnceOpen(upstream, socket);
     },
   );

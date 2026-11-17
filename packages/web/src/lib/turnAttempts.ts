@@ -40,3 +40,33 @@ export function attemptPaging(
   }
   return { hidden, pageable };
 }
+
+/** Where a turn's pager was parked, and which run was the newest when it was. */
+export interface AttemptSelection {
+  idx: number;
+  /** `seq` of the turn's last attempt at the moment the user paged. */
+  lastSeq: number;
+}
+
+/**
+ * The selections still worth honouring, as anchor seq → attempt index.
+ *
+ * A pager parked on an earlier attempt must not outlive the run it was parked
+ * beside: when the newest attempt changes (the retry's echo replaces the
+ * pending placeholder, or another retry begins) the user is waiting on that
+ * new run, and keeping the old page would hide it — it would just disappear.
+ */
+export function liveAttemptSelection(
+  timeline: readonly ChatEventEntry[],
+  selected: ReadonlyMap<number, AttemptSelection>,
+): Map<number, number> {
+  const live = new Map<number, number>();
+  if (selected.size === 0) return live;
+  for (const e of timeline) {
+    const sel = selected.get(e.seq);
+    const attempts = e.attempts;
+    if (sel === undefined || attempts === undefined || attempts.length === 0) continue;
+    if (attempts[attempts.length - 1]!.seq === sel.lastSeq) live.set(e.seq, sel.idx);
+  }
+  return live;
+}

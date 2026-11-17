@@ -1,0 +1,22 @@
+{
+  "name": "@patch/relay-worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The relay (spec/10 § Relay) as a Cloudflare Worker with one Durable Object per channel: the public relay at wss://relay.patchhq.dev.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "node test/run.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@patch/relay": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261110.1",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.160.0"
+  }
+}

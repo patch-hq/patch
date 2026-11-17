@@ -458,4 +458,65 @@ describe('TerminalPanel — command completion', () => {
     expect(await screen.findAllByText(/not connected/)).toHaveLength(2);
     expect(screen.queryByTestId('terminal-running')).toBeNull();
   });
+
+  it('a dropped socket shows the shell as ended, then reopens it once connected again', async () => {
+    const ws = makeWs();
+    usePresenceStore.getState().setConnection('connected');
+    renderPanel(ws);
+    await waitFor(() => expect(ws.sent).toHaveLength(1));
+    act(() => {
+      useTerminalStore.getState().ingest({
+        type: 'patch.terminal.ready',
+        sessionId: sessionId(),
+        cwd: '/home/tom/projects',
+      });
+    });
+    const first = sessionId();
+    act(() => {
+      usePresenceStore.getState().setConnection('reconnecting');
+      useTerminalStore.getState().interrupt('connection lost, reconnecting');
+    });
+    expect(screen.queryByTestId('terminal-prompt-row')).toBeNull();
+    expect(screen.getByTestId('terminal-reconnecting')).toBeInTheDocument();
+    expect(ws.sent).toHaveLength(1);
+    act(() => usePresenceStore.getState().setConnection('connected'));
+    await waitFor(() => expect(ws.sent).toHaveLength(2));
+    expect(ws.sent[1]).toMatchObject({ type: 'patch.terminal.open', hostId: 'd1' });
+    expect(sessionId()).not.toBe(first);
+  });
+
+  it('after a host restart, waits for it to come back before opening a fresh shell', async () => {
+    const ws = makeWs();
+    usePresenceStore.getState().setConnection('connected');
+    renderPanel(ws);
+    await waitFor(() => expect(ws.sent).toHaveLength(1));
+    const id = sessionId();
+    act(() => {
+      useTerminalStore
+        .getState()
+        .ingest({ type: 'patch.terminal.exit', sessionId: id, code: null, reason: 'daemon_shutdown' });
+    });
+    expect(ws.sent).toHaveLength(1);
+    act(() => {
+      usePresenceStore.getState().setHostOnline('d1', false);
+      useTerminalStore.getState().interrupt('machine offline', 'd1');
+    });
+    expect(ws.sent).toHaveLength(1);
+    act(() => usePresenceStore.getState().setHostOnline('d1', true));
+    await waitFor(() => expect(ws.sent).toHaveLength(2));
+  });
+
+  it('a shell the user ended stays ended until Restart', async () => {
+    const ws = makeWs();
+    usePresenceStore.getState().setConnection('connected');
+    renderPanel(ws);
+    await waitFor(() => expect(ws.sent).toHaveLength(1));
+    act(() => {
+      useTerminalStore
+        .getState()
+        .ingest({ type: 'patch.terminal.exit', sessionId: sessionId(), code: 0, reason: 'shell_exit' });
+    });
+    expect(screen.getByTestId('terminal-restart')).toBeInTheDocument();
+    expect(ws.sent).toHaveLength(1);
+  });
 });

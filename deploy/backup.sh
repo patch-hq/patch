@@ -11,7 +11,7 @@
 #
 # Required env (sourced from deploy/.env or the cron environment):
 #   RESTIC_REPOSITORY  — e.g. sftp:u123@u123.your-storagebox.de:/restic
-#                        (Hetzner Storage Box) or any restic-supported remote.
+#                        (an SFTP storage box) or any restic-supported remote.
 #   RESTIC_PASSWORD    — repository encryption password.
 #
 # Optional:
@@ -33,7 +33,7 @@ if [[ -f "$HERE/.env" ]]; then
   set +a
 fi
 
-: "${RESTIC_REPOSITORY:?RESTIC_REPOSITORY is required (restic remote, e.g. Hetzner Storage Box sftp URL)}"
+: "${RESTIC_REPOSITORY:?RESTIC_REPOSITORY is required (restic remote, e.g. an SFTP storage box sftp URL)}"
 : "${RESTIC_PASSWORD:?RESTIC_PASSWORD is required (restic repo encryption password)}"
 
 DATA_DIR="${PATCH_DATA_DIR:-$HERE/data}"

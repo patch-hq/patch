@@ -1,4 +1,4 @@
-package io.github.tomchambers2.patch
+package dev.patchhq.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -45,17 +45,17 @@ class VoiceAudioService : Service() {
     const val EXTRA_CHAT = "chat"
     const val EXTRA_MODE = "mode"
     const val EXTRA_MUTED = "muted"
-    const val ACTION_START = "io.github.tomchambers2.patch.voice.START"
-    const val ACTION_STOP = "io.github.tomchambers2.patch.voice.STOP"
+    const val ACTION_START = "dev.patchhq.app.voice.START"
+    const val ACTION_STOP = "dev.patchhq.app.voice.STOP"
     /**
      * The notification's own End call button, as distinct from ACTION_STOP,
      * which is JS tearing the service down. Only this one tells JS to end the
      * call — routing both through one action would have JS's own teardown
      * bounce straight back at it as a fresh end-the-call request.
      */
-    const val ACTION_END_FROM_NOTIFICATION = "io.github.tomchambers2.patch.voice.END"
-    const val ACTION_MUTE = "io.github.tomchambers2.patch.voice.MUTE"
-    const val ACTION_MODE = "io.github.tomchambers2.patch.voice.MODE"
+    const val ACTION_END_FROM_NOTIFICATION = "dev.patchhq.app.voice.END"
+    const val ACTION_MUTE = "dev.patchhq.app.voice.MUTE"
+    const val ACTION_MODE = "dev.patchhq.app.voice.MODE"
 
     /**
      * Set by PatchVoiceAudioServiceModule while the React context is alive.

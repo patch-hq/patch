@@ -164,3 +164,22 @@ describe('startOtaUpdatePolling', () => {
     expect(checkSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('overlapping update work', () => {
+  it('never runs two expo-updates downloads at once (native IllegalStateException: closed)', async () => {
+    const Updates = await import('./stubs/expo-updates');
+    let active = 0;
+    let peak = 0;
+    vi.spyOn(Updates, 'checkForUpdateAsync').mockImplementation(async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 10));
+      active--;
+      return { isAvailable: false } as never;
+    });
+    const { checkForOtaUpdate } = await import('../src/lib/otaUpdates');
+    const { runUpdateCheck } = await import('../src/lib/updateCheck');
+    await Promise.all([checkForOtaUpdate(), checkForOtaUpdate(), runUpdateCheck()]);
+    expect(peak).toBe(1);
+  });
+});

@@ -180,6 +180,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'file_path: string',
   },
   {
+    name: patchToolId('link_file'),
+    label: 'link_file',
+    category: 'patch',
+    description:
+      'Points at a file or folder anywhere on the host disk, with buttons to open it or reveal it in the file manager.',
+    params: 'file_path: string',
+  },
+  {
     name: patchToolId('patch_wake_me'),
     label: 'patch_wake_me',
     category: 'patch',

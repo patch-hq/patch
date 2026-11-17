@@ -86,9 +86,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'io.github.tomchambers2.patch'
+    namespace 'dev.patchhq.app'
     defaultConfig {
-        applicationId 'io.github.tomchambers2.patch'
+        applicationId 'dev.patchhq.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

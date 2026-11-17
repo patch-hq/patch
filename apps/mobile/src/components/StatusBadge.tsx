@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { Animated, Easing, View } from 'react-native';
-import { Clock, Terminal, TriangleAlert } from 'lucide-react-native';
+import { Bot, Clock, Terminal, TriangleAlert } from 'lucide-react-native';
 import type { DisplayBadge } from '../stores/types';
 import { badgeColor } from '../lib/badge';
 import { useTheme } from '../lib/theme';
@@ -119,6 +119,20 @@ export function StatusBadge({ badge, size = 12 }: Props): React.ReactElement {
   // An idle chat with a background command or sub-agent still running. A
   // static (not spinning) glyph, same grey as `read` — a spin is `working`'s
   // signal alone.
+  if (badge === 'agents') {
+    return (
+      <View
+        style={{
+          width: ringSize,
+          height: ringSize,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Bot size={size + 1} color={color} strokeWidth={2.5} />
+      </View>
+    );
+  }
   if (badge === 'background') {
     return (
       <View

@@ -14,6 +14,14 @@ describe('EmptyChat', () => {
     );
   });
 
+  it('draws one plain line under the title when given one, and none otherwise', () => {
+    const { unmount } = render(<EmptyChat title="Manager" line="Ask about any of your chats." />);
+    expect(screen.getByTestId('empty-chat-line')).toHaveTextContent('Ask about any of your chats.');
+    unmount();
+    render(<EmptyChat />);
+    expect(screen.queryByTestId('empty-chat-line')).toBeNull();
+  });
+
   it('defaults the title when none is given', () => {
     render(<EmptyChat />);
     expect(screen.getByTestId('empty-chat').querySelector('.empty-chat-title')?.textContent).toBe(
