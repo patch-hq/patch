@@ -27,6 +27,7 @@ import { createServer as createNetServer } from 'node:net';
 import { acquireHomeLock, type HomeLock } from './homeLock.js';
 import { detachDurableTurns, type DurableTurnConfig } from './durableTurn.js';
 import { SHUTDOWN_DEADLINE_MS, shutdownThenExit } from './shutdownDeadline.js';
+import { runShutdownSteps, type StepReport } from './shutdownSteps.js';
 import { linkLegacySocket, isNamedPipe } from './legacySocket.js';
 import {
   mkdirSync,
@@ -5841,28 +5842,52 @@ async function startHost(
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');
     homeLock.release();
-    await codexAccounts.close();
     logger.info('patch-daemon: shutting down');
+    const began = Date.now();
+    const report = (r: StepReport): void => {
+      if (r.overran || r.error !== undefined) {
+        logger.warn({ ...r }, 'patch-daemon: shutdown step did not finish in its budget');
+      } else {
+        logger.debug({ ...r }, 'patch-daemon: shutdown step done');
+      }
+    };
     // spec/04 § History — everything the history log was told is on disk
     // before the process goes (the batch fsync would otherwise lose up to 1 s).
+    // Only chats that moved are written, so this does not scale with how many
+    // chats the host has loaded.
     try {
       daemon.flushHistory();
     } catch (err) {
       logger.error({ err }, 'patch-daemon: history log flush failed on shutdown');
     }
-    // Terminal shells die with the host (spec/02 — no reattach); surfaces are
-    // told via `patch.terminal.exit { reason: 'daemon_shutdown' }`.
-    await terminals.shutdown().catch(() => undefined);
-    // Host searches die with the host too — a surface mid-search just gets
-    // no more frames for that `searchId`, same as a cancel.
+    // Everything that can wait on something outside the host runs together,
+    // each with its own budget (shutdownSteps.ts): one slow close must not
+    // hold up the rest, nor run the whole shutdown into its hard deadline.
+    // Terminal shells die with the host (spec/02) and surfaces are told via
+    // `patch.terminal.exit { reason: 'daemon_shutdown' }`, so they go before
+    // the server link does. Host searches die with it too — a surface
+    // mid-search just gets no more frames for that `searchId`.
     hostSearch.cancelAll();
     audioRelayBridge.dispose();
-    await audioServer.close().catch(() => undefined);
-    await kokoro.close().catch(() => undefined);
-    await whisper?.close().catch(() => undefined);
-    await liveRecognizer?.close().catch(() => undefined);
-    await link.close().catch(() => undefined);
-    await app.close().catch(() => undefined);
+    await runShutdownSteps(
+      [
+        { name: 'codex accounts', run: () => codexAccounts.close() },
+        { name: 'terminals', run: () => terminals.shutdown() },
+        { name: 'audio server', run: () => audioServer?.close() },
+        { name: 'kokoro', run: () => kokoro.close() },
+        { name: 'whisper', run: () => whisper?.close() },
+        { name: 'live recognizer', run: () => liveRecognizer?.close() },
+      ],
+      { log: report },
+    );
+    await runShutdownSteps(
+      [
+        { name: 'server link', run: () => link.close() },
+        { name: 'control socket', run: () => app.close() },
+      ],
+      { log: report },
+    );
+    logger.info({ ms: Date.now() - began }, 'patch-daemon: shutdown steps finished');
     tcp.close();
   };
   // Wire the control-IPC POST /stop endpoint to graceful shutdown.

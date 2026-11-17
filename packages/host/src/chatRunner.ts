@@ -15282,6 +15282,7 @@ export class Daemon {
       nextSeq: state.nextSeq,
       updatedAt: state.lastUpdated,
     }));
+    this.chatState.noteMirrored(chatId);
   }
 
   /**
@@ -15290,7 +15291,11 @@ export class Daemon {
    * mirrored anywhere else.
    */
   flushHistory(): void {
+    // Only chats that moved since meta.json last held them. Rewriting all of a
+    // host's loaded chats (6,400 on one) is synchronous disk work that froze
+    // the event loop for 10-49 s, so the shutdown deadline could not even fire.
     for (const state of this.chatState.list()) {
+      if (!this.chatState.needsMirror(state.chatId)) continue;
       try {
         this.mirrorSeqToMeta(state.chatId);
       } catch (err) {
