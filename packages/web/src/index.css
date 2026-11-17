@@ -18345,19 +18345,30 @@ select.permission-mode.is-pending {
   color: var(--ink-2);
 }
 .composer-dict-grip {
-  height: 10px;
-  margin: 0 auto 2px;
-  width: 40px;
+  /* Takes no layout space: the hit area and the pill hang off a zero-height
+     line at the top of the box, so dictating does not push the input down. */
+  height: 0;
+  margin: 0;
+  width: 100%;
+  position: relative;
+  z-index: 2;
   cursor: ns-resize;
   touch-action: none;
-  position: relative;
 }
-.composer-dict-grip::after {
+.composer-dict-grip::before {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
-  top: 4px;
+  top: -14px;
+  height: 28px;
+}
+.composer-dict-grip::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 20px);
+  width: 40px;
+  top: -2px;
   height: 3px;
   border-radius: 2px;
   background: var(--line);
