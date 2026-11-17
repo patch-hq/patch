@@ -377,7 +377,9 @@ describe('Settings → Hosts', () => {
     });
     usePresenceStore.getState().setHostOnline('host-a', true);
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-component-kokoro')).toHaveTextContent('340 MB');
+    expect(screen.getByTestId('host-host-a-component-kokoro')).toHaveTextContent(
+      'Not installed · 340 MB',
+    );
     expect(screen.queryByTestId('host-host-a-component-kokoro-remove')).toBeNull();
     fireEvent.click(screen.getByTestId('host-host-a-component-kokoro-install'));
     expect(send).toHaveBeenCalledWith({

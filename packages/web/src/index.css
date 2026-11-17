@@ -18825,3 +18825,14 @@ a.drop-target {
   opacity: 1;
   text-decoration: underline;
 }
+
+/* Settings → Hosts: the collapsed optional section. The summary is a row. */
+.set-optional > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.set-optional > summary::-webkit-details-marker {
+  display: none;
+}

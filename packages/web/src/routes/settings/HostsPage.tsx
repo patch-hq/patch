@@ -243,9 +243,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   }
 
   return (
-    <section className="set-group" data-testid={`host-detail-${host.hostId}`}>
-      <h2 className="set-label">{name}</h2>
-      <div className="set-card">
+    <div data-testid={`host-detail-${host.hostId}`}>
+      <Group label={name}>
         {report ? (
           <>
             <Row title="Name">
@@ -309,10 +308,10 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
         ) : (
           <Note testid={`host-${host.hostId}-unreported`}>{name} hasn’t reported yet</Note>
         )}
-      </div>
+      </Group>
 
       {report && report.backends.length > 0 ? (
-        <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-backends`}>
+        <Group testid={`host-${host.hostId}-backends`}>
           {report.backends.map((b) => (
             <Row
               key={b.id}
@@ -338,65 +337,71 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               ) : null}
             </Row>
           ))}
-        </div>
+        </Group>
       ) : null}
 
       {report && report.components.length > 0 ? (
-        <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-components`}>
-          {report.components.map((c) => (
-            <Row
-              key={c.id}
-              testid={`host-${host.hostId}-component-${c.id}`}
-              title={c.label}
-              sub={[
-                c.state === 'downloading' && c.progress !== undefined
-                  ? `downloading ${Math.round(c.progress * 100)}%`
-                  : c.state,
-                c.state === 'not-installed' ? `${Math.round(c.bytes / 1_000_000)} MB` : null,
-                c.error ?? null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            >
-              {c.state === 'not-installed' || c.state === 'failed' ? (
-                <button
-                  type="button"
-                  className="set-btn"
-                  data-testid={`host-${host.hostId}-component-${c.id}-install`}
-                  onClick={() =>
-                    sendToHost(host, {
-                      type: 'host.component_install',
-                      hostId: host.hostId,
-                      componentId: c.id,
-                    })
-                  }
-                >
-                  Install
-                </button>
-              ) : c.state === 'installed' ? (
-                <button
-                  type="button"
-                  className="set-btn ghost"
-                  data-testid={`host-${host.hostId}-component-${c.id}-remove`}
-                  onClick={() =>
-                    sendToHost(host, {
-                      type: 'host.component_remove',
-                      hostId: host.hostId,
-                      componentId: c.id,
-                    })
-                  }
-                >
-                  Remove
-                </button>
-              ) : null}
-            </Row>
-          ))}
-        </div>
+        <Group label="Optional" testid={`host-${host.hostId}-components`}>
+          <details className="set-optional">
+            <summary className="set-row set-optional-summary">
+              <span className="set-row-title">Voice (experimental)</span>
+              <span className="set-sub">Speech output and input</span>
+            </summary>
+            {report.components.map((c) => (
+              <Row
+                key={c.id}
+                testid={`host-${host.hostId}-component-${c.id}`}
+                title={c.label}
+                sub={[
+                  c.state === 'downloading' && c.progress !== undefined
+                    ? `Downloading ${Math.round(c.progress * 100)}%`
+                    : componentStateLabel(c.state),
+                  c.state === 'not-installed' ? `${Math.round(c.bytes / 1_000_000)} MB` : null,
+                  c.error ?? null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              >
+                {c.state === 'not-installed' || c.state === 'failed' ? (
+                  <button
+                    type="button"
+                    className="set-btn"
+                    data-testid={`host-${host.hostId}-component-${c.id}-install`}
+                    onClick={() =>
+                      sendToHost(host, {
+                        type: 'host.component_install',
+                        hostId: host.hostId,
+                        componentId: c.id,
+                      })
+                    }
+                  >
+                    Install
+                  </button>
+                ) : c.state === 'installed' ? (
+                  <button
+                    type="button"
+                    className="set-btn ghost"
+                    data-testid={`host-${host.hostId}-component-${c.id}-remove`}
+                    onClick={() =>
+                      sendToHost(host, {
+                        type: 'host.component_remove',
+                        hostId: host.hostId,
+                        componentId: c.id,
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </Row>
+            ))}
+          </details>
+        </Group>
       ) : null}
 
       {report ? <ClaudeSettingsEditor host={host} /> : null}
 
-      <div className="set-card set-card-gap">
+      <Group>
         <Row title="Remove this host">
           <button
             type="button"
@@ -407,9 +412,15 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
             Remove
           </button>
         </Row>
-      </div>
-    </section>
+      </Group>
+    </div>
   );
+}
+
+/** A component's state in words a person reads, not the wire value. */
+function componentStateLabel(state: string): string {
+  const spaced = state.replace(/-/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /**
