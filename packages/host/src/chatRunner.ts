@@ -10624,6 +10624,7 @@ export class Daemon {
     let reconstructTrack: readonly TrackEntry[] | undefined;
     let resumeExistingNativeSessionId: string | undefined;
     let handoffDivider: HandoffDivider | undefined;
+    let emptyRebuild = false;
     if (isProviderSwitch || isNativeRebuild) {
       const compactRequest = this.pendingCompactSwitch.get(chatId);
       this.pendingCompactSwitch.delete(chatId);
@@ -10704,6 +10705,26 @@ export class Daemon {
         }
       }
       reconstructTrack = chosen.track;
+      // A rebuild whose track holds no assistant turn at all (a chat whose only
+      // events are its prompt and a limit notice) reseeds a session with nothing
+      // answered in it, which Claude Code refuses to resume ("No conversation
+      // found"). There is nothing to carry, so this turn is a genuinely fresh
+      // session: no resume id, no reseed.
+      if (
+        isNativeRebuild &&
+        targetHarness === 'claude' &&
+        !toClaudeSessionEntries(reconstructTrack, {
+          sessionId: 'probe',
+          folder: state.folder,
+          model: state.model ?? null,
+        }).some((e) => e.type === 'assistant')
+      ) {
+        emptyRebuild = true;
+        this.opts.logger.info(
+          { chatId },
+          'native rebuild has no answered turn to carry; starting a fresh session',
+        );
+      }
       // A rebuild after a restart is not a switch: no divider to announce.
       if (isProviderSwitch) {
         this.runningProviderSwitch.set(chatId, {
@@ -10772,7 +10793,9 @@ export class Daemon {
     const claudeResumeId: string | undefined =
       resumeExistingNativeSessionId ??
       ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
-        ? randomUUID()
+        ? emptyRebuild
+          ? undefined
+          : randomUUID()
         : fork?.resumeAtUuid === null
           ? // Editing the FIRST message: the shared prefix is empty, so there is
             // nothing to resume. Resuming the parent would carry the original
