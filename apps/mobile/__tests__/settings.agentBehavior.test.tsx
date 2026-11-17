@@ -207,7 +207,7 @@ describe('Agent page: Permission mode', () => {
       preferences: { ...settingsFixture().preferences, permissionModeDefault: 'acceptEdits' },
     });
     const r = await renderAgent();
-    expect(textOf(get(r, 'permission-default'))).toBe('Accept edits');
+    expect(textOf(get(r, 'permission-default'))).toBe('Allow edits');
     await pick(r, 'permission-default', 'plan');
     expect(api.setPreferences).toHaveBeenCalledWith({ permissionModeDefault: 'plan' });
     expect(send).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ describe('Agent page: Permission mode', () => {
 
   it('sets a default for Codex among only the modes it can run', async () => {
     const r = await renderAgent();
-    expect(textOf(get(r, 'permission-default-codex'))).toBe('Ask');
+    expect(textOf(get(r, 'permission-default-codex'))).toBe('Ask first');
     await openPicker(r, 'permission-default-codex');
     expect(query(r, 'permission-default-codex-option-auto')).toBeNull();
     await pick(r, 'permission-default-codex', 'bypassPermissions');

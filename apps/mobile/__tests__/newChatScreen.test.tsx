@@ -267,7 +267,7 @@ describe('NewChat — setup quick picks', () => {
       permissionMode: 'auto',
     });
     const r = await renderReady();
-    expect(modePillLabel(r)).toBe('Permission mode: Ask before acting');
+    expect(modePillLabel(r)).toBe('Permission mode: Ask first');
     typeText(r, 'go');
     await send(r);
     const payload = api.createChat.mock.calls[0]![0] as Record<string, unknown>;
@@ -749,7 +749,7 @@ describe('NewChat — the first send creates the chat', () => {
       hosts: { [HOST]: host(HOST, true, { permissionModeDefault: 'acceptEdits' }) },
     });
     const r = await renderReady();
-    expect(modePillLabel(r)).toBe('Permission mode: Auto-accept edits');
+    expect(modePillLabel(r)).toBe('Permission mode: Allow edits');
   });
 
   it('sending with no folder chosen is refused, keeping the text', async () => {

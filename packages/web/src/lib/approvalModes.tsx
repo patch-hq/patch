@@ -7,24 +7,24 @@
 
 import type { JSX } from 'react';
 import { ClipboardList, FilePen, Lock, LockOpen, Sparkles } from 'lucide-react';
-import type { PermissionMode } from '@patch/wire';
+import { PERMISSION_MODE_COPY, type PermissionMode } from '@patch/wire';
 import { permissionModeLabel } from './permissionModeLabel.js';
 
-const WORDS: Record<string, { word: string; description: string }> = {
-  default: { word: 'Ask', description: 'Asks before each action' },
-  acceptEdits: { word: 'Edits', description: 'Edits files without asking' },
-  plan: { word: 'Plan', description: 'Plans only, changes nothing' },
-  auto: { word: 'Auto', description: 'Decides what needs asking' },
-  bypassPermissions: { word: 'Bypass', description: 'No checks at all' },
+const WORDS: Record<string, string> = {
+  default: 'Ask',
+  acceptEdits: 'Edits',
+  plan: 'Plan',
+  auto: 'Auto',
+  bypassPermissions: 'Bypass',
 };
 
 /** The trigger's word; an unknown (newer SDK) mode falls back to its full label. */
 export function approvalWord(mode: PermissionMode | string): string {
-  return WORDS[mode]?.word ?? permissionModeLabel(mode);
+  return WORDS[mode] ?? permissionModeLabel(mode);
 }
 
 export function approvalDescription(mode: PermissionMode | string): string | undefined {
-  return WORDS[mode]?.description;
+  return (PERMISSION_MODE_COPY as Record<string, { hint: string } | undefined>)[mode]?.hint;
 }
 
 export function ApprovalIcon({

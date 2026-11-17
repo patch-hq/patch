@@ -227,6 +227,16 @@ test('ChatGPT only: the model step offers ChatGPT models and moves every chat de
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
   await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
   await page.getByTestId('welcome-next').click();
+
+  // Permissions: only what ChatGPT can run, in plain words. No Auto, and the
+  // stored Auto default moves to the mode every provider runs.
+  await expect(page.getByTestId('welcome-permissions')).toBeVisible();
+  await expect(page.getByTestId('welcome-mode-auto')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-permissions')).not.toContainText('Bypass permissions');
+  await expect(page.getByTestId('welcome-mode-default').locator('input')).toBeChecked();
+  await expect.poll(() => server.patches).toContainEqual({ permissionModeDefault: 'default' });
+  await expect(page.getByTestId('welcome-mode-default')).toContainText('Ask first');
+  await shot(page, '3-permissions-chatgpt');
   await page.getByTestId('welcome-next').click();
 
   await expect(page.getByTestId('welcome-model')).toBeVisible();

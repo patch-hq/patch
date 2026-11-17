@@ -39,6 +39,6 @@ test.describe('Settings → Providers → Local model', () => {
     await page.goto(settingsUrl('agent'));
     const select = page.getByTestId('permission-default-local');
     const options = await select.locator('option').allTextContents();
-    expect(options).toEqual(['Ask', 'Accept edits', 'Bypass permissions', 'Plan']);
+    expect(options).toEqual(['Ask first', 'Allow edits', 'Never ask', 'Plan only']);
   });
 });

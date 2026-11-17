@@ -18,13 +18,17 @@ import {
   backendIdForModel,
   compactModelLabel,
   encodePairingUri,
+  PERMISSION_MODE_COPY,
+  permissionModeForProviders,
+  permissionModeHint,
+  permissionModesForProviders,
+  PROVIDERS,
   providerForModel,
   type PermissionMode,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ClaudeSignIn } from '../components/ClaudeSignIn.js';
 import { ErrorDetail } from '../components/ErrorDetail.js';
-import { PERMISSION_MODES } from '../components/Composer.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
 import { permissionModeLabel } from '../lib/permissionModeLabel.js';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
@@ -43,17 +47,16 @@ type PhonePhase = 'app' | 'pair';
 /** How long the "installed" line stays after Claude Code finishes installing. */
 export const INSTALLED_NOTE_MS = 6000;
 
-/** What each mode does, in a few words: the names alone don't say. Said of
- *  "the agent", never of one provider: nothing may be connected yet. */
-export const MODE_HINT: Record<string, string> = {
-  auto: 'Asks only when something looks risky',
-  default: 'Asks before changing files or running commands',
-  acceptEdits: 'Edits files freely, asks before commands',
-  bypassPermissions: 'Never asks, so it can delete or overwrite anything',
-  plan: 'Reads and plans, changes nothing',
-};
-/** The modes whose hint is a warning, drawn as one. */
-const MODE_WARNS = new Set(['bypassPermissions']);
+/** The providers with at least one connected account, by provider id. */
+export function useConnectedProviderIds(): string[] {
+  const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  // Providers with no account (a local model) have nothing to connect here.
+  return PROVIDERS.filter(
+    (p) =>
+      p.accountsKey !== null &&
+      (secrets?.[p.accountsKey as 'claude' | 'codex'] ?? []).some((a) => a.connected),
+  ).map((p) => p.id);
+}
 
 export function WelcomeRoute(): JSX.Element {
   const navigate = useNavigate();
@@ -289,19 +292,31 @@ function useJustInstalled(installing: boolean, failed: boolean): boolean {
 function PermissionStep({ onNext }: { onNext: () => void }): JSX.Element {
   const value = usePreferencesStore((s) => s.preferences.permissionModeDefault);
   const loaded = usePreferencesStore((s) => s.loaded);
+  const connectedIds = useConnectedProviderIds();
+  // Only what the connected providers can run, each described by what it does.
+  // A stored default none of them can run (`auto` with only Codex) is moved to
+  // `default`, which every provider runs, so the step never shows a choice
+  // that is not one of its own.
+  const modes = permissionModesForProviders(connectedIds);
+  const shown = permissionModeForProviders(value, connectedIds);
+  useEffect(() => {
+    if (loaded && shown !== value) {
+      void patchShared('permission mode', { permissionModeDefault: shown });
+    }
+  }, [loaded, shown, value]);
   return (
     <section className="welcome-step" data-testid="welcome-permissions">
       <h1>How much should agents ask first?</h1>
       <div className="welcome-options" role="radiogroup" aria-label="Permission mode">
-        {PERMISSION_MODES.map((m) => (
+        {modes.map((m) => (
           <Option
             key={m}
             id={`welcome-mode-${m}`}
-            checked={value === m}
+            checked={shown === m}
             disabled={!loaded}
             title={permissionModeLabel(m)}
-            hint={MODE_HINT[m]}
-            warn={MODE_WARNS.has(m)}
+            hint={permissionModeHint(m, connectedIds)}
+            warn={PERMISSION_MODE_COPY[m].warns}
             onPick={() =>
               void patchShared('permission mode', { permissionModeDefault: m as PermissionMode })
             }

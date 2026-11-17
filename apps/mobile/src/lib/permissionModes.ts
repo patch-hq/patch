@@ -7,24 +7,15 @@
 // the user asked for on the phone. Each name says what the mode does to the next
 // turn, so the list reads as a choice rather than a glossary.
 
-import { permissionModesFor, type PermissionMode } from '@patch/wire';
+import {
+  PERMISSION_MODE_COPY,
+  PERMISSION_MODE_ORDER as SHARED_ORDER,
+  permissionModesFor,
+  type PermissionMode,
+} from '@patch/wire';
 
 /** The list order: the everyday modes first, the dangerous one last. */
-export const PERMISSION_MODE_ORDER: readonly PermissionMode[] = [
-  'default',
-  'acceptEdits',
-  'plan',
-  'auto',
-  'bypassPermissions',
-];
-
-const LABELS: Record<PermissionMode, string> = {
-  default: 'Ask before acting',
-  acceptEdits: 'Auto-accept edits',
-  plan: 'Plan only',
-  auto: 'Auto',
-  bypassPermissions: 'Bypass — no checks',
-};
+export const PERMISSION_MODE_ORDER = SHARED_ORDER;
 
 /** The one-word name shown beside the mode icon on the composer's action row. */
 const SHORT_LABELS: Record<PermissionMode, string> = {
@@ -44,7 +35,9 @@ export function permissionModeShortLabel(mode: string): string {
  * SDK's) reads as its own id rather than being dressed up as a known one.
  */
 export function permissionModeLabel(mode: string): string {
-  return (LABELS as Record<string, string>)[mode] ?? mode;
+  return (
+    (PERMISSION_MODE_COPY as Record<string, { label: string } | undefined>)[mode]?.label ?? mode
+  );
 }
 
 /**

@@ -169,6 +169,7 @@ export * from './chatLog.js';
 // Provider keys a host holds, set from Settings → Hosts (spec/02 § Provider keys).
 export * from './provider-keys.js';
 export * from './providers.js';
+export * from './permissionModeCopy.js';
 // Which permission modes each model can actually run in (spec/02 § Permission
 // mode). Static, mirroring Claude Code's own denylist — see the module header.
 export * from './modelCapabilities.js';

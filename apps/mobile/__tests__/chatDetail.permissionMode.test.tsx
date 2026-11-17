@@ -122,7 +122,7 @@ describe('chat-detail — permission mode padlock', () => {
   it('names the mode in force in its accessible label, by its friendly name', () => {
     const r = render('acceptEdits');
     expect(findHost(r.root, byTestId('permission-mode-padlock')).props['accessibilityLabel']).toBe(
-      'Permission mode: Auto-accept edits',
+      'Permission mode: Allow edits',
     );
   });
 
@@ -132,13 +132,7 @@ describe('chat-detail — permission mode padlock', () => {
     const labels = findAllHost(r.root, (i) => i.props['accessibilityRole'] === 'menuitem').map(
       (i) => i.props['accessibilityLabel'] as string,
     );
-    expect(labels).toEqual([
-      'Ask before acting',
-      'Auto-accept edits',
-      'Plan only',
-      'Auto',
-      'Bypass — no checks',
-    ]);
+    expect(labels).toEqual(['Ask first', 'Allow edits', 'Plan only', 'Auto', 'Never ask']);
     expect(option(r.root, 'plan').props['accessibilityState']).toMatchObject({ selected: true });
     expect(option(r.root, 'default').props['accessibilityState']).toMatchObject({
       selected: false,

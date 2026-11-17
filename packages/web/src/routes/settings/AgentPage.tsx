@@ -14,6 +14,7 @@ import {
   HARNESS_PERMISSION_MODES,
   PROVIDERS,
   type PermissionMode,
+  permissionModeOptionLabel,
 } from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
@@ -107,9 +108,8 @@ function DefaultModelRow(): JSX.Element {
  * The mode new chats are stamped with (spec/02 § Permission mode) — a change
  * here never reaches back into a chat already running.
  *
- * The options are the SDK's own mode names, unchanged: the value is handed
- * straight to the agent, so a friendlier word on screen would mean the user
- * picks one thing and the model is told another.
+ * Each option is named by what it does, not by one provider's vocabulary, and
+ * says which providers can run it where that is not all of them.
  */
 function PermissionModeRow(): JSX.Element {
   const value = usePreferencesStore((s) => s.preferences.permissionModeDefault);
@@ -129,7 +129,10 @@ function PermissionModeRow(): JSX.Element {
       >
         {PERMISSION_MODES.map((m) => (
           <option key={m} value={m}>
-            {permissionModeLabel(m)}
+            {permissionModeOptionLabel(
+              m,
+              PROVIDERS.map((p) => p.id),
+            )}
           </option>
         ))}
       </select>
