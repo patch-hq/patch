@@ -2420,8 +2420,8 @@ export const SharedSettings = z
      */
     providerSettings: z.record(z.string(), z.record(z.string(), z.number())),
     chatNameInterval: z.number().int().nonnegative(),
-    /** Days of inactivity after which a host deletes a chat's log and removes its clean, fully pushed agent worktrees, at startup. Patch's own, separate from Claude Code's setting. */
-    cleanupPeriodDays: z.number().int().min(1).max(3650),
+    /** Days of inactivity after which a host deletes a chat's log and removes its clean, fully pushed agent worktrees, at startup. Patch's own, separate from Claude Code's setting. 0 means never: nothing is deleted. */
+    cleanupPeriodDays: z.number().int().min(0).max(3650),
     /** Whether the one-shot AI chat title (a token-spending call) runs. */
     titleGenerationEnabled: z.boolean(),
     /** Whether the one-shot AI per-turn status summary (a token-spending call) runs. */
