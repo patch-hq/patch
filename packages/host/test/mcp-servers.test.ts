@@ -109,7 +109,12 @@ describe('Codex tool exclusions', () => {
 describe('Patch tools server switched off (patchMcpOff)', () => {
   const patch = { command: 'node', args: ['tools.js'], env: {} };
   const extra = [{ name: 'mine', command: '/opt/m', args: [], env: { K: 'v' } }];
-  const base = { prompt: 'x', cwd: '/tmp', abortController: new AbortController() };
+  const base = {
+    prompt: 'x',
+    cwd: '/tmp',
+    oauthAccessToken: 'tok',
+    abortController: new AbortController(),
+  };
 
   it('a Claude chat keeps the host list but loses patch', () => {
     const on = buildSdkEnv({ ...base, mcpServer: patch, extraMcpServers: extra });

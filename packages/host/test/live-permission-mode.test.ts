@@ -38,6 +38,7 @@ describe('setLiveRunPermissionMode', () => {
       .run({
         prompt: 'hi',
         cwd: '/tmp',
+        oauthAccessToken: 'tok',
         chatId: 'c1',
         permissionMode: 'plan',
         abortController: new AbortController(),
@@ -67,6 +68,7 @@ describe('setLiveRunPermissionMode', () => {
       .run({
         prompt: 'hi',
         cwd: '/tmp',
+        oauthAccessToken: 'tok',
         chatId,
         permissionMode: 'plan',
         abortController: new AbortController(),
