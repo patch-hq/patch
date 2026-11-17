@@ -261,7 +261,14 @@ export class AwaitingPermissionNotifier {
   ): void {
     void this.deps.router
       .route(
-        { type: 'notify', chatId, channel, message, ...(actions ? { actions } : {}) },
+        {
+          type: 'notify',
+          chatId,
+          channel,
+          message,
+          needsYou: true,
+          ...(actions ? { actions } : {}),
+        },
         channel === 'push' ? { suppressOn: 'computer' } : { skipDesktopIfFocused: true },
       )
       .catch((err: unknown) => {

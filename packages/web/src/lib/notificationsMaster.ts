@@ -32,3 +32,16 @@ export async function writeNotificationsOff(off: boolean): Promise<void> {
   }
   setBrowserNotificationsOff(off);
 }
+
+import type { NotificationLevel } from '@patch/wire';
+
+/** The surface kinds that can be notified; a terminal or voice device cannot. */
+export const NOTIFIABLE_KINDS: ReadonlySet<string> = new Set(['web', 'desktop', 'mobile']);
+
+/** A device with no entry is on `all`. */
+export function levelOf(
+  levels: Readonly<Record<string, NotificationLevel>>,
+  surfaceId: string,
+): NotificationLevel {
+  return levels[surfaceId] ?? 'all';
+}

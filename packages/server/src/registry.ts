@@ -537,20 +537,24 @@ export class Registry implements RevocationStoreInterface {
    * deployments will always write `accountId` going forward.
    */
   listPushTokens(accountId: string): string[] {
+    // A phone re-paired as a new surface holds the same token under two ids; it
+    // must be pushed once, not twice.
+    return [...new Set(this.listPushTokenRecords(accountId).map((t) => t.token))];
+  }
+
+  /** The same live tokens as `listPushTokens`, with the surface each belongs to. */
+  listPushTokenRecords(accountId: string): { surfaceId: string; token: string }[] {
     const tokens = this.state.pushTokens ?? [];
     const revoked = new Set(this.state.surfaces.filter((s) => s.revoked).map((s) => s.surfaceId));
     const singletonAccountId = this.state.account?.accountId;
-    const live = tokens
+    return tokens
       .filter((t) => !revoked.has(t.surfaceId))
       .filter((t) => {
         if (t.accountId) return t.accountId === accountId;
         // Legacy record (no accountId): attribute to the singleton account.
         return singletonAccountId === accountId;
       })
-      .map((t) => t.token);
-    // A phone re-paired as a new surface holds the same token under two ids; it
-    // must be pushed once, not twice.
-    return [...new Set(live)];
+      .map((t) => ({ surfaceId: t.surfaceId, token: t.token }));
   }
 
   // --- Project-launch folders (Settings → Project folders) ---

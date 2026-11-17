@@ -2208,6 +2208,14 @@ export type VoiceConfigSetting = z.infer<typeof VoiceConfigSetting>;
 /** `HH:MM` on a 24-hour clock, in the server's local zone. */
 /** `Send to my phone after` (spec/01 § Settings): 1 minute, 5 minutes, or only when the screen locks. */
 export const SendToPhoneAfter = z.enum(['1m', '5m', 'lock']);
+
+/**
+ * How much one signed-in device is told: everything, only what needs the user
+ * (permission prompts, questions, failures, calls, sign-ins), or nothing. A
+ * device absent from `deviceNotifications` is on `all`.
+ */
+export const NotificationLevel = z.enum(['all', 'urgent', 'off']);
+export type NotificationLevel = z.infer<typeof NotificationLevel>;
 export type SendToPhoneAfter = z.infer<typeof SendToPhoneAfter>;
 
 const TimeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -2288,6 +2296,8 @@ export const SharedSettings = z
     reach: z.enum(['notify', 'auto-notify']),
     /** How long a computer may sit idle before notifications go to the phone (spec/09 § Presence heuristic). */
     sendToPhoneAfter: SendToPhoneAfter,
+    /** Per signed-in device, by surface id: how much it is notified. Written whole; synced to every device. */
+    deviceNotifications: z.record(z.string().min(1), NotificationLevel),
     defaultModel: z.string().min(1),
     /** The model a job's chat runs on unless the job's action names its own. */
     jobDefaultModel: z.string().min(1),
@@ -2428,6 +2438,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   addressWord: 'patch',
   reach: 'notify',
   sendToPhoneAfter: '1m',
+  deviceNotifications: {},
   // Chats and jobs alike do real work, so the out-of-the-box choice is the
   // strongest model rather than the cheapest.
   defaultModel: 'claude-opus-5',
@@ -9093,6 +9104,12 @@ export const NotifyEvent = z
      * shows a sensible notification with no inline actions at all.
      */
     actions: NotifyActions.optional(),
+    /**
+     * Server-internal: this notification is about something that needs the
+     * user (a permission prompt, a question, a failure). The router reads it
+     * for a device on the `urgent` level and strips it before any surface sees it.
+     */
+    needsYou: z.boolean().optional(),
   })
   .strict();
 export type NotifyEvent = z.infer<typeof NotifyEvent>;

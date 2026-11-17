@@ -2074,11 +2074,16 @@ export class WsHub {
   }
 
   /** Send to all surfaces of a given kind. Returns count delivered. */
-  sendToKind(surfaceKind: string, event: WireEvent): number {
+  sendToKind(
+    surfaceKind: string,
+    event: WireEvent,
+    allow?: (surfaceId: string) => boolean,
+  ): number {
     let count = 0;
     const wire = encode(event);
     for (const conn of this.allConns()) {
       if (conn.surfaceKind !== surfaceKind) continue;
+      if (allow && !allow(conn.surfaceId)) continue;
       try {
         conn.socket.send(wire);
         count++;
@@ -2097,11 +2102,17 @@ export class WsHub {
    * chat that just finished or blocked does not need a toast telling it so.
    * Returns count delivered.
    */
-  sendToKindUnlessFocused(surfaceKind: string, chatId: string, event: WireEvent): number {
+  sendToKindUnlessFocused(
+    surfaceKind: string,
+    chatId: string,
+    event: WireEvent,
+    allow?: (surfaceId: string) => boolean,
+  ): number {
     let count = 0;
     const wire = encode(event);
     for (const conn of this.allConns()) {
       if (conn.surfaceKind !== surfaceKind) continue;
+      if (allow && !allow(conn.surfaceId)) continue;
       const focused = this.deps.presence.get(conn.accountId, conn.surfaceId)?.lastFocusedChatId;
       if (focused === chatId) continue;
       try {

@@ -185,40 +185,56 @@ describe('Settings → Devices → computer presence', () => {
   });
 });
 
-describe('Settings → Notifications → master switch', () => {
-  afterEach(() => localStorage.removeItem('patch.notifications.off'));
-
-  it('is on by default, turns off per device and is remembered', async () => {
+describe('Settings → Notifications → devices', () => {
+  function setup(levels: Record<string, 'all' | 'urgent' | 'off'> = {}) {
     browserWith(null);
-    loadShared({ settings: {} });
+    const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    loadShared({ settings: { deviceNotifications: levels } });
     renderSettings('/settings/notifications');
-    const toggle = await screen.findByTestId('notifications-master-toggle');
-    await waitFor(() => expect(toggle).toBeChecked());
-    fireEvent.click(toggle);
-    await waitFor(() => expect(toggle).not.toBeChecked());
-    expect(localStorage.getItem('patch.notifications.off')).toBe('1');
-    expect(screen.getByTestId('notifications-master')).toHaveTextContent('bell');
-    // Per-kind settings stay below it.
-    expect(screen.getByTestId('send-to-phone-after')).toBeInTheDocument();
+    return server;
+  }
+
+  it('lists every phone and computer with its level, defaulting to All', async () => {
+    setup({ 'mob-7': 'urgent' });
+    const own = await screen.findByTestId('notifications-level-web-dev-1-all');
+    expect(own).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('notifications-device-web-dev-1')).toHaveTextContent('This device');
+    expect(screen.getByTestId('notifications-level-mob-7-urgent')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByTestId('notifications-device-mob-7')).toHaveTextContent('Android');
   });
 
-  it('in the desktop app it goes through main, which owns it', async () => {
-    browserWith(null);
-    let off = false;
-    const setNotificationsOff = vi.fn(async (next: boolean) => {
-      off = next;
-    });
-    (window as unknown as { patch: unknown }).patch = {
-      notificationsOff: async () => off,
-      setNotificationsOff,
-    };
-    loadShared({ settings: {} });
-    renderSettings('/settings/notifications');
-    const toggle = await screen.findByTestId('notifications-master-toggle');
-    await waitFor(() => expect(toggle).toBeChecked());
-    fireEvent.click(toggle);
-    await waitFor(() => expect(setNotificationsOff).toHaveBeenCalledWith(true));
-    expect(localStorage.getItem('patch.notifications.off')).toBeNull();
+  it("changing one device's level writes the map, keeping the others", async () => {
+    const server = setup({ 'mob-7': 'urgent' });
+    fireEvent.click(await screen.findByTestId('notifications-level-web-dev-1-off'));
+    await waitFor(() =>
+      expect(server.writes).toContainEqual({
+        deviceNotifications: { 'mob-7': 'urgent', 'web-dev-1': 'off' },
+      }),
+    );
+  });
+
+  it('the master switch is all devices: off sets every device off, on sets them all to All', async () => {
+    const server = setup({});
+    const master = await screen.findByTestId('notifications-master-toggle');
+    await waitFor(() => expect(master).toBeChecked());
+    fireEvent.click(master);
+    await waitFor(() =>
+      expect(server.writes).toContainEqual({
+        deviceNotifications: { 'web-dev-1': 'off', 'mob-7': 'off' },
+      }),
+    );
+    await waitFor(() => expect(master).not.toBeChecked());
+    expect(screen.getByTestId('notifications-master')).toHaveTextContent('bell');
+    fireEvent.click(master);
+    await waitFor(() =>
+      expect(server.writes).toContainEqual({
+        deviceNotifications: { 'web-dev-1': 'all', 'mob-7': 'all' },
+      }),
+    );
   });
 
   it('says so beside the switch when the browser has blocked notifications', async () => {

@@ -250,8 +250,8 @@ export class ChatCompletionNotifier {
     const name = chat?.name ?? chat?.preview ?? 'unnamed chat';
     const reason = event.lastError?.message;
     const message = `${name} failed${reason ? `: ${oneLine(reason)}` : ''}`;
-    this.send('desktop', chatId, message);
-    this.send('push', chatId, message);
+    this.send('desktop', chatId, message, true);
+    this.send('push', chatId, message, true);
   }
 
   /**
@@ -292,10 +292,15 @@ export class ChatCompletionNotifier {
     return 'notifyOnComplete' in job.action && job.action.notifyOnComplete === false;
   }
 
-  private send(channel: 'desktop' | 'push', chatId: string, message: string): void {
+  private send(
+    channel: 'desktop' | 'push',
+    chatId: string,
+    message: string,
+    needsYou = false,
+  ): void {
     void this.deps.router
       .route(
-        { type: 'notify', chatId, channel, message },
+        { type: 'notify', chatId, channel, message, ...(needsYou ? { needsYou } : {}) },
         channel === 'push' ? { suppressOn: 'computer' } : { skipDesktopIfFocused: true },
       )
       .catch((err: unknown) => {

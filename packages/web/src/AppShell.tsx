@@ -91,6 +91,7 @@ import { getDesktopBridge } from './lib/desktopBridge.js';
 import { initNotificationActionBridge } from './lib/notificationActionBridge.js';
 import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
+import { useNotificationLevelSync } from './lib/useNotificationLevelSync.js';
 import { failed } from './lib/errorCopy.js';
 export function AppShell(): JSX.Element {
   // Batch mode (patch/todo.md § Features to add): watch the batch and notify
@@ -105,6 +106,7 @@ export function AppShell(): JSX.Element {
   // from, and the tray's "Version & updates…" opens Settings. Main can only
   // raise the window; the routing has to happen here.
   useDesktopNavigation();
+  useNotificationLevelSync();
   // spec/14 ## Layout → Narrow widths: auto-collapse the sidebar / close the
   // editor rail below their breakpoints so the shell never grows a
   // page-level horizontal scrollbar.
