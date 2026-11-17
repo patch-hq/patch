@@ -114,7 +114,7 @@ describe('makeStatusGenerator', () => {
       { type: 'result', sessionId: 'sess-1' },
     ]);
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -138,7 +138,7 @@ describe('makeStatusGenerator', () => {
       { type: 'result', sessionId: 'sess-1' },
     ]);
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -161,7 +161,7 @@ describe('makeStatusGenerator', () => {
       { type: 'result', sessionId: 'sess-2' },
     ]);
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -173,7 +173,7 @@ describe('makeStatusGenerator', () => {
     const sdk = createMockSdkBackend();
     const runSpy = vi.spyOn(sdk, 'run');
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith((): OAuthCheckResult => ({ ok: false, reason: 'no-oauth' })),
       logger: silent,
@@ -189,7 +189,7 @@ describe('makeStatusGenerator', () => {
       { type: 'result', sessionId: 'sess-3' },
     ]);
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -206,7 +206,7 @@ describe('makeStatusGenerator', () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([{ type: 'error', errorMessage: 'model overloaded' }]);
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model'],
+      smallJobModels: () => ['set-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -227,7 +227,7 @@ describe('makeStatusGenerator', () => {
     ]);
     const resolveOAuth = vi.fn((): OAuthCheckResult => ({ ok: true, accessToken: 'tok' }));
     const gen = makeStatusGenerator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(resolveOAuth),
       logger: silent,

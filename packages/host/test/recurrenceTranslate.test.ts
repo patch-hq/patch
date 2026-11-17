@@ -91,7 +91,7 @@ describe('makeRecurrenceTranslator', () => {
       { type: 'result', sessionId: 'sess-1' },
     ]);
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -116,7 +116,7 @@ describe('makeRecurrenceTranslator', () => {
       { type: 'result', sessionId: 'sess-2' },
     ]);
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -131,7 +131,7 @@ describe('makeRecurrenceTranslator', () => {
       { type: 'result', sessionId: 'sess-3' },
     ]);
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -146,7 +146,7 @@ describe('makeRecurrenceTranslator', () => {
       { type: 'result', sessionId: 'sess-3b' },
     ]);
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -161,7 +161,7 @@ describe('makeRecurrenceTranslator', () => {
       { type: 'error', errorMessage: 'model overloaded' },
     ]);
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model'],
+      smallJobModels: () => ['set-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -172,7 +172,7 @@ describe('makeRecurrenceTranslator', () => {
   it('resolves to null (without calling the SDK) when OAuth resolution rejects', async () => {
     const sdk = createMockSdkBackend();
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(() => {
         throw new Error('token store unavailable');
@@ -186,7 +186,7 @@ describe('makeRecurrenceTranslator', () => {
   it('resolves to null when the OAuth gate reports not-ok', async () => {
     const sdk = createMockSdkBackend();
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(() => ({ ok: false, reason: 'no-oauth-account' })),
       logger: silent,
@@ -197,7 +197,7 @@ describe('makeRecurrenceTranslator', () => {
 
   it('resolves to null with no logger configured at all (optional-chaining paths)', async () => {
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: createMockSdkBackend(),
       runOnAccountWithCredit: runWith(() => ({ ok: false, reason: 'no-oauth-account' })),
     });
@@ -211,7 +211,7 @@ describe('makeRecurrenceTranslator', () => {
       },
     };
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: throwingBackend,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -227,7 +227,7 @@ describe('makeRecurrenceTranslator', () => {
     ]);
     const resolveOAuth = vi.fn((): OAuthCheckResult => ({ ok: true, accessToken: 'tok' }));
     const translate = makeRecurrenceTranslator({
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(resolveOAuth),
       logger: silent,
@@ -257,7 +257,7 @@ describe('makeRecurrenceTranslator', () => {
         },
       };
       const translate = makeRecurrenceTranslator({
-        smallJobModels: ['set-model', 'failover-model'],
+        smallJobModels: () => ['set-model', 'failover-model'],
         sdkBackend: backend,
         runOnAccountWithCredit: runWith(okOAuth),
         logger: silent,
