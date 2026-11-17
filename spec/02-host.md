@@ -64,10 +64,10 @@ host user's own agent skills directory, and rewrites it on every self-update, so
 every chat on the host can drive the CLI and the skill matches the host it
 describes (`17-cli.md` § Skill).
 
-The host self-updates. It checks the server for a newer build on boot and on a
-schedule, downloads it, and restarts itself under the service manager. A scheduled
-install waits until the published build has been the newest for 20 minutes, so a burst of deploys
-costs one restart; Update and Update all install at once. A host
+The host self-updates. It checks the server for a newer build on boot and every
+two minutes, and installs a newer build as soon as it sees one: it downloads it and
+restarts itself under the service manager. Nothing waits for the host to be idle,
+since its work outlives the restart (§ Host restarts). A host
 behind the current version shows an update control in Settings → Updates. The shared setting
 `autoUpdateHosts` (default on) governs this: off, a host neither installs on its own schedule nor is told
 to by the server when it connects, and stays put until Update (one host) or Update all is pressed. A
