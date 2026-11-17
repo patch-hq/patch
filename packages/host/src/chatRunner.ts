@@ -4873,12 +4873,24 @@ export class Daemon {
       ?.parentChatId;
   }
 
-  /** `patch_delegate_list` — every subagent `parentChatId` has created, newest first. */
+  /**
+   * `patch_delegate_list` — every subagent `parentChatId` has created, newest first.
+   *
+   * Reads the in-memory chat states, never `metaStore.list()`: `replayChat`
+   * calls this once per chat, and on reconnect every chat replays, so a disk
+   * scan here was chats × chats file reads (the second time that froze a
+   * 9,000-chat host). `state.subagent` mirrors `meta.subagent`.
+   */
   listDelegates(parentChatId: string): DelegateSummary[] {
     const out: DelegateSummary[] = [];
-    for (const meta of this.opts.metaStore.list()) {
-      if (meta.subagent?.parentChatId !== parentChatId) continue;
-      const live = this.chatState.get(meta.chatId);
+    for (const live of this.chatState.list()) {
+      if (live.subagent?.parentChatId !== parentChatId) continue;
+      const meta = {
+        chatId: live.chatId,
+        subagent: live.subagent,
+        createdAt: live.createdAt,
+        status: live.status,
+      };
       // A subagent that ended without ever passing through `maybeSettleDelegate`
       // (its folder vanished, so the turn never started) has no outcome and
       // would read as running for ever. An errored chat that is not retrying,
@@ -4888,12 +4900,13 @@ export class Daemon {
         !this.aborters.has(meta.chatId) &&
         !this.limitBlocks.has(meta.chatId) &&
         !this.rateLimitPendingTurns.has(meta.chatId) &&
-        (live ? live.activity === 'errored' && !live.turnRetrying : meta.status === 'errored');
+        live.activity === 'errored' &&
+        !live.turnRetrying;
       const status: DelegateStatus =
         meta.subagent.outcome ??
         (stranded
           ? 'failed'
-          : live?.activity === 'awaiting-permission'
+          : live.activity === 'awaiting-permission'
             ? 'awaiting-permission'
             : 'running');
       out.push({
