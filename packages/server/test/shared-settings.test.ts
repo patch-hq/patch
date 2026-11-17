@@ -245,6 +245,24 @@ describe('SharedSettingsService', () => {
     );
   });
 
+  it("stores a provider's own settings and refuses an unknown one or an out-of-range value", () => {
+    expect(service.current().providerSettings).toEqual({});
+    service.update({ providerSettings: { claude: { cleanupPeriodDays: 90 } } });
+    expect(service.current().providerSettings).toEqual({ claude: { cleanupPeriodDays: 90 } });
+    expect(() => service.update({ providerSettings: { claude: { nope: 1 } } })).toThrow(
+      /claude has no setting nope/,
+    );
+    expect(() => service.update({ providerSettings: { nope: { a: 1 } } })).toThrow(
+      /unknown provider/,
+    );
+    for (const bad of [0, 2.5, 4000]) {
+      expect(() =>
+        service.update({ providerSettings: { claude: { cleanupPeriodDays: bad } } }),
+      ).toThrow(/whole number from 1 to 3650/);
+    }
+    expect(service.current().providerSettings).toEqual({ claude: { cleanupPeriodDays: 90 } });
+  });
+
   it('stores the local model endpoint, clears it with an empty value, and refuses a non-URL', () => {
     expect(service.current().localModelBaseUrl).toBeUndefined();
     service.update({ localModelBaseUrl: 'http://127.0.0.1:11434/v1' });

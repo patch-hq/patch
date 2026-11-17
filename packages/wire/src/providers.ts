@@ -37,6 +37,26 @@ export interface ProviderCapabilities {
 
 export type ProviderCapability = keyof ProviderCapabilities;
 
+/**
+ * One of a provider's OWN settings (spec/10 § Provider settings): a value the
+ * provider itself reads from its own configuration, such as how long it keeps
+ * a session. Patch shows it and writes the user's choice through; it never
+ * sets one the user has not chosen.
+ */
+export interface ProviderSettingDescriptor {
+  /** The key in the provider's own configuration file, and in `providerSettings`. */
+  readonly key: string;
+  readonly label: string;
+  /** One line saying what the setting does, in the provider's terms. */
+  readonly description: string;
+  /** A whole number of days. */
+  readonly kind: 'days';
+  readonly min: number;
+  readonly max: number;
+  /** What the provider does while the setting is absent from its configuration. */
+  readonly providerDefault: number;
+}
+
 export interface ProviderDescriptor {
   /** Stable id; persisted in history logs, so never renamed. */
   readonly id: string;
@@ -71,6 +91,8 @@ export interface ProviderDescriptor {
   readonly builtinCommands: readonly string[];
   /** What the provider supports natively; features follow this (spec/02 § Provider adapters). */
   readonly capabilities: ProviderCapabilities;
+  /** The provider's own settings Settings exposes (spec/10 § Provider settings). */
+  readonly settings: readonly ProviderSettingDescriptor[];
 }
 
 // `as const satisfies` keeps the ids as literals so HarnessId is derived from
@@ -128,6 +150,18 @@ export const PROVIDERS = [
       interrupt: true,
       steer: false,
     },
+    settings: [
+      {
+        key: 'cleanupPeriodDays',
+        label: 'Delete sessions after',
+        description:
+          "Claude Code deletes a session's own files once it has been idle this long. Patch's record of the chat is kept.",
+        kind: 'days',
+        min: 1,
+        max: 3650,
+        providerDefault: 30,
+      },
+    ],
   },
   {
     id: 'codex',
@@ -166,6 +200,7 @@ export const PROVIDERS = [
       interrupt: true,
       steer: true,
     },
+    settings: [],
   },
   {
     id: 'local',
@@ -189,6 +224,7 @@ export const PROVIDERS = [
       interrupt: true,
       steer: false,
     },
+    settings: [],
   },
 ] as const satisfies readonly ProviderDescriptor[];
 
@@ -289,3 +325,13 @@ export const BACKEND_IDS = ACCOUNT_PROVIDERS.map((p) => p.backendId) as unknown 
   AccountBackendId,
   ...AccountBackendId[],
 ];
+
+/** A setting a provider declares, by its key; throws for one it does not. */
+export function providerSettingDescriptor(
+  providerId: string,
+  key: string,
+): ProviderSettingDescriptor {
+  const s = providerDescriptor(providerId).settings.find((d) => d.key === key);
+  if (!s) throw new Error(`${providerId} has no setting ${key}`);
+  return s;
+}

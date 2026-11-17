@@ -803,6 +803,8 @@ installation), and two parts of it are visible and editable from Settings:
   Deleting one also drops its line from that project's `MEMORY.md` index where
   present.
 
+A provider setting the user has chosen in Settings → Providers (`10-auth.md` § Settings) is written into `settings.json` by the host, keeping every other key. Settings never changes a key the user has not chosen.
+
 The host publishes its `settings.json` text and memory entries on connect and
 after every change (`03-wire-protocol.md` § Host events), and the local CLI socket carries
 the same operations (§ Control IPC).

@@ -2394,6 +2394,13 @@ export const SharedSettings = z
      * `127.0.0.1` means that host. Empty clears it.
      */
     localModelBaseUrl: z.union([z.literal(''), z.string().url()]).optional(),
+    /**
+     * The values the user chose for each provider's OWN settings, keyed by
+     * provider id then the setting's key (spec/10 § Provider settings). Only a
+     * chosen value is here; each host writes it into the provider's own
+     * configuration and writes nothing for a setting that is absent.
+     */
+    providerSettings: z.record(z.string(), z.record(z.string(), z.number())),
     chatNameInterval: z.number().int().nonnegative(),
     /** Days of inactivity after which a host deletes a chat's log and removes its clean, fully pushed agent worktrees, at startup. Patch's own, separate from Claude Code's setting. */
     cleanupPeriodDays: z.number().int().min(1).max(3650),
@@ -2509,6 +2516,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   dictationTurnDetection: true,
   permissionModeDefault: 'auto',
   providerPermissionDefaults: {},
+  providerSettings: {},
   chatNameInterval: 0,
   cleanupPeriodDays: DEFAULT_CLEANUP_PERIOD_DAYS,
   titleGenerationEnabled: true,
