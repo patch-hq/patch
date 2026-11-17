@@ -465,7 +465,8 @@ describe('an install whose service does not stay up', () => {
     expect(err).toContain('the service was started but is not running');
     // It must not claim the host is ready to use.
     expect(streams(ctx).out).not.toContain('It appears under Settings → Hosts');
-  });
+    // The installer waits ~20s for a slow-spawning job before giving up.
+  }, 40_000);
 });
 
 describe('what the install puts on the host', () => {
