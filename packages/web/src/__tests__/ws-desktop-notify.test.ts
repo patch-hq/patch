@@ -160,6 +160,21 @@ describe('ws desktop notify → native toast', () => {
       close();
     });
 
+    it('raises nothing, and reports nothing, while the master switch is off', async () => {
+      stubNotification('granted');
+      localStorage.setItem('patch.notifications.off', '1');
+      try {
+        useUiStore.setState({ errors: [] } as never);
+        const { fake, close } = await connect();
+        fake.receive(notifyFrame());
+        expect(created).toHaveLength(0);
+        expect(useUiStore.getState().errors).toHaveLength(0);
+        close();
+      } finally {
+        localStorage.removeItem('patch.notifications.off');
+      }
+    });
+
     it('reports an error instead of staying silent when permission is not granted', async () => {
       stubNotification('default');
       useUiStore.setState({ errors: [] } as never);

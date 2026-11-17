@@ -1456,6 +1456,47 @@ describe('Push register REST routes', () => {
     }
   });
 
+  it('full auth: DELETE push/register drops only this surface token; 401 without auth', async () => {
+    const { dir, registry } = makeRegistryDir();
+    registry.upsertSurface({ surfaceId: 'srf-web', surfaceKind: 'web', label: 'web', issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: ACCOUNT.privateKey,
+      surfaceId: 'srf-web',
+      surfaceKind: 'web',
+      label: 'web',
+    });
+    const link = new InProcessHostLink();
+    const app = await build({ dataDir: dir, registry, hostLink: link, jobsWatch: false });
+    try {
+      const mine = `ExponentPushToken[${'a'.repeat(22)}]`;
+      const other = `ExponentPushToken[${'b'.repeat(22)}]`;
+      registry.registerPushToken({
+        surfaceId: 'srf-web',
+        accountId: ACCOUNT.publicKey,
+        token: mine,
+        registeredAt: 1,
+      });
+      registry.registerPushToken({
+        surfaceId: 'srf-other',
+        accountId: ACCOUNT.publicKey,
+        token: other,
+        registeredAt: 1,
+      });
+      const anon = await app.inject({ method: 'DELETE', url: '/api/auth/push/register' });
+      expect(anon.statusCode).toBe(401);
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/auth/push/register',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, removed: true });
+      expect(registry.listPushTokens(ACCOUNT.publicKey)).toEqual([other]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('full auth: rejects an invalid push/register body with 400 after passing auth', async () => {
     const { dir, registry } = makeRegistryDir();
     registry.upsertSurface({ surfaceId: 'srf-web', surfaceKind: 'web', label: 'web', issuedAt: 1 });

@@ -17,6 +17,7 @@ import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { ensurePermission } from './permissionGate';
+import { notificationsOff, persistNotificationsOff } from './notificationsMaster';
 import { showIncomingCall } from './callkeep';
 import {
   initNotificationCategories,
@@ -85,6 +86,8 @@ async function registerToken(): Promise<void> {
  * may not be watching for becomes possible. Resolves false if they decline.
  */
 export async function enablePushNotifications(): Promise<boolean> {
+  // The master switch is off: the user asked for no notifications on this device.
+  if (notificationsOff()) return false;
   if (_declined) return false;
   if (!(await ensurePermission('notifications'))) {
     _declined = true; // do not re-ask on every send this session
@@ -92,6 +95,29 @@ export async function enablePushNotifications(): Promise<boolean> {
   }
   await registerToken();
   return true;
+}
+
+/**
+ * The master switch. Off drops this device's push token from the server so no
+ * push is sent to it; on registers it again (asking for the OS permission if
+ * needed). Remembered on the device. Rejects on failure so the switch can say so.
+ */
+export async function setNotificationsOff(off: boolean): Promise<void> {
+  if (off) {
+    await api.pushUnregister();
+    persistNotificationsOff(true);
+    return;
+  }
+  persistNotificationsOff(false);
+  _declined = false;
+  try {
+    if (!(await enablePushNotifications())) {
+      throw new Error('notifications are blocked in system settings');
+    }
+  } catch (e) {
+    persistNotificationsOff(true);
+    throw e;
+  }
 }
 
 async function register(): Promise<void> {
@@ -109,7 +135,7 @@ async function register(): Promise<void> {
         AppState.currentState === 'active' &&
         n.request.content.data?.['chatId'] === useChatStore.getState().activeChatId;
       return {
-        shouldShowAlert: !aboutOpenChat,
+        shouldShowAlert: !aboutOpenChat && !notificationsOff(),
         shouldPlaySound: false,
         shouldSetBadge: false,
       };
@@ -160,7 +186,9 @@ async function register(): Promise<void> {
   // Permission is NOT requested here: it is asked for, with an explanation,
   // when the user first starts a chat (`enablePushNotifications`). Already
   // granted (a previous run, or granted in system settings) registers now.
-  if ((await Notifications.getPermissionsAsync()).granted) await registerToken();
+  if (!notificationsOff() && (await Notifications.getPermissionsAsync()).granted) {
+    await registerToken();
+  }
 
   _subs.push(
     Notifications.addNotificationReceivedListener((n) => {
@@ -192,6 +220,8 @@ async function register(): Promise<void> {
   // (handler is best-effort but errors are propagated for the next call).
   _subs.push(
     Notifications.addPushTokenListener(() => {
+      // Off on this device: the token stays unregistered.
+      if (notificationsOff()) return;
       // Runs from a native callback with nobody awaiting it: a failure has to be
       // shown here or it is an unhandled rejection with the old token still registered.
       void Notifications.getExpoPushTokenAsync({ projectId: easProjectId() })

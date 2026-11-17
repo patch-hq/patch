@@ -28,6 +28,10 @@ export interface PatchDesktopBridge {
    * no shell and no window chrome to compensate for.
    */
   overlayTitleBar?: boolean;
+  /** The per-device master notifications switch, owned by main (the tray menu flips it too). */
+  notificationsOff?(): Promise<boolean>;
+  setNotificationsOff?(off: boolean): Promise<void>;
+  onNotificationsOffChange?(cb: (off: boolean) => void): () => void;
   /**
    * spec/09 § `### desktop` — show a native OS toast. Only the main process can
    * reach Electron's Notification, so an inbound `notify { channel: 'desktop' }`

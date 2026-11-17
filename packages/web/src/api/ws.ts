@@ -37,6 +37,7 @@ import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
+import { browserNotificationsOff } from '../lib/notificationsMaster.js';
 import { showBrowserNotification } from '../lib/browserNotifications.js';
 import { onServerVersion } from '../lib/liveUpdate.js';
 import { getAutoUpdateHosts } from '../lib/autoUpdatePref.js';
@@ -1139,6 +1140,8 @@ export class PatchWs {
     if (event.type === 'notify' && event.channel === 'desktop') {
       const bridge = getDesktopBridge();
       if (!bridge) {
+        // Master switch off on this browser: the bell has it, no toast.
+        if (browserNotificationsOff()) return;
         try {
           showBrowserNotification({
             body: stripMarkdown(event.message),

@@ -17,6 +17,7 @@ import { ChatsPage } from './ChatsSection';
 import { ComputerUsePage } from './ComputerUseSection';
 import { HooksPage } from './HooksSection';
 import { ManagerPage, VoicePage } from './PreferenceSections';
+import { NotificationsPage } from './NotificationsSection';
 import { UpdatesPage } from './VersionSection';
 import { ExperimentalPage } from './ExperimentalSection';
 import { AgentIdentityPage } from './AgentIdentitySection';
@@ -45,6 +46,7 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   { id: 'hosts', title: 'Hosts', group: 'Setup', Page: HostsPage },
   { id: 'identity', title: 'Agent identity', group: 'Setup', Page: AgentIdentityPage },
   { id: 'providers', title: 'Providers', group: 'Setup', Page: ProvidersPage },
+  { id: 'notifications', title: 'Notifications', group: 'Setup', Page: NotificationsPage },
   { id: 'devices', title: 'Devices', group: 'Setup', Page: DevicesPage },
   { id: 'experimental', title: 'Experimental features', group: 'System', Page: ExperimentalPage },
   { id: 'updates', title: 'Updates', group: 'System', Page: UpdatesPage },

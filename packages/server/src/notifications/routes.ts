@@ -99,6 +99,26 @@ export function registerNotificationRoutes(
     deps.logger.info({ surfaceId: auth.surfaceId }, 'push token registered');
     return reply.code(200).send({ ok: true });
   });
+
+  // ---- DELETE /api/auth/push/register ----
+  // The device's master "Notifications off" switch: drop this surface's token so
+  // no push is sent to it. Re-registering (POST) turns it back on.
+  app.delete('/api/auth/push/register', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return (
+        reply
+          /* v8 ignore next */
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: (e as Error).message })
+      );
+    }
+    const removed = deps.registry.removePushTokenForSurface(auth.surfaceId);
+    deps.logger.info({ surfaceId: auth.surfaceId, removed }, 'push token unregistered');
+    return reply.code(200).send({ ok: true, removed });
+  });
 }
 
 /**
