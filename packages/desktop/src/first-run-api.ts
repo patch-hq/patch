@@ -23,7 +23,13 @@ export interface FirstRunApi {
       code: string,
     ): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
     hostInstalled(): boolean;
-  }): Promise<{ appUrl: string; stop(): Promise<void> }>;
+  }): Promise<{
+    appUrl: string;
+    mode: 'local' | 'remote' | 'relay';
+    firstRun: boolean;
+    stop(): Promise<void>;
+  }>;
+  welcomeUrl(url: string, mode: 'local' | 'remote' | 'relay'): string;
   forgetConnection(userData: string): void;
   remembered(userData: string): { connection: { mode: 'local' | 'remote' | 'relay' } } | null;
 }

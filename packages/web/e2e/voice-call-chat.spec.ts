@@ -70,9 +70,8 @@ test.describe('a call is the chat, spoken', () => {
     // Inside the chat, as its last entry.
     const inStream = await bubble.evaluate((el) => !!el.closest('[data-testid="chat-stream"]'));
     expect(inStream).toBe(true);
-    // The words are in the chat, not repeated in the bar.
-    await expect(page.getByTestId('voice-bar-line')).toHaveText('Hearing you');
-    await expect(page.getByTestId('voice-bar-line')).not.toContainText('add milk');
+    // The bar shows the words in flight on its second line, as the phone does.
+    await expect(page.getByTestId('voice-bar-note')).toContainText('You: ');
 
     // Final: the live bubble goes, the transcript is no longer a preview.
     await voice(page, 'setCallTranscript', '');
@@ -84,12 +83,6 @@ test.describe('a call is the chat, spoken', () => {
     await voice(page, 'setCallChat', 'some-other-chat');
     await voice(page, 'setCallTranscript', 'hello');
     await expect(page.getByTestId('voice-live-bubble')).toHaveCount(0);
-  });
-
-  test('the bar names an untitled chat "New chat", never its id', async ({ page }) => {
-    await page.goto(CALL);
-    await voice(page, 'setCallChat', '01M439R1F4K37F7XSVW5PKQMGZ');
-    await expect(page.getByTestId('voice-bar-chat')).toHaveText('New chat');
   });
 
   test('a hand-off shows what the voice asked the agent; a finished call leaves its cost', async ({

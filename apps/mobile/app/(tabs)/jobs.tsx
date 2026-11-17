@@ -53,6 +53,7 @@ import {
 import { JOBS_SEARCH_PLACEHOLDER } from '../../src/lib/labels';
 import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import { usePresenceStore } from '../../src/stores/presenceStore';
+import { useExperimentalFeatures } from '../../src/stores/settingsStore';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 
 /** A job as this screen needs it — tolerant of whatever shape the server (or
@@ -151,6 +152,7 @@ function normalise(raw: Array<Record<string, unknown>>): JobShape[] {
 
 export default function Jobs(): React.ReactElement {
   const router = useRouter();
+  const experimental = useExperimentalFeatures();
   const colors = useTheme();
   const [jobs, setJobs] = React.useState<JobShape[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -299,6 +301,26 @@ export default function Jobs(): React.ReactElement {
         }}
       >
         <Text style={{ ...typography.title, color: colors.ink, flex: 1 }}>Jobs</Text>
+        {experimental ? (
+          <Pressable
+            onPress={() => router.push('/triage' as Href)}
+            testID="triage-open"
+            accessibilityRole="button"
+            accessibilityLabel="Triage"
+            style={{
+              paddingVertical: space.xs,
+              paddingHorizontal: space.sm,
+              marginRight: space.sm,
+              borderRadius: radii.md,
+              borderWidth: 1,
+              borderColor: colors.divider,
+            }}
+          >
+            <Text style={{ color: colors.ink2, fontFamily: fonts.bodyBold, fontSize: textMin }}>
+              Triage
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={() => router.push('/pads' as Href)}
           testID="pads-open"

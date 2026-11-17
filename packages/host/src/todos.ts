@@ -154,12 +154,24 @@ export function carryTodoAttachments(next: TodoItem[], prev: TodoItem[]): TodoIt
  * batch drops everything it finished earlier. The mirror keeps those completed
  * items (ahead of the new list, oldest first) so the chat's task list reads as
  * a record of what was done; an empty list is the agent clearing it, and clears
- * the history too. An item the new list still names is not repeated.
+ * the history too. An item the new list repeats as completed is not duplicated.
  */
 export function keepCompletedHistory(next: TodoItem[], prev: TodoItem[]): TodoItem[] {
   if (next.length === 0) return next;
-  const named = new Set(next.map((t) => t.text));
-  const history = prev.filter((t) => t.status === 'completed' && !named.has(t.text));
+  // Only a completed item the new list repeats AS completed stands in for its
+  // history entry (one entry per repeat). A re-opened item (pending/in_progress)
+  // keeps its earlier completed record.
+  const repeated = new Map<string, number>();
+  for (const t of next) {
+    if (t.status === 'completed') repeated.set(t.text, (repeated.get(t.text) ?? 0) + 1);
+  }
+  const history = prev.filter((t) => {
+    if (t.status !== 'completed') return false;
+    const left = repeated.get(t.text) ?? 0;
+    if (left === 0) return true;
+    repeated.set(t.text, left - 1);
+    return false;
+  });
   return history.length === 0 ? next : [...history, ...next];
 }
 
@@ -189,6 +201,14 @@ export function buildGoalSystemReminder(goal: string | null): string {
       ? "This chat's goal has been cleared: there is no longer a condition to meet, and nothing is evaluating your turns against one."
       : `A goal has been set on this chat: ${goal}\nKeep working until this condition is met. After each turn the host checks it and will send you back if it is not yet satisfied. If it can never be met, say so plainly.`;
   return `<system-reminder>\n${body}\n</system-reminder>\n\n`;
+}
+
+/**
+ * The recurring `<system-reminder>` restating the chat's active goal on the
+ * goal's own cadence (spec/04 § Goals — reminders).
+ */
+export function buildGoalReminder(goal: string): string {
+  return `<system-reminder>\nReminder: this chat's goal is still active and not yet met: ${goal}\nKeep working towards it.\n</system-reminder>\n\n`;
 }
 
 /**

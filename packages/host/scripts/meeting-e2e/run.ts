@@ -26,15 +26,17 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildScenarioAudio } from './audio.js';
 import { evaluate, reportLine, type DesktopEventSeen, type Observed } from './evaluate.js';
 import { CALL_APP_BUNDLE, OWNER_LABEL, PARTICIPANTS, type Timeline } from './scenario.js';
 import { kokoroAvailable } from '../../test/helpers/syntheticCall.js';
 
-const ROOT = resolve(__dirname, '..', '..', '..', '..');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 const DESKTOP = join(ROOT, 'packages', 'desktop');
 const HELPER = join(DESKTOP, 'build', 'native', 'patch-audio');
+const VAD_MODEL = join(ROOT, 'models', 'vad', 'silero_vad.onnx');
 const WEB_DIST = join(ROOT, 'packages', 'web', 'dist');
 const args = process.argv.slice(2);
 const keep = args.includes('--keep');
@@ -65,6 +67,7 @@ function preflight(): void {
     missing.push('the web build: pnpm --filter @patch/web build');
   if (!existsSync(join(ROOT, 'packages', 'server', 'dist', 'index.js')))
     missing.push('the server build: pnpm --filter @patch/server build');
+  if (!existsSync(VAD_MODEL)) missing.push(`the Silero VAD model (${VAD_MODEL})`);
   if (!kokoroAvailable()) missing.push('Kokoro (~/.patch/components/kokoro)');
   if ((process.env['WHISPER_BACKEND'] ?? 'local') !== 'local')
     missing.push('WHISPER_BACKEND=local (meetings use local Whisper)');
@@ -170,7 +173,7 @@ async function bootStack(work: string): Promise<Stack> {
   });
   await waitFor('the server', () => healthy(`http://127.0.0.1:${SERVER_PORT}/api/healthz`), 60_000);
 
-  run(join(ROOT, 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
+  run(join(ROOT, 'packages', 'host', 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
     cwd: join(ROOT, 'packages', 'host'),
     logFile: join(work, 'host.log'),
     env: {
@@ -185,8 +188,9 @@ async function bootStack(work: string): Promise<Stack> {
       WHISPER_BACKEND: 'local',
       // mock-check:allow the host's voice stack is irrelevant to a meeting; Whisper (local) and the analysis model are real
       KOKORO_BACKEND: 'mock',
-      // mock-check:allow as above: no call audio goes through the voice stack
-      VAD_BACKEND: 'mock',
+      // The meeting drops clips the VAD does not hear speech in, so it must be the real one.
+      VAD_BACKEND: 'silero',
+      VAD_MODEL_PATH: VAD_MODEL,
     },
   });
   await waitFor('the host', () => healthy(`http://127.0.0.1:${HEALTHZ_PORT}/healthz`), 90_000);
@@ -281,6 +285,8 @@ async function main(): Promise<number> {
       `--remote-debugging-port=${CDP_PORT}`,
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
+      // macOS sandboxes the audio service out of the temp folder the fake mic file is in.
+      '--no-sandbox',
       `--use-file-for-fake-audio-capture=${built.micWav}%noloop`,
     ],
     {
@@ -288,7 +294,7 @@ async function main(): Promise<number> {
       logFile: electronLog,
       env: {
         ...process.env,
-        PATCH_SERVER_URL: `http://127.0.0.1:${SERVER_PORT}/app/chats/${chatId}?credential=${stack.jwt}`,
+        PATCH_SERVER_URL: `http://127.0.0.1:${SERVER_PORT}/app/chats/${chatId}#credential=${stack.jwt}`,
         PATCH_USER_DATA_DIR: join(work, 'electron-data'),
         PATCH_AUDIO_TAP_FILE: built.callWav,
         PATCH_AUDIO_MIC_FEED: micFeed.path,
@@ -337,8 +343,30 @@ async function main(): Promise<number> {
   log('start prompt fired');
 
   // Start the meeting the way the prompt's click would: the Meeting button, then Start.
-  await page.getByTestId('meeting-btn').click();
-  await page.getByTestId('meeting-setup-start').click();
+  // A click that finds nothing says what the shell was showing instead.
+  const clickTestId = async (id: string): Promise<void> => {
+    try {
+      await page.getByTestId(id).click({ timeout: 30_000 });
+    } catch (err) {
+      await page.screenshot({ path: join(work, 'page-failure.png') }).catch(() => undefined);
+      const body = await page.evaluate('document.body.innerText').catch(() => '(unreadable)');
+      throw new Error(
+        `${(err as Error).message.split('\n')[0]} (${id}) | page text: ${String(body).replace(/\s+/g, ' ').slice(0, 400)}`,
+      );
+    }
+  };
+  await clickTestId('meeting-btn');
+  // The setup dialog (permissions) only appears on a Mac that has not granted them yet;
+  // where they are granted the Meeting button starts the meeting by itself. Either way
+  // the wait for the meeting to go live below is the check.
+  const setupShown = await page
+    .getByTestId('meeting-setup-start')
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  if (setupShown) await clickTestId('meeting-setup-start');
   const meetingFile = join(
     stack.patchHome,
     'meetings',

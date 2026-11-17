@@ -74,15 +74,15 @@ export function batchMessage(opts: {
     lines.push(`   selector: ${c.target.selector}`);
   });
   return [
-    `[Pad] Tom sent ${changes.length} change${changes.length === 1 ? '' : 's'} on "${pad.name}" (pad id: ${pad.id})`,
+    `[Pad] The user sent ${changes.length} change${changes.length === 1 ? '' : 's'} on "${pad.name}" (pad id: ${pad.id})`,
     '',
     ...lines,
     '',
-    'Each picture shows the change on its screen at the size Tom was looking at, marked and numbered. They',
+    'Each picture shows the change on its screen at the size the user was looking at, marked and numbered. They',
     'show what surrounds each change, which the text cannot.',
     '',
-    'Moves, resizes, text edits, added text and deletions are previews Tom made on the Pad. Make each one real in the',
-    'source, in the idiom the code already uses. Notes are requests in his own words.',
+    'Moves, resizes, text edits, added text and deletions are previews the user made on the Pad. Make each one real in the',
+    'source, in the idiom the code already uses. Notes are requests in their own words.',
     '',
     'Open each picture, make the changes in the source, then call patch_pad_update(padId, dir) and patch_pad_reply(padId, text)',
   ].join('\n');

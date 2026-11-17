@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 // `chat_tasks` is seeded in dev-harness.tsx with a goal and a 3-item TodoWrite
 // list (one completed, one in progress, one pending). jsdom already covers the
 // state transitions; what only a real browser can show is that the bar is laid
-// out above the transcript, that the collapse/expand and click-to-edit
+// out above the transcript, that the click-to-edit
 // affordances actually work under real CSS, and that a completed item reads
 // struck through.
 const HARNESS = '/app/dev-harness.html?chat=chat_tasks';
@@ -23,29 +23,28 @@ async function acceptWrites(page: import('@playwright/test').Page): Promise<void
 }
 
 test.describe('task bar', () => {
-  test('shows the current task and progress, collapsed', async ({ page }) => {
+  test('is open by default with the title and progress', async ({ page }) => {
     await page.goto(HARNESS);
     await expect(page.getByTestId('task-bar')).toBeVisible();
-    await expect(page.getByTestId('task-bar-head')).toContainText('rebuild the index');
+    await expect(page.getByTestId('task-bar-head')).toHaveText('Tasks');
     await expect(page.getByTestId('task-bar-count')).toContainText('1/3');
-    await expect(page.getByTestId('task-bar-list')).toHaveCount(0);
+    await expect(page.getByTestId('task-row')).toHaveCount(3);
   });
 
-  test('sits under the goal bar and above the transcript', async ({ page }) => {
+  test('sits inline above the composer, below the transcript', async ({ page }) => {
     await page.goto(HARNESS);
-    const goal = await page.getByTestId('goal-banner').boundingBox();
     const bar = await page.getByTestId('task-bar').boundingBox();
     const stream = await page.getByTestId('chat-stream').boundingBox();
-    expect(goal).not.toBeNull();
+    const composer = await page.getByTestId('composer-input').boundingBox();
     expect(bar).not.toBeNull();
     expect(stream).not.toBeNull();
-    expect(bar!.y).toBeGreaterThanOrEqual(goal!.y + goal!.height - 1);
-    expect(bar!.y + bar!.height).toBeLessThanOrEqual(stream!.y + 1);
+    expect(composer).not.toBeNull();
+    expect(bar!.y).toBeGreaterThanOrEqual(stream!.y + stream!.height - 1);
+    expect(bar!.y + bar!.height).toBeLessThanOrEqual(composer!.y + 1);
   });
 
-  test('expands to the full list, with completed items greyed', async ({ page }) => {
+  test('lists every task, with completed items greyed', async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('task-bar-summary').click();
     const rows = page.getByTestId('task-row');
     await expect(rows).toHaveCount(3);
     await expect(rows.nth(0)).toContainText('read the current indexer');
@@ -56,9 +55,6 @@ test.describe('task bar', () => {
         .getByTestId('task-text')
         .evaluate((el) => getComputedStyle(el).color);
     expect(await colour(0)).not.toBe(await colour(2));
-    // Collapsing puts it away again.
-    await page.getByTestId('task-bar-summary').click();
-    await expect(page.getByTestId('task-bar-list')).toHaveCount(0);
   });
 
   test('an in-progress task reads as started, not as pending', async ({ page }) => {
@@ -67,7 +63,6 @@ test.describe('task bar', () => {
     // "never started" have to be tellable apart on screen — otherwise a task the
     // chat has already had a whole turn on still reads pending.
     await page.goto(HARNESS);
-    await page.getByTestId('task-bar-summary').click();
     const rows = page.getByTestId('task-row');
     await expect(rows.nth(1)).toHaveClass(/task-row-in_progress/);
     await expect(rows.nth(1).getByTestId('task-status-btn')).toHaveAttribute(
@@ -75,17 +70,11 @@ test.describe('task bar', () => {
       'in progress',
     );
     await expect(rows.nth(2).getByTestId('task-status-btn')).toHaveAttribute('title', 'pending');
-    // Expanded, the summary is a plain title; collapsed, it is on the in-progress
-    // item rather than the pending one.
-    await expect(page.getByTestId('task-bar-head')).toHaveText('Tasks');
-    await page.getByTestId('task-bar-summary').click();
-    await expect(page.getByTestId('task-bar-head')).toContainText('rebuild the index');
   });
 
-  test('a task can be renamed in place and the summary follows it', async ({ page }) => {
+  test('a task can be renamed in place', async ({ page }) => {
     await acceptWrites(page);
     await page.goto(HARNESS);
-    await page.getByTestId('task-bar-summary').click();
     await page.getByTestId('task-text').nth(1).click();
     const input = page.getByTestId('task-text-input');
     await expect(input).toBeFocused();
@@ -94,26 +83,19 @@ test.describe('task bar', () => {
     await expect(page.getByTestId('task-row').nth(1)).toContainText(
       'rebuild the index from scratch',
     );
-    await page.getByTestId('task-bar-summary').click();
-    await expect(page.getByTestId('task-bar-head')).toContainText('rebuild the index from scratch');
   });
 
   test('clicking a status dot advances the task and the progress count', async ({ page }) => {
     await acceptWrites(page);
     await page.goto(HARNESS);
-    await page.getByTestId('task-bar-summary').click();
-    // Row 2 is in progress → one click completes it: 1/3 becomes 2/3, and the
-    // summary moves on to the next unfinished task.
+    // Row 2 is in progress → one click completes it: 1/3 becomes 2/3.
     await page.getByTestId('task-status-btn').nth(1).click();
     await expect(page.getByTestId('task-bar-count')).toContainText('2/3');
-    await page.getByTestId('task-bar-summary').click();
-    await expect(page.getByTestId('task-bar-head')).toContainText('schedule it nightly');
   });
 
   test('a task can be added and deleted', async ({ page }) => {
     await acceptWrites(page);
     await page.goto(HARNESS);
-    await page.getByTestId('task-bar-summary').click();
     const add = page.getByTestId('task-add-input');
     await add.fill('benchmark it');
     await add.press('Enter');
@@ -174,7 +156,6 @@ test.describe('task bar', () => {
     await page.getByText('Add to todo list').click();
     await expect(page.getByTestId('composer-input')).toHaveValue('');
     await expect(page.getByTestId('task-bar-count')).toContainText('1/4');
-    await page.getByTestId('task-bar-summary').click();
     const rows = page.getByTestId('task-row');
     await expect(rows).toHaveCount(4);
     await expect(rows.nth(3)).toContainText('investigate the flaky deploy');

@@ -68,6 +68,8 @@ export interface ChatSearchIndexOptions {
   claudeProjectsRoot: string;
   /** Where the Codex backend writes its history (`<patch home>/openai-history`). */
   codexHistoryRoot: string;
+  /** Where local-model sessions' history lives (same format as Codex's). */
+  localHistoryRoot: string;
   /** A chat's canonical-seq sidecar — read, never written. */
   seqIndexPath: (chatId: string) => string;
   now: () => number;
@@ -193,6 +195,9 @@ export class ChatSearchIndex {
     if (!sessionId) return null;
     if (sessionId.startsWith('codex-')) {
       return { path: join(this.opts.codexHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' };
+    }
+    if (sessionId.startsWith('local-')) {
+      return { path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' };
     }
     return {
       path: join(this.opts.claudeProjectsRoot, encodeFolder(chat.folder), `${sessionId}.jsonl`),

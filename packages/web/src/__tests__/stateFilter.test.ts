@@ -162,3 +162,25 @@ describe('a freshly spawned chat is pending, not Ready', () => {
     expect(matchesStateFilter(fresh, 'working')).toBe(true);
   });
 });
+
+describe('background work and the Ready view', () => {
+  it('puts a chat with only background commands in Ready, not Working', () => {
+    const r = row({ backgroundTasks: 2, runningAgents: 0 });
+    expect(matchesStateFilter(r, 'done')).toBe(true);
+    expect(matchesStateFilter(r, 'working')).toBe(false);
+  });
+
+  it('keeps a chat with a sub-agent running in Working, not Ready', () => {
+    const r = row({ backgroundTasks: 2, runningAgents: 1 });
+    expect(matchesStateFilter(r, 'done')).toBe(false);
+    expect(matchesStateFilter(r, 'working')).toBe(true);
+  });
+
+  it('treats an unknown agent count as before: Working, not Ready', () => {
+    for (const runningAgents of [null, undefined]) {
+      const r = row({ backgroundTasks: 1, runningAgents });
+      expect(matchesStateFilter(r, 'done')).toBe(false);
+      expect(matchesStateFilter(r, 'working')).toBe(true);
+    }
+  });
+});

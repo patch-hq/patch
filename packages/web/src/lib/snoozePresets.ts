@@ -119,8 +119,29 @@ export const UNTIL_COMPLETE_DISABLED_TIP =
  * within six days, `Thu 22 Oct` beyond, always 24-hour; "when done" for a
  * snooze until complete.
  */
-export function formatWakeTime(at: number): string {
-  return formatWakeAt(at);
+export function formatWakeTime(at: number, goalSet = false): string {
+  return formatWakeAt(at, Date.now(), goalSet);
 }
 
 export { formatWakeAt, formatSnoozeMoment, formatElapsed } from '@patch/wire';
+
+/**
+ * Whether a chat has work for "Until complete" to wait on: its own turn or goal,
+ * a one-shot wake, or a delegated agent still going. The host decides the same (`hasWorkToComplete`)
+ * and refuses the rest, so offering it any narrower hides a snooze it would accept.
+ */
+export function hasWorkToWaitFor(
+  chat: {
+    chatId: string;
+    activity: string;
+    goal?: unknown;
+    pendingWake?: { every?: unknown } | null;
+  },
+  delegateUpdates: Record<string, Record<string, { status: string }>>,
+): boolean {
+  if (chat.activity === 'running' || (chat.goal ?? null) !== null) return true;
+  if (chat.pendingWake != null && chat.pendingWake.every === undefined) return true;
+  return Object.values(delegateUpdates[chat.chatId] ?? {}).some(
+    (d) => d.status === 'running' || d.status === 'awaiting-permission',
+  );
+}

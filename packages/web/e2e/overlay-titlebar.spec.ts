@@ -87,6 +87,10 @@ test.describe('overlay title bar', () => {
     for (const testId of ['sidebar-collapse', 'sidebar-open-window']) {
       expect(await region(page.getByTestId(testId))).toBe('no-drag');
     }
+    // The status light is a span, not a button, but it carries the host-status
+    // tooltip. Chromium delivers no hover to a drag region, so in the desktop
+    // app the tooltip never showed (it worked on web).
+    expect(await region(page.getByTestId('conn-dot'))).toBe('no-drag');
 
     // Proven behaviourally too: the collapse chevron still works.
     await page.getByTestId('sidebar-collapse').click();
@@ -292,7 +296,7 @@ const BANNERS: {
         store.setState({ connection: 'connected', hostsSeeded: true, hostOnline: false });
       }),
   },
-  { name: 'staged update', testId: 'desktop-update-banner', show: async () => {} },
+  { name: 'staged update', testId: 'update-banner', show: async () => {} },
 ];
 
 for (const banner of BANNERS) {

@@ -22,10 +22,9 @@
 
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { Ear, MicOff, MessageSquare, Phone, PhoneOff } from 'lucide-react';
+import { Ear, MicOff, MessageSquare, PhoneOff } from 'lucide-react';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { useVoiceStore } from '../stores/voiceStore.js';
-import { useChatStore } from '../stores/chatStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { toggleCallMute, endVoiceCall, setCallMode } from '../lib/voiceController.js';
 
@@ -43,7 +42,6 @@ const NEXT_MODE: Record<AudioSessionMode, AudioSessionMode> = {
 
 export function VoiceBar(): JSX.Element | null {
   const call = useVoiceStore((s) => s.call);
-  const chats = useChatStore((s) => s.chats);
   const addressWord = usePreferencesStore((s) => s.preferences.addressWord);
   const [now, setNow] = useState(() => Date.now());
 
@@ -73,12 +71,11 @@ export function VoiceBar(): JSX.Element | null {
 
   if (!call) return null;
 
-  const chat = chats[call.chatId];
-  // A chat with no title yet reads "New chat" — never its raw id.
-  const name = chat?.name ?? 'New chat';
   const word = addressWord.trim() === '' ? 'patch' : addressWord.trim();
   const next = NEXT_MODE[call.mode];
-  const { tag, text, state } = describeLine(call, name, word);
+  const { state } = describeLine(call, '', word);
+  // Same rows as the phone's call strip: status row, then one quiet note line.
+  const note = callNote(call, state, word);
 
   return (
     <div
@@ -88,69 +85,98 @@ export function VoiceBar(): JSX.Element | null {
       data-state={state}
       role="status"
     >
-      <span className="vb-mode" data-testid="voice-bar-head">
-        {call.mode === 'hands-free' ? (
-          <Ear size={14} aria-hidden />
-        ) : (
-          <Phone size={14} aria-hidden />
-        )}
-        {MODE_HEAD[call.mode]}
-      </span>
-      <span className="vb-timer" data-testid="voice-bar-timer">
-        {formatElapsed(Math.max(0, now - call.startedAt))}
-      </span>
-      <span className="vb-chat" data-testid="voice-bar-chat">
-        {name}
-      </span>
-      <span className="vb-line" data-testid="voice-bar-line">
-        {state === 'listening' ? (
-          <Waveform level={call.muted ? 0 : call.level} />
-        ) : (
-          <>
-            {tag === null ? null : <span className="vb-tag">{tag}</span>}
-            <span className="vb-text">{text}</span>
-          </>
-        )}
-      </span>
-      <button
-        type="button"
-        className={`vb-action ${call.muted ? 'muted' : ''}`}
-        data-testid="voice-bar-mute"
-        aria-label={call.muted ? 'unmute' : 'mute'}
-        onClick={toggleCallMute}
-      >
-        <MicOff size={16} aria-hidden />
-      </button>
-      {/* One control switches the two modes without tearing the session down. */}
-      <button
-        type="button"
-        className="vb-action"
-        data-testid="voice-bar-mode"
-        aria-label={`switch to ${MODE_HEAD[next].toLowerCase()}`}
-        title={
-          next === 'hands-free'
-            ? `Switch to hands-free — it then only answers when you say “${word}”`
-            : 'Switch to a call — it answers everything you say'
-        }
-        onClick={() => setCallMode(next)}
-      >
-        {next === 'hands-free' ? (
-          <Ear size={16} aria-hidden />
-        ) : (
-          <MessageSquare size={16} aria-hidden />
-        )}
-      </button>
-      <button
-        type="button"
-        className="vb-action end"
-        data-testid="voice-bar-end"
-        aria-label="end voice session"
-        onClick={endVoiceCall}
-      >
-        <PhoneOff size={16} aria-hidden />
-      </button>
+      <div className="vb-row">
+        <span className="vb-mode" data-testid="voice-bar-head">
+          {MODE_HEAD[call.mode]}
+        </span>
+        <span className="vb-timer" data-testid="voice-bar-timer">
+          {formatElapsed(Math.max(0, now - call.startedAt))}
+        </span>
+        <span className="vb-line" data-testid="voice-bar-line">
+          {state === 'connecting' ? (
+            <ConnectingLabel />
+          ) : state === 'thinking' ? (
+            <span className="vb-text">Agent working</span>
+          ) : (
+            <Waveform level={call.muted ? 0 : call.level} />
+          )}
+        </span>
+        <button
+          type="button"
+          className={`vb-action ${call.muted ? 'muted' : ''}`}
+          data-testid="voice-bar-mute"
+          aria-label={call.muted ? 'unmute' : 'mute'}
+          onClick={toggleCallMute}
+        >
+          <MicOff size={16} aria-hidden />
+        </button>
+        {/* One control switches the two modes without tearing the session down. */}
+        <button
+          type="button"
+          className="vb-action"
+          data-testid="voice-bar-mode"
+          aria-label={`switch to ${MODE_HEAD[next].toLowerCase()}`}
+          title={
+            next === 'hands-free'
+              ? `Switch to hands-free — it then only answers when you say “${word}”`
+              : 'Switch to a call — it answers everything you say'
+          }
+          onClick={() => setCallMode(next)}
+        >
+          {next === 'hands-free' ? (
+            <Ear size={16} aria-hidden />
+          ) : (
+            <MessageSquare size={16} aria-hidden />
+          )}
+        </button>
+        <button
+          type="button"
+          className="vb-action end"
+          data-testid="voice-bar-end"
+          aria-label="end voice session"
+          onClick={endVoiceCall}
+        >
+          <PhoneOff size={16} aria-hidden />
+        </button>
+      </div>
+      {note === null ? null : (
+        <div className="vb-note" data-testid="voice-bar-note">
+          {note}
+        </div>
+      )}
     </div>
   );
+}
+
+/** `Connecting` with dots that count up, as on the phone. */
+function ConnectingLabel(): JSX.Element {
+  const [dots, setDots] = useState(1);
+  useEffect(() => {
+    const id = window.setInterval(() => setDots((d) => (d % 3) + 1), 400);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="vb-text" data-testid="voice-bar-connecting">
+      Connecting{'.'.repeat(dots)}
+    </span>
+  );
+}
+
+/** The second line: words in flight, a dropped utterance, or the hands-free hint. */
+function callNote(
+  call: { mode: AudioSessionMode; phase: string; transcript: string; unaddressed: string | null },
+  state: Line['state'],
+  word: string,
+): string | null {
+  if (state === 'connecting') return null;
+  if (call.transcript !== '') return `You: ${call.transcript}`;
+  if (call.unaddressed !== null) {
+    return `Heard “${call.unaddressed}” — not addressed, so not sent`;
+  }
+  if (call.mode === 'hands-free') {
+    return `Start with “${word}” — or reply within 30s of it speaking`;
+  }
+  return null;
 }
 
 /** Bars across the strip; the newest level enters on the right and scrolls left. */
@@ -228,7 +254,6 @@ export function describeLine(call: LineInput, _chatName: string, addressWord: st
 
 function formatElapsed(ms: number): string {
   const total = Math.floor(ms / 1000);
-  const mm = String(Math.floor(total / 60)).padStart(2, '0');
   const ss = String(total % 60).padStart(2, '0');
-  return `${mm}:${ss}`;
+  return `${Math.floor(total / 60)}:${ss}`;
 }

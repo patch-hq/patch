@@ -133,6 +133,14 @@ export function diagnoseUpdater(env: {
    * (spec/05 § Desktop first run, "On this Mac"). The feed is the server's.
    */
   noFeedReason?: string | null;
+  /**
+   * The platform the shell runs on. Only macOS gates an update on the bundle's
+   * signature (Squirrel.Mac); on Linux electron-updater replaces the AppImage
+   * file itself, which it can only do when the app was started from one.
+   */
+  platform: NodeJS.Platform;
+  /** Linux: the path of the AppImage this app runs from (`$APPIMAGE`), if any. */
+  appImage?: string | undefined;
 }): string | null {
   if (!env.isPackaged) {
     return 'running from source (pnpm dev) — only a packaged build can self-update';
@@ -146,6 +154,15 @@ export function diagnoseUpdater(env: {
   }
   if (/^0\.0\.0/.test(env.version)) {
     return `version is ${env.version}, which can never compare as older than a release — rebuild with a real version`;
+  }
+  if (env.platform === 'linux') {
+    if (!env.appImage) {
+      return (
+        'this app was not started from its AppImage (no $APPIMAGE), so there is no file ' +
+        'for the updater to replace — run the downloaded Patch AppImage to get updates'
+      );
+    }
+    return null;
   }
   if (!env.signed) {
     // Measured, not assumed: an adhoc build downloads the update and then fails
@@ -376,11 +393,28 @@ export function initialUpdaterState(args: {
 export const INSTALL_WATCHDOG_MS = 120_000;
 
 /**
+ * How long `quitAndInstall()` gets to actually end the process before it is
+ * ended for it. The installer (ShipIt) only proceeds once this process has
+ * exited, and a quit that something in the shutdown chain swallows (seen on
+ * 12 Nov: ShipIt waiting, app alive, banner "Update failed") leaves it waiting
+ * for ever. Ending the process is exactly what the installer is waiting for,
+ * so this is the request completed, not a workaround; it is logged by the
+ * caller's `forceExit`.
+ */
+export const QUIT_GRACE_MS = 10_000;
+
+/**
  * An updater error as one short clause for the banner, which prefixes it with
  * "Couldn't install Patch <version>:". Squirrel's messages carry the full
  * file:// path of the staged bundle, which says nothing to the person reading.
  */
 export function conciseReason(message: string): string {
+  // ShipIt found no bundle with the running app's id in the update: the app id
+  // changed (docs/desktop-packaging.md § Changing the app id). It cannot be
+  // fixed by retrying, so say what to do instead of quoting Squirrel.
+  if (/Could not locate update bundle for/i.test(message)) {
+    return 'this Patch is an older app id and cannot update itself; install the latest Patch from the download page once';
+  }
   return (message.split('\n')[0] ?? '')
     .replace(/\s*at URL\s+\S+/gi, '')
     .replace(/\s*\S+:\/\/\S+/g, '')
@@ -400,6 +434,11 @@ export function quitAndInstallNow(deps: {
    * and it is what the user is told — not that the installer stalled.
    */
   pendingError?: () => string | null;
+  /**
+   * Ends the process (cleanup, then `app.exit`) when the quit requested by
+   * `quitAndInstall` has not happened within QUIT_GRACE_MS.
+   */
+  forceExit?: () => void;
   /** Test seam for the stall watchdog below; real callers get the real timer. */
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }): void {
@@ -411,6 +450,10 @@ export function quitAndInstallNow(deps: {
     deps.app.isQuitting = false;
     deps.onError(err as Error);
     return;
+  }
+  if (deps.forceExit) {
+    const forceExit = deps.forceExit;
+    schedule(forceExit, QUIT_GRACE_MS).unref?.();
   }
   // A call that returns without throwing is not proof the install is
   // happening. If it genuinely is, this process exits before the timer below

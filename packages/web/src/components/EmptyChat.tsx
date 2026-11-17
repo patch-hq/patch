@@ -7,7 +7,14 @@
 
 import type { JSX } from 'react';
 
-export function EmptyChat({ title = 'No messages yet' }: { title?: string }): JSX.Element {
+export function EmptyChat({
+  title = 'No messages yet',
+  line,
+}: {
+  title?: string;
+  /** One plain line under the title, for a chat whose purpose isn't obvious. */
+  line?: string | undefined;
+}): JSX.Element {
   return (
     <div className="empty-chat" data-testid="empty-chat">
       <svg
@@ -42,6 +49,11 @@ export function EmptyChat({ title = 'No messages yet' }: { title?: string }): JS
         />
       </svg>
       <h2 className="empty-chat-title">{title}</h2>
+      {line ? (
+        <p className="empty-chat-line" data-testid="empty-chat-line">
+          {line}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -2,8 +2,9 @@
 // ⌘⇧F). Real files, a real `rg` child process — the manager's whole job is
 // what comes back from walking the real filesystem.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ChildProcess } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -246,5 +247,64 @@ describe('HostSearchManager', () => {
       { path: 'sub/b.ts', line: 1, column: 7, preview: 'const findMeToo = 1;' },
     ]);
     expect(done(frames)).toMatchObject({ ok: true });
+  });
+
+  it('cancelling a search whose rg never started signals no process', async () => {
+    // With no `rg` the spawn fails, but the child has no pid until its error
+    // event fires on the next tick. A kill in that window signals pid 0 — the
+    // whole process group, which killed the test runner (exit 137 in CI).
+    const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+    const savedPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      const { frames, emit } = collector();
+      const mgr = new HostSearchManager({ emit, logger });
+      mgr.handle({
+        type: 'patch.host_search.request',
+        searchId: 's1',
+        hostId: 'd1',
+        root: dir,
+        query: 'needle',
+      });
+      mgr.handle({ type: 'patch.host_search.cancel', searchId: 's1' });
+      await new Promise((r) => setTimeout(r, 100));
+      expect(done(frames)).toBeUndefined();
+      expect(kill).not.toHaveBeenCalled();
+    } finally {
+      process.env.PATH = savedPath;
+      kill.mockRestore();
+    }
+  });
+
+  it('cancelling a search kills a running rg', async () => {
+    const bin = mkdtempSync(join(tmpdir(), 'patch-hostsearch-bin-'));
+    try {
+      writeFileSync(join(bin, 'rg'), '#!/bin/sh\nexec sleep 30\n');
+      chmodSync(join(bin, 'rg'), 0o755);
+      const kill = vi.spyOn(ChildProcess.prototype, 'kill');
+      const savedPath = process.env.PATH;
+      process.env.PATH = `${bin}:${savedPath ?? ''}`;
+      try {
+        const { frames, emit } = collector();
+        const mgr = new HostSearchManager({ emit, logger });
+        mgr.handle({
+          type: 'patch.host_search.request',
+          searchId: 's1',
+          hostId: 'd1',
+          root: dir,
+          query: 'needle',
+        });
+        await new Promise((r) => setTimeout(r, 100));
+        mgr.handle({ type: 'patch.host_search.cancel', searchId: 's1' });
+        await new Promise((r) => setTimeout(r, 100));
+        expect(kill).toHaveBeenCalledTimes(1);
+        expect(done(frames)).toBeUndefined();
+      } finally {
+        process.env.PATH = savedPath;
+        kill.mockRestore();
+      }
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });

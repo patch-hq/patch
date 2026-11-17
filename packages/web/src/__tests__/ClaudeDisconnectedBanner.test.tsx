@@ -34,7 +34,7 @@ describe('ClaudeDisconnectedBanner', () => {
     const el = screen.getByTestId('claude-disconnected-banner');
     expect(el.textContent).toMatch(/can’t run/);
     expect(el.getAttribute('role')).toBe('alert');
-    expect(screen.getByRole('link').getAttribute('href')).toBe('/settings/usage');
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/connect');
   });
 
   it('stays silent when any Claude account is connected', () => {

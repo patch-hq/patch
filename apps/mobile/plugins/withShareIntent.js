@@ -29,7 +29,7 @@ const {
   AndroidConfig,
 } = require('expo/config-plugins');
 
-const PKG = 'io.github.tomchambers2.patch';
+const PKG = 'dev.patchhq.app';
 const PKG_PATH = PKG.split('.').join('/');
 
 // ---------------------------------------------------------------------------

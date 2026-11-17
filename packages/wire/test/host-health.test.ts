@@ -41,21 +41,15 @@ describe('assessHostHealth', () => {
   });
 });
 
-describe('battery and offline wording', () => {
-  it('flags a low, discharging battery but not a charging one', () => {
-    expect(assessHostHealth({ ...base, power: { onBattery: true, percent: 10 } }).reasons).toEqual([
-      'battery',
-    ]);
-    expect(assessHostHealth({ ...base, power: { onBattery: false, percent: 10 } }).reasons).toEqual(
-      [],
-    );
-    expect(assessHostHealth({ ...base, power: { onBattery: true, percent: 60 } }).reasons).toEqual(
+describe('offline wording', () => {
+  it('does not flag a low battery reported by an older host', () => {
+    expect(assessHostHealth({ ...base, power: { onBattery: true, percent: 5 } }).reasons).toEqual(
       [],
     );
   });
 
   it('words the reasons a host dropped', () => {
-    expect(describeHostOffline('Mac', 'battery')).toBe('Mac ran out of battery');
+    expect(describeHostOffline('Mac', 'battery')).toBe('Mac is offline');
     expect(describeHostOffline('Mac', 'asleep')).toBe('Mac went to sleep');
     expect(describeHostOffline('Mac', 'unresponsive')).toBe('Mac stopped responding');
     expect(describeHostOffline('Mac', undefined)).toBe('Mac is offline');

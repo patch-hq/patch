@@ -1,0 +1,20 @@
+--- a/android/src/main/java/expo/modules/updates/loader/FileDownloader.kt
++++ b/android/src/main/java/expo/modules/updates/loader/FileDownloader.kt
+@@ -205,7 +205,16 @@
+       }
+     } catch (e: Exception) {
+       // okhttp multipart reader doesn't support empty multipart bodies, but our spec does
+-      if (responseBody.bytes().isNotEmpty()) {
++      // MultipartReader.use has already closed the body, so a read error mid-body
++      // (dropped connection, truncated response) leaves bytes() throwing an
++      // uncaught IllegalStateException("closed") on the OkHttp thread, which
++      // crashes the app. Treat that as a failed download.
++      val hasContent = try {
++        responseBody.bytes().isNotEmpty()
++      } catch (closed: Exception) {
++        true
++      }
++      if (hasContent) {
+         val message = "Error while reading multipart remote update response"
+         logger.error(message, e, UpdatesErrorCode.UpdateFailedToLoad)
+         callback.onFailure(IOException(message, e))

@@ -57,6 +57,8 @@ test('with a connection remembered it goes straight to the server, asking nothin
   const asked = ui([]);
   const launch = await launchPatch({ ...base(), ui: asked.impl });
   assert.equal(launch.appUrl, `${origin}/app/#credential=a.b.c`);
+  assert.equal(launch.firstRun, false);
+  assert.equal(launch.mode, 'remote');
   assert.deepEqual(asked.log, []);
   await launch.stop();
 });
@@ -65,6 +67,7 @@ test('a first run asks, and "on my server" pairs with the code, remembers the an
   const asked = ui([{ kind: 'remote', input: encodePairingUri({ nonce: 'n1', server: origin }) }]);
   const launch = await launchPatch({ ...base(), ui: asked.impl });
   assert.equal(launch.appUrl, `${origin}/app/#credential=cred.jwt.value`);
+  assert.equal(launch.firstRun, true);
   assert.deepEqual(readSaved(join(scratch, 'connection.json')), {
     connection: { mode: 'remote', server: origin },
     credential: 'cred.jwt.value',
@@ -111,6 +114,8 @@ test('"on this Mac" brings up the local server and host, and opens the server on
     },
   });
   assert.equal(launch.appUrl, 'http://127.0.0.1:41999/app/#credential=local.jwt.value');
+  assert.equal(launch.firstRun, true);
+  assert.equal(launch.mode, 'local');
   assert.deepEqual(asked.log, ['progress:Starting the server…']);
   await launch.stop();
   assert.deepEqual(stopped, ['server']);
@@ -135,6 +140,8 @@ test('a later launch of a local setup starts the same server on the same port', 
   });
   assert.deepEqual(given, { connection: { mode: 'local', port: 41999 }, credential: 'l.j.t' });
   assert.ok(launch.appUrl.startsWith('http://127.0.0.1:41999/app/'));
+  assert.equal(launch.firstRun, false);
+  assert.equal(launch.mode, 'local');
 });
 
 test('a failed local setup is reported on the page and can be tried again', async () => {

@@ -19,7 +19,8 @@ const { chromium } = require('playwright');
 
 const WAV = resolve(process.argv[2] ?? `${REPO}/scripts/fixtures/probe-fakemic-16k.wav`);
 const CRED = readFileSync(`${homedir()}/.patch/credential.jwt`, 'utf8').trim();
-const APP = 'https://patch.tomchambers.me/app';
+if (!process.env.PATCH_APP) throw new Error('set PATCH_APP to the app URL, e.g. https://your-patch-server/app');
+const APP = process.env.PATCH_APP;
 const CHAT = 'thread_manager';
 
 const started = Date.now();

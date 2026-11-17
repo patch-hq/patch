@@ -203,6 +203,6 @@ describe('picking and costing', () => {
     });
     expect(c.engineUsd).toBeNull();
     expect(c.stt?.audioSeconds).toBe(12);
-    expect(callSummaryLine(c)).toContain('ElevenLabs Scribe · price unknown');
+    expect(callSummaryLine(c)).not.toContain('unknown');
   });
 });

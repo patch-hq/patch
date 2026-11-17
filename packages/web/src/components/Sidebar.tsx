@@ -61,6 +61,7 @@ import { clearComposerDraft } from '../stores/composerDraftStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
@@ -223,7 +224,10 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // between the normal chat list and the batch review view. The Manager is not
   // a sidebar view — it is a chat, with everything it watches beneath it
   // (spec/14 § Manager view).
-  const batchMode = useBatchStore((s) => s.mode) === 'batch';
+  // Manager and Batch are experimental: absent unless Settings → Experimental
+  // features is on, whatever mode the batch store last persisted.
+  const experimental = useExperimentalFeatures();
+  const batchMode = useBatchStore((s) => s.mode) === 'batch' && experimental;
   const navigate = useNavigate();
 
   // The folder roster seeds Recent projects with folders whose chats are all
@@ -252,6 +256,16 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
     () => (frozenOrder ? applyFrozenOrder(fresh, frozenOrder) : fresh),
     [fresh, frozenOrder],
   );
+  // A manual drag-reorder is the one change the user asks for while the pointer
+  // is over the list, so it must not be held back: re-capture the held order from
+  // the new one. Without this the drop persisted but the rows stayed put until the
+  // pointer left the list, which read as "manual sort does nothing".
+  const manualOrderSeen = useRef(manualOrder);
+  useEffect(() => {
+    if (manualOrderSeen.current === manualOrder) return;
+    manualOrderSeen.current = manualOrder;
+    setFrozenOrder((held) => (held === null ? null : captureOrder(freshRef.current)));
+  }, [manualOrder]);
 
   // Opening a row in needs-attention mode marks it read, which would
   // otherwise drop it out of the filter the instant you click it — the row
@@ -434,7 +448,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
             <SidebarViewMenu />
           </div>
           {/* Manager stays reachable from its top slot even in batch view. */}
-          <ManagerRow row={grouped.manager} active={highlightedChatId} />
+          {experimental ? <ManagerRow row={grouped.manager} active={highlightedChatId} /> : null}
           <div className="sb-scroll" data-testid="sb-scroll">
             <BatchPanel />
           </div>
@@ -581,6 +595,7 @@ function RegularSidebar({
   activeDevices: Record<string, string>;
   sectionCounts: SectionCounts | null;
 }): JSX.Element {
+  const experimental = useExperimentalFeatures();
   const channelsGlyphs = useActionGlyphs('toggleChannels');
   const archivedGlyphs = useActionGlyphs('toggleArchived');
   const navigate = useNavigate();
@@ -620,6 +635,15 @@ function RegularSidebar({
     setDeletedOpen(false);
     setAutomationsOpen(false);
   };
+  // A cold-storage icon is drawn once its section has something in it (or is
+  // open): five icons for five empty sections tell a newcomer nothing. A count
+  // not loaded yet draws the icon, so a full section is never hidden.
+  const lifecycleShown = (kind: keyof SectionCounts, open: boolean): boolean =>
+    open || sectionCounts === null || sectionCounts[kind] > 0;
+  const anyLifecycleShown =
+    (['hidden', 'archived', 'snoozed', 'deleted', 'automations'] as const).some((k) =>
+      lifecycleShown(k, false),
+    ) || openKind !== null;
   // The Channels rows as data — one entry per row the section draws, so the
   // toggle's count is `channelRows.length` rather than a hand-kept literal.
   const channelRows = useMemo(
@@ -633,6 +657,14 @@ function RegularSidebar({
     ],
     [grouped.speakers, activeDevices],
   );
+  // Channels stays out of the way until a channel has been used: a newcomer
+  // has no voice device, and an empty Speakers row explains nothing. Opening
+  // it (⌘2) still shows it.
+  const channelsShown =
+    channelsOpen ||
+    channelRows.some(
+      (c) => c.chatId === activeChatId || c.row?.preview != null || c.deviceNames.length > 0,
+    );
   // Multi-select (spec/14 § Sidebar → Selecting multiple rows): publish the
   // DRAWN order of the selectable rows — pinned first, then each folder group,
   // top to bottom — so a shift-click resolves a range the user can actually
@@ -697,7 +729,9 @@ function RegularSidebar({
 
       {/* Manager — always-visible top slot. Not in a lifecycle view, which is
           its own list. */}
-      {openKind === null ? <ManagerRow row={grouped.manager} active={activeChatId} /> : null}
+      {openKind === null && experimental ? (
+        <ManagerRow row={grouped.manager} active={activeChatId} />
+      ) : null}
 
       {/* Bulk actions for a shift-click selection (spec/14 § Sidebar →
           Selecting multiple rows). Absent while nothing is selected. Part of
@@ -998,37 +1032,39 @@ function RegularSidebar({
               no server count: special threads are fixed UI surfaces that are
               always listed, and `ChannelRow` draws a link even before the daemon
               has registered the thread — so the section's size is known here. */}
-                <div ref={channelsRef} className={`channels ${channelsOpen ? 'open' : ''}`}>
-                  <button
-                    type="button"
-                    className="ch-toggle"
-                    data-testid="channels-toggle"
-                    title={shortcutLabel(channelsGlyphs)}
-                    onClick={() => setChannelsOpen(!channelsOpen)}
-                  >
-                    <svg viewBox="0 0 16 16" className="ch-chev" aria-hidden>
-                      <path d="M5 3l5 5-5 5" />
-                    </svg>
-                    Channels
-                    <span className="ch-count" data-testid="channels-count">
-                      {channelRows.length}
-                    </span>
-                  </button>
-                  {channelsOpen ? (
-                    <div className="ch-list" data-testid="channels-list">
-                      {channelRows.map((c) => (
-                        <ChannelRow
-                          key={c.chatId}
-                          row={c.row}
-                          label={c.label}
-                          active={activeChatId}
-                          chatId={c.chatId}
-                          {...(c.deviceNames ? { deviceNames: c.deviceNames } : {})}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                {channelsShown ? (
+                  <div ref={channelsRef} className={`channels ${channelsOpen ? 'open' : ''}`}>
+                    <button
+                      type="button"
+                      className="ch-toggle"
+                      data-testid="channels-toggle"
+                      title={shortcutLabel(channelsGlyphs)}
+                      onClick={() => setChannelsOpen(!channelsOpen)}
+                    >
+                      <svg viewBox="0 0 16 16" className="ch-chev" aria-hidden>
+                        <path d="M5 3l5 5-5 5" />
+                      </svg>
+                      Channels
+                      <span className="ch-count" data-testid="channels-count">
+                        {channelRows.length}
+                      </span>
+                    </button>
+                    {channelsOpen ? (
+                      <div className="ch-list" data-testid="channels-list">
+                        {channelRows.map((c) => (
+                          <ChannelRow
+                            key={c.chatId}
+                            row={c.row}
+                            label={c.label}
+                            active={activeChatId}
+                            chatId={c.chatId}
+                            {...(c.deviceNames ? { deviceNames: c.deviceNames } : {})}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             )}
           </>
@@ -1063,7 +1099,7 @@ function RegularSidebar({
           a `0`: the count doubles as the entire empty state, since an empty
           section renders no body at all, so a placeholder zero would read as
           a definitive "nothing in there". */}
-      {attentionOnly ? null : (
+      {attentionOnly || !anyLifecycleShown ? null : (
         <div
           className="sb-lifecycle"
           data-testid="sb-lifecycle"
@@ -1080,67 +1116,78 @@ function RegularSidebar({
             usually a job's runs whose action sets `startHidden`. Collapsed by
             default; expanding lazily loads them, as they're absent from the
             active `GET /api/chats` snapshot. Each row can be shown. */}
-            <button
-              type="button"
-              className={`arch-toggle${hiddenOpen ? ' active' : ''}`}
-              data-testid="hidden-toggle"
-              title={lifecycleTitle('Hidden', sectionCounts === null ? null : sectionCounts.hidden)}
-              aria-pressed={hiddenOpen}
-              onClick={() => setHiddenOpen(!hiddenOpen)}
-            >
-              <EyeOff size={18} aria-hidden className="arch-icon" />
-            </button>
+            {lifecycleShown('hidden', hiddenOpen) ? (
+              <button
+                type="button"
+                className={`arch-toggle${hiddenOpen ? ' active' : ''}`}
+                data-testid="hidden-toggle"
+                title={lifecycleTitle(
+                  'Hidden',
+                  sectionCounts === null ? null : sectionCounts.hidden,
+                )}
+                aria-pressed={hiddenOpen}
+                onClick={() => setHiddenOpen(!hiddenOpen)}
+              >
+                <EyeOff size={18} aria-hidden className="arch-icon" />
+              </button>
+            ) : null}
 
             {/* Archived. */}
-            <button
-              type="button"
-              className={`arch-toggle${archivedOpen ? ' active' : ''}`}
-              data-testid="archived-toggle"
-              title={lifecycleTitle(
-                'Archived',
-                sectionCounts === null ? null : sectionCounts.archived,
-                archivedGlyphs,
-              )}
-              aria-pressed={archivedOpen}
-              onClick={() => setArchivedOpen(!archivedOpen)}
-            >
-              <Archive size={18} aria-hidden className="arch-icon" />
-            </button>
+            {lifecycleShown('archived', archivedOpen) ? (
+              <button
+                type="button"
+                className={`arch-toggle${archivedOpen ? ' active' : ''}`}
+                data-testid="archived-toggle"
+                title={lifecycleTitle(
+                  'Archived',
+                  sectionCounts === null ? null : sectionCounts.archived,
+                  archivedGlyphs,
+                )}
+                aria-pressed={archivedOpen}
+                onClick={() => setArchivedOpen(!archivedOpen)}
+              >
+                <Archive size={18} aria-hidden className="arch-icon" />
+              </button>
+            ) : null}
 
             {/* Snoozed (spec/04 § Snooze). Collapsed by default; expanding
             lazily loads chats that are snoozed into the future — they're
             absent from the active `GET /api/chats` snapshot. Each row shows
             its wake time and can be unsnoozed. */}
-            <button
-              type="button"
-              className={`arch-toggle${snoozedOpen ? ' active' : ''}`}
-              data-testid="snoozed-toggle"
-              title={lifecycleTitle(
-                'Snoozed',
-                sectionCounts === null ? null : sectionCounts.snoozed,
-              )}
-              aria-pressed={snoozedOpen}
-              onClick={() => setSnoozedOpen(!snoozedOpen)}
-            >
-              <Clock size={18} aria-hidden className="arch-icon" />
-            </button>
+            {lifecycleShown('snoozed', snoozedOpen) ? (
+              <button
+                type="button"
+                className={`arch-toggle${snoozedOpen ? ' active' : ''}`}
+                data-testid="snoozed-toggle"
+                title={lifecycleTitle(
+                  'Snoozed',
+                  sectionCounts === null ? null : sectionCounts.snoozed,
+                )}
+                aria-pressed={snoozedOpen}
+                onClick={() => setSnoozedOpen(!snoozedOpen)}
+              >
+                <Clock size={18} aria-hidden className="arch-icon" />
+              </button>
+            ) : null}
 
             {/* Deleted (soft-delete, spec/04 § Lifecycle → E5). Collapsed by
             default; expanding lazily loads soft-deleted chats. Each row can be
             restored. */}
-            <button
-              type="button"
-              className={`arch-toggle${deletedOpen ? ' active' : ''}`}
-              data-testid="deleted-toggle"
-              title={lifecycleTitle(
-                'Deleted',
-                sectionCounts === null ? null : sectionCounts.deleted,
-              )}
-              aria-pressed={deletedOpen}
-              onClick={() => setDeletedOpen(!deletedOpen)}
-            >
-              <DeleteIcon size={18} className="arch-icon" />
-            </button>
+            {lifecycleShown('deleted', deletedOpen) ? (
+              <button
+                type="button"
+                className={`arch-toggle${deletedOpen ? ' active' : ''}`}
+                data-testid="deleted-toggle"
+                title={lifecycleTitle(
+                  'Deleted',
+                  sectionCounts === null ? null : sectionCounts.deleted,
+                )}
+                aria-pressed={deletedOpen}
+                onClick={() => setDeletedOpen(!deletedOpen)}
+              >
+                <DeleteIcon size={18} className="arch-icon" />
+              </button>
+            ) : null}
 
             {/* Automations (spec/08 § Action, spec/14 § Sidebar). Every chat a
             job's `spawn` action created, FIFO oldest-first (a run updating
@@ -1150,19 +1197,21 @@ function RegularSidebar({
             so without this row its progress is invisible until you think to
             check Hidden). Collapsed by default; expanding lazily loads
             job-spawned chats the active snapshot excludes. */}
-            <button
-              type="button"
-              className={`arch-toggle${automationsOpen ? ' active' : ''}`}
-              data-testid="automations-toggle"
-              title={lifecycleTitle(
-                'Automations',
-                sectionCounts === null ? null : sectionCounts.automations,
-              )}
-              aria-pressed={automationsOpen}
-              onClick={() => setAutomationsOpen(!automationsOpen)}
-            >
-              <Zap size={18} aria-hidden className="arch-icon" />
-            </button>
+            {lifecycleShown('automations', automationsOpen) ? (
+              <button
+                type="button"
+                className={`arch-toggle${automationsOpen ? ' active' : ''}`}
+                data-testid="automations-toggle"
+                title={lifecycleTitle(
+                  'Automations',
+                  sectionCounts === null ? null : sectionCounts.automations,
+                )}
+                aria-pressed={automationsOpen}
+                onClick={() => setAutomationsOpen(!automationsOpen)}
+              >
+                <Zap size={18} aria-hidden className="arch-icon" />
+              </button>
+            ) : null}
           </div>
         </div>
       )}
@@ -1180,6 +1229,8 @@ function RegularSidebar({
 function BottomNav(): JSX.Element {
   const location = useLocation();
   const onPads = location.pathname.startsWith('/pads');
+  const onTriage = location.pathname.startsWith('/triage');
+  const experimentalNav = useExperimentalFeatures();
   const onJobs = location.pathname.startsWith('/jobs');
   const onSettings = location.pathname.startsWith('/settings');
   // spec/14 § File browser — open without a chat: the one entry point that
@@ -1202,6 +1253,16 @@ function BottomNav(): JSX.Element {
           >
             Files
           </button>
+          {experimentalNav && (
+            <OpenableLink
+              to="/triage"
+              opens={{ kind: 'page', page: 'triage' }}
+              className={`nav-row ${onTriage ? 'active' : ''}`}
+              data-testid="nav-triage"
+            >
+              Triage
+            </OpenableLink>
+          )}
           <OpenableLink
             to="/pads"
             opens={{ kind: 'page', page: 'pads' }}
@@ -1719,6 +1780,7 @@ export function HiddenSection({
           statusSummary: string | null;
           statusKind: StatusKind | null;
           backgroundTasks?: number | null;
+          runningAgents?: number | null;
         }>
       ).map((c) => ({
         chatId: c.chatId,
@@ -1742,6 +1804,7 @@ export function HiddenSection({
         statusSummary: c.statusSummary,
         statusKind: c.statusKind,
         backgroundTasks: c.backgroundTasks,
+        runningAgents: c.runningAgents,
       }));
       mergeChats(rows);
     },
@@ -1860,6 +1923,7 @@ export function AutomationsSection({
            * what you know" rather than as none running.
            */
           backgroundTasks?: number | null;
+          runningAgents?: number | null;
         }>
       ).map((c) => ({
         chatId: c.chatId,
@@ -1882,6 +1946,7 @@ export function AutomationsSection({
         // working, and a job whose whole payload is a backgrounded build is
         // exactly the case the badge was getting wrong.
         backgroundTasks: c.backgroundTasks,
+        runningAgents: c.runningAgents,
       }));
       mergeChats(rows);
     },
@@ -2613,7 +2678,7 @@ const ChatRowView = memo(function ChatRowView({
         {snoozed ? (
           <span className="row-when" data-testid={`row-when-${row.chatId}`}>
             <span className="when-time mono" data-testid={`snooze-when-${row.chatId}`}>
-              {row.snoozedUntil === null ? '' : formatWakeTime(row.snoozedUntil)}
+              {row.snoozedUntil === null ? '' : formatWakeTime(row.snoozedUntil, row.goal !== null)}
             </span>
             <button
               type="button"

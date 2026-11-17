@@ -445,3 +445,22 @@ describe("Composer — stale-fetch race guard (the effect's own `live` flag)", (
     expect(errors.some((m) => /abandoned folder blew up/.test(m))).toBe(false);
   });
 });
+
+describe('Composer — + menu Skill entry', () => {
+  it('inserts a "/" that opens the skill list', async () => {
+    skillsSpy.mockResolvedValue({ skills: ['plant'] });
+    const r = renderRN(<Composer chatId="c1" folder="work" />);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('composer-add')).props['onPress']();
+      await flush();
+    });
+    update(r, <Composer chatId="c1" folder="work" />);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('add-menu-skill')).props['onPress']();
+      await flush();
+    });
+    update(r, <Composer chatId="c1" folder="work" />);
+    expect(findHost(r.root, byType('TextInput')).props['value'] ?? '').toContain('/');
+    expect(findHost(r.root, byTestId('skill-menu'))).toBeTruthy();
+  });
+});

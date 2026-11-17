@@ -11,13 +11,20 @@ test.describe('question option text', () => {
     await page.goto(HARNESS);
     const option = page.getByTestId('question-option').filter({ hasText: 'Luxon' }).first();
     const label = option.locator('.question-option-label');
-    const box = (await label.boundingBox())!;
-    await page.mouse.move(box.x + 1, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 });
-    await page.mouse.up();
-
-    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('Lux');
+    await expect(label).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    // The harness keeps laying out after load; a layout shift between
+    // measuring the label and pressing the mouse makes one attempt miss the
+    // text. Re-measure and retry the whole drag until it selects.
+    await expect(async () => {
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
+      const box = (await label.boundingBox())!;
+      await page.mouse.move(box.x + 1, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.up();
+      expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('Lux');
+    }).toPass({ timeout: 10_000 });
     await expect(option).toHaveAttribute('data-selected', 'false');
   });
 

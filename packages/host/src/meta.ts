@@ -50,6 +50,12 @@ export const ChatMeta = z
      * before this field existed.
      */
     goal: z.string().nullable().optional(),
+    /** Goals that start in order once the active one is met (spec/04 § Goals — sequence). */
+    goalQueue: z.array(z.string().min(1)).optional(),
+    /** How often the active goal is restated to the agent (spec/04 § Goals — reminders). */
+    goalReminderEvery: ReminderEvery.nullable().optional(),
+    /** How often the evaluator is asked if the active goal is on track (spec/04 § Goals). */
+    goalCheckInEvery: ReminderEvery.nullable().optional(),
     /**
      * The chat's most recently FINISHED goal (spec/04 § Goals — "A finished
      * goal stays viewable from the chat header"). `null`/absent until a goal
@@ -450,8 +456,14 @@ export const ChatMeta = z
         label: z.string().min(1),
         outcome: z.enum(['done', 'failed', 'stopped']).optional(),
         finishedAt: z.number().int().optional(),
+        /** Epoch ms the current run began, set when a settled subagent is woken again. Absent: the run began at creation. */
+        runStartedAt: z.number().int().optional(),
+        /** The current run was a follow-up wake of a settled subagent, not its first run. */
+        followUp: z.boolean().optional(),
         /** Tools the parent withheld from this subagent (patch_delegate `disallowedTools`). */
         disallowedTools: z.array(z.string().min(1)).optional(),
+        /** The user paused it: idle and alive, not settled, until a turn runs again. */
+        userPaused: z.boolean().optional(),
       })
       .strict()
       .optional(),

@@ -20,7 +20,7 @@ import { useRouter } from 'expo-router';
 import { providerKeyInfo, type ProviderKeyId } from '@patch/wire';
 import { api, ApiError, type SharedState } from '../../api/rest';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { writeShared } from './sharedWrite';
+import { patchShared, writeShared } from './sharedWrite';
 import { filesRoute, formatSize, terminalRoute } from '../../lib/hostFiles';
 import { fonts, space, typography, useTheme } from '../../lib/theme';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore';
@@ -45,10 +45,7 @@ export function platformLabel(platform: string): string {
 export function hostSubtitle(h: HostPresence, now: number = Date.now()): string {
   if (!h.host) return 'awaiting first report';
   const where = platformLabel(h.host.platform);
-  const power = h.host.power
-    ? ` · ${Math.round(h.host.power.percent)}% ${h.host.power.onBattery ? 'on battery' : 'plugged in'}`
-    : '';
-  return `${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
+  return `${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}`;
 }
 
 // ── Hosts ────────────────────────────────────────────────────────────────────
@@ -665,6 +662,7 @@ export function ProvidersPage(): React.ReactElement {
   return (
     <SettingsPage title="Providers" testID="settings-page-providers">
       <ProviderKeys />
+      <LocalModelEndpoint />
       <SecretsSection />
     </SettingsPage>
   );
@@ -818,6 +816,64 @@ export function ProviderKeys(): React.ReactElement {
           </Row>
         );
       })}
+    </SettingsSection>
+  );
+}
+
+/**
+ * The server local models run on (Ollama, llama.cpp, LM Studio): one
+ * OpenAI-compatible base URL, shared by every host and reached from each host,
+ * so `127.0.0.1` means the host running the chat. Its models then appear in
+ * the model picker as `local/<name>`.
+ */
+export function LocalModelEndpoint(): React.ReactElement {
+  const conn = usePresenceStore((s) => s.connection);
+  const saved = useSettingsStore((s) => s.data?.preferences.localModelBaseUrl) ?? '';
+  const loaded = useSettingsStore((s) => s.data !== null);
+  const [draft, setDraft] = React.useState(saved);
+  React.useEffect(() => setDraft(saved), [saved]);
+  const reachable = conn === 'connected';
+  const dirty = draft.trim() !== saved;
+  return (
+    <SettingsSection title="Local model" testID="local-model">
+      <Row
+        testID="local-model-endpoint-row"
+        title="Endpoint"
+        subtitle={saved === '' ? 'Not set' : 'Set'}
+      >
+        <View style={{ marginTop: space.sm }}>
+          <Field
+            testID="local-model-endpoint"
+            accessibilityLabel="Local model endpoint"
+            placeholder="http://127.0.0.1:11434/v1"
+            value={draft}
+            onChangeText={setDraft}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            editable={loaded}
+          />
+          <ButtonRow>
+            <SettingsButton
+              testID="local-model-endpoint-save"
+              label="Save"
+              disabled={!reachable || !loaded || !dirty}
+              onPress={() =>
+                void patchShared('Local model endpoint', { localModelBaseUrl: draft.trim() })
+              }
+            />
+            {saved !== '' ? (
+              <SettingsButton
+                testID="local-model-endpoint-clear"
+                label="Clear"
+                variant="quiet"
+                disabled={!reachable}
+                onPress={() => void patchShared('Local model endpoint', { localModelBaseUrl: '' })}
+              />
+            ) : null}
+          </ButtonRow>
+        </View>
+      </Row>
     </SettingsSection>
   );
 }

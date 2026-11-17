@@ -11,6 +11,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -55,6 +56,9 @@ function expectSentenceCase(el: HTMLElement, expected: string): void {
 
 describe('Sidebar — tooltip copy', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     // Sidebar tests share one jsdom window (and its localStorage) across the
     // whole file, so a stale read watermark from a neighbouring test can decide
     // which rows draw. Start each test from a clean one.

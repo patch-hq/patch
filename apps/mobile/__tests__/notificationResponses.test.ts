@@ -5,6 +5,7 @@ import * as delivery from '../src/lib/notificationDelivery';
 import {
   initNotificationCategories,
   registerDynamicCategoryIfNeeded,
+  presentWithDynamicCategory,
   registerNotificationResponseListener,
   getPendingRetry,
 } from '../src/lib/notificationResponses';
@@ -52,6 +53,45 @@ describe('registerDynamicCategoryIfNeeded', () => {
     await registerDynamicCategoryIfNeeded(undefined);
     await registerDynamicCategoryIfNeeded({ kind: 'permission', requestId: 'r1' });
     expect(Notifications.__getCategory('patch_dynamic')).toBeUndefined();
+  });
+});
+
+describe('presentWithDynamicCategory', () => {
+  const push = (data: Record<string, unknown>) => ({
+    request: { identifier: 'push-1', content: { title: 'Patch', body: 'Logged in?', data } },
+  });
+  const actions = JSON.stringify({ kind: 'message', quickReplies: ["Done, it's logged in"] });
+
+  it('rebuilds the category and replaces the push with a local copy carrying it', async () => {
+    Notifications.__clearDismissed();
+    Notifications.__clearScheduledNotifications();
+    await presentWithDynamicCategory(push({ chatId: 'c1', actions, channelId: 'patch_quiet' }));
+    const dyn = Notifications.__getCategory('patch_dynamic') as {
+      actions: { buttonTitle: string }[];
+    };
+    expect(dyn.actions.map((a) => a.buttonTitle)).toEqual(["Done, it's logged in", 'Reply']);
+    expect(Notifications.__getDismissed()).toContain('push-1');
+    const [copy] = Notifications.__getScheduledNotifications();
+    expect(copy?.content.categoryIdentifier).toBe('patch_dynamic');
+    expect(copy?.content.body).toBe('Logged in?');
+    expect((copy?.content.data as Record<string, unknown>)['represented']).toBe('1');
+  });
+
+  it('does not re-present its own copy', async () => {
+    Notifications.__clearDismissed();
+    Notifications.__clearScheduledNotifications();
+    await presentWithDynamicCategory(push({ chatId: 'c1', actions, represented: '1' }));
+    expect(Notifications.__getScheduledNotifications()).toHaveLength(0);
+  });
+
+  it('leaves a push on a static category alone', async () => {
+    Notifications.__clearDismissed();
+    Notifications.__clearScheduledNotifications();
+    await presentWithDynamicCategory(
+      push({ chatId: 'c1', actions: JSON.stringify({ kind: 'message' }) }),
+    );
+    expect(Notifications.__getDismissed()).toHaveLength(0);
+    expect(Notifications.__getScheduledNotifications()).toHaveLength(0);
   });
 });
 

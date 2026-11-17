@@ -30,7 +30,7 @@ import {
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
-import { headCodePoints, type WireEvent } from '@patch/wire';
+import { headCodePoints, LOGGED_EVENT_TYPES, type WireEvent } from '@patch/wire';
 
 const MAX_EVENTS_PER_CHAT = 50_000;
 
@@ -118,6 +118,13 @@ export class ChatLogStore {
   private readonly logger: Pick<Logger, 'warn'>;
   private readonly maxEvents: number;
   private readonly chats = new Map<string, Map<number, WireEvent>>();
+  /**
+   * How far a host's log of each chat is known to reach with events the server
+   * does not keep (a tool-run summary, an artifact). Without it the server's
+   * high-water mark sits one short of the host's on almost every chat, and log
+   * sync asks the host about every one of them again on each reconnect.
+   */
+  private readonly reach = new Map<string, number>();
 
   constructor(opts: ChatLogStoreOptions) {
     this.logger = opts.logger;
@@ -132,7 +139,16 @@ export class ChatLogStore {
    * or `conflict`.
    */
   commit(event: WireEvent): CommitOutcome {
-    if (!isTranscriptEvent(event)) return 'ignored';
+    if (!isTranscriptEvent(event)) {
+      // History the server does not keep still says how far the host's log reaches.
+      if (LOGGED_EVENT_TYPES.has(event.type as never)) {
+        const { chatId, seq } = event as { chatId?: unknown; seq?: unknown };
+        if (typeof chatId === 'string' && typeof seq === 'number' && seq >= 0) {
+          this.noteReach(chatId, seq);
+        }
+      }
+      return 'ignored';
+    }
     const { chatId, seq } = event as { chatId?: unknown; seq?: unknown };
     if (typeof chatId !== 'string' || typeof seq !== 'number' || seq < 0) return 'ignored';
     // A replay and the live stream carry the same event under the same seq.
@@ -172,11 +188,26 @@ export class ChatLogStore {
     this.commit(event);
   }
 
-  /** The highest seq the server holds for the chat, or -1 when it holds none. */
+  /**
+   * The highest seq the server holds for the chat, or knows the host's log
+   * reaches with events it does not keep; -1 when it holds none.
+   */
   highWater(chatId: string): number {
-    let max = -1;
-    for (const seq of this.load(chatId).keys()) if (seq > max) max = seq;
+    let max = this.load(chatId).size > 0 ? (this.reach.get(chatId) ?? -1) : -1;
+    for (const seq of this.chats.get(chatId)!.keys()) if (seq > max) max = seq;
     return max;
+  }
+
+  /**
+   * Record that the host's log of a chat reaches `seq`, though the server keeps
+   * nothing there. Kept on disk with the chat, so a restart does not forget it.
+   * Only for a chat the server already holds: log sync leaves the others alone.
+   */
+  noteReach(chatId: string, seq: number): void {
+    if (this.load(chatId).size === 0) return;
+    if (seq <= this.highWater(chatId)) return;
+    this.reach.set(chatId, seq);
+    this.append(chatId, JSON.stringify({ reach: seq }), false);
   }
 
   /** True when the server holds anything for the chat. */
@@ -294,8 +325,12 @@ export class ChatLogStore {
       try {
         const event = JSON.parse(line) as WireEvent;
         const seq = (event as { seq?: unknown }).seq;
+        const reach = (event as { reach?: unknown }).reach;
         // A torn last line from a crash, or a record that is not an event, is skipped.
         if (typeof seq === 'number') log.set(seq, event);
+        else if (typeof reach === 'number' && reach > (this.reach.get(chatId) ?? -1)) {
+          this.reach.set(chatId, reach);
+        }
       } catch {
         continue;
       }

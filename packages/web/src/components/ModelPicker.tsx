@@ -18,6 +18,7 @@
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { compactModelLabel } from '@patch/wire';
+import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useModelCatalog } from '../lib/models.js';
 import { modelSpent, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
@@ -117,17 +118,17 @@ export function ModelPicker({
   // A failed load carries the host's code (`oauth_unavailable`, `upstream`).
   // The pop-up reads the sentence; the code stays one click down.
   const problem = humaniseError({ code: catalog.error }, 'models');
-  // An id with no matching option (a model retired since the chat started, or
-  // the catalogue not loaded yet) shows the raw id — surfaced, never silently
-  // blanked.
+  // With no AI connected there is nothing to list, and the host's refusal is not news.
+  const noProvider = usePreferencesStore((s) => anyProviderConnected(s.shared)) === false;
+  // The model always reads by its short name (`Opus 5`), the same one setup
+  // and the chat header use — with or without a catalogue, which is absent
+  // until an AI is connected. An id with no short form (a model retired since
+  // the chat started, an unknown provider's id) shows as itself — surfaced,
+  // never silently blanked.
   const catalogueLabel =
     selected === null ? undefined : catalog.models.find((m) => m.id === selected)?.label;
-  const label =
-    selected === null
-      ? placeholder
-      : compact
-        ? compactModelLabel(selected, catalogueLabel)
-        : (catalogueLabel ?? selected);
+  const label = selected === null ? placeholder : compactModelLabel(selected, catalogueLabel);
+  const rawId = selected !== null && label === selected;
 
   // The crumb variant's pop-up is rendered into the document body, not next to
   // its anchor. The chat header's crumb zone is `overflow: hidden` (it
@@ -195,13 +196,17 @@ export function ModelPicker({
           {note}
         </div>
       ) : null}
-      {catalog.status === 'error' ? (
+      {noProvider ? (
+        <div className="model-popup-status" data-testid="model-popup-no-provider">
+          Models appear once you connect an AI.
+        </div>
+      ) : catalog.status === 'error' ? (
         <div className="model-popup-status" data-testid="model-popup-error">
           <span>{problem.sentence}</span>
           <ErrorDetail detail={problem.detail} testId="model-popup-error-detail" />
         </div>
       ) : null}
-      {catalog.status !== 'error' && catalog.models.length === 0 ? (
+      {!noProvider && catalog.status !== 'error' && catalog.models.length === 0 ? (
         <div className="model-popup-status" data-testid="model-popup-loading">
           Loading models…
         </div>
@@ -249,7 +254,7 @@ export function ModelPicker({
         onClick={onToggle}
       >
         {icon}
-        <span className={`model-pill-label ${triggerLabel || compact ? '' : 'mono'}`}>
+        <span className={`model-pill-label ${triggerLabel || compact || !rawId ? '' : 'mono'}`}>
           {triggerLabel ?? label}
         </span>
         <span className="model-pill-caret" aria-hidden>

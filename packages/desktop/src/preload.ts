@@ -202,6 +202,10 @@ contextBridge.exposeInMainWorld('patch', {
   requestRaise(): void {
     ipcRenderer.send('patch:request-raise');
   },
+  // Whether any agent is working right now; main turns the tray icon orange.
+  setAgentWorking(working: boolean): void {
+    ipcRenderer.send('patch:agent-working', working);
+  },
   // spec/05 ## Menu-bar surface: the tray popover's show/hide, sent from main
   // because Electron's `BrowserWindow.hide()` does NOT fire the renderer's
   // `visibilitychange`. The menu-bar surface uses this to start/stop its
@@ -276,6 +280,21 @@ contextBridge.exposeInMainWorld('patch', {
     return () => ipcRenderer.removeListener('patch:system-away-changed', handler);
   },
   // spec/02 § Desktop app and the local host.
+  // spec/05 § Keep running — only in a window of a shell that runs Patch on
+  // this computer itself (main passes the flag), so the page can tell whether
+  // the keep-running step and Settings rows apply at all.
+  ...(process.argv.includes('--patch-local-machine')
+    ? {
+        keepRunning: {
+          get(): Promise<unknown> {
+            return ipcRenderer.invoke('patch:keep-running:get');
+          },
+          set(patch: { openAtLogin?: boolean; keepAwake?: boolean }): Promise<unknown> {
+            return ipcRenderer.invoke('patch:keep-running:set', patch);
+          },
+        },
+      }
+    : {}),
   localHost: {
     status(): Promise<{ installed: boolean; hostId: string | null }> {
       return ipcRenderer.invoke('patch:local-host:status') as Promise<{

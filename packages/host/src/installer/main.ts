@@ -51,12 +51,15 @@ import { hostname, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadOrCreateHostIdentity } from '../identity.js';
+import { initialProjectRoots } from '../folders.js';
+import { HostStateStore } from '../hostState.js';
 import { readDaemonKey, writeDaemonKey } from '../registration.js';
 import { redeemPairingCode } from './pairing.js';
 import { provisionSandbox, SandboxProvisionError } from './sandbox.js';
 import { versionDirsInUse } from '../durableTurn.js';
 import {
   opsFor,
+  hostLogSize,
   hostLogTail,
   ServiceRegistrationError,
   SERVICE_LABEL,
@@ -596,6 +599,24 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     );
   }
 
+  // ---- 4c. A first project folder, on a brand-new host only ----------
+  // So a first chat has somewhere sensible to run (spec/04 § Folders). Done
+  // here rather than at boot because this is the one place that knows it is
+  // installing a host; an update of a host with chats, or one whose folders
+  // were ever set, is left as it is.
+  const hostState = new HostStateStore(patchHome);
+  const chatsDir = join(patchHome, 'chats');
+  const firstRoots = initialProjectRoots({
+    persisted: hostState.get().folderRoots,
+    chatIds: existsSync(chatsDir) ? readdirSync(chatsDir) : [],
+    home,
+    mkdir: (path) => mkdirSync(path, { recursive: true }),
+  });
+  if (firstRoots.seeded) {
+    hostState.update({ folderRoots: firstRoots.roots });
+    io.out(`  first project folder: ${firstRoots.roots.join(', ')}`);
+  }
+
   // ---- 5. The agent sandbox this host will run every turn inside -----
   // Before the service exists, because a host whose sandbox does not work is
   // a host that parks every unattended job on its first command (see
@@ -777,6 +798,11 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
 
   // ---- 8. Start it ------------------------------------------------------
   if (paired) {
+    // The host log outlives every start. Note where it ends now, so the
+    // revoked check below reads only what THIS start wrote: a 4401 left by the
+    // previous host (it reconnected to a server that was still coming up)
+    // is not this host's credential being refused.
+    const logMark = hostLogSize(def.home);
     try {
       await ops.start(def);
     } catch (err) {
@@ -812,8 +838,8 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     // has been revoked still has the file, so "re-using the stored credential"
     // and "it appears under Settings → Hosts" were both asserted for a host
     // the server refuses on every reconnect. The host says so in its own log
-    // within a second of starting — so look, rather than claim.
-    const revoked = /daemon revoked|4401/.test(hostLogTail(def.home, 40));
+    // within a second of starting — so look, rather than claim.  Match the logged close code, not bare digits: a timestamp or pid can contain 4401.
+    const revoked = /daemon revoked|"code":4401\b/.test(hostLogTail(def.home, 40, logMark));
     if (revoked) {
       io.err('');
       io.err('patch install: this host is registered but its credential has been REVOKED.');

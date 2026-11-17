@@ -12,7 +12,7 @@
 //
 // Reconnect: the FIRST retry is deliberately short (250ms) so a transient miss
 // on boot — e.g. the host dialing before the server has finished binding /ws
-// on the shared Hetzner box — recovers within about a second rather than
+// on the shared host machine — recovers within about a second rather than
 // leaving surfaces stuck in `connecting`/daemon-unknown for a full second
 // (spec/12 ## Surface connection state model: "its first reconnect backoff step
 // is short (≤1s)"). Thereafter it backs off 1s -> 2s -> 5s -> 10s, capped 30s.

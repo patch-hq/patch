@@ -8,13 +8,14 @@
 // process can't prove a real pid/pgid was actually held, signalled, or
 // re-discovered).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import {
   existsSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs';
@@ -239,6 +240,37 @@ describe('WatchScheduler — survives a host restart', () => {
   });
 });
 
+describe('WatchScheduler — records written by another version', () => {
+  it('still loads a record carrying a field this version does not know', () => {
+    const deps = makeDeps();
+    const a = mkScheduler(deps);
+    const rec = a.start({
+      chatId: 'c-unknown',
+      command: 'sleep 5',
+      description: 'newer record',
+      timeoutSec: 600,
+      cwd: deps.home,
+    });
+    a.dispose();
+    const dir = join(deps.dirForChat('c-unknown'), 'watch');
+    const file = join(dir, readdirSync(dir).find((f) => f.endsWith('.json'))!);
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...raw, someFutureField: 1 }), 'utf8');
+    const b = mkScheduler(deps);
+    try {
+      expect(b.list('c-unknown')).toHaveLength(1);
+      expect(b.list('c-unknown')[0]?.taskId).toBe(rec.taskId);
+    } finally {
+      b.dispose();
+      try {
+        process.kill(-rec.pid, 'SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    }
+  });
+});
+
 describe('WatchScheduler.stop', () => {
   it('kills the whole process group and marks the record stopped WITHOUT delivering', async () => {
     const deps = makeDeps();
@@ -278,6 +310,32 @@ describe('WatchScheduler.stop', () => {
       expect(scheduler.stop('c-stop2', rec.taskId)).toBe(false);
     } finally {
       scheduler.dispose();
+    }
+  });
+
+  it('never signals a recorded pid that is no longer the task (the OS may have reused it)', () => {
+    const deps = makeDeps();
+    const first = mkScheduler(deps);
+    const second = mkScheduler({ ...deps, isAlive: () => false });
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      const rec = first.start({
+        chatId: 'c-reuse',
+        command: 'sleep 5',
+        description: 'pid since reused',
+        timeoutSec: 600,
+        cwd: deps.home,
+      });
+      kill.mockClear();
+      expect(second.stop('c-reuse', rec.taskId)).toBe(true);
+      expect(kill).not.toHaveBeenCalled();
+      expect(second.list('c-reuse')[0]?.status).toBe('stopped');
+      kill.mockRestore();
+      first.stop('c-reuse', rec.taskId);
+    } finally {
+      kill.mockRestore();
+      first.dispose();
+      second.dispose();
     }
   });
 
@@ -359,7 +417,15 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       expect(after.status).toBe('failed');
       expect(after.timedOut).toBe(true);
       expect(deps.delivered[0]!.message).toMatch(/timed out after 1m and was killed/);
-      expect(() => process.kill(rec.pid, 0)).toThrow();
+      // SIGKILL is delivered asynchronously and the pid lingers until the child is reaped.
+      await flushUntil(() => {
+        try {
+          process.kill(rec.pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      }, 5000);
     } finally {
       scheduler.dispose();
     }
@@ -523,6 +589,87 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
     } finally {
       schedulerB.dispose();
       process.kill(-rec.pid, 'SIGKILL');
+    }
+  });
+});
+
+describe('readProgress tail read', () => {
+  it('returns the last line of a large output without needing the whole file', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'patch-progress-')));
+    const f = join(dir, 'out.log');
+    writeFileSync(f, `${'x'.repeat(200_000)}\nfirst\nlast line\n\n`);
+    expect(readProgress(f).lastLine).toBe('last line');
+    expect(readProgress(join(dir, 'missing.log'))).toEqual({});
+  });
+});
+
+describe('WatchScheduler wakeOnMatch', () => {
+  it('wakes the chat on matching lines while the command keeps running', async () => {
+    const deps = makeDeps();
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-match',
+        command: 'echo noise; echo GUARD: spend high; sleep 5',
+        description: 'guard',
+        timeoutSec: 600,
+        cwd: deps.home,
+        wakeOnMatch: '^GUARD:',
+      });
+      await flushUntil(() => deps.delivered.length > 0);
+      const msg = deps.delivered[0]!.message;
+      expect(msg).toMatch(/^\[watch\].*matching \/\^GUARD:\/ and is still running/);
+      expect(msg).toContain('GUARD: spend high');
+      expect(msg).not.toContain('noise');
+      expect(scheduler.list('c-match')[0]?.status).toBe('running');
+      // Already-scanned lines are not delivered again.
+      await new Promise((r) => setTimeout(r, 150));
+      expect(deps.delivered).toHaveLength(1);
+      scheduler.stop('c-match', rec.taskId);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it('never matches a half-written line, and delivers it once complete', async () => {
+    const deps = makeDeps();
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-partial',
+        command: 'printf "GUARD: par"; sleep 0.3; printf "tial\\n"; sleep 5',
+        description: 'partial',
+        timeoutSec: 600,
+        cwd: deps.home,
+        wakeOnMatch: '^GUARD:',
+      });
+      await new Promise((r) => setTimeout(r, 150));
+      expect(deps.delivered).toHaveLength(0);
+      await flushUntil(() => deps.delivered.length > 0);
+      expect(deps.delivered[0]!.message).toContain('GUARD: partial');
+      scheduler.stop('c-partial', rec.taskId);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it('rejects an invalid regular expression at start', () => {
+    const deps = makeDeps();
+    const scheduler = mkScheduler(deps);
+    try {
+      expect(() =>
+        scheduler.start({
+          chatId: 'c-bad',
+          command: 'true',
+          description: 'd',
+          timeoutSec: 60,
+          cwd: deps.home,
+          wakeOnMatch: '(',
+        }),
+      ).toThrow(/valid regular expression/);
+      expect(scheduler.list('c-bad')).toEqual([]);
+    } finally {
+      scheduler.dispose();
     }
   });
 });

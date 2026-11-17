@@ -9,7 +9,7 @@
 // connected always has credit.
 
 import { useMemo } from 'react';
-import { PROVIDERS, providerForModel, type ProviderId } from '@patch/wire';
+import { ACCOUNT_PROVIDERS, providerForModel, type ProviderId } from '@patch/wire';
 import { accountRows, type AccountUsageRow } from '../components/UsagePopover.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -77,7 +77,7 @@ export function useCredit(): { rows: AccountUsageRow[]; apiKeyProviders: ApiKeyP
   return useMemo(() => {
     const apiKeyProviders = new Set<ProviderId>();
     if (shared !== null) {
-      for (const p of PROVIDERS) {
+      for (const p of ACCOUNT_PROVIDERS) {
         const accounts = shared.secrets[p.accountsKey] as readonly {
           connected: boolean;
           kind?: string;

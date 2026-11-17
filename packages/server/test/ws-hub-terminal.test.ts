@@ -114,4 +114,30 @@ describe('WsHub — terminal frames', () => {
     });
     expect(b.sent).toHaveLength(0);
   });
+  it('tells the owning surface its shell ended when the host goes offline', () => {
+    const { hub } = makeHub();
+    const a = new FakeSocket();
+    const b = new FakeSocket();
+    // @ts-expect-error — private map, seeded directly
+    hub['surfaces'].set('srf-A', new Set([conn('srf-A', a)]));
+    // @ts-expect-error — private map, seeded directly
+    hub['surfaces'].set('srf-B', new Set([conn('srf-B', b)]));
+    // @ts-expect-error — private method, direct unit coverage
+    hub['handleSurfaceEvent'](
+      conn('srf-A', a),
+      { type: 'patch.terminal.open', hostId: 'd1', sessionId: 't1' },
+      silentLogger,
+    );
+
+    // @ts-expect-error — private method, direct unit coverage
+    hub['announceHostStatus']('d1', 'offline');
+
+    const exits = a.sent
+      .map((m) => decode(Buffer.from(m)))
+      .filter((e) => e.type === 'patch.terminal.exit');
+    expect(exits).toMatchObject([{ sessionId: 't1', code: null, reason: 'daemon_shutdown' }]);
+    expect(
+      b.sent.map((m) => decode(Buffer.from(m))).filter((e) => e.type === 'patch.terminal.exit'),
+    ).toHaveLength(0);
+  });
 });

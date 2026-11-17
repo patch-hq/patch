@@ -1,7 +1,7 @@
 # @patch/server
 
 Patch server — Fastify relay, account registry, presence tracker, and WebSocket
-hub. Runs once on Hetzner; the only component that's internet-reachable.
+hub. Runs once on one machine; the only component that's internet-reachable.
 
 The server is a **dumb pipe + auth gate**: it authenticates surfaces, fans
 events between them and the host, and persists the singleton account +
@@ -39,8 +39,8 @@ surface registry. SDK lifecycle, chat history, and chat_state live in
     `202 { chatId, folder, status: 'pending' }` immediately).
     If neither arrives inside the window we still return 202 — the spawn
     is genuinely pending and the eventual outcome arrives over WS.
-    **Folder semantics**: `folder` is a path on the **host** (Hetzner
-    / host container), not the surface. The host checks
+    **Folder semantics**: `folder` is a path on the **host** (host machine
+    or container), not the surface. The host checks
     `existsSync(folder) && isDirectory` and emits a `chat.error
 { code: 'folder_not_found' }` if not.
 - `GET /api/chats?archived=<only|include>` (authed) — list chats from the

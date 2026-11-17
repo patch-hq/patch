@@ -12,6 +12,7 @@ import { OfflineBanner } from './OfflineBanner';
 import { HostOfflineBanner } from './HostOfflineBanner';
 import { WakeBar } from './WakeBar';
 import { BackgroundTaskBar } from './BackgroundTaskBar';
+import { StrayProcessBar } from './StrayProcessBar';
 import { SnoozedBanner } from './SnoozedBanner';
 import { GoalBar } from './chatBars/GoalBar';
 import { TaskBar } from './chatBars/TaskBar';
@@ -48,6 +49,7 @@ export function ChatBars({
       <ProviderContextBar chatId={chatId} />
       <WakeBar row={row} />
       <BackgroundTaskBar chatId={chatId} />
+      <StrayProcessBar chatId={chatId} />
       <BrowserHandoffBar chatId={chatId} />
       <ArtifactBar chatId={chatId} />
       {row ? <ArchivedBar row={row} /> : null}

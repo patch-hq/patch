@@ -508,6 +508,10 @@ export class TerminalSessions {
     // running. A bare shell kill would orphan a running `pnpm install`.
     /* v8 ignore next 6 -- `pid` is always set for a session that reached the map, and the group having already died between frames is a race no test can schedule. */
     const pid = session.child.pid;
+    // A shell that already exited has released its pid; the OS may have handed
+    // it to an unrelated process group by now (CI saw the test runner itself
+    // SIGKILLed, exit 137, right after the terminal tests), so never signal it.
+    if (session.child.exitCode !== null || session.child.signalCode !== null) return;
     try {
       if (pid !== undefined) process.kill(-pid, 'SIGKILL');
     } catch {

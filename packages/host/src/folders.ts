@@ -355,3 +355,35 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   }
   return true;
 }
+
+/**
+ * The folder a brand-new host offers for its first chats, in the home folder.
+ * Named for what it is to the person — their own empty starting folder — so it
+ * never reads as Patch's own code in the project list.
+ */
+export const FIRST_PROJECT_FOLDER = 'My first project';
+
+/**
+ * The project roots a host starts with. A host that has never had its roots
+ * set and has no chat of the user's yet is brand new: it creates `~/My first project`
+ * and makes it the one root, so a first chat has somewhere sensible to run
+ * without the person being asked a question they have no context for (spec/04
+ * § Folders). Anything else — roots ever set, even to none, or chats already
+ * there — is left exactly as it is, so an existing host never grows a folder
+ * on upgrade and a removed starting folder never comes back.
+ *
+ * Returns the roots, and whether they are new and must be persisted. A folder
+ * that cannot be created throws: NO FALLBACK.
+ */
+export function initialProjectRoots(opts: {
+  persisted: string[] | undefined;
+  chatIds: readonly string[];
+  home: string;
+  mkdir: (path: string) => void;
+}): { roots: string[]; seeded: boolean } {
+  if (opts.persisted !== undefined) return { roots: opts.persisted, seeded: false };
+  if (opts.chatIds.some((id) => !isReservedSpecialThread(id))) return { roots: [], seeded: false };
+  const path = join(opts.home, FIRST_PROJECT_FOLDER);
+  opts.mkdir(path);
+  return { roots: [path], seeded: true };
+}

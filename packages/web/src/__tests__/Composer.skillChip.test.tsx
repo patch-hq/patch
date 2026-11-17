@@ -282,3 +282,48 @@ describe('Composer — skill chips', () => {
     });
   });
 });
+
+describe('Composer — + menu Skill entry', () => {
+  beforeEach(() => {
+    usePresenceStore.getState().setConnection('connected');
+    usePresenceStore.getState().setHostOnline('d1', true);
+    reportAccount('d1', true);
+    useChatStore.getState()._reset();
+    localStorage.clear();
+    seedChat('/proj');
+    vi.spyOn(api, 'skills').mockResolvedValue({
+      skills: ['plant', 'context'],
+      paths: {},
+      descriptions: {},
+      frontmatter: {},
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function open(): HTMLTextAreaElement {
+    render(<Composer chatId="c1" hostId="d1" folder="/proj" onSend={() => {}} />);
+    return screen.getByTestId('composer-input') as HTMLTextAreaElement;
+  }
+
+  it('inserts a "/" that opens the skill list', async () => {
+    const input = open();
+    fireEvent.click(screen.getByTestId('composer-add-btn'));
+    fireEvent.click(screen.getByTestId('add-menu-skill'));
+    await waitFor(() => expect(input.value).toBe('/'));
+    expect(await screen.findByTestId('composer-skill-menu')).toBeTruthy();
+  });
+
+  it('puts a space before the "/" when it would glue onto a word', async () => {
+    const input = open();
+    fireEvent.change(input, { target: { value: 'run' } });
+    input.setSelectionRange(3, 3);
+    fireEvent.select(input);
+    fireEvent.click(screen.getByTestId('composer-add-btn'));
+    fireEvent.click(screen.getByTestId('add-menu-skill'));
+    await waitFor(() => expect(input.value).toBe('run /'));
+    expect(await screen.findByTestId('composer-skill-menu')).toBeTruthy();
+  });
+});
