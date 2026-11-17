@@ -2459,7 +2459,10 @@ export function ChatRoute({
                     }
                   />
                 ) : (
-                  renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)
+                  <>
+                    <LoadEarlier chatId={chatId} />
+                    {renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)}
+                  </>
                 )}
                 <VoiceLiveBubble chatId={chatId} />
                 {showThinking ? (
@@ -6710,6 +6713,37 @@ function TurnFailedStatus({
           <pre>{detail}</pre>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The top of a transcript whose older entries are still on the server (spec/05
+ * § Loading): coming into view asks for the page before what is shown.
+ */
+function LoadEarlier({ chatId }: { chatId: string }): JSX.Element | null {
+  const more = useChatStore((s) => s.historyMore[chatId] === true);
+  const loading = useChatStore((s) => s.historyLoadingEarlier[chatId] === true);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!more || !el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((seen) => {
+      if (seen.some((e) => e.isIntersecting)) getActiveWs()?.loadEarlier(chatId);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [chatId, more]);
+  if (!more) return null;
+  return (
+    <div className="load-earlier" data-testid="load-earlier" ref={ref}>
+      {loading ? (
+        'Loading earlier messages…'
+      ) : (
+        <button type="button" onClick={() => getActiveWs()?.loadEarlier(chatId)}>
+          Load earlier messages
+        </button>
+      )}
     </div>
   );
 }

@@ -18871,3 +18871,20 @@ a.drop-target {
 .set-optional > summary::-webkit-details-marker {
   display: none;
 }
+/* spec/05 § Loading — the top of a transcript with older pages still on the server. */
+.load-earlier {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+.load-earlier button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+}
