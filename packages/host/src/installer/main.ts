@@ -70,6 +70,8 @@ import {
   type ServiceRunState,
 } from './service.js';
 
+const MAX_SPAWN_POLLS = 120;
+
 /**
  * Whether the job is up, once it has had a moment to fall over. A crash-looping
  * host is "running" for the instant between exec and abort, so sampling once
@@ -83,10 +85,21 @@ async function settledRunState(
   delayMs = 500,
 ): Promise<ServiceRunState> {
   let last: ServiceRunState = { running: false, detail: 'service never reported a state' };
+  // launchd reports `state=spawn` while it is still starting the job (a first
+  // exec of a freshly unpacked binary can take many seconds on a loaded
+  // machine). That is neither up nor failed, so it does not end the wait, but
+  // it is capped so a job stuck spawning still fails.
+  let spawning = 0;
   for (let i = 0; i < attempts; i++) {
     await new Promise((r) => setTimeout(r, delayMs));
     last = await ops.runState(def);
-    if (!last.running) return last;
+    if (!last.running) {
+      if (/state=spawn\b/.test(last.detail) && ++spawning <= MAX_SPAWN_POLLS) {
+        i--;
+        continue;
+      }
+      return last;
+    }
   }
   return last;
 }
