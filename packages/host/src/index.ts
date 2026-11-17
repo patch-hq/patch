@@ -1277,11 +1277,17 @@ async function startHost(
           id: CODEX_BACKEND_ID,
           label: 'OpenAI Codex',
           version: codexAccounts.runtime.version,
-          state: !codexAccounts.runtime.version
-            ? 'absent'
-            : codexAccounts.report().connected
-              ? 'present'
-              : 'logged-out',
+          state:
+            codexAccounts.runtime.provision.state !== 'idle'
+              ? codexAccounts.runtime.provision.state
+              : !codexAccounts.runtime.version
+                ? 'absent'
+                : codexAccounts.report().connected
+                  ? 'present'
+                  : 'logged-out',
+          ...(codexAccounts.runtime.provision.state === 'failed'
+            ? { error: codexAccounts.runtime.provision.error }
+            : {}),
         },
         claudeBackendEntry({
           executableResolved: claudeProvision.state === 'present',
@@ -1339,7 +1345,8 @@ async function startHost(
       | 'host.backend_disconnect'
       | 'host.backend_add_account'
       | 'host.backend_usage_refresh'
-      | 'host.backend_reorder_accounts',
+      | 'host.backend_reorder_accounts'
+      | 'host.backend_install',
     backendId: string,
     send: (event: import('@patch/wire').WireEvent) => void,
   ): boolean => {
@@ -3037,6 +3044,20 @@ async function startHost(
         }
         if (event.harnessClaudeMdEnabled === false) ignoreClaudeMdOff('host.settings');
         sender(describeHost());
+        return;
+      }
+      if (event.type === 'host.backend_install') {
+        if (!isForThisHost(event.hostId, event.type)) return;
+        if (event.backendId === CODEX_BACKEND_ID) {
+          // Failures are reported on the backend entry by the runtime itself.
+          await codexAccounts.runtime.ensure().catch((err: unknown) => {
+            logger.error({ err }, 'codex-install: failed');
+          });
+        } else if (event.backendId === CLAUDE_BACKEND_ID) {
+          await installClaudeOnRequest();
+        } else {
+          refuseUnknownBackend(event.type, event.backendId, sender);
+        }
         return;
       }
       if (event.type === 'host.component_install' || event.type === 'host.component_remove') {
@@ -5032,10 +5053,21 @@ async function startHost(
       pathEnv: process.env['PATH'] ?? '',
       override: process.env['CLAUDE_CODE_PATH'],
     });
-  const refreshClaudeCli = async (): Promise<void> => {
+  // Installed only when a surface asks (`host.backend_install`), which it does
+  // once the user has picked Claude: a host never installs a provider nobody
+  // chose. Without a request an absent CLI stays absent and is reported so.
+  const installClaudeOnRequest = async (): Promise<void> => {
+    if (resolveClaude() !== undefined) {
+      void refreshClaudeCli();
+      return;
+    }
+    await refreshClaudeCli(true);
+  };
+  const refreshClaudeCli = async (install = false): Promise<void> => {
     const executable = resolveClaude();
     if (executable === undefined) {
-      if (config.sdkBackend === 'mock' || claudeProvision.state === 'installing') return;
+      if (!install || config.sdkBackend === 'mock' || claudeProvision.state === 'installing')
+        return;
       claudeProvision = { state: 'installing' };
       emit(describeHost());
       logger.info('claude-install: this host has no Claude Code; installing it');

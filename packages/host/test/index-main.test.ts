@@ -1680,10 +1680,16 @@ describe('src/index.ts main() — full host boot', () => {
     // never triggering a turn is the safer, more direct guarantee).
     const before = claudeInstalls.length;
     const boot = await bootMain({ SDK_BACKEND: 'real', CLAUDE_CODE_PATH: undefined });
-    // A real backend on a host with no Claude Code goes to install it (spec/02 §
+    // A real backend on a host with no Claude Code installs it only on request (spec/02 §
     // Agent backends). Whether this machine has one decides which happens.
     const { resolveClaudeExecutable } = await import('../src/claudeExecutable.js');
     const has = resolveClaudeExecutable({ home: homedir(), pathEnv: process.env['PATH'] ?? '' });
+    // Nothing installs at boot: a provider nobody has picked gets no CLI.
+    await boot.fakeServer.waitForAuthed();
+    await boot.fakeServer.waitForFrame((e) => e.type === 'host.host' && e.hostId === 'd1');
+    expect(claudeInstalls.length - before).toBe(0);
+    // It installs once a surface says the user picked Claude.
+    boot.fakeServer.send({ type: 'host.backend_install', hostId: 'd1', backendId: 'claude-code' });
     await vi.waitFor(() => expect(claudeInstalls.length - before).toBe(has === undefined ? 1 : 0));
     await boot.cleanup();
   });

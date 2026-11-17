@@ -631,6 +631,7 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
       [
         'chat.spawn_request',
         'host.backend_add_account',
+        'host.backend_install',
         'host.backend_usage_refresh',
         'host.claude_memory_delete',
         'host.claude_memory_set',

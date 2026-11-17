@@ -30,6 +30,7 @@ import { api } from '../api/rest.js';
 import { ClaudeSignIn } from '../components/ClaudeSignIn.js';
 import { AddClaudeApiKey } from './settings/SharedAccounts.js';
 import { ErrorDetail } from '../components/ErrorDetail.js';
+import { requestInstall } from '../lib/useInstallPickedProviders.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
 import { permissionModeLabel } from '../lib/permissionModeLabel.js';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
@@ -198,16 +199,6 @@ export function ProviderCards(): JSX.Element {
   const hosts = usePresenceStore((s) => s.hosts);
   const claude = secrets?.claude.filter((a) => a.connected) ?? [];
   const chatgpt = secrets?.codex.filter((a) => a.connected) ?? [];
-  // Whether a host is still installing Claude Code, or could not: a Claude
-  // sign-in is no use until a host can run it, and a failed install must show.
-  const claudeOnHosts = Object.values(hosts)
-    .filter((h) => h.online)
-    .map((h) => h.host?.backends.find((b) => b.id === 'claude-code'))
-    .filter((b) => b !== undefined);
-  const installing = claudeOnHosts.some((b) => b.state === 'installing');
-  const failed = claudeOnHosts.find((b) => b.state === 'failed');
-  const installed = useJustInstalled(installing, failed !== undefined);
-
   return (
     <>
       <div className="welcome-provider" data-testid="welcome-claude">
@@ -227,21 +218,7 @@ export function ProviderCards(): JSX.Element {
             </div>
           </>
         ) : null}
-        {installing ? (
-          <p className="welcome-note" data-testid="welcome-claude-installing">
-            Installing Claude Code on this computer…
-          </p>
-        ) : null}
-        {installed ? (
-          <p className="welcome-note" data-testid="welcome-claude-installed">
-            Claude Code is installed.
-          </p>
-        ) : null}
-        {failed ? (
-          <p className="set-error" role="alert" data-testid="welcome-claude-install-failed">
-            {failed.error ?? 'Installing Claude Code failed'}
-          </p>
-        ) : null}
+        <InstallStatus backendId="claude-code" name="Claude Code" testId="claude" />
       </div>
       <div className="welcome-provider" data-testid="welcome-chatgpt">
         <div className="welcome-provider-head">
@@ -257,7 +234,64 @@ export function ProviderCards(): JSX.Element {
             <AddChatGPTAccount />
           </>
         ) : null}
+        <InstallStatus backendId="codex" name="Codex" testId="codex" />
       </div>
+    </>
+  );
+}
+
+/**
+ * Where installing a provider's CLI stands on the online hosts, inside that
+ * provider's card: progress while it runs, a short "installed" when it ends, and
+ * the installer's own error with a Retry when it fails. Hosts install only after
+ * the provider is picked (lib/useInstallPickedProviders), so this is silent
+ * until then.
+ */
+function InstallStatus({
+  backendId,
+  name,
+  testId,
+}: {
+  backendId: string;
+  name: string;
+  testId: string;
+}): JSX.Element | null {
+  const hosts = usePresenceStore((s) => s.hosts);
+  const online = Object.values(hosts).filter((h) => h.online);
+  const entries = online.map((h) => ({
+    host: h,
+    backend: h.host?.backends.find((b) => b.id === backendId),
+  }));
+  const installing = entries.some((e) => e.backend?.state === 'installing');
+  const failed = entries.find((e) => e.backend?.state === 'failed');
+  const installed = useJustInstalled(installing, failed !== undefined);
+  return (
+    <>
+      {installing ? (
+        <p className="welcome-note" data-testid={`welcome-${testId}-installing`}>
+          Installing {name} on this computer…
+        </p>
+      ) : null}
+      {installed ? (
+        <p className="welcome-note" data-testid={`welcome-${testId}-installed`}>
+          {name} is installed.
+        </p>
+      ) : null}
+      {failed ? (
+        <>
+          <p className="set-error" role="alert" data-testid={`welcome-${testId}-install-failed`}>
+            {failed.backend?.error ?? `Installing ${name} failed`}
+          </p>
+          <button
+            type="button"
+            className="set-btn"
+            data-testid={`welcome-${testId}-install-retry`}
+            onClick={() => requestInstall(failed.host, backendId)}
+          >
+            Retry install
+          </button>
+        </>
+      ) : null}
     </>
   );
 }
