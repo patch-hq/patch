@@ -478,7 +478,9 @@ export const launchdOps: ServiceOps = {
       return;
     }
     try {
-      await mode.launchctl(['kickstart', mode.target]);
+      // No live host process, so there are no chats to preserve: -k forces a
+      // fresh spawn rather than trusting a job stuck pending since bootstrap.
+      await mode.launchctl(['kickstart', '-k', mode.target]);
     } catch (err) {
       throw new ServiceRegistrationError('launchctl kickstart', detail(err));
     }
