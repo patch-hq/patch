@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Command } from 'commander';
 import {
+  chatgptDeviceSignIn,
   parseBooleanValue,
   parseModelList,
   registerSettingsCommands,
@@ -35,6 +36,7 @@ test('accounts covers the whole account list: list, add, connect, disconnect, re
   for (const name of [
     'list',
     'add',
+    'sign-in',
     'connect',
     'disconnect',
     'remove',
@@ -75,4 +77,62 @@ test('a model list is typed as a comma-separated list or a JSON array, set model
   assert.deepEqual(parseModelList('a, b ,c'), ['a', 'b', 'c']);
   assert.deepEqual(parseModelList('["a","b"]'), ['a', 'b']);
   assert.deepEqual(parseModelList('a,,b'), ['a', '', 'b']); // the server refuses the empty entry
+});
+
+test('accounts signin shows the device code, then waits until the server has the login', async () => {
+  const said: string[] = [];
+  const calls: string[] = [];
+  let looks = 0;
+  const state = { version: 2 };
+  const t = {
+    async post<T>(path: string, body?: unknown): Promise<T> {
+      calls.push(`POST ${path} ${JSON.stringify(body)}`);
+      return {
+        signInId: 's1',
+        userCode: 'ABCD-1234',
+        url: 'https://auth.openai.com/codex/device',
+        intervalSeconds: 5,
+      } as T;
+    },
+    async get<T>(path: string): Promise<T> {
+      calls.push(`GET ${path}`);
+      looks += 1;
+      return (looks < 3 ? { status: 'pending' } : { status: 'complete', state }) as T;
+    },
+  };
+  const slept: number[] = [];
+  const result = await chatgptDeviceSignIn(
+    t,
+    { label: 'Work' },
+    (l) => said.push(l),
+    async (ms) => {
+      slept.push(ms);
+    },
+  );
+  assert.equal(result, state as never);
+  assert.match(said[0]!, /ABCD-1234/);
+  assert.match(said[0]!, /auth\.openai\.com\/codex\/device/);
+  assert.equal(looks, 3);
+  assert.deepEqual(slept, [5000, 5000, 5000]);
+  assert.equal(calls[0], 'POST /api/accounts/codex/signin {"label":"Work"}');
+});
+
+test('accounts signin reports a failed sign-in in the server’s words', async () => {
+  const t = {
+    async post<T>(): Promise<T> {
+      return { signInId: 's', userCode: 'X', url: 'u', intervalSeconds: 1 } as T;
+    },
+    async get<T>(): Promise<T> {
+      return { status: 'failed', error: 'This login is the same ChatGPT account as Work' } as T;
+    },
+  };
+  await assert.rejects(
+    chatgptDeviceSignIn(
+      t,
+      {},
+      () => undefined,
+      async () => undefined,
+    ),
+    /same ChatGPT account as Work/,
+  );
 });

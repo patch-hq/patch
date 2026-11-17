@@ -128,3 +128,18 @@ export {
   type ClaudeLoopbackListener,
   type ExchangeClaudeCodeOptions,
 } from './claude-signin.js';
+export {
+  CHATGPT_CLIENT_ID,
+  CHATGPT_ISSUER,
+  CHATGPT_VERIFICATION_URL,
+  ChatGPTSignInError,
+  chatgptLoginFromTokens,
+  exchangeChatGPTDeviceCode,
+  pollChatGPTDeviceCode,
+  requestChatGPTDeviceCode,
+  type ChatGPTDeviceCode,
+  type ChatGPTDevicePoll,
+  type ChatGPTFetchOptions,
+  type ChatGPTLogin,
+  type ChatGPTTokens,
+} from './chatgpt-signin.js';

@@ -408,49 +408,69 @@ describe('Settings → Usage → changing accounts', () => {
 });
 
 describe('Settings → Usage → ChatGPT sign-in', () => {
-  it('runs a ChatGPT sign-in on the chosen online host', () => {
+  const started = {
+    signInId: 's1',
+    userCode: 'ABCD-1234',
+    url: 'https://auth.openai.com/codex/device',
+    intervalSeconds: 1,
+    expiresAt: Date.now() + 900_000,
+  };
+
+  it('starts on the server with no host online, and shows the code', async () => {
     loadShared();
-    reportHost('d1', { hostName: 'hetzner' });
-    usePresenceStore.getState().setHostOnline('d1', true);
-    const { sent } = fakeWs();
+    const start = vi.spyOn(api, 'chatgptSignInStart').mockResolvedValue(started);
+    vi.spyOn(api, 'chatgptSignInStatus').mockResolvedValue({ status: 'pending' });
     renderSettings('/settings/usage');
-    fireEvent.click(screen.getByTestId('chatgpt-signin'));
-    expect(sent).toContainEqual(
-      expect.objectContaining({
-        type: 'host.backend_add_account',
-        hostId: 'd1',
-        backendId: 'codex',
-        authMethod: 'device',
-      }),
+    const button = screen.getByTestId('chatgpt-signin');
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(screen.getByTestId('chatgpt-login-pending')).toHaveTextContent('ABCD-1234'),
     );
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('chatgpt-login-open')).toHaveAttribute('href', started.url);
+    expect(screen.queryByTestId('chatgpt-no-host')).toBeNull();
   });
 
-  it('shows the code while the sign-in waits', () => {
+  it('applies the account once the server has the login', async () => {
     loadShared();
-    reportHost('d1', { hostName: 'hetzner' });
-    usePresenceStore.getState().setHostOnline('d1', true);
-    usePresenceStore.getState().setHostAccount({
-      type: 'host.account',
-      hostId: 'd1',
-      backendId: 'codex',
-      connected: false,
-      accountEmail: null,
-      login: {
-        requestId: 'r1',
-        status: 'pending',
-        code: 'ABCD-1234',
-        url: 'https://auth.openai.com/device',
-      },
+    vi.spyOn(api, 'chatgptSignInStart').mockResolvedValue(started);
+    vi.spyOn(api, 'chatgptSignInStatus').mockResolvedValue({
+      status: 'complete',
+      state: sharedState({
+        version: 2,
+        secrets: {
+          claude: [],
+          codex: [{ id: 'cx1', label: 'me@example.com', kind: 'chatgpt', connected: true }],
+        } as never,
+      }),
     });
     renderSettings('/settings/usage');
-    expect(screen.getByTestId('chatgpt-login-pending')).toHaveTextContent('ABCD-1234');
+    fireEvent.click(screen.getByTestId('chatgpt-signin'));
+    await waitFor(
+      () =>
+        expect(usePreferencesStore.getState().shared?.secrets.codex.map((a) => a.id)).toContain(
+          'cx1',
+        ),
+      { timeout: 4000 },
+    );
+    expect(screen.queryByTestId('chatgpt-login-pending')).toBeNull();
   });
 
-  it('says there is nowhere to sign in while no host is online', () => {
+  it('says why when the sign-in fails', async () => {
     loadShared();
+    vi.spyOn(api, 'chatgptSignInStart').mockResolvedValue(started);
+    vi.spyOn(api, 'chatgptSignInStatus').mockResolvedValue({
+      status: 'failed',
+      code: 'duplicate_account',
+      error: 'This login is the same ChatGPT account as Work',
+    });
     renderSettings('/settings/usage');
-    expect(screen.getByTestId('chatgpt-no-host')).toBeInTheDocument();
-    expect(screen.getByTestId('chatgpt-signin')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('chatgpt-signin'));
+    await waitFor(() => expect(screen.getByTestId('chatgpt-login-error')).toBeInTheDocument(), {
+      timeout: 4000,
+    });
+    expect(screen.getByTestId('chatgpt-login-error')).toHaveTextContent(/same ChatGPT account/);
   });
 });
 

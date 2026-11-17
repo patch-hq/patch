@@ -369,6 +369,18 @@ export type ComputerUseHost = {
   error?: string;
 };
 
+export interface ChatGPTSignInStarted {
+  signInId: string;
+  userCode: string;
+  url: string;
+  intervalSeconds: number;
+  expiresAt: number;
+}
+export type ChatGPTSignInStatus =
+  | { status: 'pending'; warning?: string }
+  | { status: 'complete'; state: SharedState }
+  | { status: 'failed'; error: string; code: string };
+
 export const api = {
   issueReporting: () => request<IssueReportingStatus>('/api/issue-reporting'),
   setIssueReporting: (enabled: boolean) =>
@@ -1049,6 +1061,16 @@ export const api = {
     label?: string;
     accountId?: string;
   }) => request<SharedState>('/api/accounts/claude-code/signin/complete', { method: 'POST', body }),
+  /** Start a ChatGPT device sign-in; the server holds the code (spec/10 § Signing in). */
+  chatgptSignInStart: (body: { accountId?: string; label?: string } = {}) =>
+    request<ChatGPTSignInStarted>('/api/accounts/codex/signin', { method: 'POST', body }),
+  /** One look at whether the code has been approved. */
+  chatgptSignInStatus: (signInId: string) =>
+    request<ChatGPTSignInStatus>(`/api/accounts/codex/signin/${encodeURIComponent(signInId)}`),
+  chatgptSignInCancel: (signInId: string) =>
+    request<{ ok: true }>(`/api/accounts/codex/signin/${encodeURIComponent(signInId)}`, {
+      method: 'DELETE',
+    }),
   updateAccount: (
     backendId: SharedBackendId,
     accountId: string,

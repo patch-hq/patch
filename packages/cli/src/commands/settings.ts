@@ -5,6 +5,7 @@
 // CLI runs — never a host's own socket. With no server reachable they fail,
 // naming it, rather than changing one host behind the others' backs.
 
+import { createInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 import {
   accountsKeyForBackend,
@@ -29,6 +30,43 @@ interface SharedState {
   };
   hosts: Array<{ hostId: string; appliedVersion?: number; error?: string }>;
   problem?: string;
+}
+
+interface ChatGPTSignInStarted {
+  signInId: string;
+  userCode: string;
+  url: string;
+  intervalSeconds: number;
+}
+type ChatGPTSignInStatus =
+  | { status: 'pending' }
+  | { status: 'complete'; state: SharedState }
+  | { status: 'failed'; error: string };
+
+/**
+ * Sign in to ChatGPT with a device code: print the code and address, approve on
+ * any device, and wait until the server has the login (spec/10 § Signing in).
+ * This is how a headless host's owner signs in.
+ */
+export async function chatgptDeviceSignIn(
+  t: { get<T>(p: string): Promise<T>; post<T>(p: string, b?: unknown): Promise<T> },
+  args: { accountId?: string; label?: string },
+  say: (line: string) => void,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<SharedState> {
+  const started = await t.post<ChatGPTSignInStarted>('/api/accounts/codex/signin', {
+    ...(args.accountId ? { accountId: args.accountId } : {}),
+    ...(args.label ? { label: args.label } : {}),
+  });
+  say(`Open ${started.url} on any device and enter the code ${started.userCode}`);
+  for (;;) {
+    await sleep(Math.max(1, started.intervalSeconds) * 1000);
+    const res = await t.get<ChatGPTSignInStatus>(
+      `/api/accounts/codex/signin/${encodeURIComponent(started.signInId)}`,
+    );
+    if (res.status === 'complete') return res.state;
+    if (res.status === 'failed') throw new Error(res.error);
+  }
 }
 
 const server = (opts: CommonOpts) => getTransport({ ...opts, remote: true });
@@ -243,6 +281,51 @@ export function registerSettingsCommands(program: Command): void {
         });
       },
     );
+
+  accounts
+    .command('sign-in <backend>')
+    .description(
+      'Sign in to Claude (paste the code claude.ai shows) or ChatGPT (approve a device code on any device)',
+    )
+    .option('--account <id>', 'sign this account in again instead of adding one')
+    .option('--label <l>', 'a name for it')
+    .option('--json', 'JSON output')
+    .action(async (backend: string, opts: CommonOpts & { account?: string; label?: string }) => {
+      await run(opts, async () => {
+        const id = backendOf(backend);
+        const t = server(opts);
+        const say = (line: string): void => {
+          if (!opts.json) emitText(line);
+        };
+        let state: SharedState;
+        if (id === 'codex') {
+          state = await chatgptDeviceSignIn(
+            t,
+            {
+              ...(opts.account ? { accountId: opts.account } : {}),
+              ...(opts.label ? { label: opts.label } : {}),
+            },
+            say,
+          );
+        } else {
+          const started = await t.post<{ signInId: string; url: string }>(
+            '/api/accounts/claude-code/signin',
+          );
+          say(`Open ${started.url} in any browser, sign in, and paste the code it shows.`);
+          const rl = createInterface({ input: process.stdin, output: process.stderr });
+          const code = (await rl.question('Code: ')).trim();
+          rl.close();
+          state = await t.post<SharedState>('/api/accounts/claude-code/signin/complete', {
+            signInId: started.signInId,
+            code,
+            ...(opts.account ? { accountId: opts.account } : {}),
+            ...(opts.label ? { label: opts.label } : {}),
+          });
+        }
+        if (opts.json) emitJson(state);
+        else printAccounts(viewOf(state), id);
+      });
+    });
 
   accounts
     .command('connect <backend> <accountId>')
