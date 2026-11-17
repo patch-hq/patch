@@ -165,6 +165,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   const collapseGlyphs = useActionGlyphs('toggleSidebar');
   const chats = useChatStore((s) => s.chats);
   const hydrated = useChatStore((s) => s.hydrated);
+  const deviceCopy = useChatStore((s) => s.deviceCopy);
   // Before the cold-start `GET /api/chats` lands (or a live reload — every
   // deploy reloads the SPA, see liveUpdate.ts), `chats` is genuinely empty —
   // not because there are no chats, but because none have arrived yet. A
@@ -385,7 +386,11 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
                 if (e.key === 'Enter' || e.key === ' ') navigate('/settings/hosts');
               }}
               aria-label={`connection: ${connection === 'connected' ? (hostOnline ? 'connected' : 'host-offline') : connection}`}
-              title={connectionSummary(connection, hostStates, getDesktopBridge() ? 'app' : 'browser')}
+              title={connectionSummary(
+                connection,
+                hostStates,
+                getDesktopBridge() ? 'app' : 'browser',
+              )}
               data-tooltip-full
               data-testid="conn-dot"
             />
@@ -458,6 +463,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
       ) : (
         <RegularSidebar
           showSidebarSkeleton={showSidebarSkeleton}
+          showCatchingUp={deviceCopy}
           view={view}
           grouped={grouped}
           onListEnter={() => setFrozenOrder(captureOrder(freshRef.current))}
@@ -537,6 +543,7 @@ function useBandsScrolling(asideRef: { current: HTMLElement | null }): boolean {
  */
 function RegularSidebar({
   showSidebarSkeleton,
+  showCatchingUp,
   view,
   grouped,
   onListEnter,
@@ -567,6 +574,7 @@ function RegularSidebar({
   sectionCounts,
 }: {
   showSidebarSkeleton: boolean;
+  showCatchingUp: boolean;
   onListEnter: () => void;
   onListLeave: () => void;
   view: Grouped;
@@ -837,6 +845,13 @@ function RegularSidebar({
           reloads itself on the new bundle hash (liveUpdate.ts), which re-runs
           this fetch from cold on an otherwise-populated sidebar. */}
             {showSidebarSkeleton ? <SidebarSkeleton /> : null}
+            {/* The rows above came from this device's copy; the server's list
+                replaces them (spec/05 § Loading). Say so until it does. */}
+            {showCatchingUp ? (
+              <div className="catching-up" data-testid="sidebar-catching-up" aria-live="polite">
+                Catching up…
+              </div>
+            ) : null}
 
             {/* Empty state for needs-attention mode when nothing matches. */}
             {!showSidebarSkeleton && attentionEmpty ? (

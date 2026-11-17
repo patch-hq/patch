@@ -2486,6 +2486,13 @@ export function ChatRoute({
                     chrome it was one more permanent-looking strip among six. */}
                 <RateLimitCard row={row} />
                 <WakeHoldBubble row={row} />
+                {/* spec/14 § Transcript: shown from what the device holds while
+                    newer entries are on their way; gone once current. */}
+                {replaying && timeline.length > 0 ? (
+                  <div className="catching-up" data-testid="catching-up" aria-live="polite">
+                    Catching up…
+                  </div>
+                ) : null}
               </div>
               {showScrollUp && railPoints.length > 0 ? (
                 <div className="scroll-down-anchor scroll-up-anchor">

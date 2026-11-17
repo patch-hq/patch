@@ -1632,3 +1632,58 @@ describe('AppShell', () => {
     ).toBe(false);
   });
 });
+
+// spec/05 § Loading — Device copy: the list renders from this device before the
+// server answers, then the server's list replaces it and the copy is rewritten.
+describe('AppShell — device copy of the chat list', () => {
+  let chatListCache: typeof import('../lib/chatListCache.js');
+
+  beforeEach(async () => {
+    document.head.innerHTML = '<link rel="icon" href="/app/favicon.svg" />';
+    const { IDBFactory } = await import('fake-indexeddb');
+    (globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory();
+    chatListCache = await import('../lib/chatListCache.js');
+    chatListCache.__resetChatListCacheForTests();
+    useChatStore.getState()._reset();
+    useUiStore.setState({ sidebarCollapsed: false, errors: [] });
+    useLayoutStore.getState()._reset();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    chatListCache.__resetChatListCacheForTests();
+    usePresenceStore.setState({ connection: 'offline', hostOnline: false });
+  });
+
+  it('draws the held list with no network answer, and says it is catching up', async () => {
+    await chatListCache.saveChatList([makeRow('held-1'), makeRow('held-2')]);
+    // The list request never answers: nothing but the device copy can be drawn.
+    const base = makeFetch([]);
+    const hung = vi.fn((url: string | URL, init?: RequestInit) =>
+      String(url) === '/api/chats' ? new Promise<Response>(() => {}) : base(url, init),
+    );
+    await renderShell('/jobs', [], hung);
+    expect(await screen.findByTestId('chat-row-held-1')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-row-held-2')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-catching-up')).toBeInTheDocument();
+    expect(screen.queryByTestId('sidebar-skeleton')).toBeNull();
+  });
+
+  it('is replaced by the server list: a chat gone elsewhere goes, the copy is rewritten', async () => {
+    await chatListCache.saveChatList([makeRow('kept'), makeRow('deleted-elsewhere')]);
+    await renderShell('/jobs', [makeRow('kept'), makeRow('new-one')]);
+    await waitFor(() => expect(screen.queryByTestId('sidebar-catching-up')).toBeNull());
+    expect(screen.queryByTestId('chat-row-deleted-elsewhere')).toBeNull();
+    expect(screen.getByTestId('chat-row-new-one')).toBeInTheDocument();
+    await waitFor(
+      async () => {
+        const held = (await chatListCache.loadChatList())?.map((r) => r.chatId).sort();
+        expect(held).toEqual(['kept', 'new-one']);
+      },
+      { timeout: 4000 },
+    );
+  });
+});

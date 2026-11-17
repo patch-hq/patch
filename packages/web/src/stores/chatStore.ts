@@ -126,6 +126,11 @@ interface ChatState {
    */
   hydrated: boolean;
   /**
+   * True while the rows shown are the device's copy of the list, not yet
+   * replaced by the server's (spec/05 § Loading). Cleared by `hydrate`.
+   */
+  deviceCopy: boolean;
+  /**
    * spec/04 § Branching — each chat's track graph, as published by
    * `chat.branches`. Absent for a chat whose graph we haven't seen yet; a
    * single-root graph means the chat has never been forked and shows no track
@@ -191,6 +196,8 @@ interface ChatState {
   setFolderRoster(roster: FolderRosterEntry[]): void;
   /** Replace the section counts from a `GET /api/chats/counts` snapshot. */
   setSectionCounts(counts: SectionCounts): void;
+  /** Show the device's copy of the chat list until the server's arrives. No-op once the server has spoken. */
+  seedFromDeviceCopy(rows: readonly ChatRow[]): void;
   hydrate(
     rows: Array<
       Omit<
@@ -1096,6 +1103,7 @@ const retryingChats = new Set<string>();
 export const useChatStore = create<ChatState>((set, get) => ({
   chats: {},
   hydrated: false,
+  deviceCopy: false,
   branchGraphs: {},
   replaying: {},
   historyMore: {},
@@ -1115,6 +1123,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setSectionCounts(counts) {
     set({ sectionCounts: counts });
+  },
+
+  seedFromDeviceCopy(rows) {
+    const state = get();
+    if (state.hydrated) return;
+    // A row a live frame already delivered is newer than the copy: keep it.
+    const next: Record<string, ChatRow> = {};
+    for (const r of rows) next[r.chatId] = r;
+    set({ chats: { ...next, ...state.chats }, deviceCopy: true });
   },
 
   hydrate(rows) {
@@ -1325,7 +1342,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (existing.snoozedUntil !== null && existing.snoozedUntil > now);
       if (outsideSnapshot) next[id] = existing;
     }
-    set({ chats: next, hydrated: true });
+    set({ chats: next, hydrated: true, deviceCopy: false });
   },
 
   mergeChats(rows) {
@@ -3520,6 +3537,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chats: {},
       hydrated: false,
+      deviceCopy: false,
       branchGraphs: {},
       replaying: {},
       historyMore: {},
