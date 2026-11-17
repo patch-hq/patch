@@ -51,11 +51,24 @@ const args = [
 if (process.argv.includes('--dir')) args.push('--dir');
 
 console.log(`[dist] packaging Patch ${version} for ${PLATFORM}${process.argv.includes('--dir') ? ' (--dir)' : ''}`);
-execFileSync(path.join(DESKTOP_DIR, 'node_modules', '.bin', 'electron-builder'), args, {
-  cwd: DESKTOP_DIR,
-  stdio: 'inherit',
-  env: process.env,
-});
+// electron-builder downloads the Electron zip from github.com, which now and then
+// answers 502. That is the network, not the build, so retry the whole packaging a
+// few times; a genuine failure still fails on the last attempt.
+const MAX_ATTEMPTS = 3;
+for (let attempt = 1; ; attempt++) {
+  try {
+    execFileSync(path.join(DESKTOP_DIR, 'node_modules', '.bin', 'electron-builder'), args, {
+      cwd: DESKTOP_DIR,
+      stdio: 'inherit',
+      env: process.env,
+    });
+    break;
+  } catch (err) {
+    if (attempt >= MAX_ATTEMPTS) throw err;
+    console.error(`[dist] electron-builder failed (attempt ${attempt}/${MAX_ATTEMPTS}); retrying in 20s`);
+    spawnSync('sleep', ['20']);
+  }
+}
 
 // The signing gate (spec/11 § Desktop code signing). Signing is what makes the
 // shell's own update path work at all: Squirrel's designated requirement check
