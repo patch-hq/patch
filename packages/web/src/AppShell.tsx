@@ -170,6 +170,9 @@ export function AppShell(): JSX.Element {
           // server saying it does not know, and stays unknown.
           backgroundTasks: c.backgroundTasks,
           runningAgents: c.runningAgents,
+          // spec/05 § Chat status: the server's status, so a cold start draws
+          // the same badge the live stream does.
+          ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
           // spec/04 § Hidden. Nothing in this snapshot is hidden, and saying so
           // clears a stale `true` on a chat that was shown from another surface.
           hidden: c.hidden,
