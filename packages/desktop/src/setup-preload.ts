@@ -5,7 +5,7 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
-type Choice = { kind: 'local' } | { kind: 'remote'; input: string };
+type Choice = { kind: 'local'; name: string } | { kind: 'remote'; input: string };
 
 contextBridge.exposeInMainWorld('patchSetup', {
   move(yes: boolean): void {
@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('patchSetup', {
   },
   choose(choice: Choice): void {
     ipcRenderer.send('patch:setup:choose', choice);
+  },
+  defaultName(): Promise<string> {
+    return ipcRenderer.invoke('patch:setup:default-name') as Promise<string>;
   },
   onProgress(cb: (message: string) => void): void {
     ipcRenderer.on('patch:setup:progress', (_e, message: string) => cb(message));

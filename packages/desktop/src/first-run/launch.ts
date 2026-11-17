@@ -12,7 +12,7 @@ import { joinServer } from './join.js';
 import type { LocalServer } from './local-server.js';
 
 /** What the first-run page lets the user choose between. */
-export type Choice = { kind: 'local' } | { kind: 'remote'; input: string };
+export type Choice = { kind: 'local'; name: string } | { kind: 'remote'; input: string };
 
 /** The first-run page, as the launch sees it. */
 export interface SetupUi {
@@ -45,6 +45,7 @@ export interface LaunchOptions {
   startLocal(
     existing: SavedConnection | null,
     progress: (message: string) => void,
+    name?: string,
   ): Promise<{ saved: SavedConnection; server: LocalServer }>;
 }
 
@@ -96,8 +97,10 @@ export async function launchPatch(opts: LaunchOptions): Promise<Launch> {
     try {
       if (choice.kind === 'local') {
         // What an earlier attempt got as far as saving is carried into this one.
-        const { saved: made, server } = await opts.startLocal(readSaved(opts.file), (m) =>
-          opts.ui.progress(m),
+        const { saved: made, server } = await opts.startLocal(
+          readSaved(opts.file),
+          (m) => opts.ui.progress(m),
+          choice.name,
         );
         writeSaved(opts.file, made);
         return {

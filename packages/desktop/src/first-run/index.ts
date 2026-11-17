@@ -33,6 +33,7 @@ export interface FirstRunEnv {
   installHost(
     origin: string,
     code: string,
+    name?: string,
   ): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   hostInstalled(): boolean;
 }
@@ -67,33 +68,37 @@ export function launch(env: FirstRunEnv): Promise<Launch> {
     file: connectionFile(env.userData),
     ui: env.ui,
     label: env.label,
-    startLocal: (existing, progress) =>
-      bringUpLocal(existing, {
-        freePort,
-        startServer: ({ port }) =>
-          startLocalServer({
-            releaseDir: join(env.resources, 'server'),
-            home: localHome(env.userData),
-            port,
-            relayUrl: env.relayUrl,
-            hostArtifacts: join(env.resources, 'host'),
-            node: { execPath: env.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
-          }),
-        call: post,
-        hostInstalled: env.hostInstalled,
-        installHost: env.installHost,
-        save: (saved) => {
-          mkdirSync(localHome(env.userData), { recursive: true });
-          writeSaved(localCredentialFile(env.userData), saved);
-          writeSaved(connectionFile(env.userData), saved);
+    startLocal: (existing, progress, name) =>
+      bringUpLocal(
+        existing,
+        {
+          freePort,
+          startServer: ({ port }) =>
+            startLocalServer({
+              releaseDir: join(env.resources, 'server'),
+              home: localHome(env.userData),
+              port,
+              relayUrl: env.relayUrl,
+              hostArtifacts: join(env.resources, 'host'),
+              node: { execPath: env.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+            }),
+          call: post,
+          hostInstalled: env.hostInstalled,
+          installHost: env.installHost,
+          save: (saved) => {
+            mkdirSync(localHome(env.userData), { recursive: true });
+            writeSaved(localCredentialFile(env.userData), saved);
+            writeSaved(connectionFile(env.userData), saved);
+          },
+          recover: () =>
+            existsSync(localCredentialFile(env.userData))
+              ? readSaved(localCredentialFile(env.userData))
+              : null,
+          progress,
+          label: env.label,
         },
-        recover: () =>
-          existsSync(localCredentialFile(env.userData))
-            ? readSaved(localCredentialFile(env.userData))
-            : null,
-        progress,
-        label: env.label,
-      }),
+        name,
+      ),
   });
 }
 

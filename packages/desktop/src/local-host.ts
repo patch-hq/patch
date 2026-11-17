@@ -7,7 +7,8 @@
 // lifetime. Nothing here talks to the host afterwards; once it is running it
 // is a host like any other, and Settings → Hosts shows it from the server.
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { hostname } from 'node:os';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -97,6 +98,8 @@ export function installLocalHost(opts: {
   serverUrl: string;
   code: string;
   home: string;
+  /** What to call this Mac; without one the installer uses the computer's own name. */
+  name?: string;
   spawnImpl?: typeof spawn;
 }): Promise<LocalHostInstallResult> {
   if (!isPairingCode(opts.code)) {
@@ -117,6 +120,7 @@ export function installLocalHost(opts: {
           PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
           PATCH_SERVER_URL: opts.serverUrl,
           PATCH_PAIRING_CODE: opts.code,
+          ...(opts.name ? { PATCH_HOST_NAME: opts.name } : {}),
           // The installer reads the service's PATH from the user's own login
           // shell; without this it would have to assume which one that is.
           ...(process.env['SHELL'] ? { SHELL: process.env['SHELL'] } : {}),
@@ -133,4 +137,31 @@ export function installLocalHost(opts: {
     child.on('error', (err) => resolve({ ok: false, exitCode: null, output: err.message }));
     child.on('close', (code) => resolve({ ok: code === 0, exitCode: code, output }));
   });
+}
+
+/**
+ * The name the person gave this computer (macOS Sharing → Computer Name), never
+ * the network hostname (`WC-M-K0X7P0RV6C`). Elsewhere the pretty hostname, then
+ * the plain one without its domain.
+ */
+export function friendlyComputerName(
+  run: (cmd: string, args: string[]) => string = (cmd, args) =>
+    execFileSync(cmd, args, { encoding: 'utf8' }),
+  platform: NodeJS.Platform = process.platform,
+  host: string = hostname(),
+): string {
+  const tryRun = (cmd: string, args: string[]): string => {
+    try {
+      return run(cmd, args).trim();
+    } catch {
+      return '';
+    }
+  };
+  const named =
+    platform === 'darwin'
+      ? tryRun('/usr/sbin/scutil', ['--get', 'ComputerName'])
+      : platform === 'linux'
+        ? tryRun('hostnamectl', ['--pretty'])
+        : '';
+  return named || host.replace(/\.local$/, '').split('.')[0] || host;
 }

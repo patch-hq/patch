@@ -47,7 +47,8 @@ import {
 } from 'node:fs';
 import { installerLog, openInstallerLog } from './runLog.js';
 import { createInterface } from 'node:readline/promises';
-import { hostname, userInfo } from 'node:os';
+import { userInfo } from 'node:os';
+import { defaultHostName } from '../config.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadOrCreateHostIdentity } from '../identity.js';
@@ -245,7 +246,7 @@ const USAGE = `patch host installer
   --server <url>            the patch server this host reports to
   --internal-token <token>  the server's voice-session secret (default: sent at pairing)
   --code <code>             the pairing code from a linked surface's Add host
-  --host-name <name>        what to call this host (default: its hostname)
+  --host-name <name>        what to call this host (default: the computer's own name)
   --non-interactive         never prompt; used when a surface runs the install
   -h, --help                this
 `;
@@ -477,7 +478,8 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     return { code: 78 };
   }
   const user = userInfo().username;
-  const host = args.hostName ?? readMachineSettings(join(home, '.patch')).hostName ?? hostname();
+  const host =
+    args.hostName ?? readMachineSettings(join(home, '.patch')).hostName ?? defaultHostName();
 
   // What this host already knows about itself; anything named on this run
   // overrides it, anything not named survives untouched.

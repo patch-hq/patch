@@ -31,7 +31,7 @@ afterEach(async () => {
   await new Promise<void>((r) => server.close(() => r()));
 });
 
-function ui(choices: Array<{ kind: 'local' } | { kind: 'remote'; input: string }>) {
+function ui(choices: Array<{ kind: 'local', name: 'Test Mac' } | { kind: 'remote'; input: string }>) {
   const log: string[] = [];
   const impl: SetupUi = {
     choose: async () => {
@@ -95,7 +95,7 @@ test('nothing is remembered from an attempt that failed', async () => {
 
 test('"on this Mac" brings up the local server and host, and opens the server on loopback', async () => {
   const stopped: string[] = [];
-  const asked = ui([{ kind: 'local' }]);
+  const asked = ui([{ kind: 'local', name: 'Test Mac' }]);
   const launch = await launchPatch({
     ...base(),
     ui: asked.impl,
@@ -145,7 +145,7 @@ test('a later launch of a local setup starts the same server on the same port', 
 });
 
 test('a failed local setup is reported on the page and can be tried again', async () => {
-  const asked = ui([{ kind: 'local' }, { kind: 'local' }]);
+  const asked = ui([{ kind: 'local', name: 'Test Mac' }, { kind: 'local', name: 'Test Mac' }]);
   let tries = 0;
   const launch = await launchPatch({
     ...base(),
@@ -164,7 +164,7 @@ test('a failed local setup is reported on the page and can be tried again', asyn
 });
 
 test('a retry carries on from what the failed attempt had already saved, rather than starting the account again', async () => {
-  const asked = ui([{ kind: 'local' }, { kind: 'local' }]);
+  const asked = ui([{ kind: 'local', name: 'Test Mac' }, { kind: 'local', name: 'Test Mac' }]);
   const given: unknown[] = [];
   const launch = await launchPatch({
     ...base(),

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import {
   HOST_SERVICE_LABEL,
   HOST_SYSTEMD_UNITS,
+  friendlyComputerName,
   installLocalHost,
   isPairingCode,
   localHostStatus,
@@ -120,4 +121,34 @@ test('refuses something that is not a pairing code without running anything', as
   });
   assert.equal(res.ok, false);
   assert.equal(calls.length, 0);
+});
+test('the name the person chose travels to the installer as environment', async () => {
+  const { impl, calls } = fakeSpawn(0, '');
+  await installLocalHost({
+    serverUrl: 'https://s',
+    code: CODE,
+    home: '/h',
+    name: "Tom's MacBook Pro",
+    spawnImpl: impl,
+  });
+  assert.equal(calls[0]!.env['PATCH_HOST_NAME'], "Tom's MacBook Pro");
+});
+
+test('the suggested name is the computer name, not the network hostname', () => {
+  const run = (cmd: string): string => (cmd.endsWith('scutil') ? "Tom's MacBook Pro\n" : '');
+  assert.equal(friendlyComputerName(run, 'darwin', 'WC-M-K0X7P0RV6C'), "Tom's MacBook Pro");
+  assert.equal(
+    friendlyComputerName(() => 'Study Box\n', 'linux', 'ubuntu-1'),
+    'Study Box',
+  );
+  assert.equal(
+    friendlyComputerName(
+      () => {
+        throw new Error('no hostnamectl');
+      },
+      'linux',
+      'box.example.com',
+    ),
+    'box',
+  );
 });
