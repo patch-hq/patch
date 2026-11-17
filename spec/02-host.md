@@ -128,6 +128,15 @@ visible message (`12-error-and-offline.md`). Nothing is added to the turn
 without the user seeing it. A turn that was only queued never began, and is sent
 as it was.
 
+### Stopping the host
+
+A stop (SIGTERM, a self-update, `POST /stop`) takes seconds, however many chats the host holds: shutdown does only work that scales with what the host was doing, never with what it has loaded.
+
+- Turns, watches and terminals are not stopped; they run as their own processes and the host reattaches to them when it starts (§ Host restarts). There is nothing to wait for.
+- Only chats whose position or last-updated time moved since their metadata was last saved are written back.
+- Everything that can wait on a peer (audio clients, the server link, control connections, transcription) closes concurrently, each with a 2 second budget; a close that overruns is logged by name and abandoned, and a close handshake the peer never answers is cut after 1 second.
+- A stop that has not finished in 10 seconds ends the process and is logged as a fault.
+
 ### Chat loading
 
 At start the host loads only the chats with live or owed work: a turn to
