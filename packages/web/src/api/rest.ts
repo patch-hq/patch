@@ -1028,9 +1028,19 @@ export const api = {
     body: { token?: string; apiKey?: string; label?: string },
   ) => request<SharedState>(`/api/accounts/${backendId}`, { method: 'POST', body }),
   /** Start signing in to Claude in the browser (spec/10 § Signing in to Claude). */
-  claudeSignInStart: () =>
-    request<{ signInId: string; url: string }>('/api/accounts/claude-code/signin', {
-      method: 'POST',
+  claudeSignInStart: (body: { label?: string; accountId?: string } = {}) =>
+    request<{ signInId: string; url: string; mode: 'loopback' | 'code' }>(
+      '/api/accounts/claude-code/signin',
+      { method: 'POST', body },
+    ),
+  /** A loopback sign-in finishes by itself on the server; this says whether it has. */
+  claudeSignInStatus: (signInId: string) =>
+    request<{ status: 'waiting' } | { status: 'done' } | { status: 'failed'; message: string }>(
+      `/api/accounts/claude-code/signin/${encodeURIComponent(signInId)}`,
+    ),
+  claudeSignInCancel: (signInId: string) =>
+    request<void>(`/api/accounts/claude-code/signin/${encodeURIComponent(signInId)}`, {
+      method: 'DELETE',
     }),
   /** Finish it with the code claude.ai showed; `accountId` signs that row in again. */
   claudeSignInComplete: (body: {

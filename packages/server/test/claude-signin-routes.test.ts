@@ -53,14 +53,22 @@ describe('Claude sign-in routes', () => {
       jobsWatch: false,
       gcalSubscriptions: false,
     });
-    const post = (url: string, payload?: unknown, auth = true) =>
+    // A relayed request (a proxy header) is a browser somewhere else: the paste flow.
+    const post = (url: string, payload?: unknown, auth = true, here = false) =>
       built.app.inject({
         method: 'POST',
         url,
-        headers: auth ? { authorization: `Bearer ${jwt}` } : {},
+        headers: {
+          ...(auth ? { authorization: `Bearer ${jwt}` } : {}),
+          ...(here ? {} : { 'x-forwarded-for': '203.0.113.9' }),
+        },
         ...(payload === undefined ? {} : { payload }),
       });
-    return { built, post, exchanged };
+    const get = (url: string) =>
+      built.app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${jwt}` } });
+    const del = (url: string) =>
+      built.app.inject({ method: 'DELETE', url, headers: { authorization: `Bearer ${jwt}` } });
+    return { built, post, get, del, exchanged };
   }
 
   it('starts a sign-in, takes the pasted code and adds the account', async () => {
@@ -174,6 +182,97 @@ describe('Claude sign-in routes', () => {
       expect((await post('/api/accounts/claude-code/signin', undefined, false)).statusCode).toBe(
         401,
       );
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('from the same machine, claude.ai returns the code to the server and nothing is pasted', async () => {
+    const { built, post, get, exchanged } = await makeApp(async () => ({
+      accessToken: 'sk-ant-oat01-loop',
+      expiresAt: 0,
+    }));
+    try {
+      const start = await post('/api/accounts/claude-code/signin', { label: 'Mine' }, true, true);
+      expect(start.statusCode, start.body).toBe(200);
+      const { signInId, url, mode } = start.json() as {
+        signInId: string;
+        url: string;
+        mode: string;
+      };
+      expect(mode).toBe('loopback');
+      const authorize = new URL(url);
+      expect(authorize.searchParams.has('code')).toBe(false);
+      const redirect = new URL(authorize.searchParams.get('redirect_uri')!);
+      expect(redirect.hostname).toBe('localhost');
+      expect(redirect.pathname).toBe('/callback');
+      expect(
+        ((await get(`/api/accounts/claude-code/signin/${signInId}`)).json() as { status: string })
+          .status,
+      ).toBe('waiting');
+
+      // The browser, after claude.ai (and any login detour) sends the person back.
+      const back = await fetch(
+        `http://127.0.0.1:${redirect.port}/callback?code=the-code&state=${authorize.searchParams.get('state')}`,
+      );
+      expect(back.status).toBe(200);
+      await expect
+        .poll(async () => (await get(`/api/accounts/claude-code/signin/${signInId}`)).json())
+        .toEqual({ status: 'done' });
+      expect(exchanged[0]).toMatchObject({
+        code: 'the-code',
+        redirectUri: redirect.toString(),
+      });
+      const state = (await get('/api/accounts/claude-code')).json() as {
+        secrets: { claude: Array<{ label: string }> };
+      };
+      expect(state.secrets.claude.map((c) => c.label)).toEqual(['Mine']);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('a loopback return with the wrong state is ignored; a refusal is reported', async () => {
+    const { built, post, get } = await makeApp(async () => ({ accessToken: 't', expiresAt: 0 }));
+    try {
+      const { signInId, url } = (
+        await post('/api/accounts/claude-code/signin', {}, true, true)
+      ).json() as {
+        signInId: string;
+        url: string;
+      };
+      const authorize = new URL(url);
+      const port = new URL(authorize.searchParams.get('redirect_uri')!).port;
+      const stray = await fetch(`http://127.0.0.1:${port}/callback?code=x&state=other`);
+      expect(stray.status).toBe(404);
+      expect(
+        ((await get(`/api/accounts/claude-code/signin/${signInId}`)).json() as { status: string })
+          .status,
+      ).toBe('waiting');
+      await fetch(
+        `http://127.0.0.1:${port}/callback?error=access_denied&state=${authorize.searchParams.get('state')}`,
+      );
+      await expect
+        .poll(async () => (await get(`/api/accounts/claude-code/signin/${signInId}`)).json())
+        .toMatchObject({ status: 'failed' });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('cancelling a loopback sign-in closes its listener', async () => {
+    const { built, post, del } = await makeApp(async () => ({ accessToken: 't', expiresAt: 0 }));
+    try {
+      const { signInId, url } = (
+        await post('/api/accounts/claude-code/signin', {}, true, true)
+      ).json() as {
+        signInId: string;
+        url: string;
+      };
+      const port = new URL(new URL(url).searchParams.get('redirect_uri')!).port;
+      const res = await del(`/api/accounts/claude-code/signin/${signInId}`);
+      expect(res.statusCode).toBe(204);
+      await expect(fetch(`http://127.0.0.1:${port}/callback`)).rejects.toThrow();
     } finally {
       await built.app.close();
     }

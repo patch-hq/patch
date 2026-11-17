@@ -6,6 +6,7 @@ import {
   CLAUDE_SIGNIN_TOKEN_SECONDS,
   ClaudeSignInError,
   exchangeClaudeSignInCode,
+  listenForClaudeSignIn,
   parseClaudeSignInCode,
   startClaudeSignIn,
 } from '../src/index.js';
@@ -106,5 +107,52 @@ describe('exchangeClaudeSignInCode', () => {
     await expect(
       exchangeClaudeSignInCode({ code: 'c', verifier: 'v', state: 's' }, { fetchImpl }),
     ).rejects.toThrow(/no token/);
+  });
+});
+
+describe('loopback sign-in', () => {
+  it('asks for a redirect to this machine and does not ask claude.ai to show a code', () => {
+    const s = startClaudeSignIn(counting, {
+      loopbackRedirect: 'http://localhost:5555/callback',
+      state: 'fixed-state',
+    });
+    const url = new URL(s.url);
+    expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:5555/callback');
+    expect(url.searchParams.has('code')).toBe(false);
+    expect(url.searchParams.get('state')).toBe('fixed-state');
+    expect(s.state).toBe('fixed-state');
+  });
+
+  it('exchanges with the redirect it was started with', async () => {
+    let body: Record<string, unknown> = {};
+    const fetchImpl = (async (_u: unknown, init: { body: string }) => {
+      body = JSON.parse(init.body) as Record<string, unknown>;
+      return new Response(JSON.stringify({ access_token: 'tok' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await exchangeClaudeSignInCode(
+      { code: 'c', verifier: 'v', state: 's', redirectUri: 'http://localhost:5555/callback' },
+      { fetchImpl },
+    );
+    expect(body['redirect_uri']).toBe('http://localhost:5555/callback');
+  });
+
+  it('hands over the code from the matching redirect, once, and then stops listening', async () => {
+    const l = await listenForClaudeSignIn('st');
+    const base = new URL(l.redirectUri);
+    const wrong = await fetch(`http://127.0.0.1:${base.port}/callback?code=x&state=nope`);
+    expect(wrong.status).toBe(404);
+    const ok = await fetch(`http://127.0.0.1:${base.port}/callback?code=abc&state=st`);
+    expect(ok.status).toBe(200);
+    expect(await l.result).toEqual({ code: 'abc' });
+    await expect(
+      fetch(`http://127.0.0.1:${base.port}/callback?code=abc&state=st`),
+    ).rejects.toThrow();
+  });
+
+  it('reports a refusal from claude.ai', async () => {
+    const l = await listenForClaudeSignIn('st');
+    const base = new URL(l.redirectUri);
+    await fetch(`http://127.0.0.1:${base.port}/callback?error=access_denied&state=st`);
+    expect(await l.result).toMatchObject({ error: expect.stringContaining('access_denied') });
   });
 });

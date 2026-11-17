@@ -13,6 +13,8 @@
 // verifier never leaves the server that started the sign-in.
 
 import { createHash, randomBytes } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { CLAUDE_OAUTH_CLIENT_ID } from './claude-oauth.js';
 
 /** Where the person signs in (the address `claude setup-token` opens). */
@@ -37,16 +39,32 @@ export interface ClaudeSignInStart {
   state: string;
 }
 
+export interface ClaudeSignInStartOptions {
+  /**
+   * A `http://localhost:<port>/callback` address on the machine the person's
+   * browser is on. With it claude.ai sends the code straight back and nothing
+   * is pasted; without it the code is shown on a page and pasted by hand.
+   */
+  loopbackRedirect?: string;
+  /** A state chosen in advance, for a loopback listener that must know it first. */
+  state?: string;
+}
+
 /** A fresh sign-in: the address to open and the secrets that finish it. */
-export function startClaudeSignIn(random: (n: number) => Buffer = randomBytes): ClaudeSignInStart {
+export function startClaudeSignIn(
+  random: (n: number) => Buffer = randomBytes,
+  opts: ClaudeSignInStartOptions = {},
+): ClaudeSignInStart {
   const verifier = b64url(random(32));
-  const state = b64url(random(32));
+  const state = opts.state ?? b64url(random(32));
   const challenge = b64url(createHash('sha256').update(verifier).digest());
   const url = new URL(CLAUDE_SIGNIN_AUTHORIZE_URL);
-  url.searchParams.set('code', 'true');
+  // `code=true` asks claude.ai to show the code on a page; a loopback sign-in
+  // is an ordinary authorization-code redirect and must not ask for it.
+  if (!opts.loopbackRedirect) url.searchParams.set('code', 'true');
   url.searchParams.set('client_id', CLAUDE_OAUTH_CLIENT_ID);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', CLAUDE_SIGNIN_REDIRECT_URL);
+  url.searchParams.set('redirect_uri', opts.loopbackRedirect ?? CLAUDE_SIGNIN_REDIRECT_URL);
   url.searchParams.set('scope', CLAUDE_SIGNIN_SCOPE);
   url.searchParams.set('code_challenge', challenge);
   url.searchParams.set('code_challenge_method', 'S256');
@@ -84,7 +102,7 @@ export interface ExchangeClaudeCodeOptions {
  * words: an expired or already-used code is something the person can act on.
  */
 export async function exchangeClaudeSignInCode(
-  args: { code: string; verifier: string; state: string },
+  args: { code: string; verifier: string; state: string; redirectUri?: string },
   opts: ExchangeClaudeCodeOptions = {},
 ): Promise<{ accessToken: string; expiresAt: number }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -96,7 +114,7 @@ export async function exchangeClaudeSignInCode(
       body: JSON.stringify({
         grant_type: 'authorization_code',
         code: args.code,
-        redirect_uri: CLAUDE_SIGNIN_REDIRECT_URL,
+        redirect_uri: args.redirectUri ?? CLAUDE_SIGNIN_REDIRECT_URL,
         client_id: CLAUDE_OAUTH_CLIENT_ID,
         code_verifier: args.verifier,
         state: args.state,
@@ -146,4 +164,68 @@ export class ClaudeSignInError extends Error {
     super(message);
     this.name = 'ClaudeSignInError';
   }
+}
+
+export interface ClaudeLoopbackResult {
+  /** The code claude.ai sent back, or why the return was not usable. */
+  outcome: { code: string } | { error: string };
+}
+
+export interface ClaudeLoopbackListener {
+  /** The address to hand to {@link startClaudeSignIn} as `loopbackRedirect`. */
+  redirectUri: string;
+  /** Settles once, when claude.ai's redirect arrives or the listener is closed. */
+  result: Promise<ClaudeLoopbackResult['outcome']>;
+  close: () => void;
+}
+
+const LOOPBACK_PAGE = (title: string, line: string): string =>
+  `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+  `<body style="font-family:system-ui;margin:3rem"><h1>${title}</h1><p>${line}</p>`;
+
+/**
+ * Listen on this machine for claude.ai's redirect, the way Claude Code's own
+ * login does. Bound to 127.0.0.1 on a free port, it answers exactly one request
+ * to `/callback` carrying this sign-in's `state`; any other request (a stray
+ * probe, another sign-in's state) is refused and the wait goes on.
+ */
+export async function listenForClaudeSignIn(
+  state: string,
+  host = '127.0.0.1',
+): Promise<ClaudeLoopbackListener> {
+  let settle!: (o: ClaudeLoopbackResult['outcome']) => void;
+  const result = new Promise<ClaudeLoopbackResult['outcome']>((r) => (settle = r));
+  const server: Server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const headers = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' };
+    if (url.pathname !== '/callback' || url.searchParams.get('state') !== state) {
+      res.writeHead(404, headers).end(LOOPBACK_PAGE('Not found', 'This is not a Patch sign-in.'));
+      return;
+    }
+    const code = url.searchParams.get('code');
+    const failure = url.searchParams.get('error_description') ?? url.searchParams.get('error');
+    if (!code) {
+      res
+        .writeHead(400, headers)
+        .end(LOOPBACK_PAGE('Sign-in failed', 'Claude did not approve the sign-in.'));
+      settle({ error: `Claude did not approve the sign-in${failure ? `: ${failure}` : ''}.` });
+    } else {
+      res
+        .writeHead(200, headers)
+        .end(LOOPBACK_PAGE('Signed in', 'You can close this tab and return to Patch.'));
+      settle({ code });
+    }
+    close();
+  });
+  const close = (): void => {
+    server.close();
+    server.closeAllConnections();
+    settle({ error: 'The sign-in was cancelled.' });
+  };
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, host, resolve);
+  });
+  const port = (server.address() as AddressInfo).port;
+  return { redirectUri: `http://localhost:${port}/callback`, result, close };
 }

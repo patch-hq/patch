@@ -217,6 +217,7 @@ export interface BuildOptions {
   validateClaudeToken?: (token: string) => Promise<import('@patch/auth').ClaudeTokenValidation>;
   /** Swaps a claude.ai sign-in code for a token; tests stand in for Anthropic. */
   exchangeClaudeCode?: typeof import('@patch/auth').exchangeClaudeSignInCode;
+  listenForClaudeSignIn?: typeof import('@patch/auth').listenForClaudeSignIn;
   /** Inject the OpenAI key check (tests). */
   validateOpenAIKey?: import('./shared-settings.js').ValidateOpenAIKey;
   /** Inject the HTTP client for provider-key checks (tests). */
@@ -2007,6 +2008,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       registry,
       shared: accountSettings,
       ...(opts.exchangeClaudeCode ? { exchangeClaudeCode: opts.exchangeClaudeCode } : {}),
+      ...(opts.listenForClaudeSignIn ? { listenForClaudeSignIn: opts.listenForClaudeSignIn } : {}),
     });
 
   // ---- link preview REST route (spec/14 § Message links) ----

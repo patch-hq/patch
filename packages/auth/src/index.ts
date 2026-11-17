@@ -116,6 +116,7 @@ export {
   startClaudeSignIn,
   parseClaudeSignInCode,
   exchangeClaudeSignInCode,
+  listenForClaudeSignIn,
   ClaudeSignInError,
   CLAUDE_SIGNIN_AUTHORIZE_URL,
   CLAUDE_SIGNIN_REDIRECT_URL,
@@ -123,5 +124,7 @@ export {
   CLAUDE_SIGNIN_SCOPE,
   CLAUDE_SIGNIN_TOKEN_SECONDS,
   type ClaudeSignInStart,
+  type ClaudeSignInStartOptions,
+  type ClaudeLoopbackListener,
   type ExchangeClaudeCodeOptions,
 } from './claude-signin.js';
