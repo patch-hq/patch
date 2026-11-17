@@ -3,7 +3,14 @@
 // host). A turn with no runner left is cut off as before.
 
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -293,5 +300,58 @@ describe('a corrupt durable turn file', () => {
     expect(seen[0]?.prompt).toBe(interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'running'));
     expect(seen[0]?.durableTurn?.attach).toBeUndefined();
     expect(lines.some((l) => l.chatId === chatId && String(l.dir).includes(chatId))).toBe(true);
+  });
+});
+
+// spec/05 § Loading: nothing arrives twice. The handled point is written when
+// the next message is taken, so a host killed after it logged a message but
+// before that point moves on has the same message replayed to its successor.
+describe('a reattached Codex turn', () => {
+  it('logs a message the previous host already logged once, not twice', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-dres-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-dresf-')));
+    const cfg: DurableTurnConfig = {
+      turnsDir: join(home, 'turns'),
+      runner: { command: 'unused', args: [] },
+    };
+    const said = (events: unknown[]): string[] =>
+      (events as Array<{ type: string; role?: string; content?: string }>)
+        .filter((e) => e.type === 'chat.message' && e.role === 'assistant')
+        .map((e) => e.content ?? '');
+    const firstEvents: unknown[] = [];
+    const firstBackend: SdkBackend = {
+      async *run() {
+        yield { type: 'system', sessionId: 'codex-th1' };
+        yield { type: 'assistant', content: 'first', nativeId: 'item-1' };
+        await new Promise<void>(() => undefined); // the host is killed here
+      },
+    };
+    const first = host(home, firstBackend, cfg, firstEvents);
+    const chatId = await first.daemon.spawnChat({ folder, model: 'openai/gpt-5' });
+    void first.daemon.sendInput({ chatId, message: 'running', localId: 'L1' });
+    await tick(60);
+    expect(said(firstEvents)).toEqual(['first']);
+    // Killed after logging 'first' and before the handled point moved past it.
+    leaveTurn(cfg, chatId, 'L1', 'live');
+
+    const secondEvents: unknown[] = [];
+    const second = host(
+      home,
+      {
+        async *run() {
+          yield { type: 'system', sessionId: 'codex-th1' };
+          yield { type: 'assistant', content: 'first', nativeId: 'item-1' }; // replayed
+          yield { type: 'assistant', content: 'second', nativeId: 'item-2' };
+          yield { type: 'result', sessionId: 'codex-th1' };
+        },
+      },
+      cfg,
+      secondEvents,
+    );
+    second.daemon.hydrate();
+    await tick(80);
+    expect(said(secondEvents)).toEqual(['second']);
+    const log = readFileSync(join(home, 'chats', chatId, 'events.jsonl'), 'utf8');
+    expect(log.match(/"content":"first"/g) ?? []).toHaveLength(1);
   });
 });
