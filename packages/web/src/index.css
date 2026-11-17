@@ -4978,6 +4978,8 @@ button.nav-row {
      (Todoist: "Wide markdown tables don't scroll horizontally in chat"). */
   .content.md .md-table-wrap {
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x pan-y;
   }
   .content.md table {
     display: table;
