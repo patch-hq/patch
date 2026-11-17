@@ -179,6 +179,7 @@ export * from './modelLabel.js';
 // all render from it.
 export * from './usageWindows.js';
 export * from './availableModel.js';
+export * from './backendStatus.js';
 export * from './codec.js';
 export * from './host-health.js';
 export * from './codepoints.js';

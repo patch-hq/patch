@@ -231,6 +231,7 @@ describe('Settings → Hosts', () => {
   // SSH into the host and run `claude login` — for a credential the wire can
   // set directly.
   it('offers a sign-in on a backend that is not signed in', () => {
+    loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'logged-out' }],
@@ -242,17 +243,74 @@ describe('Settings → Hosts', () => {
     );
   });
 
-  it('offers no sign-in on a backend that is already signed in', () => {
+  it('says Signed in with the account from the shared accounts, ignoring the host credential', () => {
+    // The host reports logged-out with its raw "run claude login" message, but the
+    // account is shared from the server and is signed in: say that, in words.
+    reportHost('host-a', {
+      hostName: 'laptop',
+      backends: [
+        {
+          id: 'claude-code',
+          label: 'Claude Code',
+          version: null,
+          state: 'logged-out',
+          error: 'Claude OAuth credential not found (checked CLAUDE_CODE_OAUTH_TOKEN)',
+        },
+      ],
+    });
+    loadShared({
+      secrets: { claude: [{ id: 'a1', label: 'Work', connected: true, email: 'you@example.com' }] },
+    });
+    renderPage('hosts');
+    const row = screen.getByTestId('host-host-a-backend-claude-code');
+    expect(row).toHaveTextContent('Signed in · you@example.com');
+    expect(row).not.toHaveTextContent(/claude login|OAuth|logged-out|absent|present/);
+    expect(screen.queryByTestId('host-host-a-backend-claude-code-connect')).toBeNull();
+    expect(screen.queryByTestId('host-host-a-backend-claude-code-details-toggle')).toBeNull();
+  });
+
+  it('says Not signed in, with Sign in, when no shared account is connected', () => {
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'claude-code', label: 'Claude Code', version: '1', state: 'present' }],
     });
+    loadShared();
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-backend-claude-code')).toBeInTheDocument();
-    expect(screen.queryByTestId('host-host-a-backend-claude-code-connect')).toBeNull();
+    expect(screen.getByTestId('host-host-a-backend-claude-code')).toHaveTextContent(
+      'Not signed in',
+    );
+    expect(screen.getByTestId('host-host-a-backend-claude-code-connect')).toBeInTheDocument();
+  });
+
+  it('a genuine host fault is said in words, with the raw message behind Details', () => {
+    reportHost('host-a', {
+      hostName: 'laptop',
+      backends: [
+        {
+          id: 'codex',
+          label: 'Codex',
+          version: null,
+          state: 'absent',
+          error: 'codex not found at /usr/bin/codex',
+        },
+      ],
+    });
+    loadShared({
+      secrets: { codex: [{ id: 'c1', kind: 'chatgpt', label: 'Me', connected: true }] },
+    });
+    renderPage('hosts');
+    const row = screen.getByTestId('host-host-a-backend-codex');
+    expect(row).toHaveTextContent('Not installed on this machine');
+    expect(row).not.toHaveTextContent('/usr/bin/codex');
+    expect(row).not.toHaveTextContent('absent');
+    fireEvent.click(screen.getByTestId('host-host-a-backend-codex-details-toggle'));
+    expect(screen.getByTestId('host-host-a-backend-codex-details')).toHaveTextContent(
+      '/usr/bin/codex',
+    );
   });
 
   it('Sign in on a Claude backend adds the pasted token for every host', async () => {
+    loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'logged-out' }],
@@ -272,6 +330,7 @@ describe('Settings → Hosts', () => {
   });
 
   it('Sign in with no token adopts the login already on that host', async () => {
+    loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'logged-out' }],
@@ -344,6 +403,7 @@ describe('Settings → Hosts', () => {
   });
 
   it('Sign in on a codex backend hands the host to the ChatGPT sign-in on Usage', () => {
+    loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'codex', label: 'Codex', version: null, state: 'logged-out' }],
@@ -357,6 +417,7 @@ describe('Settings → Hosts', () => {
   });
 
   it('Sign in on an OFFLINE host is disabled, with no error', () => {
+    loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'codex', label: 'Codex', version: null, state: 'logged-out' }],

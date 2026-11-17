@@ -11,7 +11,8 @@ import type { JSX } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '../../api/rest.js';
+import { api, ApiError, type SharedState } from '../../api/rest.js';
+import { backendStatus } from '@patch/wire';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { PairingCode } from '../../components/PairingCode.js';
@@ -24,6 +25,7 @@ import { writeShared } from './sharedWrite.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
 import { ClaudeSettingsEditor } from './ProvidersPage.js';
+import { PROVIDERS, type SharedRow } from './providers.js';
 import { KeepRunningGroup } from './KeepRunningGroup.js';
 
 /**
@@ -44,6 +46,15 @@ function installCommandProblem(err: unknown): string {
     return 'This server has no public address configured, so it cannot say where a new host should download from.';
   }
   return code;
+}
+
+/** This backend's accounts in the shared settings; null until they have loaded. */
+function sharedRows(
+  shared: Pick<SharedState, 'secrets'> | null,
+  backendId: string,
+): SharedRow[] | null {
+  if (shared === null) return null;
+  return PROVIDERS.find((p) => p.id === backendId)?.rows(shared.secrets) ?? [];
 }
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -171,6 +182,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   const navigate = useNavigate();
   const report = host.host;
   const [draft, setDraft] = useState(report?.hostName ?? '');
+  const shared = usePreferencesStore((s) => s.shared);
+  const [openDetails, setOpenDetails] = useState<string | null>(null);
   const name = hostLabel(host);
 
   function commitRename(): void {
@@ -312,31 +325,56 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
 
       {report && report.backends.length > 0 ? (
         <Group testid={`host-${host.hostId}-backends`}>
-          {report.backends.map((b) => (
-            <Row
-              key={b.id}
-              testid={`host-${host.hostId}-backend-${b.id}`}
-              title={b.label}
-              sub={[b.version, b.state, b.error].filter(Boolean).join(' · ')}
-            >
-              {/* A backend that is logged out or absent is the ONE state a person
-                  has to act on, and the row said so while offering nothing to
-                  click — which is what sent someone to SSH into the host and
-                  run `claude login` by hand. The credential can be set over the
-                  wire, so offer it here, on the host it belongs to. */}
-              {b.state !== 'present' ? (
-                <button
-                  type="button"
-                  className="set-btn"
-                  disabled={!host.online}
-                  data-testid={`host-${host.hostId}-backend-${b.id}-connect`}
-                  onClick={() => void connectBackend(b.id, b.label)}
-                >
-                  Sign in
-                </button>
-              ) : null}
-            </Row>
-          ))}
+          {report.backends.map((b) => {
+            const status = backendStatus(b, sharedRows(shared, b.id));
+            return (
+              <Row
+                key={b.id}
+                testid={`host-${host.hostId}-backend-${b.id}`}
+                title={b.label}
+                sub={
+                  <>
+                    {[b.version, status.text].filter(Boolean).join(' · ')}
+                    {status.details !== undefined ? (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          className="set-link"
+                          data-testid={`host-${host.hostId}-backend-${b.id}-details-toggle`}
+                          onClick={() => setOpenDetails(openDetails === b.id ? null : b.id)}
+                        >
+                          Details
+                        </button>
+                        {openDetails === b.id ? (
+                          <span
+                            className="set-sub"
+                            data-testid={`host-${host.hostId}-backend-${b.id}-details`}
+                          >
+                            {status.details}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </>
+                }
+              >
+                {/* Signing in is an account fact shared by every host, so the button
+                    follows the shared accounts, not this machine's own credential. */}
+                {status.needsSignIn ? (
+                  <button
+                    type="button"
+                    className="set-btn"
+                    disabled={!host.online}
+                    data-testid={`host-${host.hostId}-backend-${b.id}-connect`}
+                    onClick={() => void connectBackend(b.id, b.label)}
+                  >
+                    Sign in
+                  </button>
+                ) : null}
+              </Row>
+            );
+          })}
         </Group>
       ) : null}
 
