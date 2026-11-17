@@ -1654,52 +1654,6 @@ body {
   overflow: hidden;
 }
 
-/* Current status (patch/todo.md § Features to add — "Current status"): the
-   agent's one-line status, nested UNDER the row on its own grid line. A
-   `question` (paused on the user) is accent-coloured to draw the eye; a
-   `complete` thread (just stopped) is muted so it doesn't compete for
-   attention, and a `report` sits between the two. */
-.status-summary {
-  grid-column: 2 / -1;
-  min-width: 0;
-  display: inline-flex;
-  align-items: flex-start;
-  /* the user (spec/14 § Status badges, live review): "margin on current check is
-     too much on left, and maybe too big" — tightened from 5px alongside the
-     icon's own size drop below (13px -> 11px, Check instead of CircleCheck). */
-  gap: 3px;
-  margin-top: 2px;
-  font-size: var(--text-min);
-  line-height: 1.35;
-}
-.status-summary .status-summary-icon {
-  flex: 0 0 auto;
-  margin-top: 1px;
-}
-.status-summary .status-summary-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.status-summary.is-question {
-  color: var(--accent-strong);
-  font-weight: 500;
-}
-/* A report is the agent electing to be seen, so it must not read as muted —
-   but it is not blocking either, so it must not read as loud as a question.
-   Full-strength ink, normal weight: legible at a glance down a list of twenty
-   overnight rows without competing with the one that actually needs an answer. */
-.status-summary.is-report {
-  color: var(--ink-2);
-}
-.status-summary.is-complete {
-  color: var(--ink-3);
-}
-
 /* Draft rows (spec/14 § New chat drafts) — the file glyph sits in the badge
    column; the discard × reveals on hover like the other row tools. */
 .draft-glyph {
