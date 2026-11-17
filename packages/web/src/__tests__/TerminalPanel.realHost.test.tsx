@@ -62,6 +62,7 @@ describe('TerminalPanel against a real host shell', () => {
       .getState()
       .setHosts([{ hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] }]);
     host = new TerminalSessions({
+      runDir: join(dir, '.terminals'),
       emit: (e) => useTerminalStore.getState().ingest(e),
     });
   });
