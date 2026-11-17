@@ -80,13 +80,14 @@ async function settledRunState(
   def: ServiceDefinition,
   attempts = 6,
   delayMs = 500,
-  startupAttempts = 40,
+  startupAttempts = 160,
 ): Promise<ServiceRunState> {
   const sleep = () => new Promise((r) => setTimeout(r, delayMs));
   let last: ServiceRunState = { running: false, detail: 'service never reported a state' };
   // A freshly started job is not instantly up: launchd reports `spawn` for as
   // long as the process takes to exec, which on a cold or busy machine
-  // (a CI runner) is several seconds. Give it that long before calling it dead.
+  // (a CI runner) is several seconds, and on a hosted CI runner the first exec of a new
+  // binary can stall far longer (observed >20s). Give it up to 80s before calling it dead.
   for (let i = 0; i < startupAttempts; i++) {
     await sleep();
     last = await ops.runState(def);
