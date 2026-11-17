@@ -14,6 +14,9 @@ import { UpdateControl } from './update-control.js';
 import { portInUseMessage } from './port-holder.js';
 import { activatedFd } from './socket-activation.js';
 
+/** The longest a stop may take before the process exits regardless (spec/12 § Server restarts). */
+export const SHUTDOWN_DEADLINE_MS = 15_000;
+
 /**
  * The version an installed server is about to restart into: the installer swaps
  * `<home>/current` before it restarts the unit, so the release `current` points
@@ -142,6 +145,16 @@ export async function startServer(
     if (stopping) return;
     stopping = true;
     app.log.info({ signal }, 'patch-server stopping: telling hosts and surfaces');
+    // Nothing a restart waits on may hold it open for long: everything an
+    // outage costs is counted from here. Said loudly if it ever overruns.
+    const deadline = setTimeout(() => {
+      app.log.error(
+        { deadlineMs: SHUTDOWN_DEADLINE_MS },
+        'patch-server: shutdown overran its deadline; exiting',
+      );
+      process.exit(1);
+    }, SHUTDOWN_DEADLINE_MS);
+    deadline.unref();
     app
       .close()
       .then(() => process.exit(0))
