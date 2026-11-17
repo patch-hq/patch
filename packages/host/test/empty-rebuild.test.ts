@@ -5,13 +5,18 @@
 
 import { describe, it, expect } from 'vitest';
 import type { LoggedEvent } from '@patch/wire';
+import { hasConversation, stripSyntheticTurns } from '../src/syntheticTurns.js';
 import { toClaudeSessionEntries, type TrackEntry } from '../src/nativeReconstruct.js';
 
 const hasAnswer = (events: LoggedEvent[]): boolean =>
-  toClaudeSessionEntries(
-    events.map((event, i): TrackEntry => ({ record: { seq: i, at: 1000 + i }, event })),
-    { sessionId: 's', folder: '/f', model: null },
-  ).some((e) => e.type === 'assistant');
+  hasConversation(
+    stripSyntheticTurns(
+      toClaudeSessionEntries(
+        events.map((event, i): TrackEntry => ({ record: { seq: i, at: 1000 + i }, event })),
+        { sessionId: 's', folder: '/f', model: null },
+      ) as unknown as Parameters<typeof stripSyntheticTurns>[0],
+    ).entries,
+  );
 
 describe('empty native rebuild', () => {
   it('a prompt and a limit notice have no answered turn', () => {

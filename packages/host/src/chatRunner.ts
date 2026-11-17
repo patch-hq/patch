@@ -1416,7 +1416,7 @@ import {
   transcriptSize,
   type ClaudeSessionStore,
 } from './claudeSessionStore.js';
-import { hasConversation } from './syntheticTurns.js';
+import { hasConversation, stripSyntheticTurns } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
@@ -10705,19 +10705,23 @@ export class Daemon {
         }
       }
       reconstructTrack = chosen.track;
-      // A rebuild whose track holds no assistant turn at all (a chat whose only
-      // events are its prompt and a limit notice) reseeds a session with nothing
-      // answered in it, which Claude Code refuses to resume ("No conversation
-      // found"). There is nothing to carry, so this turn is a genuinely fresh
+      // A rebuild with nothing left once harness-written turns and trailing
+      // unanswered prompts are stripped (a chat whose only events are its prompt
+      // and a limit notice) leaves the reseeded transcript EMPTY on disk, which
+      // Claude Code refuses to resume ("No conversation found"). There is nothing to carry, so this turn is a genuinely fresh
       // session: no resume id, no reseed.
       if (
         isNativeRebuild &&
         targetHarness === 'claude' &&
-        !toClaudeSessionEntries(reconstructTrack, {
-          sessionId: 'probe',
-          folder: state.folder,
-          model: state.model ?? null,
-        }).some((e) => e.type === 'assistant')
+        !hasConversation(
+          stripSyntheticTurns(
+            toClaudeSessionEntries(reconstructTrack, {
+              sessionId: 'probe',
+              folder: state.folder,
+              model: state.model ?? null,
+            }) as unknown as Parameters<typeof stripSyntheticTurns>[0],
+          ).entries,
+        )
       ) {
         emptyRebuild = true;
         this.opts.logger.info(
