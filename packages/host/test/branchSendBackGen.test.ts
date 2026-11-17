@@ -20,7 +20,7 @@ describe('makeBranchSendBackSummarizer', () => {
     const gen = makeBranchSendBackSummarizer({
       sdkBackend: sdk,
       runOnAccountWithCredit: withToken,
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       logger: pino({ level: 'silent' }),
     });
     expect(await gen(input)).toBe('Build is green');
@@ -34,7 +34,7 @@ describe('makeBranchSendBackSummarizer', () => {
     const gen = makeBranchSendBackSummarizer({
       sdkBackend: sdk,
       runOnAccountWithCredit: withToken,
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
       logger: pino({ level: 'silent' }),
     });
     expect(await gen(input)).toBe('Build is green');

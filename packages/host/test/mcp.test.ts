@@ -220,11 +220,24 @@ describe('runPatchToolsServerStdio', () => {
       .spyOn(StdioServerTransport.prototype, 'close')
       .mockImplementation(async () => undefined);
     process.env['PATCH_CHAT_ID'] = 'chat-stdio-test';
-    process.env['PATCH_DAEMON_SOCKET'] = '/tmp/patch-stdio-test.sock';
+    // The server asks the host for the user's tool-description edits as it starts.
+    const home = mkdtempSync(join(tmpdir(), 'patch-mcp-stdio-'));
+    const socketPath = join(home, 'host.sock');
+    const seen: string[] = [];
+    const host = createServer((req, res) => {
+      seen.push(`${req.method ?? ''} ${req.url ?? ''}`);
+      res.setHeader('content-type', 'application/json');
+      res.end('{}');
+    });
+    await new Promise<void>((resolve) => host.listen(socketPath, resolve));
+    process.env['PATCH_DAEMON_SOCKET'] = socketPath;
     try {
       await runPatchToolsServerStdio();
       expect(startSpy).toHaveBeenCalledTimes(1);
+      expect(seen).toEqual(['GET /internal/tool-prompts']);
     } finally {
+      await new Promise<void>((resolve) => host.close(() => resolve()));
+      rmSync(home, { recursive: true, force: true });
       startSpy.mockRestore();
       closeSpy.mockRestore();
       if (savedEnv['PATCH_CHAT_ID'] === undefined) delete process.env['PATCH_CHAT_ID'];

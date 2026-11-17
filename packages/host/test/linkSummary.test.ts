@@ -29,7 +29,7 @@ describe('makeLinkSummariser', () => {
     const out = await makeLinkSummariser({
       sdkBackend: sdk,
       runOnAccountWithCredit: withToken,
-      smallJobModels: ['set-model', 'failover-model'],
+      smallJobModels: () => ['set-model', 'failover-model'],
     })(input);
     expect(out).toBe('A summary.');
     const o = sdk.lastOptions();
@@ -46,7 +46,7 @@ describe('makeLinkSummariser', () => {
       makeLinkSummariser({
         sdkBackend: sdk,
         runOnAccountWithCredit: withToken,
-        smallJobModels: ['set-model'],
+        smallJobModels: () => ['set-model'],
       })(input),
     ).rejects.toThrow('overloaded');
   });
@@ -58,7 +58,7 @@ describe('makeLinkSummariser', () => {
       await makeLinkSummariser({
         sdkBackend: sdk,
         runOnAccountWithCredit: withToken,
-        smallJobModels: ['set-model', 'failover-model'],
+        smallJobModels: () => ['set-model', 'failover-model'],
       })(input),
     ).toBeNull();
   });
@@ -68,7 +68,7 @@ describe('makeLinkSummariser', () => {
       await makeLinkSummariser({
         sdkBackend: createMockSdkBackend(),
         runOnAccountWithCredit: noAccount,
-        smallJobModels: ['set-model', 'failover-model'],
+        smallJobModels: () => ['set-model', 'failover-model'],
       })(input),
     ).toBeNull();
   });
