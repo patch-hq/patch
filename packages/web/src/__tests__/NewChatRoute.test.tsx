@@ -1643,7 +1643,7 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('says when a window was not reported rather than drawing an empty bar', async () => {
+  it('says the 5-hour window has not started when only the week is reported, rather than drawing an empty bar', async () => {
     setSharedAccounts({ claude: [{ connected: true }] });
     reportAccounts('d1', [
       {
@@ -1657,7 +1657,7 @@ describe('/chats/new', () => {
     renderPicker();
 
     expect((await screen.findByTestId('new-chat-usage-claude-code:c0-session')).textContent).toBe(
-      'not reported',
+      '0% · starts with your first message',
     );
     expect(screen.getByTestId('new-chat-usage-claude-code:c0-week').textContent).toBe('55% used');
   });
