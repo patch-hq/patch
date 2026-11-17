@@ -60,21 +60,21 @@ test.describe('host offline indicator', () => {
     await expect(dot).not.toHaveClass(/offline/);
     await expect(dot).toHaveAttribute(
       'title',
-      /This surface \(web\): connected\nServer: reachable\nHost dev-host: online/,
+      /This browser: connected\nServer: reachable\nHost dev-host: online/,
     );
 
     await setHostOnline(page, false);
     await expect(dot).toHaveClass(/offline/);
     await expect(dot).toHaveAttribute(
       'title',
-      /This surface \(web\): connected\nServer: reachable\nHost dev-host: offline/,
+      /This browser: connected\nServer: reachable\nHost dev-host: offline/,
     );
 
     await setHostOnline(page, true);
     await expect(dot).not.toHaveClass(/offline/);
     await expect(dot).toHaveAttribute(
       'title',
-      /This surface \(web\): connected\nServer: reachable\nHost dev-host: online/,
+      /This browser: connected\nServer: reachable\nHost dev-host: online/,
     );
   });
 });
