@@ -48,8 +48,14 @@ const WORK = {
   connected: true,
   email: 'work@example.com',
   organizationId: 'org-a',
+  state: { state: 'ready' as const },
 };
-const PERSONAL = { id: 'b', label: 'personal', connected: false };
+const PERSONAL = {
+  id: 'b',
+  label: 'personal',
+  connected: false,
+  state: { state: 'signed_out' as const },
+};
 
 function shared(claude = [WORK, PERSONAL], strategy: 'priority' | 'round-robin' = 'priority') {
   return {
@@ -97,6 +103,7 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     const r = await render();
     expect(textOf(get(r, 'account-claude-code-a'))).toContain('work');
     expect(textOf(get(r, 'account-claude-code-a'))).toContain('work@example.com');
+    expect(textOf(get(r, 'account-claude-code-a'))).toContain('Ready');
     expect(textOf(get(r, 'account-claude-code-b'))).toContain('Signed out');
     expect(query(r, 'host-switcher')).toBeNull();
   });
