@@ -172,9 +172,9 @@ test.describe('usage popover', () => {
     await expect(page.getByTestId('usage-pop-context')).toContainText('50k / 200k');
     const accounts = page.getByTestId('usage-pop-account');
     await expect(accounts).toHaveCount(2);
-    await expect(accounts.nth(0)).toContainText('Claude · Default');
+    await expect(accounts.nth(0)).toContainText('Default');
     await expect(accounts.nth(0)).toContainText('42%');
-    await expect(accounts.nth(1)).toContainText('Claude · work');
+    await expect(accounts.nth(1)).toContainText('work');
     await expect(accounts.nth(1)).toContainText('91%');
 
     await page.keyboard.press('Escape');
@@ -214,9 +214,9 @@ test.describe('usage popover', () => {
     await page.getByTestId('context-ring').click();
     const accounts = page.getByTestId('usage-pop-account');
     await expect(accounts).toHaveCount(2);
-    await expect(accounts.nth(0)).toContainText('Claude · Default');
+    await expect(accounts.nth(0)).toContainText('Default');
     await expect(accounts.nth(0)).toContainText('61%');
-    await expect(accounts.nth(1)).toContainText('Claude · work');
+    await expect(accounts.nth(1)).toContainText('work');
     await expect(accounts.nth(1)).toContainText('72%');
     const pop = page.getByTestId('usage-popover');
     await expect(pop).not.toContainText('dev-host');

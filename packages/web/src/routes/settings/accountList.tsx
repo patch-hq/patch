@@ -263,6 +263,7 @@ export function UsageBars({
   extraUsageUrl,
   testId,
   testIdFor,
+  showReadAt = true,
 }: {
   usage:
     | { session?: RateLimitWindow; week?: RateLimitWindow; overage?: RateLimitWindow; at?: number }
@@ -271,6 +272,8 @@ export function UsageBars({
   extraUsageUrl?: string;
   testId: string;
   testIdFor: (scope: Scope) => string;
+  /** Off where the caller already shows when the reading was taken. */
+  showReadAt?: boolean;
 }): JSX.Element {
   if (usage === undefined) {
     return (
@@ -331,7 +334,7 @@ export function UsageBars({
           </div>
         );
       })}
-      {usage.at !== undefined && (
+      {showReadAt && usage.at !== undefined && (
         <span className="set-sub" data-testid={`${testId}-read-at`}>
           read {formatReset(usage.at)}
         </span>
@@ -350,7 +353,7 @@ export function UsageBars({
 /** The reason as plain words, for the hover title when the column clips it. */
 function describeDisabledReason(reason: string): string {
   if (reason === OVERAGE_DISABLED_REASON) return 'Extra usage is off: turn it on at claude.ai';
-  if (reason === OVERAGE_ORG_DISABLED_REASON) return 'Extra usage disabled by organisation';
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return `Extra usage is off (${reason})`;
   return reason;
 }
 
@@ -374,6 +377,6 @@ function DisabledReason({
     );
   }
   if (reason === OVERAGE_DISABLED_REASON) return <>disabled</>;
-  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>disabled by organisation</>;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>disabled</>;
   return <>{reason}</>;
 }
