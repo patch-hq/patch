@@ -207,12 +207,15 @@ export function QuestionCard({
   onAnswer,
   onCancel,
   onActivity,
+  onAnswerAndSnooze,
 }: {
   entry: ChatEventEntry;
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
   /** The user is picking/typing — keeps the host's question window open. */
   onActivity?(): void;
+  /** Present only when the chat woke from a snooze to ask this: answer, then snooze again. */
+  onAnswerAndSnooze?: ((requestId: string, answers: Record<string, string>) => void) | undefined;
 }): JSX.Element {
   const questions = useMemo(() => parseAskUserQuestion(entry.toolArgs), [entry.toolArgs]);
   if (questions === null) {
@@ -242,6 +245,7 @@ export function QuestionCard({
       onAnswer={onAnswer}
       onCancel={onCancel}
       onActivity={onActivity}
+      onAnswerAndSnooze={onAnswerAndSnooze}
     />
   );
 }
@@ -251,10 +255,13 @@ function Footer({
   entry,
   onCancel,
   submit,
+  submitAndSnooze,
 }: {
   entry: ChatEventEntry;
   onCancel(requestId: string): void;
   submit?: { disabled: boolean; onClick(): void };
+  /** Offered only when the chat woke from a snooze to ask this (see `resnoozeTarget`). */
+  submitAndSnooze?: { disabled: boolean; onClick(): void };
 }): JSX.Element | null {
   const resolved = entry.permissionResolved;
   const agentLabel = /^\(from subagent "(.*)"\) /s.exec(entry.permissionDescription ?? '')?.[1];
@@ -319,6 +326,17 @@ function Footer({
           <span className="btn-chord" data-testid="question-submit-chord" aria-hidden="true">
             {shortcutLabel('⌘↵')}
           </span>
+        </button>
+      ) : null}
+      {submit && submitAndSnooze ? (
+        <button
+          type="button"
+          className="question-submit-snooze"
+          data-testid="question-submit-snooze"
+          disabled={submitAndSnooze.disabled}
+          onClick={submitAndSnooze.onClick}
+        >
+          Send answer and snooze
         </button>
       ) : null}
       <button type="button" data-testid="question-cancel" onClick={() => onCancel(requestId)}>
@@ -390,12 +408,14 @@ function QuestionForm({
   onAnswer,
   onCancel,
   onActivity,
+  onAnswerAndSnooze,
 }: {
   entry: ChatEventEntry;
   questions: AskQuestion[];
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
   onActivity: (() => void) | undefined;
+  onAnswerAndSnooze: ((requestId: string, answers: Record<string, string>) => void) | undefined;
 }): JSX.Element {
   const resolved = entry.permissionResolved;
   const requestId = entry.requestId;
@@ -569,7 +589,7 @@ function QuestionForm({
     setOtherOn((prev) => ({ ...prev, [question]: prev[question] !== true }));
   }
 
-  function submit(): void {
+  function submit(send: typeof onAnswer = onAnswer): void {
     if (!requestId || !complete) return;
     const answers: Record<string, string> = {};
     for (const q of questions) answers[q.question] = answerFor(q.question);
@@ -577,7 +597,7 @@ function QuestionForm({
     // the send is the moment the draft is spent, and a surface that never sees
     // its own resolution echo must not keep it.
     useQuestionDraftStore.getState().clear(requestId);
-    onAnswer(requestId, answers);
+    send(requestId, answers);
   }
 
   return (
@@ -721,7 +741,19 @@ function QuestionForm({
           </div>
         );
       })}
-      <Footer entry={entry} onCancel={onCancel} submit={{ disabled: !complete, onClick: submit }} />
+      <Footer
+        entry={entry}
+        onCancel={onCancel}
+        submit={{ disabled: !complete, onClick: () => submit() }}
+        {...(onAnswerAndSnooze
+          ? {
+              submitAndSnooze: {
+                disabled: !complete,
+                onClick: () => submit(onAnswerAndSnooze),
+              },
+            }
+          : {})}
+      />
     </div>
   );
 }
