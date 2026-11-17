@@ -18887,3 +18887,11 @@ a.drop-target {
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* A list or transcript drawn from the device's copy while the server's newer
+   entries are on their way (spec/05 § Loading). Quiet: text only. */
+.catching-up {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--ink-3);
+}

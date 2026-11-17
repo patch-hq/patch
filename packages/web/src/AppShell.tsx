@@ -100,6 +100,7 @@ import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
 import { useNotificationLevelSync } from './lib/useNotificationLevelSync.js';
 import { failed } from './lib/errorCopy.js';
+import { loadChatList, saveChatList } from './lib/chatListCache.js';
 export function AppShell(): JSX.Element {
   // Batch mode (patch/todo.md § Features to add): watch the batch and notify
   // when all member chats are ready for review, or on the reminder interval.
@@ -149,6 +150,30 @@ export function AppShell(): JSX.Element {
     window.addEventListener(CHAT_INDEX_STALE_EVENT, reload);
     return () => window.removeEventListener(CHAT_INDEX_STALE_EVENT, reload);
   }, [queryClient]);
+
+  // Device copy (spec/05 § Loading): paint the list from this device before any
+  // network call, and keep the copy current from the store once the server's
+  // list has landed. `seedFromDeviceCopy` does nothing after the server speaks.
+  useEffect(() => {
+    let cancelled = false;
+    void loadChatList().then((rows) => {
+      if (!cancelled && rows) useChatStore.getState().seedFromDeviceCopy(rows);
+    });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = useChatStore.subscribe((state, prev) => {
+      if (!state.hydrated || state.chats === prev.chats) return;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(
+        () => void saveChatList(Object.values(useChatStore.getState().chats)),
+        1000,
+      );
+    });
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, []);
 
   // Cold-start: GET /api/chats → hydrate sidebar BEFORE the WS arrives.
   const { error: chatsError, isSuccess: chatsLoaded } = useQuery({
