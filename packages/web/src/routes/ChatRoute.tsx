@@ -61,6 +61,8 @@ import { RateLimitCard } from '../components/RateLimitCard.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
 import { SnoozedBanner } from '../components/SnoozedBanner.js';
+import { resnoozeTarget } from '../lib/resnoozeAfterAnswer.js';
+import { applySnooze } from '../lib/snoozeApply.js';
 import { HiddenBanner } from '../components/HiddenBanner.js';
 import { ParentChatBar } from '../components/ParentChatBar.js';
 import { FinishedGoalBanner, GoalBanner } from '../components/GoalBanner.js';
@@ -1425,6 +1427,28 @@ export function ChatRoute({
     [handlePermission],
   );
 
+  // Answer, then snooze the chat again for as long as the snooze that woke it
+  // (lib/resnoozeAfterAnswer). The target is read now, at send time.
+  const handleQuestionAnswerAndSnooze = useCallback(
+    (requestId: string, answers: Record<string, string>): void => {
+      const current = useChatStore.getState().chats[chatId];
+      const until = resnoozeTarget(current, Date.now());
+      if (!current || until === null) {
+        useUiStore.getState().pushError(failed('snooze'), undefined, 'no snooze to repeat');
+        return;
+      }
+      handlePermission(requestId, true, answers);
+      applySnooze({
+        targets: [current],
+        until,
+        name: current.name ?? 'Chat',
+        isProject: false,
+        navigate,
+      });
+    },
+    [chatId, handlePermission, navigate],
+  );
+
   const handleQuestionCancel = useCallback(
     (requestId: string): void => {
       handlePermission(requestId, false);
@@ -2324,6 +2348,9 @@ export function ChatRoute({
           onPermission={handlePermission}
           onApproveAll={handleApproveAllPending}
           onQuestionAnswer={handleQuestionAnswer}
+          {...(resnoozeTarget(row, Date.now()) !== null
+            ? { onQuestionAnswerAndSnooze: handleQuestionAnswerAndSnooze }
+            : {})}
           onQuestionCancel={handleQuestionCancel}
           onQuestionActivity={handleQuestionActivity}
           onUnqueue={handleUnqueue}
@@ -2625,6 +2652,7 @@ const TimelineEntry = memo(function TimelineEntry({
   onPermission,
   onApproveAll,
   onQuestionAnswer,
+  onQuestionAnswerAndSnooze,
   onQuestionCancel,
   onQuestionActivity,
   onUnqueue,
@@ -2663,6 +2691,8 @@ const TimelineEntry = memo(function TimelineEntry({
   onApproveAll(): void;
   /** spec/14 § Question prompts — the user's `AskUserQuestion` selections. */
   onQuestionAnswer(requestId: string, answers: Record<string, string>): void;
+  /** Only when the chat woke from a snooze to ask: answer, then snooze it again. */
+  onQuestionAnswerAndSnooze?(requestId: string, answers: Record<string, string>): void;
   onQuestionCancel(requestId: string): void;
   onQuestionActivity(): void;
   onUnqueue?(localId: string): void;
@@ -2862,6 +2892,7 @@ const TimelineEntry = memo(function TimelineEntry({
         <QuestionCard
           entry={entry}
           onAnswer={onQuestionAnswer}
+          onAnswerAndSnooze={onQuestionAnswerAndSnooze}
           onCancel={onQuestionCancel}
           onActivity={onQuestionActivity}
         />
