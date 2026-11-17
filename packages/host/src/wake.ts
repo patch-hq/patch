@@ -76,6 +76,8 @@ export interface WakeSchedulerDeps {
   dirForChat(chatId: string): string;
   /** Every chatId known on disk — scanned on boot to re-arm persisted wakes. */
   allChatIds(): string[];
+  /** A wake was written for this chat: it now has work the host must find at start. */
+  onPersisted?(chatId: string): void;
   /** Whether the chat's pump is currently occupied by a running turn. */
   isBusy(chatId: string): boolean;
   /**
@@ -134,6 +136,7 @@ export class WakeScheduler {
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, JSON.stringify(rec), 'utf8');
     renameSync(tmp, path); // atomic — a crash mid-write can't corrupt wake.json
+    this.deps.onPersisted?.(rec.chatId);
   }
 
   /** Cancel the pending self-wake (disarm + remove the file). Returns whether one existed. */
@@ -306,8 +309,8 @@ export class WakeScheduler {
    * restart policy — a wake whose time passed during downtime fires once at
    * startup; the agent's clock-check decides if it's still relevant). Arm the rest.
    */
-  loadAll(): void {
-    for (const chatId of this.deps.allChatIds()) {
+  loadAll(chatIds: string[] = this.deps.allChatIds()): void {
+    for (const chatId of chatIds) {
       this.load(chatId);
     }
   }

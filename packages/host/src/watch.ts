@@ -97,6 +97,8 @@ export interface WatchSchedulerDeps {
   dirForChat(chatId: string): string;
   /** Every chatId known on disk — scanned each poll tick. */
   allChatIds(): string[];
+  /** A watch record was written for this chat: it now has work the host must find at start. */
+  onPersisted?(chatId: string): void;
   now(): number;
   logger: Logger;
   /** Injectable so tests never spawn a real process. */
@@ -274,6 +276,7 @@ export class WatchScheduler {
     writeFileSync(tmp, JSON.stringify(rec), 'utf8');
     renameSync(tmp, path); // atomic — a crash mid-write can't corrupt the record
     this.activeChats?.add(rec.chatId);
+    this.deps.onPersisted?.(rec.chatId);
   }
 
   private readOne(chatId: string, taskId: string): WatchRecord | null {
@@ -452,9 +455,9 @@ export class WatchScheduler {
    * in-flight tasks this host is resuming, for observability parity with
    * `WakeScheduler.loadAll()`.
    */
-  loadAll(): void {
+  loadAll(chatIds: string[] = this.deps.allChatIds()): void {
     let running = 0;
-    for (const chatId of this.deps.allChatIds()) {
+    for (const chatId of chatIds) {
       for (const rec of this.list(chatId)) {
         if (rec.status === 'running') running++;
       }

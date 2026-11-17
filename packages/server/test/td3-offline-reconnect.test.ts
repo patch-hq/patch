@@ -554,12 +554,12 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     // re-hydrating from the same metaStore — the real restart.
     const restarted = stack.newHost();
     await offline.catch(() => undefined);
-    await waitFor(() => restarted.daemon.list().some((c) => c.chatId === chatId));
+    await waitFor(() => restarted.daemon.listAll().some((c) => c.chatId === chatId));
     await online;
     await waitFor(() => stack.link.isOnline());
 
     // Restart marks chats idle.
-    const restoredState = restarted.daemon.list().find((c) => c.chatId === chatId)!;
+    const restoredState = restarted.daemon.chatState.get(chatId)!;
     expect(restoredState.activity).toBe('idle');
 
     // Next message triggers a fresh query() with resume:<claudeSessionId>.
@@ -622,7 +622,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     const online = surface.waitFor('host.online');
     const restarted = stack.newHost();
     await online;
-    await waitFor(() => restarted.daemon.list().some((c) => c.chatId === chatId));
+    await waitFor(() => restarted.daemon.listAll().some((c) => c.chatId === chatId));
 
     // The next message RUNS. It runs on a session the host mints for it — not
     // on the one that went missing, and not on nothing — with the chat's own
@@ -648,7 +648,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
       const st = restarted.daemon.list().find((c) => c.chatId === chatId);
       return st !== undefined && st.activity === 'idle';
     });
-    const st = restarted.daemon.list().find((c) => c.chatId === chatId)!;
+    const st = restarted.daemon.chatState.get(chatId)!;
     expect(st.activity).toBe('idle');
     // And the chat is back on a real session, so the NEXT turn resumes properly.
     const after = JSON.parse(readFileSync(metaPath, 'utf8')) as { claudeSessionId?: string };

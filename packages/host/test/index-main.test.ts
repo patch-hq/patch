@@ -1504,7 +1504,7 @@ describe('src/index.ts main() — full host boot', () => {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
-      expect(boot.ready.daemon.chatState.has(chatId)).toBe(false);
+      expect(boot.ready.daemon.chatState.loaded(chatId)).toBeUndefined();
 
       const ws = new WSClient(`ws://127.0.0.1:${boot.audioPort}/audio/disk-only-session-1`);
       await new Promise<void>((resolve, reject) => {

@@ -518,7 +518,27 @@ export class ChatStateMap {
     this.maxLastMessages = opts.maxLastMessages ?? DEFAULT_LAST_MESSAGES;
   }
 
+  /**
+   * Opens a chat the map does not hold yet (spec/02 § Chat loading). Absent in
+   * a bare map, where only what was `set` exists.
+   */
+  private loader: ((chatId: string) => ChatState | undefined) | undefined;
+  private idSource: (() => string[]) | undefined;
+
+  setLoader(load: (chatId: string) => ChatState | undefined, ids: () => string[]): void {
+    this.loader = load;
+    this.idSource = ids;
+  }
+
+  /** A chat, opening it from disk first if it is not loaded. */
   get(chatId: string): ChatState | undefined {
+    const loaded = this.states.get(chatId);
+    if (loaded || !this.loader) return loaded;
+    return this.loader(chatId);
+  }
+
+  /** Only what is in memory: the chats this host is holding. */
+  loaded(chatId: string): ChatState | undefined {
     return this.states.get(chatId);
   }
 
@@ -530,16 +550,19 @@ export class ChatStateMap {
    * `resolveHost`'s hostId-prefix matching in the CLI's `hosts` command.
    */
   resolve(idOrPrefix: string): ChatState | undefined {
-    const exact = this.states.get(idOrPrefix);
+    const exact = this.get(idOrPrefix);
     if (exact) return exact;
-    let match: ChatState | undefined;
-    for (const state of this.states.values()) {
-      if (state.chatId.startsWith(idOrPrefix)) {
+    // Every chat on disk counts toward a prefix, loaded or not: a prefix that
+    // is unique among the loaded ones may still be ambiguous on disk.
+    const ids = this.idSource ? this.idSource() : [...this.states.keys()];
+    let match: string | undefined;
+    for (const id of ids) {
+      if (id.startsWith(idOrPrefix)) {
         if (match) return undefined;
-        match = state;
+        match = id;
       }
     }
-    return match;
+    return match === undefined ? undefined : this.get(match);
   }
 
   /**
@@ -573,7 +596,7 @@ export class ChatStateMap {
   }
 
   has(chatId: string): boolean {
-    return this.states.has(chatId);
+    return this.get(chatId) !== undefined;
   }
 
   list(): ChatState[] {
@@ -595,7 +618,7 @@ export class ChatStateMap {
 
   /** Append a message to lastMessages, trimming to maxLastMessages. */
   pushMessage(chatId: string, msg: ChatMessageSnapshot): void {
-    const s = this.states.get(chatId);
+    const s = this.get(chatId);
     if (!s) throw new Error(`pushMessage: unknown chatId ${chatId}`);
     s.lastMessages.push(msg);
     if (s.lastMessages.length > this.maxLastMessages) {
@@ -605,7 +628,7 @@ export class ChatStateMap {
   }
 
   setActivity(chatId: string, activity: ChatActivity): void {
-    const s = this.states.get(chatId);
+    const s = this.get(chatId);
     if (!s) throw new Error(`setActivity: unknown chatId ${chatId}`);
     s.activity = activity;
     s.lastUpdated = Date.now();
@@ -614,7 +637,7 @@ export class ChatStateMap {
   }
 
   setLastError(chatId: string, err: ChatLastError | null): void {
-    const s = this.states.get(chatId);
+    const s = this.get(chatId);
     if (!s) throw new Error(`setLastError: unknown chatId ${chatId}`);
     s.lastError = err;
   }

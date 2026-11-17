@@ -1120,7 +1120,7 @@ describe('Host ChatRunner', () => {
     expect(metaStore.read('gone-folder')?.status).toBe('errored');
   });
 
-  it('hydrate flags an archived chat whose folder is gone on the chat itself, leaving it archived and not errored', () => {
+  it('opening an archived chat whose folder is gone flags on the chat itself, leaving it archived and not errored', () => {
     const { daemon, metaStore } = setup();
     metaStore.write({
       chatId: 'arch-gone',
@@ -1134,6 +1134,7 @@ describe('Host ChatRunner', () => {
       updatedAt: 2,
     });
     daemon.hydrate();
+    daemon.chatState.get('arch-gone');
 
     const meta = metaStore.read('arch-gone');
     expect(meta?.folderMissing).toBe(true);
@@ -1144,7 +1145,7 @@ describe('Host ChatRunner', () => {
     expect(daemon.chatState.get('arch-gone')?.lastError).toBeNull();
   });
 
-  it('hydrate marks an active chat whose folder is gone errored with folder_missing, before any input', () => {
+  it('opening an active chat whose folder is gone marks it errored with folder_missing, before any input', () => {
     const { daemon, metaStore, events } = setup();
     metaStore.write({
       chatId: 'act-gone',
@@ -1156,6 +1157,9 @@ describe('Host ChatRunner', () => {
       updatedAt: 2,
     });
     daemon.hydrate();
+    // Not loaded at start (nothing owed); opening it reconciles the folder.
+    expect(daemon.chatState.loaded('act-gone')).toBeUndefined();
+    daemon.chatState.get('act-gone');
 
     const meta = metaStore.read('act-gone');
     expect(meta?.folderMissing).toBe(true);
@@ -1167,7 +1171,7 @@ describe('Host ChatRunner', () => {
     expect(events.filter((e) => e.type === 'chat.error')).toHaveLength(0);
   });
 
-  it('hydrate clears the folder-missing flag once the folder is back', () => {
+  it('opening a chat clears the folder-missing flag once the folder is back', () => {
     const { daemon, metaStore, folder } = setup();
     metaStore.write({
       chatId: 'back',
@@ -1180,6 +1184,7 @@ describe('Host ChatRunner', () => {
       updatedAt: 2,
     });
     daemon.hydrate();
+    daemon.chatState.get('back');
     expect(metaStore.read('back')?.folderMissing ?? false).toBe(false);
   });
 
@@ -2961,6 +2966,8 @@ describe('Host ChatRunner', () => {
       const p = daemon.sendInput({ chatId, message: 'go', localId: 'L1' });
       await new Promise((r) => setTimeout(r, 15));
       daemon.chatState.delete(chatId);
+      // A deleted chat is gone from disk too; the memory alone would just reopen it.
+      rmSync(dirname(metaStore.pathFor(chatId)), { recursive: true, force: true });
       releaseGate?.();
       await expect(p).rejects.toThrow(/unknown chatId|bumpSeq/);
     });
@@ -4422,7 +4429,9 @@ describe('Host ChatRunner', () => {
       const chatId = await daemon.spawnChat({ folder });
       const p = daemon.sendInput({ chatId, message: 'go', localId: 'L1' });
       await new Promise((r) => setTimeout(r, 15));
-      daemon.chatState.delete(chatId); // simulate the chat vanishing mid-stream
+      daemon.chatState.delete(chatId);
+      // A deleted chat is gone from disk too; the memory alone would just reopen it.
+      rmSync(dirname(metaStore.pathFor(chatId)), { recursive: true, force: true }); // simulate the chat vanishing mid-stream
       releaseGate?.();
       await expect(p).rejects.toThrow(/unknown chatId|bumpSeq/);
     });

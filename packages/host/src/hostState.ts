@@ -50,6 +50,12 @@ const HostStateFile = z
     defaultModel: z.string().min(1).optional(),
     /** User-designated project roots (`host.folder_add` / `host.folder_remove`). */
     folderRoots: z.array(z.string().min(1)).optional(),
+    /**
+     * The recent folders last published (most recent first). The folder list is
+     * built from chats, and a chat nothing has opened is not in memory, so the
+     * list is kept here and merged with what the loaded chats say.
+     */
+    recentFolders: z.array(z.string().min(1)).optional(),
     /** Optional components installed on this host, by id. */
     installedComponents: z.array(z.string().min(1)).optional(),
     /**
