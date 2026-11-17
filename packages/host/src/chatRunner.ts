@@ -1,6 +1,8 @@
 import {
   harnessOfModel,
   harnessOfSessionId,
+  HARNESS_TRAITS,
+  type HarnessTraits,
   harnessTraitsForModel,
   harnessModesInclude,
 } from './harnesses.js';
@@ -7443,7 +7445,7 @@ export class Daemon {
     localId: string | undefined,
   ): Pick<SdkRunOptions, 'durableTurn'> {
     const config = this.opts.durableTurns;
-    if (!config || (harness !== 'claude' && harness !== 'codex')) return {};
+    if (!config || !HARNESS_TRAITS[harness].detachedTurnRunner) return {};
     const attach = this.takeDurableAttach(chatId, localId);
     this.durableAttach.delete(chatId);
     // A reattached turn is replayed whatever the previous host had not marked
@@ -9166,14 +9168,14 @@ export class Daemon {
         }
       : undefined;
     const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
-    const sideOnClaude = this.harnessOf(chatId) === 'claude';
-    if (sideOnClaude && sideResumeId)
+    const sideOwnsSessionFile = HARNESS_TRAITS[this.harnessOf(chatId)].ownsSessionFile;
+    if (sideOwnsSessionFile && sideResumeId)
       await this.claudeSessionStoreFor(chatId, state.folder).prepare(sideResumeId);
     const sdkOpts: SdkRunOptions = {
       prompt: composedPrompt,
       cwd: state.folder,
       resumeSessionId: sideResumeId,
-      ...(sideOnClaude ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
+      ...(sideOwnsSessionFile ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
       ...(fork ? { fork } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
@@ -9695,7 +9697,7 @@ export class Daemon {
       );
     }
     const nativeProvider = providerForSessionId(state.claudeSessionId);
-    if (nativeProvider !== undefined && nativeProvider !== 'claude') {
+    if (nativeProvider !== undefined && !HARNESS_TRAITS[nativeProvider].sessionMovable) {
       throw new ChatMoveError(
         'unsupported',
         `this chat is on a ${providerDescriptor(nativeProvider).label} session, which a move cannot carry yet`,
@@ -10135,7 +10137,7 @@ export class Daemon {
     // a live chat's session as easily as in a restored one's.
     if (
       this.opts.sdkBackendKind === 'real' &&
-      this.harnessOf(chatId) === 'claude' &&
+      HARNESS_TRAITS[this.harnessOf(chatId)].ownsSessionFile &&
       typeof state.claudeSessionId === 'string' &&
       state.claudeSessionId.length > 0
     ) {
@@ -10255,10 +10257,10 @@ export class Daemon {
           code: ChatErrorCode.parse(
             providerDescriptor(harnessOfModel(state.model)).loginRequiredCode,
           ),
-          message:
-            harnessOfModel(state.model) !== 'claude'
-              ? oauth.reason
-              : `${this.opts.hostId} isn't signed in to Claude, so this turn can't run. Sign in from Settings → Hosts.`,
+          message: harnessTraitsForModel(state.model).signedOutMessage(
+            this.opts.hostId,
+            oauth.reason,
+          ),
         },
         seq: OUT_OF_BAND_SEQ,
       });
@@ -10274,7 +10276,7 @@ export class Daemon {
     // A chat whose last turn never recorded a session id still switched: with
     // nothing to resume, only the rebuild carries the transcript across.
     const switchedClaudeAccount =
-      this.harnessOf(chatId) === 'claude' &&
+      HARNESS_TRAITS[this.harnessOf(chatId)].sessionBoundToAccount &&
       ((state.claudeSessionId !== undefined &&
         state.claudeSessionAccountId !== undefined &&
         oauth.accountId !== undefined &&
@@ -10772,7 +10774,7 @@ export class Daemon {
       // is appended to that file BEFORE the resume call, threaded onto the
       // existing session's own last entry rather than a disconnected second
       // root (spec/04 § History).
-      if (resumeExistingNativeSessionId && targetHarness === 'claude') {
+      if (resumeExistingNativeSessionId && HARNESS_TRAITS[targetHarness].ownsSessionFile) {
         const store = this.claudeSessionStoreFor(chatId, state.folder);
         const key = { projectKey: chatId, sessionId: resumeExistingNativeSessionId };
         const existing = await store.load(key);
@@ -10795,7 +10797,7 @@ export class Daemon {
     }
     const claudeResumeId: string | undefined =
       resumeExistingNativeSessionId ??
-      ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
+      ((isProviderSwitch || isNativeRebuild) && HARNESS_TRAITS[targetHarness].ownsSessionFile
         ? emptyRebuild
           ? undefined
           : randomUUID()
@@ -10809,7 +10811,7 @@ export class Daemon {
     // file ready (migrate / reseed / strip) and remember where it ends, so
     // what Claude itself writes on resume can be surfaced after the turn.
     let claudeTranscript: { path: string; size: number } | undefined;
-    if (targetHarness === 'claude' && claudeResumeId !== undefined) {
+    if (HARNESS_TRAITS[targetHarness].ownsSessionFile && claudeResumeId !== undefined) {
       await createClaudeSessionStore({
         chatId,
         folder: state.folder,
@@ -10858,20 +10860,17 @@ export class Daemon {
       // ignored by the one-shot default path.
       chatId,
       resumeSessionId: claudeResumeId,
-      ...(targetHarness === 'claude' ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
-      ...((isProviderSwitch || isNativeRebuild) && targetHarness === 'codex' && reconstructTrack
-        ? resumeExistingNativeSessionId
-          ? { codexAppendItems: { events: reconstructTrack } }
-          : { codexReseed: { events: reconstructTrack } }
+      ...(HARNESS_TRAITS[targetHarness].ownsSessionFile
+        ? { claudeConfigDir: this.claudeConfigDirFor(chatId) }
         : {}),
-      // A switch onto a local model has no native session to append to: the
-      // track becomes the opening messages of a fresh one.
-      ...((isProviderSwitch || isNativeRebuild) &&
-      targetHarness === 'local' &&
-      reconstructTrack &&
-      !resumeExistingNativeSessionId
-        ? { localReseed: { events: reconstructTrack } }
-        : {}),
+      // A switch carries the track across: appended to the provider's own
+      // session where it can take items, otherwise the opening messages of a
+      // fresh one (each adapter's traits name its option).
+      ...handoffRunOptions(
+        HARNESS_TRAITS[targetHarness],
+        (isProviderSwitch || isNativeRebuild) && reconstructTrack ? reconstructTrack : undefined,
+        resumeExistingNativeSessionId !== undefined,
+      ),
       // spec/04 § Branching — this turn opens a new TRACK: resume the parent
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
@@ -11037,8 +11036,8 @@ export class Daemon {
                 ? this.replanHandoff(chatId, state, err, userMessageSeq)
                 : undefined;
             if (!tighter) throw err;
-            if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
-            else if (targetHarness === 'local') sdkOpts.localReseed = { events: tighter };
+            const reseedOption = HARNESS_TRAITS[targetHarness].reseedOption;
+            if (reseedOption !== null) sdkOpts[reseedOption] = { events: tighter };
             else if (claudeResumeId !== undefined) {
               // The rejected handoff produced no output, so the file holds only
               // the seed that was too big: replace it outright.
@@ -11286,7 +11285,8 @@ export class Daemon {
         // This aggregate reads Claude's account rotation. Codex failures must
         // use their own structured limit or account probe below.
         let hostOutOfCredit =
-          harnessOfModel(state.model) === 'claude' && this.opts.hostOutOfCredit?.(chatId) === true;
+          harnessTraitsForModel(state.model).hostCreditAggregate &&
+          this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
@@ -15402,7 +15402,8 @@ export class Daemon {
     harness: HarnessId,
     sessionId: string,
   ): Promise<boolean> {
-    if (harness !== 'claude') return this.historyReader.hasSession({ folder, sessionId });
+    if (!HARNESS_TRAITS[harness].ownsSessionFile)
+      return this.historyReader.hasSession({ folder, sessionId });
     const loaded = await this.claudeSessionStoreFor(chatId, folder).load({
       projectKey: chatId,
       sessionId,
@@ -17423,4 +17424,24 @@ function nativeDedupeKey(ref: NativeRef, event: WireEvent): string {
 function mcpArgsOmitting(args: string[], model: string | undefined): string[] {
   const omitted = patchToolsOmittedFor(model);
   return omitted.length > 0 ? [...args, `--omit-tools=${omitted.join(',')}`] : args;
+}
+
+/**
+ * The run options that carry a provider switch's track into the target
+ * provider's session, named by its traits. Nothing when there is no track or the
+ * provider takes none (Claude reseeds through its session file instead).
+ */
+function handoffRunOptions(
+  traits: HarnessTraits,
+  track: readonly TrackEntry[] | undefined,
+  hasNativeSession: boolean,
+): Partial<SdkRunOptions> {
+  if (!track) return {};
+  if (hasNativeSession && traits.appendOption !== null) {
+    return { [traits.appendOption]: { events: track } };
+  }
+  if (!hasNativeSession && traits.reseedOption !== null) {
+    return { [traits.reseedOption]: { events: track } };
+  }
+  return {};
 }
