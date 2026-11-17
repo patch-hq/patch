@@ -204,7 +204,9 @@ test.describe('meeting mode — live', () => {
   test('the feed stays pinned to the newest until Tom scrolls up', async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 600 });
     await page.goto(URL_LIVE);
+    await page.evaluate(() => document.fonts.ready);
     const scroller = page.getByTestId('meeting-points');
+    await expect(scroller).toBeVisible();
     const gap = () => scroller.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
     await expect.poll(gap).toBeLessThan(5);
     const add = (n: number) =>
@@ -311,11 +313,21 @@ test.describe('meeting mode — live', () => {
       })),
     });
     const copy = page.getByTestId('meeting-transcript-copy');
+    const scroller = page.getByTestId('meeting-transcript');
+    // The feed pins to the newest line; wait for that to settle so the baseline is the stuck position.
+    await expect
+      .poll(() =>
+        scroller.evaluate((el) => {
+          const sc = el.parentElement as HTMLElement;
+          return sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+        }),
+      )
+      .toBeLessThan(2);
     const before = (await copy.boundingBox())!.y;
-    await page.getByTestId('meeting-transcript').evaluate((el) => {
+    await scroller.evaluate((el) => {
       (el.parentElement as HTMLElement).scrollTop = 400;
     });
-    expect(Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
+    await expect.poll(async () => Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await copy.click();
     const text = await page.evaluate(() => navigator.clipboard.readText());

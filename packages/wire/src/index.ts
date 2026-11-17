@@ -114,6 +114,19 @@ export interface VersionReport {
    * compared against. Null on an unstamped build.
    */
   server: LayerBuild & { startedAt: string; serverSha: string | null };
+  /**
+   * Where Patch stands against the release channel, under the one account-wide
+   * auto-update switch: the newest release on offer (null when none was seen),
+   * whether the switch is on, and whether an "Update everything" is under way.
+   * Absent from servers older than the switch.
+   */
+  release?: {
+    available: string | null;
+    /** The channel the server follows; absent from servers older than the channel setting. */
+    channel?: 'stable' | 'dev' | 'off';
+    autoUpdate: boolean;
+    updating: boolean;
+  };
   /** The SPA mounted by this server, or null when none is mounted. */
   web: WebLayer | null;
   /**

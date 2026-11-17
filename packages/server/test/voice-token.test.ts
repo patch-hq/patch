@@ -313,6 +313,69 @@ describe('POST /api/voice/token', () => {
     }
   });
 
+  it("accepts a voice device's own exp-less credential, which its host presents on its behalf", async () => {
+    const { built } = await makeApp();
+    try {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
+      const deviceCredential = await mintSurfaceCredential({
+        userPrivateKey: user.privateKey,
+        surfaceId: 'srf-device-1',
+        surfaceKind: 'voice-device',
+        label: 'kitchen',
+      });
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/voice/token',
+        headers: { authorization: `Bearer ${deviceCredential}` },
+        payload: { chatId: 'c1', role: 'voice-device-conv', surfaceKind: 'device' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { token: string };
+      expect(verifyVoiceToken({ secret: SECRET, token: body.token }).surfaceId).toBe(
+        'srf-device-1',
+      );
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('still refuses an exp-less credential for any other surface kind', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(78));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const chatRegistry = new ChatRegistry();
+    chatRegistry.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
+    const app = Fastify({ logger: false });
+    registerVoiceTokenRoute(app, {
+      logger: { warn: () => undefined, info: () => undefined } as unknown as import('pino').Logger,
+      registry,
+      chatRegistry,
+      internalToken: SECRET,
+      isHostOnline: () => true,
+      recordSessionHost: () => undefined,
+      // A web credential with no exp: mintSurfaceCredential always gives web
+      // one, so the verifier's answer is stubbed.
+      verifyCredential: async () => ({
+        sub: user.publicKey,
+        surface_id: 'srf-web-no-exp',
+        surface_kind: 'web',
+        label: 'browser',
+        iat: 1,
+      }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/voice/token',
+        headers: { authorization: 'Bearer stubbed' },
+        payload: { chatId: 'c1', role: 'voice-call', surfaceKind: 'web' },
+      });
+      expect(res.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rejects an invalid bearer with 401', async () => {
     const { built } = await makeApp();
     try {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
@@ -435,10 +436,18 @@ describe('Composer', () => {
     // the turn can never run, so accepting the message would be a lie — this is
     // the "new chat cannot work but doesn't say so" case.
     setSharedAccounts({ claude: [{ connected: false }] });
-    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(
+      <MemoryRouter>
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />
+      </MemoryRouter>,
+    );
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
     expect(input.title).toMatch(/Claude isn’t connected/);
+    // Said on screen, not only on hover, with the way straight to signing in.
+    const notice = screen.getByTestId('composer-signed-out');
+    expect(notice).toHaveTextContent('Sign in to Claude to send messages.');
+    expect(notice.querySelector('a')).toHaveAttribute('href', '/connect');
     expect((screen.getByTestId('send-btn') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('composer-add-btn') as HTMLButtonElement).disabled).toBe(true);
   });
@@ -473,7 +482,11 @@ describe('Composer', () => {
   it('blocks sending in any chat when no account is connected, whichever host it is on', () => {
     reportAccount('host-a', true);
     setSharedAccounts({ claude: [{ connected: false }] });
-    render(<Composer chatId="c1" hostId="host-a" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(
+      <MemoryRouter>
+        <Composer chatId="c1" hostId="host-a" onSend={() => {}} onStartVoiceNote={() => {}} />
+      </MemoryRouter>,
+    );
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(true);
   });
 
@@ -481,6 +494,7 @@ describe('Composer', () => {
     clearHosts();
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.queryByTestId('composer-signed-out')).toBeNull();
   });
 
   // Item 3 (desktop): the separate image + file buttons are collapsed into ONE
@@ -948,6 +962,56 @@ describe('Composer', () => {
   // spec/14 § Skill autocomplete — "the list defaults to the last-used skill":
   // completing a skill remembers it per folder, and the next `/` sorts it to
   // the top (so it is the highlighted default that Enter completes).
+  describe('run a job with !', () => {
+    const jobs = [
+      { id: 'j1', name: 'Daily timesheet' },
+      { id: 'j2', name: 'Backup' },
+    ];
+    function mount() {
+      render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+      return screen.getByTestId('composer-input') as HTMLTextAreaElement;
+    }
+
+    it('lists jobs, filters as you type, and runs the picked one without sending', async () => {
+      vi.spyOn(api, 'listJobs').mockResolvedValue({ jobs });
+      const run = vi.spyOn(api, 'runJob').mockResolvedValue({ status: 'sent', fireId: 'f' });
+      const onSend = vi.fn();
+      render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
+      const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: '!' } });
+      await screen.findByTestId('composer-job-option-j1');
+      expect(screen.getByTestId('composer-job-option-j2')).toBeInTheDocument();
+      fireEvent.change(input, { target: { value: '!back' } });
+      expect(screen.queryByTestId('composer-job-option-j1')).toBeNull();
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(run).toHaveBeenCalledWith('j2');
+      expect(input.value).toBe('');
+      expect(onSend).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('composer-job-menu')).toBeNull();
+    });
+
+    it('says so when the job list cannot be read', async () => {
+      vi.spyOn(api, 'listJobs').mockRejectedValue(new Error('boom'));
+      const input = mount();
+      fireEvent.change(input, { target: { value: '!' } });
+      expect(await screen.findByTestId('composer-job-error')).toHaveTextContent('boom');
+    });
+
+    it('surfaces a failed run', async () => {
+      vi.spyOn(api, 'listJobs').mockResolvedValue({ jobs });
+      vi.spyOn(api, 'runJob').mockRejectedValue(new Error('nope'));
+      const input = mount();
+      fireEvent.change(input, { target: { value: '!' } });
+      await screen.findByTestId('composer-job-option-j1');
+      fireEvent.mouseDown(screen.getByTestId('composer-job-option-j1'));
+      await waitFor(() =>
+        expect(
+          useUiStore.getState().errors.some((e) => String(e.message ?? e).includes('nope')),
+        ).toBe(true),
+      );
+    });
+  });
+
   describe('skill autocomplete — defaults to the last used skill', () => {
     beforeEach(() => {
       localStorage.removeItem('patch.skill.lastUsed:/proj');
@@ -1410,7 +1474,11 @@ describe('Composer', () => {
 
       it('dropping while Claude is disconnected shows the blocked hint and does not attach', async () => {
         setSharedAccounts({ claude: [{ connected: false }] });
-        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+        render(
+          <MemoryRouter>
+            <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />
+          </MemoryRouter>,
+        );
         const composer = screen.getByTestId('composer');
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } });
         expect(screen.getByTestId('composer-drop-hint')).toHaveTextContent(

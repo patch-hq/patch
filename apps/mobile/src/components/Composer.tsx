@@ -154,6 +154,7 @@ import { useNewChatDraftStore } from '../stores/newChatDraftStore';
 import { radii, space, textMin, typography, useTheme } from '../lib/theme';
 import { getWs } from '../api/ws';
 import { api } from '../api/rest';
+import { activeBangToken, filterJobs, removeBangToken } from '../lib/jobToken';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import {
@@ -644,6 +645,43 @@ export function Composer({
     if (cursor < body.length) nodes.push(<Text key="tail">{body.slice(cursor)}</Text>);
     return nodes;
   }
+  // Run a job (spec/15 § Composer): `!` opens a list of jobs where `/` opens
+  // skills. Tapping one fires it now (POST /api/jobs/:id/run, the Jobs tab's
+  // run) and removes the token; no chat turn is sent. Re-read on every open.
+  // NO FALLBACK: a failed read or run is surfaced.
+  const bangToken = activeBangToken(body, cursorPos);
+  const bangActive = bangToken !== null;
+  const [jobList, setJobList] = React.useState<{ id: string; name: string }[] | null>(null);
+  React.useEffect(() => {
+    if (!bangActive) return;
+    let live = true;
+    void api
+      .listJobs()
+      .then((r) => {
+        if (live)
+          setJobList(
+            (r.jobs as { id: string; name: string }[]).map((j) => ({ id: j.id, name: j.name })),
+          );
+      })
+      .catch((e) => {
+        if (live) useUiStore.getState().pushError(`jobs unavailable: ${(e as Error).message}`);
+      });
+    return () => {
+      live = false;
+    };
+  }, [bangActive]);
+  const bangItems =
+    bangToken !== null && jobList !== null ? filterJobs(jobList, bangToken.query) : [];
+  const showJobMenu = bangActive && bangItems.length > 0;
+  const runJobItem = (job: { id: string; name: string }): void => {
+    if (bangToken === null) return;
+    const { text, cursor } = removeBangToken(body, bangToken, cursorPos);
+    updateDraft(joinQuotes(quotes, text));
+    pendingCursorRef.current = cursor;
+    void api.runJob(job.id).catch((err) => {
+      useUiStore.getState().pushError(`couldn’t run job “${job.name}”: ${(err as Error).message}`);
+    });
+  };
   const completeSkill = (name: string): void => {
     if (skills.includes(name) && providerCommands.has(name)) return;
     if (activeToken === null) return;
@@ -652,6 +690,15 @@ export function Composer({
     pendingCursorRef.current = cursor;
     // Remembered per folder so the next `/` defaults to it.
     setLastUsedSkill(trimmedFolder, name);
+  };
+  // The + menu's Skill entry: puts a `/` at the caret (after a space if it
+  // would glue onto a word) and the autocomplete takes over.
+  const startSkill = (): void => {
+    const at = Math.min(cursorPos, body.length);
+    const glue = at > 0 && !/\s/.test(body.charAt(at - 1)) ? ' ' : '';
+    updateDraft(joinQuotes(quotes, `${body.slice(0, at)}${glue}/${body.slice(at)}`));
+    pendingCursorRef.current = at + glue.length + 1;
+    inputRef.current?.focus();
   };
   const conn = usePresenceStore((s) => s.connection);
   const daemon = usePresenceStore((s) => s.daemon);
@@ -835,6 +882,17 @@ export function Composer({
     setCursorState({ text: body, pos });
     selectionEndRef.current = pos;
   }, [body]);
+
+  // Android's back button hides the keyboard but leaves the TextInput focused,
+  // and a focused composer holds back a draft change from another surface
+  // (spec/14 § Composer) until it blurs — so a message sent elsewhere never
+  // cleared this composer. Hiding the keyboard is the user leaving the field.
+  React.useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => {
+      if (inputRef.current?.isFocused()) inputRef.current.blur();
+    });
+    return () => sub.remove();
+  }, []);
 
   // Dictation (spec/07 § "Dictation into the composer"): the mic streams live
   // to the composer — the interim transcript renders inside the input
@@ -1212,8 +1270,7 @@ export function Composer({
   // error rather than silently doing nothing.
   const pickImage = async (): Promise<void> => {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) throw new Error('photo library permission denied');
+      if (!(await ensurePermission('photos'))) throw new Error('photo library permission denied');
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 1,
@@ -1880,6 +1937,43 @@ export function Composer({
         </View>
       ) : null}
 
+      {/* Run-a-job list (spec/15 § Composer). Tap a row to run that job. */}
+      {showJobMenu ? (
+        <View
+          testID="job-menu"
+          style={{
+            marginBottom: space.xs,
+            borderWidth: 1,
+            borderColor: colors.divider,
+            borderRadius: radii.md,
+            backgroundColor: colors.paper,
+            overflow: 'hidden',
+            maxHeight: 200,
+          }}
+        >
+          <ScrollView keyboardShouldPersistTaps="handled">
+            {bangItems.map((j) => (
+              <Pressable
+                key={j.id}
+                testID={`job-option-${j.id}`}
+                onPress={() => runJobItem(j)}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: space.xs,
+                  paddingHorizontal: space.md,
+                  paddingVertical: space.sm,
+                  backgroundColor: pressed ? colors.divider : 'transparent',
+                })}
+              >
+                <Text style={{ ...typography.secondary, color: colors.leaf }}>!</Text>
+                <Text style={{ ...typography.secondary, color: colors.ink }}>{j.name}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {micState === 'recording' || dictModeOn ? <DictationLevelBar color={colors.red} /> : null}
 
       {/* Listening strip (spec/15 § Composer): with the keyboard away, this is
@@ -2495,6 +2589,7 @@ export function Composer({
       <AnchoredMenu
         visible={addMenuOpen}
         items={[
+          { id: 'skill', label: 'Skill', testID: 'add-menu-skill' },
           { id: 'camera', label: 'Take photo', testID: 'add-menu-camera' },
           { id: 'image', label: 'Photo or image', testID: 'add-menu-image' },
           { id: 'file', label: 'Any file', testID: 'add-menu-file' },
@@ -2505,7 +2600,8 @@ export function Composer({
           // The + is disabled while the host can't take a file; a menu left
           // open across that change must not act on it either.
           if (disabled || resolving) return;
-          if (id === 'camera') void takePhoto();
+          if (id === 'skill') startSkill();
+          else if (id === 'camera') void takePhoto();
           else if (id === 'image') void pickImage();
           else if (id === 'file') void pickDocument();
           else if (id === 'sketch') setSketching(true);

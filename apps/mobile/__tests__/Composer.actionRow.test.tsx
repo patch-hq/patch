@@ -225,7 +225,7 @@ describe('Composer action row — order', () => {
     }
   });
 
-  it('the + offers camera, photo, file and sketch', () => {
+  it('the + offers skill, camera, photo, file and sketch', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const menu = r.root.findAll(
@@ -235,6 +235,7 @@ describe('Composer action row — order', () => {
         (i.props['items'] as { testID?: string }[]).some((it) => it.testID === 'add-menu-camera'),
     )[0]!;
     expect((menu.props['items'] as { label: string }[]).map((i) => i.label)).toEqual([
+      'Skill',
       'Take photo',
       'Photo or image',
       'Any file',

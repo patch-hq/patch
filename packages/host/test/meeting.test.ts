@@ -372,7 +372,7 @@ describe('MeetingManager', () => {
     expect(p).toContain('never "the user"');
   });
 
-  it("passes Tom's My notes to the analysis so a voice can be named from them", async () => {
+  it("passes the user's My notes to the analysis so a voice can be named from them", async () => {
     diarise = true;
     const m = make();
     m.start('c1');
@@ -384,7 +384,7 @@ describe('MeetingManager', () => {
     expect(input.myNotes).toBe('With Priya and Dev');
     const p = buildMeetingPrompt(input);
     expect(p).toContain('With Priya and Dev');
-    expect(p).toContain("Tom's own notes");
+    expect(p).toContain("The user's own notes");
   });
 
   it('live Now shows what is said before analysis, then clears once the notes cover it', async () => {
@@ -1168,12 +1168,12 @@ describe('MeetingManager', () => {
       ]);
     });
 
-    it("turns an owner of Tom's own name into Tom's action", async () => {
+    it("turns an owner of the user's own name into the user's action", async () => {
       const m = make();
       m.start('c1');
       await m.ingestAudio('c1', 'mic', Buffer.from('a'));
       analyse.mockResolvedValueOnce(
-        analysis({ actions: [{ kind: 'other', owner: 'Tom', title: 'Join the build', why: 'w' }] }),
+        analysis({ actions: [{ kind: 'other', owner: 'You', title: 'Join the build', why: 'w' }] }),
       );
       await m.tick('c1');
       const [a] = m.get('c1')!.actions;

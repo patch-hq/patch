@@ -23,6 +23,28 @@ import { Audio } from 'expo-av';
 const { voiceNoteSpy } = vi.hoisted(() => ({ voiceNoteSpy: vi.fn() }));
 vi.mock('../src/api/rest', () => ({ api: { voiceNote: voiceNoteSpy } }));
 
+const { previewStop, previewHolder, micStart, micStop } = vi.hoisted(() => ({
+  previewStop: vi.fn(),
+  previewHolder: {
+    onPartial: null as null | ((t: string) => void),
+    onError: null as null | ((m: string) => void),
+  },
+  micStart: vi.fn().mockResolvedValue(undefined),
+  micStop: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../src/lib/dictationPreview', () => ({
+  startDictationPreview: (
+    _c: string,
+    onPartial: (t: string) => void,
+    onError: (m: string) => void,
+  ) => {
+    previewHolder.onPartial = onPartial;
+    previewHolder.onError = onError;
+    return { push: vi.fn(), stop: previewStop };
+  },
+}));
+vi.mock('../src/lib/voiceMic', () => ({ startMicCapture: micStart, stopMicCapture: micStop }));
+
 import { startVoiceNote, endVoiceNote } from '../src/lib/voiceNote';
 
 beforeEach(async () => {
@@ -322,5 +344,36 @@ describe('startVoiceNote — background prepare chain', () => {
     startVoiceNote('c2', 'tap');
     resolveStart();
     await vi.waitFor(() => expect(stopSpy).toHaveBeenCalled());
+  });
+});
+
+describe('voice note — live words', () => {
+  beforeEach(() => {
+    micStart.mockClear();
+    micStop.mockClear();
+    previewStop.mockClear();
+  });
+
+  it('feeds interim words into the store while recording and closes the preview on send', async () => {
+    startVoiceNote('c1', 'tap');
+    await vi.waitFor(() => expect(micStart).toHaveBeenCalled());
+    previewHolder.onPartial?.('walk the');
+    expect(useVoiceStore.getState().voiceNotePartial).toBe('walk the');
+    await endVoiceNote(true);
+    expect(previewStop).toHaveBeenCalled();
+    expect(micStop).toHaveBeenCalled();
+    expect(useVoiceStore.getState().voiceNotePartial).toBe('');
+    expect(voiceNoteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a preview failure is surfaced but the note still records and sends', async () => {
+    startVoiceNote('c1', 'tap');
+    await vi.waitFor(() => expect(micStart).toHaveBeenCalled());
+    previewHolder.onError?.('socket closed');
+    expect(useUiStore.getState().errors.some((e) => /socket closed/.test(JSON.stringify(e)))).toBe(
+      true,
+    );
+    await endVoiceNote(true);
+    expect(voiceNoteSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,7 +10,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act, cleanup, fireEvent } from '@testing-library/react';
 import { VoiceBar, describeLine, HEARD_LINGER_MS } from '../components/VoiceBar.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
-import { useChatStore } from '../stores/chatStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import * as voiceController from '../lib/voiceController.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
@@ -36,14 +35,12 @@ function open(mode: AudioSessionMode, over: Partial<ReturnType<typeof base>> = {
 }
 
 const line = (): string => screen.getByTestId('voice-bar-line').textContent ?? '';
+const note = (): string | null => screen.queryByTestId('voice-bar-note')?.textContent ?? null;
 const state = (): string | undefined => screen.getByTestId('voice-bar').dataset.state;
 
 describe('voice bar', () => {
   beforeEach(() => {
     useVoiceStore.setState({ call: null });
-    useChatStore.setState({
-      chats: { thread_manager: { id: 'thread_manager', name: 'Manager' } },
-    } as never);
     usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES, loaded: true });
   });
   afterEach(() => {
@@ -52,24 +49,15 @@ describe('voice bar', () => {
     vi.restoreAllMocks();
   });
 
-  it('a call is headed by the phone glyph, never the dictation mic', () => {
-    open('call');
-    render(<VoiceBar />);
-    const head = screen.getByTestId('voice-bar-head');
-    expect(head.querySelector('svg.lucide-phone')).not.toBeNull();
-    expect(head.querySelector('svg.lucide-mic')).toBeNull();
-  });
-
   it('is absent with no session', () => {
     render(<VoiceBar />);
     expect(screen.queryByTestId('voice-bar')).toBeNull();
   });
 
-  it('names the mode and the chat, in both modes', () => {
+  it('names the mode, in both modes', () => {
     open('call');
     const { rerender } = render(<VoiceBar />);
     expect(screen.getByTestId('voice-bar-head').textContent).toContain('On call');
-    expect(screen.getByTestId('voice-bar-chat').textContent).toBe('Manager');
     open('hands-free');
     rerender(<VoiceBar />);
     expect(screen.getByTestId('voice-bar-head').textContent).toContain('Hands-free');
@@ -82,8 +70,8 @@ describe('voice bar', () => {
     });
     open('hands-free');
     render(<VoiceBar />);
-    expect(line()).toBe('Waiting for you to say “jarvis”');
     expect(state()).toBe('waiting');
+    expect(note()).toBe('Start with “jarvis” — or reply within 30s of it speaking');
   });
 
   it('a call at rest shows a live waveform, not the word Listening, and never asks for an address word', () => {
@@ -92,7 +80,7 @@ describe('voice bar', () => {
     expect(state()).toBe('listening');
     expect(screen.getByTestId('voice-bar-wave')).toBeTruthy();
     expect(line()).not.toContain('Listening');
-    expect(line()).not.toContain('say');
+    expect(note()).toBeNull();
   });
 
   it('the waveform follows the input level and flattens when muted', () => {
@@ -132,7 +120,7 @@ describe('voice bar', () => {
     open('hands-free', { transcript: 'patch what is agent two' });
     render(<VoiceBar />);
     expect(state()).toBe('hearing');
-    expect(line()).toBe('Hearing you');
+    expect(note()).toBe('You: patch what is agent two');
   });
 
   it('shows a dropped utterance as heard-not-sent, then returns to waiting', () => {
@@ -140,7 +128,7 @@ describe('voice bar', () => {
     open('hands-free', { unaddressed: 'hello, hello, how is it going' });
     render(<VoiceBar />);
     expect(state()).toBe('heard');
-    expect(line()).toContain('not addressed, so not sent');
+    expect(note()).toContain('not addressed, so not sent');
     act(() => {
       vi.advanceTimersByTime(HEARD_LINGER_MS + 10);
     });
@@ -148,16 +136,16 @@ describe('voice bar', () => {
     expect(state()).toBe('waiting');
   });
 
-  it('runs a mm:ss timer off the session start', () => {
+  it('runs an m:ss timer off the session start', () => {
     vi.useFakeTimers();
     open('call', { startedAt: Date.now() });
     const { rerender } = render(<VoiceBar />);
-    expect(screen.getByTestId('voice-bar-timer').textContent).toBe('00:00');
+    expect(screen.getByTestId('voice-bar-timer').textContent).toBe('0:00');
     act(() => {
       vi.advanceTimersByTime(62_000);
     });
     rerender(<VoiceBar />);
-    expect(screen.getByTestId('voice-bar-timer').textContent).toBe('01:02');
+    expect(screen.getByTestId('voice-bar-timer').textContent).toBe('1:02');
   });
 
   it('mute, mode switch and end all reach the live session', () => {
@@ -175,10 +163,12 @@ describe('voice bar', () => {
     expect(end).toHaveBeenCalled();
   });
 
-  it('names a chat it has no title for "New chat", never its id', () => {
-    open('call', { chatId: 'unknown-chat-id' });
+  it('says Connecting… with no note and no waveform until the host answers', () => {
+    open('hands-free', { phase: 'connecting' as never });
     render(<VoiceBar />);
-    expect(screen.getByTestId('voice-bar-chat').textContent).toBe('New chat');
+    expect(screen.getByTestId('voice-bar-connecting').textContent).toBe('Connecting.');
+    expect(note()).toBeNull();
+    expect(screen.queryByTestId('voice-bar-wave')).toBeNull();
   });
 
   it('reports the turn cycle: thinking, then speaking — the reply itself streams into the chat', () => {

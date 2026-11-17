@@ -18,6 +18,8 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
     const text = hostedVoiceInstruction('auto', true);
     expect(text).toMatch(/answers at once/i);
     expect(text).toMatch(/carry on the conversation/i);
+    expect(text).toMatch(/rest of what the user said/i);
+    expect(text).toMatch(/never stop to wait/i);
     expect(text).toMatch(/never say "still working on it"/i);
     expect(text).toMatch(/result arrives as a message/i);
     expect(text).toMatch(/never guess/i);
@@ -52,4 +54,15 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
     expect(text).toMatch(/stays in progress/i);
     expect(text).toMatch(/one or two short sentences/i);
   });
+});
+
+describe('task logging', () => {
+  test.each(['auto', 'always'] as const)(
+    '%s: voice knows the agent can log tasks, Patch ones included',
+    (mode) => {
+      const text = hostedVoiceInstruction(mode);
+      expect(text).toMatch(/log tasks, including Patch tasks/i);
+      expect(text).toMatch(/never say you cannot do that/i);
+    },
+  );
 });

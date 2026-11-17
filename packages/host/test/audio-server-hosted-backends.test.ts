@@ -536,11 +536,15 @@ describe('audio server — hosted backends on every app surface', () => {
     surface.ws.close();
   });
 
-  test('a device on openai is refused — no hosted device path yet', async () => {
+  test('a device on openai runs it, and gets the reply upsampled to 48 kHz', async () => {
     const s = await start({ device: { backend: 'openai', layer: 'light' } });
     const ws = new WebSocket(`ws://127.0.0.1:${s.port}/audio/dev-1`);
     const events: AudioEvent[] = [];
-    ws.on('message', (d: Buffer) => events.push(decodeAudio(d)));
+    const binaries: Buffer[] = [];
+    ws.on('message', (d: Buffer, isBinary: boolean) => {
+      if (isBinary) binaries.push(d);
+      else events.push(decodeAudio(d));
+    });
     await new Promise<void>((r) => ws.once('open', () => r()));
     ws.send(
       encodeAudio({
@@ -556,12 +560,22 @@ describe('audio server — hosted backends on every app surface', () => {
         surfaceHasAec: false,
       }),
     );
-    await new Promise<void>((r) => ws.once('close', () => r()));
-    expect(events[0], JSON.stringify(events[0])).toMatchObject({
-      type: 'audio.error',
-      code: 'voice_config_not_implemented',
-    });
-    expect(openai).toHaveLength(0);
+    await until(() => expect(openai).toHaveLength(1));
+    // Two 20 ms pieces of 24 kHz audio from the provider.
+    const piece = Buffer.alloc(480 * 2);
+    for (let i = 0; i < 480; i++) piece.writeInt16LE(Math.round(8000 * Math.sin(i / 5)), i * 2);
+    for (let k = 0; k < 2; k++) {
+      openai[0]!.serverSend({
+        type: 'response.output_audio.delta',
+        delta: piece.toString('base64'),
+      });
+    }
+    await until(() => expect(binaries.length).toBe(2));
+    const samples = binaries.reduce((n, b) => n + b.length / 2, 0);
+    // 960 in at 24 kHz is 1920 at 48 kHz, less the 32 held back for the next piece.
+    expect(samples).toBe(1920 - 32);
+    expect(events.some((e) => e.type === 'audio.error')).toBe(false);
+    ws.close();
   });
 });
 

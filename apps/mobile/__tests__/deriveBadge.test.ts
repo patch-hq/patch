@@ -41,6 +41,22 @@ function row(overrides: Partial<ChatRow>): ChatRow {
   } as ChatRow;
 }
 
+describe('deriveBadge — agents', () => {
+  it('running sub-agents get their own badge, ahead of background tasks', () => {
+    expect(deriveBadge(row({ backgroundTasks: 2, runningAgents: 1 }))).toBe('agents');
+    expect(deriveBadge(row({ backgroundTasks: 1, runningAgents: 0 }))).toBe('background');
+  });
+
+  it('NO FALLBACK: an unknown or zero agent count never shows agents', () => {
+    expect(deriveBadge(row({ runningAgents: null }))).toBe('read');
+    expect(deriveBadge(row({ runningAgents: 0 }))).toBe('read');
+  });
+
+  it('unread still beats agents', () => {
+    expect(deriveBadge(row({ runningAgents: 1, lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
+  });
+});
+
 describe('deriveBadge — background', () => {
   it('replaces the read tick when a background task is still running', () => {
     expect(deriveBadge(row({}))).toBe('read');

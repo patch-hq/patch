@@ -16,6 +16,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from './components/Sidebar.js';
 import { MiniSidebar } from './components/MiniSidebar.js';
 import { SidebarWindowRoute } from './routes/SidebarWindowRoute.js';
+import { WelcomeRoute } from './routes/WelcomeRoute.js';
+import { ConnectRoute } from './routes/ConnectRoute.js';
 import { SidebarExpandButton } from './components/SidebarExpandButton.js';
 import { useDiscardUnsentNewChats } from './lib/unsentNewChat.js';
 import { SidebarBackdrop } from './components/SidebarBackdrop.js';
@@ -25,6 +27,7 @@ import * as transcriptCache from './lib/transcriptCache.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
+import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
@@ -44,12 +47,14 @@ import { VoiceBar } from './components/VoiceBar.js';
 import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
-import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
+import { UpdateBanner } from './components/UpdateBanner.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
 import { useChatStore } from './stores/chatStore.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
+import { ViewPositionSync } from './components/ViewPositionSync.js';
+import { useViewPositionStore } from './stores/viewPositionStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
 import { DEMO_SCRIPT } from './dev/meetingScript.js';
@@ -151,6 +156,8 @@ useChatStore.getState().hydrate([
     hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'speakers',
+    // Spoken to, so the sidebar draws Channels (it stays out of the way until used).
+    preview: 'turn the kitchen lights off',
     folder: '/home/tom/.patch/threads/speakers',
     activity: 'idle',
     status: 'active',
@@ -999,6 +1006,24 @@ useChatStore.getState().hydrate([
     // the two readouts can be checked against each other in one browser.
     backgroundTasks: 2,
   },
+  // spec/14 § Status badges — `agents`: an idle chat with two sub-agents
+  // running and nothing else. The host counts them in `backgroundTasks` too
+  // (2) and names the share that is agents in `runningAgents`.
+  {
+    chatId: 'chat_agents',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'agents-fixture',
+    folder: '/home/tom/projects/patch',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+    backgroundTasks: 2,
+    runningAgents: 2,
+  },
   // job-editor-origin e2e (job-editor-back.spec.ts) — a chat whose transcript
   // carries a `patch_job_create` row with an Open job link, so the spec can
   // click through into the editor and prove Back returns HERE rather than
@@ -1269,7 +1294,7 @@ useChatStore.getState().hydrate([
 // QUIET badge (`background`, `monitoring`) in the sidebar's OWN list, without
 // requiring a click into it first, has to be marked read explicitly or it
 // shows `done` instead, per "unread beats background/monitoring, always".
-for (const id of ['chat_bgtask', 'chat_monitoring']) {
+for (const id of ['chat_bgtask', 'chat_agents', 'chat_monitoring']) {
   useChatStore.getState().markRead(id);
 }
 
@@ -2101,6 +2126,8 @@ useChatStore.setState((s) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
         at: i,
+        // Spread over weeks so the scroll rail has dates to mark.
+        messageAt: Date.UTC(2026, 9, 1) + i * 3 * 3_600_000,
       }),
     ),
     chat_deeplink: [
@@ -2645,6 +2672,11 @@ Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: can
 // the server pushes one, without a live server.
 (window as unknown as { __preferencesStore?: typeof usePreferencesStore }).__preferencesStore =
   usePreferencesStore;
+// Exposed so specs can play a `view_position.updated` from another surface
+// (spec/05 § Handover). The sync component itself is only mounted with
+// `?viewsync=1`, so no other spec sees it report positions.
+(window as unknown as { __viewPositionStore?: typeof useViewPositionStore }).__viewPositionStore =
+  useViewPositionStore;
 
 // Exposed so the voice specs can drive a call's live transcript and chat.
 (window as unknown as { __voiceStore?: typeof useVoiceStore }).__voiceStore = useVoiceStore;
@@ -2970,6 +3002,17 @@ if (verbosityParam === 'off' || verbosityParam === 'summary' || verbosityParam =
     loaded: true,
   });
 }
+// The Manager and Batch are experimental and off by default in the product, but
+// the sidebar specs here are about them, so the harness turns them on.
+// `?experimentalFeatures=off` shows the product default.
+usePreferencesStore.setState({
+  preferences: {
+    ...usePreferencesStore.getState().preferences,
+    experimentalFeatures:
+      new URLSearchParams(window.location.search).get('experimentalFeatures') !== 'off',
+  },
+  loaded: true,
+});
 usePresenceStore.getState().setConnection('connected');
 // The `auth.ok` greeting, as the server replays it: one registered host, online,
 // with its own credential and its own last-used model. The last-used model lives
@@ -3135,6 +3178,16 @@ const archiveSize = Number(new URLSearchParams(window.location.search).get('arch
           : [];
       return Promise.resolve(
         new Response(JSON.stringify({ jobs }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
+    // No host here, so the stray-process bar would draw its "can't list" row in every chat and
+    // shift whatever a spec is measuring. The harness host has none running.
+    if (/\/api\/chats\/[^/?]+\/stray-processes(?:\?|$)/.test(url)) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ processes: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
@@ -4099,6 +4152,24 @@ function Harness(): JSX.Element {
   // instead of nesting it in the three-column shell. Rendering it inside the
   // shell would draw a second, docked Sidebar beside it and measure nothing
   // real.
+  // `?route=/welcome…` — also a bare route in AppShell: the setup steps after
+  // the desktop app's first run (spec/05 § Desktop first run).
+  if (initialRoute.startsWith('/welcome') || initialRoute.startsWith('/connect')) {
+    return (
+      <div className="app-shell bare" data-testid="app-shell-bare" style={{ height: '100vh' }}>
+        <MemoryRouter initialEntries={[initialRoute]}>
+          <Routes>
+            <Route path="/welcome" element={<WelcomeRoute />} />
+            <Route path="/connect" element={<ConnectRoute />} />
+            {/* Setup ends on a new chat, ready to type into. */}
+            <Route path="/chats/new" element={<div data-testid="welcome-finished" />} />
+            <Route path="/" element={<div data-testid="harness-root" />} />
+          </Routes>
+          <PromptModal />
+        </MemoryRouter>
+      </div>
+    );
+  }
   if (initialRoute === '/sidebar-window') {
     return (
       <div className="app-shell bare" data-testid="app-shell-bare" style={{ height: '100vh' }}>
@@ -4144,12 +4215,15 @@ function Harness(): JSX.Element {
           <Route path="/settings/*" element={<SettingsPaneRoute ws={harnessWs} />} />
           <Route path="/jobs/new" element={<JobPaneRoute ws={harnessWs} />} />
           <Route path="/jobs/:id" element={<JobPaneRoute ws={harnessWs} />} />
+          <Route path="/triage" element={<TriagePaneRoute ws={harnessWs} />} />
           <Route path="/jobs" element={<JobsPaneRoute ws={harnessWs} />} />
           <Route path="/lifecycle/:kind" element={<LifecycleRoute />} />
+          <Route path="/connect" element={<ConnectRoute />} />
         </Routes>
         {/* A LATER sibling of `<Routes>` — see `EditorFixtureBridge`'s own
             note on why its effect has to commit after `ChatPaneRoute`'s. */}
         <EditorFixtureBridge />
+        {params.get('viewsync') === '1' ? <ViewPositionSync ws={harnessWs} /> : null}
         {/* Mirrors AppShell: after the routes, so its no-drag hole is folded
             in after `.chat-head`'s drag region (spec/05 § Window chrome). */}
         <SidebarExpandButton />
@@ -4177,7 +4251,7 @@ function Harness(): JSX.Element {
     <>
       <OfflineBanner />
       <HostOfflineBanner />
-      <DesktopUpdateBanner />
+      <UpdateBanner />
       {columns}
       <VoiceNoteOverlay />
     </>

@@ -46,7 +46,12 @@ function textBackend(reply = 'ok'): SdkBackend {
 
 function setup(
   evaluateGoal: EvaluateGoal | undefined,
-  opts: { backend?: SdkBackend; goalWatchPollMs?: number; home?: string } = {},
+  opts: {
+    backend?: SdkBackend;
+    goalWatchPollMs?: number;
+    home?: string;
+    logger?: typeof silent;
+  } = {},
 ) {
   const home = opts.home ?? mkdtempSync(join(tmpdir(), 'patch-goaleval-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-goaleval-folder-')));
@@ -60,7 +65,7 @@ function setup(
     sdkBackend: opts.backend ?? textBackend(),
     oauthAccessToken: 'fake-token',
     emit: (e) => events.push(e),
-    logger: silent,
+    logger: opts.logger ?? silent,
     now: () => Date.now(),
     generateChatId: () => `chat-${++id}`,
     ...(evaluateGoal ? { evaluateGoal } : {}),
@@ -352,7 +357,9 @@ describe('maybeEvaluateGoal — deferred while patch_watch is running', () => {
     const evaluateGoal = vi.fn(
       async (): Promise<GoalVerdict> => ({ verdict: 'met', reason: 'done' }),
     );
-    const { daemon, folder } = setup(evaluateGoal, { goalWatchPollMs: 300 });
+    const lines: string[] = [];
+    const logger = pino({ level: 'warn' }, { write: (l: string) => void lines.push(l) });
+    const { daemon, folder } = setup(evaluateGoal, { goalWatchPollMs: 300, logger });
     const chatId = await daemon.spawnChat({ folder });
     await tick();
     await daemon.setGoal(chatId, 'Do the thing');
@@ -368,6 +375,10 @@ describe('maybeEvaluateGoal — deferred while patch_watch is running', () => {
     expect(evaluateGoal).not.toHaveBeenCalled();
     expect(daemon.chatState.get(chatId)?.goalEvalAwaitingWatches).toBe(true);
     expect(daemon.chatState.get(chatId)?.goal).toBe('Do the thing');
+    // The deferral is never silent, and is logged once rather than per poll.
+    const deferred = lines.filter((l) => l.includes('goal evaluation deferred'));
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]).toContain('patch_watch');
 
     // Wait for watch.ts's own resident poll to notice the process exited,
     // then this chat's goal-poll to re-check.

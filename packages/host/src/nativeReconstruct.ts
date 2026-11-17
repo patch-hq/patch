@@ -420,3 +420,29 @@ export function estimateTokens(events: readonly TrackEntry[]): number {
   }
   return Math.round(chars / 4);
 }
+
+// -----------------------------------------------------------------------
+// OpenAI-compatible direction (local models): a chat's track → chat-completion
+// messages. Tools the other harness ran have no counterpart in this engine's
+// own Bash/Read/Write set that a small model could be trusted to continue, so
+// every tool call and result becomes plain message text, as in the other
+// directions.
+
+export function toChatCompletionMessages(
+  events: readonly TrackEntry[],
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const { event } of events) {
+    if (event.type === 'chat.message') {
+      if (event.role === 'system') continue;
+      out.push({ role: event.role, content: nonEmptyText(event.content) });
+    } else if (event.type === 'chat.tool_call') {
+      out.push({ role: 'assistant', content: `[${event.tool}(${shortJson(event.args)})]` });
+    } else if (event.type === 'chat.tool_result') {
+      out.push({ role: 'user', content: `[→ ${shortJson(event.result)}]` });
+    } else if (event.type === 'chat.artifact') {
+      out.push({ role: 'assistant', content: `[artifact published: ${event.title}]` });
+    }
+  }
+  return out;
+}

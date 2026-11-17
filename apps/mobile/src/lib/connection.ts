@@ -86,7 +86,7 @@ export function offlineBannerText(
 // QUEUED (not blocked) and delivered on reconnect (spec/12 § Daemon-offline UX
 // + § Guaranteed input delivery); only real-time voice is paused.
 export const HOST_OFFLINE_BANNER =
-  'Agent offline. Messages are queued and sent when your Hetzner box reconnects. Voice is paused until then.';
+  'Agent offline. Messages are queued and sent when your host reconnects. Voice is paused until then.';
 
 export function hostOfflineBannerText(daemon: DaemonPresence): string | null {
   return daemon === 'offline' ? HOST_OFFLINE_BANNER : null;
@@ -112,7 +112,7 @@ export function hostControlDisabledReason(
   if (conn === 'offline') return 'Offline — no connection to the server.';
   if (conn === 'unauthenticated') return 'Signed out — link this device again.';
   // WS connected — the only remaining blocker is the host.
-  if (daemon === 'offline') return 'Host offline — paused until your Hetzner box reconnects.';
+  if (daemon === 'offline') return 'Host offline — paused until your host reconnects.';
   if (daemon === 'unknown') return 'Connecting to host…';
   return null;
 }

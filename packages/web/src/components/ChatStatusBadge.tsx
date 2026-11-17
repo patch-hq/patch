@@ -20,7 +20,8 @@ import { StatusBadge } from './StatusBadge.js';
  * outranks an unread entry exactly as it outranks `done`.
  */
 export function liftForUnreadNotification(badge: DisplayBadge, hasUnread: boolean): DisplayBadge {
-  return hasUnread && (badge === 'read' || badge === 'background' || badge === 'monitoring')
+  return hasUnread &&
+    (badge === 'read' || badge === 'agents' || badge === 'background' || badge === 'monitoring')
     ? 'done'
     : badge;
 }

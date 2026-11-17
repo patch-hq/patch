@@ -16,12 +16,10 @@ properties:
 Resource-grouped. `<id>` accepts the full ULID or a unique prefix.
 
 Every `hosts` subcommand that acts on one host takes `--host H`, which defaults
-to the host the command is invoked on (§ Hosts and the CLI). Two are
-exceptions. `hosts remove` requires `--host`, so an irreversible revocation is
-never aimed at a host by default. `hosts pair-device` takes no `--host` and runs
-on the host it is invoked on, because the host adopts the device itself and
-nothing about that exchange crosses the server (`16-voice-device.md`
-§ Connection model).
+to the host the command is invoked on (§ Hosts and the CLI). The exception is
+`hosts remove`, which requires `--host`, so an irreversible revocation is never
+aimed at a host by default. Voice devices are not a host matter: they are added
+in Settings and connect to the server (`16-voice-device.md`).
 
 ```
 patch                                     # interactive picker: recent folders grouped by host, this host first
@@ -42,7 +40,6 @@ patch hosts update [--host H]             # apply an available host update
 patch hosts claude-settings [--host H]                    # that host's Claude Code settings.json text and memory entries
 patch hosts claude-settings set <file> [--host H]         # replace that host's settings.json from a file
 patch hosts memory remove <project> <file> [--host H]     # delete one Claude Code memory entry
-patch hosts pair-device                   # on this host only: open a five-minute window for a voice device to announce itself (16-voice-device.md)
 patch hosts remove --host H               # revoke a host (confirmed; names its chat count)
 
 patch settings                            # every shared setting, and each host's applied version (01-server.md § Settings)
@@ -140,9 +137,7 @@ removal (`10-auth.md` § Revocation), which are server routes rather than wire
 frames. A host-scoped control added to the wire arrives with its command here in
 the same change, so no host setting is reachable from one surface and not
 another. The pairing holds both ways: each command here has a frame or a server
-route behind it, and each frame has a command. `hosts pair-device` is the one
-host command with no wire frame, and it is local-only for that reason
-(§ Commands).
+route behind it, and each frame has a command.
 
 The `chats` family carries a chat's own permission mode, the counterpart to the
 default `settings set permission-mode` sets (`02-host.md` § Permission mode).

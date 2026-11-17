@@ -441,7 +441,8 @@ body {
   -webkit-app-region: drag;
 }
 .overlay-titlebar .sb-brand button,
-.overlay-titlebar .sb-brand input {
+.overlay-titlebar .sb-brand input,
+.overlay-titlebar .sb-brand .conn-dot {
   -webkit-app-region: no-drag;
 }
 
@@ -2131,13 +2132,15 @@ a.ch-row:hover {
    order is the filled segment. Same pill outline as the view trigger beside it. */
 .sidebar-sort-seg {
   display: flex;
+  /* Tabs wrap rather than clip when the sidebar is narrow ("Name" read "Nar"). */
+  flex-wrap: wrap;
   flex: 1 1 0;
   min-width: 0;
   padding: 0;
   border: none;
 }
 .sidebar-sort-seg button {
-  flex: 1;
+  flex: 1 0 auto;
   padding: 3px 4px;
   color: var(--ink-3);
   font-size: var(--text-min);
@@ -2327,7 +2330,7 @@ a.ch-row:hover {
   cursor: pointer;
 }
 .batch-remove-btn:hover {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--bg-soft);
 }
 /* The per-row add-to-batch control tints when the chat is in the batch. */
@@ -3018,7 +3021,8 @@ button.nav-row {
    strongest "happening right now" signal in the list, and giving it to a quiet
    background job that needs no attention until it reports back would make it
    compete with `working` for the eye instead of sitting calmly below it. */
-.badge.badge-background {
+.badge.badge-background,
+.badge.badge-agents {
   background: none;
   box-shadow: none;
   border-radius: 0;
@@ -3575,7 +3579,7 @@ button.nav-row {
   color: var(--accent-strong);
 }
 .head-action.danger:hover {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--danger-tint);
 }
 /* Snooze (spec/04 § Snooze): the trigger reads as active while the chat is
@@ -3631,7 +3635,7 @@ button.nav-row {
   cursor: pointer;
 }
 .head-menu-item.danger:hover {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--danger-tint);
 }
 
@@ -3711,7 +3715,7 @@ button.nav-row {
 }
 .context-menu-item.danger:hover,
 .context-menu-item.danger:focus {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--danger-tint);
 }
 .snooze-wrap {
@@ -3812,6 +3816,82 @@ button.nav-row {
   height: 0;
   align-self: flex-end;
   overflow: visible;
+}
+.scroll-rail {
+  position: absolute;
+  right: 2px;
+  bottom: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  animation: scroll-rail-in 160ms ease-out;
+}
+@keyframes scroll-rail-in {
+  from {
+    opacity: 0;
+  }
+}
+.scroll-rail-top,
+.scroll-rail-stop {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-min);
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 120ms;
+}
+.scroll-rail-top {
+  width: 22px;
+  height: 22px;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+.scroll-rail-stop {
+  min-height: 20px;
+  padding-right: 7px;
+}
+.scroll-rail-top:hover,
+.scroll-rail-top:focus-visible,
+.scroll-rail-stop:hover,
+.scroll-rail-stop:focus-visible {
+  opacity: 1;
+  color: inherit;
+}
+.scroll-rail-label {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  opacity: 0;
+  transform: translateX(4px);
+  transition:
+    opacity 120ms,
+    transform 120ms;
+  pointer-events: none;
+}
+.scroll-rail-stop:hover .scroll-rail-label,
+.scroll-rail-stop:focus-visible .scroll-rail-label {
+  opacity: 1;
+  transform: none;
+}
+.scroll-rail-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  transition: transform 120ms;
+}
+.scroll-rail-stop:hover .scroll-rail-dot {
+  transform: scale(1.6);
 }
 .scroll-down-btn {
   position: absolute;
@@ -4406,7 +4486,7 @@ button.nav-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .delivery-status.turn-failed {
   flex-direction: column;
@@ -4489,7 +4569,7 @@ button.nav-row {
   border: 1px solid var(--danger, #c0392b);
   border-radius: 8px;
   background: var(--danger-tint);
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: 14px;
 }
 .turn-error-body {
@@ -4524,7 +4604,7 @@ button.nav-row {
   justify-content: space-between;
   gap: 12px;
   margin: 2px 0 4px;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: var(--text-min);
   opacity: 0.85;
 }
@@ -4552,6 +4632,9 @@ button.nav-row {
   font-size: var(--text-min);
   opacity: 0;
   transition: opacity 0.12s ease;
+  /* Hidden at rest, but opacity:0 text is still selectable and rides along
+     when a message is selected and copied. Metadata is not message text. */
+  user-select: none;
 }
 .msg-user .msg-meta {
   inset-inline-start: auto;
@@ -4963,7 +5046,7 @@ button.nav-row {
      this box entirely, so a grouped run sat flush against its neighbours
      (0px) while an ungrouped tool call got 10px, an inconsistency in the
      same transcript depending on how many calls happened to run together. */
-  margin: 10px 0;
+  margin: 10px -10px;
   color: var(--ink-2);
   overflow: hidden;
 }
@@ -4990,6 +5073,13 @@ button.nav-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tool-summary-latest {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 8px;
+  color: var(--ink-3);
+}
 .tool-summary:hover {
   background: var(--accent-soft, #cad9be);
 }
@@ -5002,6 +5092,29 @@ button.nav-row {
   margin-left: auto;
   flex: none;
   color: var(--ink-3);
+}
+.tool-cancel {
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.tool-cancelling {
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.tool-cancelled-chip {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-min);
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-radius: 999px;
+  padding: 2px 10px;
 }
 .tool-running-spinner {
   animation: background-task-spin 1.8s linear infinite;
@@ -5243,6 +5356,13 @@ button.view-file-download {
   border: none;
   background: none;
   cursor: pointer;
+}
+.view-file-path {
+  padding: 0 10px 8px;
+  color: var(--ink-3);
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: var(--text-min);
+  overflow-wrap: anywhere;
 }
 .view-file-error {
   padding: 4px 10px 8px;
@@ -5519,6 +5639,12 @@ button.view-file-download {
 }
 .link-preview-status {
   color: var(--ink-3);
+}
+.link-summary-title {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--ink);
 }
 .link-summary-text {
   display: block;
@@ -7419,7 +7545,7 @@ button.view-file-download {
 }
 .doc-suggestion-find {
   text-decoration: line-through;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .doc-suggestion-arrow {
   margin: 0 6px;
@@ -8119,6 +8245,17 @@ button.view-file-download {
   50% {
     opacity: 0.35;
   }
+}
+.desktop-update-text b {
+  font-weight: 600;
+}
+.desktop-update-detail {
+  color: var(--ink-2);
+}
+.desktop-update-banner.failed .desktop-update-detail,
+.desktop-update-banner.due .desktop-update-detail,
+.desktop-update-banner.overdue .desktop-update-detail {
+  color: inherit;
 }
 .desktop-update-text {
   min-width: 0;
@@ -10516,18 +10653,6 @@ button.set-row-open:focus-visible {
   }
 }
 
-/* The new-chat screen when the host cannot run a turn. Stated ABOVE the
-   setup row: this was previously discoverable only by opening the model picker,
-   so the app looked usable and failed at the send. */
-.new-chat-blocked {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  font-size: 14px;
-  color: var(--ink-2);
-}
 .new-chat-failed {
   display: flex;
   flex-direction: column;
@@ -10546,12 +10671,6 @@ button.set-row-open:focus-visible {
 }
 .draft-row .draft-failed {
   color: var(--danger);
-}
-.new-chat-blocked-title {
-  margin: 0;
-}
-.new-chat-blocked a {
-  color: var(--accent-strong);
 }
 
 /* Inline empty/placeholder text (list "No jobs yet", "No folders configured")
@@ -10609,6 +10728,25 @@ button.set-row-open:focus-visible {
   padding: 56px 24px;
   margin: auto;
 }
+/* A short pane (the Manager with its Threads panel, a banner above, a small
+   window) has less room than the drawing wants. The transcript is pinned to
+   its foot, so an empty state taller than the pane had its top scrolled out of
+   sight, under the banner. Instead it shrinks to fit: the stream's content may
+   be no taller than the stream, the drawing
+   scales down. */
+.chat-stream-content:has(> .empty-chat:only-child) {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.chat-stream-content > .empty-chat:only-child {
+  min-height: 0;
+  padding-block: 0;
+}
+.chat-stream-content > .empty-chat:only-child .empty-chat-art {
+  flex: 0 1 132px;
+  min-height: 48px;
+  width: auto;
+}
 .empty-chat-art {
   width: 176px;
   height: auto;
@@ -10631,6 +10769,11 @@ button.set-row-open:focus-visible {
   font-style: italic;
   font-size: 22px;
   color: var(--ink);
+}
+.empty-chat-line {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink-3);
 }
 
 /* The chat panel when the route names a chat this surface has no row for
@@ -11107,6 +11250,49 @@ main.empty-state p {
   resize: vertical;
 }
 
+/* Goal editor: follow-on goals and the two cadences under the goal text. */
+.goal-then-row,
+.goal-cadence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.goal-then-index,
+.goal-cadence-label {
+  flex: 0 0 64px;
+  color: var(--ink-2);
+  font-size: var(--text-min);
+}
+.goal-then-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.goal-then-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+.goal-cadence select,
+.goal-cadence input {
+  padding: 5px 8px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.goal-cadence input {
+  width: 72px;
+}
+
 /* ---------- Inline click-to-edit text (goal bar, task rows) ---------- */
 
 /* Read mode is a button so it is keyboard-reachable, but it must read as the
@@ -11159,7 +11345,6 @@ main.empty-state p {
   font: inherit;
   text-align: left;
   padding: 12px 16px 8px 16px;
-  cursor: pointer;
 }
 .task-bar-head {
   flex: 1;
@@ -11356,6 +11541,10 @@ main.empty-state p {
 }
 .wake-edit-modal {
   max-width: 640px;
+  /* A long message grows the card past the window and pushes the date/time
+     picker off-screen: cap it and scroll inside instead. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 .wake-edit-field {
   display: flex;
@@ -11366,6 +11555,7 @@ main.empty-state p {
   font-size: var(--text-min);
 }
 .wake-edit-textarea {
+  max-height: 40vh;
   width: 100%;
   resize: vertical;
   padding: 8px 10px;
@@ -11613,6 +11803,7 @@ main.empty-state p {
   background: color-mix(in srgb, var(--permission) 20%, transparent);
   color: var(--permission);
 }
+.delegate-pill-started,
 .delegate-pill-done,
 .delegate-pill-stopped {
   background: color-mix(in srgb, var(--ink-3) 18%, transparent);
@@ -11757,8 +11948,15 @@ main.empty-state p {
   opacity: 0.75;
 }
 .folder-quick:disabled,
-.model-quick:disabled {
+.model-quick:disabled,
+.folder-pill:disabled,
+.model-pill:disabled {
   cursor: default;
+}
+/* A control that cannot act reads as one: faded, whatever its fill. */
+.folder-pill:disabled,
+.model-pill:disabled {
+  opacity: 0.5;
 }
 /* The 50% fade that marks an unavailable pill as unavailable washes out the
    SELECTED fill instead: white-on-accent and the dimming both converge toward
@@ -12903,7 +13101,7 @@ main.empty-state p {
 }
 .move-chat-error {
   margin: 0 0 12px;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: var(--text-min);
 }
 
@@ -13674,7 +13872,7 @@ input.browse-filter {
   color: var(--ink-2);
 }
 .sweep-status-error {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: var(--text-min);
 }
 
@@ -13685,32 +13883,37 @@ input.browse-filter {
 .voice-bar {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 16px;
   background: #1f1c17;
   color: #f4f0e4;
   font-size: var(--text-min);
   border-bottom: 1px solid #3a342a;
 }
+.vb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vb-note {
+  color: #cfc8b8;
+  font-size: var(--text-min);
+  overflow-wrap: anywhere;
+}
+.voice-bar[data-state='heard'] .vb-note {
+  opacity: 0.75;
+  font-style: italic;
+}
 .vb-mode {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  letter-spacing: 0.1em;
   /* The strip is the same dark in both themes, so its inks are fixed too —
      a theme token here went dark-on-dark in the dark theme. */
   color: #a9d391;
   font-weight: 600;
   flex: 0 0 auto;
-}
-.vb-chat {
-  color: #e6e0d2;
-  flex: 0 0 auto;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .vb-line {
   flex: 1 1 auto;
@@ -13754,6 +13957,7 @@ input.browse-filter {
 .overlay-titlebar .voice-bar {
   padding-left: var(--overlay-titlebar-inset);
   min-height: calc(var(--overlay-titlebar-lights-bottom) + 3px);
+  justify-content: center;
   -webkit-app-region: drag;
 }
 .overlay-titlebar .voice-bar button {
@@ -13802,29 +14006,6 @@ input.browse-filter {
   border-color: var(--voice);
   color: var(--on-accent);
 }
-/* Phone width: the transcript gets its own full-width row and wraps, so the bar
-   grows to hold what was said instead of clipping it. */
-@media (max-width: 800px) {
-  .voice-bar {
-    flex-wrap: wrap;
-    row-gap: 6px;
-  }
-  .vb-chat {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  .vb-line {
-    order: 1;
-    flex: 1 1 100%;
-    overflow: visible;
-  }
-  .vb-text {
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-}
-
 /* --- Usage, where the work happens ---------------------------------------
    A crumb on the New chat header (spec/14 §8 New-chat setup row), and the
    notes on the pause banner. Both exist because the only way to learn an
@@ -14063,6 +14244,23 @@ input.browse-filter {
   position: relative;
   z-index: 2;
 }
+/* A file editor in a narrow tab: the meta strip holds up to nine controls that
+   cannot shrink, so on one line they were clipped off the right edge. Below a
+   column width of 520px the path takes its own row and the controls wrap under
+   it. Sized to the editor column, not the viewport, because the rail and tabs
+   are resizable. */
+.browse-editor {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .browse-meta {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .browse-meta .browse-meta-path {
+    flex: 1 1 100%;
+  }
+}
 
 /* Unsaved-edit indicator in a form route's header (spec/14 § Jobs view —
    Unsaved changes). Deliberately the SAME chip as `.question-header`: small,
@@ -14183,6 +14381,7 @@ button.chat-usage-crumb:hover {
 }
 .context-ring-label {
   line-height: 1;
+  white-space: nowrap;
 }
 .context-ring-track {
   fill: none;
@@ -16918,7 +17117,7 @@ select.permission-mode.is-pending {
   font-weight: 600;
 }
 .snooze-back-line.is-error {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .snooze-divider {
   display: flex;
@@ -16938,6 +17137,26 @@ select.permission-mode.is-pending {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+.snooze-divider-details {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--danger);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.snooze-error-detail {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
 }
 
 /* Quotes and the replies under them, inside the prompt input (spec/14 §
@@ -17310,6 +17529,20 @@ select.permission-mode.is-pending {
 .msg-edit-anchor ~ * {
   opacity: 0.35;
   pointer-events: none;
+}
+.composer-signed-out {
+  width: 100%;
+  max-width: 780px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 8px;
+  font-size: var(--text-min);
+  color: var(--ink-2);
+}
+.composer-signed-out a {
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 .composer-edit-banner {
   display: flex;
@@ -18178,4 +18411,408 @@ a.drop-target {
     min-width: var(--tap-min);
     height: var(--tap-min);
   }
+}
+/* Stopped / interrupted marker sits in the transcript flow, between entries. */
+.turn-stop-marker {
+  padding: 4px 0;
+}
+
+/* ---- Welcome: setup after the desktop app's first run (spec/05) ---- */
+.welcome {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--bg-app);
+  padding: 48px 24px;
+  box-sizing: border-box;
+}
+.welcome-drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 40px;
+  -webkit-app-region: drag;
+}
+.welcome-card {
+  width: min(480px, 100%);
+  display: grid;
+  gap: 24px;
+}
+.welcome-dots {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.welcome-dots li {
+  width: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.welcome-dots li.done {
+  background: var(--accent);
+}
+.welcome-step {
+  display: grid;
+  gap: 16px;
+}
+.welcome-step h1 {
+  margin: 0 0 4px;
+  font-family: 'Fraunces Variable', Georgia, serif;
+  font-variation-settings:
+    'opsz' 144,
+    'SOFT' 30,
+    'wght' 500;
+  font-size: 30px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.welcome-provider {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+.welcome-provider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.welcome-provider-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+.welcome-ok {
+  font-size: 14px;
+  color: var(--accent-strong);
+}
+.welcome-ok::before {
+  content: '✓ ';
+}
+.welcome-note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.welcome-note p {
+  margin: 0;
+}
+.welcome-options {
+  display: grid;
+  gap: 8px;
+}
+.welcome-options.scroll {
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.welcome-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+.welcome-option.checked {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.welcome-option input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.welcome-option-text {
+  display: grid;
+  gap: 2px;
+}
+.welcome-option-title {
+  font-size: 16px;
+  font-weight: 500;
+}
+.welcome-option-hint {
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.welcome-option-hint.warn {
+  color: var(--danger);
+}
+.welcome-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.welcome-primary {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.welcome-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+.welcome-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.welcome-skip,
+.welcome-back {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.welcome-skip:hover,
+.welcome-back:hover {
+  background: var(--bg-soft);
+}
+.welcome-back {
+  justify-self: start;
+  margin-left: -10px;
+}
+/* A footer whose only action is quiet lines its text up with the cards. */
+.welcome-footer > .welcome-skip:first-child {
+  margin-left: -10px;
+}
+.welcome-phone-steps {
+  margin: 0;
+  /* Numbered, flush with the heading: the global reset drops list markers. */
+  padding-left: 0;
+  list-style: decimal inside;
+  display: grid;
+  gap: 6px;
+  font-size: 16px;
+}
+.welcome-lead {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+.welcome-muted {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.welcome-phone-steps a {
+  color: var(--accent-strong);
+}
+.welcome-qr canvas {
+  display: block;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.claude-signin {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.claude-signin-label {
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.claude-signin .set-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+}
+.welcome .set-error {
+  margin: 0;
+  font-size: 14px;
+}
+.claude-signin .set-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.set-val-available {
+  color: var(--waiting);
+  font-weight: 600;
+}
+
+.new-chat-folder-path {
+  margin: 4px 0 0;
+  font-size: var(--text-min);
+  word-break: break-all;
+}
+
+/* Triage (spec/14 § Triage): one waiting chat at a time. */
+.triage-route {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.triage-count {
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.triage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 28px calc(16px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+.triage-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink-2);
+}
+.triage-message {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.triage-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.triage-reply textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  /* 16px stops iOS/Android zooming the page when the box takes focus. */
+  font-size: 16px;
+}
+.triage-reply .primary-btn {
+  align-self: flex-end;
+}
+.triage-empty,
+.triage-loading {
+  color: var(--ink-3);
+  text-align: center;
+  padding: 48px 16px;
+}
+@media (max-width: 700px) {
+  .triage-card {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+  .triage-reply .primary-btn {
+    align-self: stretch;
+  }
+}
+/* Slim running-agent pill above the composer: matches the input's width and
+   corner radius, muted so it never competes with it. */
+.agent-running-bar-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0 20px;
+  margin-bottom: -6px;
+}
+.agent-running-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 780px;
+  box-sizing: border-box;
+  padding: 4px 10px 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  line-height: 1.4;
+}
+.agent-running-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-running-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-running-bar-controls {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.agent-running-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.agent-running-bar-btn:hover:not(:disabled) {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.agent-running-bar-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.agent-chevron-open {
+  transform: rotate(180deg);
+}
+.agent-running-bar-error {
+  color: var(--danger);
+}
+@media (max-width: 640px) {
+  /* Same slim gutter as the composer, so the pill stays flush with the input. */
+  .agent-running-bar-wrap {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
+.new-chat-make-default {
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--text-muted);
+  opacity: 0.6;
+  cursor: pointer;
+}
+.new-chat-make-default:hover,
+.new-chat-make-default:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
 }

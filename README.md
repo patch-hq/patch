@@ -1,11 +1,23 @@
 # Patch
 
-Run and steer Claude Code agents from anywhere: a thin coordination layer over
-Claude Code across the terminal, web, phone, desktop and a voice device, with
-triggers (cron, webhooks, Todoist) and hosts you run yourself. A host does the
-work on a host you choose; a server connects your devices to your hosts.
+A harness for Claude Code, Codex and more, for people who spend their day in
+agents. Self-hosted, free and open source. Use the subscriptions you already
+have: any provider, any account.
 
-The design is written up in `spec/`. Licensed under the MIT licence.
+Every machine you run agents on shows up in one list, across the terminal, web,
+phone and desktop. Jobs run agents on a schedule or in response to cron,
+webhooks and Todoist. Built-in design tools (pads) let you react to a mock-up
+directly, and nothing is hidden: you can see what each agent is doing. Agents
+also get their own tools: goals, background sub-agents, watches, wakes,
+notifications and messaging between chats. A host does the work on a machine you
+choose; a server connects your devices to your hosts.
+
+The design is written up in `spec/`.
+
+Copyright (c) 2026 Tom Chambers. Licensed under the GNU Affero General Public
+Licence v3 (AGPL-3.0): you can read, change and run your own version; if you
+offer a modified Patch to others over a network, you must publish your changes
+under the same licence. Releases up to v1.1.1276 were published under MIT.
 
 ## Install a server
 
@@ -76,7 +88,6 @@ packages/
   cli/              Node + commander + Ink terminal client
   web/              Vite + React 19 + Tailwind v4 SPA (mounts at /app/)
   desktop/          Electron + electron-builder shell (macOS)
-  voice-firmware/   ESP-IDF project for the voice device (NOT a pnpm package)
   kokoro-sidecar/   Python (uv) Kokoro TTS sidecar — host spawns it; 24 kHz PCM16 over WS
   whisper-sidecar/  Python (uv) faster-whisper STT sidecar (WHISPER_BACKEND=local)
 apps/

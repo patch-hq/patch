@@ -61,7 +61,7 @@ export function buildRecentFolders(
   return [...byKey.values()].sort((a, b) => b.lastUpdated - a.lastUpdated);
 }
 
-/** Rows matching `query` by name or path (case-insensitive), narrowed to a host unless `all`. */
+/** Rows matching `query` by name or path (case-insensitive), narrowed to a host unless `all` (the sheet itself never passes `all`). */
 export function filterRows(
   recents: readonly FolderRecent[],
   query: string,

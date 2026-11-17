@@ -8,14 +8,14 @@
 // same as typing a new `/goal`). Editing and the clear (×) control are both
 // optimistic, reverting + surfacing a toast on failure (NO FALLBACK).
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { CircleCheck, CircleX, Pause, Target, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
-import type { ChatRow } from '../stores/types.js';
+import type { ChatRow, GoalPlan } from '../stores/types.js';
 import { formatDateTime } from '../lib/formatDateTime.js';
-import { ModalOverlay } from './ModalOverlay.js';
+import { GoalEditor, planOf, type GoalDraft } from './GoalEditor.js';
 import { StatusPill, StatusRow } from './StatusRow.js';
 
 /**
@@ -33,83 +33,18 @@ export function formatElapsed(ms: number): string {
   return `${s}s`;
 }
 
+/** `3 turns`, `1 turn`, `10 minutes`. */
+export function describeEvery(e: { unit: 'turns' | 'minutes'; n: number }): string {
+  const unit = e.unit === 'turns' ? 'turn' : 'minute';
+  return e.n === 1 ? `1 ${unit}` : `${e.n} ${unit}s`;
+}
+
 /** Humanise a token count: `842`, `8.2k`, `1.4M`. */
 export function formatTokenCount(n: number): string {
   if (n < 1000) return `${n}`;
   // 999_999 rounds to "1000.0" at one decimal: that is a million, not "1000k".
   if (Number((n / 1000).toFixed(1)) < 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
-}
-
-function GoalEditModal({
-  value,
-  onSave,
-  onClose,
-}: {
-  value: string;
-  onSave: (next: string) => void;
-  onClose: () => void;
-}): JSX.Element {
-  const [draft, setDraft] = useState(value);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
-  function save(): void {
-    const next = draft.trim();
-    if (next === '') return;
-    if (next !== value) onSave(next);
-    onClose();
-  }
-  return (
-    <ModalOverlay testId="goal-edit-overlay">
-      <div className="modal-backdrop" onClick={onClose} />
-      <div
-        className="modal-card goal-edit-modal"
-        data-testid="goal-edit-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Edit goal"
-      >
-        <textarea
-          ref={ref}
-          className="goal-edit-input"
-          data-testid="goal-edit-input"
-          value={draft}
-          rows={5}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              onClose();
-            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              save();
-            }
-          }}
-        />
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="modal-btn"
-            data-testid="goal-edit-cancel"
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="modal-btn primary-btn"
-            data-testid="goal-edit-save"
-            disabled={draft.trim() === ''}
-            onClick={save}
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </ModalOverlay>
-  );
 }
 
 export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
@@ -133,13 +68,15 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
 
   if (goal === null || goal.trim() === '') return null;
 
-  async function writeGoal(next: string | null): Promise<void> {
+  async function writeGoal(next: string | null, plan: GoalPlan = {}): Promise<void> {
     const prev = goal;
-    setGoal(row.chatId, next);
+    const prevPlan = planOf(row);
+    setGoal(row.chatId, next, plan);
     try {
-      await api.setGoal(row.chatId, next);
+      if (Object.keys(plan).length === 0) await api.setGoal(row.chatId, next);
+      else await api.setGoal(row.chatId, next, plan);
     } catch (err) {
-      setGoal(row.chatId, prev);
+      setGoal(row.chatId, prev, prevPlan);
       pushError(
         `${next === null ? 'clearing' : 'updating'} goal failed: ${(err as Error).message}`,
       );
@@ -148,13 +85,21 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
 
   const paused = progress?.pausedByStop === true;
   const meta = progress
-    ? `${formatElapsed(now - progress.startedAt)} · ${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}`
+    ? `${formatElapsed(now - progress.startedAt)} · ${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}${(row.goalQueue ?? []).length > 0 ? ` · ${(row.goalQueue ?? []).length} to follow` : ''}`
     : null;
   const detail: string[] = [];
   if (progress && progress.tokensSpent > 0)
     detail.push(`${formatTokenCount(progress.tokensSpent)} tokens`);
   if (progress?.lastVerdict === 'not_met' && progress.lastReason !== null)
     detail.push(`Not met: ${progress.lastReason}`);
+  const queue = row.goalQueue ?? [];
+  const remind = row.goalReminderEvery ?? null;
+  const checkInEvery = row.goalCheckInEvery ?? null;
+  const checkIn = progress?.lastCheckIn ?? null;
+  if (checkIn)
+    detail.push(
+      `Check-in ${checkIn.status === 'on_track' ? 'on track' : 'off track'}: ${checkIn.reason}`,
+    );
 
   const sub =
     paused || expanded ? (
@@ -162,6 +107,13 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
         {paused && (
           <div data-testid="goal-banner-paused-note">
             You stopped the chat. Send a message to resume.
+          </div>
+        )}
+        {expanded && (queue.length > 0 || remind !== null || checkInEvery !== null) && (
+          <div data-testid="goal-banner-plan">
+            {queue.length > 0 && <span>Then: {queue.join(' → ')}. </span>}
+            {remind !== null && <span>Reminds every {describeEvery(remind)}. </span>}
+            {checkInEvery !== null && <span>Checks in every {describeEvery(checkInEvery)}.</span>}
           </div>
         )}
         {expanded && (
@@ -231,9 +183,10 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
         </button>
       </StatusRow>
       {editing && (
-        <GoalEditModal
-          value={goal}
-          onSave={(next) => void writeGoal(next)}
+        <GoalEditor
+          goal={goal}
+          plan={planOf(row)}
+          onSave={(d: GoalDraft) => void writeGoal(d.goal, d.plan)}
           onClose={() => setEditing(false)}
         />
       )}
@@ -254,7 +207,14 @@ function readDismissed(): Record<string, number> {
  * tokens and the evaluator's reason, wrapped. Dismissible per finished goal
  * (remembered by its end time, so the next goal to finish shows again).
  */
-export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
+export function FinishedGoalBanner({
+  row,
+  onNotMet,
+}: {
+  row: ChatRow;
+  /** Re-arm the finished goal and send the agent back to work on it. Absent: no button. */
+  onNotMet?: (condition: string) => void;
+}): JSX.Element | null {
   const last = row.lastGoal;
   const [dismissed, setDismissed] = useState<Record<string, number>>(readDismissed);
   const [expanded, setExpanded] = useState(false);
@@ -289,15 +249,28 @@ export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | nul
         ) : undefined
       }
       action={
-        <button
-          type="button"
-          data-testid="finished-goal-dismiss"
-          aria-label="Dismiss"
-          title="Dismiss"
-          onClick={dismiss}
-        >
-          <X size={16} aria-hidden />
-        </button>
+        <>
+          {met && onNotMet && (
+            <button
+              type="button"
+              className="status-link status-link-underline"
+              data-testid="finished-goal-not-met"
+              title="Mark as not met"
+              onClick={() => onNotMet(last!.condition)}
+            >
+              Not met
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="finished-goal-dismiss"
+            aria-label="Dismiss"
+            title="Dismiss"
+            onClick={dismiss}
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </>
       }
     >
       <StatusPill

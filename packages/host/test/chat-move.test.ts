@@ -211,6 +211,54 @@ describe('moving a chat between hosts', () => {
     );
   });
 
+  describe('to another folder on the same host', () => {
+    it('keeps its history and session, runs in the new folder, and announces the new folder', async () => {
+      const mac = host('mac');
+      const chatId = await chatWithOneTurn(mac);
+      const other = realpathSync(mkdtempSync(join(tmpdir(), 'patch-move-mac-other-')));
+      mac.events.length = 0;
+      mac.daemon.refolderChat(chatId, other);
+
+      expect(mac.daemon.chatState.get(chatId)?.folder).toBe(other);
+      expect(mac.events.find((e) => e.type === 'chat.spawned')).toMatchObject({
+        chatId,
+        hostId: 'mac',
+        folder: other,
+      });
+      expect(texts(mac.daemon, chatId)).toEqual(['make a plan', 'the plan is ready']);
+      mac.sdk.enqueue([{ type: 'assistant', content: 'carrying on', sessionId: 'sess-1' }]);
+      await mac.daemon.sendInput({ chatId, message: 'carry on', localId: 'L-after' });
+      expect(mac.sdk.lastOptions()?.resumeSessionId).toBe('sess-1');
+      expect(mac.sdk.lastOptions()?.cwd).toBe(other);
+    });
+
+    it('refuses a missing folder or the current one, and leaves the chat as it was', async () => {
+      const mac = host('mac');
+      const chatId = await chatWithOneTurn(mac);
+      expect(() => mac.daemon.refolderChat(chatId, '/no/such/folder')).toThrow(
+        expect.objectContaining({ code: 'folder_not_found' }) as ChatMoveError,
+      );
+      expect(() => mac.daemon.refolderChat(chatId, mac.folder)).toThrow(
+        expect.objectContaining({ code: 'already_exists' }) as ChatMoveError,
+      );
+      expect(mac.daemon.chatState.get(chatId)?.folder).toBe(mac.folder);
+      expect(existsSync(join(mac.home, 'chats', chatId))).toBe(true);
+      mac.sdk.enqueue([{ type: 'assistant', content: 'still fine', sessionId: 'sess-1' }]);
+      await mac.daemon.sendInput({ chatId, message: 'hello', localId: 'L1' });
+      expect(texts(mac.daemon, chatId).at(-1)).toBe('still fine');
+    });
+
+    it('will not move a chat that is mid-turn', async () => {
+      const mac = host('mac');
+      const chatId = await chatWithOneTurn(mac);
+      const other = realpathSync(mkdtempSync(join(tmpdir(), 'patch-move-mac-other-')));
+      mac.daemon.chatState.get(chatId)!.activity = 'running';
+      expect(() => mac.daemon.refolderChat(chatId, other)).toThrow(
+        expect.objectContaining({ code: 'busy' }) as ChatMoveError,
+      );
+    });
+  });
+
   it('refuses a folder the target does not have, and leaves nothing behind', async () => {
     const mac = host('mac');
     const box = host('box');

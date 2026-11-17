@@ -13,6 +13,7 @@ import { Sidebar } from '../components/Sidebar.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
 import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { PromptModal } from '../components/PromptModal.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -75,6 +76,9 @@ const MENU = 'chat-context-menu-c1';
 
 describe('sidebar row context menu', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     useChatStore.getState()._reset();
     useLayoutStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
@@ -463,6 +467,9 @@ describe('sidebar row context menu', () => {
 
 describe('sidebar row context menu over a multi-selection', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     useChatStore.getState()._reset();
     useLayoutStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');

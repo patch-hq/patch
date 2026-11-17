@@ -8,7 +8,7 @@
 export type ThreadItem =
   /** A quoted passage, with the `> ` markers removed. */
   | { kind: 'quote'; text: string }
-  /** What the user wrote in reply to the quote above it. Always followed by another quote. */
+  /** What the user wrote in reply to the quote above it (or ahead of the first quote, when a quote was dropped into the middle of typed text). Always followed by another quote. */
   | { kind: 'reply'; text: string };
 
 export interface SplitDraft {
@@ -62,7 +62,7 @@ export function splitThread(draft: string): SplitDraft {
       }
       k = end;
     }
-    if (next === -1 || thread.length === 0) break;
+    if (next === -1) break;
     thread.push({ kind: 'reply', text: lines.slice(i, next - 1).join('\n') });
     i = next;
   }

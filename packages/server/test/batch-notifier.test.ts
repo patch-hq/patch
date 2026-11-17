@@ -227,4 +227,26 @@ describe('BatchNotifier', () => {
     notifier.recomputeTriggers();
     expect(store.current()).not.toBeNull();
   });
+  test('an archived member leaves the batch and no longer blocks the ending', () => {
+    store.start({ type: 'time', minutes: 20 });
+    notifier.start();
+    seedRunning('c1');
+    seedRunning('c2');
+    feed(state('c1', { activity: 'idle' }));
+    feed(state('c2', { activity: 'idle' }));
+    store.checkIn();
+    feed(state('c2', { activity: 'idle', status: 'archived' }));
+    expect(store.current()?.members).toEqual(['c1']);
+    store.markOpened('c1');
+    notifier.recomputeTriggers();
+    expect(store.current()).toBeNull();
+  });
+
+  test('an archived chat does not auto-join the batch', () => {
+    feed(spawned('c3'));
+    feed(state('c3', { status: 'archived' }));
+    store.start({ type: 'time', minutes: 20 });
+    feed(state('c3', { activity: 'running', status: 'archived' }));
+    expect(store.current()?.members).toEqual([]);
+  });
 });

@@ -22,6 +22,7 @@ import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { OpenableLink } from '../components/OpenableLink.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { railMarkers, nextFarState, isFar, type FarState } from '../lib/scrollRail.js';
 import { classifyTurnFailure } from '../lib/turnFailure.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
@@ -83,7 +84,10 @@ import { HookBlockCard } from '../components/HookBlockCard.js';
 import type { HookRunResult } from '@patch/wire/hooks';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ThreadsStrip } from '../components/ThreadsStrip.js';
-import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
+
+/** What the Manager is, said where a newcomer first meets it: its empty chat. */
+export const MANAGER_EMPTY_LINE = 'Ask about any of your chats, or have it message them for you.';
+import { CONNECT_PATH, ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
@@ -109,6 +113,7 @@ import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
 import { isMeetingShown, useMeetingStore } from '../stores/meetingStore.js';
 import { presentFailure } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
+import { StrayProcessBar } from '../components/StrayProcessBar.js';
 import { StatusPill, StatusRow } from '../components/StatusRow.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
@@ -133,7 +138,7 @@ import {
   creditPause,
   type QueueRelease,
 } from '../lib/queueLabel.js';
-import { attemptPaging } from '../lib/turnAttempts.js';
+import { attemptPaging, liveAttemptSelection, type AttemptSelection } from '../lib/turnAttempts.js';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
 import { AskHumanCard } from '../components/AskHumanCard.js';
@@ -144,6 +149,7 @@ import {
   ArrowUp,
   CalendarClock,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   Bell,
@@ -168,6 +174,8 @@ import {
   Check,
   Volume2,
   Square,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
@@ -260,6 +268,8 @@ const chatScrollMemory = new Map<
 // through the transcript's own late layout; and how long the ring stays.
 const JUMP_WAIT_MS = 5000;
 const JUMP_SETTLE_MS = 1000;
+// The scroll rail stays this long after the reader stops scrolling.
+const RAIL_IDLE_MS = 4000;
 const JUMP_HIGHLIGHT_MS = 2000;
 
 // How long a restored (non-bottom) open keeps re-pinning to its anchor
@@ -677,6 +687,58 @@ export function ChatRoute({
   const streamRef = useRef<HTMLElement>(null);
   // Mirrors `followRef` for the floating down arrow (spec/14 § Main chat panel).
   const [showScrollDown, setShowScrollDown] = useState(false);
+  // The up arrow above it: jump straight to the first message of a long chat.
+  const [showScrollUp, setShowScrollUp] = useState(false);
+  const railPoints = useMemo(() => railMarkers(timeline), [timeline]);
+  const showScrollUpRef = useRef(false);
+  showScrollUpRef.current = showScrollUp;
+  // The scroll rail (up arrow + dated dots) is for someone heading a long way
+  // up: it opens after a sustained upward burst, not whenever the chat is long,
+  // and goes away again once the reader stops scrolling.
+  const farRef = useRef<FarState>({ up: 0, lastAt: 0 });
+  const railHideRef = useRef<number | null>(null);
+  const railHoverRef = useRef(false);
+  const armRailHide = (): void => {
+    if (railHideRef.current !== null) window.clearTimeout(railHideRef.current);
+    railHideRef.current = window.setTimeout(() => {
+      railHideRef.current = null;
+      if (railHoverRef.current) armRailHide();
+      else setShowScrollUp(false);
+    }, RAIL_IDLE_MS);
+  };
+  function noteFarScroll(el: HTMLElement, delta: number): void {
+    farRef.current = nextFarState(farRef.current, delta, Date.now());
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+    if (atBottom) {
+      setShowScrollUp(false);
+      return;
+    }
+    if (timelineRef.current.length > TAIL_ENTRIES && isFar(farRef.current, el.clientHeight)) {
+      setShowScrollUp(true);
+    }
+    if (showScrollUpRef.current || isFar(farRef.current, el.clientHeight)) armRailHide();
+  }
+  function railJump(seq: number | undefined, first: boolean): void {
+    if (seq === undefined) return;
+    followRef.current = false;
+    setShowScrollDown(true);
+    restoreAnchorRef.current = null;
+    jumpRef.current = {
+      chatId,
+      seq: first ? (timelineRef.current[0]?.seq ?? seq) : seq,
+      found: false,
+      settleUntil: 0,
+      expireAt: Date.now() + JUMP_WAIT_MS,
+    };
+    tryJump();
+    armRailHide();
+  }
+  useEffect(
+    () => () => {
+      if (railHideRef.current !== null) window.clearTimeout(railHideRef.current);
+    },
+    [],
+  );
   const contentRef = useRef<HTMLDivElement>(null);
   // Index of the oldest mounted entry. `null` = the newest TAIL_ENTRIES, tracking
   // the tail as it grows. Keyed to the chat so a chat switch starts at the tail.
@@ -776,6 +838,11 @@ export function ChatRoute({
   const seenLocalIdsRef = useRef<Set<string> | null>(null);
   // Whether a send has re-pinned since this chat was opened.
   const repinnedForSendRef = useRef(false);
+  // Reply pin (see the effect below): how many user / assistant messages the
+  // transcript held last time (null until seeded for this open), and whether
+  // the user has scrolled UP since their latest message.
+  const turnCountsRef = useRef<{ user: number; assistant: number } | null>(null);
+  const scrolledUpSinceUserMsgRef = useRef(false);
   // The message a `?seq=` open is heading for. Held in a ref, not read from the
   // URL, because the param is cleared as soon as it is taken — so a later
   // re-render (or reopening the chat) never jumps again.
@@ -815,6 +882,7 @@ export function ChatRoute({
     const el = streamRef.current;
     if (!el || el.scrollTop <= 0) return;
     followRef.current = false;
+    scrolledUpSinceUserMsgRef.current = true;
   }
 
   // Wheel/trackpad up.
@@ -916,6 +984,7 @@ export function ChatRoute({
     const top =
       t.height > el.clientHeight ? offset - 16 : offset - (el.clientHeight - t.height) / 2;
     followRef.current = false;
+    scrolledUpSinceUserMsgRef.current = true;
     setSelfScrollTop(el, Math.max(0, top));
     if (!jump.found) {
       jump.found = true;
@@ -973,6 +1042,9 @@ export function ChatRoute({
     // now on screen rather than carrying the last one's echoes over.
     seenLocalIdsRef.current = null;
     repinnedForSendRef.current = false;
+    turnCountsRef.current = null;
+    // Reopened away from the bottom: the user's earlier scroll-up still stands.
+    scrolledUpSinceUserMsgRef.current = saved ? !saved.atBottom : false;
     lastScrollRef.current = { top: 0, maxTop: 0 };
     touchStartYRef.current = null;
     applyInitialScroll();
@@ -1083,6 +1155,32 @@ export function ChatRoute({
     requestAnimationFrame(() => scrollToBottom());
   }, [timeline]);
 
+  // A reply landing after the user's own latest message pins to the bottom
+  // unless the user has scrolled up since sending. The send re-pin above only
+  // sees optimistic echoes, so a message sent from the phone or by voice (which
+  // arrives as a persisted user message, no localId) never re-armed follow, and
+  // a follow flag dropped by any stray scroll left the reply below the fold
+  // with only the scroll-to-bottom arrow. Counts, not seqs: an echo
+  // reconciling into its persisted copy changes the seq but not the count.
+  useEffect(() => {
+    let user = 0;
+    let assistant = 0;
+    for (const e of timeline) {
+      if (e.kind !== 'message') continue;
+      if (e.role === 'user') user++;
+      else if (e.role === 'assistant') assistant++;
+    }
+    const prev = turnCountsRef.current;
+    turnCountsRef.current = { user, assistant };
+    if (prev === null) return;
+    if (user > prev.user) scrolledUpSinceUserMsgRef.current = false;
+    if (assistant <= prev.assistant || user === 0) return;
+    if (scrolledUpSinceUserMsgRef.current) return;
+    followRef.current = true;
+    setShowScrollDown(false);
+    requestAnimationFrame(() => scrollToBottom());
+  }, [timeline]);
+
   // The timeline hydrates and streams in over several frames AFTER the first
   // render — markdown/diff/tool blocks measure and grow the scrollHeight long
   // after the effects above ran, which would otherwise strand us mid-history.
@@ -1184,6 +1282,7 @@ export function ChatRoute({
     // them back, and neither must a still-settling restore (above).
     jumpRef.current = null;
     restoreAnchorRef.current = null;
+    noteFarScroll(el, el.scrollTop - prev.top);
     // A shrinking scroll range (a tool block collapsing, a placeholder being
     // replaced) drops scrollTop by exactly the amount the range lost, with no
     // input from anyone — subtract it before reading the rest as intent.
@@ -1199,6 +1298,7 @@ export function ChatRoute({
     // attachment image decoding) before its scroll event is dispatched, so
     // the event reports a position short of the grown bottom. Reading that
     // as "scrolled away" dropped follow and stranded the chat short of it.
+    if (movedUp) scrolledUpSinceUserMsgRef.current = true;
     followRef.current = movedUp ? false : followRef.current || atBottom;
     setShowScrollDown(!followRef.current);
     // Remember this chat's position so reopening restores it (spec/14 § Main
@@ -1377,9 +1477,9 @@ export function ChatRoute({
   // lost the race has to go into the composer).
   // spec/14 § Attempt pager — which attempt each re-sent turn's pager is parked
   // on, by the turn's own seq. Absent means the one that settled (the last).
-  const [attemptSel, setAttemptSel] = useState<ReadonlyMap<number, number>>(new Map());
-  const handleAttemptAt = useCallback((seq: number, idx: number) => {
-    setAttemptSel((m) => new Map(m).set(seq, idx));
+  const [attemptSelRaw, setAttemptSel] = useState<ReadonlyMap<number, AttemptSelection>>(new Map());
+  const handleAttemptAt = useCallback((seq: number, idx: number, lastSeq: number) => {
+    setAttemptSel((m) => new Map(m).set(seq, { idx, lastSeq }));
   }, []);
   const [queuedEdit, setQueuedEdit] = useState<{ localId: string; text: string } | null>(null);
   // Text handed to the mounted composer (a queued edit that lost the race).
@@ -2051,6 +2151,43 @@ export function ChatRoute({
     });
     return found;
   };
+  // Where each stopped / interrupted turn ended (spec/14 § Running-turn
+  // controls): the marker sits before the next turn's user message, or at the
+  // end of the live transcript, so it reads as "the agent stopped HERE". A turn
+  // that also failed keeps its failed line on the message instead.
+  const stopMarkerAt = new Map<number, ChatEventEntry[]>();
+  timeline.forEach((e, idx) => {
+    if (e.kind !== 'message' || e.role !== 'user' || e.queued) return;
+    if (!(e.turnStopped || e.turnInterrupted) || e.turnFailed || e.deliveryFailed) return;
+    let end = idx + 1;
+    while (end < queuedFrom) {
+      const n = timeline[end];
+      if (n && n.kind === 'message' && n.role === 'user') break;
+      end++;
+    }
+    stopMarkerAt.set(end, [...(stopMarkerAt.get(end) ?? []), e]);
+  });
+  const stopMarkersPlaced = new Set<number>();
+  const stopMarkersBefore = (idx: number): JSX.Element[] => {
+    const found: JSX.Element[] = [];
+    stopMarkerAt.forEach((entries, at) => {
+      if (at > idx || stopMarkersPlaced.has(at)) return;
+      stopMarkersPlaced.add(at);
+      for (const e of entries) {
+        found.push(
+          <TurnStopMarker
+            key={`stop-${e.seq}-${at}`}
+            entry={e}
+            onContinueTurn={handleContinueTurn}
+          />,
+        );
+      }
+    });
+    return found;
+  };
+
+  // A page chosen before a newer attempt arrived is dropped, so the new run shows.
+  const attemptSel = liveAttemptSelection(timeline, attemptSelRaw);
   const paging = attemptPaging(timeline, attemptSel);
   const renderEntries = (from: number, to: number): JSX.Element[] => {
     const out: JSX.Element[] = [];
@@ -2075,6 +2212,7 @@ export function ChatRoute({
     while (i < to) {
       const entry = timeline[i];
       if (!entry) break;
+      out.push(...stopMarkersBefore(i));
       out.push(...dividersBefore(entry.seq));
       if (i >= limitTailStart) {
         i++;
@@ -2207,6 +2345,7 @@ export function ChatRoute({
       );
       i++;
     }
+    out.push(...stopMarkersBefore(to));
     // Snoozes that began after everything drawn so far close the transcript.
     if (to === timeline.length) out.push(...dividersBefore(null));
     return out;
@@ -2242,9 +2381,12 @@ export function ChatRoute({
       ) : null}
       <div className="status-list" data-testid="status-list">
         <GoalBanner row={row} />
-        <FinishedGoalBanner row={row} />
-        <TaskBar key={`tasks-${row.chatId}`} row={row} />
+        <FinishedGoalBanner
+          row={row}
+          onNotMet={(condition) => void handleSend(`/goal ${condition}`)}
+        />
         <BackgroundTaskBar chatId={chatId} />
+        <StrayProcessBar chatId={chatId} />
         <DelegateStrip chatId={chatId} />
         <ArtifactBar chatId={chatId} />
       </div>
@@ -2278,7 +2420,14 @@ export function ChatRoute({
             >
               <div className="chat-stream-content" ref={contentRef}>
                 {timeline.length === 0 && !showThinking ? (
-                  <EmptyChat title={replaying ? 'Loading…' : undefined} />
+                  <EmptyChat
+                    title={replaying ? 'Loading…' : undefined}
+                    line={
+                      !replaying && chatId === SPECIAL_THREAD_IDS.manager
+                        ? MANAGER_EMPTY_LINE
+                        : undefined
+                    }
+                  />
                 ) : (
                   renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)
                 )}
@@ -2305,6 +2454,46 @@ export function ChatRoute({
                 <RateLimitCard row={row} />
                 <WakeHoldBubble row={row} />
               </div>
+              {showScrollUp && railPoints.length > 0 ? (
+                <div className="scroll-down-anchor scroll-up-anchor">
+                  <nav
+                    className="scroll-rail"
+                    data-testid="scroll-rail"
+                    aria-label="Jump through the chat"
+                    onPointerEnter={() => {
+                      railHoverRef.current = true;
+                    }}
+                    onPointerLeave={() => {
+                      railHoverRef.current = false;
+                      armRailHide();
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="scroll-rail-top"
+                      data-testid="scroll-to-top"
+                      aria-label="Scroll to first message"
+                      title="Scroll to first message"
+                      onClick={() => railJump(railPoints[0]?.seq, true)}
+                    >
+                      <ChevronUp size={16} aria-hidden="true" />
+                    </button>
+                    {railPoints.map((m, idx) => (
+                      <button
+                        key={m.seq}
+                        type="button"
+                        className="scroll-rail-stop"
+                        data-testid="scroll-rail-stop"
+                        aria-label={idx === 0 ? `First message, ${m.label}` : `Jump to ${m.label}`}
+                        onClick={() => railJump(m.seq, idx === 0)}
+                      >
+                        <span className="scroll-rail-label">{m.label}</span>
+                        <span className="scroll-rail-dot" aria-hidden="true" />
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+              ) : null}
               {showScrollDown ? (
                 <div className="scroll-down-anchor">
                   <button
@@ -2326,6 +2515,7 @@ export function ChatRoute({
             </section>
           </PendingApprovalCountContext.Provider>
         </BlobChatIdContext.Provider>
+        <TaskBar key={`tasks-${row.chatId}`} row={row} />
         {composerBlocked ? (
           <div className="composer-readonly" data-testid="composer-readonly">
             {disabledThread
@@ -2353,6 +2543,7 @@ export function ChatRoute({
                 onSendAnyway={handleHookSendAnyway}
               />
             ) : null}
+            <AgentRunningBar chatId={chatId} />
             <Composer
               key={chatId}
               ref={composerRef}
@@ -2499,7 +2690,7 @@ const TimelineEntry = memo(function TimelineEntry({
   attemptPageable?: boolean;
   /** The attempt the pager is parked on; absent = the last. */
   attemptAt?: number;
-  onAttemptAt?(seq: number, idx: number): void;
+  onAttemptAt?(seq: number, idx: number, lastSeq: number): void;
 }): JSX.Element {
   // spec/14 § Background task completions — a completion notice reported by the
   // layer underneath is its own entry, not a system message the reader has to
@@ -2691,7 +2882,7 @@ const TimelineEntry = memo(function TimelineEntry({
       <div className="turn-error" role="alert" data-testid="turn-error">
         <span className="turn-error-body">{presentFailure(entry.content ?? '')}</span>
         {entry.errorCode === 'chatgpt_login_required' ? (
-          <Link className="turn-error-action" to="/settings/usage" data-testid="turn-error-sign-in">
+          <Link className="turn-error-action" to={CONNECT_PATH} data-testid="turn-error-sign-in">
             Sign in
           </Link>
         ) : entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
@@ -2878,7 +3069,7 @@ function MessageEntry({
   attemptPageable?: boolean;
   /** The attempt the pager is parked on; absent = the last. */
   attemptAt?: number;
-  onAttemptAt?(seq: number, idx: number): void;
+  onAttemptAt?(seq: number, idx: number, lastSeq: number): void;
 }): JSX.Element {
   // spec/04 ## Message queueing — a queued entry on a chat paused for credit
   // says so. Selected as a primitive so the selector never returns a fresh object.
@@ -2978,7 +3169,8 @@ function MessageEntry({
   // pager — arrows onto an empty page are a control that does nothing.
   const pagedAttempts = attempts !== undefined && attemptPageable ? attempts : undefined;
   const attemptIdx = Math.min(attemptAt ?? attemptCount - 1, attemptCount - 1);
-  const setAttemptAt = (idx: number): void => onAttemptAt?.(entry.seq, idx);
+  const setAttemptAt = (idx: number): void =>
+    onAttemptAt?.(entry.seq, idx, attempts?.[attemptCount - 1]?.seq ?? entry.seq);
   const shownAttempt = pagedAttempts?.[attemptIdx];
   // A voice note appears LIVE (the user, patch/todo.md): its bubble renders the
   // instant the user finishes speaking, before any transcript exists — so an
@@ -3023,6 +3215,9 @@ function MessageEntry({
       {...(canSideThread
         ? {
             onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
+              // A link keeps the platform's own menu (Copy Link Address, Open Link in
+              // Patch/Browser): this menu's Copy would take the whole message.
+              if ((e.target as Element).closest?.('a[href]')) return;
               setMenuSelection(selectionWithin(e.currentTarget));
               sideThreadMenu.openAt(e);
             },
@@ -3324,33 +3519,6 @@ function MessageEntry({
         // separate error line): the failure reads as "this message needs
         // resending", regardless of which hop actually broke.
         <TurnFailedStatus entry={entry} onRetryTurn={onRetryTurn} onContinueTurn={onContinueTurn} />
-      ) : entry.turnInterrupted ? (
-        // spec/14 § Running-turn controls — a newer message got promoted ahead
-        // of this one. The agent DID see it (the promoted turn resumed the same
-        // session), so there is nothing to retry — just say so, muted, with no
-        // action, rather than offer a retry that would duplicate it.
-        <div className="delivery-status interrupted" data-testid="turn-interrupted">
-          <span>Interrupted by a newer message.</span>
-        </div>
-      ) : entry.turnStopped ? (
-        // spec/14 § Running-turn controls — the user pressed Stop / Esc with
-        // nothing queued behind it. The agent saw this turn and started on it,
-        // so Continue nudges it onward with a fresh turn rather than
-        // resubmitting this message's text, which it already has in context.
-        // Muted, not the danger colour — a stop is what the user asked for.
-        <div className="delivery-status stopped" data-testid="turn-stopped">
-          <span>Stopped.</span>
-          {onContinueTurn ? (
-            <button
-              type="button"
-              className="delivery-retry"
-              data-testid="turn-stopped-continue"
-              onClick={() => onContinueTurn()}
-            >
-              Continue
-            </button>
-          ) : null}
-        </div>
       ) : entry.deliveryPending && !entry.queued ? (
         <div
           className="delivery-status pending"
@@ -3494,12 +3662,15 @@ function MessageEntry({
               label: 'Quote',
               icon: <Quote size={14} aria-hidden="true" />,
               run: () => {
-                quoteSelectionIntoComposer(chatId, menuSelection || text);
-                requestAnimationFrame(() =>
-                  document
-                    .querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')
-                    ?.focus(),
+                const input = document.querySelector<HTMLTextAreaElement>(
+                  '[data-testid="composer-input"]',
                 );
+                quoteSelectionIntoComposer(
+                  chatId,
+                  menuSelection || text,
+                  input?.selectionStart ?? undefined,
+                );
+                requestAnimationFrame(() => input?.focus());
               },
             },
             {
@@ -3562,6 +3733,47 @@ function MessageReadButton({ readKey, text }: { readKey: string; text: string })
  * moment, or a cross when the write fails (NO FALLBACK: a copy that did nothing
  * must say so).
  */
+/**
+ * spec/14 § Running-turn controls — where a turn was stopped or cut off by a
+ * newer message. Drawn in the transcript at the point the turn ended (after
+ * whatever the agent had produced), not under the user's message that started
+ * it. Muted, not the danger colour: neither is an error.
+ */
+function TurnStopMarker({
+  entry,
+  onContinueTurn,
+}: {
+  entry: ChatEventEntry;
+  onContinueTurn: (() => void) | undefined;
+}): JSX.Element {
+  if (entry.turnInterrupted) {
+    // A newer message got promoted ahead of this turn; the agent saw it, so
+    // there is nothing to retry or continue.
+    return (
+      <div className="delivery-status interrupted turn-stop-marker" data-testid="turn-interrupted">
+        <span>Interrupted by a newer message.</span>
+      </div>
+    );
+  }
+  // Stop / Esc with nothing queued: Continue nudges with a fresh turn rather
+  // than resubmitting text the agent already has in context.
+  return (
+    <div className="delivery-status stopped turn-stop-marker" data-testid="turn-stopped">
+      <span>Stopped.</span>
+      {onContinueTurn ? (
+        <button
+          type="button"
+          className="delivery-retry"
+          data-testid="turn-stopped-continue"
+          onClick={() => onContinueTurn()}
+        >
+          Continue
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function MessageCopyButton({ text }: { text: string }): JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<number | undefined>(undefined);
@@ -3922,9 +4134,12 @@ function ToolCall({
     const id = entry.callId;
     return id === undefined ? undefined : s.toolRunSummaries[chatId]?.[id];
   });
+  // The whole turn's clock, shown beside the call's own: the per-call timer
+  // restarts with every call, so a long run of short calls never reads as long.
+  const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));
   const runningSince =
     !result && isCallOpen && !awaitingApproval && !isQuestionTool(entry.tool)
-      ? { at: entry.startedAt }
+      ? { at: entry.startedAt, turn: turnSince }
       : undefined;
 
   // spec/14 § Tool calls — `view_file` exists to SHOW the user a file, so its
@@ -3935,6 +4150,13 @@ function ToolCall({
   if (entry.tool && toolLabel(entry.tool) === 'view_file' && result) {
     const view = viewFilePayload(result.toolResult);
     if (view) return <ViewFileCard view={view} chatId={chatId} />;
+  }
+  // `link_file` points at a file on the host's disk: a card with its path and
+  // open / reveal buttons, nothing uploaded. Same rule — an error result falls
+  // through to the ordinary row.
+  if (entry.tool && toolLabel(entry.tool) === 'link_file' && result) {
+    const link = linkFilePayload(result.toolResult);
+    if (link) return <LinkFileCard link={link} chatId={chatId} />;
   }
 
   // One-line summary naming what the call is doing (spec/14 ## Main chat
@@ -4122,6 +4344,12 @@ function ToolCall({
       testid="tool-call"
       summary={result ? `${summary} →` : summary}
       {...(runningSince !== undefined ? { runningSince } : {})}
+      {...(runningSince !== undefined && entry.tool === 'Bash' && entry.callId
+        ? { onCancel: () => requestToolCancel(chatId, entry.callId!) }
+        : {})}
+      {...(result?.toolIsError && entry.callId && cancelRequested.has(entry.callId)
+        ? { cancelledChip: true }
+        : {})}
       detail={
         <>
           <ToolFields value={entry.toolArgs} />
@@ -4534,6 +4762,135 @@ function asViewFile(value: unknown): ViewFileView | null {
   return { kind, url, name, width, height, size, previewUrl, previewError, absPath };
 }
 
+/** What `link_file` hands back: a place on the host's disk, nothing uploaded. */
+interface LinkFileView {
+  name: string;
+  absPath: string;
+  isDirectory: boolean;
+  size?: number | undefined;
+}
+
+/** Unwrap a `link_file` ack — same three result shapes as `viewFilePayload`. */
+function linkFilePayload(result: unknown): LinkFileView | null {
+  const asLink = (value: unknown): LinkFileView | null => {
+    if (typeof value !== 'object' || value === null) return null;
+    const v = value as Record<string, unknown>;
+    if (v['kind'] !== 'link') return null;
+    const name = v['name'];
+    const absPath = v['absPath'];
+    if (typeof name !== 'string' || name.length === 0) return null;
+    if (typeof absPath !== 'string' || absPath.length === 0) return null;
+    return {
+      name,
+      absPath,
+      isDirectory: v['isDirectory'] === true,
+      size: typeof v['size'] === 'number' ? v['size'] : undefined,
+    };
+  };
+  const direct = asLink(result);
+  if (direct) return direct;
+  if (typeof result !== 'object' || result === null) return null;
+  const content = Array.isArray(result) ? result : (result as Record<string, unknown>)['content'];
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const text = (block as Record<string, unknown>)['text'];
+    if (typeof text !== 'string') continue;
+    try {
+      const parsed = asLink(JSON.parse(text));
+      if (parsed) return parsed;
+    } catch {
+      // Not this block — a `link_file` ack is always valid JSON.
+    }
+  }
+  return null;
+}
+
+/**
+ * A `link_file` card: the file's name and where it is, with open / show-in-folder
+ * buttons. They act on the disk the file is on, so they are offered only when
+ * this Mac's own host owns the chat; anywhere else the card is the path alone.
+ */
+function LinkFileCard({ link, chatId }: { link: LinkFileView; chatId: string }): JSX.Element {
+  const [openError, setOpenError] = useState<string | null>(null);
+  const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
+  const bridge = getDesktopBridge();
+  const localHostBridge = bridge?.localHost;
+  const openPathBridge = bridge?.openPath;
+  const [localHostId, setLocalHostId] = useState<string | null>(null);
+  useEffect(() => {
+    if (localHostBridge === undefined || openPathBridge === undefined) return;
+    let live = true;
+    localHostBridge.status().then(
+      (st) => {
+        if (live) setLocalHostId(st.hostId);
+      },
+      (err: unknown) => console.error('local host status failed', err),
+    );
+    return () => {
+      live = false;
+    };
+  }, [localHostBridge, openPathBridge]);
+  const canOpen =
+    openPathBridge !== undefined && localHostId !== null && localHostId === chatHostId;
+  const open = (mode: 'file' | 'folder'): void => {
+    setOpenError(null);
+    (openPathBridge as NonNullable<typeof openPathBridge>)(link.absPath, mode).catch(
+      (err: unknown) => setOpenError(err instanceof Error ? err.message : String(err)),
+    );
+  };
+  const Icon = link.isDirectory ? FolderOpen : FileText;
+  return (
+    <div className="view-file view-file-file" data-testid="link-file" data-kind="link">
+      <div className="view-file-bar">
+        <Icon size={14} aria-hidden />
+        <span className="view-file-name" data-testid="link-file-name">
+          {link.name}
+        </span>
+        {link.size !== undefined ? (
+          <span className="view-file-size" data-testid="link-file-size">
+            {formatBytes(link.size)}
+          </span>
+        ) : null}
+        {canOpen ? (
+          <>
+            <button
+              type="button"
+              className="view-file-download"
+              data-testid="link-file-open"
+              aria-label={`Open ${link.name}`}
+              title={link.isDirectory ? 'Open folder' : 'Open file'}
+              onClick={() => open('file')}
+            >
+              <ExternalLink size={14} aria-hidden />
+            </button>
+            {link.isDirectory ? null : (
+              <button
+                type="button"
+                className="view-file-download"
+                data-testid="link-file-reveal"
+                aria-label={`Show ${link.name} in its folder`}
+                title="Show in folder"
+                onClick={() => open('folder')}
+              >
+                <FolderOpen size={14} aria-hidden />
+              </button>
+            )}
+          </>
+        ) : null}
+      </div>
+      <div className="view-file-path" data-testid="link-file-path">
+        {link.absPath}
+      </div>
+      {openError !== null ? (
+        <div className="view-file-error" data-testid="link-file-open-error" role="alert">
+          {openError}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * spec/14 ## Main chat panel — what a `patch_job_*` row announces. A job call
  * changes what runs on a SCHEDULE, so unlike an `ls` its effect outlives the
@@ -4729,6 +5086,10 @@ function DelegateToolCall({
   }
 
   const status = live?.status ?? 'running';
+  // Once the call has its result the card records the spawn and nothing more:
+  // later runs of the same child (a follow-up) must not re-colour it. The
+  // child's current state lives in the Agents bar.
+  const spawned = resultAck !== null;
 
   return (
     <div
@@ -4746,10 +5107,10 @@ function DelegateToolCall({
       >
         <span className="tool-summary-text">{summary}</span>
         <span
-          className={`delegate-pill delegate-pill-${status}`}
+          className={`delegate-pill delegate-pill-${spawned ? 'started' : status}`}
           data-testid="delegate-status-pill"
         >
-          {DELEGATE_STATUS_LABEL[status]}
+          {spawned ? 'Started' : DELEGATE_STATUS_LABEL[status]}
         </span>
         <ChevronDown
           size={13}
@@ -4828,7 +5189,10 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
           activateLabel={`Open transcript of "${d.label}"`}
           meta={
             live ? (
-              <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+              <>
+                {d.followUp ? <span data-testid="delegate-strip-followup">follow-up</span> : null}{' '}
+                <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+              </>
             ) : null
           }
         >
@@ -4888,6 +5252,121 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
         )}
       </StatusRow>
       {open ? listed.map(([id, d]) => agentRow(id, d, true)) : null}
+    </div>
+  );
+}
+
+/**
+ * A slim pill directly above the composer, same width and corner radius as the
+ * input, while any `patch_delegate` subagent of this chat is running. One agent
+ * carries its own controls inline; several fold to a count that opens to one
+ * row each. Controls: pause or resume, stop, and open as a chat of its own.
+ */
+function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
+  const navigate = useNavigate();
+  const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const live = Object.entries(updates).filter(
+    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission',
+  );
+  if (live.length === 0) return null;
+
+  const control = async (
+    id: string,
+    action: 'pause' | 'resume' | 'stop' | 'spin-off',
+  ): Promise<void> => {
+    setBusy(id);
+    setError(null);
+    try {
+      const res = await api.delegateControl(chatId, id, action);
+      if (action === 'spin-off' && res.spunOffChatId) navigate(`/chats/${res.spunOffChatId}`);
+    } catch (e) {
+      setError(`Could not ${action.replace('-', ' ')}: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const controls = (id: string, d: DelegateUpdateInfo): JSX.Element => {
+    const btn = (
+      action: 'pause' | 'resume' | 'stop' | 'spin-off',
+      label: string,
+      icon: JSX.Element,
+    ): JSX.Element => (
+      <button
+        type="button"
+        className="agent-running-bar-btn"
+        data-testid={`agent-${action}`}
+        aria-label={`${label} ${d.label}`}
+        title={label}
+        disabled={busy === id}
+        onClick={() => void control(id, action)}
+      >
+        {icon}
+      </button>
+    );
+    return (
+      <span className="agent-running-bar-controls">
+        {d.paused
+          ? btn('resume', 'Resume', <Play size={14} aria-hidden />)
+          : btn('pause', 'Pause', <Pause size={14} aria-hidden />)}
+        {btn('stop', 'Stop', <Square size={14} aria-hidden />)}
+        {btn('spin-off', 'Open as its own chat', <ExternalLink size={14} aria-hidden />)}
+      </span>
+    );
+  };
+  const icon = (d: DelegateUpdateInfo): JSX.Element =>
+    d.paused ? (
+      <Pause size={14} aria-hidden />
+    ) : (
+      <LoaderCircle className="status-spinner" size={14} aria-hidden />
+    );
+
+  const [firstId, first] = live[0] as [string, DelegateUpdateInfo];
+  const paused = live.filter(([, d]) => d.paused).length;
+  const word = paused === live.length ? 'paused' : 'running';
+  const text =
+    live.length === 1
+      ? `Agent ${word} · ${first.label}`
+      : `${live.length} agents ${word}${paused > 0 && paused < live.length ? ` (${paused} paused)` : ''}`;
+  return (
+    <div className="agent-running-bar-wrap" data-testid="agent-running-bar-wrap">
+      <div className="agent-running-bar" data-testid="agent-running-bar" role="status">
+        <div className="agent-running-bar-row">
+          {icon(first)}
+          <span className="agent-running-bar-text">{text}</span>
+          {live.length === 1 ? (
+            controls(firstId, first)
+          ) : (
+            <button
+              type="button"
+              className="agent-running-bar-btn"
+              data-testid="agent-running-bar-toggle"
+              aria-label={open ? 'Hide agents' : 'Show agents'}
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+            >
+              <ChevronDown size={14} aria-hidden className={open ? 'agent-chevron-open' : ''} />
+            </button>
+          )}
+        </div>
+        {open && live.length > 1
+          ? live.map(([id, d]) => (
+              <div className="agent-running-bar-row" key={id} data-testid="agent-running-row">
+                {icon(d)}
+                <span className="agent-running-bar-text">{d.label}</span>
+                {controls(id, d)}
+              </div>
+            ))
+          : null}
+        {error ? (
+          <div className="agent-running-bar-error" data-testid="agent-running-bar-error">
+            {error}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -5338,6 +5817,7 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     entry.kind === 'tool_call' &&
     !!entry.tool &&
     (toolLabel(entry.tool) === 'view_file' ||
+      toolLabel(entry.tool) === 'link_file' ||
       toolLabel(entry.tool) === 'patch_notify' ||
       toolLabel(entry.tool) === 'patch_agent' ||
       toolLabel(entry.tool) === 'patch_delegate' ||
@@ -5380,6 +5860,7 @@ const ToolGroup = memo(
     // A collapsed run hides its calls, so the unreturned one's own spinner is
     // out of sight: surface the oldest still-open call on the run's row.
     const openCallIds = useChatStore((s) => s.chats[chatId]?.openCallIds);
+    const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));
     const runningCall = calls.find(
       (c) =>
         c.callId !== undefined &&
@@ -5387,6 +5868,11 @@ const ToolGroup = memo(
         openCallIds?.includes(c.callId) &&
         !entries.some((e) => e.kind === 'tool_result' && e.callId === c.callId),
     );
+    // The AI label is a guess written a few calls back and stays vague while a
+    // run grows ("Investigating…"), so a chat mid-turn looked stuck. While the
+    // run is live, the newest call's own line rides beside it so the row moves.
+    const liveCall =
+      matched?.live === true || runningCall !== undefined ? calls[calls.length - 1] : undefined;
     return (
       <div
         className={`tool-group${open ? ' open' : ''}`}
@@ -5406,7 +5892,17 @@ const ToolGroup = memo(
             {open ? '▾' : '▸'}
           </span>
           <span className="tool-summary-text">{summary}</span>
-          {runningCall && !open ? <ToolRunning since={runningCall.startedAt} /> : null}
+          {liveCall && !open ? (
+            <span className="tool-summary-latest" data-testid="tool-group-latest">
+              {toolCallSummary(liveCall.tool, liveCall.toolArgs)}
+            </span>
+          ) : null}
+          {runningCall && !open ? (
+            <ToolRunning since={runningCall.startedAt} turnSince={turnSince} />
+          ) : null}
+          {runningCall && !open && runningCall.tool === 'Bash' && runningCall.callId ? (
+            <CancelCommandButton onCancel={() => requestToolCancel(chatId, runningCall.callId!)} />
+          ) : null}
           {aiError !== undefined ? (
             <span
               className="tool-summary-failed"
@@ -5453,19 +5949,68 @@ const ToolGroup = memo(
     a.entries.every((e, i) => e === b.entries[i]),
 );
 
+// Not a <button>: it sits inside the row's own summary button.
+function CancelCommandButton({ onCancel }: { onCancel: () => void }): JSX.Element | null {
+  // Asked once, no confirmation; the spinner keeps going until the call returns.
+  const [asked, setAsked] = useState(false);
+  if (asked) return <span className="tool-cancelling">Cancelling…</span>;
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className="tool-cancel"
+      data-testid="tool-cancel"
+      onClick={(e) => {
+        e.stopPropagation();
+        setAsked(true);
+        onCancel();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          setAsked(true);
+          onCancel();
+        }
+      }}
+    >
+      Cancel command
+    </span>
+  );
+}
+
 // Spinner and ticking elapsed time on a tool row whose call has not returned.
-function ToolRunning({ since }: { since: number | undefined }): JSX.Element {
+/** When the current turn began: the latest user message that is not still queued. */
+export function turnStartOf(timeline: readonly ChatEventEntry[] | undefined): number | undefined {
+  if (timeline === undefined) return undefined;
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const e = timeline[i]!;
+    if (e.kind === 'message' && e.role === 'user' && e.queued !== true) return e.messageAt ?? e.at;
+  }
+  return undefined;
+}
+
+function ToolRunning({
+  since,
+  turnSince,
+}: {
+  since: number | undefined;
+  turnSince?: number | undefined;
+}): JSX.Element {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (since === undefined) return;
+    if (since === undefined && turnSince === undefined) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [since]);
+  }, [since, turnSince]);
   return (
     <span className="tool-running" data-testid="tool-running">
       <LoaderCircle className="tool-running-spinner" size={13} aria-hidden />
       {since !== undefined ? (
         <span data-testid="tool-running-elapsed">{formatElapsed(since, now)}</span>
+      ) : null}
+      {turnSince !== undefined ? (
+        <span data-testid="tool-running-turn">working for {formatElapsed(turnSince, now)}</span>
       ) : null}
     </span>
   );
@@ -5486,6 +6031,15 @@ function isQuestionTool(tool: string | undefined): boolean {
 // the row the user just tapped open snaps shut under their finger.
 const toolRowOpen = new Map<string, boolean>();
 
+// Calls the user asked to cancel. The chip only shows once the call comes back
+// as an error, so a cancel that raced a normal finish says nothing.
+const cancelRequested = new Set<string>();
+
+function requestToolCancel(chatId: string, callId: string): void {
+  cancelRequested.add(callId);
+  getActiveWs()?.send({ type: 'chat.tool_cancel_request', chatId, callId });
+}
+
 function ToolDisclosure({
   openKey,
   testid,
@@ -5495,9 +6049,15 @@ function ToolDisclosure({
   badge,
   defaultOpen,
   runningSince,
+  onCancel,
+  cancelledChip,
 }: {
+  /** Cancel this one running command; the turn carries on. */
+  onCancel?: () => void;
+  /** The user cancelled this command and it has come back. */
+  cancelledChip?: boolean;
   /** Present while the call is running: draws a spinner, and the elapsed time when `at` (the real start) is known. */
-  runningSince?: { at: number | undefined };
+  runningSince?: { at: number | undefined; turn?: number | undefined };
   /** Call id this row's open state survives remounts under. */
   openKey?: string;
   testid: string;
@@ -5538,7 +6098,17 @@ function ToolDisclosure({
         </span>
         {badge}
         <span className="tool-summary-text">{summary}</span>
-        {runningSince !== undefined ? <ToolRunning since={runningSince.at} /> : null}
+        {runningSince !== undefined ? (
+          <ToolRunning since={runningSince.at} turnSince={runningSince.turn} />
+        ) : null}
+        {cancelledChip ? (
+          <span className="tool-cancelled-chip" data-testid="tool-cancelled">
+            Cancelled by you
+          </span>
+        ) : null}
+        {runningSince !== undefined && onCancel ? (
+          <CancelCommandButton onCancel={onCancel} />
+        ) : null}
       </button>
       {open ? (
         <div className="tool-detail" data-testid={`${testid}-detail`}>

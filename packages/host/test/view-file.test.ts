@@ -603,3 +603,74 @@ describe('POST /internal/view_file (view_file)', () => {
     }
   });
 });
+
+describe('POST /internal/link_file (link_file)', () => {
+  const post = (app: Awaited<ReturnType<typeof setup>>['app'], payload: unknown) =>
+    app.inject({ method: 'POST', url: '/internal/link_file', headers: AUTH, payload });
+
+  it('acks a file outside the chat folder with its absolute path, publishing nothing', async () => {
+    const { app, chatId, published } = await setup();
+    try {
+      const elsewhere = mkdtempSync(join(tmpdir(), 'patch-linkfile-elsewhere-'));
+      writeFileSync(join(elsewhere, 'plan.xlsx'), 'abc');
+      const res = await post(app, {
+        callerChatId: chatId,
+        file_path: join(elsewhere, 'plan.xlsx'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        ok: true,
+        linked: true,
+        kind: 'link',
+        name: 'plan.xlsx',
+        absPath: join(elsewhere, 'plan.xlsx'),
+        isDirectory: false,
+        size: 3,
+      });
+      expect(published).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('acks a directory without a size', async () => {
+    const { app, chatId, folder } = await setup();
+    try {
+      const res = await post(app, { callerChatId: chatId, file_path: folder });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { isDirectory: boolean; size?: number };
+      expect(body.isDirectory).toBe(true);
+      expect(body.size).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a relative path loudly', async () => {
+    const { app, chatId } = await setup();
+    try {
+      const res = await post(app, { callerChatId: chatId, file_path: 'plan.xlsx' });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: string }).error).toBe('invalid_input');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('404s a path that does not exist, and an unknown chat', async () => {
+    const { app, chatId, folder } = await setup();
+    try {
+      const missing = await post(app, {
+        callerChatId: chatId,
+        file_path: join(folder, 'nope.txt'),
+      });
+      expect(missing.statusCode).toBe(404);
+      expect((missing.json() as { error: string }).error).toBe('link_file_not_found');
+      const noChat = await post(app, { callerChatId: 'ghost', file_path: folder });
+      expect(noChat.statusCode).toBe(404);
+      expect((noChat.json() as { error: string }).error).toBe('chat_not_found');
+    } finally {
+      await app.close();
+    }
+  });
+});

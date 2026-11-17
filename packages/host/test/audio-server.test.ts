@@ -16,7 +16,6 @@ import { createKokoro } from '../src/audio/kokoro.js';
 import type { KokoroBackend, KokoroSynthesis } from '../src/audio/kokoro.js';
 import { encodeAudio, decodeAudio, type AudioEvent } from '@patch/wire/audio';
 import { MockVad, type Vad, type VadFrameResult } from '../src/audio/vad.js';
-import { DEVICE_CONTROL_PATH } from '../src/devices/control-ws.js';
 
 const SECRET = 'unit-test-internal-token-aaaaaaaaaa';
 const logger = pino({ level: 'silent' });
@@ -61,6 +60,7 @@ async function recvOne(ws: WebSocket): Promise<AudioEvent> {
 
 async function startServer(opts?: {
   cap?: number;
+  deadPeerMs?: number;
   reply?: string;
   onDeviceSession?: (deviceId: string, active: boolean) => void;
   chatExists?: (chatId: string) => boolean;
@@ -77,6 +77,9 @@ async function startServer(opts?: {
     // Default: every chat exists. Tests for E1-d3 override this.
     chatExists: opts?.chatExists ?? ((): boolean => true),
     ...(opts?.cap !== undefined ? { maxConcurrentSessions: opts.cap } : {}),
+    ...(opts?.deadPeerMs !== undefined
+      ? { deadPeerTimeoutMs: opts.deadPeerMs, pingIntervalMs: 50 }
+      : {}),
     ...(opts?.onDeviceSession !== undefined ? { onDeviceSession: opts.onDeviceSession } : {}),
   });
   const addr = handle.address();
@@ -1101,7 +1104,7 @@ describe('audio WSS server', () => {
 
   // --- device-control-upgrade mounting --------------------------------------
 
-  test('a /device/control upgrade 404s (raw socket write + destroy) when no deviceControlUpgrade handler is configured', async () => {
+  test('a /device/control upgrade 404s: devices connect to the server, not to a host', async () => {
     const socket = netConnect(server.port, '127.0.0.1');
     await new Promise<void>((resolve, reject) => {
       socket.once('connect', () => resolve());
@@ -1115,7 +1118,7 @@ describe('audio WSS server', () => {
       });
     });
     socket.write(
-      `GET ${DEVICE_CONTROL_PATH} HTTP/1.1\r\n` +
+      'GET /device/control HTTP/1.1\r\n' +
         'Host: 127.0.0.1\r\n' +
         'Upgrade: websocket\r\n' +
         'Connection: Upgrade\r\n' +
@@ -1124,51 +1127,6 @@ describe('audio WSS server', () => {
     );
     const resp = await responseText;
     expect(resp).toContain('404');
-    socket.destroy();
-  });
-
-  test('a /device/control upgrade delegates to the configured deviceControlUpgrade handler', async () => {
-    await server.close();
-    let called: { url: string | undefined } | undefined;
-    const handle = await startAudioServer({
-      host: '127.0.0.1',
-      port: 0,
-      logger,
-      internalToken: SECRET,
-      whisper: createWhisper({ backend: 'mock', logger }),
-      kokoro: createKokoro({ backend: 'mock', logger }),
-      submitUserTurn: async () => 'ok',
-      chatExists: (): boolean => true,
-      deviceControlUpgrade: (req, socket) => {
-        called = { url: req.url };
-        socket.write('HTTP/1.1 200 OK\r\n\r\ncustom-handler-ran');
-        socket.end();
-      },
-    });
-    server = Object.assign(handle, { port: handle.address().port });
-    const socket = netConnect(server.port, '127.0.0.1');
-    await new Promise<void>((resolve, reject) => {
-      socket.once('connect', () => resolve());
-      socket.once('error', reject);
-    });
-    const responseText = new Promise<string>((resolve) => {
-      let buf = '';
-      socket.on('data', (d: Buffer) => {
-        buf += d.toString();
-        resolve(buf);
-      });
-    });
-    socket.write(
-      `GET ${DEVICE_CONTROL_PATH} HTTP/1.1\r\n` +
-        'Host: 127.0.0.1\r\n' +
-        'Upgrade: websocket\r\n' +
-        'Connection: Upgrade\r\n' +
-        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-        'Sec-WebSocket-Version: 13\r\n\r\n',
-    );
-    const resp = await responseText;
-    expect(resp).toContain('custom-handler-ran');
-    expect(called?.url).toBe(DEVICE_CONTROL_PATH);
     socket.destroy();
   });
 
@@ -2062,5 +2020,26 @@ describe('audio WSS server', () => {
     expect(server.injectUtterance(surfaceA, 'hello')).toBe(false);
     expect(server.speakCanned(surfaceA, 'hello')).toBe(false);
     expect(() => server.setFocusForSurface(surfaceA, 'some-chat')).not.toThrow();
+  });
+});
+
+describe('audio WSS server — dead peer', () => {
+  test('a peer that never answers is dropped by the server', async () => {
+    const server = await startServer({ deadPeerMs: 250 });
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s-dead`, {
+        autoPong: false,
+      });
+      await new Promise<void>((r) => ws.once('open', () => r()));
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('peer was not dropped')), 3000);
+        ws.once('close', () => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    } finally {
+      await server.close();
+    }
   });
 });

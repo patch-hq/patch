@@ -8,6 +8,7 @@ vi.mock('../src/api/rest', () => ({ api: { settings: settingsMock } }));
 
 import {
   callEngineLabel,
+  describeMicSilent,
   describeVoiceError,
   modeSwitchNeedsNewSession,
 } from '../src/lib/voiceEngine';
@@ -109,5 +110,26 @@ describe('voiceConfigOrNull', () => {
     settingsMock.mockResolvedValueOnce({});
     await expect(loadPreferences()).rejects.toThrow(/no account preferences/);
     expect(voiceConfigOrNull()).toBeNull();
+  });
+});
+
+describe('describeMicSilent', () => {
+  it('does not blame a permission the phone holds', async () => {
+    const ask = vi.fn();
+    const t = await describeMicSilent('host', { has: async () => true, ask });
+    expect(t).toContain('Another app');
+    expect(ask).not.toHaveBeenCalled();
+  });
+  it('asks for a missing permission in place', async () => {
+    const ask = vi.fn(async () => true);
+    expect(await describeMicSilent('host', { has: async () => false, ask })).toContain(
+      'now allowed',
+    );
+    expect(ask).toHaveBeenCalled();
+  });
+  it('falls back to the host sentence when the user refuses', async () => {
+    expect(
+      await describeMicSilent('host', { has: async () => false, ask: async () => false }),
+    ).toBe('host');
   });
 });

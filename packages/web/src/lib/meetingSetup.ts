@@ -1,8 +1,9 @@
-// meetingSetup — meeting mode's macOS permissions, asked for ahead of time.
-// Once, a gentle popover on the Meeting button lists what a meeting needs; and
-// pressing Meeting with something still missing shows the same list with a
-// Start button, instead of a meeting that fails at its first second. Only the
-// desktop app on macOS has anything to set up; elsewhere Meeting just starts.
+// meetingSetup — meeting mode's macOS permissions. Pressing Meeting with
+// something still missing shows what is missing with a Start button, instead
+// of a meeting that fails at its first second. Nothing is asked before
+// Meeting is pressed: a first chat is no place for three permission prompts.
+// Only the desktop app on macOS has anything to set up; elsewhere Meeting
+// just starts.
 
 import { create } from 'zustand';
 import {
@@ -13,10 +14,9 @@ import {
 import { startMeeting } from './meetingControl.js';
 import { useUiStore } from '../stores/uiStore.js';
 
-const SEEN_KEY = 'patch.meetingSetupSeen';
 const DECLINED_KEY = 'patch.meetingNamesDeclined';
 
-export type MeetingSetupMode = 'intro' | 'start';
+export type MeetingSetupMode = 'start';
 
 interface MeetingSetupState {
   /** Which chat's Meeting button the popover sits on, and why it is open. */
@@ -34,10 +34,7 @@ export const useMeetingSetup = create<MeetingSetupState>((set) => ({
   permissions: null,
   asking: null,
   namesDeclined: localStorage.getItem(DECLINED_KEY) === '1',
-  close: () => {
-    localStorage.setItem(SEEN_KEY, '1');
-    set({ open: null });
-  },
+  close: () => set({ open: null }),
 }));
 
 /** Remember (or forget) that Tom does not want to be asked about speaker names. */
@@ -70,15 +67,6 @@ export async function readPermissions(): Promise<MeetingPermissions | null> {
   const p = await bridge.getMeetingPermissions();
   useMeetingSetup.setState({ permissions: p });
   return p;
-}
-
-/** The first-run popover: once ever, and only when something is missing. */
-export async function maybeIntroduceMeetings(chatId: string): Promise<void> {
-  if (localStorage.getItem(SEEN_KEY) || useMeetingSetup.getState().open) return;
-  const p = await readPermissions();
-  if (!p || missing(p).length === 0) return;
-  if (useMeetingSetup.getState().open) return;
-  useMeetingSetup.setState({ open: { chatId, mode: 'intro' } });
 }
 
 /** The Meeting button: starts at once when everything is allowed, else shows what is missing. */

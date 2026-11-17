@@ -41,6 +41,26 @@ export function formatElapsed(startedAt: number, now: number): string {
   return `${seconds}s`;
 }
 
+/** When the current turn began: the latest user message that is not still queued. */
+export function turnStartOf(
+  timeline:
+    | readonly {
+        kind: string;
+        role?: string;
+        queued?: boolean;
+        messageAt?: number;
+        at: number;
+      }[]
+    | undefined,
+): number | undefined {
+  if (timeline === undefined) return undefined;
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const e = timeline[i]!;
+    if (e.kind === 'message' && e.role === 'user' && e.queued !== true) return e.messageAt ?? e.at;
+  }
+  return undefined;
+}
+
 /** The stack's title: what is running — `2 background tasks`. */
 export function backgroundBarTitle(tasks: number): string {
   return tasks > 0 ? `${tasks} ${tasks === 1 ? 'background task' : 'background tasks'}` : '';

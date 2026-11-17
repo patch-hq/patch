@@ -308,14 +308,11 @@ describe('Settings → Hosts', () => {
     );
   });
 
-  it('shows a host on battery with its charge, and a plugged-in one as plugged in', () => {
+  it('shows nothing about battery, even when an older host reports it', () => {
     reportHost('host-a', { hostName: 'laptop', power: { onBattery: true, percent: 12 } });
-    reportHost('host-b', { hostName: 'desk', power: { onBattery: false, percent: 80 } });
-    reportHost('host-c', { hostName: 'server' });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-power')).toHaveTextContent('12% on battery');
-    expect(screen.getByTestId('host-host-b-power')).toHaveTextContent('80% plugged in');
-    expect(screen.queryByTestId('host-host-c-power')).toBeNull();
+    expect(screen.queryByTestId('host-host-a-power')).toBeNull();
+    expect(screen.getByTestId('host-host-a-status').textContent).not.toMatch(/battery|plugged/i);
   });
 
   it("shows why the host's server link last dropped on the host page", () => {
@@ -769,8 +766,8 @@ describe('no connected account blocks the new-chat screen', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const blocked = await screen.findByTestId('new-chat-blocked');
-    expect(blocked).toHaveTextContent(/not signed in/i);
+    const blocked = await screen.findByTestId('composer-signed-out');
+    expect(blocked).toHaveTextContent('Sign in to Claude to send messages.');
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
     expect(screen.getByTestId('new-chat-model')).toBeDisabled();
   });

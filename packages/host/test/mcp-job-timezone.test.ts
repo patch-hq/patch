@@ -50,7 +50,7 @@ describe('patch_job_create / patch_job_update carry a cron timezone', () => {
   let app: any;
 
   beforeAll(async () => {
-    app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs, listDevices: () => [] });
+    app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
     await app.listen({ path: socketPath });
   });
 

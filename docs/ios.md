@@ -4,7 +4,7 @@ Status: the build pipeline and config are prepared and unverified; nothing can b
 
 ## What is ready
 
-- `apps/mobile/app.config.ts` declares iOS (bundle id `io.github.tomchambers2.patch`, usage strings, background audio and remote notification modes). The `ios/` project is generated in CI and never committed.
+- `apps/mobile/app.config.ts` declares iOS (bundle id `dev.patchhq.app`, usage strings, background audio and remote notification modes). The `ios/` project is generated in CI and never committed.
 - `apps/mobile/eas.json` has an `ios` build profile.
 - `.github/workflows/ios.yml` builds on a macOS runner and uploads to TestFlight. Manual trigger only; it fails naming the first missing secret.
 - `apps/mobile/__tests__/iosConfig.test.ts` guards the config and that Android-only native modules stay behind platform checks.
@@ -12,7 +12,7 @@ Status: the build pipeline and config are prepared and unverified; nothing can b
 ## The blocker: Tom enrols
 
 1. Enrol in the Apple Developer Program (99 USD/year) at developer.apple.com.
-2. Register the App ID `io.github.tomchambers2.patch` with Push Notifications enabled, and create the app in App Store Connect.
+2. Register the App ID `dev.patchhq.app` with Push Notifications enabled, and create the app in App Store Connect.
 3. Create an Apple Distribution certificate and an App Store provisioning profile for it; export the certificate as .p12.
 4. Create an App Store Connect API key (Admin or App Manager).
 5. Create an iOS app in the app's Firebase project and download GoogleService-Info.plist; upload the APNs key to Firebase for push.

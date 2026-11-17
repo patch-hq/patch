@@ -16,7 +16,6 @@ export default [
       'apps/mobile/android/**',
       'apps/mobile/dist/**',
       'firmware/**',
-      'packages/voice-firmware/**',
       'packages/web/public/**',
       '**/*.config.js',
       '**/*.config.mjs',

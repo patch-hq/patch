@@ -145,6 +145,11 @@ function LinkSummaryCard({
           {error instanceof Error ? error.message : 'Summary failed'}
         </span>
       ) : null}
+      {data?.title ? (
+        <span className="link-summary-title" data-testid="link-summary-title">
+          {data.title}
+        </span>
+      ) : null}
       {data ? (
         <span className="link-summary-text" data-testid="link-summary-text">
           {data.summary}

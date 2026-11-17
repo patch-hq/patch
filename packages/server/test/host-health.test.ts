@@ -26,11 +26,11 @@ function setup() {
 
 describe('HostHealthTracker', () => {
   describe('why a host dropped off', () => {
-    it('says it ran out of battery when the last heartbeat was nearly flat and discharging', () => {
+    it('ignores a battery reading from an older host: a flat one is just unresponsive', () => {
       const { tracker } = setup();
       tracker.observe(report({ power: { onBattery: true, percent: 4 } }));
       tracker.observe({ type: 'host.offline', hostId: 'h1' });
-      expect(tracker.offlineReason('h1')).toBe('battery');
+      expect(tracker.offlineReason('h1')).toBe('unresponsive');
     });
 
     it('says it went to sleep when its host reported sleeping after the last heartbeat', () => {

@@ -42,7 +42,7 @@ test('other platforms keep their native frame rather than lose every window cont
   // nothing back, so a window opened that way cannot be closed at all.
   for (const platform of ['linux', 'win32', 'freebsd']) {
     assert.equal(overlayTitleBarSupported(platform), false, platform);
-    assert.deepEqual(windowChrome(platform), {}, platform);
+    assert.deepEqual(windowChrome(platform), { autoHideMenuBar: true }, platform);
   }
 });
 
