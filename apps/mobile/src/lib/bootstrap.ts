@@ -12,6 +12,7 @@ import { getRoute, setRoute } from '../config';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { getWs, resetWs } from '../api/ws';
 import { initPush, resetPush } from './push';
+import { startNotificationLevelSync } from './notificationLevelSync';
 import { useUiStore } from '../stores/uiStore';
 import { useChatStore } from '../stores/chatStore';
 import { useFolderStore } from '../stores/folderStore';
@@ -118,6 +119,7 @@ export async function bootstrap(): Promise<void> {
   // The agent-notification log behind the Chats header bell (spec/09 § bell).
   // A failure lands in the store's `error` and shows in the drawer.
   void useNotificationsStore.getState().load();
+  startNotificationLevelSync();
 
   // Cold-start the host-owned folder list (spec/04 § Folders) so the new-chat
   // + job-editor pickers are populated before the WS delivers live

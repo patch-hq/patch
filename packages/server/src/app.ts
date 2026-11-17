@@ -804,6 +804,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'notification-router' }),
     registry,
     presence,
+    deviceLevel: (surfaceId) =>
+      (accountSettings?.current() ?? DEFAULT_SETTINGS).deviceNotifications[surfaceId],
     wsHub: undefined as unknown as WsHub, // backfilled below
     dataDir: notificationsDataDir,
     pushBackend,

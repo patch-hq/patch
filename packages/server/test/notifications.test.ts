@@ -1884,3 +1884,110 @@ describe('NotificationRouter — success delivery-confirmation audit lines (D1-d
     expect(existsSync(join(dir, 'undelivered.jsonl'))).toBe(true);
   });
 });
+
+describe('NotificationRouter — per-device level (Settings → Notifications)', () => {
+  function twoPhones() {
+    const { dir, registry } = makeRegistryDir();
+    for (const [surfaceId, token] of [
+      ['srf-a', 'tok-a'],
+      ['srf-b', 'tok-b'],
+      ['srf-c', 'tok-c'],
+    ] as const) {
+      registry.upsertSurface({ surfaceId, surfaceKind: 'mobile', label: surfaceId, issuedAt: 1 });
+      registry.registerPushToken({
+        surfaceId,
+        accountId: ACCOUNT.publicKey,
+        token,
+        registeredAt: 1,
+      });
+    }
+    const push = fakePush();
+    const levels: Record<string, 'all' | 'urgent' | 'off'> = {
+      'srf-a': 'all',
+      'srf-b': 'urgent',
+      'srf-c': 'off',
+    };
+    const router = new NotificationRouter({
+      logger: silent,
+      registry,
+      presence: new PresenceTracker(),
+      wsHub: makeFakeWsHub() as never,
+      dataDir: dir,
+      pushBackend: push.backend,
+      deviceLevel: (id) => levels[id],
+    });
+    return { router, push, levels };
+  }
+
+  it('push: all gets everything, urgent only what needs the user, off nothing', async () => {
+    const { router, push } = twoPhones();
+    await router.route({ type: 'notify', chatId: 'c1', channel: 'push', message: 'finished' });
+    expect(push.sent[0]?.tokens).toEqual(['tok-a']);
+    await router.route({
+      type: 'notify',
+      chatId: 'c1',
+      channel: 'push',
+      message: 'permission',
+      needsYou: true,
+    });
+    expect(push.sent[1]?.tokens).toEqual(['tok-a', 'tok-b']);
+    await router.route({
+      type: 'notify',
+      chatId: 'c1',
+      channel: 'push',
+      kind: 'ask',
+      message: 'question',
+    });
+    expect(push.sent[2]?.tokens).toEqual(['tok-a', 'tok-b']);
+  });
+
+  it('push: nothing is sent when every device has it off', async () => {
+    const { router, push, levels } = twoPhones();
+    levels['srf-a'] = 'off';
+    levels['srf-b'] = 'off';
+    await router.route({ type: 'notify', chatId: 'c1', channel: 'push', message: 'finished' });
+    expect(push.sent).toHaveLength(0);
+  });
+
+  it('desktop: offers each computer to the hub filter and strips the internal flag', async () => {
+    const { dir, registry } = makeRegistryDir();
+    const calls: { allow?: (id: string) => boolean; event: unknown }[] = [];
+    const wsHub = {
+      sendToKind: (_k: string, event: unknown, allow?: (id: string) => boolean) => {
+        calls.push({ event, ...(allow ? { allow } : {}) });
+        return 1;
+      },
+      sendToKindUnlessFocused: () => 1,
+    };
+    const router = new NotificationRouter({
+      logger: silent,
+      registry,
+      presence: new PresenceTracker(),
+      wsHub: wsHub as never,
+      dataDir: dir,
+      deviceLevel: (id) => (id === 'mac' ? 'urgent' : id === 'tab' ? 'off' : undefined),
+    });
+    await router.route({
+      type: 'notify',
+      chatId: 'c1',
+      channel: 'desktop',
+      message: 'm',
+      needsYou: false,
+    });
+    const allow = calls[0]?.allow;
+    expect(allow?.('mac')).toBe(false);
+    expect(allow?.('tab')).toBe(false);
+    expect(allow?.('other')).toBe(true);
+    expect(calls[0]?.event).not.toHaveProperty('needsYou');
+    calls.length = 0;
+    await router.route({
+      type: 'notify',
+      chatId: 'c1',
+      channel: 'desktop',
+      message: 'm',
+      needsYou: true,
+    });
+    expect(calls[0]?.allow?.('mac')).toBe(true);
+    expect(calls[0]?.allow?.('tab')).toBe(false);
+  });
+});

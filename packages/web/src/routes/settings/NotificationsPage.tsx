@@ -4,7 +4,7 @@
 
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
-import type { SendToPhoneAfter } from '@patch/wire';
+import type { NotificationLevel, SendToPhoneAfter } from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import {
@@ -18,12 +18,25 @@ import {
   type BrowserNotificationState,
 } from '../../lib/browserNotifications.js';
 import { Toggle } from '../../components/Toggle.js';
-import { readNotificationsOff, writeNotificationsOff } from '../../lib/notificationsMaster.js';
+import { levelOf, NOTIFIABLE_KINDS } from '../../lib/notificationsMaster.js';
+import { useDevices } from './DevicesPage.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { patchShared } from './sharedWrite.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 
 const OPTIONS = ['1m', '5m', 'lock'] as const satisfies readonly SendToPhoneAfter[];
+const LEVELS = ['all', 'urgent', 'off'] as const satisfies readonly NotificationLevel[];
+const LEVEL_LABELS: Record<NotificationLevel, string> = {
+  all: 'All',
+  urgent: 'Only urgent',
+  off: 'Off',
+};
+const LEVEL_TITLES: Record<NotificationLevel, string> = {
+  all: 'Everything',
+  urgent: 'Only what needs you: permission prompts, questions, failures, calls',
+  off: 'Nothing on this device; the bell still collects it',
+};
+const KIND_LABELS: Record<string, string> = { web: 'Web', desktop: 'Desktop', mobile: 'Android' };
 const LABELS: Record<SendToPhoneAfter, string> = {
   '1m': '1 minute',
   '5m': '5 minutes',
@@ -38,25 +51,27 @@ export function NotificationsPage(): JSX.Element {
   const [browserNotify, setBrowserNotify] = useState<BrowserNotificationState>(
     browserNotificationState(),
   );
-  const [off, setOff] = useState<boolean | null>(null);
   // The desktop app raises its own native toasts; this grant is a browser's.
   const inDesktopApp = getDesktopBridge() !== undefined;
 
-  useEffect(() => {
-    readNotificationsOff().then(setOff, (err: unknown) =>
-      pushError(`notifications: ${err instanceof Error ? err.message : String(err)}`),
-    );
-    // The tray menu can flip it while this page is open.
-    return getDesktopBridge()?.onNotificationsOffChange?.(setOff);
-  }, [pushError]);
+  const { devices } = useDevices();
+  const levels = usePreferencesStore((s) => s.preferences.deviceNotifications);
+  const notifiable = (devices ?? []).filter((d) => NOTIFIABLE_KINDS.has(d.surfaceKind));
+  const anyOn = notifiable.some((d) => levelOf(levels, d.surfaceId) !== 'off');
 
-  async function changeMaster(nextOff: boolean): Promise<void> {
-    try {
-      await writeNotificationsOff(nextOff);
-      setOff(nextOff);
-    } catch (err) {
-      pushError(`notifications: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  /** Write the whole map; this device's own switch follows it (useNotificationLevelSync). */
+  async function setLevels(next: Record<string, NotificationLevel>): Promise<void> {
+    await patchShared('notifications', { deviceNotifications: next });
+  }
+
+  function setDevice(surfaceId: string, level: NotificationLevel): void {
+    void setLevels({ ...levels, [surfaceId]: level });
+  }
+
+  function setAll(on: boolean): void {
+    void setLevels(
+      Object.fromEntries(notifiable.map((d) => [d.surfaceId, on ? 'all' : 'off'] as const)),
+    );
   }
 
   useEffect(() => {
@@ -86,13 +101,17 @@ export function NotificationsPage(): JSX.Element {
       <Group testid="notifications-master-group">
         <Row
           title="Notifications"
-          sub={off ? 'Off on this device. The bell in the app still collects them.' : null}
+          sub={
+            anyOn || devices === null
+              ? 'Every device below. Off here turns them all off.'
+              : 'Off on every device. The bell in the app still collects them.'
+          }
           testid="notifications-master"
         >
           <Toggle
-            checked={off === false}
-            disabled={off === null}
-            onChange={(on) => void changeMaster(!on)}
+            checked={anyOn}
+            disabled={!loaded || devices === null}
+            onChange={setAll}
             testid="notifications-master-toggle"
           />
         </Row>
@@ -102,6 +121,27 @@ export function NotificationsPage(): JSX.Element {
             settings (the icon left of the address bar), then reload.
           </Note>
         ) : null}
+      </Group>
+      <Group testid="notifications-devices">
+        {notifiable.map((d) => (
+          <Row
+            key={d.surfaceId}
+            title={d.label}
+            sub={d.isCurrent ? 'This device' : (KIND_LABELS[d.surfaceKind] ?? d.surfaceKind)}
+            testid={`notifications-device-${d.surfaceId}`}
+          >
+            <Pills
+              label={`${d.label} notifications`}
+              options={LEVELS}
+              labels={LEVEL_LABELS}
+              titles={LEVEL_TITLES}
+              value={levelOf(levels, d.surfaceId)}
+              disabled={!loaded}
+              testid={`notifications-level-${d.surfaceId}`}
+              onChange={(next) => setDevice(d.surfaceId, next)}
+            />
+          </Row>
+        ))}
       </Group>
       <Group>
         {inDesktopApp || browserNotify === 'unsupported' ? null : (

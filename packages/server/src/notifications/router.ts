@@ -21,7 +21,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
-import type { NotifyActions, NotifyEvent, WireEvent } from '@patch/wire';
+import type { NotificationLevel, NotifyActions, NotifyEvent, WireEvent } from '@patch/wire';
 import type { PresenceTracker } from '../presence.js';
 import type { Registry } from '../registry.js';
 import type { WsHub } from '../ws-hub.js';
@@ -54,6 +54,11 @@ export interface NotificationRouterDeps {
    * (spec/09 § Snoozed chats): nothing routed for it is delivered or replayed.
    */
   isChatSnoozed?: (chatId: string) => boolean;
+  /**
+   * How much one signed-in device is notified (Settings → Notifications). Unset,
+   * or a device with no entry, reads as `all`.
+   */
+  deviceLevel?: (surfaceId: string) => NotificationLevel | undefined;
   /** Override clock. */
   nowMs?: () => number;
 }
@@ -149,11 +154,29 @@ function categoryIdForActions(actions: NotifyActions): string {
   return options && options.length > 0 && options.length <= 3 ? 'patch_dynamic' : 'patch_reply';
 }
 
+/** Whether a notification is about something that needs the user, not just news. */
+export function needsYou(event: NotifyEvent): boolean {
+  return (
+    event.needsYou === true ||
+    event.priority === 'urgent' ||
+    event.kind === 'call' ||
+    event.kind === 'ask' ||
+    event.kind === 'sign-in' ||
+    event.kind === 'host-health'
+  );
+}
+
 export class NotificationRouter {
   private readonly deps: NotificationRouterDeps;
 
   constructor(deps: NotificationRouterDeps) {
     this.deps = deps;
+  }
+
+  /** Whether the device on `surfaceId` has asked to hear about `event`. */
+  private deviceAllows(surfaceId: string, event: NotifyEvent): boolean {
+    const level = this.deps.deviceLevel?.(surfaceId) ?? 'all';
+    return level === 'all' || (level === 'urgent' && needsYou(event));
   }
 
   /** Route an inbound `notify` event from the host. */
@@ -262,7 +285,17 @@ export class NotificationRouter {
       );
       return;
     }
-    const tokens = this.deps.registry.listPushTokens(account.accountId);
+    const records = this.deps.registry.listPushTokenRecords(account.accountId);
+    const tokens = [
+      ...new Set(records.filter((r) => this.deviceAllows(r.surfaceId, event)).map((r) => r.token)),
+    ];
+    if (tokens.length === 0 && records.length > 0) {
+      this.deps.logger.info(
+        { chatId: event.chatId },
+        'push: every registered device has turned this notification off',
+      );
+      return;
+    }
     if (tokens.length === 0) {
       this.logUndelivered({
         ts: this.now(),
@@ -348,12 +381,14 @@ export class NotificationRouter {
     // Fanout to every connected computer surface — the desktop app (native
     // toast) and a browser tab (web Notification) — except, when opted in, one
     // that already has this chat focused (RouteOptions.skipDesktopIfFocused).
-    const wire: WireEvent = { ...event };
+    const { needsYou: _internal, ...visible } = event;
+    const wire: WireEvent = visible;
+    const allow = (surfaceId: string): boolean => this.deviceAllows(surfaceId, event);
     let count = 0;
     for (const kind of ['desktop', 'web'] as const) {
       count += skipIfFocused
-        ? this.deps.wsHub.sendToKindUnlessFocused(kind, event.chatId, wire)
-        : this.deps.wsHub.sendToKind(kind, wire);
+        ? this.deps.wsHub.sendToKindUnlessFocused(kind, event.chatId, wire, allow)
+        : this.deps.wsHub.sendToKind(kind, wire, allow);
     }
     if (count === 0) {
       this.deps.logger.info(
