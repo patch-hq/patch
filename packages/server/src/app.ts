@@ -142,6 +142,9 @@ import {
 } from './dev-diag.js';
 import { ExpoPushBackend } from './notifications/expo.js';
 
+/** How long a socket has to answer the going-away notice before a stop cuts it. */
+export const WS_CLOSE_GRACE_MS = 2_000;
+
 /** The surface id settings frames to hosts are sent under. */
 const SETTINGS_SURFACE = 'shared-settings';
 
@@ -403,7 +406,22 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       }
     ).websocketServer;
     const reason = restartingReason(opts.restartTarget?.() ?? null);
-    for (const client of server?.clients ?? []) client.close(CLOSE_SERVER_RESTARTING, reason);
+    const clients = [...(server?.clients ?? [])] as Array<{
+      close(c: number, r: string): void;
+      terminate?(): void;
+      readyState?: number;
+    }>;
+    for (const client of clients) client.close(CLOSE_SERVER_RESTARTING, reason);
+    // A socket that does not answer the going-away notice (a phone asleep, a
+    // half-open link) would hold the restart open until it timed out. Each has
+    // had its notice; whatever has not closed after a moment is cut
+    // (spec/12 § Server restarts).
+    if (clients.length > 0) {
+      const cut = setTimeout(() => {
+        for (const client of clients) if (client.readyState !== 3) client.terminate?.();
+      }, WS_CLOSE_GRACE_MS);
+      cut.unref();
+    }
     done();
   });
   await app.register(websocketPlugin, {
