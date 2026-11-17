@@ -12,6 +12,9 @@ import { pickPath } from './_common.js';
 const ULID_LENGTH = 26;
 const ULID_PREFIX = /^[0-9A-HJKMNP-TV-Z]+$/;
 const SPECIAL_THREAD = /^thread_[a-z]+$/;
+// A job's chat (`jobchat-j_<job>[-<item>]`) has a fixed, non-ULID id that is
+// not in the chat list, so it is always passed through as given.
+const JOB_CHAT = /^jobchat-/;
 
 /**
  * Resolves against every host's chats: no caller ever names a host. Over the
@@ -20,7 +23,7 @@ const SPECIAL_THREAD = /^thread_[a-z]+$/;
  * already. `id` is a full id, a unique id prefix, or a chat's exact name.
  */
 export async function resolveChatId(t: Transport, id: string): Promise<string> {
-  if (SPECIAL_THREAD.test(id)) return id;
+  if (SPECIAL_THREAD.test(id) || JOB_CHAT.test(id)) return id;
   if (id.length >= ULID_LENGTH && ULID_PREFIX.test(id.toUpperCase())) return id;
   const path = pickPath(t, '/internal/chats', '/api/chats');
   let qs = '?archived=include';

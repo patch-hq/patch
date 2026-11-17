@@ -80,3 +80,9 @@ test('a name two chats share is refused, naming both', async () => {
     /ambiguous/,
   );
 });
+
+test('a job chat id is passed through without a lookup', async () => {
+  const t = fake('uds', [A]);
+  assert.equal(await resolveChatId(t, 'jobchat-j_01KZSAG4ZN-6j39Qrg'), 'jobchat-j_01KZSAG4ZN-6j39Qrg');
+  assert.deepEqual(t.gets, []);
+});
