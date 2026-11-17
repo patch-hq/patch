@@ -325,6 +325,13 @@ describe('SharedSettingsService', () => {
     expect(service.changedEvent().problem).toBeUndefined();
   });
 
+  it('stores an Anthropic API key as a Claude account and reports it as an API key', async () => {
+    const account = await service.addClaude('sk-ant-api03-key');
+    expect(account.label).toBe('Claude API (paid)');
+    const row = service.secretsSummary().claude.find((a) => a.id === account.id);
+    expect(row).toMatchObject({ connected: true, kind: 'apiKey' });
+  });
+
   it('starts without the key that locks its secrets, says why, and sends hosts nothing', async () => {
     await service.addClaude(TOKEN_A);
     rmSync(join(dir, 'secrets.key'));

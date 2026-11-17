@@ -2542,6 +2542,8 @@ export const SharedSecretsSummary = z
           id: z.string().min(1),
           label: z.string().min(1),
           connected: z.boolean(),
+          /** `apiKey` for an Anthropic API key; absent for a sign-in. */
+          kind: z.literal('apiKey').optional(),
           email: z.string().min(1).optional(),
           organizationId: z.string().min(1).optional(),
         })

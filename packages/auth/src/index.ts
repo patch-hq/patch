@@ -85,6 +85,7 @@ export {
 
 export {
   fetchClaudeUsage,
+  anthropicAuthHeaders,
   fetchClaudeOrganizationId,
   readUsageHeaders,
   ORGANIZATION_HEADER,

@@ -102,13 +102,12 @@ describe('the Connect page', () => {
     );
   }
 
-  it('leads with signing in to Claude, says which plans work, and Not now goes back', () => {
+  it('leads with signing in to Claude, offers an API key, and Not now goes back', () => {
     setSharedAccounts({});
     renderConnect();
     expect(screen.getByRole('heading', { name: 'Connect an AI' })).toBeInTheDocument();
-    expect(screen.getByTestId('welcome-claude-plans')).toHaveTextContent(
-      'Works with a Claude Pro, Max, Team or Enterprise plan.',
-    );
+    expect(screen.queryByTestId('welcome-claude-plans')).toBeNull();
+    expect(screen.getByTestId('claude-add-api-key')).toBeInTheDocument();
     expect(screen.getByTestId('claude-signin-start')).toBeInTheDocument();
     const close = screen.getByTestId('connect-close');
     expect(close).toHaveTextContent('Not now');

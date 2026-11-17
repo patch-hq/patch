@@ -26,7 +26,7 @@
 // headers at all, which is why identity and usage are two different calls here
 // and not one.
 
-import { rateLimitWindowsBlocked } from '@patch/wire';
+import { isAnthropicApiKey, rateLimitWindowsBlocked } from '@patch/wire';
 
 /** Anthropic REST API version header, required on every call. */
 const API_VERSION = '2023-06-01';
@@ -37,6 +37,13 @@ const OAUTH_BETA = 'oauth-2025-04-20';
  * `claude setup-token` token is scoped to the CLI, and a request that does not
  * look like the CLI is not the request whose limits we want to report.
  */
+/** Request auth for an Anthropic call: `x-api-key` for an API key, a bearer + beta for a sign-in token. */
+export function anthropicAuthHeaders(token: string): Record<string, string> {
+  return isAnthropicApiKey(token)
+    ? { 'x-api-key': token }
+    : { authorization: `Bearer ${token}`, 'anthropic-beta': OAUTH_BETA };
+}
+
 const USER_AGENT = 'claude-cli/2.0.0 (external, cli)';
 
 const MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
@@ -311,9 +318,8 @@ export async function fetchClaudeOrganizationId(
   try {
     const res = await fetchImpl(url, {
       headers: {
-        authorization: `Bearer ${accessToken}`,
+        ...anthropicAuthHeaders(accessToken),
         'anthropic-version': API_VERSION,
-        'anthropic-beta': OAUTH_BETA,
         'user-agent': USER_AGENT,
       },
     });

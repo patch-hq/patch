@@ -167,26 +167,47 @@ function AccountEntry({
           );
         })(),
     },
-    ...(provider.pasteToken
+    ...(provider.pasteToken && row.kind === 'apiKey'
       ? [
           {
-            label: row.connected ? 'Sign in again' : 'Sign in',
-            detail: 'Sign in with Claude in your browser',
-            testid: `account-connect-${id}`,
-            onSelect: () => setSigningIn(true),
-          },
-          {
-            label: 'Paste a token',
-            detail: 'Use a token from `claude setup-token` instead',
+            label: 'Replace key',
+            detail: 'Use a different Anthropic API key for this account',
             testid: `account-paste-${id}`,
             onSelect: () =>
-              pasteToken(
-                `${row.connected ? 'Sign in again to' : 'Sign in to'} ${row.label}`,
-                'Sign in',
-              ),
+              void (async () => {
+                const key = await useUiStore.getState().prompt({
+                  title: `Replace the key for ${row.label}`,
+                  message: 'Paste the new key:',
+                  placeholder: 'sk-ant-api03-…',
+                  confirmLabel: 'Replace',
+                });
+                if (key === null || key.trim() === '') return;
+                await writeShared('replace key', () =>
+                  api.updateAccount(backendId, row.id, { token: key.trim() }),
+                );
+              })(),
           },
         ]
-      : []),
+      : provider.pasteToken
+        ? [
+            {
+              label: row.connected ? 'Sign in again' : 'Sign in',
+              detail: 'Sign in with Claude in your browser',
+              testid: `account-connect-${id}`,
+              onSelect: () => setSigningIn(true),
+            },
+            {
+              label: 'Paste a token',
+              detail: 'Use a token from `claude setup-token` instead',
+              testid: `account-paste-${id}`,
+              onSelect: () =>
+                pasteToken(
+                  `${row.connected ? 'Sign in again to' : 'Sign in to'} ${row.label}`,
+                  'Sign in',
+                ),
+            },
+          ]
+        : []),
     ...(row.connected
       ? [
           {
@@ -268,10 +289,37 @@ function AccountEntry({
 }
 
 /** Add a Claude account: sign in in the browser, or paste a `claude setup-token` token. */
+export function AddClaudeApiKey(): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="set-btn ghost"
+      data-testid="claude-add-api-key"
+      onClick={() =>
+        void (async () => {
+          const key = await useUiStore.getState().prompt({
+            title: 'Add an Anthropic API key',
+            message: 'Paid per use. Paste the key:',
+            placeholder: 'sk-ant-api03-…',
+            confirmLabel: 'Add',
+          });
+          if (key === null || key.trim() === '') return;
+          await writeShared('add API key', () =>
+            api.addAccount('claude-code', { apiKey: key.trim() }),
+          );
+        })()
+      }
+    >
+      Add API key
+    </button>
+  );
+}
+
 export function AddClaudeAccount(): JSX.Element {
   return (
     <div className="set-inline set-add-bar start">
       <ClaudeSignIn />
+      <AddClaudeApiKey />
       <button
         type="button"
         className="set-btn ghost"

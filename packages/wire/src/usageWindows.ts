@@ -132,3 +132,13 @@ export function rateLimitWindowState(
   }
   return 'ok';
 }
+
+/**
+ * An Anthropic API key (`sk-ant-api…`) as opposed to a Claude sign-in token
+ * (`sk-ant-oat…`). Both are stored as a Claude account's credential; the key
+ * is paid per use, authenticates with `x-api-key` and has no subscription
+ * limit windows to read (spec/10 § Backend credentials).
+ */
+export function isAnthropicApiKey(token: string): boolean {
+  return token.startsWith('sk-ant-api');
+}
