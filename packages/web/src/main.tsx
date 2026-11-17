@@ -15,7 +15,6 @@ import { AppShell } from './AppShell.js';
 import { PairingScreen } from './components/PairingScreen.js';
 import {
   acceptHandedCredential,
-  clearCredential,
   loadCredential,
   maybeAcceptDevCredential,
 } from './lib/credential.js';
@@ -34,6 +33,8 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
 
+import { forgetAccountOnDevice } from './lib/forgetAccountOnDevice.js';
+
 function Boot(): JSX.Element {
   const initial = acceptHandedCredential() ?? maybeAcceptDevCredential() ?? loadCredential();
   const [credential, setCredential] = useState<string | null>(initial);
@@ -47,9 +48,11 @@ function Boot(): JSX.Element {
   // sign-in. Drop it the moment the server says no.
   useEffect(() => {
     const onRejected = (e: Event): void => {
-      clearCredential();
+      const reason = (e as CustomEvent<string>).detail ?? 'unauthenticated';
+      // The credential goes at once; the device's copies finish going in the background.
+      void forgetAccountOnDevice();
       setCredential(null);
-      setRejectedReason((e as CustomEvent<string>).detail ?? 'unauthenticated');
+      setRejectedReason(reason);
     };
     window.addEventListener('patch:credential-rejected', onRejected);
     return () => window.removeEventListener('patch:credential-rejected', onRejected);

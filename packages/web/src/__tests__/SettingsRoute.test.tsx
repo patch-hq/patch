@@ -469,6 +469,35 @@ describe('Settings → Account', () => {
       await waitFor(() => expect(reloadSpy).toHaveBeenCalled());
     });
 
+    it('forgets the chat list and transcripts held on this device before it reloads', async () => {
+      const { IDBFactory } = await import('fake-indexeddb');
+      (globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory();
+      const lists = await import('../lib/chatListCache.js');
+      const transcripts = await import('../lib/transcriptCache.js');
+      lists.__resetChatListCacheForTests();
+      transcripts.__resetCacheForTests();
+      await lists.saveChatList([{ chatId: 'a', status: 'active', lastUpdated: 1 } as never]);
+      await transcripts.saveEvents('a', [
+        { type: 'chat.message', chatId: 'a', seq: 1, role: 'user', content: 'x' },
+      ]);
+      // What the page can see at the moment it reloads: the copy must already be gone.
+      let heldAtReload: unknown = 'unset';
+      reloadSpy.mockImplementation(() => {
+        heldAtReload = 'reloaded';
+      });
+      vi.stubGlobal('fetch', makeFetch());
+      renderSettings('/settings/account');
+      await waitFor(() => expect(screen.getByTestId('account-id')).toHaveTextContent('acct-123'));
+      fireEvent.click(screen.getByTestId('deactivate-surface'));
+      fireEvent.click(await screen.findByTestId('confirm-ok'));
+      await waitFor(() => expect(heldAtReload).toBe('reloaded'));
+      expect(await lists.loadChatList()).toBeNull();
+      expect(await transcripts.loadTranscript('a')).toBeNull();
+      delete (globalThis as { indexedDB?: unknown }).indexedDB;
+      lists.__resetChatListCacheForTests();
+      transcripts.__resetCacheForTests();
+    });
+
     it('a revoke failure still clears the credential and reloads (pushes an error first)', async () => {
       vi.stubGlobal(
         'fetch',

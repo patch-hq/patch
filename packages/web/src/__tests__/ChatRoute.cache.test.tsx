@@ -128,6 +128,32 @@ describe('the device’s cached transcript', () => {
     expect(useChatStore.getState().chats['c-cache']?.pendingPermissions).toHaveLength(0);
   });
 
+  it('says it is catching up while the replay is in flight, and stops once it lands', async () => {
+    loadTranscript.mockResolvedValue({
+      events: [msg(0, 'from the cache')],
+      branchId: null,
+      resolutions: [],
+    });
+    hydrate('c-cache');
+    const { act, screen } = await import('@testing-library/react');
+    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    await waitFor(() => expect(useChatStore.getState().timelines['c-cache']?.length).toBe(1));
+
+    act(() => useChatStore.getState().setReplaying('c-cache', true));
+    expect(await screen.findByTestId('catching-up')).toBeInTheDocument();
+
+    act(() => useChatStore.getState().setReplaying('c-cache', false));
+    await waitFor(() => expect(screen.queryByTestId('catching-up')).toBeNull());
+  });
+
+  it('shows no catching-up line on a chat the device holds nothing of', async () => {
+    hydrate('c-cache');
+    const { act, screen } = await import('@testing-library/react');
+    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    act(() => useChatStore.getState().setReplaying('c-cache', true));
+    expect(screen.queryByTestId('catching-up')).toBeNull();
+  });
+
   it('still asks the host when the device holds nothing', async () => {
     loadTranscript.mockResolvedValue(null);
     hydrate('c-cache');

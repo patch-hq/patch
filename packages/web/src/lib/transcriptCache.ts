@@ -247,6 +247,25 @@ export async function dropTranscript(chatId: string): Promise<void> {
   }
 }
 
+/** Forget every cached transcript: used when the account is signed out of this device. */
+export async function clearTranscripts(): Promise<void> {
+  try {
+    const db = await openDb();
+    if (!db) return;
+    const tx = db.transaction([EVENTS, CHATS, RESOLUTIONS], 'readwrite');
+    tx.objectStore(EVENTS).clear();
+    tx.objectStore(CHATS).clear();
+    tx.objectStore(RESOLUTIONS).clear();
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('idb transaction failed'));
+      tx.onabort = () => reject(tx.error ?? new Error('idb transaction aborted'));
+    });
+  } catch (err) {
+    console.warn('[patch] transcript cache clear failed:', (err as Error).message);
+  }
+}
+
 /** Drop all but the `MAX_CACHED_CHATS` most recently opened chats. */
 export async function trimCache(): Promise<void> {
   try {
