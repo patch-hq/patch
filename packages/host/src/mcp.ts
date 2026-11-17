@@ -42,6 +42,11 @@ export interface PatchToolsServerOptions {
    * one written beside it.
    */
   toolPromptOverrides?: Record<string, string>;
+  /**
+   * Tools not offered to this chat (PATCH_OMIT_TOOLS): Patch's replacements for
+   * native tools on a provider that cannot switch its native ones off.
+   */
+  omitTools?: readonly string[];
 }
 
 interface UdsRequestOptions {
@@ -130,6 +135,10 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     const tool = (
       registerTool as (n: string, ...r: unknown[]) => { enable: () => void; disable: () => void }
     )(name, ...rest);
+    if (opts.omitTools?.includes(name)) {
+      (tool as unknown as { remove: () => void }).remove();
+      return tool;
+    }
     if (name.startsWith('patch_browser_') && name !== BROWSER_ENTRY_TOOL) {
       tool.disable();
       gatedBrowserTools.push(tool);
@@ -1736,6 +1745,7 @@ export async function runPatchToolsServerStdio(): Promise<void> {
     hostSocketPath,
     chatId,
     toolPromptOverrides,
+    omitTools: (process.env['PATCH_OMIT_TOOLS'] ?? '').split(',').filter((n) => n.length > 0),
     localKey:
       localKeyFile && localKeyFile.length > 0
         ? () => {

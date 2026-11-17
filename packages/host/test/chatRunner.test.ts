@@ -1450,6 +1450,28 @@ describe('Host ChatRunner', () => {
     });
   });
 
+  it('a Claude chat omits no Patch tool: it can switch its native subagent and cron tools off', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-runner-omit-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-runner-omit-folder-')));
+    const sdk = createMockSdkBackend();
+    let id = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: sdk,
+      oauthAccessToken: 'fake-token',
+      emit: () => undefined,
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: () => `chat-${++id}`,
+      mcpServer: { command: '/usr/bin/node', args: ['/tmp/mcp.js'], env: {} },
+    });
+    sdk.enqueue([{ type: 'result', sessionId: 'sess-A' }]);
+    await daemon.spawnChat({ folder, prompt: 'hello' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sdk.lastOptions()?.mcpServer?.env['PATCH_OMIT_TOOLS']).toBe('');
+  });
+
   // spec/04 § Name — AI-generated chat titles (the optional `generateTitle` DI).
   describe('AI title generation (spec/04 § Name)', () => {
     function setupTitle(
