@@ -8,7 +8,7 @@ Per-surface detailed design lives in dedicated docs:
 - `14-design-web.md` — web app SPA at `/app`
 - `15-design-mobile.md` — Android-native (Expo/RN).
 
-This doc covers shared surface concerns: presence, editor, QR linking, lifecycle.
+This doc covers shared surface concerns: loading, chat status, capability-gated actions, presence, editor, QR linking, lifecycle.
 
 ## Terminal (`patch` CLI)
 
@@ -37,14 +37,41 @@ Static SPA served by the server (subpath `/app`).
 - Push notifications via Expo's push API (see `09-notifications.md`).
 - Voice button per chat, Manager voice.
 
+## Loading
+
+Surfaces read only from the server's record (`01-server.md`). Opening a chat never waits on its host, and a host being offline never stops a chat from being read.
+
+- Device copy. Each device keeps a local copy of its recent and active chats: the chat list entries, each chat's status, and the entries it has shown for the chats it follows. On launch the chat list and those chats render from this copy before any network call, then catch up. The copy is a read-only copy of what the server sent: what the server sends replaces it, so a chat deleted or renamed elsewhere does not survive from it. Unsent input is not part of it (`12-error-and-offline.md` § Guaranteed input delivery).
+- Update feed. One feed per account tells the device what changed anywhere: chat list entries, statuses, and new entries for the chats it follows (`03-wire-protocol.md` § Account feed). The device copy is kept current from it.
+- Positions. A surface holds a position in each chat it shows. It asks the server for what is new since that position and for older pages before its earliest one. Live entries and history are one stream: reconnecting continues from the position, so nothing a device has shown is lost and nothing arrives twice.
+- Opening a chat lands on its last screen, rendered from the device copy where it holds one and otherwise fetched from the server. Older entries load page by page as the reader scrolls up. Large tool output loads when its row is expanded.
+- The chat list comes from the server's chat index, page by page (`01-server.md`). Sections the device does not hold, such as Archived, load when opened.
+- Never empty while loading. A chat or list that has not yet heard from the server shows that it is loading, never an empty state, a finished state or a stale status presented as current. An empty state appears only once the server has said there is nothing. A chat shown from the device copy while newer entries are on their way says it is catching up until it is current.
+- Targets. The chat list and followed chats render from the device copy with no network wait; any chat's last screen renders within one second of opening; nothing a device has shown is lost on reconnect. These are required checks (`19-testing.md`).
+
+## Chat status
+
+The server decides each chat's status; the statuses and their allowed transitions are listed in `12-error-and-offline.md` § Chat status. A surface displays the status the server sends and stores it with its copy of the chat. It never derives a status from transcript events, connection state, timers or its own sends, and never shows an assumed one before the server's arrives. Snoozed, archived, pinned and read are user flags, drawn beside the status and never mixed into it.
+
+- Interrupted carries a Continue action (`12-error-and-offline.md` § Continue).
+- Waiting for sign-in carries a Sign in action, which works from every surface, including the device-code flow (`10-auth.md` § Signing in).
+- Paused until a reset names the reset time and the behaviour the user chose for limits (`10-auth.md` § Limits).
+- Failed shows its reason.
+
+## Capabilities and provider switches
+
+Actions that depend on the provider follow the chat's provider capabilities (`02-host.md` § Provider adapters). Edit, rewind and branch controls appear only on chats whose provider supports them natively; on any other chat they are absent, not disabled. A chat whose provider session is gone stays readable and shows that it cannot continue with the model's memory.
+
+A provider switch, and a move to another host, starts a new chat linked to the old one (`04-chats-and-folders.md` § Provider switches, § Moving to another host). Surfaces show the linked chats as one continuing thread: the earlier chat's entries, a divider marking the switch or move and naming both providers or hosts, then the new chat from its first message, which is the visible carried-over context. The chat list shows the thread once, as its newest chat.
+
 ## Handover
 
-The server keeps one account-wide **view position**: the page the user is on and, in a chat, the message at the top of the viewport. Pages that exist on every surface are covered — a chat, jobs, a job, pads, a pad and settings; anything else (new chat, lifecycle screens) reports nothing.
+The server keeps one account-wide view position: the page the user is on and, in a chat, the message at the top of the viewport. Pages that exist on every surface are covered — a chat, jobs, a job, pads, a pad and settings; anything else (new chat, lifecycle screens) reports nothing.
 
 - A surface sends `view_position.set {page, id?, seq?}` (debounced ~800 ms) only once the user has actually used it since it launched or came to the front — a surface that merely opened must not overwrite the position it is about to adopt. `seq` is absent when the chat is at the latest message. The server stamps the sender's surface id and a receipt time, persists it (`<dataDir>/view-position.json`, atomic write; a corrupt file is logged and read as empty) and broadcasts `view_position.updated`. A connecting surface is sent the current position right after `auth.ok`.
-- A surface adopts another surface's position only **on launch** (when the connect snapshot arrives before any input) and **when it returns to the foreground** (tab visible / window focus / app active). It never moves under a hand: once the user is using it, newer remote positions wait for the next foreground. The launch snapshot is adopted even when this same surface wrote it, so restarting the app reopens the chat and position it closed on rather than the default page; every later echo of its own is ignored. A position is adopted once (`updatedAt` newer than the last adopted or authored).
+- A surface adopts another surface's position only on launch (when the connect snapshot arrives before any input) and when it returns to the foreground (tab visible / window focus / app active). It never moves under a hand: once the user is using it, newer remote positions wait for the next foreground. The launch snapshot is adopted even when this same surface wrote it, so restarting the app reopens the chat and position it closed on rather than the default page; every later echo of its own is ignored. A position is adopted once (`updatedAt` newer than the last adopted or authored).
 - Adopting navigates to the page; a chat opens at `seq` through the same jump-to-message path as a search hit. On the desktop the position lands in the group/tab layout the way any navigation does (spec/14 § Groups): a chat some group already shows has that group focused, otherwise the focused group switches to it; a page replaces the active tab. The tab layout itself is never sent — the phone has none — so each desktop keeps its own, and the handover chooses only where in it to open. A launch snapshot that arrives before the navigator has mounted waits for it and is then adopted.
-- **Settings → Account → "Sync position between surfaces"** (shared setting `syncPosition`, default on) turns the whole handover off for the account: with it off no surface sends `view_position.set` and none adopts another's position. Until a surface has loaded the setting it does neither (no assumed default); turning it on mid-session takes effect without a relaunch.
+- Settings → Account → "Sync position between surfaces" (shared setting `syncPosition`, default on) turns the whole handover off for the account: with it off no surface sends `view_position.set` and none adopts another's position. Until a surface has loaded the setting it does neither (no assumed default); turning it on mid-session takes effect without a relaunch.
 - The phone reads where it is from the navigation container's own `state`/`ready` events (`useCurrentRoute`), never from expo-router's `usePathname`/`useGlobalSearchParams`/`useRootNavigationState` under the navigator: those re-sync the router store during render, and with the tab group's nested navigator that loops forever (the JS thread at 100% on every tab screen until the app runs out of memory).
 
 ## Desktop notifier
@@ -70,9 +97,10 @@ The mobile equivalent is OS-level (persistent foreground notification + launcher
 
 The macOS desktop app (`@patch/desktop`) wraps the deployed web app in an Electron shell, plus the menu-bar surface above.
 
-The app installs and manages a host on its own Mac as a separate OS service
-with its own lifetime, and shows that host's status alongside every other host.
-See `02-host.md` § Desktop app and the local host.
+The app is a window onto Patch. On its own Mac it installs and manages a
+server and a host, each a separate OS service with its own lifetime, and shows
+that host's status alongside every other host. See `11-deployment.md` and
+`02-host.md` § Desktop app and the local host.
 
 Only one desktop process may own a user profile. Launching another copy exits
 that copy and shows the existing window, restoring it if minimised. The saved
@@ -134,11 +162,11 @@ and no window controls to begin with, so they reserve no strip.
 
 Packaging invariants that must hold:
 
-- Bootstrap must run when packaged. The `whenReady` bootstrap (window + tray + hotkeys) is gated so a test harness that imports `main.js` doesn't spawn windows. A packaged app is always the entry, but Electron loads `main` from `package.json` so `process.argv[1]` is not `main.js` — an argv-only entry check false-negatives and the app launches with no window ("won't launch"). The gate is therefore `app.isPackaged || isAppEntry()`.
-- Ship the tray template icon. `createTray` reads `build/trayIconTemplate.png` (+ `@2x`) from inside the asar. The `files` glob must list them explicitly (it bundles `dist/**` + `package.json` only by default), else the asset is absent and the tray throws on every launch.
-- App icon is `build/icon.png` — a green rounded square with a cream italic "p" (matches the web favicon's mark, square not circular). electron-builder generates the `.icns`.
-- Auto-updater needs `app-update.yml`. That config only ships in real published dmg/zip builds; a local `--dir` dev build is packaged but has no update config, so the updater is skipped when the file is absent (no unhandled rejection).
-- Local `--dir` builds skip signing, leaving a stale `Identifier=Electron` ad-hoc signature that Apple Silicon refuses to launch from Finder. Re-sign ad-hoc (`codesign --force --deep --sign -`) so the identifier becomes `dev.patchhq.app`; real release builds sign with the project's signing identity (`11-deployment.md` § Desktop code signing).
+- The start-up that opens the window, tray and hotkeys always runs in a packaged app, and is gated so a test harness that imports the main module opens nothing.
+- The tray template icon ships inside the packaged app; without it the tray fails on every launch.
+- The app icon is a green rounded square with a cream italic "p", the web favicon's mark drawn square.
+- A build that carries no update config (a local unpacked build) skips the updater without an unhandled error.
+- A local unsigned build is re-signed ad hoc so Apple Silicon launches it from Finder; release builds sign with the project's signing identity (`11-deployment.md` § Desktop code signing).
 
 #### Desktop first run
 
@@ -147,7 +175,7 @@ No server address is built into the app. A launch with no remembered connection 
 On a Mac, a first run opened from anywhere but Applications (Downloads, the disk image, a quarantined download macOS runs from a temporary copy) first asks "Move Patch to Applications?" on the same window, with Move and Not now. Move puts the app in /Applications, quits, and opens the moved copy, which goes on to the setup; a move that fails says why and the question stands. Not now goes on to the setup from where the app is. Every answer is stored where Settings stores it and can be changed there later; nothing is kept in a store of the setup's own.
 
 1. Where your agents run: "This computer" or "My own server". This step is a window of the shell's own, because there is no server to load anything from until it is answered. The answer is remembered (`connection.json` in the app's data directory, 0600, with the app's credential on that server) and not asked again; App menu → Switch Server… forgets it and asks on the next launch. Closing the window unanswered quits. A step that fails says why on the same window, and the question is asked again.
-2. Connect an AI: one card per provider, every card the same shape — Sign in and Add API key, with no line spelling out which plans or keys work (`10-auth.md` § Backend credentials) — and its sign-in (`10-auth.md` § Signing in to Claude from a surface, § OpenAI accounts). A sign-in that hands the user to a browser says on the card, in one line, what to do there: for Claude, sign in at claude.ai, copy the code it shows and paste it here (and, since claude.ai lands signed-out people on its dashboard after sign-in, that they press Open claude.ai again to get the code); for a ChatGPT device code, open the sign-in page and enter the code shown. Continue is enabled once any account is connected; the step can be skipped. Skipping says once, in one line on the step, that chats won't run until an AI is connected and that it can be done later from the banner in any chat; Continue then moves on. While a host is installing Claude Code (`02-host.md` § Agent backends) the step says so, says briefly when it has finished, and a failed install shows the installer's own reason.
+2. Connect an AI: one card per provider, every card the same shape — Sign in and Add API key, with no line spelling out which plans or keys work (`10-auth.md` § Backend credentials) — and its sign-in (`10-auth.md` § Signing in). A sign-in that hands the user to a browser says on the card, in one line, what to do there: for Claude, sign in at claude.ai, copy the code it shows and paste it here (and, since claude.ai lands signed-out people on its dashboard after sign-in, that they press Open claude.ai again to get the code); for a ChatGPT device code, open the sign-in page and enter the code shown. Continue is enabled once any account is connected; the step can be skipped. Skipping says once, in one line on the step, that chats won't run until an AI is connected and that it can be done later from the banner in any chat; Continue then moves on. While a host is installing Claude Code (`02-host.md` § Agent backends) the step says so, says briefly when it has finished, and a failed install shows the installer's own reason.
 3. The permission mode new chats start in (`02-host.md` § Permission mode), each mode named with a few words on what it does, said of the agent and never of one provider, since none may be connected. Bypass permissions carries its warning in its few words, drawn in the danger colour: it never asks, so it can delete or overwrite anything.
 4. The model new chats start on (the shared default model, `01-server.md` § Settings), from the host's catalogue, by its short name. Asked only once an AI is connected: with none there is nothing to choose between. It offers only the connected providers' models. A default on a provider that isn't connected is moved to the newest model that is, so what is shown chosen is what new chats use; the jobs' and the Manager's default models move to the chosen one too when theirs is on a provider that isn't connected. A catalogue that fails to load says so in a sentence, with the host's code behind Details (`12-error-and-offline.md` § Principles).
 5. Keep running, only for "This computer" (§ Keep running).
@@ -155,20 +183,20 @@ On a Mac, a first run opened from anywhere but Applications (Downloads, the disk
 
 Steps 2 to 6 are pages of the app itself, opened on the server step 1 chose, with Back on every step but the first of them. Their progress bar has one mark per step that page asks, so it counts three to five; step 1 draws none. Finishing, or skipping the phone, opens a new chat ready to type into.
 
-- This computer. The app runs a Patch server of its own and a host beside it, and nothing has to be installed. The server is the release the app carries, started with the app's own Node, listening on a loopback port chosen once and kept; its data lives in the app's data directory. The app makes the account, and sets this computer up as a machine with the host build the app carries, served from that server's own download channel like any other (`11-deployment.md` § Host installation). The server holds a relay channel (`10-auth.md` § Relay) so a phone can join it by QR from anywhere. Choosing this again after Switch Server… picks the same account up. This app takes no updates from a server it runs itself; a newer app is installed over it.
+- This computer. The app installs a Patch server and a host on this computer, each as its own OS service (`11-deployment.md`), and nothing else has to be installed. The server is the release the app carries, listening on a loopback port chosen once and kept; its data lives in its one server folder (`11-deployment.md`). The app makes the account, and sets this computer up as a machine with the host build the app carries, served from that server's own download channel like any other (`11-deployment.md` § Host installation). The server holds a relay channel (`10-auth.md` § Relay) so a phone can join it by QR from anywhere. Choosing this again after Switch Server… picks the same account up. This app takes no updates from a server it runs itself; a newer app is installed over it.
 - My own server. The user pastes the pairing code their server printed (`patch-server pair`, `11-deployment.md` § Server installation). A code naming the server's address pairs with it directly and loads its web app. A code naming a relay pairs through the relay and loads the web app from a loopback listener on this computer that carries every request and WebSocket through the encrypted session (`10-auth.md` § Relay), so the page cannot tell. The app's updates come from the feed the connected server publishes.
 
 The page the shell loads receives the credential in the URL fragment (`/app/#credential=…`), which is never sent anywhere and is taken only inside the shell.
 
 #### Keep running
 
-When this computer runs Patch, the agents and the phone's connection depend on the app, not on its window.
+When this computer runs Patch, the agents and the phone's connection depend on its server and host services, not on the app.
 
-- Closing the window leaves the app running in the menu bar (the tray, off macOS), with its server and host.
+- Closing the window leaves the app running in the menu bar (the tray, off macOS). Neither closing nor quitting the app stops the server or the host; they stop when the user turns them off in Settings → Hosts, or when the computer sleeps or shuts down.
 - Open at login, on by default. Opened at login, the app starts in the menu bar with no window. On Linux this is a desktop autostart entry for the AppImage; a run not started from its AppImage has no file to start at login, so the choice is not offered there. On a Mac the login item opens the app from where it runs: macOS records the path an item was registered from, so when the app has moved since, the item is removed and registered again from the new place on the next launch. A Mac app running from its disk image or a quarantined download has no path that lasts until the next login, so the choice is not offered there either.
-- Keep this computer awake while plugged in, on by default. While on mains power the system is kept from sleeping so the phone can reach it; the display still sleeps. On battery nothing is held.
+- Keep this computer awake while plugged in, on by default. While on mains power the system is kept from sleeping so the phone can reach it, whether or not the app is open; the display still sleeps. On battery nothing is held.
 - Both are offered in the setup's Keep running step, in Settings → Hosts → Keep running, and as checkboxes in the tray menu, and all three show the same state.
-- Quit Patch in the tray menu asks first, saying that agents on this computer stop and the phone cannot reach it until Patch is opened again. Quitting stops the server and host and releases the awake hold.
+- Quit Patch in the tray menu closes the app and its menu-bar item only; agents on this computer keep running and the phone can still reach it.
 
 #### Runtime invariants
 
@@ -194,9 +222,9 @@ separate, PER-CHAT question is "was this particular chat open?", which
 `patch_activity` (`06-threads-manager-speakers.md` § Cross-chat toolset, with
 `includeSessions`) answers from two existing signals, combined:
 
-- **Focused**: the surface's last `chat.focus_change` (`03-wire-protocol.md`)
+- Focused: the surface's last `chat.focus_change` (`03-wire-protocol.md`)
   named this chat.
-- **Visible**: the surface is foregrounded — its last `surface.foregrounded` /
+- Visible: the surface is foregrounded — its last `surface.foregrounded` /
   `surface.backgrounded` said so.
 
 A chat is "open" only while BOTH hold on the same surface. Focused-but-backgrounded
@@ -205,8 +233,7 @@ with no chat selected) don't count — a chat sitting unread in a background tab
 is not time spent looking at it. The server (not any one host) records every
 surface's `chat.focus_change` / `surface.foregrounded` / `surface.backgrounded`
 transition for this purpose, because it is the only place that sees every
-surface regardless of which host each chat happens to live on
-(`activity-log.ts`). Two surfaces open on the same chat at once are two separate
+surface regardless of which host each chat happens to live on. Two surfaces open on the same chat at once are two separate
 open periods, not one — both really happened.
 
 ## QR-code linking

@@ -299,71 +299,47 @@ told it was judged.
 
 ## On the agent's response
 
-Runs when a turn settles (`checkAgentResponseHooks`, `chatRunner.ts`), on the
-agent's side, quietly — for the agent, not the user, and unlike § On the
-user's message there is no composer waiting, no Checking… state, nothing
-blocking a send.
+Runs when a turn settles, on the agent's side, quietly — for the agent, not the
+user, and unlike § On the user's message there is no composer waiting, no
+Checking… state, nothing blocking a send. How the host acts on a result is
+`04-chats-and-folders.md` § Turns a hook resubmits.
 
-- **Pass** (every matching hook's result is `pass`): nothing happens. No row,
+- Pass (every matching hook's result is `pass`): nothing happens. No row,
   no log beyond the ordinary one.
-- **Block**: the host fires a fresh turn carrying the blocking hook's own
-  `analysis`/`suggestion` as its actual message text — `origin: 'machine'`
-  (spec/09 § Whose turn it was: no completion doorbell, same as a self-wake
-  or the todo auto-advance) and `hookTrigger` on the resulting `chat.message`
-  (spec/03-wire-protocol.md § Hooks), which is what tells a surface to render
-  it as transcript furniture (04-chats-and-folders.md § Turns a hook
-  resubmits) rather than a user bubble. `fromUser` is never set — a hidden
-  chat stays hidden (spec/04 § Hidden), a hook resubmitting is exactly as
-  quiet as a job's own fire into it. More than one hook blocking the SAME
-  turn combines into one resubmit naming each.
-- **Advise**: no redo. The analysis is deferred — carried as a
-  `<system-reminder>` block (spec/02-host.md § System-reminder disclosure)
-  prepended to whichever turn the chat runs NEXT, whatever kind that turns
-  out to be (a person's reply, a job's fire, another hook's own resubmit),
-  consumed once the moment that turn is accepted. The row is a sibling
-  disclosure under THAT turn once it lands, labelled "Hook advice" — not its
-  own standalone row, and not forced into existence by the advise itself.
-- **The row is visible and is what the agent receives.** Nothing here is an
-  invisible injection (`principles.md`): a block's resubmit IS the hook's own
-  words, verbatim, as the turn's real content; an advise's reminder is
-  exactly what the disclosure shows, because the disclosure is built FROM the
-  text actually prepended to the prompt (same mechanism as every other
-  leading `<system-reminder>` — `history.ts`'s `extractSystemContext`).
-- **Loop guard**: `consecutiveHookBlocks` counts block-resubmits in a row with
-  no genuine (non-hook) turn in between, reset to 0 the instant one lands.
-  At `HOOK_BLOCK_LOOP_LIMIT` (3, declared in `chatRunner.ts` — not
-  configurable; the point is a ceiling a hook cannot talk its way past) the
-  host stops resubmitting and declares the chat's status instead
-  (`statusKind: 'report'`, the same self-chosen sidebar state
-  `04-chats-and-folders.md` § Current status describes), carrying the last
-  blocking analysis — surfacing it in the "needs attention" list
-  (`14-design-web.md` § Sidebar) rather than looping forever.
-- **Hidden/job chats**: a block resubmits exactly the same way — nothing
-  about `agent_response` hooks distinguishes a hidden or job-owned chat from
-  an ordinary one, since the gate (§ Gate) is what decides whether a hook
-  applies, not the chat's own visibility. Only the loop guard tripping
-  surfaces it (declaring a status is itself a `needs attention` claim,
-  regardless of Hidden membership).
-- **A hook that fails or times out**: never resubmitted — a broken hook must
-  not force the agent to redo work it never earned, unlike a `user_message`
-  hook's failure (which holds a send that hasn't happened yet and costs
-  nothing to hold). Not silent either: it defers exactly like an `advise`
-  (same `<system-reminder>` carry, same next-turn disclosure), labelled "Hook
-  failed" instead of "Hook advice" and naming the error in place of an
-  analysis. A batch that mixes a failure with a genuine `advise` reads under
-  the failure's own label — the less usual fact wins.
-- Works identically on a Claude or a Codex chat — nothing here is gated to
-  one backend the way the AI-generated "current status" summary is; a
-  `script` hook has no model in it at all, and a `prompt` hook's `model`
-  already names which backend answers it (§ `prompt`).
+- Block: the host runs a fresh turn whose message is the blocking hook's own
+  `analysis`/`suggestion`, verbatim, as a machine turn (no completion
+  doorbell, `09-notifications.md` § Whose turn it was) tagged `hookTrigger`
+  (`03-wire-protocol.md` § Hooks), so surfaces draw it as transcript
+  furniture rather than a user bubble. A hidden chat stays hidden. More than
+  one hook blocking the same turn combines into one resubmit naming each.
+- Advise: no redo. The analysis goes with whichever turn the chat runs next
+  as a note labelled "Hook advice" (`04-chats-and-folders.md` § Notes to the
+  agent), consumed once that turn is accepted.
+- What the agent receives is what the row shows: a block's resubmit is the
+  hook's own words as the turn's real content, and an advise is an ordinary
+  message in the chat's record (`principles.md` § No hidden prompt content).
+- Loop guard: after a ceiling of consecutive block-resubmits (3, declared in
+  code and not configurable — a ceiling a hook cannot talk its way past) with
+  no genuine turn between them, the host stops resubmitting and declares a
+  `report` status carrying the last blocking analysis
+  (`04-chats-and-folders.md` § Chat model), surfacing the chat in the needs
+  attention list (`14-design-web.md` § Sidebar). Hidden and job-owned chats
+  are treated exactly like any other; only the loop guard surfaces them.
+- A hook that fails or times out is never resubmitted — a broken hook must
+  not force the agent to redo work — and is not silent either: it goes with
+  the next turn exactly like an advise, labelled "Hook failed" and naming the
+  error. A batch mixing a failure with an advise reads under the failure's
+  label.
+- Works identically on every provider: a `script` hook has no model in it at
+  all, and a `prompt` hook's `model` names which provider answers it
+  (§ `prompt`).
 
 ## CRUD
 
 - Web/desktop (`14-design-web.md` § `/settings` details — Hooks): list, add,
-  edit, enable/disable, delete. Mobile mirrors it (`15-design-mobile.md` §
+  edit, enable/disable, delete. Mobile has the same (`15-design-mobile.md` §
   Hooks).
-- CLI — the `patch message-hooks` family (`17-cli.md` § Commands), REST-only
-  (there is no host-side UDS mirror for hooks the way jobs has one) — a
+- CLI — the `patch message-hooks` family (`17-cli.md` § Commands), REST-only — a
   chat manages its own hooks by shelling out to it, same as a human would.
 - Direct file edit — server watches `/data/hooks/`.
 
