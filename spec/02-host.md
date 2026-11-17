@@ -1259,6 +1259,20 @@ ends with it, with `daemon_shutdown`.
 - A runner with no host attached for 30 minutes ends its shell, so an orphaned
   terminal does not outlive the user's interest in it. The idle timeout applies
   as before once a host is attached.
+- The server keeps a PTY session's route when its host goes offline and tells
+  the surface nothing while the host is away: a restart is a blip, not an end.
+  When the host returns, what the surface sees is the host's own reattach
+  report, an `exit` for each shell that ended while away and the output
+  printed meanwhile for the rest. Only a host that has not returned within two
+  minutes of being announced offline has its PTY sessions reported lost, each as
+  `exit` with a null code and `daemon_shutdown`. A pipe session is reported at
+  once, because it died with the host.
+- A surface holding a PTY session asks for it again by `sessionId` when its host
+  comes back, and when its own link to the server returns. The reply is `ready`
+  and the whole scrollback, which replaces what the surface has drawn (the phone
+  clears its emulator on that `ready`). A session reported lost reopens the same
+  way and gets a fresh shell under the same id. The web drawer uses pipe
+  sessions only, so it keeps ending and reopening on a host restart.
 - A session record that cannot be read is discarded. The scrollback is on the
   host's disk, readable only by its user.
 

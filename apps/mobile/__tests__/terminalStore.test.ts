@@ -187,3 +187,45 @@ describe('terminalStore — a link that dies without an exit frame', () => {
     expect(store().sessions['s2']?.reopen).toBe('no');
   });
 });
+
+describe('terminalStore — a host that comes back', () => {
+  beforeEach(() => {
+    store()._reset();
+    store().start('s1', 'd1', '/home/tom');
+    store().ingest({ type: 'patch.terminal.ready', sessionId: 's1', cwd: '/home/tom', pty: true });
+    store().ingest({ type: 'patch.terminal.output', sessionId: 's1', stream: 'stdout', data: 'a' });
+  });
+
+  it('marks only that host’s live sessions to be asked for again by id', () => {
+    store().hostBack('other');
+    expect(s1().reopen).toBe('no');
+    store().hostBack('d1');
+    expect(s1()).toMatchObject({ status: 'live', reopen: 'now' });
+  });
+
+  it('the answer to a resume replaces the scrollback instead of adding to it', () => {
+    store().resume('s1');
+    expect(s1()).toMatchObject({ status: 'starting', reopen: 'no', resuming: true });
+    store().ingest({ type: 'patch.terminal.ready', sessionId: 's1', cwd: '/home/tom', pty: true });
+    expect(s1()).toMatchObject({ status: 'live', resuming: false, epoch: 1, output: [] });
+    store().ingest({
+      type: 'patch.terminal.output',
+      sessionId: 's1',
+      stream: 'stdout',
+      data: 'ab',
+    });
+    expect(undrawn(s1(), 0)).toBe('ab');
+  });
+
+  it('a session reported lost while the host was away reopens when it returns', () => {
+    store().ingest({
+      type: 'patch.terminal.exit',
+      sessionId: 's1',
+      code: null,
+      reason: 'daemon_shutdown',
+    });
+    expect(s1().reopen).toBe('after-offline');
+    store().hostBack('d1');
+    expect(s1().reopen).toBe('now');
+  });
+});

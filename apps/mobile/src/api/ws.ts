@@ -897,6 +897,8 @@ export class PatchWs {
     }
     if (event.type === 'host.online') {
       usePresenceStore.getState().setHostOnline(event.hostId, true);
+      // A terminal shell outlives a host restart: ask for each again by id.
+      useTerminalStore.getState().hostBack(event.hostId);
       // The host is back — redeliver pending inputs so queued-while-offline
       // turns land promptly and any lost to a flush-time flap heals (idempotent;
       // the host dedups). spec/12.
@@ -906,9 +908,9 @@ export class PatchWs {
     }
     if (event.type === 'host.offline') {
       usePresenceStore.getState().setHostOnline(event.hostId, false, event.reason);
-      useTerminalStore
-        .getState()
-        .interrupt('The machine went offline, waiting for it to return', event.hostId);
+      // Terminals are told nothing while the host is away: a PTY session's shell
+      // outlives a restart (spec/02 § PTY sessions — Surviving a host restart).
+      // The server reports them lost if the host does not return in time.
       return;
     }
     if (event.type === 'host.host') {

@@ -49,6 +49,13 @@ export interface HostTerminal {
    * for half an hour.
    */
   wrongKind: boolean;
+  /**
+   * The screen has asked the host to open this session again (the link came
+   * back, or the host did). The `ready` that answers redraws the whole
+   * scrollback, so what is drawn is cleared first and `epoch` counts the clears.
+   */
+  resuming: boolean;
+  epoch: number;
 }
 
 /** Scrollback kept for a redraw. Older output is dropped from the front. */
@@ -78,6 +85,18 @@ interface TerminalState {
   sessions: Record<string, HostTerminal>;
   /** Register a session the caller is about to open on the wire. */
   start(sessionId: string, hostId: string, cwd: string): void;
+  /**
+   * The screen is opening this session again under the same id (spec/02 § PTY
+   * sessions — Surviving a host restart): the host hands back the same shell
+   * and its scrollback, which replaces what is on screen.
+   */
+  resume(sessionId: string): void;
+  /**
+   * A host came back. Its live sessions are asked for again by id, so a shell
+   * that survived the restart is drawn afresh and one that did not is replaced;
+   * a session reported lost while the host was away reopens too.
+   */
+  hostBack(hostId: string): void;
   /** Mark a session failed from this side (the open could not even be sent). */
   fail(sessionId: string, message: string): void;
   /** Feed a host → surface terminal frame in. Unknown sessions are ignored. */
@@ -130,9 +149,39 @@ export const useTerminalStore = create<TerminalState>((set) => ({
           outputTotal: 0,
           message: null,
           wrongKind: false,
+          resuming: false,
+          epoch: 0,
         },
       },
     })),
+
+  resume: (sessionId) =>
+    set((state) =>
+      patch(state, sessionId, (s) => ({
+        ...s,
+        status: 'starting',
+        reopen: 'no',
+        message: null,
+        resuming: true,
+      })),
+    ),
+
+  hostBack: (hostId) =>
+    set((state) => {
+      const sessions = { ...state.sessions };
+      let changed = false;
+      for (const [id, s] of Object.entries(state.sessions)) {
+        if (s.hostId !== hostId) continue;
+        if (s.status === 'live') {
+          sessions[id] = { ...s, reopen: 'now' };
+          changed = true;
+        } else if (s.reopen === 'after-offline') {
+          sessions[id] = { ...s, reopen: 'now' };
+          changed = true;
+        }
+      }
+      return changed ? { sessions } : state;
+    }),
 
   fail: (sessionId, message) =>
     set((state) =>
@@ -162,7 +211,20 @@ export const useTerminalStore = create<TerminalState>((set) => ({
         set((state) =>
           patch(state, event.sessionId, (s) =>
             event.pty === true
-              ? { ...s, status: 'live', cwd: event.cwd }
+              ? {
+                  ...s,
+                  status: 'live',
+                  cwd: event.cwd,
+                  ...(s.resuming
+                    ? {
+                        output: [],
+                        outputChars: 0,
+                        outputTotal: 0,
+                        resuming: false,
+                        epoch: s.epoch + 1,
+                      }
+                    : {}),
+                }
               : { ...s, status: 'error', reopen: 'no', message: TOO_OLD_MESSAGE, wrongKind: true },
           ),
         );
@@ -197,7 +259,12 @@ export const useTerminalStore = create<TerminalState>((set) => ({
         return;
       case 'patch.terminal.error':
         set((state) =>
-          patch(state, event.sessionId, (s) => ({ ...s, status: 'error', reopen: 'no', message: event.message })),
+          patch(state, event.sessionId, (s) => ({
+            ...s,
+            status: 'error',
+            reopen: 'no',
+            message: event.message,
+          })),
         );
         return;
       default:

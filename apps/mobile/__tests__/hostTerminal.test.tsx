@@ -244,7 +244,7 @@ describe('Host terminal', () => {
     expect(inputs()).toEqual([]);
   });
 
-  it('a dropped link ends the shell on screen, then opens a fresh one by itself once back', () => {
+  it('a dropped link ends the shell on screen, then asks the host for the same session once back', () => {
     usePresenceStore.setState({
       connection: 'connected',
       hosts: { d1: { hostId: 'd1', online: true } as never },
@@ -259,7 +259,34 @@ describe('Host terminal', () => {
     actSync(() => usePresenceStore.setState({ connection: 'connected' }));
     const opens = sent().filter((e) => e.type === 'patch.terminal.open');
     expect(opens).toHaveLength(2);
-    expect((opens[1] as { sessionId: string }).sessionId).not.toBe(sessionId);
+    expect((opens[1] as { sessionId: string }).sessionId).toBe(sessionId);
+  });
+
+  it('a host that comes back is asked for the same session and its scrollback replaces the screen', () => {
+    usePresenceStore.setState({
+      connection: 'connected',
+      hosts: { d1: { hostId: 'd1', online: true } as never },
+    });
+    const { r, sessionId } = openLive();
+    fromHost({ type: 'patch.terminal.output', sessionId, stream: 'stdout', data: 'old\r\n' });
+    // The host went away and told nobody: the screen stays as it was.
+    expect(hasText(r.root, 'Session closed')).toBe(false);
+    actSync(() => useTerminalStore.getState().hostBack('d1'));
+    const opens = sent().filter((e) => e.type === 'patch.terminal.open');
+    expect(opens).toHaveLength(2);
+    expect((opens[1] as { sessionId: string }).sessionId).toBe(sessionId);
+    // Its answer is the same shell: the redraw replaces what was on screen.
+    __injected.length = 0;
+    fromHost({ type: 'patch.terminal.ready', sessionId, cwd: '/srv', pty: true });
+    fromHost({
+      type: 'patch.terminal.output',
+      sessionId,
+      stream: 'stdout',
+      data: 'old\r\nnew\r\n',
+    });
+    expect(__injected).toContain('window.__patch.reset();true;');
+    expect(__injected.join('')).toContain('new');
+    expect(useTerminalStore.getState().sessions[sessionId]?.output.join('')).toBe('old\r\nnew\r\n');
   });
 
   it('an ended session says why and restarts as a fresh shell on a cleared screen', () => {

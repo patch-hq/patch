@@ -188,6 +188,12 @@ export interface WsHubDeps {
    * back (Settings → Agent behavior, off by default; spec/12 § Continue).
    */
   autoContinueInterrupted?: () => boolean;
+  /**
+   * How long a host that is announced offline may take to come back before the
+   * PTY terminal sessions on it are reported lost (spec/02 § Terminal sessions —
+   * Surviving a host restart; spec/12 § Chat status). Default 120000.
+   */
+  terminalLossWindowMs?: number;
   /** Why a host that is down went down (`describeHostOffline`), if known. */
   hostOfflineReason?: (hostId: string) => string | undefined;
   /** A surface on a host's own host said the host is going to sleep, or is awake. */
@@ -348,6 +354,14 @@ export class WsHub {
   /** `sessionId → surfaceId` that opened it, so a dead host can tell that surface its shell is gone. */
   private readonly terminalSessionSurface = new Map<string, string>();
   /**
+   * Sessions that were opened as a PTY. Their shell runs under its own runner on
+   * the host and outlives a host restart, so their routes survive the host going
+   * offline; a pipe shell dies with the host and is ended at once.
+   */
+  private readonly ptyTerminalSessions = new Set<string>();
+  /** Per host: the timer that reports its PTY sessions lost if it does not return. */
+  private readonly terminalLossTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
    * The host-search counterpart of `terminalSessionHost` — `searchId →
    * hostId`, stamped from `patch.host_search.request` (the only host-search
    * frame that carries a `hostId`). `patch.host_search.cancel` names only
@@ -497,15 +511,17 @@ export class WsHub {
   }
 
   /**
-   * A host went away (offline or removed): every shell on it died with it.
-   * Drop the routes AND tell each owning surface, loudly — otherwise the
+   * A host went away for good (removed, or offline past the window): its shells
+   * are gone. Drop the routes AND tell each owning surface, loudly — otherwise the
    * drawer keeps showing a live prompt, swallows typed commands, and only
    * says `no terminal session` once a keystroke is refused. NO FALLBACK.
    */
-  private endTerminalSessionsOnHost(hostId: string): void {
+  private endTerminalSessionsOnHost(hostId: string, only: 'pipe' | 'all' = 'all'): void {
     for (const [sessionId, host] of [...this.terminalSessionHost.entries()]) {
       if (host !== hostId) continue;
+      if (only === 'pipe' && this.ptyTerminalSessions.has(sessionId)) continue;
       this.terminalSessionHost.delete(sessionId);
+      this.ptyTerminalSessions.delete(sessionId);
       const surfaceId = this.terminalSessionSurface.get(sessionId);
       this.terminalSessionSurface.delete(sessionId);
       if (surfaceId !== undefined) {
@@ -517,6 +533,20 @@ export class WsHub {
         });
       }
     }
+  }
+
+  private armTerminalLossTimer(hostId: string): void {
+    const hasPty = [...this.terminalSessionHost].some(
+      ([id, host]) => host === hostId && this.ptyTerminalSessions.has(id),
+    );
+    if (!hasPty) return;
+    clearTimeout(this.terminalLossTimers.get(hostId));
+    const timer = setTimeout(() => {
+      this.terminalLossTimers.delete(hostId);
+      this.endTerminalSessionsOnHost(hostId);
+    }, this.deps.terminalLossWindowMs ?? 120_000);
+    timer.unref?.();
+    this.terminalLossTimers.set(hostId, timer);
   }
 
   /** Tell every surface and host a host's status changed; on offline, resolve what died with it. */
@@ -549,7 +579,13 @@ export class WsHub {
     // Every shell on that host died with it. Drop the routes so a
     // surface still holding those ids is told `unknown_session` instead of
     // having its keystrokes buffered for a shell that no longer exists.
-    this.endTerminalSessionsOnHost(hostId);
+    // A PTY session is the exception: its shell runs under its own runner and
+    // outlives a host restart (spec/02 § Host restarts), so its route stays and
+    // surfaces are told nothing while the host is away. The host's reattach
+    // report is what they see when it returns; only a host that has not
+    // returned within the window has its sessions reported lost.
+    this.endTerminalSessionsOnHost(hostId, 'pipe');
+    this.armTerminalLossTimer(hostId);
     // Same reasoning for a search mid-walk on that host — it died with
     // the host, and a cancel for it would otherwise route nowhere.
     for (const [searchId, host] of this.hostSearchHost.entries()) {
@@ -667,6 +703,10 @@ export class WsHub {
         const restarting = this.restartingHosts.get(hostId);
         if (restarting) clearTimeout(restarting);
         this.restartingHosts.delete(hostId);
+
+        // Back inside the window: its PTY sessions are still there.
+        clearTimeout(this.terminalLossTimers.get(hostId));
+        this.terminalLossTimers.delete(hostId);
       }
       // A link that drops and returns inside the grace window is a network
       // blip, not an outage: nobody is told it went offline, so surfaces do
@@ -829,6 +869,9 @@ export class WsHub {
     this.offlineTimers.clear();
     for (const t of this.restartingHosts.values()) clearTimeout(t);
     this.restartingHosts.clear();
+
+    for (const t of this.terminalLossTimers.values()) clearTimeout(t);
+    this.terminalLossTimers.clear();
     this.hostEventUnsub?.();
     this.hostStatusUnsub?.();
     this.composerDraftsUnsub?.();
@@ -1827,6 +1870,8 @@ export class WsHub {
         // where this session's host is recorded for every later frame.
         this.terminalSessionHost.set(event.sessionId, event.hostId);
         this.terminalSessionSurface.set(event.sessionId, conn.surfaceId);
+        if (event.pty !== undefined) this.ptyTerminalSessions.add(event.sessionId);
+        else this.ptyTerminalSessions.delete(event.sessionId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, tagged);
         return;
@@ -1880,6 +1925,7 @@ export class WsHub {
         if (event.type === 'patch.terminal.close') {
           this.terminalSessionHost.delete(event.sessionId);
           this.terminalSessionSurface.delete(event.sessionId);
+          this.ptyTerminalSessions.delete(event.sessionId);
         }
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
         this.deps.hostLink.sendTo(hostId, conn.surfaceId, tagged);
@@ -2123,6 +2169,7 @@ export class WsHub {
     if (event.type === 'patch.terminal.exit') {
       this.terminalSessionHost.delete(event.sessionId);
       this.terminalSessionSurface.delete(event.sessionId);
+      this.ptyTerminalSessions.delete(event.sessionId);
     }
     if (event.type === 'patch.host_search.done') {
       this.hostSearchHost.delete(event.searchId);
