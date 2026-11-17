@@ -18,6 +18,7 @@ import {
 
 const calls: string[][] = [];
 let loaded = true;
+let hostPid = 4242;
 
 vi.mock('node:child_process', () => ({
   execFile: (
@@ -31,7 +32,7 @@ vi.mock('node:child_process', () => ({
     if (file === 'sudo') return cb(new Error('sudo: a password is required'));
     if (args[0] === 'print') {
       if (!loaded) return cb(new Error('Could not find service'));
-      return cb(null, { stdout: '\tstate = running\n\tpid = 4242\n', stderr: '' });
+      return cb(null, { stdout: `\tstate = running\n\tpid = ${hostPid}\n`, stderr: '' });
     }
     return cb(null, { stdout: '', stderr: '' });
   },
@@ -51,6 +52,7 @@ beforeEach(() => {
   };
   mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
   loaded = true;
+  hostPid = 4242;
 });
 afterEach(() => {
   calls.length = 0;
@@ -81,7 +83,10 @@ describe('launchd update keeps running chats alive', () => {
   });
 
   it('start signals only the host pid and never uses kickstart -k', async () => {
-    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      hostPid = 4343; // KeepAlive brought a replacement up
+      return true;
+    });
     await launchdOps.start(def);
     expect(kill).toHaveBeenCalledWith(4242, 'SIGTERM');
     expect(calls.some((c) => c.includes('kickstart'))).toBe(false);
