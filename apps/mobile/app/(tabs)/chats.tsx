@@ -10,6 +10,7 @@ import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import {
   AlarmClock,
+  Archive,
   Bell,
   Bot,
   Ear,
@@ -37,6 +38,7 @@ import { EMPTY_STATES } from '../../src/lib/emptyStates';
 import { needsAttention, sortAttentionQueue } from '../../src/lib/attentionQueue';
 import { matchesStateFilter, type ChatStateFilter } from '../../src/lib/stateFilter';
 import { useBatchStore } from '../../src/stores/batchStore';
+import { useExperimentalFeatures } from '../../src/stores/settingsStore';
 import { useUiStore } from '../../src/stores/uiStore';
 import { OptionPicker } from '../../src/components/OptionPicker';
 import {
@@ -72,7 +74,7 @@ import type { ChatRow, DisplayBadge } from '../../src/stores/types';
 import { useChatBadge } from '../../src/lib/chatBadge';
 import { isHidden, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
-import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
+import { getSectionOpen, getStoredSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import type { CollapsibleSection } from '../../src/lib/sectionCollapse';
 import { hasDraftText, useNewChatDraftStore } from '../../src/stores/newChatDraftStore';
 
@@ -99,6 +101,7 @@ const MANAGER_STATUS: Record<DisplayBadge, string> = {
   permission: 'Waiting on you',
   errored: 'Failed',
   done: 'New reply',
+  agents: 'Agents running',
   background: 'Background job',
   monitoring: 'Monitoring',
   read: 'Idle',
@@ -293,12 +296,14 @@ function ChatsHeader({
   onQuery,
   onOpenSearch,
   onCloseSearch,
+  onShowArchived,
 }: {
   searching: boolean;
   query: string;
   onQuery: (q: string) => void;
   onOpenSearch: () => void;
   onCloseSearch: () => void;
+  onShowArchived: () => void;
 }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
@@ -419,6 +424,15 @@ function ChatsHeader({
             </Pressable>
           ) : null}
           <Pressable
+            testID="chats-archived-button"
+            onPress={onShowArchived}
+            accessibilityRole="button"
+            accessibilityLabel="Archived chats"
+            style={iconButton}
+          >
+            <Archive size={20} color={colors.ink2} />
+          </Pressable>
+          <Pressable
             onPress={showNotificationsDrawer}
             accessibilityRole="button"
             accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
@@ -448,6 +462,7 @@ function ChatsHeader({
 // Batch option carries the same non-zero member count web's dropdown shows —
 // the server's own membership count, the same the batch view lists.
 function SidebarViewMenu(): React.ReactElement {
+  const experimental = useExperimentalFeatures();
   const mode = useBatchStore((s) => s.mode);
   const setMode = useBatchStore((s) => s.setMode);
   const batchCount = useBatchStore((s) => s.batch?.members.length ?? 0);
@@ -460,7 +475,7 @@ function SidebarViewMenu(): React.ReactElement {
   const grouping = useUiStore((s) => s.grouping);
   const setGrouping = useUiStore((s) => s.setGrouping);
 
-  const view = sidebarViewFrom(mode === 'batch', attentionOnly, stateFilter);
+  const view = sidebarViewFrom(mode === 'batch' && experimental, attentionOnly, stateFilter);
 
   return (
     <View
@@ -477,10 +492,12 @@ function SidebarViewMenu(): React.ReactElement {
         selectedId={view}
         selectedLabel={sidebarViewTriggerLabel(view)}
         emptyText="No views"
-        options={SIDEBAR_VIEW_OPTIONS.map((o) => ({
-          id: o.value,
-          label: o.value === 'batch' && batchCount > 0 ? `${o.label} · ${batchCount}` : o.label,
-        }))}
+        options={SIDEBAR_VIEW_OPTIONS.filter((o) => experimental || o.value !== 'batch').map(
+          (o) => ({
+            id: o.value,
+            label: o.value === 'batch' && batchCount > 0 ? `${o.label} · ${batchCount}` : o.label,
+          }),
+        )}
         onSelect={(id) =>
           applySidebarView(id as SidebarView, {
             setBatchMode: (on) => setMode(on ? 'batch' : 'regular'),
@@ -576,6 +593,7 @@ function buildSections(
   attentionMatches: ((row: ChatRow) => boolean) | null,
   stateFilter: ChatStateFilter,
   grouping: SidebarGrouping = 'project',
+  experimental = false,
 ): Section[] {
   const searching = query.trim() !== '';
   const match = (rows: ChatRow[]): ChatRow[] => (searching ? filterChats(rows, query) : rows);
@@ -631,7 +649,8 @@ function buildSections(
 
   const out: Section[] = [];
   // No section header over Manager: the row is itself named "Manager".
-  if (manager && match([manager]).length > 0) out.push({ kind: 'manager', row: manager });
+  if (experimental && manager && match([manager]).length > 0)
+    out.push({ kind: 'manager', row: manager });
 
   if (attentionMatches && !searching) {
     let anyRows = false;
@@ -926,12 +945,14 @@ export default function ChatsScreen(): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
   const chats = useChatStore((s) => s.chats);
-  // Channels is EXPANDED by default (spec/15 §4): a collapsed channel list
-  // reads as "hidden/broken". Hidden, Snoozed and Archived are COLLAPSED by default
+  // Channels is EXPANDED by default when it has a channel in it (spec/15 §4),
+  // and CLOSED by default while it is empty — an open section with nothing in
+  // it is just a gap. Hidden, Snoozed and Archived are COLLAPSED by default
   // (§§5–7) — they are cold storage, and their header count says what is in
-  // them without opening. Every toggle is remembered across launches.
+  // them without opening. Every toggle is remembered across launches; Channels'
+  // own default is resolved below, since it depends on the roster.
   const [open, setOpen] = React.useState<Open>(() => ({
-    channels: getSectionOpen('channels', true),
+    channels: getSectionOpen('channels', false),
     hidden: getSectionOpen('hidden', false),
     snoozed: getSectionOpen('snoozed', false),
     archived: getSectionOpen('archived', false),
@@ -952,7 +973,8 @@ export default function ChatsScreen(): React.ReactElement {
   // Batch mode (spec/15 § Batch view): the `Batch` tab swaps the whole column
   // for BatchView, which owns its own scroll region — the Chats tab's own
   // FlatList/search is simply not rendered while it is active.
-  const batchMode = useBatchStore((s) => s.mode) === 'batch';
+  const experimental = useExperimentalFeatures();
+  const batchMode = useBatchStore((s) => s.mode) === 'batch' && experimental;
 
   // Needs-attention mode (spec/15 § Needs attention). Opening a row marks it
   // read, which would ordinarily drop it out of the filter the instant you
@@ -997,19 +1019,57 @@ export default function ChatsScreen(): React.ReactElement {
 
   const serverQuery = searching ? searchableQuery(query) : null;
   const grouping = useUiStore((s) => s.grouping);
+  // Channels with no stored choice follows its contents: open once there is a
+  // channel, closed while there is none.
+  const hasChannels = Object.values(chats).some(
+    (c) => c.awaitingState !== true && c.chatId === SPEAKERS_ID,
+  );
+  const channelsChosen = getStoredSectionOpen('channels') !== undefined;
+  const effectiveOpen = React.useMemo<Open>(
+    () => (channelsChosen ? open : { ...open, channels: hasChannels }),
+    [open, channelsChosen, hasChannels],
+  );
   const items = React.useMemo(
-    () => buildSections(chats, open, counts, query, attentionMatches, stateFilter, grouping),
-    [chats, open, counts, query, attentionMatches, stateFilter, grouping],
+    () =>
+      buildSections(
+        chats,
+        effectiveOpen,
+        counts,
+        query,
+        attentionMatches,
+        stateFilter,
+        grouping,
+        experimental,
+      ),
+    [chats, effectiveOpen, counts, query, attentionMatches, stateFilter, grouping, experimental],
   );
 
   const toggle = (section: ChatsTabSection): void => {
-    const next = !open[section];
+    const next = !effectiveOpen[section];
     setSectionOpen(section, next);
-    setOpen({ ...open, [section]: next });
+    setOpen({ ...effectiveOpen, [section]: next });
   };
 
   // Shared by the header's close button and pressing a search result: either
   // way, search is done and the normal list should be what's there next.
+  // The header's Archive button: archived is the last section of a long list,
+  // so open it and scroll straight to its header instead of making the user
+  // hunt for the collapsed row at the bottom.
+  const listRef = React.useRef<FlatList<Section>>(null);
+  const [jumpToArchived, setJumpToArchived] = React.useState(false);
+  const showArchived = (): void => {
+    setSectionOpen('archived', true);
+    setOpen((o) => ({ ...o, archived: true }));
+    setJumpToArchived(true);
+  };
+  React.useEffect(() => {
+    if (!jumpToArchived || batchMode || serverQuery !== null) return;
+    const index = items.findIndex((i) => i.kind === 'header' && i.toggle === 'archived');
+    if (index < 0) return;
+    setJumpToArchived(false);
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
+  }, [jumpToArchived, items, batchMode, serverQuery]);
+
   const closeSearch = (): void => {
     setQuery('');
     setSearching(false);
@@ -1023,6 +1083,7 @@ export default function ChatsScreen(): React.ReactElement {
         onQuery={setQuery}
         onOpenSearch={() => setSearching(true)}
         onCloseSearch={closeSearch}
+        onShowArchived={showArchived}
       />
       <SidebarViewMenu />
       <OfflineBanner />
@@ -1034,7 +1095,14 @@ export default function ChatsScreen(): React.ReactElement {
         <SearchResults query={serverQuery} onHitPress={closeSearch} />
       ) : (
         <FlatList
+          ref={listRef}
           data={items}
+          onScrollToIndexFailed={({ index }) => {
+            // Rows vary in height, so the target may not be measured yet: scroll
+            // to the end (archived is the last section) and retry.
+            listRef.current?.scrollToEnd({ animated: false });
+            setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true }), 100);
+          }}
           onEndReached={open.archived ? loadMoreArchived : undefined}
           onEndReachedThreshold={1}
           keyboardShouldPersistTaps="handled"
@@ -1069,7 +1137,7 @@ export default function ChatsScreen(): React.ReactElement {
                     numberOfLines={1}
                     style={{ ...typography.sectionHeader, flexShrink: 0, color: colors.ink3 }}
                   >
-                    {section ? `${item.label} ${open[section] ? '▾' : '▸'}` : item.label}
+                    {section ? `${item.label} ${effectiveOpen[section] ? '▾' : '▸'}` : item.label}
                   </Text>
                   {item.pill ? (
                     <View

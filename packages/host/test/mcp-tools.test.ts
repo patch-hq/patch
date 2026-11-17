@@ -51,15 +51,6 @@ describe('patch-tools MCP server — full client round-trip', () => {
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      listDevices: () => [
-        {
-          deviceId: 'kitchen',
-          name: 'Kitchen',
-          online: true,
-          muted: false,
-          lastUsedAt: 1_700_000_000_000,
-        },
-      ],
     });
     await app.listen({ path: socketPath });
 
@@ -154,6 +145,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_watch_list',
         'patch_watch_output',
         'patch_watch_stop',
+        'link_file',
         'view_file',
       ].sort(),
     );
@@ -288,6 +280,48 @@ describe('patch-tools MCP server — full client round-trip', () => {
       expect(daemon.chatState.get(goalCallerId)?.goal).toBeNull();
     } finally {
       await cG.close();
+    }
+  });
+
+  it('patch_goal_set carries the goals to follow and both cadences, and patch_goal_get reads them back', async () => {
+    const id = await daemon.spawnChat({ folder });
+    const server = buildPatchToolsServer({
+      hostSocketPath: socketPath,
+      chatId: id,
+      localKey: LOCAL_KEY,
+    });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c: any = new Client({ name: 'testSeq', version: '0.0.0' });
+    await Promise.all([server.connect(st), c.connect(ct)]);
+    try {
+      await c.callTool({
+        name: 'patch_goal_set',
+        arguments: {
+          condition: 'Ship it',
+          then: ['Write notes'],
+          remindEvery: { unit: 'turns', n: 3 },
+          checkInEvery: { unit: 'minutes', n: 15 },
+        },
+      });
+      const state = daemon.chatState.get(id);
+      expect(state?.goalQueue).toEqual(['Write notes']);
+      expect(state?.goalReminderEvery).toEqual({ unit: 'turns', n: 3 });
+      expect(state?.goalCheckInEvery).toEqual({ unit: 'minutes', n: 15 });
+      const get = (await c.callTool({ name: 'patch_goal_get', arguments: {} })) as {
+        content: { text: string }[];
+      };
+      expect(JSON.parse(get.content[0]!.text)).toMatchObject({
+        goalQueue: ['Write notes'],
+        goalReminderEvery: { unit: 'turns', n: 3 },
+        goalCheckInEvery: { unit: 'minutes', n: 15 },
+      });
+      // A plain call replaces the plan, like a new /goal does.
+      await c.callTool({ name: 'patch_goal_set', arguments: { condition: 'Different' } });
+      expect(daemon.chatState.get(id)?.goalQueue).toEqual([]);
+      expect(daemon.chatState.get(id)?.goalCheckInEvery).toBeNull();
+    } finally {
+      await c.close();
     }
   });
 

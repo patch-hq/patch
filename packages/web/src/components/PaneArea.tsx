@@ -76,6 +76,7 @@ import { JobEditorRoute } from '../routes/JobEditorRoute.js';
 import { SettingsRoute } from '../routes/SettingsRoute.js';
 import { TerminalPanel } from './TerminalPanel.js';
 import { BrowserView } from './BrowserView.js';
+import { TriagePage } from './TriagePage.js';
 import { PadsPage } from './PadsPage.js';
 import { PadPane } from './PadPane.js';
 import { NewPadPage } from './NewPadPage.js';
@@ -166,6 +167,8 @@ function tabTitle(
           return 'Host files';
         case 'pads':
           return 'Pads';
+        case 'triage':
+          return 'Triage';
         case 'pad':
           return padName ?? 'Pad';
         case 'new-pad':
@@ -174,6 +177,17 @@ function tabTitle(
           return artifactTitle ?? 'Artifact';
       }
   }
+}
+
+/**
+ * A group with no chat is showing a page (Settings, Jobs, Pads…): its header
+ * names the page in front, as that page's tab does. Only a group with nothing
+ * in it at all is empty.
+ */
+export function pageGroupTitle(group: Group): string {
+  const pane = findPane(group.root, group.activePaneId);
+  const tab = pane?.type === 'leaf' ? pane.tabs.find((t) => t.id === pane.activeTabId) : undefined;
+  return tab ? tabTitle(tab, undefined, undefined) : 'Empty group';
 }
 
 /** Icon for a tab's kind (spec/14 § Panes and tabs) — a chat tab draws its
@@ -198,6 +212,7 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
         case 'files':
         case 'host-files':
           return <Files size={16} aria-hidden />;
+        case 'triage':
         case 'pads':
         case 'pad':
         case 'new-pad':
@@ -456,8 +471,8 @@ function GroupCard({
               {index + 1}
             </span>
           ) : null}
-          <span className="group-title">
-            {group.chatId === null ? 'Empty group' : chatTitle(group.chatId, undefined)}
+          <span className="group-title" data-testid="group-title">
+            {group.chatId === null ? pageGroupTitle(group) : chatTitle(group.chatId, undefined)}
           </span>
         </span>
         {cards ? (
@@ -742,6 +757,8 @@ function TabContent({
           return <HostFilesPage ws={ws} />;
         case 'pads':
           return <PadsPage />;
+        case 'triage':
+          return <TriagePage ws={ws} />;
         case 'pad':
           return <PadPane padId={d.padId} />;
         case 'new-pad':
@@ -1104,6 +1121,7 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
       });
     }
     out.push(
+      tab('new-triage', 'Triage', { kind: 'page', page: 'triage' }, 'Pages'),
       tab('new-pads', 'Pads', { kind: 'page', page: 'pads' }, 'Pages'),
       tab('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }, 'Pages'),
       tab('new-settings', 'Settings', { kind: 'page', page: 'settings' }, 'Pages'),

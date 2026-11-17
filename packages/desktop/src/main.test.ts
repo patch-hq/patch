@@ -944,3 +944,17 @@ test('meeting detection restarts its watcher, writes events to disk and surfaces
   const fn = src.slice(src.indexOf('function reportMeetingDetectionOff'));
   assert.match(fn, /setMeetingDetectionState\(\{ off: true/);
 });
+
+// A click on any toast but the latest was dropped when the unreferenced
+// Notification was garbage-collected; every shown toast must be held until it
+// is clicked or closed.
+test('main.ts holds every native toast until click/close', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  const fn = src.slice(
+    src.indexOf('function showNativeNotification'),
+    src.indexOf('function dispatchNotificationAction'),
+  );
+  assert.match(fn, /liveToasts\.add\(n\)/);
+  assert.match(fn, /liveToasts\.delete\(n\)/);
+  assert.match(fn, /n\.on\(['"]close['"]/);
+});

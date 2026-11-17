@@ -25,7 +25,9 @@ export interface KeepRunningState extends KeepRunningPrefs {
   holdingAwake: boolean;
   /**
    * Whether this app can open itself at login here. A Linux app not started
-   * from its AppImage has no file a login entry could start, so it cannot.
+   * from its AppImage has no file a login entry could start, so it cannot; nor
+   * can a Mac app running from its disk image or a quarantined download
+   * (app-location.ts).
    */
   canOpenAtLogin: boolean;
 }
@@ -64,6 +66,8 @@ export function writePrefs(file: string, prefs: KeepRunningPrefs): void {
 export interface KeepRunningHost {
   /** False where nothing can start this app at login (see KeepRunningState). */
   canOpenAtLogin: boolean;
+  /** Why not, when it cannot: said to whoever asks to turn it on. */
+  whyNotOpenAtLogin?: string;
   setOpenAtLogin(on: boolean): void;
   onBattery(): boolean;
   /** Fires with `true` on battery and `false` on mains power. */
@@ -105,7 +109,7 @@ export class KeepRunning {
 
   set(patch: Partial<KeepRunningPrefs>): KeepRunningState {
     if (patch.openAtLogin === true && !this.host.canOpenAtLogin) {
-      throw new Error('Patch cannot open at login here: it was not started from its AppImage');
+      throw new Error(this.host.whyNotOpenAtLogin ?? 'Patch cannot open at login here');
     }
     for (const k of ['openAtLogin', 'keepAwake'] as const) {
       const v = patch[k];

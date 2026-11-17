@@ -55,6 +55,12 @@ export interface RelayConnectOptions {
   WebSocket: WebSocketCtor;
   /** Give up on the relay and the handshake after this long. */
   timeoutMs?: number;
+  /**
+   * How often to ping the server through the session (default 30 s). It keeps
+   * a quiet session from being dropped as idle, and once the server has
+   * answered one ping, two unanswered in a row end the session as dead.
+   */
+  keepaliveMs?: number;
 }
 
 export interface RelayRequestInit {
@@ -96,11 +102,17 @@ export class RelayClient {
   private readonly sockets = new Map<number, TunnelSocket>();
   private readonly closeListeners = new Set<(reason: string) => void>();
   private ended: string | null = null;
+  /** Whether the server has ever answered a ping; one from before pings never will. */
+  private answers = false;
+  private unanswered = 0;
+  private readonly keepalive: ReturnType<typeof setInterval>;
 
   private constructor(
     private readonly ws: WebSocketLike,
     private readonly session: RelaySession,
+    keepaliveMs: number,
   ) {
+    this.keepalive = setInterval(() => this.ping(), keepaliveMs);
     ws.onmessage = (ev) => {
       try {
         this.receive(new Uint8Array(ev.data as ArrayBuffer));
@@ -164,7 +176,7 @@ export class RelayClient {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          resolve(new RelayClient(ws, session));
+          resolve(new RelayClient(ws, session, opts.keepaliveMs ?? 30_000));
         } catch (e) {
           fail(
             e instanceof RelayError
@@ -202,6 +214,25 @@ export class RelayClient {
       this.ws.close();
     } catch {
       /* already gone */
+    }
+  }
+
+  private ping(): void {
+    if (this.ended !== null) return;
+    if (this.answers && this.unanswered >= 2) {
+      this.end('the server stopped answering through the relay');
+      try {
+        this.ws.close();
+      } catch {
+        /* already gone */
+      }
+      return;
+    }
+    this.unanswered++;
+    try {
+      this.send(Msg.Ping, 0);
+    } catch {
+      /* the socket is already closing; its onclose ends the session */
     }
   }
 
@@ -282,8 +313,13 @@ export class RelayClient {
 
   private receive(frame: Uint8Array): void {
     const msg = decodeMessage(this.session.open(frame));
+    // Anything from the server shows the path to it is alive.
+    this.unanswered = 0;
     const pending = this.requests.get(msg.stream);
     switch (msg.type) {
+      case Msg.Pong:
+        this.answers = true;
+        return;
       case Msg.ResHead:
         if (pending) pending.head = parseJson<ResponseHead>(msg.payload);
         return;
@@ -331,6 +367,7 @@ export class RelayClient {
   private end(reason: string): void {
     if (this.ended !== null) return;
     this.ended = reason;
+    clearInterval(this.keepalive);
     for (const p of this.requests.values()) p.reject(new RelayError(reason));
     this.requests.clear();
     for (const s of this.sockets.values()) s.closed(1006, reason);

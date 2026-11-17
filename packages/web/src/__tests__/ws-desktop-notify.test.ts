@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PatchWs } from '../api/ws.js';
+import { useUiStore } from '../stores/uiStore.js';
 import type { PatchDesktopBridge } from '../lib/desktopBridge.js';
 
 class FakeWS {
@@ -134,11 +135,40 @@ describe('ws desktop notify → native toast', () => {
     close();
   });
 
-  it('does nothing in a plain browser, where there is no bridge at all', async () => {
-    const { fake, close } = await connect();
-    expect(() => fake.receive(notifyFrame())).not.toThrow();
-    expect(notify).not.toHaveBeenCalled();
-    close();
+  describe('plain browser (no desktop bridge)', () => {
+    let created: { title: string; options: NotificationOptions }[];
+
+    function stubNotification(permission: NotificationPermission): void {
+      created = [];
+      class FakeNotification {
+        static permission = permission;
+        onclick: (() => void) | null = null;
+        constructor(title: string, options: NotificationOptions) {
+          created.push({ title, options });
+        }
+        close(): void {}
+      }
+      vi.stubGlobal('Notification', FakeNotification);
+    }
+
+    it('raises a web Notification when permission is granted', async () => {
+      stubNotification('granted');
+      const { fake, close } = await connect();
+      fake.receive(notifyFrame({ message: '**done**' }));
+      expect(created).toEqual([{ title: 'Patch', options: { body: 'done', tag: 'c1' } }]);
+      expect(notify).not.toHaveBeenCalled();
+      close();
+    });
+
+    it('reports an error instead of staying silent when permission is not granted', async () => {
+      stubNotification('default');
+      useUiStore.setState({ errors: [] } as never);
+      const { fake, close } = await connect();
+      fake.receive(notifyFrame());
+      expect(created).toHaveLength(0);
+      expect(JSON.stringify(useUiStore.getState())).toContain('browser notifications are default');
+      close();
+    });
   });
 
   it('does nothing on an older shell whose bridge predates notify', async () => {

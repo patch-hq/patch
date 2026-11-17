@@ -116,3 +116,8 @@ export function anyProviderConnected(shared: PreferencesState['shared']): boolea
 }
 
 usePreferencesStore.subscribe((s) => setAutoUpdateHosts(s.preferences.autoUpdateHosts));
+
+/** Whether the half-finished features (the Manager, Batch) are on. Off until Settings → Experimental features says so. */
+export function useExperimentalFeatures(): boolean {
+  return usePreferencesStore((s) => s.preferences.experimentalFeatures);
+}

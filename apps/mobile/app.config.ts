@@ -111,7 +111,7 @@ const config: ExpoConfig = {
   // the Android package so the two read as one app. Every usage string is
   // required by Apple at upload: a missing one is rejected, not defaulted.
   ios: {
-    bundleIdentifier: 'io.github.tomchambers2.patch',
+    bundleIdentifier: 'dev.patchhq.app',
     buildNumber: '1',
     supportsTablet: false,
     infoPlist: {
@@ -125,7 +125,7 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    package: 'io.github.tomchambers2.patch',
+    package: 'dev.patchhq.app',
     versionCode: 1,
     googleServicesFile: './google-services.json',
     // Adaptive launcher icon (spec/15 § App icon). A circular green icon: the

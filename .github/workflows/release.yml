@@ -23,6 +23,8 @@
 #   APPLE_API_KEY_ID, APPLE_API_ISSUER
 #   PATCH_UPDATE_SIGNING_KEY         signs the phone's over-the-air update (its certificate is
 #                                    apps/mobile/certs/certificate.pem, built into the APK)
+#   CLOUDFLARE_API_TOKEN             deploys the public relay (the `relay` job)
+#   CLOUDFLARE_ACCOUNT_ID            the Cloudflare account it runs in
 
 name: release
 
@@ -222,8 +224,8 @@ jobs:
           test -f "$APK"
           # Refuse anything that is not this app: a wrong id would install beside it.
           PKG=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
-          if [ "$PKG" != "io.github.tomchambers2.patch" ]; then
-            echo "built package is '$PKG', expected io.github.tomchambers2.patch" >&2
+          if [ "$PKG" != "dev.patchhq.app" ]; then
+            echo "built package is '$PKG', expected dev.patchhq.app" >&2
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/apk"
@@ -363,7 +365,7 @@ jobs:
           set -euo pipefail
           APP=packages/desktop/release/mac-arm64/Patch.app
           codesign --verify --deep --strict "$APP"
-          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=io.github.tomchambers2.patch'
+          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=dev.patchhq.app'
           # Notarised and stapled: Gatekeeper accepts it as a download.
           ASSESS=$(spctl --assess --type execute -vv "$APP" 2>&1)
           echo "$ASSESS"
@@ -392,11 +394,30 @@ jobs:
             sleep 20
           done
           spctl -a -vvv -t open --context context:primary-signature "$DMG"
+          # It opens as the install window: Patch, an Applications shortcut, the background.
+          # Mounted where a double-click mounts it (/Volumes/<name>): the window's
+          # background is found by that path, so a mount elsewhere shows none.
+          mkdir -p "$RUNNER_TEMP/first-run"
+          MNT=$(hdiutil attach -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)
+          echo "mounted at $MNT"
+          case "$MNT" in /Volumes/*) ;; *) echo "the disk image did not mount under /Volumes" >&2; exit 1 ;; esac
+          test -d "$MNT/Patch.app"
+          [ "$(readlink "$MNT/Applications")" = /Applications ]
+          ls "$MNT"/.background/*.tiff
+          # A picture of that window, for a person to look at; not a gate (the
+          # runner's screen may not be capturable).
+          open "$MNT" && sleep 5 && screencapture -x "$RUNNER_TEMP/first-run/dmg-window.png" \
+            || echo "::warning::could not capture the disk image's window"
+          osascript -e 'tell application "Finder" to close every window' || true
+          hdiutil detach "$MNT"
       # A stranger's first run, on the app as it is published: the zip, downloaded
-      # (quarantined) and unpacked the way Safari does, accepted by Gatekeeper,
-      # then "On this computer" — the server starts, the host this app carries is
-      # installed as a login service and comes online, and a chat opens. The
-      # runner is disposable, so installing a host here replaces nothing.
+      # (quarantined) and unpacked the way Safari does, accepted by Gatekeeper.
+      # Opened from Downloads it offers to move itself to Applications, and does.
+      # Then "On this computer" — the server starts, the host this app carries is
+      # installed as a login service and comes online, and a chat opens — and
+      # the login item macOS holds opens the app where it now is, following it
+      # when it is moved again. The runner is disposable, so installing a host
+      # or a login item here replaces nothing.
       - name: First run of the notarised app, "On this computer"
         if: steps.scope.outputs.build == 'true'
         env:
@@ -411,7 +432,12 @@ jobs:
           ditto -x -k "$DL/$(basename "$ZIP")" "$DL"
           xattr -p com.apple.quarantine "$DL/Patch.app"
           spctl -a -vvv -t exec "$DL/Patch.app"
-          node packages/desktop/scripts/smoke-first-run.mjs "$DL/Patch.app/Contents/MacOS/Patch" --first-run
+          node packages/desktop/scripts/smoke-app-location.mjs move "$DL/Patch.app"
+          node packages/desktop/scripts/smoke-first-run.mjs /Applications/Patch.app/Contents/MacOS/Patch --first-run
+          node packages/desktop/scripts/smoke-app-location.mjs login-item /Applications/Patch.app
+          mkdir -p "$HOME/Applications"
+          mv /Applications/Patch.app "$HOME/Applications/Patch.app"
+          node packages/desktop/scripts/smoke-app-location.mjs login-item "$HOME/Applications/Patch.app" /Applications/Patch.app
       - uses: actions/upload-artifact@v4
         if: always() && steps.scope.outputs.build == 'true'
         with:
@@ -444,7 +470,7 @@ jobs:
           # A build from before the disk image has none to carry.
           DMG=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).dmg ?? "")' "$RUNNER_TEMP/out/desktop-latest.json")
           gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/out" \
-            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap" ${DMG:+--pattern "$DMG""
+            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap" ${DMG:+--pattern "$DMG"}
           # NO FALLBACK: the feed and the zip it names must both be there.
           test -f "$RUNNER_TEMP/out/latest-mac.yml"
           test -f "$RUNNER_TEMP/out/$ZIP"
@@ -593,6 +619,62 @@ jobs:
           name: mobile-update
           if-no-files-found: error
           path: ${{ runner.temp }}/mobile-update/*
+
+  # The public relay, relay.patchhq.dev: a Cloudflare Worker (packages/relay-worker),
+  # not a release asset — every version of every client reaches the same one. It
+  # is deployed from main once the commit's tests pass, and only when its code
+  # changed, because a deploy restarts every channel and drops each relayed
+  # connection once (both ends redial). Then /healthz has to answer every time,
+  # not once, and the relay's behaviour tests run against the live address. Only
+  # main deploys: a run dispatched on another branch must not put that branch live.
+  #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID   a token that can deploy Workers
+  relay:
+    if: github.repository == 'patch-hq/patch' && github.ref == 'refs/heads/main'
+    needs: [tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BEFORE" "$GITHUB_SHA" -- packages/relay-worker packages/relay/src; then
+            echo "the relay did not change; not deploying"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.deploy == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - if: steps.changed.outputs.deploy == 'true'
+        run: corepack enable && pnpm install --frozen-lockfile
+      - if: steps.changed.outputs.deploy == 'true'
+        run: pnpm turbo build --filter=@patch/relay --output-logs=errors-only
+      - name: Deploy the relay
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: pnpm --filter @patch/relay-worker run deploy
+      - name: Check the live relay
+        if: steps.changed.outputs.deploy == 'true'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            curl -fsS --max-time 10 https://relay.patchhq.dev/healthz
+            echo
+            sleep 3
+          done
+          node packages/relay-worker/test/run.mjs wss://relay.patchhq.dev
 
   # Only main publishes. A run dispatched on another branch builds, signs,
   # notarises and checks everything, and publishes nothing — how a change to the

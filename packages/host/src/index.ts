@@ -1,3 +1,4 @@
+import { cutoffMs } from './cleanup.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
@@ -5,6 +6,14 @@ import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexHistory } from './codexHistory.js';
+import {
+  LOCAL_BACKEND_ID,
+  LocalBackend,
+  LocalModels,
+  isLocalModel,
+  localHistoryDir,
+  localSessionDir,
+} from './localModels.js';
 import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 // Entry point for the patch-daemon process.
 //
@@ -95,7 +104,12 @@ import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
 import { QueuePullClient } from './queuePull.js';
-import { assessHostHealth, HOST_HEALTH_INTERVAL_MS } from '@patch/wire';
+import {
+  assessHostHealth,
+  HOST_HEALTH_INTERVAL_MS,
+  providerDescriptor,
+  providerForModel,
+} from '@patch/wire';
 import type { ChatInputEvent } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
@@ -184,14 +198,12 @@ import { AccountUsageTracker } from './accountUsage.js';
 import { CreditResume } from './creditResume.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { installClaudeCode, installFailure } from './claudeInstall.js';
-import { DeviceAdoption } from './devices/adoption.js';
 import { localKeyPath, mintLocalKey } from './localKey.js';
 import {
   CLAUDE_BACKEND_ID,
   claudeBackendEntry,
   describeHost as buildHostDescription,
 } from './host.js';
-import { createPowerWatcher } from './power.js';
 import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
@@ -204,12 +216,14 @@ import { FolderRegistry } from './folders.js';
 import { ModelCatalog } from './modelCatalog.js';
 import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
+import { StrayProcessTracker, handleStrayProcessesRequest } from './strayProcesses.js';
 import {
   handleWatchCheckInRequest,
   handleWatchOutputRequest,
   handleWatchListRequest,
   handleWatchStopRequest,
 } from './watchRequests.js';
+import { handleDelegateControlRequest } from './delegateControlRequests.js';
 import { HostStateStore } from './hostState.js';
 import { AudioRelayBridge } from './audio-relay-bridge.js';
 import { webBotAuthFromServer } from './webBotAuth.js';
@@ -287,10 +301,6 @@ import {
   type Vad,
 } from './audio/vad.js';
 import { clipHasSpeech } from './meetingSpeechGate.js';
-import { DeviceRegistry } from './devices/registry.js';
-import { PresenceRegistry } from './devices/presence.js';
-import { DeviceControlServer, mountDeviceControlUpgrade } from './devices/control-ws.js';
-import type { DeviceRingFrame } from '@patch/wire/device-control';
 import {
   DEFAULT_VOICE_CONFIG,
   voiceKeyMissingMessage,
@@ -300,7 +310,6 @@ import {
   type VoiceConfig,
   type VoiceKeys,
 } from '@patch/wire/audio';
-import { WebSocketServer } from 'ws';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -335,8 +344,6 @@ export interface MainTestHooks {
     secretsStore: SecretsStore;
     /** The control-IPC Fastify app — lets a test `app.inject(...)` directly. */
     app: FastifyInstance;
-    /** The host-owned voice-device pairing registry (spec/16 § F2). */
-    deviceRegistry: DeviceRegistry;
     /**
      * The SDK backend this host is running against — under `SDK_BACKEND=mock`
      * (every test boot) this is a `MockSdkBackend`, letting a test `enqueue()`
@@ -719,7 +726,6 @@ async function startHost(
     }
     return { sub: payload.sub, daemon_id: payload.daemon_id };
   })();
-  const accountPublicKey = daemonKeyClaims.sub;
   /** This host's id. Stamped on every frame this host emits. */
   const selfHostId = daemonKeyClaims.daemon_id;
   // The service manager appends stdout/stderr to daemon.log for ever; cap it.
@@ -755,6 +761,7 @@ async function startHost(
     {
       claudeProjectsRoot: config.claudeProjectsRoot,
       codexHistoryRoot: join(config.patchHome, 'openai-history'),
+      localHistoryRoot: localHistoryDir(config.patchHome),
       seqIndexPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'seqindex.jsonl'),
       now: () => Date.now(),
       onCorruptLine: ({ path, message }) =>
@@ -769,8 +776,20 @@ async function startHost(
     chatSearchBuilt = resolve;
   });
   const codexBackend = new CodexBackend(codexAccounts, codexHistory);
+  const localModels = new LocalModels();
+  const localHistory = new CodexHistory(localHistoryDir(config.patchHome), 'local');
+  const localBackend = new LocalBackend(
+    localModels,
+    localHistory,
+    localSessionDir(config.patchHome),
+  );
   const routedBackend: SdkBackend = {
-    run: (opts) => (isCodexModel(opts.model) ? codexBackend.run(opts) : sdkBackend.run(opts)),
+    run: (opts) =>
+      isCodexModel(opts.model)
+        ? codexBackend.run(opts)
+        : isLocalModel(opts.model)
+          ? localBackend.run(opts)
+          : sdkBackend.run(opts),
   };
 
   /**
@@ -864,6 +883,7 @@ async function startHost(
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
     persistedHostState.watchCheckInPrompt ?? DEFAULT_WATCH_CHECK_IN_PROMPT;
+  let cleanupRan = false;
   let watchCheckInMinutes: number =
     persistedHostState.watchCheckInMinutes ?? DEFAULT_WATCH_CHECK_IN_MINUTES;
   let goalModel: string = persistedHostState.goalModel ?? DEFAULT_GOAL_MODEL;
@@ -1215,10 +1235,6 @@ async function startHost(
    * time so a surface never renders a stale backend or component list. Emitted
    * on connect and after anything it reports changes.
    */
-  const powerWatcher = createPowerWatcher({
-    onChange: () => emit(describeHost()),
-    onError: (err) => logger.warn({ err }, 'power: battery read failed'),
-  });
   const sleepDetector = createSleepDetector();
   // Whether this host has the Claude Code its turns run (spec/02 § Agent
   // backends). A mock backend runs none, so it counts as present.
@@ -1234,7 +1250,6 @@ async function startHost(
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
       ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
-      ...(powerWatcher.current() ? { power: powerWatcher.current() } : {}),
       hostId: selfHostId,
       hostName,
       hostVersion: VERSION,
@@ -1894,6 +1909,7 @@ async function startHost(
       );
     }
     daemon.setProviderPermissionDefaults(shared.providerPermissionDefaults);
+    localModels.setBaseUrl(shared.localModelBaseUrl);
     setDefaultModel(shared.defaultModel);
     if (shared.specialThreadModel !== specialThreadModel) {
       specialThreadModel = shared.specialThreadModel;
@@ -1967,6 +1983,30 @@ async function startHost(
       });
       hostStateStore.update({ watchCheckInPrompt, watchCheckInMinutes });
       logger.info({ watchCheckInMinutes }, 'watch check-in settings changed');
+    }
+    if (!cleanupRan) {
+      // Once per host start, on the first settings snapshot (carries the period).
+      cleanupRan = true;
+      if (!Number.isInteger(shared.cleanupPeriodDays) || shared.cleanupPeriodDays < 1) {
+        logger.error(
+          { period: shared.cleanupPeriodDays },
+          'startup cleanup skipped: server sent no valid cleanupPeriodDays',
+        );
+        return;
+      }
+      void daemon
+        .cleanupOldData(cutoffMs(Date.now(), shared.cleanupPeriodDays))
+        .then((r) =>
+          logger.info(
+            {
+              chats: r.chats.length,
+              worktrees: r.worktrees.removed.length,
+              kept: r.worktrees.kept.length,
+            },
+            'startup cleanup done',
+          ),
+        )
+        .catch((err) => logger.error({ err }, 'startup cleanup failed'));
     }
     if (shared.chatNameInterval !== chatNameInterval) {
       chatNameInterval = shared.chatNameInterval;
@@ -2280,13 +2320,11 @@ async function startHost(
       );
       if (!critical) daemon.releaseHeldTurns();
     }
-    const power = powerWatcher.current();
     if (linkOnline) {
       link.send({
         type: 'host.health',
         hostId: selfHostId,
         ...sample,
-        ...(power ? { power } : {}),
       });
     }
   };
@@ -2522,6 +2560,16 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'patch.stray_processes.request') {
+        handleStrayProcessesRequest(
+          event,
+          strayProcesses,
+          (chatId) => daemon.chatState.get(chatId) !== undefined,
+          sender,
+          logger,
+        );
+        return;
+      }
       if (event.type === 'patch.watch_list.request') {
         handleWatchListRequest(
           event,
@@ -2570,6 +2618,22 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'patch.delegate_control.request') {
+        void handleDelegateControlRequest(
+          event,
+          {
+            hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
+            isDelegateOf: (parent, id) => daemon.delegateParentOf(id) === parent,
+            pause: (parent, id) => daemon.pauseDelegate(parent, id),
+            resume: (parent, id) => daemon.resumeDelegate(parent, id),
+            stop: (parent, id) => daemon.stopDelegate(parent, id),
+            spinOff: (parent, id) => daemon.spinOffDelegate(parent, id),
+          },
+          sender,
+          logger,
+        );
+        return;
+      }
       if (event.type === 'patch.watch_stop.request') {
         handleWatchStopRequest(
           event,
@@ -2612,7 +2676,15 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.models.request') {
-        void handleModelsRequest(event, modelCatalog, sender, logger, selfHostId, codexAccounts);
+        void handleModelsRequest(
+          event,
+          modelCatalog,
+          sender,
+          logger,
+          selfHostId,
+          codexAccounts,
+          localModels,
+        );
         return;
       }
       if (event.type === 'patch.recurrence.translate.request') {
@@ -3369,7 +3441,7 @@ async function startHost(
             // hidden rather than leaking into the main list.
             ...(event.sourceChatId === 'thread_manager'
               ? { nudge: true }
-              : { fromAgent: event.revealTarget === true, fromSibling: true }),
+              : { fromAgent: event.revealTarget === true }),
           })
           .then(() => {
             sender({
@@ -3726,56 +3798,6 @@ async function startHost(
   const toolLogStore = new ToolLogStore(config.patchHome);
   const usageHistory = new UsageHistoryStore(config.patchHome);
   const chatTokens = new ChatTokenReader(join(config.patchHome, 'chats'));
-  // Voice-device registries — persistent pairing records + live presence.
-  // Back `patch_list_devices` and (in later voice groups) outbound routing.
-  // `presence` starts empty on boot: a device only shows `online: true` once
-  // its control WSS connects, which is correct — presence cannot outlive the
-  // socket that proves it (see devices/presence.ts).
-  const deviceRegistry = DeviceRegistry.load(config.patchHome);
-  const presence = new PresenceRegistry();
-  // Voice-device control plane (F2, spec/16). Owns device presence + outbound
-  // ring + the phone>device>idle concurrency arbiter. The firmware/mock dial
-  // `wss://<host>/device/control` on the SAME host:port as the audio WSS, so
-  // the control upgrade (mounted at step 8) shares the audio HTTP listener.
-  // Constructed here so the speakers cascade (buildControl, below) can route
-  // its ring frames through it; `isPhoneCallActive` reads the live audio server
-  // lazily (forward-declared `audioServer`, assigned by the time a frame lands).
-  // The five-minute voice-device adoption window this host's command line
-  // opens on it (spec/16 § F2). In-memory by design: a window is a live,
-  // attended act and must not survive a restart.
-  const deviceAdoption = new DeviceAdoption();
-
-  const deviceControl = new DeviceControlServer({
-    registry: deviceRegistry,
-    // The window the CLI opens is what admits an unknown device. Without this
-    // it was opened and never consulted, so no device could ever be adopted.
-    adoption: deviceAdoption,
-    presence,
-    accountPublicKey,
-    accountId: accountPublicKey,
-    internalToken: config.internalToken,
-    // Wake-word conversations route to the Speakers thread (spec/06 ## Speakers
-    // thread). 'thread_speakers' is the canonical id (specialThreads.ts /
-    // wire SPECIAL_THREAD_IDS.speakers).
-    voiceDeviceChatId: 'thread_speakers',
-    // DeviceControlServer calls `isPhoneCallActive` only while routing a ring
-    // to a PAIRED, CONNECTED voice device, to decide whether an in-progress
-    // phone call should suppress it (spec/16 § Concurrency). Driving it for
-    // real needs a live device-control WS session (its own JWT-authenticated
-    // pairing handshake — devices/control-ws.ts's own 100%-covered domain,
-    // exercised end-to-end in test/device-control-ws.test.ts) concurrently
-    // with an open phone-call-role audio session. Replicating that whole
-    // cross-subsystem harness here just to tick this one-line delegation is
-    // out of proportion to what it could realistically catch — a real bug in
-    // `phoneCallActive()` itself is caught by audio/server.ts's own 100%
-    // coverage; a real bug in the ring-routing decision is caught by
-    // devices/control-ws.ts's own 100% coverage.
-    isPhoneCallActive: /* v8 ignore next */ () => audioServer?.phoneCallActive() ?? false,
-    // Device sessions run concurrently up to the same whisper concurrency cap
-    // the audio server enforces (spec/07 §Concurrency on the host).
-    maxConcurrentSessions: config.audio.maxConcurrentSessions,
-    logger: logger.child({ component: 'device-control' }),
-  });
   /**
    * The stdio MCP server every SDK query launches (spec/02 § MCP server). It
    * sits beside this module — as `.js` in a built host, as `.ts` when the
@@ -3912,6 +3934,7 @@ async function startHost(
   const claudeRoute = (
     store: NonNullable<ReturnType<typeof readPatchStore>>,
     preferredAccountId?: string,
+    sessionAccountId?: string,
   ): { accounts: FailoverAccount[]; route: RouteOptions } => ({
     accounts: store.accounts.map((a) => ({
       id: a.id,
@@ -3923,9 +3946,9 @@ async function startHost(
     route: {
       strategy: accountStrategy.claude,
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
+      ...(sessionAccountId !== undefined ? { sessionAccount: sessionAccountId } : {}),
       resumeOnAnyAccount: autoResumeRateLimit,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
-      nearlyOut: (id) => accountUsage?.nearlyOut(id) === true,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
         const values = [w?.session?.utilization, w?.week?.utilization].filter(
@@ -4037,6 +4060,7 @@ async function startHost(
   const resolveOAuthWithCredit = async (turn?: {
     chatId: string;
     preferredAccountId?: string;
+    sessionAccountId?: string;
   }): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {
@@ -4046,7 +4070,11 @@ async function startHost(
       // name, and inventing one would put a fiction in the usage report.
       return resolveOAuth();
     }
-    const { accounts, route } = claudeRoute(store, turn?.preferredAccountId);
+    const { accounts, route } = claudeRoute(
+      store,
+      turn?.preferredAccountId,
+      turn?.sessionAccountId,
+    );
     // Read before `startTurn`, which moves a round-robin on.
     const first = accountRotation.order(accounts, route)[0]?.id;
     // Only a starting turn moves the rotation; a credential check peeks.
@@ -4078,10 +4106,17 @@ async function startHost(
    */
   const resolveModelOAuth = async (
     model?: string,
-    turn?: { chatId: string; preferredAccountId?: string },
+    turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
   ): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {
+    if (isLocalModel(model))
+      return localModels.configured
+        ? { ok: true, accessToken: '' }
+        : {
+            ok: false,
+            reason: 'No local model endpoint is set. Add its URL under Settings → Providers.',
+          };
     if (!isCodexModel(model)) return resolveOAuthWithCredit(turn);
     try {
       const account = await codexAccounts.resolve(
@@ -4240,7 +4275,13 @@ async function startHost(
   if (config.sdkBackend === 'real') accountUsage.start();
 
   const modelLimits = new ModelLimits();
-  const modelCatalog = new ModelCatalog({ runOnAccountWithCredit, limits: modelLimits });
+  const modelCatalog = new ModelCatalog({
+    runOnAccountWithCredit,
+    limits: modelLimits,
+    // The Manager's model is refused while there is no catalogue (no AI
+    // connected yet); the first real read after a sign-in puts it on it.
+    onRefreshed: () => applySpecialThreadModel(),
+  });
   // spec/08 § Recurrence — the job editor's natural-language schedule input.
   // Cheap one-shot Haiku, same gate as the title/status/digest generators.
   const translateRecurrenceRule = makeRecurrenceTranslator({
@@ -4256,6 +4297,7 @@ async function startHost(
     smallJobModels: config.smallJobModels,
   });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
+  const strayProcesses = new StrayProcessTracker();
   const daemon: Daemon = new Daemon({
     ...(durableTurns ? { durableTurns } : {}),
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),
@@ -4272,6 +4314,7 @@ async function startHost(
       const results = await Promise.allSettled([
         modelCatalog.get().then((r) => r.models),
         codexAccounts.models(),
+        localModels.configured ? localModels.models() : Promise.resolve([]),
       ]);
       const models = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
       if (!models.length)
@@ -4301,14 +4344,17 @@ async function startHost(
             'history: skipping unreadable JSONL line',
           ),
       });
+      const readerFor = (sessionId: string) =>
+        sessionId.startsWith('codex-')
+          ? codexHistory
+          : sessionId.startsWith('local-')
+            ? localHistory
+            : claudeHistory;
       return {
-        hasSession: (o) =>
-          (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).hasSession(o),
-        read: (o) => (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).read(o),
-        forkPoint: (o) =>
-          (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).forkPoint(o),
-        sidePoint: (o) =>
-          (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).sidePoint(o),
+        hasSession: (o) => readerFor(o.sessionId).hasSession(o),
+        read: (o) => readerFor(o.sessionId).read(o),
+        forkPoint: (o) => readerFor(o.sessionId).forkPoint(o),
+        sidePoint: (o) => readerFor(o.sessionId).sidePoint(o),
       };
     })(),
     // OAuth gate (spec/10-auth.md): the gate protects the real SDK path only;
@@ -4321,10 +4367,13 @@ async function startHost(
     // then on `resolveOAuthWithCredit` routes the rest without any of them
     // failing (spec/10-auth.md § Backend credentials).
     accountLabel: (model, accountId) =>
-      isCodexModel(model)
-        ? codexAccounts.report().accounts?.find((a) => a.id === accountId)?.label
-        : readPatchStore(oauthOpts)?.accounts.find((a) => a.id === accountId)?.label,
+      isLocalModel(model)
+        ? undefined
+        : isCodexModel(model)
+          ? codexAccounts.report().accounts?.find((a) => a.id === accountId)?.label
+          : readPatchStore(oauthOpts)?.accounts.find((a) => a.id === accountId)?.label,
     accountSpent: (model, fromAccountId) => {
+      if (isLocalModel(model)) return { spent: false };
       if (isCodexModel(model)) {
         const info = codexAccounts.limitInfo(fromAccountId);
         const spent = info?.scope !== undefined;
@@ -4365,7 +4414,7 @@ async function startHost(
     // The strategy and how many held keys are out, so a blocked chat says
     // "Round robin — all 3 accounts out" and not just one account's countdown.
     accountRouting: (model) => {
-      if (isCodexModel(model)) return undefined;
+      if (isCodexModel(model) || isLocalModel(model)) return undefined;
       const store = readPatchStore(oauthOpts);
       if (!store) return undefined;
       const out = store.accounts.filter((a) => accountRotation.isExhausted(a.id));
@@ -4429,6 +4478,7 @@ async function startHost(
       smallJobModels: config.smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
+      local: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
     }),
     // patch/todo.md § Features to add — "Current status": after each turn
@@ -4953,10 +5003,6 @@ async function startHost(
   void refreshUpdateAvailable().catch((err: unknown) => {
     logger.warn({ err }, 'self-update: initial availability check failed');
   });
-  void powerWatcher.poll().catch((err: unknown) => {
-    logger.warn({ err }, 'power: initial battery read failed');
-  });
-  powerWatcher.start();
   sleepDetector.start();
   const updateCheckTimer = setInterval(() => {
     void refreshUpdateAvailable().catch((err: unknown) => {
@@ -5183,7 +5229,6 @@ async function startHost(
           emit(describeHost());
         },
       },
-      pairDevice: () => deviceAdoption.open(),
       update: async () => {
         const result = await applyUpdateOnce();
         // A refused apply (nothing newer, bad digest, bad signature) is
@@ -5226,48 +5271,15 @@ async function startHost(
     // spec/03 § Cross-chat tools — a chat not found among THIS host's own
     // resolves on the OWNING host's own answer, exactly like a cross-host
     // spawn, once the server's chat mirror says where it actually lives.
+    runsManager: () => runsManager,
     peekRemoteChat,
     historyRemoteChat,
     sendToRemoteChat,
     stopRemoteChat,
-    listDevices: () => presence.enumerate(deviceRegistry.list()),
-    // Speakers-channel device-resolution cascade (spec/09 § `### speakers`).
-    // Composes the live presence registry; step-4 exhaustion re-routes the
-    // text through the `push` notify path (server delivers it or logs to
-    // undelivered.jsonl). The ring frame the cascade emits is consumed by the
-    // device's control WSS handler (firmware specifics: F2).
     // spec/07 § Agent-initiated voice — an app call already open takes the
     // message as speech instead of a ring. Late-bound: the audio server starts
     // after buildControl, and is up long before any tool call lands.
     interruptOpenCall: (text: string) => audioServer?.interruptOpenCall(text) ?? false,
-    speakers: {
-      presence: {
-        enumerate: () => presence.enumerate(deviceRegistry.list()),
-        isOnline: (id) => presence.isOnline(id),
-        // speakers-cascade.ts's `reachable()` short-circuits on `isOnline(id)`
-        // first; this host-side `isMuted` closure (and `send` below) is
-        // only reached for a device that IS online, which — like
-        // `isPhoneCallActive` above — needs a real, paired, connected
-        // device-control WS session to produce (its own 100%-covered domain
-        // in devices/control-ws.ts + presence.ts, exercised end-to-end in
-        // test/device-control-ws.test.ts). The boot test here proves the
-        // explicit-deviceId path's `reachable()` call for an OFFLINE
-        // registered device (isOnline=false, hence these closures
-        // short-circuited away) and the cascade's fallthrough to pushFallback.
-        isMuted: /* v8 ignore next */ (id) => presence.isMuted(id),
-        // Route the ring through the control plane (F2) rather than the raw
-        // presence socket, so the device's eventual `ring_accepted` resolves
-        // to the right chat (`deviceControl` records the pending ring). The
-        // frame the cascade builds IS a DeviceRingFrame (type:'ring', chatId,
-        // message, conversational:false, [lowVolume]). Returns false when the
-        // device is not connected → cascade falls to the next candidate.
-        /* v8 ignore next */
-        send: (id, frame) => deviceControl.ring(id, frame as unknown as DeviceRingFrame),
-      },
-      pushFallback: ({ chatId, message }) => {
-        emit({ type: 'notify', chatId, channel: 'push', message });
-      },
-    },
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,
@@ -5592,7 +5604,6 @@ async function startHost(
       ? await createSileroVadFactory({ modelPath: config.audio.vadModelPath })
       : (): Vad => new MockVad();
 
-  const deviceControlWss = new WebSocketServer({ noServer: true });
   audioServer = await startAudioServer({
     host: config.audio.host,
     port: config.audio.port,
@@ -5617,31 +5628,18 @@ async function startHost(
     // resumable from disk still exists, even if not currently hydrated).
     chatExists: (chatId: string): boolean =>
       daemon.chatState.has(chatId) || metaStore.read(chatId) !== undefined,
-    // spec/14 ## Sidebar + spec/16 — a physical voice-device session opening
-    // or closing drives the "mid-session" pill on the Speakers row across all
-    // surfaces. Resolve the user-given device name from the registry so the
-    // pill reads e.g. "🎙 kitchen". `device.session` is account-scoped (no
-    // chatId) so the server fans it out to every connected surface.
+    // spec/14 ## Sidebar + spec/16 — a voice-device session opening or
+    // closing drives the "mid-session" pill across all surfaces.
+    // `device.session` is account-scoped (no chatId) so the server fans it out
+    // to every connected surface. Devices are known to the server, not to
+    // hosts, so the pill names the device by its id.
     onDeviceSession: (deviceId, active) => {
-      const record = deviceRegistry.get(deviceId);
-      const name = record?.name ?? deviceId;
-      emit({ type: 'device.session', deviceId, name, active });
+      emit({ type: 'device.session', deviceId, name: deviceId, active });
     },
     // spec/07 § A call can move between devices — account-scoped, so every
     // surface learns a call is live on this chat and can offer to take it.
     onCallSession: (info) =>
       emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) }),
-    // F2: when a phone Manager call ends, release any device events the
-    // concurrency arbiter queued behind it (spec/16 §Concurrency).
-    onSessionClosed: ({ wasPhoneCall }) => {
-      if (wasPhoneCall) deviceControl.onPhoneCallEnded();
-    },
-    // F2: share the audio HTTP listener for the persistent device control WSS.
-    deviceControlUpgrade: mountDeviceControlUpgrade({
-      server: deviceControl,
-      wss: deviceControlWss,
-      logger: logger.child({ component: 'device-control' }),
-    }),
     submitUserTurn: async ({ chatId, message, source, onReplyText, handoff, onAccepted }) => {
       // Tag the turn by its ingress. Physical voice devices get
       // `[voice • device:<deviceId>]` (spec/06 ## Speakers thread) so the
@@ -5800,10 +5798,6 @@ async function startHost(
     } catch (err) {
       logger.error({ err }, 'patch-daemon: history log flush failed on shutdown');
     }
-    // Close device control sockets first so the shared audio HTTP listener can
-    // close cleanly (otherwise http.close() waits on the persistent control
-    // WSS connections; F2).
-    deviceControl.closeAll();
     // Terminal shells die with the host (spec/02 — no reattach); surfaces are
     // told via `patch.terminal.exit { reason: 'daemon_shutdown' }`.
     await terminals.shutdown().catch(() => undefined);
@@ -5845,7 +5839,6 @@ async function startHost(
     folderRegistry,
     secretsStore,
     app,
-    deviceRegistry,
     sdkBackend,
   });
 }
@@ -5982,6 +5975,7 @@ export async function handleModelsRequest(
   logger: Logger,
   hostId: string,
   codex?: CodexAccounts,
+  local?: LocalModels,
 ): Promise<void> {
   // Every entry names the backend serving it, and a backend that failed is
   // returned as an error AGAINST THAT BACKEND alongside the models that did
@@ -5989,14 +5983,18 @@ export async function handleModelsRequest(
   // other's models (spec/02 § Model catalogue). NO FALLBACK: a failure is never
   // papered over with a hand-maintained list.
   if (codex) {
-    const outcomes = await Promise.allSettled([
-      catalog.get().then((s) => s.models),
-      codex.models(),
-    ]);
+    // The local endpoint is only asked when one is set: an account that never
+    // configured local models has no error to report about them.
+    const sources: Array<{ backend: string; load: Promise<{ id: string; label: string }[]> }> = [
+      { backend: CLAUDE_BACKEND_ID, load: catalog.get().then((s) => s.models) },
+      { backend: CODEX_BACKEND_ID, load: codex.models() },
+      ...(local?.configured ? [{ backend: LOCAL_BACKEND_ID, load: local.models() }] : []),
+    ];
+    const outcomes = await Promise.allSettled(sources.map((src) => src.load));
     const models: { id: string; label: string; backend: string }[] = [];
     const errors: { backend: string; code: 'upstream'; message: string }[] = [];
     outcomes.forEach((result, index) => {
-      const backend = index === 0 ? CLAUDE_BACKEND_ID : CODEX_BACKEND_ID;
+      const backend = sources[index]!.backend;
       if (result.status === 'fulfilled')
         models.push(...result.value.map((m) => ({ ...m, backend })));
       else errors.push({ backend, code: 'upstream', message: String(result.reason) });
@@ -6967,6 +6965,14 @@ export function handleChatMoveRequest(
       sender({ ...base, ok: true });
       return;
     }
+    if (event.op === 'refolder') {
+      if (event.folder === undefined) {
+        throw new ChatMoveError('internal', 'a refolder needs a folder');
+      }
+      daemon.refolderChat(event.chatId, event.folder);
+      sender({ ...base, ok: true });
+      return;
+    }
     if (event.op === 'retire' && event.force === true) {
       // A takeover stops running work, which takes a moment: answer when done.
       void daemon
@@ -7126,11 +7132,12 @@ export async function handleServerEvent(
         // credit (spec/10 § Backend credentials); a spawn cannot name one.
         const spawnAuth = await daemon.backendCredential(event.model);
         if (!spawnAuth.ok) {
+          const spawnProvider = providerDescriptor(providerForModel(event.model));
           const host = daemon.hostId;
           sender({
             type: 'host.unauthenticated',
             hostId: host,
-            backendId: isCodexModel(event.model) ? CODEX_BACKEND_ID : CLAUDE_BACKEND_ID,
+            backendId: spawnProvider.backendId,
             reason: spawnAuth.reason,
           });
           // CORRECT THE SELF-REPORT. `connected` was computed once at boot, so a
@@ -7141,12 +7148,12 @@ export async function handleServerEvent(
           // it resolves them in order and takes the first that works — so it is
           // the host that is disconnected, not one row of it.
           const report: import('@patch/wire').HostAccountEvent =
-            accounts && !isCodexModel(event.model)
+            accounts && spawnProvider.id === 'claude'
               ? accounts.buildAccountReport({ connected: false })
               : {
                   type: 'host.account',
                   hostId: host,
-                  backendId: isCodexModel(event.model) ? CODEX_BACKEND_ID : CLAUDE_BACKEND_ID,
+                  backendId: spawnProvider.backendId,
                   connected: false,
                   accountEmail: null,
                 };
@@ -7159,11 +7166,11 @@ export async function handleServerEvent(
             type: 'chat.error',
             chatId: event.chatId ?? 'pending-spawn',
             error: {
-              code: isCodexModel(event.model) ? 'chatgpt_login_required' : 'claude_oauth_missing',
+              code: spawnProvider.loginRequiredCode as ChatErrorCode,
               // Short and actionable. This lands in a toast and in the chat, so
               // dumping the provider's raw OAuth JSON at a person tells them
               // nothing they can act on — the reason goes to the log instead.
-              message: `${host} isn't signed in to ${isCodexModel(event.model) ? 'Codex' : 'Claude'}. Sign in from Settings → Hosts.`,
+              message: `${spawnProvider.id === 'local' ? spawnAuth.reason : `${host} isn't signed in to ${spawnProvider.label}. Sign in from Settings → Hosts.`}`,
             },
             seq: OUT_OF_BAND_SEQ,
           });
@@ -7478,7 +7485,11 @@ export async function handleServerEvent(
         return;
       }
       case 'chat.goal_request': {
-        await daemon.setGoal(event.chatId, event.goal);
+        await daemon.setGoal(event.chatId, event.goal, {
+          ...(event.then !== undefined ? { then: event.then } : {}),
+          ...(event.remindEvery !== undefined ? { remindEvery: event.remindEvery } : {}),
+          ...(event.checkInEvery !== undefined ? { checkInEvery: event.checkInEvery } : {}),
+        });
         return;
       }
       case 'chat.todos_request': {

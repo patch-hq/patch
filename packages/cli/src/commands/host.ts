@@ -1,4 +1,4 @@
-// `patch host *` — host management (only meaningful on the Hetzner box).
+// `patch host *` — host management (only meaningful on the host machine).
 //
 // start/stop are aliases to systemd / docker-compose commands; we expose
 // them as primitives so an agent can invoke them. status checks reachability.

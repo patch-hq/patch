@@ -1,6 +1,8 @@
 // The whole path, for real: a relay, a host terminating on a real local HTTP and
 // WebSocket server, and a device using the client. What the relay held on the way
-// is recorded, to prove it holds nothing readable.
+// is recorded, to prove it holds nothing readable: by the relay itself when the
+// suite runs its own, and always as every byte the device's socket sent to the
+// relay and was sent by it — which is all an external relay ever holds of it.
 
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -14,11 +16,11 @@ import {
   type ServerIdentity,
 } from '../src/crypto.js';
 import { RelayHost } from '../src/host.js';
-import { createRelayServer, type RelayServerHandle } from '../src/server.js';
+import { budget, external, startRelay, untilOffline, type TestRelay } from './target.js';
 
 const SECRET = 'sk-live-THE-SECRET-the-relay-must-never-read-0123456789';
 
-let relay: RelayServerHandle;
+let relay: TestRelay;
 let relayUrl: string;
 let target: Server;
 let targetUrl: string;
@@ -38,12 +40,8 @@ const readBody = (req: IncomingMessage): Promise<Buffer> =>
 beforeEach(async () => {
   seen = [];
   targetSockets = [];
-  relay = await createRelayServer({
-    port: 0,
-    host: '127.0.0.1',
-    onFrame: (f) => seen.push(Buffer.from(f.bytes)),
-  });
-  relayUrl = `ws://127.0.0.1:${relay.port}`;
+  relay = await startRelay({ onFrame: (f) => seen.push(Buffer.from(f.bytes)) });
+  relayUrl = relay.url;
   target = createServer(async (req, res) => {
     const body = await readBody(req);
     const pathname = new URL(req.url ?? '/', 'http://x').pathname;
@@ -106,12 +104,25 @@ afterEach(async () => {
 });
 
 async function until(pick: () => boolean, ms = 3000): Promise<void> {
-  const end = Date.now() + ms;
+  const end = Date.now() + budget(ms);
   while (!pick()) {
     if (Date.now() > end) throw new Error('timed out');
     await new Promise((r) => setTimeout(r, 5));
   }
 }
+
+/** The device's socket, recording every byte it sends to the relay and is sent by it. */
+class TappedWebSocket extends WebSocket {
+  constructor(url: string) {
+    super(url);
+    this.on('message', (data: Buffer | ArrayBuffer) => seen.push(Buffer.from(data as Buffer)));
+  }
+  override send(data: unknown, ...rest: unknown[]): void {
+    seen.push(Buffer.from(data as Buffer));
+    (super.send as (...a: unknown[]) => void)(data, ...rest);
+  }
+}
+const DeviceWebSocket = TappedWebSocket as unknown as WebSocketCtor;
 
 const connect = (
   over: Partial<{ serverKey: string; channel: string }> = {},
@@ -122,7 +133,7 @@ const connect = (
       channel: over.channel ?? channelFor(identity.publicKey),
       serverKey: over.serverKey ?? toBase64Url(identity.publicKey),
     },
-    { WebSocket: WebSocket as unknown as WebSocketCtor },
+    { WebSocket: DeviceWebSocket },
   );
 
 describe('HTTP through the tunnel', () => {
@@ -371,14 +382,15 @@ describe('who is on the other end', () => {
 
   it('is told when the server is offline', async () => {
     host.stop();
-    await until(() => relay.stats().servers === 0);
+    await untilOffline(relayUrl, host.channel);
     const err = await connect().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RelayError);
     expect((err as RelayError).code).toBe(4404);
   });
 });
 
-describe('losing the connection', () => {
+// Restarting the relay under its users needs a relay this suite owns.
+describe.skipIf(external)('losing the connection', () => {
   it('ends the device’s session and everything on it, and the host reconnects by itself', async () => {
     const client = await connect();
     const sock = client.openSocket('/ws');
@@ -389,7 +401,7 @@ describe('losing the connection', () => {
     client.onClose((r) => reasons.push(r));
 
     // The relay restarts under them.
-    const port = relay.port;
+    const port = relay.local!.port;
     await relay.close();
     await until(() => !host.status().connected);
     await until(() => client.closed);
@@ -397,11 +409,7 @@ describe('losing the connection', () => {
     expect(reasons).toHaveLength(1);
     await expect(client.fetch('/json')).rejects.toThrow(/closed/);
 
-    relay = await createRelayServer({
-      port,
-      host: '127.0.0.1',
-      onFrame: (f) => seen.push(Buffer.from(f.bytes)),
-    });
+    relay = await startRelay({ port, onFrame: (f) => seen.push(Buffer.from(f.bytes)) });
     await until(() => host.status().connected, 5000);
     const again = await connect();
     expect((await again.fetch('/missing')).status).toBe(404);
@@ -417,7 +425,7 @@ describe('a route that outlives any one session', () => {
         channel: over.channel ?? channelFor(identity.publicKey),
         serverKey: over.serverKey ?? toBase64Url(identity.publicKey),
       },
-      { WebSocket: WebSocket as unknown as WebSocketCtor },
+      { WebSocket: DeviceWebSocket },
     );
 
   it('dials on first use, shares the session, and says it is connected', async () => {
@@ -428,7 +436,7 @@ describe('a route that outlives any one session', () => {
     const [a, b] = await Promise.all([conn.fetch('/missing'), conn.fetch('/missing')]);
     expect([a.status, b.status]).toEqual([404, 404]);
     expect(states).toEqual(['connecting', 'connected']);
-    expect(relay.stats().clients).toBe(1);
+    expect(host.status().sessions).toBe(1);
     conn.close();
   });
 
@@ -471,7 +479,7 @@ describe('a route that outlives any one session', () => {
 
   it('reports offline, with the reason, when the server is not there — and tries again next time', async () => {
     host.stop();
-    await until(() => relay.stats().servers === 0);
+    await untilOffline(relayUrl, host.channel);
     const conn = route();
     await expect(conn.fetch('/x')).rejects.toThrow(/offline/);
     expect(conn.status).toEqual({ state: 'offline', error: expect.stringMatching(/offline/) });

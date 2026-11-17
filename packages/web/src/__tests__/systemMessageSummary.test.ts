@@ -21,8 +21,8 @@ describe('systemMessageSummary', () => {
     );
   });
   it('keeps a Pad delivery line as is', () => {
-    expect(systemMessageSummary('[Pad] Tom sent 2 changes\nbody', 'job')).toBe(
-      '[Pad] Tom sent 2 changes',
+    expect(systemMessageSummary('[Pad] The user sent 2 changes\nbody', 'job')).toBe(
+      '[Pad] The user sent 2 changes',
     );
   });
   it('labels a job fire and any other host message with a clipped first line', () => {

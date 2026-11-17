@@ -130,3 +130,11 @@ test('Linux: the autostart entry starts the AppImage in the tray, and is removed
   setLinuxAutostart(f, '/x', false);
   assert.equal(existsSync(f), false);
 });
+
+test('turning on open at login where it cannot be says why, in the words the host gives', () => {
+  const { host } = fakeHost(false, false);
+  host.whyNotOpenAtLogin = 'Move it to Applications first';
+  const k = new KeepRunning(file(), host);
+  k.start();
+  assert.throws(() => k.set({ openAtLogin: true }), /Move it to Applications first/);
+});

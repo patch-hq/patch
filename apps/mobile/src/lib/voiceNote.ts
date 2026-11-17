@@ -33,8 +33,45 @@ import { useUiStore } from '../stores/uiStore';
 import { useChatStore } from '../stores/chatStore';
 import { ensurePermission } from './permissionGate';
 import { voiceKeyRefusal } from './voiceKeys';
+import { startMicCapture, stopMicCapture } from './voiceMic';
+import { startDictationPreview, type DictationPreview } from './dictationPreview';
 
 let _recording: Audio.Recording | null = null;
+// Live-words leg (spec/07 § Live transcript): an audio session opened alongside
+// the recording, fed by a second mic tap, always closed as cancelled. The clip
+// upload stays the authoritative transcript; this only lets the user watch
+// their words appear. Its failure is surfaced and never ends the note.
+let _preview: DictationPreview | null = null;
+
+function startNotePreview(chatId: string, gen: number): void {
+  const preview = startDictationPreview(
+    chatId,
+    (text) => {
+      if (gen === _noteGen && _preview === preview) {
+        useVoiceStore.getState().setVoiceNotePartial(text);
+      }
+    },
+    (m) => useUiStore.getState().pushError(`live transcript unavailable (still recording): ${m}`),
+  );
+  _preview = preview;
+  startMicCapture(
+    (pcm) => preview.push(pcm),
+    (m) => useUiStore.getState().pushError(`live transcript mic failed (still recording): ${m}`),
+  ).catch((e: unknown) => {
+    useUiStore
+      .getState()
+      .pushError(`live transcript unavailable (still recording): ${(e as Error).message}`);
+  });
+}
+
+function stopNotePreview(): void {
+  if (!_preview) return;
+  _preview.stop();
+  _preview = null;
+  void stopMicCapture().catch((e: Error) =>
+    console.warn(`[patch-voice] note preview mic not stopped: ${e.message}`),
+  );
+}
 // Resolves when the async prepare/start settles (recording live, superseded, or
 // failed). `endVoiceNote` AWAITS this so a quick hold-release still catches the
 // recording instead of racing past a half-prepared mic (the old silent no-op).
@@ -89,9 +126,11 @@ export function startVoiceNote(chatId: string, mode: VoiceNoteMode = 'tap'): voi
     }
     _recording = rec;
     console.log('[patch-voice] note recording live (expo-av AudioRecorder)');
+    startNotePreview(chatId, gen);
   })();
   _prepare.catch((e: unknown) => {
     if (gen !== _noteGen) return;
+    stopNotePreview();
     useVoiceStore.getState().endVoiceNote();
     useUiStore
       .getState()
@@ -155,6 +194,8 @@ export async function endVoiceNote(send: boolean): Promise<void> {
     _cancelWhileTaking = false;
     send = false;
   }
+  stopNotePreview();
+  useVoiceStore.getState().setVoiceNotePartial('');
 
   if (!rec) {
     // Prepare failed (already surfaced) or the gesture was released before the

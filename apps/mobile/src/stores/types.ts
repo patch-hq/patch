@@ -109,6 +109,8 @@ export interface ChatRow {
    * known to be nonzero, so a chat with nothing running never polls at all.
    */
   backgroundTasks: number | null;
+  /** The running sub-agent share of `backgroundTasks`; `null` is unknown. */
+  runningAgents: number | null;
   /**
    * How full the chat's context window is (spec/14 § Composer — context ring):
    * the roster's value, then every `chat.state` that carries one. `null` is
@@ -158,6 +160,12 @@ export interface ChatRow {
    * § Chat detail → Status bars), same data as web's GoalBanner.
    */
   goal: string | null;
+  /** Goals that start in order once the active one is met (spec/04 § Goals — sequence). */
+  goalQueue?: string[];
+  /** How often the active goal is restated to the agent; `null`/absent = never. */
+  goalReminderEvery?: ReminderEvery | null;
+  /** How often the evaluator is asked whether the goal is on track; `null`/absent = never. */
+  goalCheckInEvery?: ReminderEvery | null;
   /** The chat's reminder (`/remind`), or `null`. Drives the reminder bar. */
   reminder: string | null;
   /** How often the reminder is re-injected into the agent; `null` = banner only. */
@@ -203,6 +211,7 @@ export type ChatListRow = Omit<
   | 'snoozedUntil'
   | 'hidden'
   | 'backgroundTasks'
+  | 'runningAgents'
   | 'context'
   | 'model'
   | 'jobId'
@@ -226,6 +235,7 @@ export type ChatListRow = Omit<
   snoozedUntil?: number | null;
   hidden?: boolean;
   backgroundTasks?: number | null;
+  runningAgents?: number | null;
   context?: ChatContextUsage | null;
   model?: string | null;
   jobId?: string | null;
@@ -281,6 +291,7 @@ export type DisplayBadge =
   | 'permission'
   | 'errored'
   | 'done'
+  | 'agents'
   | 'background'
   | 'monitoring'
   | 'read';
@@ -301,7 +312,16 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   }
   // Unread beats a background job or self-wake loop.
   if (row.lastSeq > row.lastReadSeq) return 'done';
+  // Running sub-agents get their own state and icon; they win over plain background tasks.
+  if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   if (row.pendingWake) return 'monitoring';
   return 'read';
+}
+
+/** What surrounds a goal when it is set from a surface (spec/04 § Goals). */
+export interface GoalPlan {
+  then?: string[];
+  remindEvery?: ReminderEvery | null;
+  checkInEvery?: ReminderEvery | null;
 }

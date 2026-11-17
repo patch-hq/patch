@@ -29,6 +29,7 @@ import {
   deriveBadge,
   type ChatRow,
   type DisplayBadge,
+  type GoalPlan,
   type FolderRosterEntry,
   type PendingPermission,
   type SectionCounts,
@@ -200,6 +201,9 @@ interface ChatState {
         | 'goal'
         | 'goalProgress'
         | 'lastGoal'
+        | 'goalQueue'
+        | 'goalReminderEvery'
+        | 'goalCheckInEvery'
         | 'reminder'
         | 'reminderEvery'
         | 'pendingWake'
@@ -222,6 +226,9 @@ interface ChatState {
         goal?: string | null;
         goalProgress?: GoalProgress | null;
         lastGoal?: FinishedGoal | null;
+        goalQueue?: string[];
+        goalReminderEvery?: ReminderEvery | null;
+        goalCheckInEvery?: ReminderEvery | null;
         reminder?: string | null;
         reminderEvery?: ReminderEvery | null;
         pendingWake?: PendingWake | null;
@@ -283,6 +290,9 @@ interface ChatState {
         | 'goal'
         | 'goalProgress'
         | 'lastGoal'
+        | 'goalQueue'
+        | 'goalReminderEvery'
+        | 'goalCheckInEvery'
         | 'reminder'
         | 'reminderEvery'
         | 'pendingWake'
@@ -305,6 +315,9 @@ interface ChatState {
         goal?: string | null;
         goalProgress?: GoalProgress | null;
         lastGoal?: FinishedGoal | null;
+        goalQueue?: string[];
+        goalReminderEvery?: ReminderEvery | null;
+        goalCheckInEvery?: ReminderEvery | null;
         reminder?: string | null;
         reminderEvery?: ReminderEvery | null;
         pendingWake?: PendingWake | null;
@@ -490,7 +503,7 @@ interface ChatState {
   /** Local optimistic update for a rename (spec/04 § Name); null clears it. */
   setName(chatId: string, name: string | null): void;
   /** Local optimistic update for the chat's goal (patch/todo.md — `/goal`). */
-  setGoal(chatId: string, goal: string | null): void;
+  setGoal(chatId: string, goal: string | null, plan?: GoalPlan): void;
   /** Local optimistic update for the chat's reminder (patch/todo.md — Reminders). */
   setReminder(chatId: string, reminder: string | null, every?: ReminderEvery | null): void;
   /**
@@ -575,8 +588,12 @@ export interface DelegateUpdateInfo {
   status: ChatDelegateUpdateEvent['status'];
   /** Set while the subagent is parked on a usage limit; `resetsAt` is when it resumes. */
   outOfCredit?: { resetsAt?: number };
-  /** Epoch ms this surface first saw the subagent — the running-time clock. */
+  /** Epoch ms the current run began — the running-time clock. The host's `runStartedAt`; the time this surface first saw it only against a host that sends none. */
   since: number;
+  /** The current run is a follow-up wake of a settled subagent. */
+  followUp?: boolean;
+  /** The user paused it: alive and idle until resumed. */
+  paused?: boolean;
 }
 
 export interface ChatEventEntry {
@@ -963,6 +980,9 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     goal: null,
     goalProgress: null,
     lastGoal: null,
+    goalQueue: [],
+    goalReminderEvery: null,
+    goalCheckInEvery: null,
     reminder: null,
     reminderEvery: null,
     pendingWake: null,
@@ -997,6 +1017,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     // not zero — the sidebar draws no background state until a host that
     // tracks them reports a number (spec/02 § Background task completions).
     backgroundTasks: null,
+    runningAgents: null,
     context: null,
     providerContext: {},
   };
@@ -1054,6 +1075,9 @@ function stepsInCurrentTurn(
   return steps;
 }
 
+/** Chats whose last failure the host reported it is retrying (outlives one applyEvent). */
+const retryingChats = new Set<string>();
+
 export const useChatStore = create<ChatState>((set, get) => ({
   chats: {},
   hydrated: false,
@@ -1107,6 +1131,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const goalProgress =
         r.goalProgress !== undefined ? r.goalProgress : (existing?.goalProgress ?? null);
       const lastGoal = r.lastGoal !== undefined ? r.lastGoal : (existing?.lastGoal ?? null);
+      const goalQueue = r.goalQueue !== undefined ? r.goalQueue : (existing?.goalQueue ?? []);
+      const goalReminderEvery =
+        r.goalReminderEvery !== undefined
+          ? r.goalReminderEvery
+          : (existing?.goalReminderEvery ?? null);
+      const goalCheckInEvery =
+        r.goalCheckInEvery !== undefined
+          ? r.goalCheckInEvery
+          : (existing?.goalCheckInEvery ?? null);
       // Reminder CAN be cleared (null is meaningful) — only fall back to the
       // known reminder when the incoming row omits the field entirely (undefined).
       const reminder = r.reminder !== undefined ? r.reminder : (existing?.reminder ?? null);
@@ -1157,6 +1190,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // known value — a caller that predates the field must not blank it.
       const backgroundTasks =
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
+      const runningAgents =
+        r.runningAgents !== undefined ? r.runningAgents : (existing?.runningAgents ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
@@ -1185,6 +1220,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1204,6 +1242,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1217,6 +1256,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1235,6 +1277,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1276,6 +1319,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const goalProgress =
         r.goalProgress !== undefined ? r.goalProgress : (existing?.goalProgress ?? null);
       const lastGoal = r.lastGoal !== undefined ? r.lastGoal : (existing?.lastGoal ?? null);
+      const goalQueue = r.goalQueue !== undefined ? r.goalQueue : (existing?.goalQueue ?? []);
+      const goalReminderEvery =
+        r.goalReminderEvery !== undefined
+          ? r.goalReminderEvery
+          : (existing?.goalReminderEvery ?? null);
+      const goalCheckInEvery =
+        r.goalCheckInEvery !== undefined
+          ? r.goalCheckInEvery
+          : (existing?.goalCheckInEvery ?? null);
       const reminder = r.reminder !== undefined ? r.reminder : (existing?.reminder ?? null);
       const reminderEvery =
         r.reminderEvery !== undefined ? r.reminderEvery : (existing?.reminderEvery ?? null);
@@ -1318,6 +1370,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // known value — a caller that predates the field must not blank it.
       const backgroundTasks =
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
+      const runningAgents =
+        r.runningAgents !== undefined ? r.runningAgents : (existing?.runningAgents ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
@@ -1334,6 +1388,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1353,6 +1410,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1366,6 +1424,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1384,6 +1445,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1474,14 +1536,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
      * for a link drop is removable. A real turn failure (`sdk_error`,
      * `claude_oauth_missing`, …) is an outcome and stays put forever.
      */
-    function clearTransientErrors(chatId: string): void {
+    function clearTransientErrors(chatId: string, alsoRetried = false): void {
+      // `alsoRetried`: the host said this failure was being retried, and the
+      // retry is now running — a standalone `sdk_error` card that could not be
+      // attached to a bubble is just as over as a lost-link card.
+      const removable = (e: ChatEventEntry): boolean =>
+        e.kind === 'error' &&
+        (isTransientChatError(e.errorCode) || (alsoRetried && e.errorCode === 'sdk_error'));
       const held = timelines[chatId];
-      if (!held?.some((e) => e.kind === 'error' && isTransientChatError(e.errorCode))) return;
+      if (!held?.some(removable)) return;
       const list = ownTimeline(chatId);
       let last: ChatEventEntry | undefined;
       for (let i = list.length - 1; i >= 0; i--) {
         const e = list[i]!;
-        if (e.kind === 'error' && isTransientChatError(e.errorCode)) {
+        if (removable(e)) {
           last ??= e;
           list.splice(i, 1);
         }
@@ -1751,6 +1819,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             goal: event.goal !== undefined ? event.goal : row.goal,
             goalProgress: event.goalProgress !== undefined ? event.goalProgress : row.goalProgress,
             lastGoal: event.lastGoal !== undefined ? event.lastGoal : row.lastGoal,
+            goalQueue: event.goalQueue !== undefined ? event.goalQueue : row.goalQueue,
+            goalReminderEvery:
+              event.goalReminderEvery !== undefined
+                ? event.goalReminderEvery
+                : row.goalReminderEvery,
+            goalCheckInEvery:
+              event.goalCheckInEvery !== undefined ? event.goalCheckInEvery : row.goalCheckInEvery,
             // Reminder CAN be cleared (null is meaningful) — only keep the existing
             // reminder when the event omits the field (undefined), not when it's null.
             reminder: event.reminder !== undefined ? event.reminder : row.reminder,
@@ -1852,6 +1927,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.backgroundTasks !== undefined
                 ? event.backgroundTasks
                 : (row.backgroundTasks ?? null),
+            runningAgents:
+              event.runningAgents !== undefined ? event.runningAgents : (row.runningAgents ?? null),
             context: event.context !== undefined ? event.context : (row.context ?? null),
           };
           // The host is speaking for this chat again. If it reports anything
@@ -1862,7 +1939,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // (a host returning says nothing about whether THIS chat's turn did).
           // If the host never comes back there is no such event and the notice
           // stays, which is the truth.
-          if (event.activity !== 'errored') clearTransientErrors(event.chatId);
+          if (event.activity !== 'errored') {
+            clearTransientErrors(event.chatId, retryingChats.has(event.chatId));
+            if (event.activity === 'running') retryingChats.delete(event.chatId);
+          } else if (event.turnRetrying === true) retryingChats.add(event.chatId);
+          else retryingChats.delete(event.chatId);
           // A generic `sdk_error` is marked on the turn's own bubble, and the
           // host then retries that turn on its own. The mark is cleared when
           // the re-send folds in (`foldRetryAttempt`), but a turn that carries
@@ -2685,7 +2766,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 label: event.label,
                 status: event.status,
                 ...(event.outOfCredit ? { outOfCredit: event.outOfCredit } : {}),
-                since: delegateUpdates[event.chatId]?.[event.delegateId]?.since ?? Date.now(),
+                since:
+                  event.runStartedAt ??
+                  delegateUpdates[event.chatId]?.[event.delegateId]?.since ??
+                  Date.now(),
+                ...(event.followUp ? { followUp: true } : {}),
+                ...(event.paused ? { paused: true } : {}),
               },
             },
           };
@@ -3263,7 +3349,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  setGoal(chatId, goal) {
+  setGoal(chatId, goal, plan = {}) {
     const row = get().chats[chatId];
     if (!row) return;
     // Optimistic reset of the live counters too (mirrors the host's own
@@ -3282,7 +3368,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chats: {
         ...get().chats,
-        [chatId]: { ...row, goal, goalProgress },
+        [chatId]: {
+          ...row,
+          goal,
+          goalProgress,
+          goalQueue: goal === null ? [] : (plan.then ?? []),
+          goalReminderEvery: goal === null ? null : (plan.remindEvery ?? null),
+          goalCheckInEvery: goal === null ? null : (plan.checkInEvery ?? null),
+        },
       },
     });
   },
@@ -3355,6 +3448,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   _reset() {
+    retryingChats.clear();
     retractedChatIds.clear();
     rosteredChatIds.clear();
     settledLocalIds.clear();

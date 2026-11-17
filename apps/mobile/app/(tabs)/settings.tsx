@@ -14,8 +14,8 @@ import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { fonts, radii, space, textMin, useTheme } from '../../src/lib/theme';
-import { useSettingsStore } from '../../src/stores/settingsStore';
-import { SETTINGS_PAGES, type SettingsGroup } from '../../src/components/settings/pages';
+import { useExperimentalFeatures, useSettingsStore } from '../../src/stores/settingsStore';
+import { visibleSettingsPages, type SettingsGroup } from '../../src/components/settings/pages';
 import { GroupLabel } from '../../src/components/settings/ui';
 import { useUpdatesBehind } from '../../src/components/settings/VersionSection';
 
@@ -30,6 +30,7 @@ export default function SettingsScreen(): React.ReactElement {
   const behind = useUpdatesBehind();
   // The server cannot read its stored accounts and keys, so no host is sent settings.
   const problem = useSettingsStore((s) => s.data?.shared?.problem);
+  const experimental = useExperimentalFeatures();
 
   React.useEffect(() => {
     const load = (): void => void useSettingsStore.getState().load();
@@ -86,51 +87,55 @@ export default function SettingsScreen(): React.ReactElement {
           <View style={{ marginHorizontal: space.xs, marginBottom: -2 }}>
             <GroupLabel>{group}</GroupLabel>
           </View>
-          {SETTINGS_PAGES.filter((p) => p.group === group).map((p) => (
-            <Pressable
-              key={p.id}
-              testID={`settings-row-${p.id}`}
-              accessibilityRole="button"
-              accessibilityLabel={p.title}
-              onPress={() => router.push({ pathname: '/settings/[page]', params: { page: p.id } })}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: space.md + 2,
-                paddingHorizontal: space.lg,
-                marginTop: -1,
-                borderWidth: 1,
-                borderColor: colors.lineSoft,
-                backgroundColor: pressed ? colors.bgSoft : colors.paperRaised,
-              })}
-            >
-              <Text
-                style={{
-                  flex: 1,
-                  fontFamily: fonts.bodyMedium,
-                  fontSize: 15,
-                  lineHeight: 21,
-                  color: colors.ink2,
-                }}
+          {visibleSettingsPages(experimental)
+            .filter((p) => p.group === group)
+            .map((p) => (
+              <Pressable
+                key={p.id}
+                testID={`settings-row-${p.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={p.title}
+                onPress={() =>
+                  router.push({ pathname: '/settings/[page]', params: { page: p.id } })
+                }
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: space.md + 2,
+                  paddingHorizontal: space.lg,
+                  marginTop: -1,
+                  borderWidth: 1,
+                  borderColor: colors.lineSoft,
+                  backgroundColor: pressed ? colors.bgSoft : colors.paperRaised,
+                })}
               >
-                {p.title}
-              </Text>
-              {p.id === 'updates' && behind ? (
-                <View
-                  testID="settings-updates-pip"
-                  accessibilityLabel="Something is behind"
+                <Text
                   style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: colors.waiting,
-                    marginRight: space.md,
+                    flex: 1,
+                    fontFamily: fonts.bodyMedium,
+                    fontSize: 15,
+                    lineHeight: 21,
+                    color: colors.ink2,
                   }}
-                />
-              ) : null}
-              <Text style={{ fontSize: 18, color: colors.inkFaint }}>›</Text>
-            </Pressable>
-          ))}
+                >
+                  {p.title}
+                </Text>
+                {p.id === 'updates' && behind ? (
+                  <View
+                    testID="settings-updates-pip"
+                    accessibilityLabel="Something is behind"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: colors.waiting,
+                      marginRight: space.md,
+                    }}
+                  />
+                ) : null}
+                <Text style={{ fontSize: 18, color: colors.inkFaint }}>›</Text>
+              </Pressable>
+            ))}
         </View>
       ))}
     </ScrollView>

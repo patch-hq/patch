@@ -28,7 +28,7 @@ const {
   AndroidConfig,
 } = require('expo/config-plugins');
 
-const PKG = 'io.github.tomchambers2.patch';
+const PKG = 'dev.patchhq.app';
 const PKG_PATH = PKG.split('.').join('/');
 
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ const withShortcutStrings = (config) =>
 // ---------------------------------------------------------------------------
 // Network security config: Android 9+ blocks cleartext (http://) traffic by
 // default in RELEASE builds (Expo only enables `usesCleartextTraffic` in the
-// debug manifest). The production server is HTTPS (patch.tomchambers.dev), but
+// debug manifest). The production server is HTTPS (your Patch domain), but
 // a release APK pointed at a LOCAL dev/self-hosted stack reaches it over plain
 // http on loopback (localhost / 10.0.2.2 emulator host bridge / 127.0.0.1).
 // Without this the WS + REST calls silently fail and the app sits forever on

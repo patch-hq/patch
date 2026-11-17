@@ -27,7 +27,7 @@
 
 import { AppState, type NativeEventSubscription } from 'react-native';
 import * as Updates from 'expo-updates';
-import { recordUpdateCheck } from './updateCheck';
+import { recordUpdateCheck, serialiseUpdateWork } from './updateCheck';
 import { updateSource } from './updateSource';
 import { logUpdater } from './updaterLog';
 
@@ -48,17 +48,19 @@ export async function checkForOtaUpdate(): Promise<void> {
   // Not before this launch is pointed at the paired server (updateSource.ts).
   if (updateSource().state !== 'active') return;
   try {
-    const result = await Updates.checkForUpdateAsync();
-    // Record the check so Settings → Version shows an accurate "Last checked",
-    // whether or not an update was found.
-    recordUpdateCheck(new Date().toISOString());
-    logUpdater('check', result.isAvailable ? 'update available' : 'up to date');
-    if (!result.isAvailable) return;
-    // Download only. `useUpdates().isUpdatePending` flips once this resolves,
-    // which is what puts "An update is downloaded and ready to install." and
-    // the "Restart to update" button in Settings → Version.
-    await Updates.fetchUpdateAsync();
-    logUpdater('fetched', 'update downloaded, applies on next start');
+    await serialiseUpdateWork(async () => {
+      const result = await Updates.checkForUpdateAsync();
+      // Record the check so Settings → Version shows an accurate "Last checked",
+      // whether or not an update was found.
+      recordUpdateCheck(new Date().toISOString());
+      logUpdater('check', result.isAvailable ? 'update available' : 'up to date');
+      if (!result.isAvailable) return;
+      // Download only. `useUpdates().isUpdatePending` flips once this resolves,
+      // which is what puts "An update is downloaded and ready to install." and
+      // the "Restart to update" button in Settings → Version.
+      await Updates.fetchUpdateAsync();
+      logUpdater('fetched', 'update downloaded, applies on next start');
+    });
   } catch (err) {
     logUpdater('error', `ota check failed: ${String(err)}`);
     console.warn('[ota] update check failed', err);

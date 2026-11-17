@@ -322,6 +322,95 @@ describe('patch_delegate', () => {
     expect(await daemon.stopDelegate(parentChatId, id)).toBe(false);
   });
 
+  it('lists a subagent whose chat errored without settling as failed, not running', async () => {
+    const { daemon, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(daemon.listDelegates(parentChatId)[0]?.status).toBe('running');
+
+    // Simulate the stranded case: the run is gone and the chat is errored.
+    const d = daemon as unknown as {
+      aborters: Map<string, unknown>;
+      chatState: { setActivity(id: string, a: string): void };
+    };
+    d.aborters.delete(id);
+    d.chatState.setActivity(id, 'errored');
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'failed' });
+  });
+
+  it('a user pause interrupts the turn without settling or reporting it, and stop still works', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(await daemon.pauseDelegate(parentChatId, id)).toBe(true);
+    // Alive, not settled: still running, flagged paused, nothing delivered.
+    expect(daemon.listDelegates(parentChatId)).toEqual([
+      expect.objectContaining({ id, status: 'running', paused: true }),
+    ]);
+    expect(messagesOn(events, parentChatId)).toHaveLength(0);
+    const update = events
+      .filter((e) => e.type === 'chat.delegate_update' && e.delegateId === id)
+      .at(-1);
+    expect(update).toMatchObject({ status: 'running', paused: true });
+
+    // Pausing again is idempotent; a stranger's id is refused.
+    expect(await daemon.pauseDelegate(parentChatId, id)).toBe(true);
+    expect(await daemon.pauseDelegate('someone-else', id)).toBe(false);
+
+    // A paused agent can still be stopped outright.
+    expect(await daemon.stopDelegate(parentChatId, id)).toBe(true);
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'stopped' });
+    expect(await daemon.pauseDelegate(parentChatId, id)).toBe(false);
+  });
+
+  it('resume only applies to a paused agent, and runs it again', async () => {
+    const { daemon, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(await daemon.resumeDelegate(parentChatId, id)).toBe(false);
+    await daemon.pauseDelegate(parentChatId, id);
+    expect(await daemon.resumeDelegate(parentChatId, id)).toBe(true);
+    await flushUntil(() => daemon.listDelegates(parentChatId)[0]?.paused === undefined);
+    expect(daemon.listDelegates(parentChatId)[0]?.status).toBe('running');
+    await daemon.stopDelegate(parentChatId, id);
+  });
+
+  it('spinning off makes it an ordinary chat in the list and ends its reporting to the parent', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({
+      parentChatId,
+      prompt: 'a slow task',
+      title: 'slow one',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(daemon.listWithFilter({}).map((c) => c.chatId)).not.toContain(id);
+
+    expect(daemon.spinOffDelegate('someone-else', id)).toBeUndefined();
+    expect(daemon.spinOffDelegate(parentChatId, id)).toBe(id);
+
+    expect(daemon.isSubagent(id)).toBe(false);
+    expect(daemon.delegateParentOf(id)).toBeUndefined();
+    expect(daemon.listWithFilter({}).map((c) => c.chatId)).toContain(id);
+    expect(daemon.listDelegates(parentChatId)).toEqual([]);
+    expect(
+      events.some(
+        (e) => e.type === 'chat.spawned' && e.chatId === id && e.parentChatId === parentChatId,
+      ),
+    ).toBe(true);
+    expect(events.at(-1)).toBeDefined();
+    expect(
+      events.filter((e) => e.type === 'chat.delegate_update' && e.delegateId === id).at(-1),
+    ).toMatchObject({ status: 'stopped', spunOffChatId: id });
+    // Spun off, it is no longer stopped with its parent.
+    await daemon.stopChat(id);
+  });
+
   it("counts a running subagent in the parent's chat.state backgroundTasks, and drops it once stopped", async () => {
     const { daemon, events, folder } = setupHanging();
     const parentChatId = await daemon.spawnChat({ folder });
@@ -338,6 +427,25 @@ describe('patch_delegate', () => {
 
     await daemon.stopDelegate(parentChatId, id);
     await flushUntil(() => lastCount() === 0);
+  });
+
+  it('reports the sub-agent share of the count as runningAgents', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const last = () =>
+      events
+        .filter(
+          (e): e is Extract<WireEvent, { type: 'chat.state' }> =>
+            e.type === 'chat.state' && e.chatId === parentChatId,
+        )
+        .at(-1);
+
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await flushUntil(() => last()?.runningAgents === 1);
+    expect(last()?.backgroundTasks).toBe(1);
+
+    await daemon.stopDelegate(parentChatId, id);
+    await flushUntil(() => last()?.runningAgents === 0);
   });
 
   it('builds a chat.state without scanning every chat on disk (reconnect sends one per chat)', async () => {
@@ -369,6 +477,7 @@ describe('patch_delegate', () => {
 
     listCalls = 0;
     expect(daemon.currentStateEvent(parentChatId)?.backgroundTasks).toBe(1);
+    expect(daemon.currentStateEvent(parentChatId)?.runningAgents).toBe(1);
     expect(listCalls).toBe(0);
   });
 
@@ -680,6 +789,28 @@ describe('patch_delegate', () => {
       expect(daemon.listDelegates(parentChatId)).toHaveLength(1);
     });
 
+    it('a follow-up wake restarts the run clock host-side and a reconnecting surface is told the same start', async () => {
+      const { daemon, sdk, folder } = setup();
+      const parentChatId = await daemon.spawnChat({ folder });
+      sdk.enqueue([{ type: 'assistant', content: 'first' }, { type: 'result' }]);
+      const first = await daemon.createDelegate({ parentChatId, prompt: 'start', wait: true });
+      await first.result!;
+
+      sdk.enqueue([{ type: 'assistant', content: 'second' }, { type: 'result' }]);
+      const next = await daemon.sendToDelegate({
+        parentChatId,
+        id: first.id,
+        message: 'again',
+        wait: true,
+      });
+      await next.result!;
+      const meta = (
+        daemon as unknown as { opts: { metaStore: { read(id: string): any } } }
+      ).opts.metaStore.read(first.id);
+      expect(meta.subagent.followUp).toBe(true);
+      expect(meta.subagent.runStartedAt).toBe(1_700_000_000_000);
+    });
+
     it("sendToDelegate refuses another chat's subagent and a non-subagent", async () => {
       const { daemon, folder } = setup();
       const a = await daemon.spawnChat({ folder });
@@ -692,5 +823,147 @@ describe('patch_delegate', () => {
         daemon.sendToDelegate({ parentChatId: a, id: b, message: 'hi' }),
       ).rejects.toThrow(/not a subagent/);
     });
+  });
+});
+
+describe('patch_delegate across a host restart', () => {
+  function setupWaitGone() {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-gone-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-gone-f-')));
+    const events: WireEvent[] = [];
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'assistant', content: 'done it' }, { type: 'result' }]);
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: sdk,
+      oauthAccessToken: 'tok',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: (() => {
+        let n = 0;
+        return () => `gone-${++n}`;
+      })(),
+      discoverClaudeMcpServers: () => [],
+    });
+    return { daemon, events, folder };
+  }
+
+  function host(home: string, sdkBackend: SdkBackend) {
+    const events: WireEvent[] = [];
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend,
+      oauthAccessToken: 'tok',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: (() => {
+        let n = 0;
+        return () => `r${++n}-${Math.random().toString(36).slice(2, 6)}`;
+      })(),
+      discoverClaudeMcpServers: () => [],
+    });
+    return { daemon, events };
+  }
+  const held: SdkBackend = {
+    async *run() {
+      await new Promise<void>(() => undefined);
+    },
+  } as unknown as SdkBackend;
+
+  it('a background subagent cut off by a restart still delivers its result to the parent', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-restart-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-restart-f-')));
+    let parentChatId = '';
+    let childId = '';
+    {
+      const { daemon } = host(home, held);
+      parentChatId = await daemon.spawnChat({ folder });
+      ({ id: childId } = await daemon.createDelegate({
+        parentChatId,
+        prompt: 'work',
+        title: 'Worker',
+      }));
+      await new Promise((r) => setTimeout(r, 30));
+      daemon.shutdown();
+    }
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'assistant', content: 'all done' }, { type: 'result' }]);
+    const { daemon, events } = host(home, sdk);
+    daemon.hydrate();
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${childId}`)),
+    );
+    expect(
+      messagesOn(events, parentChatId)
+        .map((m) => m.content)
+        .join('\n'),
+    ).toContain('all done');
+    daemon.shutdown();
+  });
+
+  it('a settled subagent whose own child is cut off by a restart is woken by the result, and reports up', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-restart2-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-restart2-f-')));
+    let topId = '';
+    let midId = '';
+    let leafId = '';
+    {
+      const sdk1 = createMockSdkBackend();
+      sdk1.enqueue([{ type: 'assistant', content: 'waiting on leaf' }, { type: 'result' }]);
+      let n = 0;
+      const { daemon } = host(home, sdk1);
+      topId = await daemon.spawnChat({ folder });
+      ({ id: midId } = await daemon.createDelegate({
+        parentChatId: topId,
+        prompt: 'mid',
+        title: 'Mid',
+      }));
+      await new Promise((r) => setTimeout(r, 50));
+      // the middle agent has settled; now its own child starts and hangs
+      (daemon as unknown as { opts: { sdkBackend: SdkBackend } }).opts.sdkBackend = held;
+      ({ id: leafId } = await daemon.createDelegate({
+        parentChatId: midId,
+        prompt: 'leaf',
+        title: 'Leaf',
+      }));
+      void n;
+      await new Promise((r) => setTimeout(r, 30));
+      daemon.shutdown();
+    }
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'assistant', content: 'leaf finished' }, { type: 'result' }]);
+    sdk.enqueue([{ type: 'assistant', content: 'mid relays leaf finished' }, { type: 'result' }]);
+    const { daemon, events } = host(home, sdk);
+    daemon.hydrate();
+    await flushUntil(() =>
+      messagesOn(events, topId).some((m) => m.content.includes('mid relays leaf finished')),
+    );
+    expect(leafId).not.toBe('');
+    daemon.shutdown();
+  });
+
+  it('a waiting caller that went away gets the result delivered to the parent as a turn instead', async () => {
+    const { daemon, events, folder } = setupWaitGone();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id, result } = await daemon.createDelegate({
+      parentChatId,
+      prompt: 'work',
+      title: 'Worker',
+      wait: true,
+    });
+    void result;
+    daemon.abandonDelegateWait(id);
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${id}`)),
+    );
+    expect(
+      messagesOn(events, parentChatId)
+        .map((m) => m.content)
+        .join('\n'),
+    ).toContain('done it');
   });
 });

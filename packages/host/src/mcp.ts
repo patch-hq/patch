@@ -503,16 +503,32 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         "each turn settles, Patch's own evaluator judges `condition` against the conversation: not met " +
         'continues with the reason as guidance, met or impossible clears it. Unlike the composer command, ' +
         'calling this tool does NOT also send `condition` as a turn — it only arms the evaluator, since ' +
-        'you are already mid-conversation. Visible to the user the whole time, via a bar above the chat.',
+        'you are already mid-conversation. Visible to the user the whole time, via a bar above the chat. ' +
+        'Optionally `then` queues goals that start, in order, each when the one before is met; ' +
+        '`remindEvery` restates the goal to you every N turns or minutes; `checkInEvery` has the ' +
+        'evaluator also judge whether the work is on track every N turns or minutes (off track surfaces the chat).',
       inputSchema: {
         condition: z.string().min(1),
+        then: z.array(z.string().min(1)).max(50).optional(),
+        remindEvery: z
+          .object({ unit: z.enum(['turns', 'minutes']), n: z.number().int().min(1).max(10000) })
+          .optional(),
+        checkInEvery: z
+          .object({ unit: z.enum(['turns', 'minutes']), n: z.number().int().min(1).max(10000) })
+          .optional(),
       },
     },
-    async ({ condition }) => {
+    async ({ condition, then, remindEvery, checkInEvery }) => {
       const res = await uds<unknown>({
         method: 'POST',
         path: '/internal/goal',
-        body: { chatId: callerChatId, goal: condition },
+        body: {
+          chatId: callerChatId,
+          goal: condition,
+          ...(then !== undefined ? { then } : {}),
+          ...(remindEvery !== undefined ? { remindEvery } : {}),
+          ...(checkInEvery !== undefined ? { checkInEvery } : {}),
+        },
       });
       return toolResult(res);
     },
@@ -568,7 +584,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         "Bash's `run_in_background` (disabled: see the tool-call denial for why). Spawns " +
         '`command` as a detached process the host holds a real pid for, persists it, and returns ' +
         'immediately with `{ taskId }` — it does NOT block this turn. The host polls it in the ' +
-        'background and, once it exits, delivers a `[watch]`-prefixed message into THIS chat as a new ' +
+        'background and, once it exits (or, with `wakeOnMatch`, whenever an output line matches), delivers a `[watch]`-prefixed message into THIS chat as a new ' +
         'turn (survives a host restart either way — the task keeps running and is re-attached). Use ' +
         'for anything that takes longer than you want to wait: a build, a long test run, a download. ' +
         "Every line the command prints is its progress: the last one shows in the user's task strip, so print short status lines. " +
@@ -597,16 +613,24 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .describe(
             'How often, in minutes, you are sent a check-in while this runs. Omit for the default (an hour). A long wait warrants a longer interval, e.g. a 10-hour wait every 5 hours.',
           ),
+        wakeOnMatch: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Regular expression. While the command keeps running, each complete output line matching it wakes this chat with a `[watch]` message carrying the matching lines (batched per few seconds). For a monitor that stays up after an alert, e.g. "^GUARD:". The normal exit message still arrives when it ends. Omit to be woken only on exit.',
+          ),
         cwd: z.string().min(1).optional(),
       },
     },
-    async ({ command, description, timeoutSec, checkInMinutes, cwd }) => {
+    async ({ command, description, timeoutSec, checkInMinutes, wakeOnMatch, cwd }) => {
       const body: Record<string, unknown> = {
         chatId: callerChatId,
         command,
         description,
         timeoutSec,
         ...(checkInMinutes !== undefined ? { checkInSec: checkInMinutes * 60 } : {}),
+        ...(wakeOnMatch !== undefined ? { wakeOnMatch } : {}),
       };
       if (cwd !== undefined) body['cwd'] = cwd;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/watch', body });
@@ -1335,7 +1359,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_notify',
     {
       description:
-        "Tell the user something they did not ask for right now — a build finished, a watched condition tripped, they are still up at 1am. NOT for replying to a turn they just sent. You choose two things and only two: what to say, and how much it matters. Where it lands is not yours to pick — Patch sends it to the desktop when they are at a computer and to the phone when they are not, because only Patch knows where they are. importance: 'silent' makes no sound and asks for nothing now, it is simply there next time they look (a daily summary, a watcher's line); 'normal' is an ordinary notification, held back while they are already at a surface that shows this chat; 'urgent' is 'normal' with a more urgent sound, routed and held back the same way — use it when you can say what is lost by waiting an hour. Tapping it opens this chat, unless deepLink names somewhere better to land (an installed app's custom-scheme or https URI, e.g. the task the notification is about). Your message must NAME where that link goes — say the app or the thing, e.g. 'open it in Citymapper' — because a link the message does not mention is refused and the tap opens this chat instead. quickReplies is at most 2 short strings (e.g. 'Yes', 'Snooze 10 min'); each renders as its own button on the notification that, tapped, sends that exact text back into this chat as the user's reply — use it when you can predict the answer, not as a substitute for asking a real question.",
+        "Tell the user something they did not ask for right now — a build finished, a watched condition tripped, they are still up at 1am. NOT for replying to a turn they just sent. You choose two things and only two: what to say, and how much it matters. Where it lands is not yours to pick — Patch sends it to the desktop when they are at a computer and to the phone when they are not, because only Patch knows where they are. importance: 'silent' makes no sound and asks for nothing now, it is simply there next time they look (a daily summary, a watcher's line); 'normal' is an ordinary notification, held back while they are already at a surface that shows this chat; 'urgent' is 'normal' with a more urgent sound, routed and held back the same way — use it when you can say what is lost by waiting an hour. Tapping it opens this chat, unless deepLink names somewhere better to land (an installed app's custom-scheme or https URI, e.g. the task the notification is about). Your message must NAME where that link goes — say the app or the thing, e.g. 'open it in Citymapper' — because a link the message does not mention is refused and the tap opens this chat instead. quickReplies is at most 2 short strings (e.g. 'Yes', 'Snooze 10 min'); each renders as its own button on the notification that, tapped, sends that exact text back into this chat as the user's reply — use it when you can predict the answer, not as a substitute for asking a real question. If the chat is snoozed nothing is delivered, and the result says {delivered:false, reason:'chat is snoozed'} — then the user has NOT been told, so do not wait for a reply to it.",
       inputSchema: {
         message: z.string().min(1),
         importance: z.enum(['silent', 'normal', 'urgent']),
@@ -1357,7 +1381,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_speak',
     {
       description:
-        "Say something OUT LOUD on a voice device in the house. A different act from notifying: it fills the room, anyone there hears it, and it is gone — no notification is left behind for later. Use it when the user is in the house and away from screens, and the thing is worth saying to the room. deviceId picks a speaker ('kitchen', 'bedroom'); omit it and Patch picks the one most recently used, or all of them quietly if none was. If no speaker is reachable it falls through to a push.",
+        "Say something OUT LOUD on a voice device in the house. A different act from notifying: it fills the room, anyone there hears it, and it is gone — no notification is left behind for later. Use it when the user is in the house and away from screens, and the thing is worth saying to the room. deviceId picks a speaker ('kitchen', 'bedroom'); omit it and Patch picks the one most recently used, or all of them if none was. If no speaker is reachable it falls through to a push.",
       inputSchema: {
         message: z.string().min(1),
         deviceId: z.string().min(1).optional(),
@@ -1376,7 +1400,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_ask_human',
     {
       description:
-        "Say you are BLOCKED until the user does something themselves, in the world: grant a permission the OS will only take by hand, plug something in, sign a form, take a photo. Not for a decision (ask a question) and not for approving a tool (that already prompts) — this is for work only they can do. It pushes to their phone, pulls this chat out of Hidden (or Archived), and leaves the task ON the chat's row until they act on it — so a hidden job cannot sit blocked where nobody is looking, and a missed notification does not lose the request. Say the task as an instruction they could follow without reading the chat ('grant Screen Recording to Foreman Observer in System Settings'), and put the consequence in `why` ('until then I am judging your day from window titles alone'). Having called it, decide for yourself whether to wait or carry on with what is still possible.",
+        "Say you are BLOCKED until the user does something themselves, in the world: grant a permission the OS will only take by hand, plug something in, sign a form, take a photo. Not for a decision (ask a question) and not for approving a tool (that already prompts) — this is for work only they can do. It pushes to their phone, pulls this chat out of Hidden (or Archived), and leaves the task ON the chat's row until they act on it — so a hidden job cannot sit blocked where nobody is looking, and a missed notification does not lose the request. Say the task as an instruction they could follow without reading the chat ('grant Screen Recording to Foreman Observer in System Settings'), and put the consequence in `why` ('until then I am judging your day from window titles alone'). Having called it, decide for yourself whether to wait or carry on with what is still possible. If the result says delivered:false (the chat is snoozed) the user was NOT pushed; the task is still on the chat's row.",
       inputSchema: {
         task: z.string().min(1),
         why: z.string().min(1).optional(),
@@ -1545,6 +1569,26 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       const res = await uds<unknown>({
         method: 'POST',
         path: '/internal/view_file',
+        body: { file_path, callerChatId },
+      });
+      return toolResult(res);
+    },
+  );
+
+  // ---- link_file ----------------------------------------------------------
+  server.registerTool(
+    'link_file',
+    {
+      description:
+        "Point the USER at a file or folder that already sits on this host's disk, anywhere on it, without uploading or reading it. In the chat it shows as a card with the file's name and path, and in the desktop app (when the app is running on this same machine) buttons to open the file or reveal it in Finder / the file manager. Use it when the user needs to go and find or work on a file in place — a project folder, a download, a document you edited — rather than view it inline (that is view_file, which only reaches files inside the chat folder and copies them to the screen). file_path must be absolute or start with ~/. Returns { name, absPath, isDirectory, size? }.",
+      inputSchema: {
+        file_path: z.string().min(1),
+      },
+    },
+    async ({ file_path }) => {
+      const res = await uds<unknown>({
+        method: 'POST',
+        path: '/internal/link_file',
         body: { file_path, callerChatId },
       });
       return toolResult(res);

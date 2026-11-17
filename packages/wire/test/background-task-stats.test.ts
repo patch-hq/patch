@@ -148,3 +148,42 @@ describe('patch.background_task_stats.response', () => {
     ).toBe(false);
   });
 });
+
+// spec/03 § Stray processes
+describe('patch.stray_processes', () => {
+  it('round-trips the request with and without a stopPid, and a response', () => {
+    const req = { type: 'patch.stray_processes.request', requestId: 'r1', chatId: 'c1' } as const;
+    expect(decode(encode(req))).toEqual(req);
+    expect(decode(encode({ ...req, stopPid: 42 }))).toEqual({ ...req, stopPid: 42 });
+    const res = {
+      type: 'patch.stray_processes.response',
+      requestId: 'r1',
+      ok: true,
+      processes: [{ pid: 42, command: 'sleep 9', startedAt: 1, running: true }],
+    } as const;
+    expect(decode(encode(res))).toEqual(res);
+  });
+
+  it('rejects a non-positive pid and an unknown error code', () => {
+    expect(() =>
+      decode(
+        encode({
+          type: 'patch.stray_processes.request',
+          requestId: 'r',
+          chatId: 'c',
+          stopPid: 0,
+        } as never),
+      ),
+    ).toThrow(WireDecodeError);
+    expect(() =>
+      decode(
+        encode({
+          type: 'patch.stray_processes.response',
+          requestId: 'r',
+          ok: false,
+          error: { code: 'nope', message: 'x' },
+        } as never),
+      ),
+    ).toThrow(WireDecodeError);
+  });
+});

@@ -7,12 +7,7 @@ Open a PR; when its tests pass it merges itself, and the merge is the release.
    (`scripts/verify.mjs`) on one runner for every PR, and the full gate (four
    shards, browser layer on) in the merge queue, which builds at most three
    entries at once so it can't fill the runner pool. Nothing re-runs on `main`.
-   GitHub removes a PR that fails, conflicts or makes an invalid merge commit,
-   and nothing puts it back: a Patch job on the `dequeued` event runs
-   `scripts/merge-queue-dequeue.mjs`, which files an App Updates task (or comments on the open one) for an agent to fix and re-enable auto-merge. Conflicts are left to `pr-conflicts.yml` and its `needs-rebase` label.
-   `pr-automerge.yml` turns on auto-merge for each PR as Tom, using the `AUTOMERGE_TOKEN` PAT secret because the Actions bot never gets a PR queued (the merge queue sets the method; the PAT expires and must be renewed);
-   `pr-conflicts.yml` labels a PR `needs-rebase` and comments when main moves
-   under it, for the chat that owns it to rebase and force-push.
+   Three flows keep nothing stuck. A new PR turns on auto-merge (`pr-automerge.yml`, as Tom, using the `AUTOMERGE_TOKEN` PAT secret because the Actions bot never gets a PR queued; the PAT expires and must be renewed) and every push re-arms it. A PR that fails (failed check, failed merge-queue run, conflict with main) or a newly opened issue is sent to Patch as one webhook, which spawns a fresh chat for it that fixes and pushes (the PR then merges) or investigates and closes the issue, directly or with a PR saying `Closes #N`. The senders are `needs-attention.yml` (checks, queue, issues; also runnable by hand with a PR/issue number) and `pr-conflicts.yml` (GitHub sends no event for a conflict, so each push to main checks the open PRs). Both call `scripts/needs-attention.mjs` with the `PATCH_ATTENTION_URL` and `PATCH_ATTENTION_SECRET` repo secrets. There is no attempt cap, no label and no sweep; a flaky test is a failure like any other.
 1. **GitHub Actions** (`.github/workflows/release.yml`) builds every surface
    alongside the tests and waits for that commit's `tests` check: the
    server and web release, the Linux and macOS hosts, the signed and notarised

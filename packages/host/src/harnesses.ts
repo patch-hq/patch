@@ -16,6 +16,7 @@ import {
 } from '@patch/wire';
 import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
+import { LOCAL_BACKEND_ID } from './localModels.js';
 
 export interface HarnessTraits {
   /** The `backendId` this provider's credentials report under (`host.unauthenticated`). */
@@ -48,6 +49,15 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     rateLimitSweeps: false,
     turnRetrySafe: (err) => err instanceof CodexTurnError && err.retrySafe,
     limitMustStateReset: true,
+  },
+  // A local endpoint has no account, no quota and no status model of its own.
+  local: {
+    backendId: LOCAL_BACKEND_ID,
+    resolvesPermissionModeByModel: false,
+    generatesStatus: false,
+    rateLimitSweeps: false,
+    turnRetrySafe: () => false,
+    limitMustStateReset: false,
   },
 };
 

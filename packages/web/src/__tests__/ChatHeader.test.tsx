@@ -929,7 +929,7 @@ describe('ChatHeader', () => {
     it('⋯ menu: clicking the Snooze label opens the Snooze sheet and closes the menu', () => {
       render(<ChatHeader row={row()} />);
       openMore();
-      fireEvent.click(screen.getByRole('menuitem', { name: /snooze/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Snooze chat' }));
       expect(useUiStore.getState().snoozeSheet).toEqual({ kind: 'chat', chatId: 'c1' });
       expect(screen.queryByTestId('menu-snooze-row')).toBeNull();
     });
@@ -938,7 +938,7 @@ describe('ChatHeader', () => {
       render(<ChatHeader row={row()} />);
       fireEvent.click(screen.getByTestId('action-hamburger'));
       const hm = screen.getByTestId('head-hamburger-menu');
-      fireEvent.click(within(hm).getByRole('menuitem', { name: /snooze/i }));
+      fireEvent.click(within(hm).getByRole('menuitem', { name: 'Snooze chat' }));
       expect(useUiStore.getState().snoozeSheet).toEqual({ kind: 'chat', chatId: 'c1' });
     });
 

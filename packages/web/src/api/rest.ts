@@ -21,7 +21,9 @@ import type {
   UsageSample,
   ChatTokenUsage,
   WatchTaskRow,
+  StrayProcessRow,
 } from '@patch/wire';
+import type { GoalPlan } from '../stores/types.js';
 import type { Hook, HookCreateBody, HookPatchBody, HookCheckResponse } from '@patch/wire/hooks';
 import { assertVersionReport } from '@patch/wire';
 import { loadCredential } from '../lib/credential.js';
@@ -93,6 +95,10 @@ export interface ChatSummaryRow {
    * whole cold-start roster away.
    */
   backgroundTasks?: number | null;
+  /** Why the chat is errored; null otherwise. Absent from an older server. */
+  lastError?: { code: string; message: string; at: number } | null;
+  /** The sub-agent share of `backgroundTasks`; absent or null is unknown. */
+  runningAgents?: number | null;
   /**
    * Running out of the active list (spec/04 § Hidden). Optional because an
    * older server does not send it; absent keeps whatever the store knows.
@@ -400,6 +406,12 @@ export const api = {
   // Validated at the boundary: a partial report must reach the panel's error state,
   // not render as "all layers agree".
   version: async () => assertVersionReport(await request<unknown>('/api/version')),
+  setReleaseChannel: (channel: 'stable' | 'dev') =>
+    request<{ channel: 'stable' | 'dev' }>('/api/release-channel', {
+      method: 'PUT',
+      body: { channel },
+    }),
+  updateAll: () => request<{ ok: true }>('/api/update-all', { method: 'POST' }),
   me: () =>
     request<{
       account: { accountId: string; userPublicKey: string; createdAt: number };
@@ -779,10 +791,10 @@ export const api = {
       body: { name },
     }),
   // patch/todo.md — `/goal`: set (or clear, with null) the chat's goal.
-  setGoal: (chatId: string, goal: string | null) =>
+  setGoal: (chatId: string, goal: string | null, plan: GoalPlan = {}) =>
     request<unknown>(`/api/chats/${chatId}/goal`, {
       method: 'POST',
-      body: { goal },
+      body: { goal, ...plan },
     }),
   // spec/02 § Task list — replace the chat's task list with `todos` (the WHOLE
   // list, not a delta). The host adopts it and tells the agent on its next turn.
@@ -1123,6 +1135,12 @@ export const api = {
     }),
   signInDeny: (id: string) =>
     request<{ ok: true }>(`/api/auth/signin/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
+  // Settings → Voice devices → Add device: a long-lived device token, shown once.
+  addVoiceDevice: (label: string) =>
+    request<{ surfaceId: string; label: string; token: string }>('/api/voice-devices', {
+      method: 'POST',
+      body: { label },
+    }),
   surfacePairStart: () =>
     request<{ nonce: string; expiresAt: number; uri?: string }>('/api/auth/pair/start', {
       method: 'POST',
@@ -1275,6 +1293,28 @@ export const api = {
     request<{ stopped: boolean }>(`/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/stop`, {
       method: 'POST',
     }),
+  // The user's own controls over one delegated agent of this chat. `applied`
+  // is false when the agent had already finished; `spunOffChatId` comes back
+  // for `spin-off`, the id of the new ordinary chat.
+  delegateControl: (
+    chatId: string,
+    delegateId: string,
+    action: 'pause' | 'resume' | 'stop' | 'spin-off',
+  ) =>
+    request<{ applied: boolean; spunOffChatId?: string }>(
+      `/api/chats/${chatId}/delegates/${encodeURIComponent(delegateId)}/${action}`,
+      { method: 'POST' },
+    ),
+  // Processes the chat started outside Patch's tracked tools (a `nohup … &`
+  // in a Bash call), running or recently ended (spec/14 § Main chat panel —
+  // Stray process bar). A 501 means the host cannot detect them.
+  strayProcesses: (chatId: string) =>
+    request<{ processes: StrayProcessRow[] }>(`/api/chats/${chatId}/stray-processes`),
+  strayProcessStop: (chatId: string, pid: number) =>
+    request<{ processes: StrayProcessRow[]; stopped: boolean }>(
+      `/api/chats/${chatId}/stray-processes/${pid}/stop`,
+      { method: 'POST' },
+    ),
   // Change how often a running task's owning agent is checked in with. The
   // next check-in is one new interval from now.
   watchCheckIn: (chatId: string, taskId: string, checkInSec: number) =>

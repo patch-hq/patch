@@ -95,6 +95,23 @@ describe('running tool call', () => {
     expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('1m 30s');
   });
 
+  // A long run of short calls: each call's clock restarts, the turn's does not.
+  it('shows how long the whole turn has been working beside the call clock', () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 0,
+      role: 'user',
+      content: 'go',
+      createdAt: NOW - 25 * 60_000,
+    } as never);
+    useChatStore.getState().applyEvent({ ...call, startedAt: NOW - 5_000 });
+    renderChat();
+    expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('5s');
+    expect(screen.getByTestId('tool-running-turn').textContent).toBe('working for 25m 00s');
+  });
+
   it('shows the spinner but no clock when the start time is unknown', () => {
     seed();
     const noStart = { ...call };
@@ -239,6 +256,54 @@ describe('running tool call', () => {
     const group = screen.getByTestId('tool-group');
     expect(group.getAttribute('data-open')).toBe('false');
     expect(screen.getByTestId('tool-running')).toBeTruthy();
+  });
+
+  // 12 Nov 2026: a growing run showed only a vague AI label ("Investigating…")
+  // that lagged several calls behind, so a working chat looked stuck.
+  it('shows the newest call beside the label of a live collapsed run, not once it is final', () => {
+    seed();
+    const store = useChatStore.getState();
+    store.applyEvent(call);
+    store.applyEvent({
+      ...call,
+      seq: 2,
+      callId: 'call-2',
+      args: { command: 'ls', description: 'List the repo' },
+    });
+    store.applyEvent({
+      type: 'chat.tool_run_summary',
+      chatId: 'c1',
+      callIds: ['call-1'],
+      summary: 'Investigating…',
+      live: true,
+      seq: 3,
+    });
+    renderChat();
+    expect(screen.getByTestId('tool-group-latest').textContent).toBe('List the repo');
+    act(() => {
+      store.applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        callId: 'call-1',
+        result: 'ok',
+        seq: 4,
+      } as never);
+      store.applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        callId: 'call-2',
+        result: 'ok',
+        seq: 5,
+      } as never);
+      store.applyEvent({
+        type: 'chat.tool_run_summary',
+        chatId: 'c1',
+        callIds: ['call-1', 'call-2'],
+        summary: 'Looked around',
+        seq: 6,
+      });
+    });
+    expect(screen.queryByTestId('tool-group-latest')).toBeNull();
   });
 });
 

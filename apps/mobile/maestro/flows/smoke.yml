@@ -22,7 +22,7 @@
 # this journey is `pnpm smoke:android` (scripts/mobile-surface-smoke.mjs), which
 # is what actually gates a deploy; keep the two in step.
 
-appId: io.github.tomchambers2.patch
+appId: dev.patchhq.app
 ---
 - launchApp:
     clearState: true

@@ -110,6 +110,9 @@ export function makeFetch(overrides: Record<string, unknown> = {}, handler?: Han
     if (u.includes('/api/usage-report')) return json({ samples: [], chats: [] });
     if (u.includes('/api/models')) return json({ models: [] });
     if (u.includes('/api/secrets')) return json({ secrets: [] });
+    if (u.includes('/api/voice-devices')) {
+      return json({ surfaceId: 'vd-new', label: 'Kitchen', token: 'DEVICE-TOKEN-xyz' });
+    }
     if (u.includes('/api/auth/daemon/pair/start') || u.includes('/pair/start')) {
       return json({ nonce: 'NONCE-abc123def456', expiresAt: Date.now() + 300_000 });
     }
@@ -194,7 +197,12 @@ export function resetSettingsState(): void {
   useUiStore.getState().resolvePrompt(null);
   useUiStore.getState().setCodexSignInHost(null);
   useSettingsHostStore.setState({ selected: null });
-  usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES, loaded: true, shared: null });
+  // Settings tests start with the experimental features on, so Manager is in the nav.
+  usePreferencesStore.setState({
+    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    loaded: true,
+    shared: null,
+  });
   clearHosts();
   resetModelCatalog();
   usePresenceStore.getState().setConnection('connected');

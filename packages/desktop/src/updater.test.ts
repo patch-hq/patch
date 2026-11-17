@@ -17,6 +17,7 @@ import {
   emptyPersisted,
   initialUpdaterState,
   INSTALL_WATCHDOG_MS,
+  QUIT_GRACE_MS,
   parsePersisted,
   persistedOf,
   quitAndInstallNow,
@@ -842,7 +843,7 @@ test('a persisted error comes back as a check error — an install failure did n
 // --- an install Squirrel has already failed says why ------------------------
 
 const SQUIRREL =
-  'Code signature at URL file:///Users/x/Library/Caches/io.github.tomchambers2.patch.ShipIt/update.abc/Patch.app/ ' +
+  'Code signature at URL file:///Users/x/Library/Caches/dev.patchhq.app.ShipIt/update.abc/Patch.app/ ' +
   'did not pass validation: code failed to satisfy specified code requirement(s)';
 
 test('an updater error becomes one short clause, without the bundle path', () => {
@@ -918,4 +919,34 @@ test('the stall watchdog outlasts a slow healthy install, so it cannot cause a s
     },
   });
   assert.deepEqual(delays, [INSTALL_WATCHDOG_MS]);
+});
+
+test('quitAndInstallNow force-exits when the quit never happens, after the grace period', () => {
+  const timers: Array<{ fn: () => void; ms: number }> = [];
+  let exits = 0;
+  quitAndInstallNow({
+    app: { isQuitting: false },
+    autoUpdater: { quitAndInstall: () => undefined },
+    onError: () => undefined,
+    forceExit: () => exits++,
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms });
+      return {};
+    },
+  });
+  const grace = timers.find((t) => t.ms === QUIT_GRACE_MS);
+  assert.ok(grace, 'a grace timer is armed');
+  assert.ok(QUIT_GRACE_MS < INSTALL_WATCHDOG_MS);
+  assert.equal(exits, 0, 'not before the grace period ends');
+  grace.fn();
+  assert.equal(exits, 1);
+});
+
+test('an app-id change is reported as a one-time reinstall, not as Squirrel text', () => {
+  assert.equal(
+    conciseReason(
+      'Could not locate update bundle for old.app.id within file:///x/ShipIt/update.abc\n    at foo',
+    ),
+    'this Patch is an older app id and cannot update itself; install the latest Patch from the download page once',
+  );
 });

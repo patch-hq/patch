@@ -12,6 +12,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { groupChats } from '../lib/chatGroups.js';
 import type { ChatRow } from '../stores/types.js';
 import { OpenableLink } from './OpenableLink.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { ChatStatusBadge } from './ChatStatusBadge.js';
 
 export function MiniSidebar(): JSX.Element {
@@ -22,6 +23,7 @@ export function MiniSidebar(): JSX.Element {
   const location = useLocation();
   const highlighted = location.pathname.startsWith('/chats/') ? activeChatId : null;
 
+  const experimental = useExperimentalFeatures();
   const chatSort = useUiStore((s) => s.chatSort);
   const manualOrder = useUiStore((s) => s.manualOrder);
   const groupSort = useUiStore((s) => s.groupSort);
@@ -32,7 +34,7 @@ export function MiniSidebar(): JSX.Element {
   // Same order as the full sidebar: Manager, pinned, then each project's rows,
   // with a hairline between projects.
   const groups: ChatRow[][] = [
-    ...(grouped.manager ? [[grouped.manager]] : []),
+    ...(experimental && grouped.manager ? [[grouped.manager]] : []),
     ...(grouped.pinned.length > 0 ? [grouped.pinned] : []),
     ...grouped.folders.map((f) => f.rows),
   ];

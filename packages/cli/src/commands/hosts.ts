@@ -184,35 +184,6 @@ export function registerHostsCommands(program: Command): void {
     });
 
   hosts
-    .command('devices')
-    .description('The voice devices registered on this host, with live presence (online, muted)')
-    .option('--json', 'JSON output')
-    .action(async (opts: CommonOpts) => {
-      await run(opts, async () => {
-        // Presence is the host's own, so this is the local socket only.
-        const t = getTransport(opts);
-        if (t.kind !== 'uds') {
-          throw new Error(
-            'hosts devices: needs the host running on this host (no host socket found)',
-          );
-        }
-        const res = await t.get<{
-          devices: Array<{ deviceId: string; name?: string; online?: boolean; muted?: boolean }>;
-        }>('/internal/devices');
-        if (opts.json) {
-          emitJson(res);
-          return;
-        }
-        if (res.devices.length === 0) emitText('(no devices)');
-        for (const d of res.devices) {
-          emitText(
-            `${d.deviceId}  ${d.name ?? ''}  ${d.online ? 'online' : 'offline'}${d.muted ? '  muted' : ''}`,
-          );
-        }
-      });
-    });
-
-  hosts
     .command('models')
     .description("That host's model catalogue across its backends")
     .option('--host <h>', 'host name or hostId prefix (default: this host)')
@@ -325,22 +296,6 @@ export function registerHostsCommands(program: Command): void {
       await run(opts, async () => {
         const { t, path, hostId } = await hostRoute(opts, '/update', () => '/api/hosts/update');
         emitJson(await t.post<unknown>(path, withHost({}, hostId)));
-      });
-    });
-
-  hosts
-    .command('pair-device')
-    .description('On this host only: open a five-minute window for a voice device')
-    .option('--json', 'JSON output')
-    .action(async (opts: CommonOpts) => {
-      await run(opts, async () => {
-        // No `--host`: the host adopts the device itself, so this is
-        // local-only and has no wire frame (spec/02 § Control IPC).
-        const t = getTransport(opts);
-        if (t.kind !== 'uds') {
-          throw new Error('hosts pair-device runs on the host itself, over its local socket');
-        }
-        emitJson(await t.post<unknown>('/pair-device', {}));
       });
     });
 

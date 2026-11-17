@@ -369,7 +369,11 @@ export function AddChatGPTAccount(): JSX.Element {
       {host === null ? <Note testid="chatgpt-no-host">Connect a host to sign in</Note> : null}
       {pending && login ? (
         <div className="set-inline" role="status" data-testid="chatgpt-login-pending">
-          <span className="set-row-title">Waiting for sign-in…</span>
+          <span className="set-row-title">
+            {login.code
+              ? 'Open the sign-in page, enter this code, and come back here.'
+              : 'Finish signing in on the page that opened.'}
+          </span>
           {login.code ? <code className="set-code">{login.code}</code> : null}
           {login.url ? (
             <a className="set-btn" href={login.url} target="_blank" rel="noreferrer">

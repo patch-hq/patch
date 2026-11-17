@@ -164,6 +164,46 @@ describe('LogSync', () => {
     expect(injected.map((e) => e.type)).toEqual(['chat.message']);
   });
 
+  test("a turn's closing summary, which the server does not keep, is not asked about after every reconnect", () => {
+    // The host's log ends on a tool-run summary: one past the server's transcript.
+    sync.observe(reported(4));
+    settle();
+    expect(sent).toHaveLength(1);
+    sync.observe({
+      type: 'patch.log_sync.batch',
+      chatId: 'c1',
+      events: [{ type: 'chat.tool_run_summary', chatId: 'c1', callIds: [], summary: 's', seq: 4 }],
+      done: true,
+    } as WireEvent);
+    expect(store.highWater('c1')).toBe(4);
+
+    // The link drops and comes back (a server or host restart): nothing to ask.
+    sent.length = 0;
+    sync.observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);
+    sync.observe(reported(4));
+    settle();
+    expect(sent).toEqual([]);
+  });
+
+  test('the reach is recorded only once the whole answer is in', () => {
+    sync.observe(reported(6));
+    settle();
+    sync.observe({
+      type: 'patch.log_sync.batch',
+      chatId: 'c1',
+      events: [],
+      done: false,
+    } as WireEvent);
+    expect(store.highWater('c1')).toBe(3);
+    sync.observe({
+      type: 'patch.log_sync.batch',
+      chatId: 'c1',
+      events: [],
+      done: true,
+    } as WireEvent);
+    expect(store.highWater('c1')).toBe(6);
+  });
+
   test('a host going offline cancels what was waiting', () => {
     sync.observe(reported(9));
     sync.observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);

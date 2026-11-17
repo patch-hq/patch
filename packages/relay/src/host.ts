@@ -49,6 +49,12 @@ export interface RelayHostOptions {
   maxBodyBytes?: number;
   /** Reconnect backoff to the relay. */
   backoffMs?: { min: number; max: number };
+  /**
+   * How often to ping the relay (default 30 s). A relay may drop a connection it
+   * thinks is idle, and a dead one can look open for a long time: after two
+   * pings in a row go unanswered the connection is dropped and dialled again.
+   */
+  keepaliveMs?: number;
 }
 
 export interface RelayHostStatus {
@@ -167,13 +173,33 @@ export class RelayHost {
         this.opts.logger?.warn({ err: String(e) }, 'relay: dropped a bad frame');
       }
     });
+    let unanswered = 0;
+    let keepalive: ReturnType<typeof setInterval> | null = null;
     ws.on('open', () => {
       openedAt = Date.now();
+      keepalive = setInterval(() => {
+        if (unanswered >= 2) {
+          this.lastError = 'the relay stopped answering pings';
+          this.opts.logger?.warn(
+            { channel: this.channel },
+            'relay: no answer to pings; redialling',
+          );
+          ws.terminate();
+          return;
+        }
+        unanswered++;
+        ws.ping();
+      }, this.opts.keepaliveMs ?? 30_000);
+      keepalive.unref?.();
+    });
+    ws.on('pong', () => {
+      unanswered = 0;
     });
     ws.on('error', (e: Error) => {
       this.lastError = e.message;
     });
     ws.on('close', (code: number, reason: Buffer) => {
+      if (keepalive) clearInterval(keepalive);
       if (this.ws !== ws) return;
       this.ws = null;
       this.dropAll();
@@ -315,6 +341,9 @@ export class RelayHost {
         if (s) void this.runRequest(client, s, id, say, fail);
         return;
       }
+      case Msg.Ping:
+        say(Msg.Pong);
+        return;
       case Msg.Cancel:
         client.streams.get(id)?.abort.abort();
         client.streams.delete(id);

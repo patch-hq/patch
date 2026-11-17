@@ -13,6 +13,7 @@ import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { OAuthCheckResult } from './chatRunner.js';
 import { isCodexModel } from './codexAccounts.js';
+import { isLocalModel } from './localModels.js';
 import type { Logger } from 'pino';
 import { cutAt, stripWrappingQuotes } from './textClean.js';
 
@@ -47,6 +48,11 @@ export interface MakeTitleGeneratorOptions {
    * no Claude account for `runOnAccountWithCredit` to find.
    */
   codex?: {
+    sdkBackend: SdkBackend;
+    resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
+  };
+  /** The same for a local-model chat: titled by the local model itself. */
+  local?: {
     sdkBackend: SdkBackend;
     resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
   };
@@ -148,21 +154,26 @@ export function makeTitleGenerator(
   opts: MakeTitleGeneratorOptions,
 ): (input: GenerateTitleInput) => Promise<string | null> {
   return async function generateTitle(input: GenerateTitleInput): Promise<string | null> {
-    if (isCodexModel(input.chatModel)) {
+    const own = isCodexModel(input.chatModel)
+      ? { dep: opts.codex, name: 'Codex' }
+      : isLocalModel(input.chatModel)
+        ? { dep: opts.local, name: 'local model' }
+        : undefined;
+    if (own) {
       const model = input.chatModel!;
-      if (!opts.codex) {
-        opts.logger?.warn({ chatId: input.chatId }, 'title gen: no Codex backend configured');
+      if (!own.dep) {
+        opts.logger?.warn({ chatId: input.chatId }, `title gen: no ${own.name} backend configured`);
         return null;
       }
-      const auth = await opts.codex.resolveOAuth(model);
+      const auth = await own.dep.resolveOAuth(model);
       if (!auth.ok) {
         opts.logger?.warn(
           { chatId: input.chatId, reason: auth.reason },
-          'title gen: no Codex credential available',
+          `title gen: no ${own.name} credential available`,
         );
         return null;
       }
-      return await runTitleQuery(opts.codex.sdkBackend, auth.accessToken, model, input);
+      return await runTitleQuery(own.dep.sdkBackend, auth.accessToken, model, input);
     }
     return await runSmallJob(opts, `title gen ${input.chatId}`, (accessToken, model) =>
       runTitleQuery(opts.sdkBackend, accessToken, model, input),

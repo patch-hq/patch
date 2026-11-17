@@ -59,18 +59,22 @@ export function FolderPickerSheet({
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = React.useState('');
-  const [hostTab, setHostTab] = React.useState<string | 'all'>('all');
+  // The sheet only ever lists ONE host's folders: a path means one directory
+  // on one host, so another host's folders are never offered.
+  // Several hosts and none chosen: no host is guessed — the user picks a chip.
+  const initialHost = currentHostId ?? (hosts.length === 1 ? hosts[0]!.hostId : null);
+  const [hostTab, setHostTab] = React.useState<string | null>(initialHost);
   const [browsing, setBrowsing] = React.useState(false);
 
   // A reopened sheet never shows the last session's text or browse position.
   React.useEffect(() => {
     if (visible) {
       setQuery('');
-      setHostTab('all');
+      setHostTab(initialHost);
       setBrowsing(false);
       setError(null);
     }
-  }, [visible]);
+  }, [visible, initialHost]);
 
   const hostNames = React.useMemo(
     () => Object.fromEntries(hosts.map((h) => [h.hostId, h.name])),
@@ -79,8 +83,7 @@ export function FolderPickerSheet({
   // The host path completion and Browse… act on: the chosen chip, else the
   // current host, else the only host. Null (several hosts, none chosen) is
   // said out loud, never guessed.
-  const actingHost =
-    hostTab !== 'all' ? hostTab : (currentHostId ?? (hosts.length === 1 ? hosts[0]!.hostId : null));
+  const actingHost = hostTab;
 
   const [dir, setDir] = React.useState<string | null>(null);
   const [parent, setParent] = React.useState<string | null>(null);
@@ -137,7 +140,7 @@ export function FolderPickerSheet({
     onPick(hostId, folder);
   };
 
-  const rows = filterRows(recents, pathMode ? '' : query, hostTab);
+  const rows = filterRows(recents, pathMode ? '' : query, hostTab ?? '');
   const suggestions = pathQuery ? filterPathEntries(entries, pathQuery.partial) : [];
 
   const rowStyle = ({ pressed }: { pressed: boolean }) => ({
@@ -284,7 +287,7 @@ export function FolderPickerSheet({
                   style={{ flexGrow: 0, marginTop: space.sm }}
                   contentContainerStyle={{ paddingHorizontal: space.lg, gap: space.xs }}
                 >
-                  {[{ hostId: 'all', name: 'All', online: true }, ...hosts].map((h) => {
+                  {hosts.map((h) => {
                     const on = h.hostId === hostTab;
                     return (
                       <Pressable

@@ -34,8 +34,15 @@ import {
   type VoiceHandoff,
   type VoiceLayer,
 } from '@patch/wire/audio';
-import { VoiceSession, type SessionDeps, type SessionInit, type SessionState } from './session.js';
+import {
+  StreamingUpsampler48k,
+  VoiceSession,
+  type SessionDeps,
+  type SessionInit,
+  type SessionState,
+} from './session.js';
 import { MockVad, type Vad } from './vad.js';
+import { watchPeerLiveness } from './peer-liveness.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
 import type { KokoroBackend } from './kokoro.js';
@@ -54,7 +61,6 @@ import {
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
-import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
 import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
@@ -225,6 +231,10 @@ export interface AudioServerOptions {
    * Default 4 (matches Groq budget per spec).
    */
   maxConcurrentSessions?: number;
+  /** A peer silent (no frame, no pong) this long is dropped. Default 45 s. */
+  deadPeerTimeoutMs?: number;
+  /** How often peers are pinged. Default 15 s. */
+  pingIntervalMs?: number;
   /**
    * Fired when a physical voice-device session (surfaceKind === 'device')
    * opens (`active: true`) or closes (`active: false`). The host wires this
@@ -274,18 +284,6 @@ export interface AudioServerOptions {
     endedAt: number;
     engine: EngineCosting;
   }) => void;
-  /**
-   * Optional `/device/control` WSS upgrade handler (spec/16 voice-device
-   * control plane, F2). The firmware/mock dial the SAME host:port for
-   * both `/audio/<sessionId>` and `/device/control`, so the control plane
-   * shares this HTTP listener. When unset, `/device/control` upgrades 404 —
-   * the in-process audio smoke tests don't wire a device registry.
-   */
-  deviceControlUpgrade?: (
-    req: import('node:http').IncomingMessage,
-    socket: import('node:stream').Duplex,
-    head: Buffer,
-  ) => void;
   /** Test hooks. */
   nowMs?: () => number;
   /**
@@ -500,22 +498,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
   const wss = new WebSocketServer({ noServer: true });
 
   http.on('upgrade', (req, socket, head) => {
-    // Device control plane shares this listener (spec/16, F2). Route it first;
-    // the device's persistent control WSS lives at /device/control while
-    // per-session audio is under /audio/<sessionId>.
-    // Same unreachable-fallback reasoning as the diag-speak handler above:
-    // `req.url` is always populated for a real upgrade request, and
-    // `.split()` always yields >=1 element.
-    const path = (req.url ?? '').split('?')[0] ?? ''; /* v8 ignore next */
-    if (path === DEVICE_CONTROL_PATH) {
-      if (opts.deviceControlUpgrade) {
-        opts.deviceControlUpgrade(req, socket, head);
-      } else {
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-        socket.destroy();
-      }
-      return;
-    }
     if (!req.url || !req.url.startsWith(AUDIO_PATH_PREFIX)) {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
       socket.destroy();
@@ -557,6 +539,12 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     let isAppCall = false;
     let pendingBinaryMeta: { samples: number } | undefined;
 
+    watchPeerLiveness(ws, {
+      ...(opts.deadPeerTimeoutMs !== undefined ? { timeoutMs: opts.deadPeerTimeoutMs } : {}),
+      ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
+      onDead: (silentMs) =>
+        log.warn({ sessionId: urlSessionId, silentMs }, 'audio: peer went silent, ending session'),
+    });
     ws.on('message', (data: Buffer | string, isBinary: boolean) => {
       if (isBinary) {
         if (!session) {
@@ -762,19 +750,15 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const sendAudioFn = (ev: AudioEvent): void => send(ws, ev);
         const sendBinaryFn = (pcm: Int16Array): void =>
           ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), { binary: true });
+        // Hosted engines speak 24 kHz; a voice device plays 48 kHz (spec/16
+        // § Audio WSS), so their audio to a device is upsampled as it streams.
+        // (VoiceSession upsamples its own device audio.)
+        const deviceUpsampler = voiceSurface === 'device' ? new StreamingUpsampler48k() : null;
+        const hostedSendBinary = (pcm24: Int16Array): void => {
+          const pcm = deviceUpsampler ? deviceUpsampler.push(pcm24) : pcm24;
+          if (pcm.length > 0) sendBinaryFn(pcm);
+        };
 
-        if (voiceSurface === 'device' && cell.backend !== 'local') {
-          // The device's 16 kHz-mic / 48 kHz-speaker path is specific to
-          // VoiceSession's device branch; no hosted session speaks it yet.
-          // A real, accepted config cell with no engine behind it — refuse
-          // loudly, never run `local` in its place.
-          rejectConn(
-            ws,
-            'voice_config_not_implemented',
-            `device does not support backend "${cell.backend}" yet; select "local" instead`,
-          );
-          return;
-        }
         if (cell.backend === 'local' && cell.layer !== undefined && cell.layer !== 'direct') {
           // local + light/heavy: no front model exists for the local backend
           // (Haiku was tried and rejected as not capable enough — spec/07
@@ -801,7 +785,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
-            sendBinary: sendBinaryFn,
+            sendBinary: hostedSendBinary,
             submitUserTurn: opts.submitUserTurn,
             apiKey: geminiKey,
             gate: {
@@ -830,7 +814,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
-            sendBinary: sendBinaryFn,
+            sendBinary: hostedSendBinary,
             submitUserTurn: opts.submitUserTurn,
             apiKey: openaiKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
@@ -855,7 +839,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
-            sendBinary: sendBinaryFn,
+            sendBinary: hostedSendBinary,
             submitUserTurn: opts.submitUserTurn,
             apiKey: elevenKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),

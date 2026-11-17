@@ -159,7 +159,8 @@ test.describe('job editor — unsaved changes', () => {
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
     await expect(page.getByTestId('job-editor-unsaved')).toBeVisible();
     await page.getByTestId('job-save').click();
-    await expect(page.getByTestId('jobs-route')).toBeVisible();
+    // Save closes the editor's own tab; it no longer navigates to the list.
+    await expect(page.getByTestId('job-name')).toHaveCount(0);
     await expect(page.getByTestId('confirm-modal')).toHaveCount(0);
   });
 });

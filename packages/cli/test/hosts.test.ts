@@ -38,7 +38,6 @@ test('every hosts subcommand the spec names is registered', () => {
     'update',
     'claude-settings',
     'memory',
-    'pair-device',
     'remove',
   ]) {
     assert.ok(
@@ -68,10 +67,10 @@ test('the host-scoped commands take --host, defaulting to this host', () => {
   }
 });
 
-test('pair-device takes no --host — the host adopts the device itself', () => {
-  const cmd = hostsCmd(build()).commands.find((c) => c.name() === 'pair-device');
-  assert.ok(cmd);
-  assert.ok(!cmd.options.some((o) => o.long === '--host'), 'pair-device has no --host');
+test('voice devices are not managed per host: no devices or pair-device command', () => {
+  const names = hostsCmd(build()).commands.map((c) => c.name());
+  assert.ok(!names.includes('devices'));
+  assert.ok(!names.includes('pair-device'));
 });
 
 test('folders has add and remove under it', () => {

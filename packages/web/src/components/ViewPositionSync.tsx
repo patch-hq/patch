@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { positionFromPath, pathFromPosition } from '../lib/viewPosition.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import type { PatchWs } from '../api/ws.js';
@@ -50,6 +51,13 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       return;
     if (!r || (r.surfaceId === own && !allowOwn) || r.updatedAt <= st.handledAt) return;
     st.markHandled(r.updatedAt);
+    // A chat some group already shows is brought forward (spec/14 § Groups).
+    // The chat route leaves an already-showing chat alone so a reload keeps the
+    // focus it restored, so the handover has to say it means to move there.
+    if (r.page === 'chat' && r.id !== undefined) {
+      const layout = useLayoutStore.getState();
+      if (layout.groups.some((g) => g.chatId === r.id)) layout.showChat(r.id);
+    }
     navigate(pathFromPosition(r));
   };
 

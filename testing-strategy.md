@@ -27,7 +27,7 @@ Environment facts about the browser layer; the first and last look like a broken
 | server + host         | `https://patch.tomchambers.me/api`, `wss://patch.tomchambers.me/ws` | Vitest + Playwright API suites talk to the deployed Hetzner stack OR a local `docker compose -f docker-compose.test.yml up` mirror. Host control surface is reachable through the server-proxied `/api/daemon/*` routes.                                                                     |
 | web (deployed)        | `https://patch.tomchambers.me/app/`                                 | Chrome DevTools MCP (`mcp__chrome-devtools__*`) — `select_page` before every action, `take_snapshot` for the a11y tree. Playwright MCP is also available; pick one and stay on it for a run.                                                                                                 |
 | desktop (Electron)    | `/Applications/Patch.app`                                           | Launch with `--remote-debugging-port=9222`, then drive web content via Chrome DevTools MCP against `http://localhost:9222`. Drive the _native shell_ (tray, menu bar, window controls, ⌃Space hotkey) via `mcp__computer-use__*` and AppleScript batch scripts (`testing/macos-desktop.md`). |
-| mobile-android        | Pixel_7 AVD on this Mac                                             | `adb` (`~/Library/Android/sdk/platform-tools/adb`) for install/launch/screenshot/tap/intent. `adb shell uiautomator dump` for accessibility-aware element finding. Package id `io.github.tomchambers2.patch`. See `testing/android-emulator.md`.                                             |
+| mobile-android        | Pixel_7 AVD on this Mac                                             | `adb` (`~/Library/Android/sdk/platform-tools/adb`) for install/launch/screenshot/tap/intent. `adb shell uiautomator dump` for accessibility-aware element finding. Package id `dev.patchhq.app`. See `testing/android-emulator.md`.                                                          |
 | voice device firmware | physical ESP32-S3 in the corner                                     | OTA flash + control-WSS injected commands via `patch logs --surface <deviceId>` and a host-side Python harness that fakes mic input. See `testing/voice-device.md`.                                                                                                                          |
 | terminal CLI          | this shell                                                          | Spawn `node packages/cli/dist/index.js ...` against the test compose stack; assert on stdout/exit code.                                                                                                                                                                                      |
 
@@ -175,7 +175,7 @@ The web behaviour inside the Electron window is the same code as the web SPA, so
    npx expo run:android --device
    ```
 
-   The dev build is functionally equivalent to the EAS preview APK for E2E purposes. Differences (dev menu, log levels) don't affect feature behaviour. Bundle id is the same (`io.github.tomchambers2.patch`).
+   The dev build is functionally equivalent to the EAS preview APK for E2E purposes. Differences (dev menu, log levels) don't affect feature behaviour. Bundle id is the same (`dev.patchhq.app`).
 
 3. **JS-only fix** — instant, no rebuild, no install. Metro hot-reloads.
 

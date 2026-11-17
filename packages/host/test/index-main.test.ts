@@ -1015,31 +1015,10 @@ describe('src/index.ts main() — full host boot', () => {
       await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.account' && e.connected === false);
 
-      // --- control-UDS closures main() wires into buildControl: listDevices
-      //     (-> presence.enumerate/isOnline/isMuted), toolLogger, the
-      //     serverLink diagnostics/dropLink/floodBuffer triad, and
+      // --- control-UDS closures main() wires into buildControl: toolLogger,
+      //     the serverLink diagnostics/dropLink/floodBuffer triad, and
       //     onBroadcast (via /internal/notify). All otherwise unreachable
       //     without hitting these exact endpoints — nothing else invokes them. ---
-      boot.ready.deviceRegistry.register({
-        deviceId: 'device-paired-1',
-        name: 'kitchen',
-        accountId: 'acct-1',
-        publicKey: 'fake-pubkey',
-        registeredAt: Date.now(),
-      });
-      const devicesRes = await boot.ready.app.inject({
-        method: 'GET',
-        url: '/internal/devices',
-        headers: AUTH,
-        headers: { authorization: `Bearer ${boot.localKey}` },
-      });
-      expect(devicesRes.statusCode).toBe(200);
-      // Registered but never connected -> reported offline (presence.isOnline
-      // + isMuted are exercised on the real per-device iteration path).
-      expect(devicesRes.json()).toMatchObject({
-        devices: [{ deviceId: 'device-paired-1', online: false }],
-      });
-
       const diagRes = await boot.ready.app.inject({
         method: 'GET',
         url: '/internal/diag/link',
@@ -1128,12 +1107,8 @@ describe('src/index.ts main() — full host boot', () => {
       );
       expect(readPendingBroadcasts(process.cwd(), 'thread_speakers').length).toBe(beforePending);
 
-      // patch_notify on 'speakers' targeting the paired-but-never-connected
-      // device explicitly: the cascade's step-1 `reachable()` check calls
-      // the `speakers.presence.isOnline`/`isMuted` closures (main()'s OWN
-      // wiring — otherwise unreachable, since the step-2/3 candidate pool
-      // uses `presence.enumerate()`'s own online/muted fields directly, not
-      // these closures). Offline -> falls through to `pushFallback`.
+      // patch_notify on 'speakers' naming a device: the host only forwards the
+      // notify to the server, which speaks it on a connected device or pushes.
       const notifySpeakersRes = await boot.ready.app.inject({
         method: 'POST',
         url: '/internal/notify',
@@ -1148,7 +1123,11 @@ describe('src/index.ts main() — full host boot', () => {
       });
       expect(notifySpeakersRes.statusCode).toBe(200);
       await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'notify' && e.channel === 'push' && e.message.includes('ring ring'),
+        (e) =>
+          e.type === 'notify' &&
+          e.channel === 'speakers' &&
+          e.deviceId === 'device-paired-1' &&
+          e.message.includes('ring ring'),
       );
 
       // dropLink (control-UDS diag) — severs the socket without stopping the
@@ -1319,19 +1298,6 @@ describe('src/index.ts main() — full host boot', () => {
         10_000,
       );
 
-      // Register the device (with a human name) BETWEEN the open and close
-      // firings of `onDeviceSession`, so its `record?.name ?? deviceId`
-      // ternary hits BOTH sides in one test: the OPEN firing above ran
-      // unregistered (the `?? deviceId` fallback), and this CLOSE firing
-      // now finds a name on file (the `record.name` truthy side).
-      boot.ready.deviceRegistry.register({
-        deviceId: 'device-9',
-        name: 'the office',
-        accountId: 'acct-1',
-        publicKey: 'fake-pubkey-device-9',
-        registeredAt: Date.now(),
-      });
-
       // Close the session -> onSessionClosed({wasPhoneCall:false}); proves
       // the host-side session-teardown wiring runs without throwing.
       ws.close();
@@ -1342,7 +1308,7 @@ describe('src/index.ts main() — full host boot', () => {
               e.type === 'device.session' &&
               e.deviceId === 'device-9' &&
               e.active === false &&
-              e.name === 'the office',
+              e.name === 'device-9',
           ),
         10_000,
       );

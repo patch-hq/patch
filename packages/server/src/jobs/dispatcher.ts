@@ -2354,6 +2354,10 @@ export class JobDispatcher {
           // this branch because that is the only fire that PLACES a chat: every
           // later fire is a `chat.input` into one that already has a home.
           hidden: action.startHidden === true,
+          // Creation-time only, like `spawn`'s; omitted means the host default.
+          ...(action.permissionMode !== undefined
+            ? { permissionMode: action.permissionMode }
+            : {}),
           // spec/04 § Goals, spec/08 ## Action — set once, when this fire
           // creates the durable chat.
           ...(action.goal !== undefined ? { goal: action.goal } : {}),

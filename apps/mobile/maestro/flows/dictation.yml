@@ -22,7 +22,7 @@
 # Usage:
 #   maestro test apps/mobile/maestro/flows/dictation.yml --env CRED=<JWT> --env SERVER=<origin>
 
-appId: io.github.tomchambers2.patch
+appId: dev.patchhq.app
 ---
 - launchApp:
     clearState: true

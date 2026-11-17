@@ -141,6 +141,8 @@ Claude Code runs through `@anthropic-ai/claude-agent-sdk` against the host's ins
 Codex supports explicit approval, workspace edits, read-only planning and explicitly unrestricted execution. It does not offer Claude's automatic approval classifier. A new OpenAI chat inherits explicit approval when the host default is Claude's automatic mode.
 
 Codex history persists independently of Claude transcripts, including tool results and pending turn identities. On reconnect the host reconciles an outstanding provider turn before submitting another request. An uncertain outcome is reported and never silently retried. Branches fork at provider-supported turn boundaries; unsupported partial-turn branch points are refused.
+Local models (`local/<name>`: Ollama, llama.cpp, LM Studio) run through the generic OpenAI-compatible engine against one endpoint, the shared setting `localModelBaseUrl` (Settings → Providers), reached from each host. The provider has no account, credential, quota or usage; it is unavailable until the endpoint is set, and a chat on it with none set is refused naming the setting. The models offered are whatever the endpoint lists at `/models`; an unreachable endpoint is reported against the `local` backend alongside the other backends' models. It runs explicit approval, workspace edits, read-only planning and unrestricted execution, never Claude's automatic mode, and has no effort setting. Its history is Patch's own, like Codex's, and a switch onto it starts a session from the chat's track. Branching a chat on a local model is refused. Titles and goal checks run on the chat's own local model. Nothing in this provider calls a paid API.
+
 Claude also offers a per-chat thinking-effort override (`04-chats-and-folders.md` § Effort); Codex has no equivalent setting.
 
 The host provisions a backend the host lacks rather than reporting it as
@@ -204,7 +206,9 @@ deliberate choice, made by someone who intends to be there to answer it.
 The modes are `auto`, `acceptEdits`, `bypassPermissions`, `default` and `plan`.
 They are the Agent SDK's own mode names and are passed through to it unchanged,
 so every surface that offers the choice names them exactly as written here
-rather than in words of its own.
+rather than in words of its own — except `default`, which surfaces call Ask:
+it is not the default mode, and "Default" beside a preselected Auto reads as
+a contradiction.
 
 Every chat carries its own mode. It is stamped at creation from the host
 default in force at that moment (a spawn request naming a mode wins over it),
@@ -895,7 +899,17 @@ A task with no such process is reported as unmeasured, not as zero: a background
 
 The host also counts how many of each chat's background tasks are still running, and reports that count on the chat's state (`03-wire-protocol.md` ## Event categories). It tracks them from its own outgoing stream: a `run_in_background` call starts one, a completion notice ends one, and an explicit kill ends one, paired by the same rules a surface uses (`14-design-web.md` § Main chat panel — Background task bar). A surface holding many chats has the transcript of none, so this count is the only way the list can tell a chat that has finished from one that settled idle with work still in flight. It is in memory only: a background task belongs to the agent session that launched it, and a restart leaves nothing of it running. The count is reported on every state emit, zero included, so a surface can tell a host that counts them and reports none running from a host that does not count them at all.
 
-A `patch_watch` task must be given a `timeoutSec`; the host kills the task's whole process group when it is exceeded and delivers a `[watch]` message saying it timed out. Whatever the task prints is its progress: the last non-empty line of its output, and when it was written, are reported with each task so a surface can show it beside the elapsed time (`14-design-web.md` § Main chat panel — Background task bar). A task that prints nothing for an hour is flagged amber on the bar. At each check-in interval a task is still running (default one hour, a host setting; the agent may give a different `checkInMinutes` when it starts the task, and the user may change it from the bar, which restarts the clock), the host sends the owning chat a `[watch]` check-in asking whether it is still working as intended; the prompt text is a setting too, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in. Each running task reports when its next check-in is due, and the bar shows it as `next check-in at HH:MM`; clicking it opens a field to change the interval. The setting is currently held by the host (`setWatchCheckIn`); the prompts settings page will edit it.
+A `patch_watch` task must be given a `timeoutSec`; the host kills the task's whole process group when it is exceeded and delivers a `[watch]` message saying it timed out. Whatever the task prints is its progress: the last non-empty line of its output, and when it was written, are reported with each task so a surface can show it beside the elapsed time (`14-design-web.md` § Main chat panel — Background task bar). A task that prints nothing for an hour is flagged amber on the bar. A task may also be started with `wakeOnMatch`, a regular expression: while it keeps running, each complete output line that matches wakes the owning chat with a `[watch]` message carrying the matching lines (batched per poll, at most 20 per message), for monitors that stay up after an alert. Output is scanned incrementally from a persisted offset, a half-written line is never matched, and an invalid expression is refused when the task starts. The exit message is unaffected. At each check-in interval a task is still running (default one hour, a host setting; the agent may give a different `checkInMinutes` when it starts the task, and the user may change it from the bar, which restarts the clock), the host sends the owning chat a `[watch]` check-in asking whether it is still working as intended; the prompt text is a setting too, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in. Each running task reports when its next check-in is due, and the bar shows it as `next check-in at HH:MM`; clicking it opens a field to change the interval. The setting is currently held by the host (`setWatchCheckIn`); the prompts settings page will edit it.
+
+## Stray processes
+
+A chat can start work that no tracked tool knows about: `nohup long-thing &` inside a plain Bash call is neither a `patch_watch` task nor a refused background request. The shell exits, the process is adopted by init and keeps running. The host answers a surface's request for these, so the user can see that something is running and stop it.
+
+A chat's shell commands carry `PATCH_CHAT_ID` in their environment (`buildSdkEnv`). An environment survives reparenting and `setsid`, where a process group or session does not, so it is the handle. A stray is a process carrying the chat's id whose parent is no longer one of the chat's own processes AND which has been adopted by init or a subreaper. The second condition is what keeps the agent process itself (parent: the host or the durable runner), its MCP servers and any command still running inside the tree out of the list.
+
+Each stray is reported with its command line, when it started, and whether it is still running. The host remembers each stray it has seen, in memory only, so one that exits is reported as ended, with when the host noticed, rather than vanishing; the last twenty ended are kept per chat. The ended time is the host's observation, not the process's own. A request may name a pid to stop: the host stops it, and everything it started, only if that pid is currently one of that chat's strays, and answers `stopped: false` otherwise, so a surface cannot make the host signal an arbitrary process.
+
+Detection reads `/proc`, so it is Linux only. NO FALLBACK: on a host without it the request fails with `unsupported_platform` rather than answering with an empty list, which would read as "nothing is running". A surface treats that as "this host cannot tell" and shows nothing; any other failure it shows.
 
 Nothing else on a user message is chat-visible. Tool results and the turn's own prompt echo arrive the same way and are not transcript entries.
 
@@ -1013,7 +1027,6 @@ Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discover
 | `/claude-settings/memory/delete` | POST | Delete one memory entry                                                        |
 | `/claude-settings`               | POST | Replace settings.json with `{text}`; text that is not a JSON object is refused |
 | `/update`                        | POST | Apply an available host update                                                 |
-| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)       |
 
 Below the chat endpoints, the socket carries every host-scoped control of
 `03-wire-protocol.md` § Host events that this host owns, one endpoint per
@@ -1025,9 +1038,7 @@ endpoint here: the CLI changes them through the server wherever it runs
 (`01-server.md` § Settings). Three host controls are reached over HTTP too, even
 when the CLI is invoked on that host, because the server owns them rather than
 the host: minting a registration code for a new host, renaming a host, and
-revoking one. `/pair-device` runs
-the other way round — it exists here and has no wire frame, since the host
-adopts the device itself and the command is local-only (`17-cli.md` § Commands).
+revoking one.
 
 Requests carry a `Bearer` local key — a defence-in-depth measure over the OS-level same-host/same-user trust the `0600` socket already provides (cheap to add, closes the case where another local process can reach the socket). When the CLI runs on a different host, it goes via the WebSocket server, not this IPC.
 

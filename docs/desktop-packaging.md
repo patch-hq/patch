@@ -70,6 +70,14 @@ bundle is non-adhoc and passes `codesign --verify --deep --strict` before shippi
 - An update installs itself, and the install must actually quit. `update-downloaded` calls `installUpdate()` unconditionally — there is no "restart to install" prompt, because Patch deploys ~20x a day and the answer was always yes. That makes the `app.isQuitting` rule load-bearing rather than incidental: `quitAndInstall` closes every window and then quits, and the main window's `close` handler cancels any close it hasn't been told is a real quit, so without the flag ~20 prompts a day become ~20 silent app deaths on the old build. One wrapper (`quitAndInstallNow`, `updater.ts`) sets the flag, force-relaunches, and hands a refusal to the version panel.
 - Main→renderer "start" IPC must be readiness-gated (`sendWhenReady`). A freshly created window's `loadURL` is async; a synchronous `webContents.send` right after creation is dropped because the renderer hasn't registered its listeners. The voice-note overlay is lazily created, so the first ⌃Space press would open the overlay without starting recording. Sends defer to `did-finish-load` while loading.
 
+## Where the Mac app runs from
+
+`app-location.ts` holds the rules; `scripts/smoke-app-location.mjs` checks them on the notarised build in the release workflow.
+
+- The move offer is the first screen of the setup window (`setup.html#move`), not a native dialog, so the release smoke can click it over CDP. "Move" calls `app.moveToApplicationsFolder()`, which quits and relaunches the moved copy through Launch Services.
+- `app.setLoginItemSettings` on macOS 13+ registers `SMAppService.mainApp`, and Background Task Management keeps the bundle URL it was registered from. Registering again while the item is enabled does not repoint it, so an app moved after registering kept opening the old path (seen: `~/Downloads/Patch.app`). The shell records the path in `login-item.json` beside its data and unregisters then registers when the running bundle differs. `sudo sfltool dumpbtm` shows what macOS holds.
+- A quiet instance (the first-run e2e) neither asks to move nor touches login items, which is why the move and login-item checks live in the release smoke on a disposable runner.
+
 ## Changing the app id breaks every installed Mac
 
 ShipIt unpacks an update and looks for a bundle whose identifier matches the running
@@ -80,3 +88,28 @@ and the Update button does nothing. The old binary cannot be fixed from here: th
 needs one manual reinstall of the new build (`pnpm --filter @patch/desktop install:app`
 after a `dist`, or copy the zip's `Patch.app` into /Applications). `src/app-id.test.ts`
 pins the id so it cannot change again by accident.
+
+### The move to `dev.patchhq.app` (before the public launch)
+
+The id moved from `io.github.tomchambers2.patch` to the product id `dev.patchhq.app`
+everywhere it is derived: electron-builder `appId`, the Mac bundle check in
+`release.yml`, the Android `applicationId`/namespace/Kotlin package, the iOS bundle id
+and the Maestro flows. Neither the host (`dev.patch.host`, launchd
+`io.github.patch-hq.host`) nor keychain/service names carried the old id, so they are
+unchanged. The update feeds are unchanged; they are keyed by repository and channel, not by id.
+
+Existing installs (Tom's machines, test Macs, the phone) cannot update across the change:
+
+- Mac: the old app downloads the new zip and ShipIt fails. The updater now reports
+  "this Patch is an older app id and cannot update itself; install the latest Patch from
+  the download page once" instead of Squirrel's text. That wording only reaches a Mac if it
+  is in the old-id build, so cut one last release under the old id with just the
+  `conciseReason` change (`updater.ts`) cherry-picked, before releasing the rename. Each Mac
+  then needs one manual install of the new build (`pnpm --filter @patch/desktop install:app`, or
+  drop the zip's `Patch.app` into /Applications) and to delete the old `Patch.app`.
+- Android: a package rename is a new app. The in-app installer hands the new APK to Android,
+  which installs it beside the old one rather than over it. Open the new app, sign in again,
+  then uninstall the old one. FCM for the new package is a separate Firebase app
+  (`1:236103167818:android:fc7dd87b382daeb9285bb3`), already in `google-services.json`
+  beside the old clients so a build from either side of the change still registers.
+- iOS: nothing is published under the old id.

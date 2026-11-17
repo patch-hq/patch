@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readAvailableRelease } from '../src/release-mirror.js';
 import {
   MIRROR_FORMAT,
   mergeHostManifests,
@@ -221,6 +222,13 @@ describe('mirrorOnce', () => {
     expect(existsSync(join(dir, 'host-latest.json'))).toBe(false);
     expect(readMirrorState(dir)).toBeNull();
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('peekOnly notes the release on offer and mirrors nothing', async () => {
+    expect(await mirrorOnce({ ...opts(github(GOOD()).fetchImpl), peekOnly: true })).toBeNull();
+    expect(readMirrorState(dir)).toBeNull();
+    expect(existsSync(join(dir, 'host-latest.json'))).toBe(false);
+    expect(readAvailableRelease(dir)?.version).toBe('1.2.3');
   });
 
   it('a manifest that names a target with no signed artifact changes nothing', async () => {

@@ -26,6 +26,9 @@ import {
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
 import { buildVersionReport, readPublishedArtifact, readWebLayer } from './version-report.js';
+import { UpdateControl } from './update-control.js';
+import { isNewer } from './self-update.js';
+import { readAvailableRelease } from './release-mirror.js';
 import { Registry } from './registry.js';
 import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
@@ -80,7 +83,7 @@ const MANAGER_SWEEP_TICK_MS = 10_000;
 const THREAD_ROTATION_TICK_MS = 30_000;
 import { registerLinkPreviewRoutes } from './link-preview-routes.js';
 import { registerLinkSummaryRoutes } from './link-summary-routes.js';
-import { RELEASE_REPO } from './release-channel.js';
+import { RELEASE_REPO, readChannel, writeChannel } from './release-channel.js';
 import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
 import { IssueFiler, hostTurnFailureReport } from './issue-filer.js';
@@ -125,6 +128,7 @@ import { NotificationLog } from './notifications/log.js';
 import { registerNotificationLogRoutes } from './notifications/log-routes.js';
 import { registerVoiceTokenRoute } from './voice/token.js';
 import { AudioSessionRouter, registerAudioRelayRoute } from './audio-relay.js';
+import { registerDeviceControlRoute, type DeviceControlHandle } from './device-control.js';
 import { registerVoiceNoteRoute } from './voice/note.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerArtifactRoutes } from './artifacts.js';
@@ -145,6 +149,8 @@ export interface BuildOptions {
   webDistDir?: string;
   /** Required for WS auth + pairing — file-backed registry is loaded from this dir. */
   dataDir?: string;
+  /** The one auto-update switch (update-control.ts); a held-open default in tests. */
+  updateControl?: UpdateControl;
   /** How long the Manager host must be offline before another takes over (tests shorten it). */
   managerFailoverGraceMs?: number;
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
@@ -700,6 +706,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         logger: log.child({ component: 'shared-settings' }),
       })
     : undefined;
+  // The one switch over server, hosts and app updates (update-control.ts).
+  const updateControl = opts.updateControl ?? new UpdateControl({ dataDir: null });
+  updateControl.setAutoUpdate(
+    () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
+  );
   if (accountSettings) {
     accountSettings.startCredentialRefresh();
     app.addHook('onClose', async () => accountSettings.close());
@@ -783,7 +794,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   }
 
   const notificationsDataDir = registry.dataDir;
+  // Voice devices (spec/16): the control route is mounted further down, but
+  // announcements and audio relay need it from here. Text for a device
+  // announcement waits here, by session, until the device joins its session.
+  let deviceControl: DeviceControlHandle | undefined;
+  const pendingDeviceSpeech = new Map<string, string>();
   const notificationRouter = new NotificationRouter({
+    announce: (a) => deviceControl?.announce(a) ?? 0,
     logger: log.child({ component: 'notification-router' }),
     registry,
     presence,
@@ -904,7 +921,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     idGenerator,
     getAppVersion: () => readServedBundleVersion?.() ?? appBundleVersion,
     serverVersion: VERSION,
-    autoUpdateHosts: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
+    autoUpdateHosts: () => updateControl.mayUpdate(),
     // Read per connect, not cached: a deploy publishes the host and restarts
     // this server in one run, but a hand-published host must count too. A
     // missing or unreadable manifest is null — "nothing published", which the
@@ -1738,6 +1755,66 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   //
   // Deliberately re-reads the mounted web-dist and the downloads dir on EVERY
   // request, so the panel's "Check now" reflects the box as it is right now.
+  const surfaceAuthorised = async (authHeader: string | undefined): Promise<boolean> => {
+    const account = registry.getAccount();
+    if (!account || !authHeader || !authHeader.startsWith('Bearer ')) return false;
+    try {
+      const claims = await verifySurfaceCredential(authHeader.slice('Bearer '.length).trim(), {
+        userPublicKey: account.userPublicKey,
+      });
+      return !registry.isRevoked(claims.surface_id);
+    } catch {
+      return false;
+    }
+  };
+
+  // "Update everything": the server, then every host, move to the newest
+  // release, whatever the switch says. The hold returns once all are on it.
+  app.post('/api/update-all', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    log.info({ running: VERSION }, 'update everything requested');
+    updateControl.requestUpdateAll();
+    return reply.code(202).send({ ok: true });
+  });
+
+  // Which release channel this server follows: stable (default) or dev, which
+  // includes prereleases. `off` stays an operator choice (`patch-server channel off`);
+  // this route only moves between the two a user may pick, and refuses to touch off.
+  app.put('/api/release-channel', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const wanted = (req.body as { channel?: unknown } | null)?.channel;
+    if (wanted !== 'stable' && wanted !== 'dev') {
+      return reply.code(400).send({ error: 'channel must be "stable" or "dev"' });
+    }
+    const dir = opts.dataDir ?? registry.dataDir;
+    if (readChannel(dir) === 'off') {
+      return reply.code(409).send({
+        error: 'this server has updates turned off by its operator (patch-server channel)',
+      });
+    }
+    writeChannel(dir, wanted);
+    log.info({ channel: wanted }, 'release channel changed');
+    return reply.send({ channel: wanted });
+  });
+
+  const updateAllDone = setInterval(() => {
+    if (!updateControl.updateAllPending()) return;
+    const available = readAvailableRelease(downloadsDir)?.version ?? null;
+    if (available && isNewer(available, VERSION)) return;
+    const behind = wsHub
+      .hosts()
+      .filter((h) => h.online && h.host?.hostVersion && h.host.hostVersion !== VERSION);
+    if (behind.length > 0) return;
+    log.info({ version: VERSION }, 'update everything finished: server and hosts are in step');
+    updateControl.clearUpdateAll();
+  }, 30_000);
+  updateAllDone.unref();
+  app.addHook('onClose', async () => clearInterval(updateAllDone));
+
   app.get('/api/version', async (req, reply) => {
     const account = registry.getAccount();
     if (!account) return reply.code(401).send({ error: 'unauthenticated' });
@@ -1787,6 +1864,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         gitSha: h.host?.gitSha ?? null,
         builtAt: h.host?.builtAt ?? null,
       })),
+      release: {
+        available: readAvailableRelease(downloadsDir)?.version ?? null,
+        channel: readChannel(opts.dataDir ?? registry.dataDir),
+        autoUpdate: updateControl.isAutoUpdate(),
+        updating: updateControl.updateAllPending(),
+      },
       desktop: readPublishedArtifact(
         downloadsDir,
         'desktop-latest.json',
@@ -1829,6 +1912,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     router: audioSessionRouter,
     hostLink,
     audioRelayHostFor: (hostId) => wsHub.audioRelayHost(hostId),
+    takeSpeech: (sessionId) => {
+      const text = pendingDeviceSpeech.get(sessionId);
+      pendingDeviceSpeech.delete(sessionId);
+      return text;
+    },
   });
 
   // ---- chat REST routes ----
@@ -2032,6 +2120,21 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   if (opts.internalToken && opts.internalToken.length >= 16) {
     registerVoiceTokenRoute(app, {
       logger: log.child({ component: 'voice-token' }),
+      registry,
+      chatRegistry,
+      internalToken: opts.internalToken,
+      isHostOnline: (hostId) => hostLink.isOnline(hostId),
+      recordSessionHost: (sessionId, hostId) => audioSessionRouter.record(sessionId, hostId),
+      ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
+    });
+    // Voice devices connect here, not to a host (spec/16 § Connection model).
+    deviceControl = registerDeviceControlRoute(app, {
+      logger: log.child({ component: 'device-control' }),
+      queueSpeech: (sessionId, text) => {
+        pendingDeviceSpeech.set(sessionId, text);
+        // A device that never joins must not leave its text behind.
+        setTimeout(() => pendingDeviceSpeech.delete(sessionId), 5 * 60_000).unref();
+      },
       registry,
       chatRegistry,
       internalToken: opts.internalToken,

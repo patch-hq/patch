@@ -196,7 +196,7 @@ export interface PatchDesktopBridge {
    * A deploy has just landed (liveUpdate.ts saw a new bundle hash): check the
    * shell's own feed NOW rather than leaving the shell up to an hour behind the
    * surface it is rendering. It DOWNLOADS only — the shell no longer restarts
-   * itself, it raises a banner (see DesktopUpdateBanner) and waits to be asked.
+   * itself, it raises a banner (see UpdateBanner) and waits to be asked.
    */
   checkForUpdateNow?(): void;
   /**
@@ -296,8 +296,8 @@ export function getDesktopBridge(): PatchDesktopBridge | undefined {
  * The shell's own updater state, live. `null` in a browser (no bridge) and
  * until the first `getUpdaterState()` resolves.
  *
- * The ONE place that subscribes to shell updater state, so DesktopUpdateBanner
- * and WebUpdateBanner read the same value instead of each polling their own —
+ * The ONE place that subscribes to shell updater state, so UpdateBanner
+ * and UpdateBanner read the same value instead of each polling their own —
  * two independent reads of "has the shell finished downloading?" is how they
  * used to drift and show a Restart prompt and a Reload prompt for the same
  * deploy at once.

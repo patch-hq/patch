@@ -18,6 +18,7 @@ import { loadCachedJobs, saveCachedJobs } from '../lib/jobsCache.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Job, JobAction, JobLatestRun } from '@patch/wire/jobs';
+import { compactModelLabel } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { JobDefaults } from './JobDefaults.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -304,7 +305,8 @@ function JobsControls({
   hasUnset: boolean;
 }): JSX.Element {
   const catalog = useModelCatalog();
-  const modelLabel = (id: string): string => catalog.models.find((m) => m.id === id)?.label ?? id;
+  const modelLabel = (id: string): string =>
+    compactModelLabel(id, catalog.models.find((m) => m.id === id)?.label);
   // The selected model stays an option even if no job pins it any more, so the
   // control never shows a value it cannot name.
   const ids =
