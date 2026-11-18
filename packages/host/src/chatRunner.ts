@@ -3507,6 +3507,24 @@ export class Daemon {
     });
     this.emitState(chatId);
     this.opts.logger.info({ chatId }, 'resume: the turn was cut off; the chat is interrupted');
+    this.continueUnattendedChild(chatId);
+  }
+
+  /**
+   * A background child (`patch_agent`) has no person watching it: its Interrupted
+   * state is withheld from every surface and its parent is waiting on a result
+   * that would never come. So a child cut off by a restart is continued here, the
+   * same way Continue does, rather than left idle and silent (spec/12 § Continue).
+   * A finished or user-paused child is left alone.
+   */
+  private continueUnattendedChild(chatId: string): void {
+    const sub = this.chatState.get(chatId)?.subagent ?? this.opts.metaStore.read(chatId)?.subagent;
+    if (!sub || sub.outcome !== undefined || sub.userPaused) return;
+    this.opts.logger.info(
+      { chatId },
+      'resume: continuing a background child cut off by the restart',
+    );
+    void this.continueChat(chatId);
   }
 
   private clearInterrupted(chatId: string): void {
