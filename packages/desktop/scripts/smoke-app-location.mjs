@@ -220,21 +220,16 @@ if (oldArg) {
     fail(`the login item still opens ${old}:\n${stale.map((s) => s.block).join('\n')}`);
   log(`no login item opens ${old} any more`);
 }
-// Quit as a person does (⌘Q, or Quit in the Dock), so the app stops what it
-// started; then this computer's server must be gone with it.
+// Quit as a person does (⌘Q, or Quit in the Dock). The server is its own
+// launchd agent, so it must keep answering after the window app is gone.
 const origin = new URL(main.url()).origin;
 await browser.close().catch(() => undefined);
 execFileSync('osascript', ['-e', `tell application id "${APP_ID}" to quit`]);
 await until('the app to quit', 30_000, async () => exited, { exitOk: true });
 log(`quit: ${JSON.stringify(exited)}`);
-await until(
-  `the server on ${origin} to stop with the app`,
-  20_000,
-  async () => !(await answering(origin)),
-  {
-    exitOk: true,
-  },
-);
-log(`the server on ${origin} stopped with the app`);
+await new Promise((r) => setTimeout(r, 5_000));
+if (!(await answering(origin)))
+  fail(`the server on ${origin} stopped when the app quit; it should outlive the app`);
+log(`the server on ${origin} is still running after the app quit`);
 console.log(`--- the app's output ---\n${output.trim()}`);
 process.exit(0);
