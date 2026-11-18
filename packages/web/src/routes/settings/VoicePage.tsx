@@ -93,17 +93,17 @@ const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
   'whisper',
 ];
 const DICTATION_LABELS: Record<DictationEngine, string> = {
-  local: 'Parakeet on this computer',
+  local: 'Parakeet (free, on device)',
   device: 'Built-in',
   deepgram: 'Deepgram',
   elevenlabs: 'ElevenLabs',
-  host: 'On this host',
+  host: 'Host server',
   whisper: 'Whisper',
 };
 
 const MEETING_ENGINES: readonly MeetingEngine[] = ['local', 'elevenlabs', 'deepgram', 'assemblyai'];
 const MEETING_LABELS: Record<MeetingEngine, string> = {
-  local: 'On this computer',
+  local: 'Free, on device',
   elevenlabs: 'ElevenLabs',
   deepgram: 'Deepgram',
   assemblyai: 'AssemblyAI',
@@ -471,7 +471,7 @@ function EngineGroup(): JSX.Element {
   };
 
   return (
-    <Group label="Engine" testid="settings-voice-config">
+    <Group label="Voice conversations" testid="settings-voice-config">
       {SURFACES.map(({ key: surface, label }) => {
         const cell = voiceConfig[surface];
         const { backend, layer, handoff } = cell;
@@ -601,9 +601,8 @@ const KOKORO_VOICES: { id: string; label: string }[] = [
   { id: 'bm_lewis', label: 'Lewis (British M)' },
 ];
 
-/** How Patch speaks on every host: the engine and its voice, and how often it says the chat's name. */
+/** How Patch speaks on every host: the engine and its voice, and how often the chat's title is refreshed. */
 function SpeakingGroup(): JSX.Element {
-  const pushError = useUiStore((s) => s.pushError);
   const kokoroVoice = usePreferencesStore((s) => s.preferences.kokoroVoice);
   const ttsBackend = usePreferencesStore((s) => s.preferences.ttsBackend) ?? 'kokoro';
   const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
@@ -617,19 +616,16 @@ function SpeakingGroup(): JSX.Element {
     (h) => h.elevenLabsVoicesError !== undefined,
   )?.elevenLabsVoicesError;
 
-  function setNameInterval(raw: string): void {
-    const n = parseInt(raw, 10);
-    if (isNaN(n) || n < 0) {
-      pushError('Chat name interval must be a non-negative integer');
-      return;
-    }
-    if (n === chatNameInterval) return;
-    void patchShared('chat name interval', { chatNameInterval: n });
-  }
+  const titleOptions = [...new Set([0, 5, 10, 20, chatNameInterval])]
+    .sort((x, y) => x - y)
+    .map(String);
+  const titleLabels = Object.fromEntries(
+    titleOptions.map((n) => [n, n === '0' ? 'Set once' : `Every ${n} messages`]),
+  );
 
   return (
     <Group label="Speaking" testid="voice-speaking">
-      <Row title="Speech engine">
+      <Row title="Spoken replies">
         <Pills
           label="Speech engine"
           value={ttsBackend}
@@ -686,22 +682,20 @@ function SpeakingGroup(): JSX.Element {
           </select>
         </Row>
       )}
-      <Row title="Say the chat name every">
-        <input
-          type="number"
-          min={0}
-          className="set-num"
-          aria-label="Say the chat name every (replies)"
-          data-testid="chat-name-interval"
-          key={chatNameInterval}
-          defaultValue={chatNameInterval}
+      <Row
+        title="Chat title"
+        sub="How often Patch rewrites a chat’s title as the conversation moves on."
+        className="stack set-row-choices"
+      >
+        <Pills
+          label="Chat title refresh"
+          value={String(chatNameInterval)}
+          options={titleOptions}
+          labels={titleLabels}
           disabled={!loaded}
-          onBlur={(e) => setNameInterval(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') setNameInterval((e.target as HTMLInputElement).value);
-          }}
+          testid="chat-name-interval"
+          onChange={(v) => void patchShared('chat title refresh', { chatNameInterval: Number(v) })}
         />
-        <span className="set-unit">replies</span>
       </Row>
     </Group>
   );

@@ -20,8 +20,6 @@ const FIELDS = [
   { testid: 'manager-quiet-start', page: 'manager', minWidth: 90 },
   { testid: 'manager-quiet-end', page: 'manager', minWidth: 90 },
   { testid: 'manager-address-word', page: 'manager', minWidth: 90 },
-  // A compact number box by design — wide enough for its numbers, no wider.
-  { testid: 'chat-name-interval', page: 'voice', minWidth: 60 },
   { testid: 'kokoro-voice', page: 'voice', minWidth: 90 },
 ] as const;
 
@@ -80,7 +78,7 @@ test.describe('Settings rows — label and value are distinct, bordered fields',
 
   for (const [name, labels] of [
     ['manager', ['Quiet hours', 'Address word']],
-    ['voice', ['Voice', 'Say the chat name every']],
+    ['voice', ['Voice', 'Chat title']],
   ] as const) {
     test(`${name}: every label/value pair is separated by a real gap`, async ({ page }) => {
       await openPage(page, name);
