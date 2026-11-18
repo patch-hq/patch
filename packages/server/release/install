@@ -154,9 +154,13 @@ if [ "${REL}" != "${TARGET}" ]; then
   STAGE="${TARGET}.new.$$"
   rm -rf "${STAGE}"
   cp -R "${REL}" "${STAGE}"
-  rm -rf "${TARGET}"
+  # Both steps are renames, so no tree is ever deleted while another process
+  # is writing into it, even if the lock above were lost.
+  OLD="${TARGET}.old.$$"
+  mv "${TARGET}" "${OLD}" 2>/dev/null || true
   mv "${STAGE}" "${TARGET}"
   STAGE=""
+  rm -rf "${OLD}"
 fi
 "${NODE}" -e "
   const fs = require('fs');
@@ -174,7 +178,7 @@ echo "installed release ${RELEASE} (${GIT_SHA}) → ${HOME_DIR}/current"
   const [dir, keep] = process.argv.slice(1);
   const old = fs.readdirSync(dir)
     .map((n) => path.join(dir, n))
-    .filter((p) => p !== keep)
+    .filter((p) => p !== keep && !/\.(new|old)\.\d+$/.test(p))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
     .slice(2);
   for (const p of old) { fs.rmSync(p, { recursive: true, force: true }); console.log('removed old release ' + path.basename(p)); }
