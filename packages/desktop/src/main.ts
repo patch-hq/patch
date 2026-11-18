@@ -2010,10 +2010,13 @@ function setupAutoUpdater(): void {
     await loadFirstRun().turnOffLocalServer(app.getPath('home'));
   });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
-  ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
+  ipcMain.handle('patch:local-host:default-name', () => friendlyComputerName());
+  ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown; name?: unknown }) =>
     installLocalHost({
       serverUrl: serverOrigin(SERVER_URL),
       code: typeof payload?.code === 'string' ? payload.code : '',
+      name:
+        typeof payload?.name === 'string' && payload.name.trim() ? payload.name.trim() : undefined,
       home: app.getPath('home'),
     }),
   );

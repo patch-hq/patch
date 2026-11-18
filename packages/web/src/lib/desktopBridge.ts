@@ -160,7 +160,12 @@ export interface PatchDesktopBridge {
   localServer?: { turnOff(): Promise<void> };
   localHost?: {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
-    install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
+    /** The name the person gave this computer, not its network hostname. */
+    defaultName(): Promise<string>;
+    install(
+      code: string,
+      name?: string,
+    ): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   };
   /**
    * spec/07 § Dictation engines (`local`) — Parakeet run by the desktop app on

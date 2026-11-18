@@ -319,8 +319,14 @@ contextBridge.exposeInMainWorld('patch', {
         hostId: string | null;
       }>;
     },
-    install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }> {
-      return ipcRenderer.invoke('patch:local-host:install', { code }) as Promise<{
+    defaultName(): Promise<string> {
+      return ipcRenderer.invoke('patch:local-host:default-name') as Promise<string>;
+    },
+    install(
+      code: string,
+      name?: string,
+    ): Promise<{ ok: boolean; exitCode: number | null; output: string }> {
+      return ipcRenderer.invoke('patch:local-host:install', { code, name }) as Promise<{
         ok: boolean;
         exitCode: number | null;
         output: string;
