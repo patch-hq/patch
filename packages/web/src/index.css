@@ -11860,6 +11860,22 @@ main.empty-state p {
   background: color-mix(in srgb, var(--permission) 20%, transparent);
   color: var(--permission);
 }
+.delegate-elapsed {
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.tool-summary-delegate .tool-summary-text {
+  flex: 1 1 auto;
+}
+.delegate-open {
+  flex: none;
+  margin-left: 4px;
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--ink-2);
+}
 .delegate-pill-started,
 .delegate-pill-done,
 .delegate-pill-stopped {

@@ -5229,10 +5229,16 @@ function DelegateToolCall({
   }
 
   const status = live?.status ?? 'running';
-  // Once the call has its result the card records the spawn and nothing more:
-  // later runs of the same child (a follow-up) must not re-colour it. The
-  // child's current state lives in the Agents bar.
-  const spawned = resultAck !== null;
+  // The row follows the child's current state. 'Started' is only what is known
+  // before any live update has reached this surface (e.g. just after a reload).
+  const known = live !== undefined;
+  const isLive = status === 'running' || status === 'awaiting-permission';
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!known || !isLive) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [known, isLive]);
 
   return (
     <div
@@ -5248,12 +5254,20 @@ function DelegateToolCall({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="tool-summary-text">{summary}</span>
+        <span className="tool-summary-text">{ack.label}</span>
         <span
-          className={`delegate-pill delegate-pill-${spawned ? 'started' : status}`}
+          className={`delegate-pill delegate-pill-${known ? status : 'started'}`}
           data-testid="delegate-status-pill"
         >
-          {spawned ? 'Started' : DELEGATE_STATUS_LABEL[status]}
+          {known ? DELEGATE_STATUS_LABEL[status] : 'Started'}
+        </span>
+        {known && isLive ? (
+          <span className="delegate-elapsed" data-testid="delegate-elapsed">
+            {formatElapsed(live.since, now)}
+          </span>
+        ) : null}
+        <span className="delegate-open" data-testid="delegate-open-label">
+          {open ? 'Close' : 'Open'}
         </span>
         <ChevronDown
           size={13}

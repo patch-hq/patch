@@ -486,6 +486,19 @@ useChatStore.getState().hydrate([
   // A turn that fired a run of tools around one file edit (spec/14 § Main chat
   // panel — "Tool runs collapse to one row") — drives the tool-group e2e.
   {
+    chatId: 'chat_agentrows',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'agentrows-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
+  {
     chatId: 'chat_tools',
     hostId: 'd1',
     permissionMode: 'auto' as const,
@@ -1952,6 +1965,24 @@ useChatStore.setState((s) => ({
     chat_delegate: {
       'sub-1': { label: 'resume job', status: 'running' as const, since: Date.now() },
     },
+    chat_agentrows: {
+      'ag-1': {
+        label: 'Fix restart bug',
+        status: 'running' as const,
+        since: Date.now() - 4 * 60_000,
+      },
+      'ag-2': {
+        label: 'Write migration tests',
+        status: 'awaiting-permission' as const,
+        since: Date.now() - 90_000,
+      },
+      'ag-3': {
+        label: 'Draft release notes',
+        status: 'done' as const,
+        since: Date.now() - 600_000,
+      },
+      'ag-4': { label: 'Check PR 412', status: 'failed' as const, since: Date.now() - 600_000 },
+    },
     chat_status: {
       'a-1': {
         label: 'OpenNext review and repair',
@@ -1994,6 +2025,37 @@ useChatStore.setState((s) => ({
       artifactPath: `out/art-${i}.html`,
       at: Date.now() - (3 - i) * 20 * 60_000,
     })),
+    chat_agentrows: [
+      {
+        seq: 0,
+        kind: 'message',
+        role: 'user',
+        content: 'run the four jobs in the background',
+        at: 0,
+      },
+      ...[
+        'Fix restart bug',
+        'Write migration tests',
+        'Draft release notes',
+        'Check PR 412',
+      ].flatMap((title, i) => [
+        {
+          seq: 1 + i * 2,
+          kind: 'tool_call' as const,
+          tool: 'mcp__patch__patch_agent',
+          toolArgs: { prompt: title, title, background: true },
+          callId: `call-ag-${i + 1}`,
+          at: 1 + i,
+        },
+        {
+          seq: 2 + i * 2,
+          kind: 'tool_result' as const,
+          callId: `call-ag-${i + 1}`,
+          toolResult: { id: `ag-${i + 1}`, label: title },
+          at: 1 + i,
+        },
+      ]),
+    ],
     chat_delegate: [
       { seq: 0, kind: 'message', role: 'user', content: 'run the job', at: 0 },
       {
