@@ -63,6 +63,21 @@ const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 /**
+ * Dead-link watchdog window. The server answers every `surface.heartbeat` with
+ * a `surface.heartbeat_ack`; once one has been seen on a socket, NO inbound
+ * frame for this long means the link is dead even though the socket still
+ * reports OPEN (a server or host that went away without a close frame). 30s =
+ * three missed heartbeat cycles, the same window the web client uses.
+ */
+export const HEARTBEAT_LIVENESS_TIMEOUT_MS = 30_000;
+/**
+ * A dial that has neither opened nor failed by now is abandoned and redialled.
+ * A restarting server or proxy can accept the TCP connection and never finish
+ * the upgrade, leaving the socket CONNECTING with no close ever coming — no
+ * retry, so the app sits on its reconnecting treatment for ever.
+ */
+export const CONNECT_TIMEOUT_MS = 15_000;
+/**
  * How long inbound store events are gathered before being committed together
  * (see `queueForStore`). One frame: long enough that a `chat.replay` burst —
  * 500+ events inside half a second on a busy chat — collapses into a couple of
@@ -95,6 +110,11 @@ export class PatchWs {
   /** Until when redials stay fast after a going-away notice (0 = not restarting). */
   private restartingUntil = 0;
   private reconnectTimer: TimerHandle | null = null;
+  private connectTimer: TimerHandle | null = null;
+  /** Epoch ms of the last inbound frame on the current socket (watchdog input). */
+  private lastInboundAt = 0;
+  /** True once the current socket has received a heartbeat ack (arms the watchdog). */
+  private pongSupported = false;
   private heartbeatTimer: TimerHandle | null = null;
   /** Running while a foreground outage is inside its grace period. */
   private outageTimer: TimerHandle | null = null;
@@ -147,6 +167,7 @@ export class PatchWs {
 
   close(): void {
     this.closed = true;
+    this.clearConnectTimer();
     if (this.syncDebounce !== null) {
       clearTimeout(this.syncDebounce);
       this.syncDebounce = null;
@@ -461,7 +482,28 @@ export class PatchWs {
     if (this.heartbeatTimer !== null) return;
     this.heartbeatTimer = setInterval(() => {
       this.safeSend({ type: 'surface.heartbeat' });
+      this.checkLiveness();
     }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  /**
+   * Detect a socket that is OPEN in name only. Once the server has acked a
+   * heartbeat it acks every one, so a long gap in all inbound traffic means the
+   * link is dead: force a reconnect rather than sit "connected" and frozen.
+   */
+  private checkLiveness(): void {
+    if (!this.pongSupported) return;
+    if (!this.ws || this.ws.readyState !== 1) return;
+    if (Date.now() - this.lastInboundAt <= HEARTBEAT_LIVENESS_TIMEOUT_MS) return;
+    console.warn('[ws] no traffic from the server, reconnecting');
+    this.reconnectNow();
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== null) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
   }
 
   private stopHeartbeat(): void {
@@ -496,11 +538,22 @@ export class PatchWs {
 
     const ws = new WebSocket(this.url);
     this.ws = ws;
+    this.pongSupported = false;
+    this.lastInboundAt = Date.now();
+    this.clearConnectTimer();
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.closed || this.ws !== ws || ws.readyState !== 0) return;
+      console.warn('[ws] connect attempt timed out, redialling');
+      this.reconnectNow();
+    }, CONNECT_TIMEOUT_MS);
 
     // A new socket has heard nothing: every held chat may need its replay
     // again, including one whose request died with the old connection.
     this.lastReplayCursor.clear();
     ws.onopen = (): void => {
+      this.clearConnectTimer();
+      this.lastInboundAt = Date.now();
       // The backoff is NOT reset here: an accepted upgrade proves nothing. A
       // server that takes the socket and then drops it (rate limit, overload, a
       // refused hello) would be redialled once a second for ever. It starts
@@ -563,6 +616,7 @@ export class PatchWs {
     };
 
     ws.onmessage = (msg: { data: unknown }): void => {
+      if (this.ws === ws) this.lastInboundAt = Date.now();
       const data = typeof msg.data === 'string' ? msg.data : '';
       let result: ReturnType<typeof decodeCompat>;
       try {
@@ -585,6 +639,10 @@ export class PatchWs {
         return;
       }
       for (const path of result.tolerated) noteFirstSight(`field ${path}`);
+      if (result.event.type === 'surface.heartbeat_ack') {
+        if (this.ws === ws) this.pongSupported = true;
+        return;
+      }
       this.dispatch(result.event);
     };
 
@@ -592,6 +650,7 @@ export class PatchWs {
       // A socket already replaced (`reconnectNow` abandons the old one before
       // dialling) must not null out, or reschedule over, its successor.
       const current = this.ws === ws;
+      if (current) this.clearConnectTimer();
       if (current) {
         this.ws = null;
         this.stopHeartbeat();
