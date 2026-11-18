@@ -830,6 +830,7 @@ const DelegateStartBody = z
     title: z.string().min(1).max(60).optional(),
     model: z.string().min(1).optional(),
     folder: z.string().min(1).optional(),
+    account: z.string().min(1).optional(),
     disallowedTools: z.array(z.string().min(1)).optional(),
     wait: z.boolean().optional(),
   })
@@ -2995,7 +2996,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, prompt, title, model, folder, disallowedTools, wait } = parsed.data;
+    const { chatId, prompt, title, model, folder, account, disallowedTools, wait } = parsed.data;
     if (!limiter.check(`delegate:${chatId}`)) {
       toolLog({
         tool: 'patch_delegate',
@@ -3006,10 +3007,29 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
       return sendRateLimited(reply, `delegate:${chatId}`);
     }
+    let preferredAccountId: string | undefined;
+    if (account !== undefined) {
+      try {
+        preferredAccountId = resolveSpawnAccount(account, model);
+      } catch (err) {
+        toolLog({
+          tool: 'patch_delegate',
+          callerChatId: chatId,
+          durationMs: Date.now() - start,
+          ok: false,
+          err: 'account_not_found',
+        });
+        return reply.code(400).send({
+          error: 'account_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     try {
       const { id, label, result } = await opts.daemon!.createDelegate({
         parentChatId: chatId,
         prompt,
+        ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
         ...(title !== undefined ? { title } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(folder !== undefined ? { folder } : {}),

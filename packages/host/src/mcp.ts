@@ -724,7 +724,10 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         'the call waits and returns { id, label, status, reply }. Set background: true to return ' +
         'immediately with { id, label }; Patch keeps the child durable and delivers its final result ' +
         'back into this parent when it settles. Multiple calls may run in parallel. Use patch_spawn ' +
-        'for an independent user-visible chat and patch_send_to for an existing independent chat.',
+        'for an independent user-visible chat and patch_send_to for an existing independent chat. ' +
+        "The child follows this chat's account lock, else the shared account order (failing over " +
+        'when an account is spent); `account` locks it to one account instead (see ' +
+        'patch_list_accounts). A waited result names the account the child ran on.',
       inputSchema: {
         prompt: z.string().min(1),
         title: z
@@ -737,6 +740,13 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           ),
         model: z.string().min(1).optional(),
         folder: z.string().min(1).optional(),
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Id or label of the stored account to lock the child to (see patch_list_accounts). An account this machine does not hold is refused.',
+          ),
         disallowedTools: z
           .array(z.string().min(1))
           .optional()
@@ -744,7 +754,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         background: z.boolean().optional(),
       },
     },
-    async ({ prompt, title, model, folder, disallowedTools, background }) => {
+    async ({ prompt, title, model, folder, account, disallowedTools, background }) => {
       const body: Record<string, unknown> = {
         chatId: callerChatId,
         prompt,
@@ -753,6 +763,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       if (title !== undefined) body['title'] = title;
       if (model !== undefined) body['model'] = model;
       if (folder !== undefined) body['folder'] = folder;
+      if (account !== undefined) body['account'] = account;
       if (disallowedTools !== undefined) body['disallowedTools'] = disallowedTools;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/delegate', body });
       return toolResult(res);

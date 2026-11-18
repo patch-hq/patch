@@ -957,7 +957,7 @@ Subagents are Patch-owned. Where the provider can switch off its native subagent
 
 ### Patch-owned `patch_agent` subagents
 
-`patch_agent({ prompt, model?, folder?, disallowedTools?, background? })` gives an agent a real Patch-owned child: a durable worker that runs `prompt` to completion and hands its full final reply directly back to the chat that called it (the PARENT), never through `patch_send_to`. It is built on the host's own chat machinery rather than being a second implementation of a chat: a subagent IS an ordinary chat — same `meta.json`, same provider session, same turn queue, same restart reattach — with one extra field, `meta.subagent: { parentChatId, label, outcome? }`, that is never cleared.
+`patch_agent({ prompt, model?, folder?, account?, disallowedTools?, background? })` gives an agent a real Patch-owned child: a durable worker that runs `prompt` to completion and hands its full final reply directly back to the chat that called it (the PARENT), never through `patch_send_to`. It is built on the host's own chat machinery rather than being a second implementation of a chat: a subagent IS an ordinary chat — same `meta.json`, same provider session, same turn queue, same restart reattach — with one extra field, `meta.subagent: { parentChatId, label, outcome? }`, that is never cleared.
 
 That one field does three things:
 
