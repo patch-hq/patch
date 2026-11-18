@@ -46,6 +46,9 @@ describe('flushHistory writes only the chats that moved', () => {
     const ids: string[] = [];
     for (let i = 0; i < 40; i += 1) ids.push(await first.spawnChat({ folder }));
     first.shutdown();
+    // Only chats with live work load at start; a snooze keeps all 40 loaded.
+    for (const id of ids)
+      metaStore.update(id, (m) => ({ ...m, snoozedUntil: 1_700_000_000_000 + 3_600_000 }));
 
     // A fresh host loads all 40 from disk and then goes down without touching any.
     const updates: string[] = [];
