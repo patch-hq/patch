@@ -8,7 +8,7 @@
 import React, { type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import type { ChatStatusInfo } from '@patch/wire';
+import { modelAccountConnected, providerLabelForModel, type ChatStatusInfo } from '@patch/wire';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { fonts, space, textMin, useTheme } from '../../lib/theme';
 import { BarShell } from './BarShell';
@@ -24,19 +24,12 @@ export function ChatSignInBar({
   const router = useRouter();
   const secrets = useSettingsStore((s) => s.data?.shared?.secrets);
   if (status?.state !== 'waiting_for_sign_in') return null;
-  const openai = model?.startsWith('openai/') ?? false;
-  if (secrets) {
-    const kind = model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt';
-    const connected = openai
-      ? secrets.codex.some((a) => a.connected && a.kind === kind)
-      : secrets.claude.some((a) => a.connected);
-    if (!connected) return null;
-  }
+  if (secrets && !modelAccountConnected(secrets, model)) return null;
   return (
     <BarShell testID="chat-signin-bar" tone="alert" role="alert">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Text style={{ flex: 1, color: colors.ink, fontSize: textMin }}>
-          Signed out of {openai ? 'Codex' : 'Claude'}. This chat is waiting.
+          Signed out of {providerLabelForModel(model)}. This chat is waiting.
         </Text>
         <Pressable
           testID="chat-signin-action"

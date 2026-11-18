@@ -121,6 +121,7 @@ import {
   type AttachmentRef,
   type EffortLevel,
   type PermissionMode,
+  modelHasCapability,
 } from '@patch/wire';
 import { useRouter, type Href } from 'expo-router';
 import { AnchoredMenu } from './AnchoredMenu';
@@ -1723,6 +1724,7 @@ export function Composer({
     pendingTools.length > 0 && pendingTools.every((p) => p.tool === 'AskUserQuestion');
   const showStop =
     !edit &&
+    modelHasCapability(row?.model, 'interrupt') &&
     (running ||
       (row?.activity === 'awaiting-permission' && !onlyQuestionsPending) ||
       pendingSend) &&

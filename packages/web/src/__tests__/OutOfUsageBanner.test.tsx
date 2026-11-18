@@ -97,9 +97,7 @@ describe('OutOfUsageBanner — when credit has run out', () => {
   it('invents no reset when none was stated', () => {
     reportAccounts('host-a', [spent('a', 'Default')]);
     renderBanner();
-    expect(screen.getByTestId('out-of-usage-reset').textContent).toBe(
-      'Anthropic gave no reset time.',
-    );
+    expect(screen.getByTestId('out-of-usage-reset').textContent).toBe('Claude gave no reset time.');
     expect(screen.getByTestId('out-of-usage-reset').getAttribute('title')).toBeNull();
   });
 

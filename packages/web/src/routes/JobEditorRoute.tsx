@@ -13,7 +13,12 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import type { Job, JobAction, JobCreateBody, JobTrigger, WebhookScheme } from '@patch/wire/jobs';
 import { scriptVerdictLine } from '@patch/wire/jobs';
 import type { PermissionMode } from '@patch/wire';
-import { isJunkFolder, isReservedSpecialThread, permissionModesFor } from '@patch/wire';
+import {
+  isJunkFolder,
+  isReservedSpecialThread,
+  permissionModesFor,
+  accountsKeyForModel,
+} from '@patch/wire';
 import { describeRecurrence, parseRecurrenceFields } from '@patch/wire';
 import { api, ApiError } from '../api/rest.js';
 import { Toggle } from '../components/Toggle.js';
@@ -1405,8 +1410,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
    * past. Fixed when the chat is created, like the model.
    */
   function accountField(): JSX.Element | null {
-    const codex = form.spawnModel.startsWith('openai/');
-    const accounts = (codex ? sharedAccounts?.codex : sharedAccounts?.claude) ?? [];
+    const accountsKey = accountsKeyForModel(form.spawnModel);
+    const accounts = (accountsKey !== null ? sharedAccounts?.[accountsKey] : undefined) ?? [];
     const value = form.spawnAccount;
     const extra =
       value && !accounts.some((a) => a.id === value)

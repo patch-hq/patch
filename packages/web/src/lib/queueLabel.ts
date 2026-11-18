@@ -25,11 +25,18 @@ function ordinal(n: number): string {
 // queued behind one). Omitted, the chip carries position only.
 export type QueueRelease = 'tool' | 'turn';
 
-/** What releases the entry at `index` of a queued block; one needing its own turn holds back everything behind it. */
+/**
+ * What releases the entry at `index` of a queued block; one needing its own turn
+ * holds back everything behind it. `steer` is whether the chat's provider takes
+ * input into a running turn (spec/02 § Provider adapters); without it nothing is
+ * handed over at a tool boundary, so every entry waits for the turn to end.
+ */
 export function queueRelease(
   block: ReadonlyArray<{ queuedOwnTurn?: boolean }>,
   index: number,
+  steer: boolean,
 ): QueueRelease {
+  if (!steer) return 'turn';
   for (let i = 0; i <= index; i++) if (block[i]?.queuedOwnTurn) return 'turn';
   return 'tool';
 }

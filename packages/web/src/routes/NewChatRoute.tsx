@@ -24,6 +24,8 @@ import {
   backendIdForModel,
   compactModelLabel,
   providerForModel,
+  accountsKeyForModel,
+  accountKindForModel,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ApiError } from '../api/rest.js';
@@ -547,13 +549,10 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // The accounts a chat on this model could start on: the shared Claude or
   // ChatGPT list, whichever backend the model runs on.
   const sharedSecrets = usePreferencesStore((st) => st.shared?.secrets);
-  const preferableAccounts = useMemo(
-    () =>
-      (
-        (effectiveModel?.startsWith('openai/') ? sharedSecrets?.codex : sharedSecrets?.claude) ?? []
-      ).filter((a) => a.connected),
-    [sharedSecrets, effectiveModel],
-  );
+  const preferableAccounts = useMemo(() => {
+    const key = accountsKeyForModel(effectiveModel);
+    return ((key !== null ? sharedSecrets?.[key] : undefined) ?? []).filter((a) => a.connected);
+  }, [sharedSecrets, effectiveModel]);
   // Default to an account that is in credit: when one of the model's accounts
   // is spent and another is not, the chat is pinned to the one that is not
   // until the user chooses, so it never starts on a spent one. Auto stays one click
@@ -589,7 +588,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // chat's header carries none at all now (its composer's context ring covers
   // it instead), but there is no chat yet here for a ring to measure.
   const usageSummary = summariseUsage(
-    effectiveModel?.startsWith('openai/api/') ? undefined : chosenAccount?.usage,
+    accountKindForModel(effectiveModel) === 'apiKey' ? undefined : chosenAccount?.usage,
   );
   // The models offered as chips in the Model row (spec/14 §8): the account
   // default first — marked as such — then the head of the catalogue

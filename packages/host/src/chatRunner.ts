@@ -208,7 +208,7 @@ import {
   type ManagerSweepCandidate,
   type ManagerSweepResultEvent,
 } from '@patch/wire';
-import { modelHasCapability, patchToolsOmittedFor } from '@patch/wire';
+import { modelHasCapability, patchToolsOmittedFor, type ProviderCapability } from '@patch/wire';
 import type { SweepDecisionResult } from './managerSweepGen.js';
 import { countMessages, windowTrack } from './managerContext.js';
 import { permissionModeChangeLine } from './permissionMode.js';
@@ -1085,9 +1085,10 @@ const TITLE_GEN_RETRY_DELAY_MS = 3_000;
 /**
  * What Continue sends when a turn was cut off (spec/12 § Continue). An ordinary
  * message in the chat, visible to the user and the agent alike: nothing is added
- * to the turn unseen, and the cut-off turn's own text is not re-sent. A provider
- * whose adapter declares a resume of its own would continue without a message;
- * none does yet, so every chat takes this one.
+ * to the turn unseen, and the cut-off turn's own text is not re-sent. It runs on
+ * the provider's own saved session where the provider declares `resume`, so the
+ * agent carries on with its memory of the cut-off turn. No adapter can carry on
+ * a cut-off turn without a new message, so every chat takes this one.
  */
 export const CONTINUE_MESSAGE = 'Carry on from where you were cut off.';
 
@@ -1802,6 +1803,33 @@ export class UnknownModelError extends Error {
  * option, so there is nothing to round the request to — the chat's effort is
  * left exactly as it was.
  */
+/**
+ * A request for something the chat's provider does not declare (spec/02 §
+ * Provider adapters). Features follow declared capability: the host refuses
+ * rather than doing a lesser version of it.
+ */
+export class CapabilityUnsupportedError extends Error {
+  readonly code = 'capability_unsupported' as const;
+  constructor(
+    readonly chatId: string,
+    readonly capability: ProviderCapability,
+  ) {
+    super(`${CAPABILITY_ACTION[capability]} is not supported by this chat's provider`);
+    this.name = 'CapabilityUnsupportedError';
+  }
+}
+
+/** How each capability is named when a request for it is refused. */
+const CAPABILITY_ACTION: Record<ProviderCapability, string> = {
+  resume: 'resuming the session',
+  editAtMessage: 'editing a message',
+  rewind: 'rewinding the chat',
+  branchAtTurn: 'a side thread',
+  disableNativeTools: "switching off the provider's native tools",
+  interrupt: 'interrupting a turn',
+  steer: 'adding input to a running turn',
+};
+
 export class EffortNotSupportedError extends Error {
   readonly code = 'effort_not_supported' as const;
   constructor(chatId: string, model: string | undefined) {
@@ -7958,6 +7986,9 @@ export class Daemon {
   private deliverQueuedAtBoundary(chatId: string): string | undefined {
     const queue = this.turnQueues.get(chatId);
     if (!queue || queue.length === 0) return undefined;
+    // Only a provider that declares steer takes input into a running turn;
+    // otherwise the queue waits for the turn to end (spec/02 § Provider adapters).
+    if (!modelHasCapability(this.chatState.get(chatId)?.model, 'steer')) return undefined;
     const delivered: QueuedTurn[] = [];
     while (queue.length > 0) {
       const item = queue[0]!;
@@ -8436,6 +8467,7 @@ export class Daemon {
     if (!q) return;
     const idx = q.findIndex((it) => it.localId === localId);
     if (idx < 0) return;
+    if (this.refuseUnlessCapable(chatId, 'interrupt')) return;
     // Interrupting closes the SDK query; the pump's drainQueue then picks up
     // the queue head — already the promoted turn, or whatever was already
     // scheduled ahead of it.
@@ -9345,6 +9377,26 @@ export class Daemon {
     } catch (err) {
       this.opts.logger.warn({ chatId, callId, err: (err as Error).message }, 'tool cancel: failed');
     }
+  }
+
+  /**
+   * Features follow declared capability (spec/02 § Provider adapters). True when
+   * the chat's provider does not declare `capability`: the refusal has been said
+   * to every surface as `capability_unsupported` and logged, and the caller does
+   * nothing more. False when the provider declares it.
+   */
+  refuseUnlessCapable(chatId: string, capability: ProviderCapability): boolean {
+    const model = this.chatState.get(chatId)?.model ?? this.opts.metaStore.read(chatId)?.model;
+    if (modelHasCapability(model, capability)) return false;
+    const refused = new CapabilityUnsupportedError(chatId, capability);
+    this.emit({
+      type: 'chat.error',
+      chatId,
+      error: { code: refused.code, message: refused.message },
+      seq: OUT_OF_BAND_SEQ,
+    });
+    this.opts.logger.warn({ chatId, capability }, `refused: provider lacks ${capability}`);
+    return true;
   }
 
   /** Stop a specific branch's running turn, or no-op if it has none. */
@@ -11204,6 +11256,11 @@ export class Daemon {
       !this.hasAnsweredTrack(chatId, userMessageSeq)
         ? this.withUnansweredPrompts(chatId, userMessageSeq, prompt)
         : prompt;
+    // Continuing the provider's own saved session is the resume capability
+    // (spec/02 § Provider adapters): refused, never replaced with a fresh one.
+    if (claudeResumeId !== undefined && !modelHasCapability(state.model, 'resume')) {
+      throw new CapabilityUnsupportedError(chatId, 'resume');
+    }
     const sdkOpts: SdkRunOptions = {
       prompt: sdkPrompt,
       cwd: state.folder,
@@ -11387,8 +11444,8 @@ export class Daemon {
                 ? this.replanHandoff(chatId, state, err, userMessageSeq)
                 : undefined;
             if (!tighter) throw err;
-            const reseedOption = HARNESS_TRAITS[targetHarness].reseedOption;
-            if (reseedOption !== null) sdkOpts[reseedOption] = { events: tighter };
+            const reseedRunOptions = HARNESS_TRAITS[targetHarness].reseedRunOptions;
+            if (reseedRunOptions !== null) Object.assign(sdkOpts, reseedRunOptions(tighter));
             else if (claudeResumeId !== undefined) {
               // The rejected handoff produced no output, so the file holds only
               // the seed that was too big: replace it outright.
@@ -17886,11 +17943,7 @@ function handoffRunOptions(
   hasNativeSession: boolean,
 ): Partial<SdkRunOptions> {
   if (!track) return {};
-  if (hasNativeSession && traits.appendOption !== null) {
-    return { [traits.appendOption]: { events: track } };
-  }
-  if (!hasNativeSession && traits.reseedOption !== null) {
-    return { [traits.reseedOption]: { events: track } };
-  }
+  if (hasNativeSession && traits.appendRunOptions !== null) return traits.appendRunOptions(track);
+  if (!hasNativeSession && traits.reseedRunOptions !== null) return traits.reseedRunOptions(track);
   return {};
 }

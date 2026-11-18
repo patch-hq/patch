@@ -1398,7 +1398,11 @@ function ChatDetailBody(): React.ReactElement {
                     entry={entry}
                     chatId={chatId}
                     queuePos={i + 1}
-                    release={queueRelease(queuedEntries, i)}
+                    release={queueRelease(
+                      queuedEntries,
+                      i,
+                      modelHasCapability(row?.model, 'steer'),
+                    )}
                     {...(queuedEdit !== null && entry.localId === queuedEdit.localId
                       ? { queuedDraft: queuedEdit.text }
                       : {})}
@@ -3067,7 +3071,10 @@ const TimelineItem = React.memo(function TimelineItem({
             // the host has no persisted record of yet, so there is no fork
             // point to hang a side thread off (NO FALLBACK) — mirrors web's
             // `canSideThread`.
-            {...(entry.localId === undefined ? { sideThread: { chatId, seq: entry.seq } } : {})}
+            // Offered only where the chat's provider declares branchAtTurn.
+            {...(entry.localId === undefined && modelHasCapability(chatModel, 'branchAtTurn')
+              ? { sideThread: { chatId, seq: entry.seq } }
+              : {})}
             // Retry: a settled turn re-runs its user message (an assistant
             // reply re-runs the one it answered). Offered only when that
             // message is text-only — attachments would be dropped.
@@ -3176,7 +3183,7 @@ const TimelineItem = React.memo(function TimelineItem({
             >
               {queueChipLabel(queuePos, hostOnline, release, pause)}
             </Text>
-            {entry.localId ? (
+            {entry.localId && modelHasCapability(chatModel, 'interrupt') ? (
               <Pressable
                 testID="queued-promote"
                 accessibilityRole="button"

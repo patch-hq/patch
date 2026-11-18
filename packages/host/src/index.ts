@@ -75,7 +75,9 @@ import type {
   RateLimitWindow,
   PatchActivityResponseEvent,
   PatchSearchChatsResponseEvent,
+  ProviderId,
 } from '@patch/wire';
+import { providerForSessionId } from '@patch/wire';
 import {
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
@@ -4692,12 +4694,13 @@ async function startHost(
             'history: skipping unreadable JSONL line',
           ),
       });
-      const readerFor = (sessionId: string) =>
-        sessionId.startsWith('codex-')
-          ? codexHistory
-          : sessionId.startsWith('local-')
-            ? localHistory
-            : claudeHistory;
+      // Each provider's transcripts are read by its own adapter's reader.
+      const readers: Record<ProviderId, typeof claudeHistory> = {
+        claude: claudeHistory,
+        codex: codexHistory,
+        local: localHistory,
+      };
+      const readerFor = (sessionId: string) => readers[providerForSessionId(sessionId)!];
       return {
         hasSession: (o) => readerFor(o.sessionId).hasSession(o),
         read: (o) => readerFor(o.sessionId).read(o),
@@ -7717,7 +7720,9 @@ export async function handleServerEvent(
       case 'chat.stop_request': {
         // spec/04 § Branching — a branch-addressed stop ends just that
         // branch's turn; the plain (no branchId) form is "stop THE CHAT",
-        // which ends every branch's turn.
+        // which ends every branch's turn. Only where the provider declares
+        // interrupt (spec/02 § Provider adapters).
+        if (daemon.refuseUnlessCapable(event.chatId, 'interrupt')) return;
         if (event.branchId !== undefined) daemon.stopBranch(event.chatId, event.branchId);
         else await daemon.stopAllBranches(event.chatId);
         return;

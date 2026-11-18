@@ -13,7 +13,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { ChevronLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { ChatBranch } from '@patch/wire';
+import { modelHasCapability, type ChatBranch } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore';
 import type { PendingPermission } from '../stores/types';
 import {
@@ -305,6 +305,7 @@ function ThreadPane({
   const events = useBranchHistory(chatId, branchId, branch.running === true, branch.forkFromSeq);
   const mainTimeline = useChatStore((s) => s.timelines[chatId]);
   const branchGraph = useChatStore((s) => s.branchGraphs[chatId]);
+  const canInterrupt = useChatStore((s) => modelHasCapability(s.chats[chatId]?.model, 'interrupt'));
   const permissions = useChatStore(
     (s) => s.sideThreadPermissions[`${chatId}::${branchId}`] ?? EMPTY_PERMISSIONS,
   );
@@ -419,7 +420,7 @@ function ThreadPane({
         style={{ paddingBottom: insets.bottom, borderTopWidth: 1, borderColor: colors.divider }}
       >
         <View style={{ flexDirection: 'row', padding: space.sm, gap: space.sm }}>
-          {branch.running ? (
+          {branch.running && canInterrupt ? (
             <Pressable
               testID="side-threads-stop"
               onPress={() => stopBranch(chatId, branchId)}
