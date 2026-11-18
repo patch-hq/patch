@@ -967,8 +967,7 @@ describe('patch_delegate across a host restart', () => {
     sdk.enqueue([{ type: 'assistant', content: 'all done' }, { type: 'result' }]);
     const { daemon, events } = host(home, sdk);
     daemon.hydrate();
-    // The cut-off subagent is Interrupted until it is continued (spec/12 § Continue).
-    await daemon.continueChat(childId);
+    // The cut-off subagent is continued by the host itself: nobody is watching it.
     await flushUntil(() =>
       messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${childId}`)),
     );

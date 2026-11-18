@@ -521,6 +521,25 @@ describe('resuming turns a host restart interrupted', () => {
     expect(g2.prompts).toEqual([CONTINUE_MESSAGE]);
   });
 
+  // spec/12 § Continue — a background child has no one watching it, so a restart
+  // that cut it off continues it rather than leaving it idle and silent.
+  it('continues a background child a restart cut off, and leaves an ordinary chat waiting', async () => {
+    const g1 = gatedBackend();
+    const { home, folder } = setup();
+    const first = hostOver(home, g1.backend);
+    const parentId = await chatWithHistory(first.daemon, folder, g1);
+    await first.daemon.createDelegate({ parentChatId: parentId, prompt: 'do it' });
+    await tick();
+
+    const g2 = gatedBackend();
+    const second = hostOver(home, g2.backend);
+    second.daemon.hydrate();
+    await tick(50);
+
+    // The child is continued; the (idle) parent had nothing running.
+    expect(g2.prompts).toEqual([CONTINUE_MESSAGE]);
+  });
+
   it('Continue on a chat that was never interrupted does nothing', async () => {
     const g = gatedBackend();
     const { home, folder } = setup();
