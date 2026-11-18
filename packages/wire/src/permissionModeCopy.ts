@@ -63,12 +63,12 @@ export const PERMISSION_MODE_COPY: Record<PermissionMode, PermissionModeCopy> = 
   },
 };
 
-/** The order modes are listed in: everyday first, the dangerous one last. */
+/** The order modes are listed in: everyday first, then the read-only one, the dangerous one last. */
 export const PERMISSION_MODE_ORDER: readonly PermissionMode[] = [
   'default',
   'acceptEdits',
-  'plan',
   'auto',
+  'plan',
   'bypassPermissions',
 ];
 
