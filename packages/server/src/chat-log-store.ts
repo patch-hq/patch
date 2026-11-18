@@ -31,6 +31,13 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 import { headCodePoints, LOGGED_EVENT_TYPES, type WireEvent } from '@patch/wire';
+import {
+  matchMessages,
+  RecordTextIndex,
+  searchableMessage,
+  type RecordMatch,
+  type RecordMessage,
+} from './record-search.js';
 
 const MAX_EVENTS_PER_CHAT = 50_000;
 
@@ -150,6 +157,9 @@ export class ChatLogStore {
     string,
     Map<string, { request: WireEvent; response?: WireEvent }>
   >();
+
+  /** Message text of each chat's file, for search without loading the whole record. */
+  private readonly text = new RecordTextIndex();
 
   constructor(opts: ChatLogStoreOptions) {
     this.logger = opts.logger;
@@ -355,6 +365,34 @@ export class ChatLogStore {
     if (seq <= this.highWater(chatId)) return;
     this.reach.set(chatId, seq);
     this.append(chatId, JSON.stringify({ reach: seq }), false);
+  }
+
+  /**
+   * True when the server keeps a record of the chat, without loading it: what
+   * search uses to count the chats it could answer for.
+   */
+  holds(chatId: string): boolean {
+    if ((this.chats.get(chatId)?.size ?? 0) > 0) return true;
+    return this.dir !== null && existsSync(this.pathOf(chatId));
+  }
+
+  /**
+   * The chat's user and assistant messages containing every term, the newest as
+   * the snippet; `null` for none (spec/03 § Chat search). Reads the record on
+   * disk incrementally and never loads a chat's whole log to do it.
+   */
+  searchMessages(chatId: string, terms: string[]): RecordMatch | null {
+    if (this.dir !== null) return matchMessages(this.text.messages(this.pathOf(chatId)), terms);
+    const messages: [number, RecordMessage][] = [];
+    for (const [seq, event] of this.chats.get(chatId) ?? []) {
+      const m = searchableMessage(event);
+      if (m) messages.push([seq, m]);
+    }
+    return matchMessages(messages, terms);
+  }
+
+  private pathOf(chatId: string): string {
+    return join(this.dir as string, `${fileName(chatId)}.jsonl`);
   }
 
   /** True when the server holds anything for the chat. */

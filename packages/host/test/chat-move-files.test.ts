@@ -1,6 +1,7 @@
 // spec/04 § Moving a chat to another host — what a bundle carries, and how it
-// lands: blobs, the native session mirror, Claude's own transcript and the
-// chat's attachments, with the old folder rewritten to the new one.
+// lands: blobs, Claude's own transcript and the chat's attachments, with the
+// old folder rewritten to the new one. A host from before the retired
+// `native/claude` copies may still send one; it lands as the chat's own transcript.
 
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -126,12 +127,13 @@ describe('chat move bundle', () => {
     expect(meta.pendingTurns).toEqual([]);
     expect(meta.claudeSessionId).toBe('sess-1');
 
-    const mirror = readFileSync(
-      join(dst.chatsRoot, CHAT, 'native', 'claude', 'sess-1.jsonl'),
+    const own = readFileSync(
+      join(dst.chatsRoot, CHAT, 'claude', 'projects', encodeFolder(dst.folder), 'sess-1.jsonl'),
       'utf8',
     );
-    expect(JSON.parse(mirror.split('\n')[0]!).cwd).toBe(dst.folder);
-    expect(mirror.split('\n')[1]).toBe('not json');
+    expect(JSON.parse(own.split('\n')[0]!).cwd).toBe(dst.folder);
+    expect(own.split('\n')[1]).toBe('not json');
+    expect(existsSync(join(dst.chatsRoot, CHAT, 'native'))).toBe(false);
 
     const transcript = join(dst.claudeProjectsRoot, encodeFolder(dst.folder), 'sess-1.jsonl');
     expect(JSON.parse(readFileSync(transcript, 'utf8')).cwd).toBe(dst.folder);
@@ -145,6 +147,29 @@ describe('chat move bundle', () => {
       'A1',
     ]);
     expect(existsSync(join(dst.chatsRoot, `.incoming-${CHAT}`))).toBe(false);
+  });
+
+  it('keeps the chat’s own transcript over an old native copy sent beside it', () => {
+    const src = paths();
+    seedChat(src);
+    const ownDir = join(src.chatsRoot, CHAT, 'claude', 'projects', encodeFolder(src.folder));
+    mkdirSync(ownDir, { recursive: true });
+    writeFileSync(join(ownDir, 'sess-1.jsonl'), JSON.stringify({ uuid: 'own', cwd: src.folder }));
+    const bundle = buildMoveBundle(CHAT, src);
+    // Either order: the chat's own copy wins.
+    for (const files of [bundle.files, [...bundle.files].reverse()]) {
+      const dst = paths();
+      writeMoveBundle({ ...bundle, files }, dst.folder, dst, 99);
+      const landed = join(
+        dst.chatsRoot,
+        CHAT,
+        'claude',
+        'projects',
+        encodeFolder(dst.folder),
+        'sess-1.jsonl',
+      );
+      expect(JSON.parse(readFileSync(landed, 'utf8')).uuid).toBe('own');
+    }
   });
 
   it('refuses a corrupted blob and leaves no half-written chat', () => {

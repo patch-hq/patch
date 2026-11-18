@@ -8,7 +8,7 @@
 // packages/host/test/chat-search.test.ts.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
@@ -17,6 +17,7 @@ import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
 import { CHAT_SEARCH_TIMEOUT_MS } from '../src/chat-search-routes.js';
+import { ChatLogStore } from '../src/chat-log-store.js';
 
 type Req = Extract<WireEvent, { type: 'patch.chat_search.request' }>;
 type Res = Extract<WireEvent, { type: 'patch.chat_search.response' }>;
@@ -405,7 +406,7 @@ describe('chat search route', () => {
     }
   });
 
-  it('searches the server mirror for a chat whose host is offline, flagged as mirrored', async () => {
+  it('searches the server record for a chat whose host is offline, flagged as mirrored', async () => {
     const link = new FakeSearchHosts(() => ({ ok: true, hits: [], total: 0 }));
     const { built, auth } = await boot(link);
     try {
@@ -424,7 +425,7 @@ describe('chat search route', () => {
         } as WireEvent,
         'pi',
       );
-      // A chat on an ONLINE host is never answered from the mirror (the host is authoritative).
+      // A chat on an ONLINE host is never answered from the record (the host is asked).
       link.emit(
         { type: 'chat.spawned', chatId: 'mac-chat', hostId: 'mac', folder: '/m' } as WireEvent,
         'mac',
@@ -450,7 +451,7 @@ describe('chat search route', () => {
         mirroredChats: 1,
       });
       expect(body.hosts.find((h) => h.hostId === 'd1')!.mirroredChats).toBeUndefined();
-      // fullText=false skips message text, so the mirror finds nothing by body.
+      // fullText=false skips message text, so the record finds nothing by body.
       const names = ChatSearchResponse.parse(
         (
           await built.app.inject({
@@ -468,6 +469,39 @@ describe('chat search route', () => {
         );
         expect(byId.hits.map((h) => h.chatId)).toEqual(['pi-chat']);
       }
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('answers an offline host from the record kept before this start, and clears the old mirror', async () => {
+    // What a previous run of the server recorded, and the retired mirror folder beside it.
+    new ChatLogStore({ dataDir: dir, logger: { warn: () => undefined } }).commit({
+      type: 'chat.message',
+      chatId: 'pi-old',
+      seq: 3,
+      role: 'assistant',
+      content: 'the boiler was serviced in March',
+    } as WireEvent);
+    mkdirSync(join(dir, 'chat-mirror'));
+    writeFileSync(join(dir, 'chat-mirror', 'pi-old.jsonl'), '{"seq":3}\n');
+    const link = new FakeSearchHosts(() => ({ ok: true, hits: [], total: 0 }));
+    const { built, auth } = await boot(link);
+    try {
+      expect(existsSync(join(dir, 'chat-mirror'))).toBe(false);
+      link.emit(
+        { type: 'chat.spawned', chatId: 'pi-old', hostId: 'pi', folder: '/srv' } as WireEvent,
+        'pi',
+      );
+      const body = ChatSearchResponse.parse(
+        (
+          await built.app.inject({ method: 'GET', url: search('q=serviced'), headers: auth })
+        ).json(),
+      );
+      expect(body.hits.map((h) => [h.chatId, h.mirrored, h.snippet?.seq])).toEqual([
+        ['pi-old', true, 3],
+      ]);
+      expect(body.hosts.find((h) => h.hostId === 'pi')).toMatchObject({ mirroredChats: 1 });
     } finally {
       await built.app.close();
     }

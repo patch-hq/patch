@@ -7,8 +7,7 @@
 // copy, with no throwaway `claude-resume-*` materialisation in between.
 //
 // This module is the host's side of that file, used BEFORE a turn spawns:
-//   - migrate: a session that still lives in the old per-chat mirror
-//     (`native/claude/<sessionId>.jsonl`) or Claude Code's shared
+//   - migrate: a session that still lives in Claude Code's shared
 //     `~/.claude/projects` is copied into the chat's dir once;
 //   - reseed: a provider switch or explicit reconstruction writes the chat's
 //     own log as a synthesized session;
@@ -44,11 +43,6 @@ export function chatClaudeDir(chatDir: string): string {
   return join(chatDir, 'claude');
 }
 
-/** The pre-migration per-chat mirror: `~/.patch/chats/<chatId>/native/claude`. */
-export function legacyMirrorDir(chatDir: string): string {
-  return join(chatDir, 'native', 'claude');
-}
-
 /** Where Claude Code keeps `sessionId`'s transcript inside the chat's own dir. */
 export function chatTranscriptPath(chatDir: string, folder: string, sessionId: string): string {
   return join(chatClaudeDir(chatDir), 'projects', encodeFolder(folder), `${sessionId}.jsonl`);
@@ -60,19 +54,17 @@ function nonEmpty(path: string): boolean {
 
 /**
  * The transcript `sessionId` resumes from: the chat's own file; failing that
- * the old mirror or Claude Code's shared projects dir (a chat not migrated
- * yet — the next resume copies it in). `null` when none exists.
+ * Claude Code's shared projects dir (a chat not migrated yet — the next resume
+ * copies it in). `null` when none exists.
  */
 export function findTranscript(opts: {
   chatDir: string;
   folder: string;
   sessionId: string;
   claudeProjectsRoot: string;
-}): { path: string; source: 'chat' | 'legacy' | 'shared' } | null {
+}): { path: string; source: 'chat' | 'shared' } | null {
   const own = chatTranscriptPath(opts.chatDir, opts.folder, opts.sessionId);
   if (nonEmpty(own)) return { path: own, source: 'chat' };
-  const legacy = join(legacyMirrorDir(opts.chatDir), `${opts.sessionId}.jsonl`);
-  if (nonEmpty(legacy)) return { path: legacy, source: 'legacy' };
   const shared = join(
     opts.claudeProjectsRoot,
     encodeFolder(opts.folder),

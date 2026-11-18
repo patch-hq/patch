@@ -21,7 +21,6 @@ import {
   createClaudeSessionStore,
   entriesSince,
   findTranscript,
-  legacyMirrorDir,
   transcriptSize,
 } from '../src/claudeSessionStore.js';
 import { encodeFolder } from '../src/history.js';
@@ -137,32 +136,16 @@ describe('migration of an existing chat, once', () => {
     { type: 'assistant', uuid: 'a1', parentUuid: 'u1', message: REAL_REPLY },
   ];
 
-  it('copies the old per-chat mirror in on the first prepare, then leaves it', async () => {
-    const { chatDir, store, own } = mk();
-    mkdirSync(legacyMirrorDir(chatDir), { recursive: true });
-    const legacy = join(legacyMirrorDir(chatDir), 's1.jsonl');
-    writeFileSync(legacy, jl(...entries));
-    expect(existsSync(own('s1'))).toBe(false);
-    await store.prepare('s1');
-    expect(lines(own('s1')).map((e) => e['uuid'])).toEqual(['u1', 'a1']);
-    // From here on the chat's own file is the live one: a later change to the
-    // old mirror is never copied over it.
-    writeFileSync(legacy, jl({ type: 'user', uuid: 'stale' }));
-    await store.prepare('s1');
-    expect(lines(own('s1')).map((e) => e['uuid'])).toEqual(['u1', 'a1']);
-  });
-
-  it('prefers the old mirror to Claude Code’s shared store, as the old resume did', async () => {
+  it('never reads the retired native/claude copy; the shared store is the only source', async () => {
     const { chatDir, claudeProjectsRoot, store, own } = mk();
-    mkdirSync(legacyMirrorDir(chatDir), { recursive: true });
-    writeFileSync(join(legacyMirrorDir(chatDir), 's1.jsonl'), jl(...entries));
-    mkdirSync(join(claudeProjectsRoot, encodeFolder('/w')), { recursive: true });
-    writeFileSync(
-      join(claudeProjectsRoot, encodeFolder('/w'), 's1.jsonl'),
-      jl({ type: 'user', uuid: 'old' }),
-    );
+    mkdirSync(join(chatDir, 'native', 'claude'), { recursive: true });
+    writeFileSync(join(chatDir, 'native', 'claude', 's1.jsonl'), jl(...entries));
+    expect(
+      findTranscript({ chatDir, folder: '/w', sessionId: 's1', claudeProjectsRoot }),
+    ).toBeNull();
     await store.prepare('s1');
-    expect(lines(own('s1'))).toHaveLength(2);
+    expect(existsSync(own('s1'))).toBe(false);
+    expect(await store.load(key('s1'))).toBeNull();
   });
 
   it('copies a session that only lives in the shared store, with its sub-agent files', async () => {
@@ -181,20 +164,20 @@ describe('migration of an existing chat, once', () => {
 
   it('is findable before it is migrated (a resume check must not lose it)', () => {
     const { chatDir, claudeProjectsRoot } = mk();
-    mkdirSync(legacyMirrorDir(chatDir), { recursive: true });
-    writeFileSync(join(legacyMirrorDir(chatDir), 's1.jsonl'), jl(...entries));
+    mkdirSync(join(claudeProjectsRoot, encodeFolder('/w')), { recursive: true });
+    writeFileSync(join(claudeProjectsRoot, encodeFolder('/w'), 's1.jsonl'), jl(...entries));
     expect(
       findTranscript({ chatDir, folder: '/w', sessionId: 's1', claudeProjectsRoot })?.source,
-    ).toBe('legacy');
+    ).toBe('shared');
     expect(
       findTranscript({ chatDir, folder: '/w', sessionId: 'zz', claudeProjectsRoot }),
     ).toBeNull();
   });
 
   it('migrating makes the session’s file appear under the chat dir only — no temp resume dir', async () => {
-    const { chatDir, store } = mk();
-    mkdirSync(legacyMirrorDir(chatDir), { recursive: true });
-    writeFileSync(join(legacyMirrorDir(chatDir), 's1.jsonl'), jl(...entries));
+    const { claudeProjectsRoot, store } = mk();
+    mkdirSync(join(claudeProjectsRoot, encodeFolder('/w')), { recursive: true });
+    writeFileSync(join(claudeProjectsRoot, encodeFolder('/w'), 's1.jsonl'), jl(...entries));
     const before = readdirSync(tmpdir()).filter((n) => n.startsWith('claude-resume-'));
     await store.prepare('s1');
     await store.prepare('s1');

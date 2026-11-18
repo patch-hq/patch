@@ -958,7 +958,6 @@ describe('message dispatch', () => {
       data: {
         devices: [],
         push: { tokenCount: 0 },
-        telegram: { connected: false, chatId: null, botUsername: null },
         google: { configured: false, connected: false, scope: null },
         preferences: DEFAULT_SHARED_SETTINGS,
       },

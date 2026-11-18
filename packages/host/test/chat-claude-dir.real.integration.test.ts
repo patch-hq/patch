@@ -8,7 +8,7 @@
 //      config dir, and no `claude-resume-*` temp dir is ever created.
 //   2. A host that dies mid-`sleep` (a host update) leaves the turn running; the
 //      next host carries it to completion and the transcript is continuous.
-//   3. A chat whose session lives only in the old per-chat mirror still
+//   3. A chat whose session lives only in Claude Code's shared projects dir still
 //      resumes, migrated once into the chat's own dir.
 
 import { spawn } from 'node:child_process';
@@ -34,8 +34,8 @@ import {
   chatClaudeDir,
   chatTranscriptPath,
   createClaudeSessionStore,
-  legacyMirrorDir,
 } from '../src/claudeSessionStore.js';
+import { encodeFolder } from '../src/history.js';
 import { createRealSdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
 import { REAL_CLAUDE_SKIP_REASON, realClaudeEnabled } from './helpers/real-claude.js';
 
@@ -204,7 +204,7 @@ describe(`one conversation file per chat, real Claude${realClaudeEnabled() ? '' 
   );
 
   real(
-    '(3) a chat whose session lives only in the old mirror still resumes, migrated once',
+    '(3) a chat whose session lives only in Claude Code’s shared store still resumes, migrated once',
     async () => {
       const chatDir = mkdtempSync(join(tmpdir(), 'patch-real-chat-'));
       const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'patch-real-cwd-')));
@@ -212,7 +212,7 @@ describe(`one conversation file per chat, real Claude${realClaudeEnabled() ? '' 
       const sessionId = randomUUID();
       const log = pino({ level: 'silent' });
       try {
-        // An old chat: its conversation exists only in native/claude, as the old store wrote it.
+        // An old chat: its conversation exists only in Claude Code's shared projects dir.
         const { toClaudeSessionEntries } = await import('../src/nativeReconstruct.js');
         const seeded = toClaudeSessionEntries(
           [
@@ -239,17 +239,16 @@ describe(`one conversation file per chat, real Claude${realClaudeEnabled() ? '' 
           ],
           { sessionId, folder: cwd, model: MODEL },
         );
-        mkdirSync(legacyMirrorDir(chatDir), { recursive: true });
-        writeFileSync(
-          join(legacyMirrorDir(chatDir), `${sessionId}.jsonl`),
-          seeded.map((e) => JSON.stringify(e)).join('\n') + '\n',
-        );
+        const shared = mkdtempSync(join(tmpdir(), 'patch-real-shared-'));
+        const sharedFile = join(shared, encodeFolder(cwd), `${sessionId}.jsonl`);
+        mkdirSync(dirname(sharedFile), { recursive: true });
+        writeFileSync(sharedFile, seeded.map((e) => JSON.stringify(e)).join('\n') + '\n');
 
         const store = createClaudeSessionStore({
           chatId: 'real-dir',
           folder: cwd,
           chatDir,
-          claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-real-shared-')),
+          claudeProjectsRoot: shared,
           logger: log,
         });
         await store.prepare(sessionId);
@@ -264,12 +263,10 @@ describe(`one conversation file per chat, real Claude${realClaudeEnabled() ? '' 
         );
         expect(r.sessionId).toBe(sessionId);
         expect(r.text).toContain(word);
-        // Migrated once: the old mirror is left as it was, the live file grew.
-        expect(
-          readFileSync(join(legacyMirrorDir(chatDir), `${sessionId}.jsonl`), 'utf8')
-            .split('\n')
-            .filter(Boolean),
-        ).toHaveLength(seeded.length);
+        // Migrated once: the shared copy is left as it was, the live file grew.
+        expect(readFileSync(sharedFile, 'utf8').split('\n').filter(Boolean)).toHaveLength(
+          seeded.length,
+        );
         expect(entriesOf(file).length).toBeGreaterThan(seeded.length);
       } finally {
         rmSync(chatDir, { recursive: true, force: true });

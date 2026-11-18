@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // mock-check — decontamination gate for the `patch` codebase.
 //
-// WHY: external deps (Claude SDK, Telegram, Calendar, Todoist, FCM, Groq) may be
+// WHY: external deps (Claude SDK, Calendar, Todoist, FCM, Groq) may be
 // mocked in UNIT TESTS, because a final integration round exercises the real
 // thing. The contamination this catches is mocks that have leaked OUT of unit
 // tests into places that make a real boot silently run fakes:

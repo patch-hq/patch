@@ -271,9 +271,18 @@ export function writeMoveBundle(
       if (kind === 'chat') {
         // The conversation lives under `claude/projects/<encoded folder>/`, and
         // the encoded folder is the new one on this host.
-        const parts = rel.split('/');
+        let parts = rel.split('/');
         if (parts[0] === 'claude' && parts[1] === 'projects' && parts.length > 3) {
           parts[2] = encodeFolder(folder);
+        }
+        // A host from before the retired `native/claude` copies may still send
+        // one. Its transcript lands where this host resumes from, unless the
+        // chat's own copy came in the bundle too; nothing else there is kept.
+        if (parts[0] === 'native') {
+          const name = parts[2];
+          if (parts[1] !== 'claude' || parts.length !== 3 || !name?.endsWith('.jsonl')) continue;
+          parts = ['claude', 'projects', encodeFolder(folder), name];
+          if (existsSync(join(stage, ...parts))) continue;
         }
         const dest = join(stage, ...parts);
         mkdirSync(dirname(dest), { recursive: true });
@@ -292,10 +301,7 @@ export function writeMoveBundle(
             updatedAt: now,
           };
           writeFileSync(dest, JSON.stringify(moved, null, 2));
-        } else if (
-          (rel.startsWith('native/claude/') || rel.startsWith('claude/projects/')) &&
-          rel.endsWith('.jsonl')
-        ) {
+        } else if (parts[0] === 'claude' && parts[1] === 'projects' && rel.endsWith('.jsonl')) {
           writeFileSync(dest, rehomeJsonl(bytes.toString('utf8'), from, folder));
         } else {
           writeFileSync(dest, bytes);
