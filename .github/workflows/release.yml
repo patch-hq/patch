@@ -140,6 +140,16 @@ jobs:
           rm -f "$RUNNER_TEMP/artifact-signing.key"
           # One manifest per target; the release consumer merges them.
           mv "$RUNNER_TEMP/out/host-latest.json" "$RUNNER_TEMP/out/host-latest-${{ matrix.target }}.json"
+      - name: Smoke test the host artifact (install, delete staging, boot, stay up)
+        # The arm64 build cannot run on this x64 runner: it gets the symlink check only.
+        run: |
+          set -euo pipefail
+          ART=$(ls "$RUNNER_TEMP"/out/patch-host-*.tar.gz)
+          if [ "${{ matrix.target }}" = linux-x64 ]; then
+            node scripts/host-smoke.mjs --artifact "$ART" --seconds 60
+          else
+            node scripts/host-smoke.mjs --artifact "$ART" --scan-only
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: host-${{ matrix.target }}
@@ -355,6 +365,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/out"
           cp dist/host/*.tar.gz dist/host/*.tar.gz.sig "$RUNNER_TEMP/out/"
           cp dist/host/host-latest.json "$RUNNER_TEMP/out/host-latest-darwin-arm64.json"
+      - name: Smoke test the host artifact (install, delete staging, boot, stay up)
+        run: node scripts/host-smoke.mjs --artifact "$(ls "$RUNNER_TEMP"/out/patch-host-*.tar.gz)" --seconds 60
       - name: Build, sign and notarise the desktop app
         if: steps.scope.outputs.build == 'true'
         env:
