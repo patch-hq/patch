@@ -19,6 +19,7 @@ import {
   type RenderRules,
 } from 'react-native-markdown-display';
 import { configureMarkdownIt } from '../lib/markdownIt';
+import { fenceBoxDrawing } from '../lib/boxDrawing';
 import { useRouter } from 'expo-router';
 import { chatLinkRoute } from '../lib/deepLink';
 import { LinkPreview } from './LinkPreview';
@@ -137,10 +138,14 @@ function leafRules(selectable: boolean): RenderRules {
         {trimTrailingNewline(node.content)}
       </Text>
     ),
+    // A fenced block never wraps: long lines (a box-drawn table, a command)
+    // scroll sideways, as a table does.
     fence: (node: ASTNode, _children, _parent, styles, inheritedStyles = {}) => (
-      <Text key={node.key} selectable={selectable} style={[inheritedStyles, styles.fence]}>
-        {trimTrailingNewline(node.content)}
-      </Text>
+      <TableScroll key={node.key}>
+        <Text selectable={selectable} style={[inheritedStyles, styles.fence]}>
+          {trimTrailingNewline(node.content)}
+        </Text>
+      </TableScroll>
     ),
   };
 }
@@ -291,7 +296,7 @@ function renderMarkdownCached(
   const cached = renderCache.get(cacheKey);
   if (cached) return cached;
   const renderer = rendererFor(variantKey, style, selectable);
-  const element = parseMarkdown(content, renderer.render, markdownIt);
+  const element = parseMarkdown(fenceBoxDrawing(content), renderer.render, markdownIt);
   if (renderCache.size >= RENDER_CACHE_LIMIT) {
     const oldest = renderCache.keys().next().value;
     if (oldest !== undefined) renderCache.delete(oldest);
