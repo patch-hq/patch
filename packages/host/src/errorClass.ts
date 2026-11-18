@@ -135,3 +135,15 @@ export function classifyFailure(message: string): FailureClass {
 export function backoffMs(attempt: number, baseMs: number, capMs: number): number {
   return Math.min(baseMs * 2 ** (attempt - 1), capMs);
 }
+
+/**
+ * A turn the SDK aborted that nobody stopped: either the iterator threw an
+ * `AbortError`, or Claude Code reported its own crash as an error result
+ * ("[session_crash] error_name=AbortError ...") which arrives as a plain Error.
+ * Both are the same dead session, so both take the resume-then-fresh restart
+ * rather than the retry ladder, which re-sends into the same wedged state.
+ */
+export function isSessionAbort(err: unknown, message: string): boolean {
+  if (err instanceof Error && err.name === 'AbortError') return true;
+  return /\[session_crash\]\s*error_name=AbortError\b/.test(message);
+}
