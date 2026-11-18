@@ -39,6 +39,11 @@ test.describe('sidebar layout redesign', () => {
     for (const b of boxes) expect(Math.abs(b.y - boxes[0]!.y)).toBeLessThan(1);
     expect(boxes[0]!.height).toBeLessThan(44);
     expect(boxes[0]!.width).toBeLessThan(120);
+    // The guide button joins the row and the whole row stays inside the sidebar.
+    const guide = (await page.getByTestId('nav-getting-started').boundingBox())!;
+    expect(Math.abs(guide.y - boxes[0]!.y)).toBeLessThan(1);
+    const sb = (await page.getByTestId('sidebar').boundingBox())!;
+    expect(guide.x + guide.width).toBeLessThanOrEqual(sb.x + sb.width);
   });
 
   test('divider has a visible grab handle', async ({ page }) => {
