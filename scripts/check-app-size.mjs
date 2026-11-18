@@ -24,11 +24,12 @@ export function sizeOf(path) {
 const mb = (bytes) => (bytes / 1024 / 1024).toFixed(0);
 
 /** Returns { ok, bytes, report } for `dir` against `budgetMb`. */
-export function checkSize(dir, budgetMb, top = 8) {
+export function checkSize(dir, budgetMb, top = 12) {
   const bytes = sizeOf(dir);
   const ok = bytes <= budgetMb * 1024 * 1024;
   const lines = [`${dir}: ${mb(bytes)} MB (budget ${budgetMb} MB)`];
-  if (!ok) {
+  {
+    // Always listed, not just on failure: the CI log is where the next cut is chosen from.
     // One level into Contents/Resources (or resources) shows host/server/asar apart.
     const parts = [];
     const walk = (d, depth) => {
