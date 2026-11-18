@@ -478,8 +478,48 @@ function HostTools({ host }: { host: HostPresence }): React.ReactElement {
  * surface is also sent `host.removed`).
  */
 function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
+  const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const name = hostName(host);
+  // The Manager never moves by itself (spec/06 § Changing home): its home is
+  // removed only after the user has chosen another one.
+  const ask = async (): Promise<void> => {
+    const others = Object.keys(usePresenceStore.getState().hosts).filter(
+      (id) => id !== host.hostId,
+    );
+    if (others.length > 0) {
+      let home: string | null;
+      try {
+        home = (await api.managerHome()).hostId;
+      } catch (e) {
+        Alert.alert('Remove failed', (e as Error).message);
+        return;
+      }
+      if (home === host.hostId) {
+        Alert.alert(
+          `${name} is the Manager's home`,
+          `Choose a new home for the Manager before removing ${name}.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Choose new home',
+              onPress: () =>
+                router.push({ pathname: '/settings/[page]', params: { page: 'manager' } }),
+            },
+          ],
+        );
+        return;
+      }
+    }
+    Alert.alert(
+      `Remove ${name}?`,
+      `${name} is signed out and has to be paired again to come back.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => void remove() },
+      ],
+    );
+  };
   const remove = async (): Promise<void> => {
     setBusy(true);
     try {
@@ -504,16 +544,7 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
             label={busy ? 'Removing…' : 'Remove'}
             variant="danger"
             disabled={busy}
-            onPress={() =>
-              Alert.alert(
-                `Remove ${name}?`,
-                `${name} is signed out and has to be paired again to come back.`,
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Remove', style: 'destructive', onPress: () => void remove() },
-                ],
-              )
-            }
+            onPress={() => void ask()}
           />
         }
       />

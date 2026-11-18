@@ -43,7 +43,14 @@ import {
 const send = vi.fn();
 vi.mock('../src/api/ws', () => ({ getWs: () => ({ send }) }));
 vi.mock('../src/api/rest', () => ({
-  api: { settings: vi.fn(), setPreferences: vi.fn(), models: vi.fn() },
+  api: {
+    settings: vi.fn(),
+    setPreferences: vi.fn(),
+    models: vi.fn(),
+    managerHome: vi.fn(),
+    managerHomeDraft: vi.fn(),
+    setManagerHome: vi.fn(),
+  },
 }));
 
 const CATALOGUE = [
@@ -59,6 +66,11 @@ beforeEach(() => {
       preferences: { ...settingsFixture().preferences, ...patch },
     }));
   vi.mocked(api.models).mockReset().mockResolvedValue({ models: CATALOGUE });
+  vi.mocked(api.managerHome).mockReset().mockResolvedValue({ hostId: 'home' });
+  vi.mocked(api.managerHomeDraft).mockReset().mockResolvedValue({ message: 'user: hello' });
+  vi.mocked(api.setManagerHome)
+    .mockReset()
+    .mockImplementation(async (hostId) => ({ hostId }));
   send.mockReset();
   __clearLastAlert();
   useSettingsStore.getState()._reset();
@@ -368,6 +380,55 @@ describe('Manager page', () => {
     // No host switcher: nothing here belongs to one host.
     reportHost('other', { hostName: 'mac' });
     expect(queryHost(renderRN(<ManagerPage />).root, byTestId('host-switcher'))).toBeNull();
+  });
+
+  // spec/06 § Changing home: the user chooses, and sees the handover first.
+  it('Home: choosing a host shows the drafted handover; Move sends what was approved', async () => {
+    reportHost('mac', { hostName: 'mac', runsManager: false });
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('manager-home')))).toBe('laptop');
+    await pick(r, 'manager-home', 'mac');
+    expect(api.managerHomeDraft).toHaveBeenCalledWith('mac');
+    expect(api.setManagerHome).not.toHaveBeenCalled();
+    expect(textOf(findHost(r.root, byTestId('manager-home-handover')))).toContain(
+      'Move from laptop to mac',
+    );
+    const message = (): ReturnType<typeof findHost> =>
+      findHost(r.root, byTestId('manager-home-message'));
+    expect(message().props.value).toBe('user: hello');
+    await actAsync(() => message().props.onChangeText('carry on'));
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-home-move')).props.onPress();
+      await flush();
+    });
+    expect(api.setManagerHome).toHaveBeenCalledWith('mac', 'carry on');
+    expect(queryHost(r.root, byTestId('manager-home-handover'))).toBeNull();
+    expect(textOf(findHost(r.root, byTestId('manager-home')))).toBe('mac');
+  });
+
+  it('Home: Cancel moves nothing, and a refused move is said', async () => {
+    reportHost('mac', { hostName: 'mac', runsManager: false });
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    await pick(r, 'manager-home', 'mac');
+    await actAsync(() => findHost(r.root, byTestId('manager-home-cancel')).props.onPress());
+    expect(queryHost(r.root, byTestId('manager-home-handover'))).toBeNull();
+    expect(api.setManagerHome).not.toHaveBeenCalled();
+
+    vi.mocked(api.setManagerHome).mockRejectedValue(new Error('unknown_host: no host mac'));
+    await pick(r, 'manager-home', 'mac');
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-home-move')).props.onPress();
+      await flush();
+    });
+    expect(__getLastAlert()).toMatchObject({
+      title: 'Move failed',
+      message: 'unknown_host: no host mac',
+    });
+    expect(findHost(r.root, byTestId('manager-home-handover'))).toBeTruthy();
   });
 
   it('Enabled writes sweepEnabled', async () => {

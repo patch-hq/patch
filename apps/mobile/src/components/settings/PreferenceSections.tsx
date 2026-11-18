@@ -32,6 +32,7 @@ import { SettingsSection } from '../SettingsSection';
 import { VoiceDevicesSection } from './DevicesSections';
 import { patchShared } from './sharedWrite';
 import { ModelChoice } from './ModelChoice';
+import { ManagerHomeSection } from './ManagerHomeSection';
 import { SettingsPage } from './SettingsPage';
 import { Chips, Field, Muted, Row, ToggleRow, WithSettings } from './ui';
 
@@ -93,6 +94,7 @@ export function ManagerPage(): React.ReactElement {
       <WithSettings testID="manager">
         {(data) => (
           <>
+            <ManagerHomeSection />
             <SettingsSection title="Manager" testID="settings-manager">
               <ManagerControls preferences={data.preferences} />
             </SettingsSection>

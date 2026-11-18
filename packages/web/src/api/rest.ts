@@ -1114,6 +1114,16 @@ export const api = {
       method: 'POST',
       body: { hostId },
     }),
+  // The Manager's home host (spec/06 § Changing home). Moving it is a visible
+  // handover: fetch the draft, let the user edit or clear it, then PUT it.
+  managerHome: () => request<{ hostId: string | null }>('/api/manager/home'),
+  managerHomeDraft: (hostId: string) =>
+    request<{ message: string }>(`/api/manager/home/draft?hostId=${encodeURIComponent(hostId)}`),
+  setManagerHome: (hostId: string, message: string) =>
+    request<{ hostId: string }>('/api/manager/home', {
+      method: 'PUT',
+      body: { hostId, message },
+    }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every
   // connected surface (this one included) is also sent `host.removed

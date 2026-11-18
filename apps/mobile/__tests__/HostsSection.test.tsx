@@ -62,6 +62,7 @@ vi.mock('../src/api/rest', () => {
       hostInstallCommand: vi.fn(),
       hostPairStart: vi.fn(),
       removeHost: vi.fn(),
+      managerHome: vi.fn(),
       addAccount: vi.fn(async () => SHARED),
       adoptAccount: vi.fn(async () => SHARED),
     },
@@ -692,6 +693,8 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     beforeEach(() => {
       reportHost('h1', { hostName: 'laptop' });
       reportHost('h2', { hostName: 'other' });
+      // h2 is the Manager's home, so removing h1 is plain.
+      vi.mocked(api.managerHome).mockResolvedValue({ hostId: 'h2' });
     });
 
     async function askToRemove(r: ReactTestRenderer): Promise<void> {
@@ -779,6 +782,33 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       await pressAlertButton('Remove');
       await flush();
       expect(__getLastAlert()?.message).toBe('Network request failed');
+    });
+
+    // spec/06 § Changing home: the Manager never moves by itself.
+    it('the Manager home is not removed: it asks for a new home first', async () => {
+      vi.mocked(api.managerHome).mockResolvedValue({ hostId: 'h1' });
+      const r = render(<HostDetail hostId="h1" />);
+      await askToRemove(r);
+      await flush();
+      expect(__getLastAlert()).toMatchObject({
+        title: "laptop is the Manager's home",
+        message: 'Choose a new home for the Manager before removing laptop.',
+      });
+      await pressAlertButton('Choose new home');
+      expect(routerMock.push).toHaveBeenCalledWith({
+        pathname: '/settings/[page]',
+        params: { page: 'manager' },
+      });
+      expect(api.removeHost).not.toHaveBeenCalled();
+    });
+
+    it('the only host is removed without asking about the Manager', async () => {
+      resetHosts();
+      reportHost('h1', { hostName: 'laptop' });
+      const r = render(<HostDetail hostId="h1" />);
+      await askToRemove(r);
+      expect(__getLastAlert()?.title).toBe('Remove laptop?');
+      expect(api.managerHome).not.toHaveBeenCalled();
     });
 
     it('removed from elsewhere while open (host.removed): says it is gone and goes back', async () => {
