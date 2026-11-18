@@ -46,7 +46,6 @@ import {
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { isAbsolute, join } from 'node:path';
-import { hostname } from 'node:os';
 import {
   realpathSync,
   existsSync,
@@ -2267,7 +2266,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
       resources: process.resourcesPath,
       execPath: process.execPath,
       relayUrl: process.env['PATCH_RELAY_URL'] ?? DEFAULT_RELAY_URL,
-      label: `${app.getName()} on ${hostname()}`,
+      label: friendlyComputerName(),
       ui,
       installHost: (origin, code, name) =>
         installLocalHost({ serverUrl: origin, code, name, home: app.getPath('home') }),
