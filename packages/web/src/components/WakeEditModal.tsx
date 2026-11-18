@@ -24,14 +24,19 @@ export function WakeEditModal({
   onClose,
 }: {
   chatId: string;
-  wake: Wake;
+  /** The pending wake to edit; omitted to arm a new loop or one-shot wake. */
+  wake?: Wake;
   onClose: () => void;
 }): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
-  const isLoop = wake.every !== undefined;
-  const [message, setMessage] = useState(wake.message);
-  const [every, setEvery] = useState(isLoop ? formatEvery(wake.every!).replace(/ /g, '') : '');
-  const initialAt = toLocalInput(wake.fireAt);
+  const creating = wake === undefined;
+  const [loopMode, setLoopMode] = useState(creating ? true : wake.every !== undefined);
+  const isLoop = loopMode;
+  const [message, setMessage] = useState(wake?.message ?? '');
+  const [every, setEvery] = useState(
+    wake?.every !== undefined ? formatEvery(wake.every).replace(/ /g, '') : creating ? '10m' : '',
+  );
+  const initialAt = toLocalInput(wake?.fireAt ?? Date.now() + 3_600_000);
   const [at, setAt] = useState(initialAt);
   const [saving, setSaving] = useState(false);
 
@@ -44,7 +49,7 @@ export function WakeEditModal({
         await api.setLoop(chatId, {
           message,
           every: every.trim(),
-          ...(wake.notAfter !== undefined
+          ...(wake?.notAfter !== undefined
             ? { notAfter: new Date(wake.notAfter).toISOString() }
             : {}),
         });
@@ -52,7 +57,9 @@ export function WakeEditModal({
         // An untouched time keeps the exact original fire time (the input only
         // has minute resolution).
         const iso =
-          at === initialAt ? new Date(wake.fireAt).toISOString() : new Date(at).toISOString();
+          wake && at === initialAt
+            ? new Date(wake.fireAt).toISOString()
+            : new Date(at).toISOString();
         await api.setLoop(chatId, { message, at: iso });
       }
       onClose();
@@ -70,12 +77,36 @@ export function WakeEditModal({
         data-testid="wake-edit-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Edit wake"
+        aria-label={creating ? 'Set loop or wake' : 'Edit wake'}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose();
         }}
       >
-        <h2 className="modal-title">Edit wake</h2>
+        <h2 className="modal-title">{creating ? 'Set loop or wake' : 'Edit wake'}</h2>
+        {creating ? (
+          <div className="wake-edit-field" role="radiogroup" aria-label="Kind">
+            <label>
+              <input
+                type="radio"
+                name="wake-kind"
+                data-testid="wake-edit-kind-loop"
+                checked={loopMode}
+                onChange={() => setLoopMode(true)}
+              />{' '}
+              Loop (repeats)
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="wake-kind"
+                data-testid="wake-edit-kind-at"
+                checked={!loopMode}
+                onChange={() => setLoopMode(false)}
+              />{' '}
+              Wake once
+            </label>
+          </div>
+        ) : null}
         <label className="wake-edit-field">
           <span>Message</span>
           <textarea

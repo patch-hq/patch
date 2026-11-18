@@ -46,6 +46,7 @@ import {
   SquareTerminal,
   X,
   Volume2,
+  Clock,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
 import { JobTickChip } from './JobTickBar.js';
@@ -63,6 +64,7 @@ import { openChatInNewWindow } from '../lib/newWindow.js';
 import { SnoozeMenu } from './SnoozeMenu.js';
 import { MoveChatModal } from './MoveChatModal.js';
 import { GoalEditor, planOf, type GoalDraft } from './GoalEditor.js';
+import { WakeEditModal } from './WakeEditModal.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { failed } from '../lib/errorCopy.js';
@@ -213,6 +215,7 @@ export function ChatHeader({
   // The ⋯ overflow menu (spec/14 § Chat panel header). Same dismissal contract
   // as every other anchored pop-up: click-off and Esc.
   const [menuOpen, setMenuOpen] = useState(false);
+  const [wakeOpen, setWakeOpen] = useState(false);
   // spec/04 § Moving a chat to another host — the Move dialog.
   const [moveOpen, setMoveOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -628,6 +631,19 @@ export function ChatHeader({
                     <Copy size={14} aria-hidden />
                     Copy chat ID
                   </button>
+                  <button
+                    type="button"
+                    className="head-menu-item"
+                    data-testid="action-set-wake"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setWakeOpen(true);
+                    }}
+                  >
+                    <Clock size={14} aria-hidden />
+                    Loop or wake…
+                  </button>
                   {canAddTasks ? (
                     <button
                       type="button"
@@ -983,6 +999,7 @@ export function ChatHeader({
             onClose={() => setGoalOpen(false)}
           />
         ) : null}
+        {wakeOpen ? <WakeEditModal chatId={row.chatId} onClose={() => setWakeOpen(false)} /> : null}
       </header>
     </>
   );

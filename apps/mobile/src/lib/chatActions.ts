@@ -41,6 +41,7 @@ export function chatKebabItems(chatId: string, state: ChatMenuState): string[] {
   const items = ['New chat', state.readAll ? 'Stop reading everything' : 'Read everything aloud'];
   if (!isReadOnlyMirrorThread(chatId)) items.push('Call', 'Tools', 'Documents');
   if (state.noTasks) items.push('Add tasks');
+  if (!isReadOnlyMirrorThread(chatId)) items.push('Loop or wake…');
   if (isReservedSpecialThread(chatId)) {
     items.push(state.disabled ? 'Enable' : 'Disable', 'Clear context');
     return items;
