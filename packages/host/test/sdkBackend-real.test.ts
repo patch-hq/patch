@@ -891,6 +891,33 @@ describe('realRun — one-shot vs persistent dispatch', () => {
     );
     expect(calls[0]!.prompt).toBe('a');
   });
+
+  it('waits for a Claude Code install in progress before starting the query', async () => {
+    let queried = false;
+    const mod = await loadRealBackend(() => {
+      queried = true;
+      return (async function* () {
+        yield { type: 'result', session_id: 's' };
+      })();
+    });
+    let finish!: () => void;
+    mod.setClaudeInstallGate(new Promise<void>((r) => (finish = r)));
+    const run = drain(
+      mod.createRealSdkBackend().run({
+        prompt: 'a',
+        cwd: '/tmp',
+        chatId: 'c1',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(queried).toBe(false);
+    mod.setClaudeInstallGate(undefined);
+    finish();
+    await run;
+    expect(queried).toBe(true);
+  });
 });
 
 // ---- persistentRun / openPersistSession ------------------------------------

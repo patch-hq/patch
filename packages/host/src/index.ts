@@ -144,6 +144,7 @@ import {
   createMockSdkBackend,
   createRealSdkBackend,
   forgetClaudeExecutable,
+  setClaudeInstallGate,
   type LimitFacts,
   type SdkBackend,
 } from './sdkBackend.js';
@@ -5265,9 +5266,16 @@ async function startHost(
       claudeProvision = { state: 'installing' };
       emit(describeHost());
       logger.info('claude-install: this host has no Claude Code; installing it');
-      const result = await (testHooks?.installClaudeCode
+      const installing = testHooks?.installClaudeCode
         ? testHooks.installClaudeCode(homedir())
-        : installClaudeCode({ home: homedir() }));
+        : installClaudeCode({ home: homedir() });
+      setClaudeInstallGate(
+        installing.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+      const result = await installing.finally(() => setClaudeInstallGate(undefined));
       const installed = result.ok ? resolveClaude() : undefined;
       if (installed === undefined) {
         const error = result.ok
