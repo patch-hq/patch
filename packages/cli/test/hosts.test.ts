@@ -130,3 +130,14 @@ test('withHost: a remote call carries its machine id in the body, a local one do
   assert.deepEqual(withHost({ componentId: 'x' }, 'd-abc'), { componentId: 'x', hostId: 'd-abc' });
   assert.deepEqual(withHost({ componentId: 'x' }, undefined), { componentId: 'x' });
 });
+
+test('isNotRelayable recognises the relay refusal so remove can point to Settings', async () => {
+  const { isNotRelayable } = await import('../src/commands/hosts.js');
+  assert.equal(
+    isNotRelayable(
+      new Error('path_not_relayable: /api/auth/revoke is not available through a host'),
+    ),
+    true,
+  );
+  assert.equal(isNotRelayable(new Error('boom')), false);
+});
