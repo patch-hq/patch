@@ -662,7 +662,13 @@ async function startHost(
   }
   const oauth = bootstrapClaudeOAuth(oauthOpts);
   if (oauth.error) {
-    logger.error({ err: oauth.error }, 'patch-daemon: Claude OAuth not ready');
+    // Not an error yet: a new host's accounts arrive in the first settings
+    // snapshot seconds after connecting. It is re-checked, and reported as an
+    // error if still missing, once that snapshot has been applied.
+    logger.warn(
+      { err: oauth.error },
+      'patch-daemon: Claude OAuth not ready; waiting for the first account sync',
+    );
   } else {
     logger.info({ source: oauth.credentials?.sourcePath }, 'patch-daemon: Claude OAuth loaded');
   }
@@ -2148,6 +2154,15 @@ async function startHost(
    * cannot be applied is named in the returned error, and the rest still take
    * effect, so one refused key does not leave every other setting stale.
    */
+  let firstSnapshotApplied = false;
+  const warmModelCatalog = (when: string): void => {
+    void modelCatalog.get().catch((err: unknown) => {
+      logger.warn(
+        { err: (err as Error).message },
+        `model catalogue read failed on ${when}; pickers open empty until it succeeds`,
+      );
+    });
+  };
   const applySnapshot = async (snapshot: SettingsSnapshotEvent): Promise<string | undefined> => {
     const errors: string[] = [];
     const part = async (name: string, run: () => void | Promise<void>): Promise<void> => {
@@ -2161,6 +2176,16 @@ async function startHost(
         );
       }
     };
+    // Provider keys go first: a speech engine named in the settings is checked
+    // against the keys this snapshot carries, so they must already be held.
+    await part('provider keys', () => {
+      try {
+        providerKeys.replaceAll(snapshot.secrets.providerKeys);
+      } catch (err) {
+        if (err instanceof ProviderKeyError) throw new Error(err.message);
+        throw err;
+      }
+    });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
     await part('Claude accounts', () => {
       const before = JSON.stringify(readPatchStore(oauthOpts)?.accounts ?? []);
@@ -2182,16 +2207,21 @@ async function startHost(
       }
     });
     await part('OpenAI accounts', () => codexAccounts.applyShared(snapshot.secrets.codex));
-    await part('provider keys', () => {
-      try {
-        providerKeys.replaceAll(snapshot.secrets.providerKeys);
-      } catch (err) {
-        if (err instanceof ProviderKeyError) throw new Error(err.message);
-        throw err;
-      }
-    });
     link.send(buildAccountReport());
     publishHost();
+    if (!firstSnapshotApplied) {
+      firstSnapshotApplied = true;
+      // The first account and key sync is in: only now is a missing credential
+      // or an unreadable catalogue a real fault rather than a host still starting.
+      const result = await resolveOAuth();
+      if (!result.ok) {
+        logger.error(
+          { err: result.reason },
+          'patch-daemon: Claude OAuth not ready after the first account sync',
+        );
+      }
+      warmModelCatalog('first sync');
+    }
     logger.info({ version: snapshot.version, errors }, 'shared settings: snapshot applied');
     return errors.length ? errors.join('; ') : undefined;
   };
@@ -2499,12 +2529,9 @@ async function startHost(
       // anything: the model a model-less spawn takes is the account default the
       // server pushes, not the newest entry of whatever catalogue this host
       // happened to read first.
-      void modelCatalog.get().catch((err: unknown) => {
-        logger.warn(
-          { err: (err as Error).message },
-          'model catalogue read failed on connect; pickers open empty until it succeeds',
-        );
-      });
+      // A host that has not yet had its first account sync has nothing to read
+      // the catalogue with; the first snapshot warms it instead.
+      if (firstSnapshotApplied) warmModelCatalog('connect');
       // spec/15 § Secrets: publish the host-owned secret set so every
       // surface's editor is populated from the same source on (re)connect.
       sender({ type: 'secrets.list', secrets: secretsStore.list() });
