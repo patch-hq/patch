@@ -33,7 +33,7 @@ export function KeepRunningGroup(): JSX.Element | null {
         <Row title="Open at login">
           <Toggle
             testid="keep-running-login"
-            label="Open at login"
+            ariaLabel="Open at login"
             checked={state?.openAtLogin ?? false}
             disabled={state === null}
             onChange={(v) => set({ openAtLogin: v })}
@@ -46,7 +46,7 @@ export function KeepRunningGroup(): JSX.Element | null {
       >
         <Toggle
           testid="keep-running-awake"
-          label="Keep this computer awake while plugged in"
+          ariaLabel="Keep this computer awake while plugged in"
           checked={state?.keepAwake ?? false}
           disabled={state === null}
           onChange={(v) => set({ keepAwake: v })}

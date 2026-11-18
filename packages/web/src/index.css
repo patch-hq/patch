@@ -9719,6 +9719,18 @@ button.view-file-download {
 .set-nav .set-label {
   margin: 14px 10px 4px;
 }
+.set-nav button.set-label {
+  width: auto;
+  padding: 0;
+  margin: 14px 10px 4px;
+  border-radius: 0;
+  background: none;
+  justify-content: flex-start;
+  gap: 4px;
+}
+.set-nav button.set-label:disabled {
+  cursor: default;
+}
 .set-nav button {
   display: flex;
   align-items: center;
