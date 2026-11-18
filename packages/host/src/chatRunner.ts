@@ -921,6 +921,8 @@ export interface SpawnChatOptions {
  * Its length IS the retry ceiling.
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
+/** A credit wait longer than this, or with no known end, is reported as an error row. */
+const LONG_CREDIT_WAIT_MS = 24 * 60 * 60 * 1000;
 
 /** How often a turn held for a sleeping host asks whether it has woken. */
 const WAKE_POLL_MS = 15_000;
@@ -11463,6 +11465,19 @@ export class Daemon {
             };
             this.chatState.setLastError(chatId, detail);
             this.chatState.setActivity(chatId, 'errored');
+            // A wait that is not coming back soon is an error to read, not a
+            // pause: a cancelled account resets weeks away, and the chat sat
+            // empty with only the banner to say why (18 Nov 2026). A short
+            // wait stays quiet — the transcript's pause bubble covers it.
+            if (resumeAt === undefined || resumeAt - now > LONG_CREDIT_WAIT_MS) {
+              this.emit({
+                type: 'chat.error',
+                chatId,
+                error: { code: 'sdk_error', message: reportedMsg },
+                seq: this.bumpSeq(chatId),
+                ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}),
+              });
+            }
             // AND ON DISK — not as `status`, which stays `active` because a
             // parked turn is a chat with work owed rather than a dead one (the
             // lifecycle status is what archives and sidebars read), but the

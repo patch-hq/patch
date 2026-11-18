@@ -267,3 +267,27 @@ describe('credit stays with the provider that owns it', () => {
     daemon.shutdown();
   });
 });
+
+describe('out of credit with no way back soon: an error row, not just a banner', () => {
+  it('posts a chat.error when no reset is stated', async () => {
+    const { daemon, events, folder } = setup({ failWith: NO_RESET_SPEND_LIMIT });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+
+    const errors = events.filter((e) => e.type === 'chat.error');
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Extract<WireEvent, { type: 'chat.error' }>).error.message).toMatch(
+      /limit|credit|usage/i,
+    );
+    daemon.shutdown();
+  });
+
+  it('stays quiet when the reset is hours away', async () => {
+    const { daemon, events, folder } = setup({ failWith: LONDON_SPEND_LIMIT });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+
+    expect(events.filter((e) => e.type === 'chat.error')).toHaveLength(0);
+    daemon.shutdown();
+  });
+});
