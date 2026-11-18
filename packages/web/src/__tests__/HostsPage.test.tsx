@@ -282,7 +282,7 @@ describe('Settings → Hosts', () => {
     expect(screen.getByTestId('host-host-a-backend-claude-code-connect')).toBeInTheDocument();
   });
 
-  it('a genuine host fault is said in words, with the raw message behind Details', () => {
+  it('a backend Patch is about to install says so, with the raw message behind Details', () => {
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [
@@ -300,13 +300,26 @@ describe('Settings → Hosts', () => {
     });
     renderPage('hosts');
     const row = screen.getByTestId('host-host-a-backend-codex');
-    expect(row).toHaveTextContent('Not installed on this machine');
+    expect(row).toHaveTextContent('Installing…');
+    expect(row).not.toHaveTextContent('Not installed');
     expect(row).not.toHaveTextContent('/usr/bin/codex');
     expect(row).not.toHaveTextContent('absent');
     fireEvent.click(screen.getByTestId('host-host-a-backend-codex-details-toggle'));
     expect(screen.getByTestId('host-host-a-backend-codex-details')).toHaveTextContent(
       '/usr/bin/codex',
     );
+  });
+
+  it('an absent backend with no account reads as installing on connect, not a fault', () => {
+    loadShared();
+    reportHost('host-a', {
+      hostName: 'laptop',
+      backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'absent' }],
+    });
+    renderPage('hosts');
+    const row = screen.getByTestId('host-host-a-backend-claude-code');
+    expect(row).toHaveTextContent('Installs when you connect Claude Code');
+    expect(row).not.toHaveTextContent('Not installed');
   });
 
   it('Sign in on a Claude backend adds the pasted token for every host', async () => {
@@ -349,7 +362,9 @@ describe('Settings → Hosts', () => {
     usePresenceStore.getState().setHostOnline('host-a', true);
     loadShared({ version: 5, hosts: [{ hostId: 'host-a', appliedVersion: 5 }] });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Has your latest settings');
+    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent(
+      'Has your latest settings',
+    );
     act(() => {
       loadShared({
         version: 6,
