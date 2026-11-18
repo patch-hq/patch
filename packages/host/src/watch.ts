@@ -480,8 +480,12 @@ export class WatchScheduler {
     for (const chatId of [...this.activeChats]) {
       const records = this.list(chatId);
       if (!records.some((r) => r.status === 'running')) this.activeChats.delete(chatId);
-      for (const rec of records) {
-        if (rec.status !== 'running') continue;
+      for (const listed of records) {
+        // `records` is a snapshot and earlier iterations awaited (deliveries can
+        // take a whole agent turn): re-read so a watch stopped since is left
+        // stopped, not overwritten with a stale 'running' record.
+        let rec = this.runningNow(listed);
+        if (!rec) continue;
         if (
           rec.timeoutSec !== undefined &&
           this.deps.now() - rec.startedAt > rec.timeoutSec * 1000
@@ -491,6 +495,9 @@ export class WatchScheduler {
         }
         const scanned = await this.wakeOnMatches(rec);
         await this.checkInIfDue(scanned);
+        // The deliveries above may have let the agent stop the watch.
+        rec = this.runningNow(rec);
+        if (!rec) continue;
         const handle = this.liveHandles.get(rec.taskId);
         if (handle) {
           // Node tracks a spawned child's exit internally regardless of
@@ -509,6 +516,12 @@ export class WatchScheduler {
         }
       }
     }
+  }
+
+  /** The record as it is on disk now, or null unless it is still running. */
+  private runningNow(rec: WatchRecord): WatchRecord | null {
+    const fresh = this.readOne(rec.chatId, rec.taskId);
+    return fresh !== null && fresh.status === 'running' ? fresh : null;
   }
 
   /**
