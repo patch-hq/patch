@@ -1047,6 +1047,16 @@ describe('Settings → Voice', () => {
       expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Add an ElevenLabs key');
     });
 
+    it('chooses an ElevenLabs model and writes it to the account', async () => {
+      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      loadShared({ settings: { ttsBackend: 'elevenlabs' } });
+      renderSettings('/settings/voice');
+      const select = await screen.findByTestId('elevenlabs-model');
+      fireEvent.change(select, { target: { value: 'eleven_v3' } });
+      await waitFor(() => expect(server.writes).toContainEqual({ elevenLabsModel: 'eleven_v3' }));
+    });
+
     it('says each host uses its own default until a voice is chosen', async () => {
       vi.stubGlobal('fetch', makeFetch());
       loadShared();

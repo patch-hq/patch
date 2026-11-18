@@ -67,6 +67,7 @@ const HOST_HELD_KEYS = [
   'kokoroVoice',
   'ttsBackend',
   'elevenLabsVoice',
+  'elevenLabsModel',
   'permissionModeDefault',
   'chatNameInterval',
   'titleGenerationEnabled',

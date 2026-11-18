@@ -21,6 +21,12 @@ export const ELEVENLABS_LIVE_MODEL = 'eleven_flash_v2_5';
 /** Higher-quality model: announcements and briefings, spoken once. */
 export const ELEVENLABS_ANNOUNCE_MODEL = 'eleven_multilingual_v2';
 
+export type ElevenLabsTtsModel =
+  | 'eleven_flash_v2_5'
+  | 'eleven_turbo_v2_5'
+  | 'eleven_multilingual_v2'
+  | 'eleven_v3';
+
 /** Voice Design model: turns a description into candidate voices. */
 export const ELEVENLABS_DESIGN_MODEL = 'eleven_ttv_v3';
 
@@ -42,6 +48,8 @@ export interface ElevenLabsVoice {
 
 export interface CreateElevenLabsOptions {
   apiKey: KeySource;
+  /** The model chosen in Settings, read per request; absent keeps the per-purpose defaults. */
+  getModel?: () => ElevenLabsTtsModel | undefined;
   logger: Logger;
   /** Called once per accepted request, with what it will bill. */
   onUsage?: (usage: SpeechUsage) => void;
@@ -190,7 +198,9 @@ export class ElevenLabsBackend implements KokoroBackend {
         'ElevenLabs is selected for speech but no voice is chosen. Pick one in Settings → Voice.',
       );
     }
-    const model = opts?.purpose === 'announce' ? ELEVENLABS_ANNOUNCE_MODEL : ELEVENLABS_LIVE_MODEL;
+    const model =
+      this.opts.getModel?.() ??
+      (opts?.purpose === 'announce' ? ELEVENLABS_ANNOUNCE_MODEL : ELEVENLABS_LIVE_MODEL);
     const abort = new AbortController();
     let res: Response;
     try {

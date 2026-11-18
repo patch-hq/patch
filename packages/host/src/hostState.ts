@@ -66,6 +66,9 @@ const HostStateFile = z
     /** Speech engine and ElevenLabs voice (`host.settings`). Absent = Kokoro. */
     ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
     elevenLabsVoice: z.string().min(1).optional(),
+    elevenLabsModel: z
+      .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
+      .optional(),
     /**
      * Account's per-surface voice config (`host.settings` → `voiceConfig`),
      * mirrored down the same way `defaultModel` is. Persisted so a host

@@ -2440,6 +2440,10 @@ export const SharedSettings = z
     ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
     /** The ElevenLabs voice id to speak with, from the account's own list. */
     elevenLabsVoice: z.string().min(1).optional(),
+    /** The ElevenLabs speech model. Absent: fast model for conversation, richer one for announcements. */
+    elevenLabsModel: z
+      .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
+      .optional(),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -2989,6 +2993,9 @@ export const HostInfoEvent = z
     /** The speech engine and ElevenLabs voice this host is using (`host.settings`). */
     ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
     elevenLabsVoice: z.string().min(1).optional(),
+    elevenLabsModel: z
+      .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
+      .optional(),
     /**
      * The voices on this host's ElevenLabs account, cloned and designed ones
      * included. Present only while the host holds a key; `elevenLabsVoicesError`
