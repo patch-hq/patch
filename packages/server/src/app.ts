@@ -2102,6 +2102,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       ...(opts.exchangeClaudeCode ? { exchangeClaudeCode: opts.exchangeClaudeCode } : {}),
       ...(opts.listenForClaudeSignIn ? { listenForClaudeSignIn: opts.listenForClaudeSignIn } : {}),
       ...(opts.chatgptDevice ? { chatgptDevice: opts.chatgptDevice } : {}),
+      ...(opts.nowMs ? { now: opts.nowMs } : {}),
     });
 
   // ---- link preview REST route (spec/14 § Message links) ----
