@@ -10432,8 +10432,12 @@ button.set-row-open:focus-visible {
   background: var(--line);
 }
 .set-bars-empty,
-.set-bars-reason {
+.set-bars-reason,
+.set-bars-read-at {
   grid-column: 1 / -1;
+}
+.set-bars-read-at {
+  white-space: nowrap;
 }
 
 /* Memories: search + type pills, then list | detail. */

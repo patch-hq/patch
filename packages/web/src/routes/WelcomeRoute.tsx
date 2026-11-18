@@ -169,6 +169,10 @@ function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
   return (
     <section className="welcome-step" data-testid="welcome-providers">
       <h1>Connect an AI</h1>
+      <p className="welcome-note" data-testid="welcome-plans-note">
+        Works with a Claude Pro or Max plan, or a ChatGPT Plus or Pro plan. An API key is billed
+        separately by the provider.
+      </p>
       <ProviderCards />
       {connected === 0 ? (
         <p className="welcome-note" data-testid="welcome-skip-note">
