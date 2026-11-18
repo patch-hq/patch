@@ -1,6 +1,6 @@
-// Send is refused while every account on the chat's host is out of usage — the
-// turn would only park. Unknown is not spent: an account with no reading, or
-// one still usable, never blocks.
+// Send is never blocked by usage. While every account on the chat's host is out
+// of usage the message is accepted and queued (the host parks the turn); the
+// tooltip says so.
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
@@ -49,15 +49,15 @@ afterEach(() => {
 });
 
 describe('Composer — out of usage', () => {
-  it('disables Send and ignores Enter when every account is spent', () => {
+  it('keeps Send enabled and sends on Enter when every account is spent', () => {
     reportAccounts('d1', [spent('a'), spent('b')]);
     const calls: string[] = [];
     const input = mount(async (m) => (calls.push(m), true));
     const send = screen.getByTestId('send-btn') as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
-    expect(send.title).toMatch(/out of usage/i);
+    expect(send.disabled).toBe(false);
+    expect(send.title).toMatch(/queue/i);
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(['hello']);
   });
 
   it('keeps Send enabled while one account has usage left', () => {
