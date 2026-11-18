@@ -383,7 +383,11 @@ describe('an account switch carries the conversation over', () => {
               account = 'a2';
               throw limitError(SPEND_LIMIT);
             }
-            yield { type: 'assistant', content: 'reply', raw: {} };
+            yield {
+              type: 'assistant',
+              content: 'reply',
+              raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } },
+            };
             yield { type: 'result', sessionId: 'sess-a', content: 'reply', raw: {} };
           }
           return gen();
@@ -398,6 +402,10 @@ describe('an account switch carries the conversation over', () => {
     });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    // The reseed carries what the chat answered, so the answer must be logged first.
+    await vi.waitFor(() =>
+      expect(events.some((e) => e.type === 'chat.message' && e.role === 'assistant')).toBe(true),
+    );
     failNext = true;
     await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
@@ -430,7 +438,11 @@ describe('an account switch on a chat with no recorded session id', () => {
           seen.push(opts);
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             // The first turn answers but the provider never hands back a session id.
-            yield { type: 'assistant', content: 'reply', raw: {} };
+            yield {
+              type: 'assistant',
+              content: 'reply',
+              raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } },
+            };
             yield { type: 'result', content: 'reply', raw: {} };
           }
           return gen();
@@ -445,6 +457,7 @@ describe('an account switch on a chat with no recorded session id', () => {
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     await vi.waitFor(() => expect(seen.length).toBe(1));
+    await vi.waitFor(() => expect(daemon.chatState.get(chatId)?.activity).toBe('idle'));
     account = 'a2';
     await daemon.sendInput({ chatId, message: 'follow up', localId: 'l2' });
     await vi.waitFor(() => expect(seen.length).toBe(2));

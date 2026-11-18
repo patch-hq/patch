@@ -44,6 +44,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -346,6 +347,35 @@ export async function bundle(esb, entry, outfile) {
   });
 }
 
+/**
+ * Replace byte-identical regular files in `dir` (not recursive) with relative
+ * symlinks to the one with the longest name (the fully versioned one). Run before
+ * signing: the signer skips symlinks, so the library is signed once, and the
+ * soname still resolves. Returns the number of files replaced.
+ */
+export function linkDuplicateFiles(dir) {
+  const byHash = new Map();
+  for (const name of readdirSync(dir).sort()) {
+    const p = join(dir, name);
+    const st = lstatSync(p);
+    if (!st.isFile() || st.size < 1024 * 1024) continue; // only big files are worth it
+    const hash = createHash('sha256').update(readFileSync(p)).digest('hex');
+    byHash.set(hash, [...(byHash.get(hash) ?? []), name]);
+  }
+  let replaced = 0;
+  for (const names of byHash.values()) {
+    if (names.length < 2) continue;
+    const keep = [...names].sort((a, b) => b.length - a.length || a.localeCompare(b))[0];
+    for (const name of names) {
+      if (name === keep) continue;
+      rmSync(join(dir, name));
+      symlinkSync(keep, join(dir, name));
+      replaced++;
+    }
+  }
+  return replaced;
+}
+
 /** Copy the platform's onnxruntime-node into `native/`. */
 function copyNativeAddons(vendor, t, outDir) {
   const src = requireDir(join(vendor, 'onnxruntime-node'), 'vendored onnxruntime-node');
@@ -360,6 +390,9 @@ function copyNativeAddons(vendor, t, outDir) {
   const binDir = join(dest, 'bin', 'napi-v6', t.platform, t.arch);
   mkdirSync(binDir, { recursive: true });
   cpSync(prebuilt, binDir, { recursive: true });
+  // The prebuild carries its library under both its full and its soname name,
+  // as two regular files: 38 MB twice (and again when it is signed).
+  linkDuplicateFiles(binDir);
   // Its one runtime dependency is pure JS and platform-independent.
   const common = requireDir(
     join(

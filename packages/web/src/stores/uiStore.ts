@@ -823,6 +823,8 @@ interface UiState {
   sidebarMini: boolean;
   setSidebarMini(v: boolean): void;
   cheatSheetOpen: boolean;
+  /** The "Getting started" guide modal. */
+  guideOpen: boolean;
   /**
    * Connection diagnostics screen opened on demand from a banner's Diagnose
    * action (spec/12 § Connection diagnostics screen). The BLOCKING variant is
@@ -981,6 +983,7 @@ interface UiState {
   toggleFolderCollapsed(folder: string): void;
   setSidebarCollapsed(v: boolean): void;
   setCheatSheetOpen(v: boolean): void;
+  setGuideOpen(v: boolean): void;
   setDiagnosticsOpen(v: boolean): void;
   closeDiagnosticsBlocking(): void;
   setSearchQuery(q: string): void;
@@ -1126,6 +1129,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   sidebarCollapsed: loadSidebarHiddenParam(),
   sidebarMini: loadBool(SIDEBAR_MINI_KEY),
   cheatSheetOpen: false,
+  guideOpen: false,
   diagnosticsOpen: false,
   diagnosticsBlockingClosed: false,
   searchQuery: '',
@@ -1239,6 +1243,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setCheatSheetOpen(v) {
     set({ cheatSheetOpen: v });
+  },
+  setGuideOpen(v) {
+    set({ guideOpen: v });
   },
   setDiagnosticsOpen(v) {
     set({ diagnosticsOpen: v });

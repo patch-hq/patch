@@ -1037,7 +1037,7 @@ export const Composer = forwardRef(function Composer(
   // clicking back into the input (or its actions) doesn't dismiss.
   const formRef = useRef<HTMLFormElement>(null);
   useDismissOnClickOff(showSkillMenu, [formRef], () => setSlashDismissed(true));
-  // Run a job (spec/14 § Composer — Run a job): `!` opens a menu of jobs where
+  // Run a job (spec/14 § Composer — Run a job): `#` opens a menu of jobs where
   // `/` opens skills. Picking one fires it now (POST /api/jobs/:id/run, the
   // Jobs page's "Run now") and removes the token; no chat turn is sent. The
   // list is re-read on every open. NO FALLBACK: a failed read or run is shown.

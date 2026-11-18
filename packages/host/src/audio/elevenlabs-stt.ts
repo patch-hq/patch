@@ -26,6 +26,17 @@ const SCRIBE_REALTIME_WSS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 const SAMPLE_RATE = 16000;
 /** How long a commit waits for Scribe to hand back the last words. */
 export const SCRIBE_COMMIT_TIMEOUT_MS = 3000;
+/**
+ * Scribe ends a session (`queue_overflow`) when audio arrives faster than real
+ * time. Backlogged audio (a phone reconnecting and flushing what it held) is
+ * therefore paced: at most this many seconds of audio per second of wall clock,
+ * after a one-second head start. Slightly over 1 so a backlog drains while the
+ * live mic keeps arriving.
+ */
+export const SCRIBE_SEND_RATE = 1.25;
+const SCRIBE_SEND_LEAD_MS = 1000;
+/** How long a commit waits for the paced backlog to be sent before giving up. */
+const SCRIBE_DRAIN_TIMEOUT_MS = 60_000;
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -58,7 +69,12 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
   private open = false;
   private closed = false;
   private failed = false;
-  private readonly pending: string[] = [];
+  /** Audio not yet sent, paced to real time (see SCRIBE_SEND_RATE). */
+  private readonly queue: Int16Array[] = [];
+  private sentSamples = 0;
+  private paceStart = 0;
+  private paceTimer: ReturnType<typeof setTimeout> | null = null;
+  private drainWaiter: (() => void) | null = null;
   private readonly committed: string[] = [];
   private partial = '';
   private lastText = '';
@@ -70,7 +86,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     private readonly deps: ScribeStreamDeps,
     private readonly handlers: {
       onText: (text: string) => void;
-      onError: (message: string) => void;
+      /** `restartable`: Scribe ended this session itself; a new one may be opened. */
+      onError: (message: string, restartable?: boolean) => void;
     },
   ) {}
 
@@ -114,7 +131,7 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
         return;
       }
       this.open = true;
-      for (const m of this.pending.splice(0)) ws.send(m);
+      this.drain();
       this.openWaiter?.();
     });
     ws.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
@@ -139,6 +156,7 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
       if (!this.closed) {
         this.fail(
           `ElevenLabs closed the connection (${code}${reason.length ? `: ${String(reason)}` : ''})`,
+          true,
         );
       }
     });
@@ -158,6 +176,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     } else if (NOTHING_TO_COMMIT.has(type)) {
       this.deps.logger.warn({ type }, 'scribe: nothing to commit');
       this.commitWaiter?.();
+    } else if (type === 'queue_overflow') {
+      this.fail(`ElevenLabs reported ${type}: ${msg.error ?? 'no detail'}`, true);
     } else if (type === 'error' || type.endsWith('_error') || msg.error !== undefined) {
       this.fail(`ElevenLabs reported ${type || 'an error'}: ${msg.error ?? 'no detail'}`);
     } else if (
@@ -172,13 +192,45 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
   push(pcm: Int16Array): void {
     if (this.closed || this.failed) return;
     this.samples += pcm.length;
-    const audio = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64');
-    this.send({
-      message_type: 'input_audio_chunk',
-      audio_base_64: audio,
-      commit: false,
-      sample_rate: SAMPLE_RATE,
-    });
+    this.queue.push(pcm);
+    this.drain();
+  }
+
+  /** Audio that was queued but never sent: carried to the next session after a restart. */
+  takeUnsent(): Int16Array[] {
+    return this.queue.splice(0);
+  }
+
+  /** Sends queued audio up to the real-time budget, and schedules the rest. */
+  private drain(): void {
+    if (this.paceTimer) {
+      clearTimeout(this.paceTimer);
+      this.paceTimer = null;
+    }
+    if (!this.open || this.closed || this.failed) return;
+    if (this.paceStart === 0) this.paceStart = Date.now();
+    const budget = ((Date.now() - this.paceStart + SCRIBE_SEND_LEAD_MS) / 1000) * SAMPLE_RATE;
+    while (this.queue.length > 0) {
+      const next = this.queue[0]!;
+      if (this.sentSamples > 0 && this.sentSamples + next.length > budget * SCRIBE_SEND_RATE) break;
+      this.queue.shift();
+      this.sentSamples += next.length;
+      this.ws!.send(
+        JSON.stringify({
+          message_type: 'input_audio_chunk',
+          audio_base_64: Buffer.from(next.buffer, next.byteOffset, next.byteLength).toString(
+            'base64',
+          ),
+          commit: false,
+          sample_rate: SAMPLE_RATE,
+        }),
+      );
+    }
+    if (this.queue.length > 0) {
+      this.paceTimer = setTimeout(() => this.drain(), 50);
+    } else {
+      this.drainWaiter?.();
+    }
   }
 
   /**
@@ -196,6 +248,23 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
       if (this.failed) return;
       if (!this.open) {
         this.fail('the connection to ElevenLabs did not open in time');
+        return;
+      }
+    }
+    // Audio still being paced out must reach Scribe before the commit does.
+    if (this.queue.length > 0) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, SCRIBE_DRAIN_TIMEOUT_MS);
+        function done(): void {
+          clearTimeout(timer);
+          resolve();
+        }
+        this.drainWaiter = done;
+      });
+      this.drainWaiter = null;
+      if (this.closed || this.failed) return;
+      if (this.queue.length > 0) {
+        this.fail('the audio backlog did not reach ElevenLabs in time');
         return;
       }
     }
@@ -233,8 +302,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
 
   private send(msg: object): void {
     const raw = JSON.stringify(msg);
-    if (this.open) this.ws!.send(raw);
-    else this.pending.push(raw);
+    if (!this.open) throw new Error('scribe: send before the connection opened');
+    this.ws!.send(raw);
   }
 
   private emit(): void {
@@ -245,18 +314,22 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     this.handlers.onText(text);
   }
 
-  private fail(message: string): void {
+  private fail(message: string, restartable = false): void {
     if (this.closed || this.failed) return;
     this.failed = true;
+    if (this.paceTimer) clearTimeout(this.paceTimer);
     this.commitWaiter?.();
     this.openWaiter?.();
+    this.drainWaiter?.();
     this.deps.logger.error({ err: message }, 'scribe-realtime');
-    this.handlers.onError(message);
+    this.handlers.onError(message, restartable);
   }
 
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.paceTimer) clearTimeout(this.paceTimer);
+    this.drainWaiter?.();
     this.commitWaiter?.();
     this.ws?.close();
   }

@@ -1,31 +1,31 @@
-// jobToken — the `!` trigger that runs a job from the composer (spec/14 §
+// jobToken — the `#` trigger that runs a job from the composer (spec/14 §
 // Composer — Run a job). `/` is taken by skills and built-in commands, so jobs
-// get their own character. Same word-start rule as the `/` menu: the `!` must
+// get their own character. Same word-start rule as the `/` menu: the `#` must
 // begin the message or follow whitespace, and the token is active only while
 // the cursor sits at its end with no closing whitespace.
 
 export interface ActiveBangToken {
-  /** Index of the `!` itself. */
+  /** Index of the `#` itself. */
   start: number;
-  /** Everything typed after the `!` so far (may be empty). */
+  /** Everything typed after the `#` so far (may be empty). */
   query: string;
 }
 
 export function activeBangToken(text: string, cursor: number): ActiveBangToken | null {
-  const m = /(^|\s)!(\S*)$/.exec(text.slice(0, cursor));
+  const m = /(^|\s)#(\S*)$/.exec(text.slice(0, cursor));
   if (!m) return null;
   const query = m[2] ?? '';
   return { start: cursor - query.length - 1, query };
 }
 
-/** Remove the token (`!` + query) from `text`, leaving the rest untouched. */
+/** Remove the token (`#` + query) from `text`, leaving the rest untouched. */
 export function removeBangToken(
   text: string,
   token: ActiveBangToken,
   cursor: number,
 ): { text: string; cursor: number } {
   let end = cursor;
-  // Swallow one space left behind so "run !job now" doesn't keep a double space.
+  // Swallow one space left behind so "run #job now" doesn't keep a double space.
   if (token.start > 0 && /\s/.test(text[token.start - 1] ?? '') && /^\s/.test(text.slice(end))) {
     end += 1;
   }

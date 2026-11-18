@@ -592,6 +592,9 @@ function JobsEmpty(): JSX.Element {
         <path d="M172 46 c0 -18 8 -30 26 -34 c-2 18 -10 30 -26 34 z" className="empty-chat-leaf" />
       </svg>
       <h2 className="empty-chat-title">No jobs yet</h2>
+      <p className="empty-chat-line" data-testid="jobs-empty-line">
+        A job runs a prompt at set times or when a webhook fires. Use New job to make one.
+      </p>
     </div>
   );
 }

@@ -23,3 +23,9 @@ test('fails over budget and names the largest item', () => {
   assert.equal(r.ok, false);
   assert.match(r.report, /Resources\/host\/big\.bin/);
 });
+
+test('lists the largest items even when under budget', () => {
+  const r = checkSize(app(), 50);
+  assert.equal(r.ok, true);
+  assert.match(r.report, /Resources\/host\/big\.bin/);
+});

@@ -117,7 +117,9 @@ export function PadsPage(): JSX.Element {
       </header>
       {pads === null ? null : groups.length === 0 ? (
         <p className="jobs-no-matches" data-testid="pads-empty">
-          {query ? 'No pads match.' : 'No pads yet.'}
+          {query
+            ? 'No pads match.'
+            : 'No pads yet. A Pad is a design you can edit and send back to a chat; ask an agent to make one, or use New Pad.'}
         </p>
       ) : (
         groups.map(([app, pads]) => (

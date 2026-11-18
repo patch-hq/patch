@@ -1303,6 +1303,16 @@ function BottomNav(): JSX.Element {
           >
             Settings
           </OpenableLink>
+          <button
+            type="button"
+            className="nav-row nav-row-icon"
+            data-testid="nav-getting-started"
+            aria-label="Getting started guide"
+            title="Getting started guide"
+            onClick={() => useUiStore.getState().setGuideOpen(true)}
+          >
+            ?
+          </button>
         </div>
       </nav>
     </>

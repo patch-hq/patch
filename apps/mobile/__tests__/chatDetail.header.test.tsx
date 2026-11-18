@@ -295,6 +295,52 @@ describe('chat-detail header', () => {
     expect(routerMock.back).not.toHaveBeenCalled();
   });
 
+  // Previous / next buttons step through the Chats tab's order
+  // (spec/15 § Chat detail).
+  describe('previous / next chat buttons', () => {
+    function seedThree(): void {
+      const row = (chatId: string, lastUserActivity: number) => ({
+        chatId,
+        name: chatId,
+        folder: '~/project',
+        activity: 'idle' as const,
+        status: 'active' as const,
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+        lastUserActivity,
+      });
+      // Newest user activity first within a folder: c3, c2, c1.
+      useChatStore.getState().hydrate([row('c1', 1), row('c2', 2), row('c3', 3)]);
+    }
+
+    it('open the neighbour either side, replacing the open chat', () => {
+      seedThree();
+      __setLocalSearchParams({ chatId: 'c2' });
+      const r = renderRN(<ChatDetailScreen />);
+      findHost(r.root, byLabel('Next chat')).props.onPress();
+      expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c1');
+      findHost(r.root, byLabel('Previous chat')).props.onPress();
+      expect(routerMock.replace).toHaveBeenLastCalledWith('/chats/c3');
+    });
+
+    it('are disabled at the ends of the list', () => {
+      seedThree();
+      __setLocalSearchParams({ chatId: 'c3' });
+      const r = renderRN(<ChatDetailScreen />);
+      expect(findHost(r.root, byLabel('Previous chat')).props.disabled).toBe(true);
+      expect(findHost(r.root, byLabel('Next chat')).props.disabled).toBe(false);
+    });
+
+    it('are both disabled on a chat outside the live list', () => {
+      seedChat('c1', { status: 'archived' });
+      __setLocalSearchParams({ chatId: 'c1' });
+      const r = renderRN(<ChatDetailScreen />);
+      expect(findHost(r.root, byLabel('Previous chat')).props.disabled).toBe(true);
+      expect(findHost(r.root, byLabel('Next chat')).props.disabled).toBe(true);
+    });
+  });
+
   it('the hardware back press goes to the chat list too', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });

@@ -1297,6 +1297,7 @@ describe('reconnect with backoff', () => {
     const afterDrop = FakeWebSocket.instances.length;
     ws.reconnectNow();
     expect(FakeWebSocket.instances.length).toBe(afterDrop + 1);
+    FakeWebSocket.last().emitOpen();
     // The cancelled backoff timer must not ALSO fire a second dial.
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances.length).toBe(afterDrop + 1);

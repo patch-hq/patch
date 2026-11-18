@@ -160,7 +160,11 @@ describe('a turn resumed onto a session with no transcript', () => {
                 `Claude Code returned an error result: No conversation found with session ID: ${opts.resumeSessionId}`,
               );
             }
-            yield { type: 'assistant', content: 'done', raw: {} };
+            yield {
+              type: 'assistant',
+              content: 'done',
+              raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } },
+            };
             yield { type: 'result', sessionId: 'sess-dead', content: 'done', raw: {} };
           }
           return gen();

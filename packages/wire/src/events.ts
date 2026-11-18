@@ -2302,6 +2302,8 @@ export const SharedSettings = z
   .object({
     /** Whether half-finished features (the Manager, Batch) are shown. Off by default; Settings → Experimental features. */
     experimentalFeatures: z.boolean(),
+    /** Whether the first-run intro on a new chat has been dismissed. Per account; the "Getting started" guide stays reachable either way. */
+    introDismissed: z.boolean(),
     // ---- server-acted preferences ----
     /** Public metadata served at `/agent` for this deployment's Web Bot Auth identity. */
     agentIdentity: z
@@ -2492,6 +2494,7 @@ export type SharedSettingsPatch = z.infer<typeof SharedSettingsPatch>;
 
 export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   experimentalFeatures: false,
+  introDismissed: false,
   agentIdentity: {
     enabled: false,
     name: 'Patch',
@@ -7346,6 +7349,33 @@ export const PatchModelsResponseEvent = z
   .strict();
 export type PatchModelsResponseEvent = z.infer<typeof PatchModelsResponseEvent>;
 
+// `patch.backends.request` is server-originated: it backs `GET /api/hosts/backends`
+// (the CLI's `hosts backends --host`). The backend list and the machine's view
+// of the shared accounts are the host's own, so only that host can answer.
+export const PatchBackendsRequestEvent = z
+  .object({
+    type: z.literal('patch.backends.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** Stamped by the hub — the surface the response routes back to. */
+    ...forSurfaceIdField,
+  })
+  .strict();
+export type PatchBackendsRequestEvent = z.infer<typeof PatchBackendsRequestEvent>;
+
+/** Opaque to the wire: the host's own `backends.list()` / `backends.accounts()` rows. */
+export const PatchBackendsResponseEvent = z
+  .object({
+    type: z.literal('patch.backends.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    backends: z.array(z.record(z.unknown())),
+    accounts: z.array(z.record(z.unknown())),
+    ...forSurfaceIdField,
+  })
+  .strict();
+export type PatchBackendsResponseEvent = z.infer<typeof PatchBackendsResponseEvent>;
+
 // `patch.recurrence.translate.request` is server-originated: it backs
 // `POST /api/jobs/recurrence/translate` (spec/08 § Recurrence — the job
 // editor's natural-language schedule input). The host holds the Claude
@@ -9760,6 +9790,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'host.backend_add_account',
   'host.backend_usage_refresh',
   'patch.models.request',
+  'patch.backends.request',
   'patch.recurrence.translate.request',
   'patch.terminal.open',
   'patch.folders.browse.request',
@@ -10007,6 +10038,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchSkillsResponseEvent,
   PatchModelsRequestEvent,
   PatchModelsResponseEvent,
+  PatchBackendsRequestEvent,
+  PatchBackendsResponseEvent,
   PatchRecurrenceTranslateRequestEvent,
   PatchRecurrenceTranslateResponseEvent,
   PatchLinkSummaryRequestEvent,
@@ -10334,6 +10367,8 @@ export const EVENT_SCHEMAS = {
   'patch.skills.response': PatchSkillsResponseEvent,
   'patch.models.request': PatchModelsRequestEvent,
   'patch.models.response': PatchModelsResponseEvent,
+  'patch.backends.request': PatchBackendsRequestEvent,
+  'patch.backends.response': PatchBackendsResponseEvent,
   'patch.recurrence.translate.request': PatchRecurrenceTranslateRequestEvent,
   'patch.recurrence.translate.response': PatchRecurrenceTranslateResponseEvent,
   'patch.link_summary.request': PatchLinkSummaryRequestEvent,

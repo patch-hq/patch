@@ -2763,7 +2763,8 @@ a.ch-row:hover {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 7px 8px;
+  padding: 7px 4px;
+  min-width: 0;
   color: var(--ink-2);
   text-decoration: none;
   font-size: var(--text-min);
@@ -2772,6 +2773,12 @@ a.ch-row:hover {
 /* The Files row (spec/14 § Sidebar item 7) is a button, not a route Link —
    it opens a tab rather than navigating — so it needs the Link rows'
    browser-default resets undone. */
+/* The guide "?" is icon-sized: it keeps its width so the tabs row stays one
+   line inside the sidebar with Triage showing too. */
+.nav-row.nav-row-icon {
+  flex: 0 0 auto;
+  padding: 7px 8px;
+}
 button.nav-row {
   background: none;
   border: none;
@@ -18888,4 +18895,49 @@ a.drop-target {
   padding: 8px 14px;
   font-size: 14px;
   color: var(--ink-3);
+}
+
+.guide-purpose {
+  margin: 0 0 12px;
+}
+.guide-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.guide-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.guide-title {
+  font-weight: 600;
+}
+.guide-go {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 10px;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.first-run-intro {
+  max-width: 420px;
+  margin: 16px auto 0;
+  text-align: center;
+}
+.first-run-intro ul {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+.first-run-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
