@@ -17,7 +17,7 @@ import {
 import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
 import { LOCAL_BACKEND_ID } from './localModels.js';
-import { GEMINI_BACKEND_ID } from './geminiAgent.js';
+import { ACP_BACKEND_ID } from './acpRegistry.js';
 import type { SdkRunOptions } from './sdkBackend.js';
 
 /** The track of Patch's record handed to an adapter that takes one. */
@@ -117,17 +117,20 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     appendRunOptions: null,
     signedOutMessage: (_hostId, reason) => reason,
   },
-  // An ACP agent keeps its own session, account and quota; Patch sees none of them.
-  gemini: {
-    backendId: GEMINI_BACKEND_ID,
+  // An ACP agent (acpBackend.ts): its turn runs under the detached runner, its
+  // session is the agent's own and stays where the agent keeps it, and its
+  // credential is a provider key or the agent's own sign-in.
+  acp: {
+    backendId: ACP_BACKEND_ID,
     resolvesPermissionModeByModel: false,
     generatesStatus: false,
     rateLimitSweeps: false,
     turnRetrySafe: () => false,
-    limitMustStateReset: false,
+    // An agent's limit error states no reset: it fails visibly rather than parking.
+    limitMustStateReset: true,
     ownsSessionFile: false,
     sessionBoundToAccount: false,
-    detachedTurnRunner: false,
+    detachedTurnRunner: true,
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,

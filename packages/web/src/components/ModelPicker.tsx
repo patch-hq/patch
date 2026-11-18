@@ -119,7 +119,10 @@ export function ModelPicker({
   // The pop-up reads the sentence; the code stays one click down.
   const problem = humaniseError({ code: catalog.error }, 'models');
   // With no AI connected there is nothing to list, and the host's refusal is not news.
-  const noProvider = usePreferencesStore((s) => anyProviderConnected(s.shared)) === false;
+  // An ACP agent or a local model needs no account, so models the host does
+  // list are shown whatever the accounts say.
+  const noAccount = usePreferencesStore((s) => anyProviderConnected(s.shared)) === false;
+  const noProvider = noAccount && catalog.models.length === 0;
   // The model always reads by its short name (`Opus 5`), the same one setup
   // and the chat header use — with or without a catalogue, which is absent
   // until an AI is connected. An id with no short form (a model retired since

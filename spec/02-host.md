@@ -225,14 +225,9 @@ The Agent Client Protocol (ACP) adapter is the default: any ACP agent is added a
 a provider through it, and its capabilities are those the agent advertises over
 ACP.
 
-Gemini CLI is the first ACP provider. The host runs the user's own `gemini` in its
-ACP mode, so turns use the version, configuration and sign-in the user has in their
-terminal; Patch keeps no Gemini account and sets no API key. Its models are the
-ones the agent lists for itself (`gemini/<model>`), asked only when `gemini` is
-installed. A host without `gemini` reports that rather than failing a turn
-obscurely. A turn resumes with the agent's session load; the agent's replay of the
-saved conversation is not part of the turn. The agent's permission requests follow
-the chat's permission mode, and ask the user in `default`. Two providers have direct adapters because they expose more than ACP does:
+Gemini CLI is the first ACP agent; § ACP agents below says how they run.
+
+Two providers have direct adapters because they expose more than ACP does:
 
 - Claude Code runs through the Claude Agent SDK against the host's own
   installation. It offers a per-chat thinking-effort override
@@ -248,6 +243,68 @@ the chat's permission mode, and ask the user in `default`. Two providers have di
   turn boundaries the app-server supports. On reconnect the adapter reconciles an
   outstanding provider turn before submitting another; an uncertain outcome is
   reported and never silently retried. It has no effort setting.
+
+### ACP agents
+
+Every ACP agent runs through one provider, `acp`. An agent is configuration,
+not code: the command that starts it speaking ACP on stdio, its arguments, a
+label, which shared provider keys (§ Provider keys) it reads from which
+environment variables, and optionally which of its own session modes matches
+each Patch permission mode. Patch ships Gemini CLI (`gemini --acp`, reading the
+shared `gemini` key as `GEMINI_API_KEY`); the shared `acpAgents` setting adds
+agents or replaces one by id. Its models are `acp/<agent>/<model>`.
+
+- A host offers the agents whose command it has. It asks each one, over
+  `initialize` and a `session/new` in a scratch folder that never sends a
+  prompt, for its version, its capabilities and its models (the session's
+  `model` config option, or the older `models` field; an agent that names none
+  offers `default`). The answer is kept for ten minutes, a failed one for one,
+  and asked again when the agent's entry or keys change. Each installed agent is
+  a row in Settings → Hosts (`acp:<agent>`) with the state the agent gave:
+  ready, not signed in (add its key under Settings → Providers, or sign in to
+  the agent on that host; there is no sign-in button), or not working, with the
+  agent's own words behind Details. A signed-out or broken agent lists no models
+  and says why against the `acp` backend in the model picker.
+- A turn is one agent process: `initialize`, the chat's session (new, or the
+  saved one reopened with `session/resume` or `session/load` where the agent
+  advertises either; a load's replay of the conversation is not recorded
+  again), the chat's model (`session/set_config_option` or `session/set_model`)
+  and mode (`session/set_mode`, where the agent entry maps one), then
+  `session/prompt`. Patch's tools go to the session as its `patch` MCP server,
+  followed by the host's enabled servers.
+- What the agent says becomes the record: message chunks stream and close into
+  one message, thought is kept apart, a tool call keeps the agent's own name and
+  input and is settled by its update (a diff is recorded as the edit), and a
+  plan becomes the chat's task list. Each entry carries the agent's id for it
+  (`nativeRef`): the tool call id, or the message id where the agent gives one,
+  else one made from where the message began in the turn's output.
+- A permission request goes through Patch's permission flow. Under bypass every
+  call is allowed and under accept edits every edit, delete and move; otherwise
+  the user is asked, and "allow for the session" picks the agent's allow-always
+  option. A stop is `session/cancel`; an agent that has not finished 15 seconds
+  later is ended.
+- Declared capabilities: interrupt always, resume where the agent advertises
+  load or resume. ACP has no edit, rewind, branch, steer or native-tool switch,
+  so those are absent, and so are `auto` and `plan` modes. A chat on an agent
+  that cannot reopen a session cannot continue after its first turn; it says so
+  and stays readable. A switched-off Patch tool is left out of Patch's MCP
+  server; a switched-off tool of any other kind is refused, since ACP cannot
+  switch it off. ACP chats get no generated title (it would be a turn of the
+  agent's own, kept in its history).
+- Turns outlive the host. An ACP agent runs under the same detached runner as a
+  Codex turn (both are JSON-RPC lines on stdio). ACP has no way for a new
+  process to rejoin a running prompt, so the runner is what is reattached: the
+  next host reads from the runner's files which session and prompt request the
+  turn is on, numbers its own requests past the previous host's, is handed what
+  the agent said that the previous host had not handled, asks again any
+  permission left unanswered, and takes the prompt's answer whether it arrives
+  now or arrived while no host was attached.
+- Account state (`10-auth.md` § Account states) is what ACP shows: signed out
+  when the agent refuses a session for want of a sign-in, limited when a turn is
+  refused with a quota error (with no reset time, so the turn fails visibly
+  rather than parking), broken with the agent's message otherwise. ACP carries no
+  usage readings, and an agent may accept a session with a key its model API
+  later refuses; that refusal fails the turn in the agent's words.
 
 Switching off native tools is a capability. Where Patch has its own version of
 something a provider also offers natively (subagents, scheduled self-wakes), the

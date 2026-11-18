@@ -271,25 +271,32 @@ export const PROVIDERS = [
     settings: [],
     nativeDuplicates: [],
   },
+  // Any Agent Client Protocol agent (spec/02 § Provider adapters): Gemini CLI
+  // and every agent added as a config entry. Models are
+  // `acp/<agent>/<agent's model id>`. These are the capabilities ACP itself
+  // guarantees every agent; what one agent adds (loading a saved session) it
+  // advertises at `initialize`, and the host's adapter reads it from there.
   {
-    id: 'gemini',
-    label: 'Gemini',
-    modelPrefix: 'gemini/',
-    sessionIdPrefix: 'gemini-',
-    // Reached over ACP, which has no classifier-driven approval, so no `auto`.
-    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-    backendId: 'gemini',
-    // The Gemini CLI holds its own sign-in; Patch keeps no accounts for it.
+    id: 'acp',
+    label: 'ACP agent',
+    modelPrefix: 'acp/',
+    sessionIdPrefix: 'acp-',
+    // No classifier-driven approval. Plan needs a read-only mode the agent may
+    // not have, so it is not offered across the board.
+    permissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
+    backendId: 'acp',
+    // Its credential is a provider key (Settings → Providers) or the agent's
+    // own sign-in, not an account list.
     accountsKey: null,
     accountKinds: null,
     // Its key is a shared provider key (Settings → Providers), not a per-host sign-in.
     hostSignIn: null,
-    aliases: ['google'],
+    aliases: [],
     supportsEffort: false,
-    loginRequiredCode: 'gemini_login_required',
+    loginRequiredCode: 'acp_agent_signed_out',
     builtinCommands: [],
     capabilities: {
-      resume: true,
+      resume: false,
       editAtMessage: false,
       rewind: false,
       branchAtTurn: false,

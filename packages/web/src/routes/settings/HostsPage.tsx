@@ -12,7 +12,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type SharedState } from '../../api/rest.js';
-import { backendStatus, providerDescriptor, providerForBackendId } from '@patch/wire';
+import {
+  acpBackendStatus,
+  backendStatus,
+  isAcpBackendRow,
+  providerDescriptor,
+  providerForBackendId,
+} from '@patch/wire';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { PairingCode } from '../../components/PairingCode.js';
@@ -363,7 +369,9 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       {report && report.backends.length > 0 ? (
         <Group testid={`host-${host.hostId}-backends`}>
           {report.backends.map((b) => {
-            const status = backendStatus(b, sharedRows(shared, b.id));
+            const status = isAcpBackendRow(b.id)
+              ? acpBackendStatus(b)
+              : backendStatus(b, sharedRows(shared, b.id));
             return (
               <Row
                 key={b.id}

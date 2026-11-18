@@ -44,7 +44,7 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     id: 'gemini',
     label: 'Gemini',
     envVar: 'GEMINI_API_KEY',
-    usedFor: 'Voice on the gemini backend',
+    usedFor: 'Voice on the gemini backend, and Gemini CLI chats',
   },
   {
     id: 'openai',
