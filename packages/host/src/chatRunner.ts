@@ -10724,7 +10724,7 @@ export class Daemon {
       // session: no resume id, no reseed.
       if (
         isNativeRebuild &&
-        targetHarness === 'claude' &&
+        HARNESS_TRAITS[targetHarness].ownsSessionFile &&
         !hasConversation(
           stripSyntheticTurns(
             toClaudeSessionEntries(reconstructTrack, {
