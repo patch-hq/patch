@@ -20,6 +20,21 @@ describe('handleUncaught', () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  it('logs and survives a write ENOSPC on a full disk', () => {
+    const logger = { error: vi.fn(), fatal: vi.fn() };
+    const exit = vi.fn();
+    handleUncaught(
+      Object.assign(new Error('ENOSPC: no space left on device, write'), {
+        code: 'ENOSPC',
+        syscall: 'write',
+      }),
+      logger,
+      exit,
+    );
+    expect(logger.error).toHaveBeenCalledOnce();
+    expect(exit).not.toHaveBeenCalled();
+  });
+
   it('logs fatally and exits 1 on anything else', () => {
     const logger = { error: vi.fn(), fatal: vi.fn() };
     const exit = vi.fn();
