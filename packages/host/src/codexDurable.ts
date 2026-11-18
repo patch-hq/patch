@@ -42,6 +42,7 @@ import {
   inspectTurnDir,
   isAlive,
   isDetachingDurableTurns,
+  runnerLogTail,
   keepRunnerLog,
   readJson,
   registerLiveTurn,
@@ -263,7 +264,7 @@ export class DurableCodexProcess implements LiveTurn {
     child.on('exit', (code, signal) => {
       if (!this.finished && this.sock === undefined && !this.detached && !isDetachingDurableTurns())
         this.fail(
-          `the turn runner exited (${code ?? signal}) without reporting codex's exit; see ${join(this.dir, RUNNER_LOG)}`,
+          `the turn runner exited (${code ?? signal}) without reporting codex's exit${runnerLogTail(join(this.dir, RUNNER_LOG))}`,
         );
     });
     child.unref();
