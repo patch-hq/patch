@@ -983,12 +983,140 @@ describe('JobEditorRoute (single-page form)', () => {
         await screen.findByTestId('job-name');
         const input = (await screen.findByTestId('job-concurrency')) as HTMLInputElement;
         expect(input.value).toBe('2');
-        fireEvent.change(input, { target: { value: typed } });
+        // No limit is the "parallel" mode now, not an emptied field.
+        if (typed === '') {
+          fireEvent.change(screen.getByTestId('job-queue-mode'), { target: { value: 'parallel' } });
+        } else {
+          fireEvent.change(input, { target: { value: typed } });
+        }
         fireEvent.click(screen.getByTestId('job-save'));
         await waitFor(() => expect(calls.length).toBe(1));
         expect(calls[0]?.body.concurrency).toBe(expected);
         vi.unstubAllGlobals();
       });
+
+    describe('queueing, one-off and wake host', () => {
+      async function openJob(
+        job: Record<string, unknown>,
+      ): Promise<Array<Record<string, unknown>>> {
+        const calls: Array<Record<string, unknown>> = [];
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string, init?: RequestInit) => {
+            const method = (init?.method ?? 'GET').toUpperCase();
+            if (String(url).includes('/runs')) {
+              return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+            }
+            if (String(url).includes('/queue')) {
+              return new Response(JSON.stringify({ concurrency: 1, inFlight: [], queued: [] }), {
+                status: 200,
+              });
+            }
+            if (method === 'PATCH') {
+              calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+              return new Response(JSON.stringify({ ...job, updatedAt: 2 }), { status: 200 });
+            }
+            if (String(url).includes('/api/jobs/j_test1')) {
+              return new Response(JSON.stringify(job), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              });
+            }
+            return defaultRoute(String(url));
+          }),
+        );
+        renderEdit();
+        await screen.findByTestId('job-name');
+        return calls;
+      }
+      const base = {
+        id: 'j_test1',
+        name: 'Triage',
+        enabled: true,
+        trigger: { type: 'todoist' },
+        filter: null,
+        action: { type: 'continue', hostId: 'd1', folder: '/tmp', skill: 'app-update' },
+        createdAt: 1,
+        updatedAt: 1,
+      };
+
+      it('a keyed queue saves as queueing and clears the legacy concurrency', async () => {
+        const calls = await openJob({ ...base, concurrency: 2 });
+        fireEvent.change(await screen.findByTestId('job-queue-key'), {
+          target: { value: '{{payload.event_data.id}}' },
+        });
+        fireEvent.click(screen.getByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect(calls[0]?.queueing).toEqual({
+          mode: 'queue',
+          concurrency: 2,
+          key: '{{payload.event_data.id}}',
+        });
+        expect(calls[0]?.concurrency).toBeNull();
+        vi.unstubAllGlobals();
+      });
+
+      it('append saves its limits in ms and follow-activity', async () => {
+        const calls = await openJob({
+          ...base,
+          queueing: { mode: 'append', idleTimeoutMs: 3_600_000 },
+        });
+        const idle = (await screen.findByTestId('job-append-idle')) as HTMLInputElement;
+        expect(idle.value).toBe('60');
+        fireEvent.change(screen.getByTestId('job-append-messages'), { target: { value: '50' } });
+        fireEvent.click(screen.getByTestId('job-append-follow-activity'));
+        fireEvent.click(screen.getByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect(calls[0]?.queueing).toEqual({
+          mode: 'append',
+          idleTimeoutMs: 3_600_000,
+          resetAfterMessages: 50,
+          followActivity: true,
+        });
+        vi.unstubAllGlobals();
+      });
+
+      it('back to parallel clears a stored queueing', async () => {
+        const calls = await openJob({ ...base, queueing: { mode: 'queue', concurrency: 1 } });
+        fireEvent.change(await screen.findByTestId('job-queue-mode'), {
+          target: { value: 'parallel' },
+        });
+        fireEvent.click(screen.getByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect(calls[0]?.queueing).toBeNull();
+        vi.unstubAllGlobals();
+      });
+
+      it('one-off and an untouched job: only a ticked or loaded flag is written', async () => {
+        const calls = await openJob({ ...base });
+        fireEvent.click(await screen.findByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect('oneOff' in (calls[0] ?? {})).toBe(false);
+        expect('wakeHost' in (calls[0] ?? {})).toBe(false);
+        vi.unstubAllGlobals();
+      });
+
+      it('ticking one-off saves oneOff: true', async () => {
+        const calls = await openJob({ ...base });
+        fireEvent.click(await screen.findByTestId('job-one-off'));
+        fireEvent.click(screen.getByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect(calls[0]?.oneOff).toBe(true);
+        vi.unstubAllGlobals();
+      });
+
+      it('wake host appears for cron and saves', async () => {
+        const calls = await openJob({
+          ...base,
+          trigger: { type: 'cron', expression: '0 9 * * *' },
+        });
+        fireEvent.click(await screen.findByTestId('job-wake-host'));
+        fireEvent.click(screen.getByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect(calls[0]?.wakeHost).toBe(true);
+        vi.unstubAllGlobals();
+      });
+    });
 
     for (const [typed, expected] of [
       ['30', 30],

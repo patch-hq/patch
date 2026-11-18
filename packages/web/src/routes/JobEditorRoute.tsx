@@ -10,7 +10,14 @@ import { flushSync } from 'react-dom';
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import type { Job, JobAction, JobCreateBody, JobTrigger, WebhookScheme } from '@patch/wire/jobs';
+import type {
+  Job,
+  JobAction,
+  JobCreateBody,
+  JobTrigger,
+  Queueing,
+  WebhookScheme,
+} from '@patch/wire/jobs';
 import { scriptVerdictLine } from '@patch/wire/jobs';
 import type { PermissionMode } from '@patch/wire';
 import { isJunkFolder, isReservedSpecialThread, permissionModesFor } from '@patch/wire';
@@ -703,6 +710,23 @@ interface FormState {
   concurrency: string;
   /** True when the loaded job had a limit, so emptying the field must save `null` to remove it. */
   loadedConcurrency: boolean;
+  /** How fires relate to one another (spec/08 § Queueing). `queue` with no key is the legacy `concurrency` field. */
+  queueMode: 'parallel' | 'queue' | 'append';
+  /** `queue` only — per-subject key template. Empty means one job-wide queue. */
+  queueKey: string;
+  /** True when the loaded job stored a `queueing` block, so leaving it must save `null`. */
+  loadedQueueing: boolean;
+  /** `append` only — minutes. Empty means no such reset. */
+  appendIdleMinutes: string;
+  appendResetAfterMinutes: string;
+  appendResetAfterMessages: string;
+  appendFollowActivity: boolean;
+  /** Retire the job after its first successful fire (spec/08 § One-off jobs). */
+  oneOff: boolean;
+  loadedOneOff: boolean;
+  /** Cron only — ask the host to wake before each fire (spec/08 § Wake host). */
+  wakeHost: boolean;
+  loadedWakeHost: boolean;
   /** Minutes a fire may hold its slot before it is stopped. Empty string means the server default. */
   timeoutMinutes: string;
   /** True when the loaded job had a timeout, so emptying the field must save `null` to restore the default. */
@@ -781,6 +805,17 @@ const DEFAULT_FORM: FormState = {
   loadedConcurrency: false,
   timeoutMinutes: '',
   loadedTimeoutMinutes: false,
+  queueMode: 'parallel',
+  queueKey: '',
+  loadedQueueing: false,
+  appendIdleMinutes: '',
+  appendResetAfterMinutes: '',
+  appendResetAfterMessages: '',
+  appendFollowActivity: false,
+  oneOff: false,
+  loadedOneOff: false,
+  wakeHost: false,
+  loadedWakeHost: false,
   gateHostId: '',
   gateFolder: '',
   gateCommand: '',
@@ -1265,6 +1300,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // only happens via the raw-RRULE textarea being cleared by hand.
   const recurrenceBlocksSave =
     form.triggerType === 'recurrence' && form.recurrenceRule.trim() === '';
+  const appendBlocksSave = form.queueMode === 'append' && form.actionType !== 'continue';
 
   function handleSubmit(e: React.FormEvent): void {
     e.preventDefault();
@@ -1279,6 +1315,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // server would accept without complaint since it's valid cron.
     if (scheduleBlocksSave) {
       pushError('Couldn’t read that schedule. Set the cron directly, or fix the phrase.');
+      return;
+    }
+    if (appendBlocksSave) {
+      pushError('Append queueing needs the “continue” action.');
       return;
     }
     if (recurrenceBlocksSave) {
@@ -2180,26 +2220,120 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
 
         <section className="form-group" data-testid="group-concurrency">
           <h2 className="form-group-title">
-            Concurrency <span className="form-group-opt">· optional</span>
+            Queueing <span className="form-group-opt">· optional</span>
           </h2>
           <label>
-            Max fires running at once
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={form.concurrency}
+            When fires overlap
+            <select
+              value={form.queueMode}
               onChange={(e) => {
-                const next = e.target.value;
-                setForm((f) => ({ ...f, concurrency: next }));
+                const next = e.target.value as FormState['queueMode'];
+                setForm((f) => ({ ...f, queueMode: next }));
               }}
-              placeholder="No limit"
-              data-testid="job-concurrency"
-            />
-            <p className="field-hint">
-              Further fires queue until a slot frees. Empty means no limit.
-            </p>
+              data-testid="job-queue-mode"
+            >
+              <option value="parallel">Run every fire at once</option>
+              <option value="queue">Queue — limit how many run at once</option>
+              <option value="append">Append — deliver every fire into one chat</option>
+            </select>
           </label>
+          {form.queueMode === 'queue' ? (
+            <>
+              <label>
+                Max fires running at once
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.concurrency}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, concurrency: next }));
+                  }}
+                  placeholder="1"
+                  data-testid="job-concurrency"
+                />
+                <p className="field-hint">Further fires wait until a slot frees. Empty means 1.</p>
+              </label>
+              <label>
+                Queue per subject
+                <input
+                  value={form.queueKey}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, queueKey: next }));
+                  }}
+                  placeholder="{{payload.event_data.id}}"
+                  data-testid="job-queue-key"
+                />
+                <p className="field-hint">
+                  Optional. With a key the limit applies to each subject separately: two subjects
+                  run side by side, two fires for one subject run in turn.
+                </p>
+              </label>
+            </>
+          ) : null}
+          {form.queueMode === 'append' ? (
+            <>
+              <p className="field-hint">
+                Needs the “continue” action. A new chat starts when any limit below is reached; with
+                none, the chat is never reset.
+              </p>
+              <label>
+                Start a new chat after idle for (minutes)
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={form.appendIdleMinutes}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, appendIdleMinutes: next }));
+                  }}
+                  data-testid="job-append-idle"
+                />
+              </label>
+              <label>
+                Start a new chat once it is this old (minutes)
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={form.appendResetAfterMinutes}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, appendResetAfterMinutes: next }));
+                  }}
+                  data-testid="job-append-reset-after"
+                />
+              </label>
+              <label>
+                Start a new chat after this many fires
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.appendResetAfterMessages}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setForm((f) => ({ ...f, appendResetAfterMessages: next }));
+                  }}
+                  data-testid="job-append-messages"
+                />
+              </label>
+              <Toggle
+                checked={form.appendFollowActivity}
+                onChange={(on) => setForm((f) => ({ ...f, appendFollowActivity: on }))}
+                label="Follow the chat: append while it is working, start a new one once it has finished"
+                testid="job-append-follow-activity"
+              />
+              {form.actionType !== 'continue' ? (
+                <p className="error" data-testid="job-append-needs-continue">
+                  Append only works with the “continue” action.
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </section>
 
         <section className="form-group" data-testid="group-timeout">
@@ -2224,6 +2358,26 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               A fire still holding its slot after this long is stopped. Empty means 240 (4 hours).
             </p>
           </label>
+        </section>
+
+        <section className="form-group" data-testid="group-lifecycle">
+          <h2 className="form-group-title">
+            Lifecycle <span className="form-group-opt">· optional</span>
+          </h2>
+          <Toggle
+            checked={form.oneOff}
+            onChange={(on) => setForm((f) => ({ ...f, oneOff: on }))}
+            label="One-off: disable the job after its first successful fire"
+            testid="job-one-off"
+          />
+          {form.triggerType === 'cron' ? (
+            <Toggle
+              checked={form.wakeHost}
+              onChange={(on) => setForm((f) => ({ ...f, wakeHost: on }))}
+              label="Wake the host a minute before each fire (macOS on power only)"
+              testid="job-wake-host"
+            />
+          ) : null}
         </section>
 
         <section className="form-group" data-testid="group-window">
@@ -2715,13 +2869,15 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             type="submit"
             className="primary-btn"
             data-testid="job-save"
-            disabled={saving || scheduleBlocksSave || recurrenceBlocksSave}
+            disabled={saving || scheduleBlocksSave || recurrenceBlocksSave || appendBlocksSave}
             title={
               scheduleBlocksSave
                 ? 'Fix the schedule first — the typed phrase didn’t parse'
                 : recurrenceBlocksSave
                   ? 'Set a schedule first — the RRULE is empty'
-                  : shortcutLabel('⌘↵')
+                  : appendBlocksSave
+                    ? 'Append needs the “continue” action'
+                    : shortcutLabel('⌘↵')
             }
           >
             {isNew ? 'Create' : 'Save'}
@@ -2763,7 +2919,9 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       {/* The gate's queue (spec/08 § Concurrency). Only a job WITH a limit
           has one: without a limit every fire goes out the moment it arrives,
           so the panel would be permanently empty and say nothing. */}
-      {!isNew && data && (data as Job).concurrency !== undefined ? (
+      {!isNew &&
+      data &&
+      ((data as Job).concurrency !== undefined || (data as Job).queueing?.mode === 'queue') ? (
         <JobQueuePanel job={data as Job} />
       ) : null}
       {!isNew && data ? <RecentRunsPanel job={data as Job} /> : null}
@@ -3121,6 +3279,32 @@ function jobToForm(job: Job): FormState {
   if (job.concurrency !== undefined) {
     f.concurrency = String(job.concurrency);
     f.loadedConcurrency = true;
+    f.queueMode = 'queue';
+  }
+  if (job.queueing !== undefined) {
+    f.loadedQueueing = true;
+    f.queueMode = job.queueing.mode;
+    if (job.queueing.mode === 'queue') {
+      f.concurrency =
+        job.queueing.concurrency === undefined ? '' : String(job.queueing.concurrency);
+      f.queueKey = job.queueing.key ?? '';
+    } else if (job.queueing.mode === 'append') {
+      const q = job.queueing;
+      f.appendIdleMinutes = q.idleTimeoutMs === undefined ? '' : String(q.idleTimeoutMs / 60_000);
+      f.appendResetAfterMinutes =
+        q.resetAfterMs === undefined ? '' : String(q.resetAfterMs / 60_000);
+      f.appendResetAfterMessages =
+        q.resetAfterMessages === undefined ? '' : String(q.resetAfterMessages);
+      f.appendFollowActivity = q.followActivity === true;
+    }
+  }
+  if (job.oneOff !== undefined) {
+    f.oneOff = job.oneOff;
+    f.loadedOneOff = true;
+  }
+  if (job.wakeHost !== undefined) {
+    f.wakeHost = job.wakeHost;
+    f.loadedWakeHost = true;
   }
   if (job.timeoutMinutes !== undefined) {
     f.timeoutMinutes = String(job.timeoutMinutes);
@@ -3175,9 +3359,13 @@ function jobToForm(job: Job): FormState {
   return f;
 }
 
-function formToBody(form: FormState): Omit<JobCreateBody, 'concurrency' | 'timeoutMinutes'> & {
+function formToBody(form: FormState): Omit<
+  JobCreateBody,
+  'concurrency' | 'timeoutMinutes' | 'queueing'
+> & {
   concurrency?: number | null;
   timeoutMinutes?: number | null;
+  queueing?: Queueing | null;
 } {
   let trigger: JobTrigger;
   switch (form.triggerType) {
@@ -3335,13 +3523,11 @@ function formToBody(form: FormState): Omit<JobCreateBody, 'concurrency' | 'timeo
         : null,
     // Unticked is `null`, not omitted: a PATCH that omits the field leaves the
     // stored window alone (spec/08 § Run window).
-    // Empty is no limit. A job that HAD one saves `null` to remove it (an omitted
-    // key on PATCH leaves the stored limit alone); a new job just omits it.
-    ...(form.concurrency.trim() !== ''
-      ? { concurrency: Number(form.concurrency) }
-      : form.loadedConcurrency
-        ? { concurrency: null }
-        : {}),
+    // Queueing (spec/08 § Queueing). `concurrency` and `queueing` are two spellings of
+    // one limit and a body carrying both is refused, so whichever is not in use is
+    // cleared with `null` when the loaded job had it (an omitted key on PATCH leaves
+    // the stored value alone). A keyless queue keeps the legacy `concurrency` spelling.
+    ...queueingBody(form),
     ...(form.timeoutMinutes.trim() !== ''
       ? { timeoutMinutes: Number(form.timeoutMinutes) }
       : form.loadedTimeoutMinutes
@@ -3350,6 +3536,52 @@ function formToBody(form: FormState): Omit<JobCreateBody, 'concurrency' | 'timeo
     window: form.windowOn
       ? { start: form.windowStart, end: form.windowEnd, timezone: form.windowTimezone }
       : null,
+    // Written only when ticked, or when the loaded job had it (so unticking saves
+    // `false`); an untouched job serialises exactly as before the field was editable.
+    ...(form.oneOff || form.loadedOneOff ? { oneOff: form.oneOff } : {}),
+    ...(form.triggerType === 'cron' && (form.wakeHost || form.loadedWakeHost)
+      ? { wakeHost: form.wakeHost }
+      : {}),
     action,
+  };
+}
+
+function minutesToMs(minutes: string): number | undefined {
+  return minutes.trim() === '' ? undefined : Math.round(Number(minutes) * 60_000);
+}
+
+function queueingBody(form: FormState): {
+  concurrency?: number | null;
+  queueing?: Queueing | null;
+} {
+  const clearConcurrency = form.loadedConcurrency ? { concurrency: null } : {};
+  const clearQueueing = form.loadedQueueing ? { queueing: null } : {};
+  if (form.queueMode === 'parallel') return { ...clearConcurrency, ...clearQueueing };
+  if (form.queueMode === 'queue') {
+    const limit = form.concurrency.trim() === '' ? undefined : Number(form.concurrency);
+    if (form.queueKey.trim() === '') {
+      return { concurrency: limit ?? 1, ...clearQueueing };
+    }
+    return {
+      queueing: {
+        mode: 'queue',
+        ...(limit !== undefined ? { concurrency: limit } : {}),
+        key: form.queueKey,
+      },
+      ...clearConcurrency,
+    };
+  }
+  const idle = minutesToMs(form.appendIdleMinutes);
+  const reset = minutesToMs(form.appendResetAfterMinutes);
+  const messages = form.appendResetAfterMessages.trim();
+  return {
+    queueing: {
+      mode: 'append',
+      ...(idle !== undefined ? { idleTimeoutMs: idle } : {}),
+      ...(reset !== undefined ? { resetAfterMs: reset } : {}),
+      ...(messages !== '' ? { resetAfterMessages: Number(messages) } : {}),
+      ...(form.appendFollowActivity ? { followActivity: true } : {}),
+    },
+    ...clearConcurrency,
   };
 }
