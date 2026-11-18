@@ -148,6 +148,23 @@ describe('ElevenLabs dictation', () => {
     await s.close();
   });
 
+  test('session_time_limit_exceeded starts a new session, not a failure', async () => {
+    const fake = await fakeScribe();
+    open.push(fake);
+    const { s, events } = session(fake);
+    s.onSessionStart();
+    const sock = await fake.socket();
+    sock.send(JSON.stringify({ message_type: 'committed_transcript', text: 'long talk' }));
+    await until(() => events.some((e) => e.type === 'audio.transcript_partial'), 'partial');
+    sock.send(JSON.stringify({ message_type: 'session_time_limit_exceeded' }));
+    sock.close();
+    await tick(300);
+    expect(events.some((e) => e.type === 'audio.error')).toBe(false);
+    await s.onMicFrame(new Int16Array(1600).fill(500));
+    await until(() => fake.chunks.length >= 1, 'audio on the new session');
+    await s.close();
+  });
+
   test('a missing key fails, not falls back', async () => {
     const fake = await fakeScribe();
     open.push(fake);
