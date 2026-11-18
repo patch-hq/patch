@@ -195,7 +195,16 @@ provider keeps it. Patch never reads it for display and never writes it.
 
 The Agent Client Protocol (ACP) adapter is the default: any ACP agent is added as
 a provider through it, and its capabilities are those the agent advertises over
-ACP. Two providers have direct adapters because they expose more than ACP does:
+ACP.
+
+Gemini CLI is the first ACP provider. The host runs the user's own `gemini` in its
+ACP mode, so turns use the version, configuration and sign-in the user has in their
+terminal; Patch keeps no Gemini account and sets no API key. Its models are the
+ones the agent lists for itself (`gemini/<model>`), asked only when `gemini` is
+installed. A host without `gemini` reports that rather than failing a turn
+obscurely. A turn resumes with the agent's session load; the agent's replay of the
+saved conversation is not part of the turn. The agent's permission requests follow
+the chat's permission mode, and ask the user in `default`. Two providers have direct adapters because they expose more than ACP does:
 
 - Claude Code runs through the Claude Agent SDK against the host's own
   installation. It offers a per-chat thinking-effort override

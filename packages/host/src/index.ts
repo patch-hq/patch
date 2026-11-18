@@ -4,6 +4,13 @@ import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { HARNESS_TRAITS } from './harnesses.js';
 import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
+import {
+  findGemini,
+  GEMINI_BACKEND_ID,
+  GEMINI_MISSING,
+  geminiModels,
+  makeGeminiBackend,
+} from './geminiAgent.js';
 import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
@@ -793,6 +800,7 @@ async function startHost(
     localHistory,
     localSessionDir(config.patchHome),
   );
+  const geminiBackend = makeGeminiBackend();
   const routedBackend: SdkBackend = {
     run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
   };
@@ -2797,6 +2805,7 @@ async function startHost(
           selfHostId,
           codexAccounts,
           localModels,
+          () => geminiModels(geminiBackend, process.cwd()),
         );
         return;
       }
@@ -4303,6 +4312,17 @@ async function startHost(
       nextAccountAfterExhausted: () => undefined,
       accountRouting: () => undefined,
     },
+    // An ACP agent holds its own sign-in; the host only checks it is installed.
+    gemini: {
+      run: (opts) => geminiBackend.run(opts),
+      resolveCredential: async () =>
+        findGemini() ? { ok: true, accessToken: '' } : { ok: false, reason: GEMINI_MISSING },
+      heldAccounts: () => [],
+      accountLabel: () => undefined,
+      accountSpent: () => ({ spent: false }),
+      nextAccountAfterExhausted: () => undefined,
+      accountRouting: () => undefined,
+    },
   };
 
   /**
@@ -4670,6 +4690,7 @@ async function startHost(
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       local: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
+      gemini: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
     }),
     // patch/todo.md § Features to add — "Current status": after each turn
@@ -6241,6 +6262,7 @@ export async function handleModelsRequest(
   hostId: string,
   codex?: CodexAccounts,
   local?: LocalModels,
+  gemini?: () => Promise<{ id: string; label: string }[]>,
 ): Promise<void> {
   // Every entry names the backend serving it, and a backend that failed is
   // returned as an error AGAINST THAT BACKEND alongside the models that did
@@ -6254,6 +6276,8 @@ export async function handleModelsRequest(
       { backend: CLAUDE_BACKEND_ID, load: catalog.get().then((s) => s.models) },
       { backend: CODEX_BACKEND_ID, load: codex.models() },
       ...(local?.configured ? [{ backend: LOCAL_BACKEND_ID, load: local.models() }] : []),
+      // Only asked when the Gemini CLI is installed: a host without it has no error to report.
+      ...(gemini && findGemini() ? [{ backend: GEMINI_BACKEND_ID, load: gemini() }] : []),
     ];
     const outcomes = await Promise.allSettled(sources.map((src) => src.load));
     const models: { id: string; label: string; backend: string }[] = [];
