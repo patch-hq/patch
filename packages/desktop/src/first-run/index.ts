@@ -10,7 +10,8 @@ import { readSaved, welcomeUrl, writeSaved, type SavedConnection } from './conne
 
 export { welcomeUrl };
 import { launchPatch, type Launch, type SetupUi } from './launch.js';
-import { freePort, startLocalServer } from './local-server.js';
+import { freePort, startLocalServer, startLocalService } from './local-server.js';
+import { serviceControl, type ServiceControl } from './server-service.js';
 import { bringUpLocal } from './setup-local.js';
 
 export type { Launch, SetupUi };
@@ -63,6 +64,16 @@ async function post(
   };
 }
 
+/** The Mac's launchd agent for this app's own server. */
+export function macService(userHome: string): ServiceControl {
+  return serviceControl({ userHome, uid: process.getuid?.() ?? 0 });
+}
+
+/** Settings → Hosts → turn the server on this Mac off (spec/11 § Server on a Mac). */
+export function turnOffLocalServer(userHome: string): Promise<void> {
+  return macService(userHome).turnOff();
+}
+
 export function launch(env: FirstRunEnv): Promise<Launch> {
   return launchPatch({
     file: connectionFile(env.userData),
@@ -73,15 +84,21 @@ export function launch(env: FirstRunEnv): Promise<Launch> {
         existing,
         {
           freePort,
-          startServer: ({ port }) =>
-            startLocalServer({
+          startServer: ({ port }) => {
+            const base = {
               releaseDir: join(env.resources, 'server'),
               home: localHome(env.userData),
               port,
               relayUrl: env.relayUrl,
               hostArtifacts: join(env.resources, 'host'),
               node: { execPath: env.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
-            }),
+            };
+            // On a Mac the server is a launchd agent of its own (spec/11 § Server on a
+            // Mac); elsewhere the app still starts it and stops it at quit.
+            return process.platform === 'darwin'
+              ? startLocalService({ ...base, userHome: env.home, service: macService(env.home) })
+              : startLocalServer(base);
+          },
           call: post,
           hostInstalled: env.hostInstalled,
           installHost: env.installHost,

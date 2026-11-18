@@ -170,6 +170,17 @@ Hosts), when the Mac sleeps and when it shuts down, and starts again at login
 and on wake. A newer desktop app installs the server release it carries and
 restarts the service onto it.
 
+The agent is `io.github.patch-hq.server`, registered from
+`~/Library/LaunchAgents`, running the install home's `current/patch-server`
+with the app's own Node on a loopback port chosen once and kept. The home is the
+app's `server` folder (`data/`, `downloads/`, `logs/`, `versions/`, `current`).
+Turning the server off in Settings → Hosts stops the agent and disables its
+label, so it stays off through logins until the app is opened again, which
+enables it and starts it. A desktop install from before the agent, whose app
+started the server as its own child process, is migrated on its next launch:
+the child is stopped once, the same folder becomes the agent's home, and nothing
+in `data/` moves.
+
 ## Moving the server
 
 The server's data folder is self-contained (`01-server.md` § Data folder), so

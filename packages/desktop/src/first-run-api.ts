@@ -32,6 +32,8 @@ export interface FirstRunApi {
   }>;
   welcomeUrl(url: string, mode: 'local' | 'remote' | 'relay'): string;
   forgetConnection(userData: string): void;
+  /** Stop this Mac's server and keep it from starting at login until the app opens again (macOS). */
+  turnOffLocalServer(userHome: string): Promise<void>;
   remembered(userData: string): { connection: { mode: 'local' | 'remote' | 'relay' } } | null;
 }
 

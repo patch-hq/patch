@@ -156,6 +156,8 @@ export interface PatchDesktopBridge {
       patch: Partial<Pick<KeepRunningState, 'openAtLogin' | 'keepAwake'>>,
     ): Promise<KeepRunningState>;
   };
+  /** spec/11 § Server on a Mac — stop the server this Mac runs; it stays off until the app opens again. */
+  localServer?: { turnOff(): Promise<void> };
   localHost?: {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
