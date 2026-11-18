@@ -168,7 +168,20 @@ export interface DurableCodexHandlers {
   onExit(reason: string): void;
 }
 
-/** The host's end of one Codex turn's runner. */
+/**
+ * Which process a runner holds. The class carries any JSON-RPC-over-lines
+ * process, not only `codex app-server`: a local-model turn's agent process
+ * (`localAgent.ts`) speaks the same shape and rides the same runner.
+ */
+export interface DurableProcessKind {
+  /** Shown in errors: "Codex process exited". */
+  name: string;
+  /** Written to `turn.json` and used in log lines. */
+  harness: string;
+}
+const CODEX_KIND: DurableProcessKind = { name: 'Codex', harness: 'codex' };
+
+/** The host's end of one Codex (or local-model) turn's runner. */
 export class DurableCodexProcess implements LiveTurn {
   readonly chatId: string;
   readonly dir: string;
@@ -186,7 +199,10 @@ export class DurableCodexProcess implements LiveTurn {
   /** Recovered state, set when this process carries on a previous host's turn. */
   readonly recovered: RecoveredCodexTurn | undefined;
 
-  constructor(private readonly req: DurableTurnRequest) {
+  constructor(
+    private readonly req: DurableTurnRequest,
+    private readonly kind: DurableProcessKind = CODEX_KIND,
+  ) {
     this.chatId = req.chatId;
     this.dir = turnDirFor(req.config, req.chatId);
     this.consumed = req.attach?.consumed ?? null;
@@ -230,7 +246,7 @@ export class DurableCodexProcess implements LiveTurn {
     if (existsSync(this.dir)) {
       this.req.log.error(
         { chatId: this.chatId, dir: this.dir },
-        'durable codex turn: a previous turn of this chat was still on disk; ending it',
+        `durable ${this.kind.harness} turn: a previous turn of this chat was still on disk; ending it`,
       );
       keepRunnerLog(this.dir, 'leftover');
       retireTurn(this.dir);
@@ -239,7 +255,7 @@ export class DurableCodexProcess implements LiveTurn {
     writeJsonAtomic(join(this.dir, TURN_META), {
       chatId: this.chatId,
       ownerId: this.ownerId,
-      harness: 'codex',
+      harness: this.kind.harness,
       ...(this.req.localId !== undefined ? { localId: this.req.localId } : {}),
       ...(this.req.accountId !== undefined ? { accountId: this.req.accountId } : {}),
       startedAt: Date.now(),
@@ -264,7 +280,7 @@ export class DurableCodexProcess implements LiveTurn {
     child.on('exit', (code, signal) => {
       if (!this.finished && this.sock === undefined && !this.detached && !isDetachingDurableTurns())
         this.fail(
-          `the turn runner exited (${code ?? signal}) without reporting codex's exit${runnerLogTail(join(this.dir, RUNNER_LOG))}`,
+          `the turn runner exited (${code ?? signal}) without reporting ${this.kind.harness}'s exit${runnerLogTail(join(this.dir, RUNNER_LOG))}`,
         );
     });
     child.unref();
@@ -275,16 +291,18 @@ export class DurableCodexProcess implements LiveTurn {
   attach(handlers: DurableCodexHandlers): void {
     const disk = inspectTurnDir(this.dir);
     if (!disk || disk.state === 'lost')
-      throw new Error(`durable codex turn: nothing to reattach to for chat ${this.chatId}`);
+      throw new Error(
+        `durable ${this.kind.harness} turn: nothing to reattach to for chat ${this.chatId}`,
+      );
     if (!SUPPORTED_RUNNER_PROTOCOLS.includes(disk.protocol))
       throw new Error(
-        `durable codex turn: chat ${this.chatId}'s runner speaks protocol ${disk.protocol}; this host speaks ${SUPPORTED_RUNNER_PROTOCOLS.join(', ')}`,
+        `durable ${this.kind.harness} turn: chat ${this.chatId}'s runner speaks protocol ${disk.protocol}; this host speaks ${SUPPORTED_RUNNER_PROTOCOLS.join(', ')}`,
       );
     this.handlers = handlers;
     registerLiveTurn(this);
     this.req.log.info(
       { chatId: this.chatId, state: disk.state, consumed: this.consumed },
-      'durable codex turn: reattaching to a turn the previous host started',
+      `durable ${this.kind.harness} turn: reattaching to a turn the previous host started`,
     );
     const outPath = join(this.dir, RUNNER_OUT);
     this.replayUntil = existsSync(outPath) ? statSync(outPath).size : 0;
@@ -301,7 +319,7 @@ export class DurableCodexProcess implements LiveTurn {
       start = i + 1;
     }
     const exit = readJson<RunnerExit>(join(this.dir, RUNNER_EXIT));
-    this.exit(`Codex process exited (${exit?.signal ?? exit?.code ?? 'unknown'})`);
+    this.exit(`${this.kind.name} process exited (${exit?.signal ?? exit?.code ?? 'unknown'})`);
   }
 
   private connect(attempt = 0): void {
@@ -313,8 +331,8 @@ export class DurableCodexProcess implements LiveTurn {
       sock.on('close', () => {
         if (this.finished || this.detached || isDetachingDurableTurns()) return;
         const exit = readJson<RunnerExit>(join(this.dir, RUNNER_EXIT));
-        if (exit) this.exit(`Codex process exited (${exit.signal ?? exit.code})`);
-        else this.fail('lost the connection to the turn runner before Codex exited');
+        if (exit) this.exit(`${this.kind.name} process exited (${exit.signal ?? exit.code})`);
+        else this.fail(`lost the connection to the turn runner before ${this.kind.name} exited`);
       });
       sock.on('error', () => undefined);
       sock.write(`${JSON.stringify({ t: 'attach', from: 0 })}\n`);
@@ -348,7 +366,7 @@ export class DurableCodexProcess implements LiveTurn {
       if (f['t'] === 'out' && typeof f['line'] === 'string' && typeof f['end'] === 'number')
         this.onOut(f['line'], f['end']);
       else if (f['t'] === 'exit')
-        this.exit(`Codex process exited (${f['signal'] ?? f['code'] ?? 'unknown'})`);
+        this.exit(`${this.kind.name} process exited (${f['signal'] ?? f['code'] ?? 'unknown'})`);
     }
   }
 
@@ -364,7 +382,7 @@ export class DurableCodexProcess implements LiveTurn {
 
   /** Say something to app-server. */
   write(line: string): void {
-    if (this.finished || this.detached) throw new Error('Codex is not running');
+    if (this.finished || this.detached) throw new Error(`${this.kind.name} is not running`);
     const text = `${JSON.stringify({ t: 'in', line })}\n`;
     if (this.sock) this.sock.write(text);
     else this.queue.push(text);
@@ -464,7 +482,10 @@ export class DurableCodexProcess implements LiveTurn {
 
   private fail(reason: string): void {
     if (this.finished) return;
-    this.req.log.error({ chatId: this.chatId, err: reason }, 'durable codex turn failed');
+    this.req.log.error(
+      { chatId: this.chatId, err: reason },
+      `durable ${this.kind.harness} turn failed`,
+    );
     this.finished = true;
     this.handlers?.onExit(reason);
   }

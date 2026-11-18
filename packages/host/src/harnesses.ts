@@ -98,7 +98,8 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     limitMustStateReset: false,
     ownsSessionFile: false,
     sessionBoundToAccount: false,
-    detachedTurnRunner: false,
+    // Its loop runs in an agent process under the turn runner (localAgent.ts).
+    detachedTurnRunner: true,
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
