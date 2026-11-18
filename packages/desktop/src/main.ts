@@ -2002,6 +2002,13 @@ function setupAutoUpdater(): void {
       (patch ?? {}) as { openAtLogin?: boolean; keepAwake?: boolean },
     );
   });
+  // spec/11 § Server on a Mac — Settings → Hosts turns the server off. The agent
+  // stops and stays off until the app is opened again; quitting never does this.
+  ipcMain.handle('patch:local-server:turn-off', async () => {
+    if (!keepRunning || process.platform !== 'darwin')
+      throw new Error('This computer does not run the Patch server as a service');
+    await loadFirstRun().turnOffLocalServer(app.getPath('home'));
+  });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
   ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
     installLocalHost({

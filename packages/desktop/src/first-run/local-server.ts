@@ -20,6 +20,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
+import { layOutRelease, serverPlist, type ServiceControl } from './server-service.js';
 
 export interface LocalServerOptions {
   /** The server release the app carries (`patch-server`, `server/`, `web/`, `build-info.json`). */
@@ -220,5 +221,67 @@ export async function startLocalServer(opts: LocalServerOptions): Promise<LocalS
   await stop();
   throw new Error(
     `The server did not answer on ${origin} within ${(opts.startTimeoutMs ?? 30_000) / 1000}s. The end of ${logFile}:\n${tail(logFile)}`,
+  );
+}
+
+export interface LocalServiceOptions extends LocalServerOptions {
+  /** The user's home directory, where the launchd agent is registered. */
+  userHome: string;
+  service: ServiceControl;
+}
+
+/**
+ * The same server as a launchd agent of its own (spec/11 § Server on a Mac). The
+ * release the app carries is installed into the home, the agent registered and
+ * started, and the app is left only a window onto it: `stop` does nothing, so
+ * quitting the app leaves the server running. A server this app used to start as
+ * its own child (`server.pid`) is stopped once, so the agent can take its port
+ * and its data folder over.
+ */
+export async function startLocalService(opts: LocalServiceOptions): Promise<LocalServer> {
+  const launcher = join(opts.releaseDir, 'patch-server');
+  if (!existsSync(launcher))
+    throw new Error(`There is no server release at ${opts.releaseDir} (no patch-server launcher).`);
+  const origin = `http://127.0.0.1:${opts.port}`;
+  const info = JSON.parse(readFileSync(join(opts.releaseDir, 'build-info.json'), 'utf8')) as {
+    gitSha: string;
+    release: string;
+  };
+
+  const moved = layOutRelease(opts.home, opts.releaseDir, info.release);
+  if (opts.hostArtifacts) seed(opts.hostArtifacts, join(opts.home, 'downloads'));
+
+  // Migration: a server the app started itself holds the port and the data.
+  const pidFile = join(opts.home, 'server.pid');
+  const pid = leftoverPid(pidFile);
+  if (pid !== null) {
+    await stopLeftover(pid, origin, opts.port);
+  }
+  rmSync(pidFile, { force: true });
+
+  const running = await healthz(origin);
+  if (running !== null && running.gitSha !== info.gitSha && !(await opts.service.loaded())) {
+    throw new Error(
+      `Port ${opts.port} is already answering as a Patch server that is not this Mac's (build ${running.gitSha}). Quit it first.`,
+    );
+  }
+  await opts.service.install(
+    serverPlist(
+      { home: opts.home, node: opts.node, port: opts.port, relayUrl: opts.relayUrl },
+      opts.userHome,
+    ),
+    moved,
+  );
+
+  const logFile = join(opts.home, 'logs', 'server.log');
+  const timeout = opts.startTimeoutMs ?? 30_000;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const h = await healthz(origin);
+    if (h !== null && h.gitSha === info.gitSha) return { origin, stop: async () => undefined };
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(
+    `The server did not report build ${info.gitSha} on ${origin} within ${timeout / 1000}s. The end of ${logFile}:\n${tail(logFile)}`,
   );
 }

@@ -305,6 +305,11 @@ contextBridge.exposeInMainWorld('patch', {
             return ipcRenderer.invoke('patch:keep-running:set', patch);
           },
         },
+        localServer: {
+          turnOff(): Promise<void> {
+            return ipcRenderer.invoke('patch:local-server:turn-off');
+          },
+        },
       }
     : {}),
   localHost: {

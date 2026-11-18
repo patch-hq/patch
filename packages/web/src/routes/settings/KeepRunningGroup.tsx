@@ -10,6 +10,7 @@ import { Group, Row } from './ui.js';
 
 export function KeepRunningGroup(): JSX.Element | null {
   const bridge = getDesktopBridge()?.keepRunning;
+  const server = getDesktopBridge()?.localServer;
   const [state, setState] = useState<KeepRunningState | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -51,6 +52,24 @@ export function KeepRunningGroup(): JSX.Element | null {
           onChange={(v) => set({ keepAwake: v })}
         />
       </Row>
+      {server ? (
+        <Row
+          title="Patch server on this computer"
+          sub="Keeps running when the app is closed. Turning it off stops it until you open Patch again."
+        >
+          <button
+            type="button"
+            className="set-btn"
+            data-testid="keep-running-server-off"
+            onClick={() => {
+              setError(null);
+              void server.turnOff().catch((e: Error) => setError(e.message));
+            }}
+          >
+            Turn off
+          </button>
+        </Row>
+      ) : null}
       {error ? (
         <p className="set-error" role="alert">
           {error}
