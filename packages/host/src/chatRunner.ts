@@ -246,7 +246,12 @@ import type {
 } from '@patch/wire';
 import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
-import { sweepAgentWorktrees, type WorktreeSweepResult } from './cleanup.js';
+import {
+  sweepAgentWorktrees,
+  cutoffMs,
+  WORKTREE_IDLE_DAYS,
+  type WorktreeSweepResult,
+} from './cleanup.js';
 import { parseLeadingGoal } from './goalCommand.js';
 import { prefixKeepingCommandFirst } from './leadCommand.js';
 
@@ -9921,7 +9926,7 @@ export class Daemon {
 
   /**
    * Startup cleanup (`cleanupPeriodDays`): delete the logs of chats idle since
-   * before `cutoff`, then sweep stale clean agent worktrees. Pinned chats, the
+   * before `cutoff`, then sweep idle, clean, pushed worktrees of any location (shorter cutoff). Pinned chats, the
    * special threads and anything running (a turn, a watch, a delegate) stay.
    */
   async cleanupOldData(
@@ -9945,9 +9950,23 @@ export class Daemon {
     if (chats.length > 0)
       this.opts.logger.info({ count: chats.length }, 'cleanup: removed old chats');
     const gone = new Set(chats);
+    const remaining = all.filter((s) => !gone.has(s.chatId));
+    // Worktrees go on their own, shorter idle cutoff (never longer than the chat one).
+    const wtCutoff = Math.max(cutoff, cutoffMs(Date.now(), WORKTREE_IDLE_DAYS));
+    // A chat has not ended while it is running, watched, delegating or recently updated.
+    const inUse = remaining
+      .filter(
+        (s) =>
+          this.aborters.has(s.chatId) ||
+          this.watch.count(s.chatId) > 0 ||
+          this.hasRunningDelegates(s.chatId) ||
+          s.lastUpdated > wtCutoff,
+      )
+      .map((s) => s.folder);
     const worktrees = await sweepAgentWorktrees({
-      folders: all.filter((s) => !gone.has(s.chatId)).map((s) => s.folder),
-      cutoff,
+      folders: remaining.map((s) => s.folder),
+      inUse,
+      cutoff: wtCutoff,
       logger: this.opts.logger,
     });
     return { chats, worktrees };
