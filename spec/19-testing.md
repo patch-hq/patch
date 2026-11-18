@@ -45,6 +45,8 @@ The load targets in `05-surfaces.md` § Loading are required checks, run in the 
 - Nothing a device has shown is lost on reconnect. The connection drops mid-turn while entries keep arriving; after reconnecting every entry shown before is still shown and every later one arrives exactly once, in order.
 - No chat, list or section renders as empty or finished before the server has answered for it.
 
+These run in the Browser layer, as the `load-targets` Playwright project, but not against the component harness: they start a real server and host (the Integration layer's back-end harness) and serve the real web app against them, because the targets are about what the real client does with what a real server sends. Playwright holds the connection between the page and the server, so a test can withhold every answer, drop the link while entries keep arriving, and bring it back. The project runs alone, after every other browser spec, because the one-second target is a measurement and a measurement taken while other workers hold the CPU measures the CPU; it needs a machine that is not starved. A change under `packages/server/` or `packages/host/` runs the browser layer, since either can move a target.
+
 ### Status transitions
 
 The status rules in `12-error-and-offline.md` are required checks:

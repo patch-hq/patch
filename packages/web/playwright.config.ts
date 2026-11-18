@@ -57,5 +57,17 @@ export default defineConfig({
     reuseExistingServer: OWN_PORT ? false : !process.env.CI,
     timeout: 60_000,
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    { name: 'chromium', testIgnore: /load-targets\.spec\.ts/, use: { browserName: 'chromium' } },
+    // The load targets (spec/19 § Load targets) time the real app against a real
+    // server. They run alone, after every other spec has finished: a one-second
+    // target measured while other workers hold the CPU measures the CPU.
+    {
+      name: 'load-targets',
+      testMatch: /load-targets\.spec\.ts/,
+      dependencies: ['chromium'],
+      fullyParallel: false,
+      use: { browserName: 'chromium' },
+    },
+  ],
 });
