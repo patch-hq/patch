@@ -245,3 +245,17 @@ describe('toolCallSummary — description that does not start on its first line'
     expect(out).toBe(`${'A'.repeat(58)}😀…`);
   });
 });
+
+describe('toolCallSummary — background agents name themselves', () => {
+  it('shows the agent title, not the tool id', () => {
+    expect(
+      toolCallSummary('mcp__patch__patch_agent', {
+        title: 'Build A: server record complete',
+        prompt: 'x',
+      }),
+    ).toBe('Build A: server record complete');
+  });
+  it('falls back to the prompt start only when no title was given', () => {
+    expect(toolCallSummary('patch_agent', { prompt: 'Do the thing' })).toBe('Do the thing');
+  });
+});
