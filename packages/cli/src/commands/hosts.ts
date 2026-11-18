@@ -178,7 +178,11 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(opts, '/backends', () => '/api/hosts/backends');
+        const { t, path } = await hostRoute(
+          opts,
+          '/backends',
+          (id) => `/api/hosts/backends?hostId=${encodeURIComponent(id)}`,
+        );
         emitJson(await t.get<unknown>(path));
       });
     });

@@ -1232,6 +1232,18 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       forage: { name: 'forage', description: 'Find wild food nearby.', 'user-invocable': 'true' },
     },
   },
+  'patch.backends.request': {
+    type: 'patch.backends.request',
+    requestId: 'bk1',
+    hostId: 'host-a',
+  },
+  'patch.backends.response': {
+    type: 'patch.backends.response',
+    requestId: 'bk1',
+    hostId: 'host-a',
+    backends: [{ id: 'claude-code', version: '2.0.0' }],
+    accounts: [],
+  },
   'patch.models.request': {
     type: 'patch.models.request',
     requestId: 'md1',
