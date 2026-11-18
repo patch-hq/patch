@@ -320,7 +320,10 @@ The command runs through the host's login shell as the host's user. `timeoutMs`
 (default 60s, ceiling 10 minutes) kills it and records the fire failed — a hung
 command must not hold the job's concurrency slot, which a `script` fire frees when its
 result arrives rather than when a chat goes idle. A folder that does not exist on that
-host fails the fire and says so; it is never run somewhere else instead.
+host fails the fire and says so; it is never run somewhere else instead. The command
+outlives a host restart: the restarted host picks it up and reports its result, and one
+that died with the machine is reported as interrupted rather than lost or re-run
+(`02-host.md` § Host restarts).
 
 A run entry for a `script` fire carries `exitCode` and an `output` tail (4000
 characters per stream, tail kept), and a `chatId` only where the command announced one, so

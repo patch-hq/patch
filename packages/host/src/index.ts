@@ -220,7 +220,7 @@ import { RecordImport } from './recordImport.js';
 import { Outbox } from './outbox.js';
 import { createHealthSampler } from './healthReport.js';
 import { checkLaunchPath } from './launchPath.js';
-import { handleJobExec } from './jobExec.js';
+import { JobRuns } from './jobExec.js';
 import { handleHostWake } from './hostWake.js';
 import { rotateLog } from './logRotate.js';
 import { handleHookCheck } from './hookCheck.js';
@@ -788,10 +788,30 @@ async function startHost(
   const codexBackend = new CodexBackend(codexAccounts, codexHistory);
   const localModels = new LocalModels();
   const localHistory = new CodexHistory(localHistoryDir(config.patchHome), 'local');
+  // A local-model turn runs in an agent process of its own under the turn
+  // runner (spec/02 § Host restarts), resolved like the runner itself below.
+  // Only the real backend runs turns durably, so only it needs one.
+  const localAgent = ((): { command: string; args: string[] } | undefined => {
+    if (config.sdkBackend !== 'real') return undefined;
+    const here = dirname(fileURLToPath(import.meta.url));
+    const built = resolve(here, 'bin', 'local-agent.js');
+    const source = resolve(here, 'bin', 'local-agent.ts');
+    if (existsSync(built)) return { command: process.execPath, args: [built] };
+    if (existsSync(source)) {
+      const tsxLoader = createRequire(import.meta.url).resolve('tsx');
+      return {
+        command: process.execPath,
+        args: ['--import', pathToFileURL(tsxLoader).href, source],
+      };
+    }
+    throw new Error(`patch-daemon: local agent not found at ${built} or ${source}`);
+  })();
   const localBackend = new LocalBackend(
     localModels,
     localHistory,
     localSessionDir(config.patchHome),
+    undefined,
+    localAgent,
   );
   const routedBackend: SdkBackend = {
     run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
@@ -1877,6 +1897,15 @@ async function startHost(
     },
     logger,
   });
+  // Script job runs (spec/08 § Action — `script`). Each runs detached and is
+  // persisted, so a host restart mid-run picks it up and still reports it
+  // (spec/02 § Host restarts). Results go through the link, which buffers
+  // them while the server is away.
+  const jobRuns = new JobRuns({
+    runDir: join(config.patchHome, 'job-runs'),
+    emit: (event) => link.send(event),
+    logger: logger.child({ component: 'job-runs' }),
+  });
   // Host search (spec/02 § Host search). Same bound-sender pattern as
   // `terminals` above — a session only exists downstream of a surface frame,
   // so the sender is always bound by the time anything needs to emit.
@@ -2916,7 +2945,10 @@ async function startHost(
       if (event.type === 'job.exec_request') {
         // spec/08 § Action — `script`. A job that runs a command on this host
         // instead of starting a chat; the result frame is what settles its run.
-        handleJobExec(event, sender, logger);
+        // The command runs detached and outlives a host restart (spec/02 §
+        // Host restarts), so its result goes out through the link, not this
+        // connection's sender.
+        jobRuns.start(event);
         return;
       }
       if (event.type === 'hook.check_request') {
@@ -5128,6 +5160,15 @@ async function startHost(
   // flush the instant `auth.ok` lands. Auto-reconnects with a short first
   // backoff (serverLink BACKOFF_SCHEDULE_MS).
   link.start();
+  // spec/02 § Host restarts: script runs a previous host started are picked up
+  // and reported when they end; one that died with the machine is reported
+  // interrupted.
+  try {
+    const n = jobRuns.adopt();
+    if (n > 0) logger.info({ runs: n }, 'patch-daemon: picked up running script jobs');
+  } catch (err) {
+    logger.error({ err }, 'patch-daemon: could not pick up running script jobs');
+  }
   // spec/02 § Host restarts: terminals a previous host left running are
   // reattached, and what they printed meanwhile goes to the surface.
   terminals.adopt().then(
@@ -6056,6 +6097,8 @@ async function startHost(
     // Host searches die with the host too — a surface mid-search just gets no
     // more frames for that `searchId`.
     hostSearch.cancelAll();
+    // Script runs keep going; the next host picks them up.
+    jobRuns.dispose();
     audioRelayBridge.dispose();
     await runShutdownSteps(
       [

@@ -83,8 +83,9 @@ host is still being built.
 A host restart, whether a self-update or a service restart, leaves the host's
 work running. Every long-lived piece of it runs as its own process rather than
 as a child of the host: each turn under a detached runner, each terminal session
-(§ Terminal sessions), each watch and each `patch_watch` job (§ Background work).
-The host talks to each over a socket and reattaches on start.
+(§ Terminal sessions), each watch and each `patch_watch` job (§ Background work),
+and each script job's command (`08-triggers-and-jobs.md` § Action — `script`). The host
+reattaches to each on start.
 
 A turn's runner owns the provider process's stdio and keeps everything said to
 and by it on disk, under `<patchHome>/turns/<chatId>/`. On start the host reads
@@ -110,6 +111,26 @@ replayed, and the new host's request ids continue past the highest the old one
 used. A replayed item the chat's log already holds, found by its item id, is not
 logged again.
 
+A local-model turn is no different either. Its tool-calling loop (stream the
+model's reply, run the tools it asked for, send the results back) runs in an agent
+process of its own under the same runner, which speaks the same JSON-RPC line shape,
+so it is reattached exactly as a Codex turn is: what the agent said after the point
+the previous host had handled is replayed, and a tool approval no host had answered
+is asked again. The tools it runs are the agent's children, so they carry on too. A
+turn that had not yet named its session had not begun, and starts again as a new turn.
+
+A script job's command runs detached in its own process group, with its output
+written to files and its exit code to a sidecar file, and its record is on disk
+under `<patchHome>/job-runs/` before the request returns. A host that restarts
+mid-run picks each record up, keeps enforcing the command's timeout, and reports
+the result when the command ends, with its real exit code, output and duration; one
+that finished while no host was up is reported as if the host had been there. A
+command that died with the machine left no exit code, and is reported failed as
+interrupted, never re-run. The server waits for a script's result for its timeout
+plus the acknowledgement bound (20 seconds), so a host that is down for longer than
+that has the fire recorded as unanswered first, and the result it reports when it
+returns is not recorded.
+
 A turn's identity for reattachment is its turn id. A turn that arrives without
 one (a spawn prompt, so every job-fired chat's first turn) is given one when it
 starts.
@@ -132,7 +153,7 @@ as it was.
 
 A stop (SIGTERM, a self-update, `POST /stop`) takes seconds, however many chats the host holds: shutdown does only work that scales with what the host was doing, never with what it has loaded.
 
-- Turns, watches and terminals are not stopped; they run as their own processes and the host reattaches to them when it starts (§ Host restarts). There is nothing to wait for.
+- Turns, watches, terminals and script job runs are not stopped; they run as their own processes and the host reattaches to them when it starts (§ Host restarts). There is nothing to wait for.
 - Only chats whose position or last-updated time moved since their metadata was last saved are written back.
 - Everything that can wait on a peer (audio clients, the server link, control connections, transcription) closes concurrently, each with a 2 second budget; a close that overruns is logged by name and abandoned, and a close handshake the peer never answers is cut after 1 second.
 - A stop that has not finished in 10 seconds ends the process and is logged as a fault.
@@ -922,7 +943,7 @@ last-used model.
 
 - Node (pinned runtime, shipped with the host artifact), TypeScript, single process.
 - Drives each provider through its adapter (§ Provider adapters), each turn in its own runner process (§ Host restarts).
-- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-host test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json` and the `seq` counter) + `~/.patch/outbox/` (§ Host outbox) + `~/.patch/turns/` (§ Host restarts) + `~/.patch/threads/{manager,speakers}/` on the Manager host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). Each provider's own session files stay where the provider keeps them (§ Provider adapters); they are not the record.
+- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-host test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json` and the `seq` counter) + `~/.patch/outbox/` (§ Host outbox) + `~/.patch/turns/` and `~/.patch/job-runs/` (§ Host restarts) + `~/.patch/threads/{manager,speakers}/` on the Manager host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). Each provider's own session files stay where the provider keeps them (§ Provider adapters); they are not the record.
 - Connects to server via WebSocket. Reconnects with exponential backoff; durable events wait in the outbox during a disconnect (§ Host outbox). See `12-error-and-offline.md`.
 
 ## CLI

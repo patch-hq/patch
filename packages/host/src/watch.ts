@@ -187,7 +187,7 @@ function formatDuration(ms: number): string {
   return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m` : `${m}m`;
 }
 
-function defaultIsAlive(pid: number): boolean {
+export function defaultIsAlive(pid: number): boolean {
   try {
     // Signal 0: no-op, but throws ESRCH if the pid is gone (or EPERM for a
     // pid that exists but isn't ours — same-user watched processes never hit
@@ -200,7 +200,7 @@ function defaultIsAlive(pid: number): boolean {
 }
 
 /** Start time of a pid as `ps` prints it; undefined when there is no such process. */
-function defaultProcessStart(pid: number): string | undefined {
+export function defaultProcessStart(pid: number): string | undefined {
   try {
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
@@ -213,7 +213,7 @@ function defaultProcessStart(pid: number): string | undefined {
 }
 
 /** When the machine booted (epoch ms), or undefined if the OS will not say. */
-function defaultBootTime(): number | undefined {
+export function defaultBootTime(): number | undefined {
   try {
     if (process.platform === 'linux') {
       const m = /^btime (\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'));

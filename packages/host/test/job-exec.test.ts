@@ -3,40 +3,65 @@
 // wrong directory or swallowed a failure.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
-import { handleJobExec } from '../src/jobExec.js';
+import { JobRuns } from '../src/jobExec.js';
 
 const silentLogger = pino({ level: 'silent' });
 
-function run(
-  command: string,
-  folder: string,
-  timeoutMs = 5000,
-): Promise<Extract<WireEvent, { type: 'job.exec_result' }>> {
-  return new Promise((resolve) => {
-    handleJobExec(
-      {
-        type: 'job.exec_request',
-        hostId: 'd1',
-        jobId: 'j_1',
-        fireId: 'f_1',
-        folder,
-        command,
-        timeoutMs,
-      },
-      (e) => {
-        if (e.type === 'job.exec_result') resolve(e);
-      },
-      silentLogger,
-    );
-  });
+type Result = Extract<WireEvent, { type: 'job.exec_result' }>;
+
+function request(command: string, folder: string, timeoutMs = 5000, fireId = 'f_1') {
+  return {
+    type: 'job.exec_request' as const,
+    hostId: 'd1',
+    jobId: 'j_1',
+    fireId,
+    folder,
+    command,
+    timeoutMs,
+  };
 }
 
-describe('handleJobExec', () => {
+/** One host's job runner, collecting what it reports. */
+function host(runDir: string, extra: { bootTime?: () => number | undefined } = {}) {
+  const results: Result[] = [];
+  const waiters: Array<(r: Result) => void> = [];
+  const runs = new JobRuns({
+    runDir,
+    emit: (e) => {
+      if (e.type !== 'job.exec_result') return;
+      results.push(e);
+      waiters.shift()?.(e);
+    },
+    logger: silentLogger,
+    pollMs: 50,
+    ...extra,
+  });
+  const next = (): Promise<Result> =>
+    results.length > 0
+      ? Promise.resolve(results.shift()!)
+      : new Promise((resolve) =>
+          waiters.push((r) => {
+            results.splice(results.indexOf(r), 1);
+            resolve(r);
+          }),
+        );
+  return { runs, next, results };
+}
+
+function run(command: string, folder: string, timeoutMs = 5000): Promise<Result> {
+  const h = host(mkdtempSync(join(tmpdir(), 'patch-exec-runs-')));
+  h.runs.start(request(command, folder, timeoutMs));
+  return h.next();
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+describe('script job runs', () => {
   it('runs the command IN the folder it was given and reports its output', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
     writeFileSync(join(dir, 'marker.txt'), 'here');
@@ -181,5 +206,102 @@ describe('handleJobExec', () => {
       expect(r.stdout).toContain('done "quoted" sub');
       rmSync(dir, { recursive: true, force: true });
     });
+  });
+});
+
+// spec/02 § Host restarts: a script job is the host's work, and a host restart
+// must neither kill it nor lose its result.
+describe('script job runs outlive a host restart', () => {
+  it('a run the restarted host picks up mid-run completes and is reported', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const runDir = mkdtempSync(join(tmpdir(), 'patch-exec-runs-'));
+    const first = host(runDir);
+    first.runs.start(request('sleep 1; echo "made it"; echo "and warned" >&2', dir));
+    // The host goes down while the command runs.
+    first.runs.dispose();
+    await sleep(100);
+    expect(first.results).toEqual([]);
+
+    const second = host(runDir);
+    expect(second.runs.adopt()).toBe(1);
+    const r = await second.next();
+    expect(r.ok).toBe(true);
+    expect(r.exitCode).toBe(0);
+    expect(r.fireId).toBe('f_1');
+    expect(r.stdout).toBe('made it');
+    expect(r.stderr).toBe('and warned');
+    // The duration is the run's own, not the time since the new host came up.
+    expect(r.durationMs).toBeGreaterThanOrEqual(900);
+    expect(readdirSync(runDir)).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a run that finished while no host was up is reported with its real exit code', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const runDir = mkdtempSync(join(tmpdir(), 'patch-exec-runs-'));
+    const first = host(runDir);
+    first.runs.start(request('echo bye; exit 4', dir));
+    first.runs.dispose();
+    await sleep(500);
+
+    const second = host(runDir);
+    second.runs.adopt();
+    const r = await second.next();
+    expect(r.ok).toBe(false);
+    expect(r.exitCode).toBe(4);
+    expect(r.stdout).toBe('bye');
+    expect(r.error).toContain('exit code 4');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a run that died with the machine is reported interrupted, not lost and not re-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const runDir = mkdtempSync(join(tmpdir(), 'patch-exec-runs-'));
+    const first = host(runDir);
+    first.runs.start(request('echo started >> ran.txt; sleep 30', dir, 60_000));
+    await sleep(300);
+    first.runs.dispose();
+    // The machine goes down: the whole run dies, wrapper and all.
+    const rec = JSON.parse(readFileSync(join(runDir, 'f_1.json'), 'utf8')) as { pid: number };
+    process.kill(-rec.pid, 'SIGKILL');
+    await sleep(100);
+
+    const second = host(runDir, { bootTime: () => Date.now() });
+    second.runs.adopt();
+    const r = await second.next();
+    expect(r.ok).toBe(false);
+    expect(r.exitCode).toBeNull();
+    expect(r.error).toMatch(/^interrupted: the (machine|Mac) restarted/);
+    await sleep(200);
+    expect(readFileSync(join(dir, 'ran.txt'), 'utf8')).toBe('started\n');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('the restarted host still enforces the timeout', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const runDir = mkdtempSync(join(tmpdir(), 'patch-exec-runs-'));
+    const first = host(runDir);
+    first.runs.start(request('sleep 30', dir, 1000));
+    first.runs.dispose();
+
+    const second = host(runDir);
+    second.runs.adopt();
+    const r = await second.next();
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('timeout');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('the same fire sent twice runs once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const h = host(mkdtempSync(join(tmpdir(), 'patch-exec-runs-')));
+    h.runs.start(request('echo x >> count.txt; sleep 0.3', dir));
+    h.runs.start(request('echo x >> count.txt; sleep 0.3', dir));
+    const r = await h.next();
+    expect(r.ok).toBe(true);
+    await sleep(200);
+    expect(h.results).toEqual([]);
+    expect(readFileSync(join(dir, 'count.txt'), 'utf8')).toBe('x\n');
+    rmSync(dir, { recursive: true, force: true });
   });
 });
