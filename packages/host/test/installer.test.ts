@@ -10,6 +10,7 @@ import { readFileSync, readdirSync, utimesSync } from 'node:fs';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
   lstatSync,
+  readlinkSync,
   symlinkSync,
   mkdtempSync,
   mkdirSync,
@@ -470,6 +471,44 @@ describe('an install whose service does not stay up', () => {
 });
 
 describe('what the install puts on the host', () => {
+  it('keeps relative symlinks relative, so they survive the artifact dir being deleted', async () => {
+    const home = mkTmp('patch-home-');
+    const artifactDir = makeArtifact('linux-x64');
+    mkdirSync(join(artifactDir, 'lib'), { recursive: true });
+    writeFileSync(join(artifactDir, 'lib/libx.1.dylib'), 'lib');
+    symlinkSync('libx.1.dylib', join(artifactDir, 'lib/libx.dylib'));
+    await runInstaller(
+      makeCtx({
+        home,
+        artifactDir,
+        serviceOps: recordingOps(),
+        argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+      }),
+    );
+    const link = join(home, '.patch/versions/9.9.9/lib/libx.dylib');
+    expect(readlinkSync(link)).toBe('libx.1.dylib');
+    rmSync(artifactDir, { recursive: true, force: true });
+    expect(readFileSync(link, 'utf8')).toBe('lib');
+  });
+
+  it('refuses a release with a dangling symlink and leaves `current` alone', async () => {
+    const home = mkTmp('patch-home-');
+    const artifactDir = makeArtifact('linux-x64');
+    symlinkSync('/nonexistent/libgone.dylib', join(artifactDir, 'libgone.dylib'));
+    await expect(
+      runInstaller(
+        makeCtx({
+          home,
+          artifactDir,
+          serviceOps: recordingOps(),
+          argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+        }),
+      ),
+    ).rejects.toThrow(/dangling symlinks/);
+    expect(existsSync(join(home, '.patch/current'))).toBe(false);
+    expect(existsSync(join(home, '.patch/versions/9.9.9'))).toBe(false);
+  });
+
   it('a brand-new host gets no project folder: the person chooses one (spec/04 § Folders)', async () => {
     const home = mkTmp('patch-home-');
     const ctx = makeCtx({

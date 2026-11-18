@@ -44,6 +44,7 @@ import {
   type ReadStream,
   readdirSync,
   statSync,
+  lstatSync,
 } from 'node:fs';
 import { installerLog, openInstallerLog } from './runLog.js';
 import { createInterface } from 'node:readline/promises';
@@ -132,6 +133,26 @@ export interface InstallerContext {
   loginShellPath?: () => string;
   /** Delay between service-state polls — test hook, so a dead service does not make a unit test wait ~20s. */
   runStatePollMs?: number;
+}
+
+/**
+ * Symlinks under `dir` whose target does not exist. A release holding one is
+ * broken: the host loads native libraries through these links.
+ */
+export function findDanglingSymlinks(dir: string): string[] {
+  const bad: string[] = [];
+  const walk = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isSymbolicLink()) {
+        if (!existsSync(p)) bad.push(p);
+      } else if (e.isDirectory() && lstatSync(p).isDirectory()) {
+        walk(p);
+      }
+    }
+  };
+  walk(dir);
+  return bad;
 }
 
 /** How many installed versions to keep: the new one and the one still running. */
@@ -519,7 +540,18 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   const installDir = join(patchHome, 'versions', build.version);
   mkdirSync(installDir, { recursive: true });
   if (resolve(ctx.artifactDir) !== resolve(installDir)) {
-    cpSync(ctx.artifactDir, installDir, { recursive: true });
+    // verbatimSymlinks: without it Node rewrites relative links as absolute
+    // paths into the (temporary) source dir, which dangle once it is deleted.
+    cpSync(ctx.artifactDir, installDir, { recursive: true, verbatimSymlinks: true });
+  }
+  const dangling = findDanglingSymlinks(installDir);
+  if (dangling.length > 0) {
+    if (resolve(ctx.artifactDir) !== resolve(installDir)) {
+      rmSync(installDir, { recursive: true, force: true });
+    }
+    throw new Error(
+      `release ${build.version} has dangling symlinks, so it was not installed: ${dangling.join(', ')}`,
+    );
   }
   for (const exe of ['node', 'install']) {
     const p = join(installDir, exe);
