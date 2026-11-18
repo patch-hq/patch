@@ -168,7 +168,7 @@ function tabTitle(
         case 'files':
           return `Files — ${chatTitle(d.chatId, chatName)}`;
         case 'host-files':
-          return 'Host files';
+          return 'Files';
         case 'pads':
           return 'Pads';
         case 'triage':

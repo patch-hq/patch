@@ -17431,6 +17431,20 @@ select.permission-mode.is-pending {
   padding: 1px 4px;
   color: var(--ink);
 }
+.browse-hidden-toggle {
+  padding: 1px 6px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--text-min);
+  cursor: pointer;
+}
+.browse-hidden-toggle:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
 .browse-places {
   position: relative;
   margin-left: auto;
@@ -17485,6 +17499,7 @@ select.permission-mode.is-pending {
   background: transparent;
   border: 0;
   color: var(--ink);
+  font-family: inherit;
   font-size: var(--text-min);
   text-align: left;
   cursor: pointer;

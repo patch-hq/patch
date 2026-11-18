@@ -61,7 +61,7 @@ export function Breadcrumb({
         const isLast = i === segs.length - 1;
         return (
           <Fragment key={seg.path}>
-            {i > 0 ? (
+            {i > 1 ? (
               <span className="browse-breadcrumb-sep" aria-hidden>
                 /
               </span>
@@ -588,6 +588,7 @@ function HostBrowsePanel({
   // Keyboard shortcuts), so this is just how a search hit tells the editor
   // which line to land on once it has mounted for the newly-opened file.
   const [goToLine, setGoToLine] = useState<number | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
 
   if (hostId === null) {
     const ids = Object.keys(hosts);
@@ -618,13 +619,23 @@ function HostBrowsePanel({
     );
   }
 
-  const entries: HostFileEntry[] = listQuery.data?.entries ?? [];
+  const allEntries: HostFileEntry[] = listQuery.data?.entries ?? [];
+  const entries = showHidden ? allEntries : allEntries.filter((e) => !e.name.startsWith('.'));
 
   return (
     <div className="browse-panel" data-testid="host-browse-panel" ref={panelRef}>
       <div className="browse-tree" data-testid="host-browse-tree">
         <div className="browse-tree-header">
           <PlacesMenu hostId={hostId} chatFolder={null} onPick={navigate} />
+          <button
+            type="button"
+            className="browse-hidden-toggle"
+            data-testid="host-browse-hidden-toggle"
+            aria-pressed={showHidden}
+            onClick={() => setShowHidden((v) => !v)}
+          >
+            {showHidden ? 'Hide hidden' : 'Show hidden'}
+          </button>
         </div>
         {resolvedPath ? <Breadcrumb path={resolvedPath} onNavigate={navigate} /> : null}
         <div className="browse-tree-list" data-testid="host-browse-list">
