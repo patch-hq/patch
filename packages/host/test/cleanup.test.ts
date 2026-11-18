@@ -85,7 +85,7 @@ describe('sweepAgentWorktrees', () => {
     expect(existsSync(p)).toBe(true);
   });
 
-  it('ignores worktrees outside .claude/worktrees and non-git folders', async () => {
+  it('sweeps worktrees outside .claude/worktrees, ignores non-git folders', async () => {
     const other = join(root, 'other');
     sh(repo, 'worktree', 'add', '-b', 'other', other);
     age(other, 40);
@@ -94,7 +94,39 @@ describe('sweepAgentWorktrees', () => {
       cutoff: cutoffMs(Date.now(), 30),
       logger,
     });
+    expect(r.removed).toEqual([other]);
+    expect(existsSync(other)).toBe(false);
+    expect(existsSync(repo)).toBe(true);
+  });
+
+  it('keeps a worktree a live chat is working in', async () => {
+    const p = addWorktree('live');
+    age(p, 40);
+    const r = await sweepAgentWorktrees({
+      folders: [repo],
+      inUse: [join(p, 'sub')],
+      cutoff: cutoffMs(Date.now(), 30),
+      logger,
+    });
     expect(r.removed).toEqual([]);
-    expect(existsSync(other)).toBe(true);
+    expect(r.kept[0]?.reason).toBe('chat still active');
+  });
+
+  it('removes a merged branch whose commits are on the remote', async () => {
+    const p = addWorktree('merged');
+    writeFileSync(join(p, 'm.txt'), 'm');
+    sh(p, 'add', '.');
+    sh(p, 'commit', '-m', 'work');
+    sh(p, 'push', 'origin', 'merged');
+    age(p, 40);
+    const r = await run(cutoffMs(Date.now(), 30));
+    expect(r.removed).toEqual([p]);
+  });
+
+  it('prunes worktrees whose directory is already gone', async () => {
+    const p = addWorktree('gone');
+    rmSync(p, { recursive: true });
+    const r = await run(cutoffMs(Date.now(), 30));
+    expect(r.kept).toEqual([]);
   });
 });
