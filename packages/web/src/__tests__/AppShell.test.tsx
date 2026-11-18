@@ -969,8 +969,23 @@ describe('AppShell', () => {
       lastUpdated: 50,
       status: 'archived',
     });
-    await renderShell('/', [older, newer, archived]);
-    await waitFor(() => expect(useChatStore.getState().chats['older-unread']).toBeDefined());
+    const hidden = makeRow('hidden-unread', { lastSeq: 5, lastReadSeq: -1, lastUpdated: 10 });
+    const snoozed = makeRow('snoozed-unread', { lastSeq: 5, lastReadSeq: -1, lastUpdated: 20 });
+    const deleted = makeRow('deleted-unread', { lastSeq: 5, lastReadSeq: -1, lastUpdated: 30 });
+    await renderShell('/', [older, newer, archived, hidden, snoozed, deleted]);
+    await waitFor(() => expect(useChatStore.getState().chats['deleted-unread']).toBeDefined());
+    // The cold-start payload strips these fields, so patch them in after hydrate.
+    useChatStore.setState((s) => ({
+      chats: {
+        ...s.chats,
+        ['hidden-unread']: { ...s.chats['hidden-unread']!, hidden: true },
+        ['snoozed-unread']: {
+          ...s.chats['snoozed-unread']!,
+          snoozedUntil: Date.now() + 3_600_000,
+        },
+        ['deleted-unread']: { ...s.chats['deleted-unread']!, status: 'deleted' as const },
+      },
+    }));
     fireEvent.keyDown(window, { key: 'j', metaKey: true });
     await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('older-unread'));
   });

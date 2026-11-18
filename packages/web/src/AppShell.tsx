@@ -69,6 +69,7 @@ import { useSectionCounts } from './lib/sectionCounts.js';
 import { useDocumentTitleSync } from './lib/documentTitle.js';
 import { useFrontChatReport } from './lib/frontChat.js';
 import { useChatStore, deriveBadge } from './stores/chatStore.js';
+import { isHidden, isSnoozed } from './stores/types.js';
 import { useAgentWorkingIndicator } from './lib/agentWorkingIndicator.js';
 import { useSelectionStore } from './stores/selectionStore.js';
 import { stepVisibleChat } from './lib/chatGroups.js';
@@ -492,9 +493,12 @@ export function AppShell(): JSX.Element {
       },
       onJumpOldestUnread: () => {
         // ⌘J — jump to the OLDEST unread chat (a `done` or `permission` badge),
-        // i.e. the one waiting longest. Skips archived rows.
+        // i.e. the one waiting longest. Only chats the sidebar draws in the
+        // active list count: not archived, deleted, hidden or snoozed.
+        const now = Date.now();
         const chats = Object.values(useChatStore.getState().chats).filter(
-          (c) => c.status !== 'archived',
+          (c) =>
+            c.status !== 'archived' && c.status !== 'deleted' && !isHidden(c) && !isSnoozed(c, now),
         );
         const unread = chats
           .filter((c) => {
