@@ -77,7 +77,10 @@ const SETTING_KEYS: Record<string, string> = {
   'default-model': 'defaultModel',
   'question-expiry': 'questionExpiry',
   'question-expiry-seconds': 'questionExpirySeconds',
+  // Retired: kept so a script that sets it still works; the server reads it as
+  // the limit behaviour it meant.
   'auto-resume': 'autoResumeRateLimit',
+  'limit-behaviour': 'limitBehaviour',
   'auto-update': 'autoUpdateHosts',
   'chat-name-interval': 'chatNameInterval',
   'title-generation': 'titleGenerationEnabled',

@@ -78,3 +78,23 @@ describe('limitControls', () => {
     expect(formatSpanShort(50 * 3_600_000)).toBe('2 d 2 h');
   });
 });
+
+describe('limitControls — the user’s limit behaviour leads (decision 25)', () => {
+  it('switch_provider makes Change provider the main button, ahead of another account', () => {
+    const c = limitControls({
+      ...base,
+      limitNext: 'switch_provider',
+      rows: [row('claude', 'work', true), row('claude', 'home', false), row('codex', 'me', false)],
+    });
+    expect(c.main).toBe('provider');
+  });
+  it('credit back makes Continue the main button, even with a reset still ahead', () => {
+    const c = limitControls({
+      ...base,
+      creditReturned: true,
+      rows: [row('claude', 'work', true), row('claude', 'home', false)],
+    });
+    expect(c.send.enabled).toBe(true);
+    expect(c.main).toBe('send');
+  });
+});

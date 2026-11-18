@@ -101,6 +101,9 @@ describe('mobile Settings → Providers → Claude settings', () => {
     expect(update).toHaveBeenCalledWith({
       providerSettings: { claude: { cleanupPeriodDays: 90 } },
     });
-    expect(queryHost(r.root, byTestId('provider-settings-codex'))).toBeNull();
+    // Codex has no session setting to offer: its group says so instead of
+    // drawing rows (spec/10 § Settings).
+    expect(queryHost(r.root, byTestId('provider-settings-note-codex'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('provider-settings-codex-cleanupPeriodDays'))).toBeNull();
   });
 });

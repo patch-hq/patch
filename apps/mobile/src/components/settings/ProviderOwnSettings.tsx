@@ -9,6 +9,7 @@ import { View } from 'react-native';
 import {
   PROVIDERS as WIRE_PROVIDERS,
   providerDescriptor,
+  type ProviderDescriptor,
   type ProviderSettingDescriptor,
 } from '@patch/wire';
 import { space } from '../../lib/theme';
@@ -17,22 +18,29 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { SettingsSection } from '../SettingsSection';
 import { hostName, sortedHosts } from './HostSwitcher';
 import { patchShared } from './sharedWrite';
-import { ButtonRow, Field, Row, SettingsButton } from './ui';
+import { ButtonRow, Field, Muted, Row, SettingsButton } from './ui';
 
 export function ProviderOwnSettings(): React.ReactElement {
   return (
     <>
-      {WIRE_PROVIDERS.filter((p) => p.settings.length > 0).map((p) => (
-        <SettingsSection
-          key={p.id}
-          title={`${p.label} settings`}
-          testID={`provider-settings-${p.id}`}
-        >
-          {p.settings.map((setting) => (
-            <ProviderSettingRow key={setting.key} providerId={p.id} setting={setting} />
-          ))}
-        </SettingsSection>
-      ))}
+      {(WIRE_PROVIDERS as readonly ProviderDescriptor[])
+        .filter((p) => p.settings.length > 0 || p.settingsNote !== undefined)
+        .map((p) => (
+          <SettingsSection
+            key={p.id}
+            title={`${p.label} settings`}
+            testID={`provider-settings-${p.id}`}
+          >
+            {p.settings.map((setting) => (
+              <ProviderSettingRow key={setting.key} providerId={p.id} setting={setting} />
+            ))}
+            {p.settingsNote !== undefined ? (
+              <View style={{ paddingHorizontal: space.md, paddingVertical: space.sm }}>
+                <Muted testID={`provider-settings-note-${p.id}`}>{p.settingsNote}</Muted>
+              </View>
+            ) : null}
+          </SettingsSection>
+        ))}
     </>
   );
 }

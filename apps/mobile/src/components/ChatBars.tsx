@@ -28,6 +28,7 @@ import { BrowserHandoffBar } from './chatBars/BrowserHandoffBar';
 import { JobBar } from './chatBars/JobBar';
 import { JobTickBar } from './chatBars/JobTickBar';
 import { ParentChatBar } from './chatBars/ParentChatBar';
+import { LimitBar } from './chatBars/LimitBar';
 
 export function ChatBars({
   chatId,
@@ -59,6 +60,7 @@ export function ChatBars({
       {row ? <ReminderBar row={row} /> : null}
       <ProviderContextBar chatId={chatId} />
       <WakeBar row={row} />
+      {row ? <LimitBar row={row} /> : null}
       <BackgroundTaskBar chatId={chatId} />
       <StrayProcessBar chatId={chatId} />
       <BrowserHandoffBar chatId={chatId} />

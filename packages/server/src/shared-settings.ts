@@ -55,6 +55,7 @@ import {
   type ProviderDescriptor,
   isAnthropicApiKey,
   type ProviderBackendId,
+  limitBehaviourFromAutoResume,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { AccountStateTracker } from './account-states.js';
@@ -73,6 +74,7 @@ const HOST_HELD_KEYS = [
   'titleGenerationEnabled',
   'statusGenerationEnabled',
   'autoResumeRateLimit',
+  'limitBehaviour',
   'questionExpiry',
   'questionExpirySeconds',
   'questionExpiredPrompt',
@@ -81,6 +83,23 @@ const HOST_HELD_KEYS = [
   'harnessSkills',
   'harnessMemoryEnabled',
 ] as const satisfies readonly (keyof SharedSettings)[];
+
+/**
+ * Keep the retired `autoResumeRateLimit` in step with `limitBehaviour`
+ * (spec/10 § When an account hits a limit). A write of the new setting sets the
+ * old one for hosts and surfaces that still read it; a write of ONLY the old
+ * one, from a client older than the new setting, is read as the behaviour it
+ * meant. A write naming both is taken at `limitBehaviour`'s word.
+ */
+export function limitBehaviourInStep<T extends Partial<SharedSettings>>(patch: T): T {
+  if (patch.limitBehaviour !== undefined) {
+    return { ...patch, autoResumeRateLimit: patch.limitBehaviour !== 'switch_provider' };
+  }
+  if (patch.autoResumeRateLimit !== undefined) {
+    return { ...patch, limitBehaviour: limitBehaviourFromAutoResume(patch.autoResumeRateLimit) };
+  }
+  return patch;
+}
 
 /** A refusal a REST caller should see verbatim, with its HTTP status. */
 export class SettingsError extends Error {
@@ -362,7 +381,10 @@ export class SharedSettingsService {
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);
     }
-    return { ...structuredClone(DEFAULT_SHARED_SETTINGS), ...parsed.data };
+    // A file from before `limitBehaviour` gains the behaviour its
+    // `autoResumeRateLimit` meant, so nobody's limits behave differently on
+    // upgrade (spec/10 § When an account hits a limit).
+    return { ...structuredClone(DEFAULT_SHARED_SETTINGS), ...limitBehaviourInStep(parsed.data) };
   }
 
   private persist(opts: { secrets: boolean }): void {
@@ -678,7 +700,7 @@ export class SharedSettingsService {
       }
       this.settings = {
         ...this.settings,
-        ...(SharedSettingsPatch.parse(patch) as SharedSettingsPatch),
+        ...limitBehaviourInStep(SharedSettingsPatch.parse(patch) as SharedSettingsPatch),
       };
     }
     const added: string[] = [];
@@ -900,7 +922,7 @@ export class SharedSettingsService {
         }
       }
     }
-    this.settings = { ...this.settings, ...parsed.data };
+    this.settings = { ...this.settings, ...limitBehaviourInStep(parsed.data) };
     this.commit({ secrets: false });
     return this.current();
   }

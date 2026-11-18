@@ -957,6 +957,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 : row.rateLimitResumingAt,
             resumeKind: event.resumeKind !== undefined ? event.resumeKind : row.resumeKind,
             limitBlock: event.limitBlock !== undefined ? event.limitBlock : row.limitBlock,
+            limitNext: event.limitNext !== undefined ? event.limitNext : row.limitNext,
+            creditReturned:
+              event.creditReturned !== undefined ? event.creditReturned : row.creditReturned,
             // Same rule as `pendingWake`: an explicit `null` is the host WAKING
             // the chat (spec/04 § Snooze), so it must land; an omitted field is a
             // `chat.state` about something else and preserves the known wake time.

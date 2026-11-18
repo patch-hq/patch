@@ -59,7 +59,7 @@ describe.each([true, false])(
         accountLimitInfo: () => ({ label: 'Work', scope: 'week' as const, resetsAt: RESETS_AT }),
         discoverClaudeMcpServers: () => [],
       });
-      daemon.setAutoResumeRateLimit(autoResume);
+      daemon.setLimitBehaviour(autoResume ? 'other_account' : 'switch_provider');
       const parentChatId = await daemon.spawnChat({ folder });
       const { id } = await daemon.createDelegate({ parentChatId, prompt: 'work' });
 

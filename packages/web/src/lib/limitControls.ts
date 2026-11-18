@@ -31,12 +31,18 @@ export function limitControls(input: {
   currentProviderId: string;
   rows: readonly AccountUsageRow[];
   overageBlocked: boolean;
+  /** What releases the pause (`chat.state.limitNext`). */
+  limitNext?: 'resume_at_reset' | 'other_account' | 'switch_provider' | 'ask' | null;
+  /** Credit is back for a chat that stopped for it. */
+  creditReturned?: boolean;
 }): LimitControls {
   const { now, resetsAt, rows } = input;
   const left = rows.filter((r) => !isBlocked(r.usage, now));
 
+  // Credit seen again overrides a reset still ahead: the account that came back
+  // need not be the one whose window is counting down.
   const send: LimitControl =
-    resetsAt !== null && resetsAt > now
+    input.creditReturned !== true && resetsAt !== null && resetsAt > now
       ? { enabled: false, reason: `Available at ${formatReset(resetsAt, now)}` }
       : { enabled: true };
 
@@ -60,13 +66,21 @@ export function limitControls(input: {
     ? { enabled: true }
     : { enabled: false, reason: 'Extra usage is already on' };
 
-  const main = account.enabled
-    ? 'account'
-    : provider.enabled
-      ? 'provider'
-      : send.enabled
-        ? 'send'
-        : null;
+  // The user's own choices lead: Continue once credit is back, the provider
+  // switch when that is the chosen behaviour (spec/10 § When an account hits a
+  // limit). Otherwise the first control that can help.
+  const main =
+    input.creditReturned === true
+      ? 'send'
+      : input.limitNext === 'switch_provider' && provider.enabled
+        ? 'provider'
+        : account.enabled
+          ? 'account'
+          : provider.enabled
+            ? 'provider'
+            : send.enabled
+              ? 'send'
+              : null;
   return { send, account, provider, extraUsage, main };
 }
 

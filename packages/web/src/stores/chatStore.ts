@@ -1046,6 +1046,8 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     rateLimitResumingAt: null,
     resumeKind: null,
     limitBlock: null,
+    limitNext: null,
+    creditReturned: false,
     // Nobody has counted this chat's background work yet. `null` is unknown,
     // not zero — the sidebar draws no background state until a host that
     // tracks them reports a number (spec/02 § Background task completions).
@@ -1963,6 +1965,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // full, when it clears. Same absent/null rule as the two above.
             limitBlock:
               event.limitBlock !== undefined ? event.limitBlock : (row.limitBlock ?? null),
+            // What releases the pause, and whether credit has come back. Same
+            // absent/null rule: an older host never sends them.
+            limitNext: event.limitNext !== undefined ? event.limitNext : (row.limitNext ?? null),
+            creditReturned:
+              event.creditReturned !== undefined
+                ? event.creditReturned
+                : (row.creditReturned ?? false),
             // Why the chat failed, for the failed badge's tooltip. Only meaningful
             // while errored, so it never outlives the failure.
             lastError:
@@ -2076,13 +2085,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (
               settled.limitBlock !== null ||
               settled.rateLimitResumingAt !== null ||
-              settled.resumeKind !== null
+              settled.resumeKind !== null ||
+              (settled.limitNext ?? null) !== null ||
+              settled.creditReturned === true
             ) {
               chats[event.chatId] = {
                 ...settled,
                 limitBlock: null,
                 rateLimitResumingAt: null,
                 resumeKind: null,
+                limitNext: null,
+                creditReturned: false,
               };
             }
           }
