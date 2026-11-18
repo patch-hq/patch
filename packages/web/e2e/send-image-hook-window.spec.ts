@@ -96,3 +96,28 @@ test('a blocked send puts the image back in the composer', async ({ page }) => {
   });
   await expect(page.getByTestId('composer-attachment')).toHaveCount(1);
 });
+
+test('an image that finishes uploading after Send still shows once', async ({ page }) => {
+  const held = await holdHookCheck(page);
+  const uploads: Route[] = [];
+  await page.route('**/api/chats/*/attachment', (route) => {
+    uploads.push(route);
+  });
+  await page.goto(HARNESS);
+  await page.getByTestId('composer-input').fill('what is this?');
+  await attachPng(page, 'shot.png');
+  await expect.poll(() => uploads.length).toBe(1);
+  await page.getByTestId('send-btn').click();
+  await expect.poll(() => held.length).toBe(1);
+  await expect(page.getByTestId('composer-attachment')).toHaveCount(0);
+
+  // The upload lands mid-check: the chip is re-keyed to the server id.
+  await uploads[0]!.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      ref: { id: 'a1', name: 'shot.png', mimeType: 'image/png', kind: 'image', url: '/x/a1' },
+    }),
+  });
+  await expect(page.getByTestId('composer-attachment')).toHaveCount(0);
+});

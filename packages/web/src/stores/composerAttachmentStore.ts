@@ -95,6 +95,12 @@ const sentWhileUploading = new Set<string>();
  *  holding the key from before the upload finished can still name it. */
 const landedAs = new Map<string, string>();
 
+/** The key a chip now carries: a file that landed after its chip was named
+ *  takes the server id, so a key held from before still resolves to it. */
+export function landedKey(draftKey: string, key: string): string {
+  return landedAs.get(`${draftKey}::${key}`) ?? key;
+}
+
 /** Which kind of draft each key belongs to, so a snapshot of one kind never touches the other's. */
 const keyKinds = new Map<string, AttachmentTarget['kind']>();
 

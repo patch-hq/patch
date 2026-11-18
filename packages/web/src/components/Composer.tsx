@@ -98,6 +98,7 @@ import {
   useComposerAttachmentStore,
   waitForAttachmentUpload,
   NO_ATTACHMENTS,
+  landedKey,
   type AttachmentTarget,
   type DraftAttachment,
 } from '../stores/composerAttachmentStore.js';
@@ -818,7 +819,11 @@ export const Composer = forwardRef(function Composer(
   // the draft must not show them as well. They stay in the store until the
   // send is accepted (a refused send brings the chips straight back).
   const [sendingKeys, setSendingKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const visibleAttachments = attachments.filter((a) => !sendingKeys.has(a.key));
+  // A file that lands mid-send is re-keyed to its server id, so match both.
+  const sendingNow = new Set([...sendingKeys].map((k) => landedKey(attachmentDraftKey, k)));
+  const visibleAttachments = attachments.filter(
+    (a) => !sendingKeys.has(a.key) && !sendingNow.has(a.key),
+  );
   const attachAction = useComposerAttachmentStore((s) => s.attach);
   const removeAttachmentAction = useComposerAttachmentStore((s) => s.remove);
   const retryAttachmentAction = useComposerAttachmentStore((s) => s.retry);

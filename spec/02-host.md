@@ -83,7 +83,7 @@ host is still being built.
 A host restart, whether a self-update or a service restart, leaves the host's
 work running. Every long-lived piece of it runs as its own process rather than
 as a child of the host: each turn under a detached runner, each terminal session
-(§ Terminal sessions), each watch and each `patch_run` job (§ Background work).
+(§ Terminal sessions), each watch and each `patch_watch` job (§ Background work).
 The host talks to each over a socket and reattaches on start.
 
 A turn's runner owns the provider process's stdio and keeps everything said to
