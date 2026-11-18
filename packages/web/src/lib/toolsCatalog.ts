@@ -124,7 +124,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     description:
       'Runs a scoped task in a Patch-owned child agent and returns its result directly to this chat.',
     params:
-      'prompt: string, title?: string, model?: string, folder?: string, disallowedTools?: string[], background?: boolean',
+      'prompt: string, title?: string, model?: string, account?: string, folder?: string, disallowedTools?: string[], background?: boolean',
   },
   {
     name: patchToolId('patch_spawn'),
