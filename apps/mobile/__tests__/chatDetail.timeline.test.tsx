@@ -1121,6 +1121,10 @@ describe('permission request', () => {
     const pressables = findAllHost(r.root, (i) => i.type === 'Pressable');
     expect(pressables.some((p) => hasText(p, 'allow all Bash during this session'))).toBe(false);
     expect(pressables.some((p) => hasText(p, '1. Yes'))).toBe(true);
+    expect(pressables.some((p) => hasText(p, '2. No, tell Claude what to do differently'))).toBe(
+      true,
+    );
+    expect(pressables.some((p) => hasText(p, '3. '))).toBe(false);
   });
 
   it('a permission entry with no tool name falls back to "tools" in the allow-session option label', () => {

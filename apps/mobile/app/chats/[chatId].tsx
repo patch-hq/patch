@@ -3501,7 +3501,7 @@ const TimelineItem = React.memo(function TimelineItem({
           <View style={{ flexDirection: 'column', marginTop: space.sm }}>
             {(
               [
-                { key: 'approve', label: '1. Yes', approve: true, decision: 'approve' },
+                { key: 'approve', label: 'Yes', approve: true, decision: 'approve' },
                 {
                   key: 'approve_session',
                   // Text mirrors Claude Code's exact option 2 wording (spec/15
@@ -3510,13 +3510,13 @@ const TimelineItem = React.memo(function TimelineItem({
                   // session (sdkBackend.ts `buildCanUseTool`), so `tool`
                   // itself stops asking for the rest of the session rather
                   // than just this one call.
-                  label: `2. Yes, allow all ${entry.tool ?? 'tools'} during this session`,
+                  label: `Yes, allow all ${entry.tool ?? 'tools'} during this session`,
                   approve: true,
                   decision: 'approve_with_session_allow',
                 },
                 {
                   key: 'deny',
-                  label: '3. No, tell Claude what to do differently',
+                  label: 'No, tell Claude what to do differently',
                   approve: false,
                   decision: 'deny',
                 },
@@ -3530,7 +3530,7 @@ const TimelineItem = React.memo(function TimelineItem({
                   opt.key !== 'approve_session' ||
                   useChatStore.getState().chats[chatId]?.permissionMode !== 'bypassPermissions',
               )
-              .map((opt) => (
+              .map((opt, i) => (
                 <Pressable
                   key={opt.key}
                   onPress={() => {
@@ -3567,7 +3567,7 @@ const TimelineItem = React.memo(function TimelineItem({
                       color: opt.approve ? colors.onAccent : colors.ink,
                     }}
                   >
-                    {opt.label}
+                    {`${i + 1}. ${opt.label}`}
                   </Text>
                 </Pressable>
               ))}
