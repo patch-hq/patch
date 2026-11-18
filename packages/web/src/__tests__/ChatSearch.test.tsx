@@ -135,6 +135,8 @@ describe('sidebar chat search', () => {
   });
 
   it('is one field in its own fixed top-band row, marked for ⌘K/⌘F', () => {
+    // The view menu is hidden until there is a chat to filter.
+    useChatStore.getState().hydrate([chat({ chatId: 'c0', name: 'a chat' })]);
     renderSidebar();
     const field = screen.getByTestId('chat-search');
     expect(field).toHaveAttribute('type', 'search');
