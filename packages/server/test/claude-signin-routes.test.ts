@@ -24,7 +24,7 @@ describe('Claude sign-in routes', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  async function makeApp(exchange: Exchange) {
+  async function makeApp(exchange: Exchange, nowMs?: () => number) {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(4));
     const data = mkdtempSync(join(dir, 'data-'));
     const registry = Registry.load(data);
@@ -52,6 +52,7 @@ describe('Claude sign-in routes', () => {
       },
       jobsWatch: false,
       gcalSubscriptions: false,
+      ...(nowMs ? { nowMs } : {}),
     });
     // A relayed request (a proxy header) is a browser somewhere else: the paste flow.
     const post = (url: string, payload?: unknown, auth = true, here = false) =>
@@ -272,6 +273,27 @@ describe('Claude sign-in routes', () => {
       const port = new URL(new URL(url).searchParams.get('redirect_uri')!).port;
       const res = await del(`/api/accounts/claude-code/signin/${signInId}`);
       expect(res.statusCode).toBe(204);
+      await expect(fetch(`http://127.0.0.1:${port}/callback`)).rejects.toThrow();
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('a loopback sign-in still completes after a long wait, but not past the limit', async () => {
+    let t = 1_000_000;
+    const { built, post, get } = await makeApp(
+      async () => ({ accessToken: 't', expiresAt: 0 }),
+      () => t,
+    );
+    try {
+      const { signInId, url } = (
+        await post('/api/accounts/claude-code/signin', {}, true, true)
+      ).json() as { signInId: string; url: string };
+      const port = new URL(new URL(url).searchParams.get('redirect_uri')!).port;
+      t += 60 * 60_000;
+      expect((await get(`/api/accounts/claude-code/signin/${signInId}`)).statusCode).toBe(200);
+      t += 2 * 60 * 60_000;
+      expect((await get(`/api/accounts/claude-code/signin/${signInId}`)).statusCode).toBe(410);
       await expect(fetch(`http://127.0.0.1:${port}/callback`)).rejects.toThrow();
     } finally {
       await built.app.close();

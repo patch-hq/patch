@@ -48,8 +48,12 @@ export interface SettingsRoutesDeps {
   now?: () => number;
 }
 
-/** How long a started Claude sign-in waits for its code. */
-export const CLAUDE_SIGNIN_TTL_MS = 15 * 60_000;
+/**
+ * How long a started Claude sign-in waits for its code. Generous: a password
+ * manager, 2FA or a break can take a long time, and when the wait ends the
+ * loopback listener closes and the browser lands on a dead page.
+ */
+export const CLAUDE_SIGNIN_TTL_MS = 2 * 60 * 60_000;
 /** How long a ChatGPT device code is good for (OpenAI's own limit). */
 export const CHATGPT_SIGNIN_TTL_MS = 15 * 60_000;
 /** Started sign-ins kept at once; the oldest goes first. */
