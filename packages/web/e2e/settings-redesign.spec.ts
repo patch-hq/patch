@@ -22,7 +22,7 @@ import {
 // `aria-current` stand in for the URL.
 
 const PAGES = [
-  { id: 'usage', title: 'Usage', testid: 'settings-usage' },
+  { id: 'usage', title: 'AI accounts', testid: 'settings-usage' },
   { id: 'chats', title: 'Chats', testid: 'settings-chats' },
   { id: 'agent', title: 'Agent', testid: 'settings-agent' },
   { id: 'mcp', title: 'MCP', testid: 'settings-mcp' },
@@ -31,7 +31,7 @@ const PAGES = [
   { id: 'voice', title: 'Voice', testid: 'settings-voice' },
   { id: 'hooks', title: 'Hooks', testid: 'settings-hooks-page' },
   { id: 'hosts', title: 'Hosts', testid: 'settings-hosts' },
-  { id: 'providers', title: 'Providers', testid: 'settings-providers' },
+  { id: 'providers', title: 'Voice and other services', testid: 'settings-providers' },
   { id: 'devices', title: 'Devices', testid: 'settings-devices' },
   { id: 'updates', title: 'Updates', testid: 'settings-version' },
   { id: 'account', title: 'Account', testid: 'settings-account' },
@@ -140,31 +140,28 @@ test.describe('Settings — desktop', () => {
     await expect(page.getByTestId('settings-back')).toBeHidden();
     // The nav's groups, in order.
     await expect(page.getByTestId('settings-nav').locator('h2')).toHaveText([
-      'Agents',
       'Setup',
+      'Agents',
       'System',
     ]);
     await expect(
       page.getByTestId('settings-nav').locator('button[data-testid^="settings-nav-"]'),
     ).toHaveText([
-      'Usage',
+      'AI accounts',
+      'Hosts',
+      'Notifications',
+      'Devices',
+      'Voice and other services',
       'Chats',
       'Agent',
-      'MCP',
+      'Agent identity',
       'Memories',
       'Manager',
       'Goals',
       'Prompts',
       'Voice',
-      'Hooks',
-      'Computer use',
-      'Activity',
-      'Hosts',
-      'Agent identity',
-      'Providers',
-      'Notifications',
-      'Devices',
       'Shortcuts',
+      'Advanced ▸',
       'Experimental features',
       'Updates',
       'Bug reports',
@@ -175,6 +172,10 @@ test.describe('Settings — desktop', () => {
   test('the nav reaches the pages below, each at its own address', async ({ page }) => {
     await page.goto(settingsUrl());
     for (const p of PAGES) {
+      if (p.id === 'mcp' || p.id === 'hooks') {
+        const adv = page.getByTestId('settings-nav-advanced');
+        if ((await adv.getAttribute('aria-expanded')) !== 'true') await adv.click();
+      }
       await page.getByTestId(`settings-nav-${p.id}`).click();
       await expectOnPage(page, p);
       await expect(page.getByTestId('settings-route')).toHaveClass(/\bopen\b/);
@@ -291,6 +292,7 @@ test.describe('Settings — behaviour', () => {
     await expect(page.getByTestId('host-d2-memory-unreported')).toBeVisible();
 
     // The choice is shared across the per-host pages…
+    await page.getByTestId('settings-nav-advanced').click();
     await page.getByTestId('settings-nav-mcp').click();
     await expect(page.getByTestId('settings-host-d2')).toHaveAttribute('aria-selected', 'true');
     // …and a page of shared settings draws no switcher at all.

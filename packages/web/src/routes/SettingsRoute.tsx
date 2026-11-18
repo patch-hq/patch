@@ -27,6 +27,7 @@ import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { useExperimentalFeatures, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import {
+  ADVANCED_GROUP,
   DEFAULT_SETTINGS_PAGE,
   visibleSettingsPages,
   type SettingsPageId,
@@ -194,20 +195,41 @@ function SettingsNav({
 }): JSX.Element {
   const behind = useBehind();
   const experimental = useExperimentalFeatures();
+  const pages = visibleSettingsPages(experimental);
+  // Advanced pages stay folded until asked for — or until one is on screen.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedCurrent = pages.some((p) => p.group === ADVANCED_GROUP && p.id === current);
+  const showAdvanced = advancedOpen || advancedCurrent;
   let lastGroup = '';
   return (
     <nav className="set-nav" data-testid="settings-nav" aria-label="Settings">
       <div className="route-head-title">
         <NavHistoryControls />
       </div>
-      {visibleSettingsPages(experimental).map((p) => {
+      {pages.map((p) => {
+        const isAdvanced = p.group === ADVANCED_GROUP;
         const heading =
           p.group !== lastGroup ? (
-            <h2 className="set-label" key={`g-${p.group}`}>
-              {p.group}
-            </h2>
+            isAdvanced ? (
+              <button
+                type="button"
+                className="set-label"
+                key={`g-${p.group}`}
+                aria-expanded={showAdvanced}
+                disabled={advancedCurrent}
+                data-testid="settings-nav-advanced"
+                onClick={() => setAdvancedOpen((o) => !o)}
+              >
+                {p.group} {showAdvanced ? '▾' : '▸'}
+              </button>
+            ) : (
+              <h2 className="set-label" key={`g-${p.group}`}>
+                {p.group}
+              </h2>
+            )
           ) : null;
         lastGroup = p.group;
+        if (isAdvanced && !showAdvanced) return [heading];
         return [
           heading,
           <button

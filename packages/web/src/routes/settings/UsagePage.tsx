@@ -17,7 +17,7 @@ export function UsagePage(): JSX.Element {
   const autoResume = usePreferencesStore((s) => s.preferences.autoResumeRateLimit);
   const loaded = usePreferencesStore((s) => s.loaded);
   return (
-    <SettingsPage title="Usage" testid="settings-usage">
+    <SettingsPage title="AI accounts" testid="settings-usage">
       <UsageHistory />
       {PROVIDERS.map((p) => (
         <Group

@@ -71,20 +71,22 @@ export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.El
 
   return (
     <div data-testid={`accounts-${backendId}`}>
-      <Row title="Pick the account by" testid={`strategy-row-${backendId}`}>
-        <Pills
-          label={`${name} account strategy`}
-          options={STRATEGIES}
-          value={strategy}
-          disabled={!loaded}
-          labels={STRATEGY_LABELS}
-          titles={STRATEGY_TITLES}
-          testid={`strategy-${backendId}`}
-          onChange={(next) =>
-            void writeShared(`${name} strategy`, () => api.setAccountStrategy(backendId, next))
-          }
-        />
-      </Row>
+      {rows.length > 0 ? (
+        <Row title="Pick the account by" testid={`strategy-row-${backendId}`}>
+          <Pills
+            label={`${name} account strategy`}
+            options={STRATEGIES}
+            value={strategy}
+            disabled={!loaded}
+            labels={STRATEGY_LABELS}
+            titles={STRATEGY_TITLES}
+            testid={`strategy-${backendId}`}
+            onChange={(next) =>
+              void writeShared(`${name} strategy`, () => api.setAccountStrategy(backendId, next))
+            }
+          />
+        </Row>
+      ) : null}
       {rows.length === 0 ? (
         <Note testid={`accounts-empty-${backendId}`}>No {name} accounts yet</Note>
       ) : (
