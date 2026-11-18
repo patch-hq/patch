@@ -518,6 +518,7 @@ describe('PaneArea — the + menu', () => {
       'Browser',
       'b',
       'Triage',
+      'Inbox',
       'Pads',
       'Jobs',
       'Settings',
