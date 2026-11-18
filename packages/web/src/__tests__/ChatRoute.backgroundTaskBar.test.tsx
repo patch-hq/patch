@@ -146,7 +146,7 @@ describe('ChatRoute — background task bar', () => {
     await renderWithTasks(1, [task()]);
     const bar = screen.getByTestId('background-task-bar');
     expect(screen.getAllByTestId('background-task-bar-task')).toHaveLength(1);
-    expect(bar.textContent).toContain('Task');
+    expect(bar.textContent).toContain('Background');
     expect(bar.textContent).toContain('Build web package to compile CSS');
     // One item is a plain row: no pill, no separate title line.
     expect(screen.queryByTestId('background-task-bar-toggle')).toBeNull();
