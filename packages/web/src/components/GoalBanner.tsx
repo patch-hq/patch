@@ -214,11 +214,11 @@ function readDismissed(): Record<string, number> {
  */
 export function FinishedGoalBanner({
   row,
-  onNotMet,
+  onReset,
 }: {
   row: ChatRow;
-  /** Re-arm the finished goal and send the agent back to work on it. Absent: no button. */
-  onNotMet?: (condition: string) => void;
+  /** Re-arm the finished goal (met or impossible) and send the agent back to work on it. Absent: no button. */
+  onReset?: (condition: string) => void;
 }): JSX.Element | null {
   const last = row.lastGoal;
   const [dismissed, setDismissed] = useState<Record<string, number>>(readDismissed);
@@ -255,15 +255,15 @@ export function FinishedGoalBanner({
       }
       action={
         <>
-          {met && onNotMet && (
+          {onReset && (
             <button
               type="button"
               className="status-link status-link-underline"
-              data-testid="finished-goal-not-met"
-              title="Mark as not met"
-              onClick={() => onNotMet(last!.condition)}
+              data-testid="finished-goal-reset"
+              title="Reset goal and work on it again"
+              onClick={() => onReset(last!.condition)}
             >
-              Not met
+              Reset
             </button>
           )}
           <button
