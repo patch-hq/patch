@@ -1116,7 +1116,7 @@ async function startHost(
   /**
    * The server says it is restarting into `version`. With that build staged,
    * install it now so host and server come back together; without it, do
-   * nothing — the reconnect update takes over, as before. Holds for running
+   * nothing — the two-minute update check takes over. Holds for running
    * turns like any update.
    */
   const swapToStaged = (version: string | null): void => {
@@ -1124,7 +1124,7 @@ async function startHost(
     if (!stagedBuild(config.patchHome, version)) {
       logger.warn(
         { version },
-        'self-update: server restarting into a build not staged here; will update on reconnect',
+        'self-update: server restarting into a build not staged here; the scheduled check (every two minutes) will update it',
       );
       return;
     }
