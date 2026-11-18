@@ -235,5 +235,13 @@ log(`quit: ${JSON.stringify(exited)}`);
 await new Promise((r) => setTimeout(r, 5000));
 if (!(await answering(origin))) fail(`the server on ${origin} stopped when the app quit`);
 log(`the server on ${origin} kept running after the app quit`);
+// Remove the agent so the next smoke run starts from a clean machine.
+execFileSync('launchctl', ['bootout', `gui/${process.getuid()}/io.github.patch-hq.server`]);
+await until(
+  `the server on ${origin} to stop once its agent is removed`,
+  20_000,
+  async () => !(await answering(origin)),
+  { exitOk: true },
+);
 console.log(`--- the app's output ---\n${output.trim()}`);
 process.exit(0);
