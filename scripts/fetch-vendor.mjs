@@ -61,10 +61,11 @@ const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
 /**
  * A stalled connection from a CI runner is the usual failure here, so each
- * attempt gets a short timeout and a few are made against the same pinned URL.
+ * attempt gets a short timeout and several are made against the same pinned URL,
+ * backing off up to a minute so a few minutes of host 502s (Hugging Face) is outlasted.
  * Every attempt is logged and the last error is thrown: nothing is swallowed.
  */
-async function download(url, attempts = 4) {
+async function download(url, attempts = 7) {
   for (let i = 1; ; i++) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(90_000) });
@@ -73,7 +74,7 @@ async function download(url, attempts = 4) {
     } catch (err) {
       console.error(`download ${url} attempt ${i}/${attempts} failed: ${err.message}`);
       if (i >= attempts) throw err;
-      await new Promise((r) => setTimeout(r, 5_000 * i));
+      await new Promise((r) => setTimeout(r, Math.min(60_000, 5_000 * 2 ** (i - 1))));
     }
   }
 }
