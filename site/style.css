@@ -579,10 +579,6 @@ code {
   margin-top: 0;
 }
 
-.features + .wrap .cta-strip {
-  margin-top: 112px;
-}
-
 /* ---------- In practice ---------- */
 
 .practice {
@@ -1281,9 +1277,6 @@ kbd {
     grid-template-columns: 1fr;
     gap: 4px;
   }
-  .features + .wrap .cta-strip {
-    margin-top: 88px;
-  }
   .how,
   .details,
   .start {
@@ -1355,4 +1348,16 @@ kbd {
   .platforms li.current .p-name::after {
     display: none;
   }
+}
+
+.step-links .p-link {
+  font-family: inherit;
+}
+
+.needs {
+  margin: 16px auto 0;
+  max-width: 520px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 15px;
 }
