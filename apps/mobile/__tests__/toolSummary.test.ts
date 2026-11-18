@@ -352,3 +352,18 @@ describe('toolCallSummary — description that does not start on its first line'
     expect(out).toBe(`${'A'.repeat(58)}😀…`);
   });
 });
+
+describe('permissionTarget', () => {
+  it('returns the literal target per tool, null when there is none', async () => {
+    const { permissionTarget } = await import('../src/lib/toolSummary');
+    expect(permissionTarget('Bash', { command: 'ls -la' })).toBe('ls -la');
+    expect(permissionTarget('Edit', { file_path: '/a/b.ts' })).toBe('/a/b.ts');
+    expect(permissionTarget('WebFetch', { url: 'https://x.test' })).toBe('https://x.test');
+    expect(permissionTarget('mcp__s__t', { a: 1 })).toContain('"a": 1');
+    expect(permissionTarget('mcp__s__t', {})).toBeNull();
+    expect(permissionTarget('Bash', {})).toBeNull();
+    expect(permissionTarget('AskUserQuestion', { questions: [] })).toBeNull();
+    expect(permissionTarget(undefined, { command: 'x' })).toBeNull();
+    expect(permissionTarget('Bash', undefined)).toBeNull();
+  });
+});

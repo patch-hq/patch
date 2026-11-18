@@ -991,6 +991,40 @@ describe('permission request', () => {
     expect(hasText(r.root, '1. Yes')).toBe(true);
   });
 
+  it("shows the literal command being approved, not just the model's description", () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      seq: 1,
+      requestId: 'r1',
+      request: {
+        tool: 'Bash',
+        description: 'Record wave 1 agents; remove audit worktree',
+        args: { command: 'git worktree remove --force /tmp/audit' },
+      },
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(hasText(r.root, 'Record wave 1 agents; remove audit worktree')).toBe(true);
+    expect(findAllHost(r.root, byTestId('permission-target'))).toHaveLength(1);
+    expect(hasText(r.root, 'git worktree remove --force /tmp/audit')).toBe(true);
+  });
+
+  it('shows the diff for an Edit approval', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      seq: 1,
+      requestId: 'r1',
+      request: {
+        tool: 'Edit',
+        args: { file_path: '/src/a.ts', old_string: 'oldLine', new_string: 'newLine' },
+      },
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('permission-diff'))).toHaveLength(1);
+    expect(hasText(r.root, '/src/a.ts')).toBe(true);
+  });
+
   it('approve sends decision=approve', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.permission_request',

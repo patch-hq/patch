@@ -385,3 +385,46 @@ export function voiceHandoffPending(timeline: ChatEventEntry[], at: number): boo
   }
   return true;
 }
+
+/**
+ * The literal thing a permission card asks the person to approve — the full
+ * Bash command, the file an edit touches, the URL to fetch — as opposed to
+ * `toolCallSummary`'s one-line paraphrase. The model's own `description` of a
+ * call can be vague ("Record wave 1 agents; remove audit worktree"), so the
+ * card shows this beneath it. Null when the tool has no single target worth
+ * showing (questions, plan exit, MCP tools: those fall back to their args).
+ */
+export function permissionTarget(tool: string | undefined, rawArgs: unknown): string | null {
+  if (!tool || typeof rawArgs !== 'object' || rawArgs === null) return null;
+  const args = rawArgs as Record<string, unknown>;
+  const pick = (...keys: string[]): string | null => {
+    for (const k of keys) {
+      const v = args[k];
+      if (typeof v === 'string' && v.trim() !== '') return v;
+    }
+    return null;
+  };
+  switch (tool) {
+    case 'Bash':
+      return pick('command');
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'MultiEdit':
+      return pick('file_path');
+    case 'NotebookEdit':
+      return pick('notebook_path');
+    case 'WebFetch':
+      return pick('url');
+    case 'WebSearch':
+      return pick('query');
+    case 'Grep':
+    case 'Glob':
+      return pick('pattern');
+  }
+  if (tool.startsWith('mcp__')) {
+    const entries = Object.entries(args).filter(([, v]) => v !== undefined);
+    return entries.length > 0 ? JSON.stringify(args, null, 2) : null;
+  }
+  return null;
+}

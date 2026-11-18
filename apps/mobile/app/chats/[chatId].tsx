@@ -140,6 +140,7 @@ import {
   insertSnoozeDividers,
   rowFirstSeq,
   pairedResult,
+  permissionTarget,
   type TimelineRow,
 } from '../../src/lib/toolSummary';
 import {
@@ -3475,6 +3476,8 @@ const TimelineItem = React.memo(function TimelineItem({
     // would send a duplicate response for a requestId the host has already
     // resolved.
     const resolved = entry.permissionResolved;
+    const permissionDiff = diffFromToolCall(entry.tool, entry.toolArgs);
+    const permissionTargetText = permissionTarget(entry.tool, entry.toolArgs);
     return (
       <View
         testID={resolved ? 'permission-resolved' : 'permission'}
@@ -3493,6 +3496,29 @@ const TimelineItem = React.memo(function TimelineItem({
         {entry.permissionDescription ? (
           <Text style={{ color: resolved ? colors.ink3 : colors.ink2, marginTop: 4 }}>
             {entry.permissionDescription}
+          </Text>
+        ) : null}
+        {permissionDiff ? (
+          <View testID="permission-diff" style={{ marginTop: space.sm }}>
+            <UnifiedDiff pairs={permissionDiff} />
+          </View>
+        ) : null}
+        {permissionTargetText ? (
+          <Text
+            testID="permission-target"
+            selectable
+            numberOfLines={resolved ? 3 : 12}
+            style={{
+              ...typography.meta,
+              fontFamily: 'monospace',
+              color: resolved ? colors.ink3 : colors.ink,
+              backgroundColor: colors.bgSoft,
+              padding: space.sm,
+              borderRadius: radii.md,
+              marginTop: space.sm,
+            }}
+          >
+            {permissionTargetText}
           </Text>
         ) : null}
         {resolved ? (
