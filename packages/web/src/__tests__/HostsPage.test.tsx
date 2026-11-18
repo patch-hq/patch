@@ -349,7 +349,9 @@ describe('Settings → Hosts', () => {
     usePresenceStore.getState().setHostOnline('host-a', true);
     loadShared({ version: 5, hosts: [{ hostId: 'host-a', appliedVersion: 5 }] });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Has your latest settings');
+    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent(
+      'Has your latest settings',
+    );
     act(() => {
       loadShared({
         version: 6,
@@ -843,6 +845,7 @@ describe('This Mac (spec/02 § Desktop app and the local host)', () => {
   ) {
     const bridge = {
       status: vi.fn().mockResolvedValue(status),
+      defaultName: vi.fn().mockResolvedValue("Tom's MacBook Pro"),
       install: vi.fn().mockResolvedValue(result),
     };
     (window as unknown as { patch?: unknown }).patch = { localHost: bridge };
@@ -865,13 +868,32 @@ describe('This Mac (spec/02 § Desktop app and the local host)', () => {
     expect(screen.queryByTestId('this-mac')).not.toBeInTheDocument();
   });
 
+  it('asks for a name, prefilled with the computer name, and installs with it', async () => {
+    const bridge = withBridge({ installed: false, hostId: null });
+    fetchRoutes['POST /api/auth/daemon/pair/start'] = () =>
+      json(200, { nonce: 'fresh-code-0123456789', expiresAt: 1 });
+    renderPage('hosts');
+    fireEvent.click(await screen.findByTestId('this-mac-install'));
+    const input = await screen.findByTestId('this-mac-name');
+    expect(input).toHaveValue("Tom's MacBook Pro");
+    expect(bridge.install).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'Studio Mac' } });
+    fireEvent.click(screen.getByTestId('this-mac-confirm'));
+    await waitFor(() =>
+      expect(bridge.install).toHaveBeenCalledWith('fresh-code-0123456789', 'Studio Mac'),
+    );
+  });
+
   it('installs with a freshly minted pairing code', async () => {
     const bridge = withBridge({ installed: false, hostId: null });
     fetchRoutes['POST /api/auth/daemon/pair/start'] = () =>
       json(200, { nonce: 'fresh-code-0123456789', expiresAt: 1 });
     renderPage('hosts');
     fireEvent.click(await screen.findByTestId('this-mac-install'));
-    await waitFor(() => expect(bridge.install).toHaveBeenCalledWith('fresh-code-0123456789'));
+    fireEvent.click(await screen.findByTestId('this-mac-confirm'));
+    await waitFor(() =>
+      expect(bridge.install).toHaveBeenCalledWith('fresh-code-0123456789', "Tom's MacBook Pro"),
+    );
     expect(screen.queryByTestId('this-mac-error')).not.toBeInTheDocument();
   });
 
@@ -884,6 +906,7 @@ describe('This Mac (spec/02 § Desktop app and the local host)', () => {
       json(200, { nonce: 'fresh-code-0123456789', expiresAt: 1 });
     renderPage('hosts');
     fireEvent.click(await screen.findByTestId('this-mac-install'));
+    fireEvent.click(await screen.findByTestId('this-mac-confirm'));
     expect(await screen.findByTestId('this-mac-error')).toHaveTextContent(
       'the pairing code could not be submitted',
     );
