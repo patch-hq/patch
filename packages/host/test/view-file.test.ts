@@ -16,7 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
@@ -282,6 +282,36 @@ describe('POST /internal/view_file (view_file)', () => {
       expect((res.json() as { kind: string }).kind).toBe('html');
       expect(published[0]!.html).toContain('<h1>West Point</h1>');
       expect(published[0]!.html.toLowerCase()).toContain('<html');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("accepts a file under the chat's own config dir, but not a sibling chat's", async () => {
+    const { app, daemon, chatId } = await setup();
+    try {
+      const configDir = daemon.chatConfigDir(chatId);
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(join(configDir, 'scratch.png'), PNG_1X1);
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: join(configDir, 'scratch.png') },
+      });
+      expect(ok.statusCode).toBe(200);
+      expect((ok.json() as { name: string }).name).toBe('scratch.png');
+
+      const sibling = join(dirname(configDir), '..', 'other-chat', 'claude');
+      mkdirSync(sibling, { recursive: true });
+      writeFileSync(join(sibling, 'x.png'), PNG_1X1);
+      const bad = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: join(sibling, 'x.png') },
+      });
+      expect(bad.statusCode).toBe(400);
     } finally {
       await app.close();
     }

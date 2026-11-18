@@ -1015,7 +1015,8 @@ const ArtifactBody = z
   .strict();
 
 // view_file (spec/14 § Tool calls). `file_path` may be absolute or
-// chat-folder-relative; the resolver rejects anything outside the chat folder.
+// chat-folder-relative; the resolver rejects anything outside the chat folder
+// and the chat's own config dir.
 const ViewFileBody = z
   .object({
     file_path: z.string().min(1),
@@ -3885,7 +3886,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     let raw: { contentType: string; base64: string; filename?: string } | undefined;
     let fileBytes: number | undefined;
     try {
-      const resolved = resolveViewFilePath(state.folder, filePath);
+      const resolved = resolveViewFilePath(state.folder, filePath, [
+        opts.daemon!.chatConfigDir(callerChatId),
+      ]);
       relPath = resolved.relPath;
       absPath = resolved.absPath;
       kind = resolved.kind;
