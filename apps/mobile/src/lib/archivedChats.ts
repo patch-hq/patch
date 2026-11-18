@@ -48,26 +48,45 @@ export const ARCHIVED_PAGE_SIZE = 30;
 // near its end (`loadMore`). `all` — a search is running — pulls every
 // remaining page, because a local match further down would otherwise not show.
 // A roster bump resets to the first page, as the rows were dropped.
+type PagePosition = { cursor: string } | { offset: number };
+
+/**
+ * Where the next page starts, from a page's answer, or `null` when nothing is
+ * left. A server released before the cursor sends only `nextOffset`; one that
+ * sends neither is an error, never "start again from the top".
+ */
+export function nextArchivedPage(r: {
+  nextCursor?: string | null;
+  nextOffset?: number | null;
+}): PagePosition | null {
+  if (typeof r.nextCursor === 'string') return { cursor: r.nextCursor };
+  if (r.nextCursor === null) return null;
+  if (typeof r.nextOffset === 'number') return { offset: r.nextOffset };
+  if (r.nextOffset === null) return null;
+  throw new Error('the server said nothing about a next page');
+}
+
 export function useArchivedChats(wanted: boolean, all = false): { loadMore: () => void } {
   const generation = useChatStore((s) => s.rosterGeneration);
-  // undefined = first page not requested; null = nothing left; number = next offset.
-  const nextRef = React.useRef<number | null | undefined>(undefined);
+  // undefined = first page not requested; null = nothing left; otherwise where the next page starts.
+  const nextRef = React.useRef<PagePosition | null | undefined>(undefined);
   const loadingRef = React.useRef(false);
   const liveRef = React.useRef(false);
   const allRef = React.useRef(all);
   allRef.current = all;
 
-  const load = React.useCallback((offset: number) => {
+  const load = React.useCallback((at: PagePosition | undefined) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     api
-      .listArchivedChats({ limit: ARCHIVED_PAGE_SIZE, offset })
+      .listArchivedChats({ limit: ARCHIVED_PAGE_SIZE, ...at })
       .then((r) => {
         loadingRef.current = false;
         if (!liveRef.current) return;
         useChatStore.getState().mergeRows(r.chats.map(toChatListRow));
-        nextRef.current = r.nextOffset;
-        if (allRef.current && r.nextOffset !== null) load(r.nextOffset);
+        const next = nextArchivedPage(r);
+        nextRef.current = next;
+        if (allRef.current && next !== null) load(next);
       })
       .catch((e: Error) => {
         loadingRef.current = false;
@@ -81,7 +100,7 @@ export function useArchivedChats(wanted: boolean, all = false): { loadMore: () =
     liveRef.current = true;
     nextRef.current = undefined;
     loadingRef.current = false;
-    load(0);
+    load(undefined);
     return () => {
       liveRef.current = false;
     };

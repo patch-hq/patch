@@ -21,3 +21,31 @@ for (const bad of ['2', '0/4', '2/0', 'a/b', '2/4/6', '']) {
     assert.doesNotMatch(r.stdout, /=== verify/);
   });
 }
+
+// The load targets run once per gate, alone, on the first shard; the rest of
+// the browser layer is split across every shard.
+function plan(shard) {
+  const r = spawnSync('node', [verify, '--plan'], {
+    env: { ...process.env, PATCH_BROWSER_SHARD: shard, PATCH_RUN_BROWSER_GATE: '1' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.split('\n').filter((l) => /^[a-z +]+: /.test(l));
+}
+
+test('shard 1/4 runs its slice of the browser specs, then the load targets alone', () => {
+  const lines = plan('1/4');
+  const browser = lines.findIndex((l) => l.startsWith('browser: '));
+  const targets = lines.findIndex((l) => l.startsWith('load targets: '));
+  assert.match(lines[browser], /--project=chromium --shard=1\/4$/);
+  assert.match(lines[targets], /--project=load-targets$/);
+  assert.ok(targets > browser);
+});
+
+test('the other shards run their slice and no load targets', () => {
+  for (const shard of ['2/4', '3/4', '4/4']) {
+    const lines = plan(shard);
+    assert.ok(lines.some((l) => l.endsWith(`--project=chromium --shard=${shard}`)));
+    assert.ok(!lines.some((l) => l.startsWith('load targets: ')));
+  }
+});

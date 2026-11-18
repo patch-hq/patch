@@ -91,8 +91,8 @@ describe('sidebar row context menu', () => {
     useUiStore.getState().setSearchQuery('');
     useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });
     useUiStore.getState().resolveConfirm(false);
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
 
   afterEach(() => {
@@ -481,8 +481,8 @@ describe('sidebar row context menu over a multi-selection', () => {
     useUiStore.getState().setSearchQuery('');
     useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });
     useUiStore.getState().resolveConfirm(false);
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
     useChatStore
       .getState()
       .hydrate([

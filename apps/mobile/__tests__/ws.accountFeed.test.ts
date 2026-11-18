@@ -97,6 +97,100 @@ describe('phone with the account feed', () => {
     ws.close();
   });
 
+  it('tells the server with feed.follow when a chat it did not follow is opened, and not otherwise', () => {
+    const ws = connect();
+    FakeWebSocket.last().emitMessage(JSON.stringify(authOk));
+    const [resume] = sent('feed.resume');
+    expect(resume!['follow']).toEqual([]);
+
+    // Opening a chat changes what the phone follows.
+    useChatStore.setState({ activeChatId: 'c7' });
+    vi.advanceTimersByTime(400);
+    const follows = sent('feed.follow');
+    expect(follows).toHaveLength(1);
+    expect(follows[0]!['follow']).toEqual([{ chatId: 'c7', after: -1 }]);
+
+    // A store change that leaves the set as it was sends nothing.
+    useChatStore.setState({ activeChatId: 'c7', timelines: {} });
+    vi.advanceTimersByTime(400);
+    expect(sent('feed.follow')).toHaveLength(1);
+
+    // Leaving it drops it from the set.
+    useChatStore.setState({ activeChatId: null });
+    vi.advanceTimersByTime(400);
+    expect(sent('feed.follow')[1]!['follow']).toEqual([]);
+    ws.close();
+  });
+
+  it('sends no feed.follow to a server without the feed', () => {
+    const ws = connect();
+    FakeWebSocket.last().emitMessage(JSON.stringify({ ...authOk, accountFeed: false }));
+    useChatStore.setState({ activeChatId: 'c7' });
+    vi.advanceTimersByTime(400);
+    expect(sent('feed.follow')).toEqual([]);
+    ws.close();
+  });
+
+  it('takes a followed chat it held nothing of as its last screen, and asks for it itself when opened later', () => {
+    useChatStore.setState({
+      activeChatId: 'c1',
+      chats: {
+        c2: {
+          chatId: 'c2',
+          name: 'c2',
+          hostId: 'h',
+          folder: '/f',
+          activity: 'idle',
+          permissionMode: 'auto',
+          status: 'active',
+          pinned: false,
+          pinnedAt: null,
+          lastUpdated: 5,
+          pendingWake: null,
+          snoozedUntil: null,
+        } as never,
+      },
+    });
+    const ws = connect();
+    FakeWebSocket.last().emitMessage(JSON.stringify(authOk));
+    const [resume] = sent('feed.resume');
+    expect(resume!['follow']).toEqual([
+      { chatId: 'c1', after: -1 },
+      { chatId: 'c2', after: -1 },
+    ]);
+    // The server answers the open chat with its last screen; older pages remain.
+    FakeWebSocket.last().emitMessage(
+      JSON.stringify({
+        type: 'chat.history',
+        requestId: 'feed.last',
+        chatId: 'c1',
+        entries: [msg('c1', 98), msg('c1', 99)],
+        more: true,
+        through: 99,
+        pending: [],
+        queued: [],
+      }),
+    );
+    expect(useChatStore.getState().timelines['c1']?.map((e) => e.seq)).toEqual([98, 99]);
+    expect(useChatStore.getState().historyMore['c1']).toBe(true);
+    // Forward catch-up is not asked for: the last screen is already the end.
+    expect(sent('chat.history_request')).toEqual([]);
+    // The open chat was answered by the feed: asking again is only for what
+    // follows its last screen…
+    ws.requestReplay('c1');
+    expect(sent('chat.history_request')).toEqual([
+      expect.objectContaining({ chatId: 'c1', after: 99 }),
+    ]);
+    // …while a followed chat whose answer went only to the offline copy asks
+    // for its own last screen when opened.
+    ws.requestReplay('c2');
+    expect(sent('chat.history_request')[1]).toEqual(
+      expect.objectContaining({ chatId: 'c2', limit: 100 }),
+    );
+    expect(sent('chat.history_request')[1]!['after']).toBeUndefined();
+    ws.close();
+  });
+
   it('keeps the feed position it is sent', () => {
     const ws = connect();
     FakeWebSocket.last().emitMessage(JSON.stringify(authOk));

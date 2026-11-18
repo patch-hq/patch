@@ -60,12 +60,15 @@ export default defineConfig({
   projects: [
     { name: 'chromium', testIgnore: /load-targets\.spec\.ts/, use: { browserName: 'chromium' } },
     // The load targets (spec/19 § Load targets) time the real app against a real
-    // server. They run alone, after every other spec has finished: a one-second
-    // target measured while other workers hold the CPU measures the CPU.
+    // server. They must run alone, after every other spec has finished: a
+    // one-second target measured while other workers hold the CPU measures the
+    // CPU. Run them as their own invocation (`--project=load-targets`, as
+    // `test:ui` and scripts/verify.mjs do), not through a project dependency: a
+    // dependency on `chromium` makes the whole suite one unsplittable group, so
+    // `--shard` puts every spec on the first shard and none on the others.
     {
       name: 'load-targets',
       testMatch: /load-targets\.spec\.ts/,
-      dependencies: ['chromium'],
       fullyParallel: false,
       use: { browserName: 'chromium' },
     },

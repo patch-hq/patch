@@ -26,7 +26,7 @@ test.describe('sidebar empty-state inset', () => {
           query: 'zzz-no-such-chat',
           hits: [],
           total: 0,
-          nextOffset: null,
+          nextCursor: null,
           hosts: [{ hostId: 'mac1', hostName: 'Mac', state: 'offline' }],
         }),
       }),

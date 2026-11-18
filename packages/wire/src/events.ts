@@ -9574,6 +9574,16 @@ export const FeedFollow = z
 export type FeedFollow = z.infer<typeof FeedFollow>;
 
 /**
+ * The `requestId` of the `chat.history` the server sends for a followed chat
+ * the device holds nothing of (`after: -1`): the chat's last screen, with
+ * `more` running backwards as for a request that names neither direction. A
+ * followed chat the device holds part of is caught up forwards under
+ * `FEED_CATCH_UP_REQUEST_ID` (spec/03 § Account feed).
+ */
+export const FEED_LAST_SCREEN_REQUEST_ID = 'feed.last';
+export const FEED_CATCH_UP_REQUEST_ID = 'feed';
+
+/**
  * Surface -> server: a page of a chat's record (spec/03 § Chat history). Only
  * the server answers. At most one of `after` and `before`; neither asks for
  * the chat's last `limit` entries. Sent only to a server whose `auth.ok`

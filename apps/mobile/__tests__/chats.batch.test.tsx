@@ -59,7 +59,7 @@ vi.mock('../src/api/rest', () => ({
       deleted: 0,
       automations: 0,
     }),
-    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextOffset: null }),
+    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextCursor: null }),
     listHiddenChats: vi.fn().mockResolvedValue({ chats: [] }),
     archiveChat: archiveChatSpy,
     pinChat: pinChatSpy,

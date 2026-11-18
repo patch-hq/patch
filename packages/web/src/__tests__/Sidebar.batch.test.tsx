@@ -75,8 +75,8 @@ describe('Sidebar batch mode', () => {
     usePresenceStore.getState().setConnection('connected');
     useVoiceStore.setState({ activeDevices: {} });
     useUiStore.getState().setAttentionOnly(false);
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
   afterEach(() => {
     cleanup();

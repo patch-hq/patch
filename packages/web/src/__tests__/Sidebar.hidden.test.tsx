@@ -68,8 +68,8 @@ describe('Sidebar — hidden chats', () => {
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.setState({ forgottenFolders: [], errors: [] });
     useUiStore.getState().setSearchQuery('');
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsHidden').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsHidden').mockResolvedValue({ chats: [], nextCursor: null });
     vi.spyOn(api, 'hideChat').mockResolvedValue(undefined as never);
   });
   afterEach(() => {
@@ -146,7 +146,7 @@ describe('Sidebar — hidden chats', () => {
           statusKind: null,
         },
       ],
-      nextOffset: null,
+      nextCursor: null,
     });
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));

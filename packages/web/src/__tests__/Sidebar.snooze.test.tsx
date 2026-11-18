@@ -68,9 +68,9 @@ describe('Sidebar — snoozed chats', () => {
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.setState({ forgottenFolders: [], errors: [] });
     useUiStore.getState().setSearchQuery('');
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsSnoozed').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsSnoozed').mockResolvedValue({ chats: [], nextCursor: null });
     vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
   });

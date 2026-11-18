@@ -278,6 +278,11 @@ function readSynced(): Record<string, number> {
   }
 }
 
+/** The chats this phone holds a transcript for. Reads only the index, never a transcript. */
+export function heldChatIds(): Set<string> {
+  return new Set(Object.keys(readIndex()));
+}
+
 /** The highest seq held for a chat, or -1 when nothing is. Reads only; no recency bump. */
 export function heldCursor(chatId: string): number {
   const held = readChat(chatId);

@@ -160,8 +160,8 @@ describe('Sidebar', () => {
     useUiStore.getState().resolveConfirm(false);
     // The Archived/Deleted sections lazily fetch on expand; default them to an
     // empty merge so tests that seed the store directly aren't disturbed.
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
 
   afterEach(() => {
@@ -1778,7 +1778,7 @@ describe('Sidebar', () => {
           lastUpdated: 5,
         },
       ],
-      nextOffset: null,
+      nextCursor: null,
     });
     renderInRouter();
     fireEvent.click(screen.getByTestId('archived-toggle'));
@@ -2004,7 +2004,7 @@ describe('Sidebar', () => {
   });
 
   it('the archived-section fetch effect is cancelled cleanly on unmount (no state-after-unmount error)', () => {
-    let resolveList!: (v: { chats: unknown[]; nextOffset: number | null }) => void;
+    let resolveList!: (v: { chats: unknown[]; nextCursor: string | null }) => void;
     vi.spyOn(api, 'listChatsArchived').mockReturnValue(
       new Promise((r) => {
         resolveList = r;
@@ -2013,7 +2013,7 @@ describe('Sidebar', () => {
     renderInRouter();
     fireEvent.click(screen.getByTestId('archived-toggle'));
     cleanup();
-    expect(() => resolveList({ chats: [], nextOffset: null })).not.toThrow();
+    expect(() => resolveList({ chats: [], nextCursor: null })).not.toThrow();
   });
 
   // ---- E5: soft-delete + Deleted section + restore ----
@@ -2080,7 +2080,7 @@ describe('Sidebar', () => {
 
   it('Deleted section: lazily folds soft-deleted chats into the store on expand', async () => {
     vi.restoreAllMocks();
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
     vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({
       chats: [
         {
@@ -2098,7 +2098,7 @@ describe('Sidebar', () => {
           lastUpdated: 5,
         },
       ],
-      nextOffset: null,
+      nextCursor: null,
     });
     renderInRouter();
     fireEvent.click(screen.getByTestId('deleted-toggle'));
@@ -2110,7 +2110,7 @@ describe('Sidebar', () => {
 
   it('Deleted section: surfaces a load-failure error', async () => {
     vi.restoreAllMocks();
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
     vi.spyOn(api, 'listChatsDeleted').mockRejectedValue(new Error('db down'));
     renderInRouter();
     fireEvent.click(screen.getByTestId('deleted-toggle'));
@@ -2120,7 +2120,7 @@ describe('Sidebar', () => {
   });
 
   it('the Deleted-section fetch effect is cancelled cleanly on unmount', () => {
-    let resolveList!: (v: { chats: unknown[]; nextOffset: number | null }) => void;
+    let resolveList!: (v: { chats: unknown[]; nextCursor: string | null }) => void;
     vi.spyOn(api, 'listChatsDeleted').mockReturnValue(
       new Promise((r) => {
         resolveList = r;
@@ -2129,7 +2129,7 @@ describe('Sidebar', () => {
     renderInRouter();
     fireEvent.click(screen.getByTestId('deleted-toggle'));
     cleanup();
-    expect(() => resolveList({ chats: [], nextOffset: null })).not.toThrow();
+    expect(() => resolveList({ chats: [], nextCursor: null })).not.toThrow();
   });
 
   // ---- E6: recent folders ----

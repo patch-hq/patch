@@ -55,7 +55,7 @@ vi.mock('../src/api/rest', () => ({
       deleted: 0,
       automations: 0,
     }),
-    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextOffset: null }),
+    listArchivedChats: vi.fn().mockResolvedValue({ chats: [], nextCursor: null }),
     listHiddenChats: vi.fn().mockResolvedValue({ chats: [] }),
   },
 }));
@@ -383,7 +383,11 @@ describe('ChatsScreen — Channels section (empty state + collapse toggle)', () 
 
   it('collapsing the Channels header hides the empty state, expanding again shows it', () => {
     const r = renderRN(<ChatsScreen />);
-    actSync(() => findAllHost(r.root, byType('Pressable')).find((p) => hasText(p, 'Channels'))!.props.onPress());
+    actSync(() =>
+      findAllHost(r.root, byType('Pressable'))
+        .find((p) => hasText(p, 'Channels'))!
+        .props.onPress(),
+    );
     // The header row is a Pressable wrapping the "Channels ▾/▸" Text — pick it
     // out by its text content rather than index (there are several headers).
     const headerPressable = (): ReturnType<typeof findHost> =>

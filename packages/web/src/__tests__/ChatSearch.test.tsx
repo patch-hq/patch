@@ -123,7 +123,7 @@ describe('sidebar chat search', () => {
     useUiStore.getState().setSearchFullText(false);
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.getState().setArchivedOpen(false);
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
     search = vi.spyOn(api, 'searchChats');
   });
 

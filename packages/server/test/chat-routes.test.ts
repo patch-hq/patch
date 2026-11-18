@@ -374,6 +374,77 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('GET /api/chats?...&cursor= continues after a position, not a count, while the list changes', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    const seed = (chatId: string, lastUpdated: number, status: 'active' | 'archived') => {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/x' });
+      hostLink.emit({
+        type: 'chat.state',
+        permissionMode: 'bypassPermissions',
+        chatId,
+        activity: 'idle',
+        lastUpdated,
+        status,
+        pinned: false,
+        folder: '/x',
+      });
+    };
+    type Page = { chats: { chatId: string }[]; nextCursor: string | null };
+    const get = async (url: string) => {
+      const res = await built.app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      return { status: res.statusCode, body: res.json() as Page };
+    };
+    try {
+      // Same lastUpdated for b1/b2: the chatId tiebreak keeps them in one order.
+      seed('a5', 50, 'archived');
+      seed('a4', 40, 'archived');
+      seed('b2', 30, 'archived');
+      seed('b1', 30, 'archived');
+      seed('a1', 10, 'archived');
+
+      const page1 = await get('/api/chats?archived=only&limit=2');
+      expect(page1.body.chats.map((c) => c.chatId)).toEqual(['a5', 'a4']);
+      expect(page1.body.nextCursor).toEqual(expect.any(String));
+
+      // Between pages: a new chat lands at the top and a5 leaves the list.
+      // An offset of 2 would now repeat a4 and skip b1; the cursor does neither.
+      seed('a9', 90, 'archived');
+      seed('a5', 51, 'active');
+
+      const page2 = await get(
+        `/api/chats?archived=only&limit=2&cursor=${encodeURIComponent(page1.body.nextCursor!)}`,
+      );
+      expect(page2.body.chats.map((c) => c.chatId)).toEqual(['b1', 'b2']);
+      const page3 = await get(
+        `/api/chats?archived=only&limit=2&cursor=${encodeURIComponent(page2.body.nextCursor!)}`,
+      );
+      expect(page3.body.chats.map((c) => c.chatId)).toEqual(['a1']);
+      expect(page3.body.nextCursor).toBeNull();
+
+      // A cursor is bound to its list, and garbage is refused (NO FALLBACK).
+      const other = await get(
+        `/api/chats?hidden=only&limit=2&cursor=${encodeURIComponent(page1.body.nextCursor!)}`,
+      );
+      expect(other.status).toBe(400);
+      expect((await get('/api/chats?archived=only&limit=2&cursor=nope')).status).toBe(400);
+      expect(
+        (
+          await get(
+            `/api/chats?archived=only&limit=2&offset=2&cursor=${encodeURIComponent(page1.body.nextCursor!)}`,
+          )
+        ).status,
+      ).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('GET /api/chats rejects a bad limit or offset with 400 (NO FALLBACK)', async () => {
     const { registry, jwt } = await bootstrap();
     const built = await makeApp({ registry, hostLink: new InProcessHostLink() });

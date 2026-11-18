@@ -1356,15 +1356,15 @@ const LIFECYCLE_PAGE_SIZE = 30;
 function useLifecyclePaging(
   fetchPage: (opts: {
     limit: number;
-    offset: number;
-  }) => Promise<{ chats: unknown[]; nextOffset: number | null }>,
+    cursor?: string;
+  }) => Promise<{ chats: unknown[]; nextCursor: string | null }>,
   fold: (chats: unknown[]) => void,
   label: string,
 ): { error: string | null } {
   const [error, setError] = useState<string | null>(null);
   // `undefined` = first page not back yet; `null` = nothing further to fetch;
-  // a number = the offset the next page starts at.
-  const nextOffsetRef = useRef<number | null | undefined>(undefined);
+  // a string = the cursor the next page starts after.
+  const nextCursorRef = useRef<string | null | undefined>(undefined);
   const loadingRef = useRef(false);
   const mountedRef = useRef(true);
   const fetchRef = useRef(fetchPage);
@@ -1378,31 +1378,37 @@ function useLifecyclePaging(
   const seenTickRef = useRef(tick);
 
   const load = useCallback(
-    (offset: number) => {
+    (cursor: string | undefined) => {
       if (loadingRef.current) return;
       loadingRef.current = true;
-      fetchRef.current({ limit: LIFECYCLE_PAGE_SIZE, offset }).then(
-        (r) => {
-          loadingRef.current = false;
-          if (!mountedRef.current) return;
-          foldRef.current(r.chats);
-          nextOffsetRef.current = r.nextOffset;
-          setError(null);
-        },
-        (e: unknown) => {
-          loadingRef.current = false;
-          if (!mountedRef.current) return;
-          setError(`Failed to load ${label}: ${(e as Error).message}`);
-        },
-      );
+      fetchRef
+        .current(
+          cursor === undefined
+            ? { limit: LIFECYCLE_PAGE_SIZE }
+            : { limit: LIFECYCLE_PAGE_SIZE, cursor },
+        )
+        .then(
+          (r) => {
+            loadingRef.current = false;
+            if (!mountedRef.current) return;
+            foldRef.current(r.chats);
+            nextCursorRef.current = r.nextCursor;
+            setError(null);
+          },
+          (e: unknown) => {
+            loadingRef.current = false;
+            if (!mountedRef.current) return;
+            setError(`Failed to load ${label}: ${(e as Error).message}`);
+          },
+        );
     },
     [label],
   );
 
   useEffect(() => {
     mountedRef.current = true;
-    nextOffsetRef.current = undefined;
-    load(0);
+    nextCursorRef.current = undefined;
+    load(undefined);
     return () => {
       mountedRef.current = false;
     };
@@ -1411,7 +1417,7 @@ function useLifecyclePaging(
   useEffect(() => {
     if (tick === seenTickRef.current) return;
     seenTickRef.current = tick;
-    const next = nextOffsetRef.current;
+    const next = nextCursorRef.current;
     if (next === null || next === undefined) return;
     load(next);
   }, [tick, load]);

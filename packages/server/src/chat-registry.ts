@@ -1028,19 +1028,7 @@ export class ChatRegistry {
       if (opts.includeArchived) return true;
       return c.status !== 'archived';
     });
-    filtered.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      if (a.pinned && b.pinned) {
-        // Both pinned: most-recent-pinned at top. Nulls last.
-        const ap = a.pinnedAt;
-        const bp = b.pinnedAt;
-        if (ap === null && bp === null) return b.lastUpdated - a.lastUpdated;
-        if (ap === null) return 1;
-        if (bp === null) return -1;
-        if (ap !== bp) return bp - ap;
-      }
-      return opts.order === 'asc' ? a.lastUpdated - b.lastUpdated : b.lastUpdated - a.lastUpdated;
-    });
+    filtered.sort((a, b) => compareChatOrder(chatOrderKey(a), chatOrderKey(b), opts.order));
     return filtered;
   }
 
@@ -1086,4 +1074,48 @@ export class ChatRegistry {
   size(): number {
     return this.chats.size;
   }
+}
+
+/**
+ * The fields `ChatRegistry.list()` sorts on, and what an index-page cursor
+ * carries (spec/01 § GET /api/chats). `chatId` is the final tiebreak, so
+ * the order is total: two chats never compare equal, and "everything after
+ * this key" is well defined even after the row the key came from has moved
+ * or gone.
+ */
+export interface ChatOrderKey {
+  pinned: boolean;
+  pinnedAt: number | null;
+  lastUpdated: number;
+  chatId: string;
+}
+
+export function chatOrderKey(c: ChatSummary): ChatOrderKey {
+  return { pinned: c.pinned, pinnedAt: c.pinnedAt, lastUpdated: c.lastUpdated, chatId: c.chatId };
+}
+
+/**
+ * Sidebar order: pinned first (most-recently pinned at top, unknown pin time
+ * last), then by `lastUpdated` in `order` (default most-recent first), then
+ * by `chatId` ascending.
+ */
+export function compareChatOrder(
+  a: ChatOrderKey,
+  b: ChatOrderKey,
+  order: 'asc' | 'desc' = 'desc',
+): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  if (a.pinned && b.pinned) {
+    const ap = a.pinnedAt;
+    const bp = b.pinnedAt;
+    if (ap === null && bp !== null) return 1;
+    if (bp === null && ap !== null) return -1;
+    if (ap !== null && bp !== null && ap !== bp) return bp - ap;
+    // Both pinned with no pin time: most-recent first, whatever `order` says.
+    if (ap === null && a.lastUpdated !== b.lastUpdated) return b.lastUpdated - a.lastUpdated;
+  }
+  if (a.lastUpdated !== b.lastUpdated) {
+    return order === 'asc' ? a.lastUpdated - b.lastUpdated : b.lastUpdated - a.lastUpdated;
+  }
+  return a.chatId < b.chatId ? -1 : a.chatId > b.chatId ? 1 : 0;
 }

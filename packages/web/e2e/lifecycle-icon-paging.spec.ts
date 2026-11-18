@@ -41,7 +41,7 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ chats: [hiddenRow('h1', 1)], nextOffset: null }),
+        body: JSON.stringify({ chats: [hiddenRow('h1', 1)], nextCursor: null }),
       }),
     );
     await page.goto(HARNESS);
@@ -69,9 +69,9 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
   }) => {
     const page1 = {
       chats: Array.from({ length: 30 }, (_, i) => hiddenRow(`h${i}`, i)),
-      nextOffset: 30,
+      nextCursor: 'cur-30',
     };
-    const page2 = { chats: [hiddenRow('h-more', 999)], nextOffset: null };
+    const page2 = { chats: [hiddenRow('h-more', 999)], nextCursor: null };
     let calls = 0;
     await page.route('**/api/chats/counts', (route) =>
       route.fulfill({
@@ -130,7 +130,7 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
         contentType: 'application/json',
         body: JSON.stringify({
           chats: Array.from({ length: 30 }, (_, i) => hiddenRow(`h${i}`, i)),
-          nextOffset: null,
+          nextCursor: null,
         }),
       }),
     );
