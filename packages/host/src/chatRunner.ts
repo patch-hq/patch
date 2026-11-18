@@ -15678,6 +15678,12 @@ export class Daemon {
     return chatClaudeDir(this.chatDirFor(chatId));
   }
 
+  /** The chat's private config dir — a root `view_file` may read from besides
+   * the chat folder. */
+  chatConfigDir(chatId: string): string {
+    return this.claudeConfigDirFor(chatId);
+  }
+
   private claudeSessionStoreFor(chatId: string, folder: string): ClaudeSessionStore {
     return createClaudeSessionStore({
       chatId,
