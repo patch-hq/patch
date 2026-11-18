@@ -61,6 +61,12 @@ const base = () => ({
   patchHome: home,
 });
 
+/** The running version's own install dir, which a rollback would re-run. */
+function keepRunningVersion(patchHome: string, version: string): void {
+  mkdirSync(join(patchHome, 'versions', version), { recursive: true });
+  writeFileSync(join(patchHome, 'versions', version, 'install'), '#!/bin/sh\n');
+}
+
 const serverDown = (async () => {
   throw new Error('ECONNREFUSED');
 }) as unknown as typeof fetch;
@@ -103,6 +109,7 @@ describe('stageUpdate', () => {
 describe('applyUpdate from a staged build', () => {
   it('installs the staged build without contacting the server', async () => {
     await stageUpdate({ ...base(), version: '0.2.0', fetchImpl: release('0.2.0') });
+    keepRunningVersion(home, '0.1.0');
     const runInstaller = vi.fn(async () => {});
     const onInstallStart = vi.fn();
     await applyUpdate({
@@ -111,6 +118,7 @@ describe('applyUpdate from a staged build', () => {
       stagedVersion: '0.2.0',
       fetchImpl: serverDown,
       runInstaller,
+      startWatchdog: () => {},
       onInstallStart,
     });
     expect(onInstallStart).toHaveBeenCalledWith('0.2.0');

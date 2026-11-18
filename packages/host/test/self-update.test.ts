@@ -261,11 +261,14 @@ describe('requestUpdate: turns do not hold an install', () => {
     const { execFileSync } = await import('node:child_process');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
+    const { readProbation } = await import('../src/updateProbation.js');
     const dir = mkdtempSync(join(tmpdir(), 'patch-su-test-'));
     try {
       const name = 'patch-host-0.2.0-linux-x64';
       mkdirSync(join(dir, name));
       writeFileSync(join(dir, name, 'install'), '#!/bin/sh\n');
+      mkdirSync(join(dir, 'home', 'versions', '0.1.0'), { recursive: true });
+      writeFileSync(join(dir, 'home', 'versions', '0.1.0', 'install'), '#!/bin/sh\n');
       execFileSync('tar', ['-czf', join(dir, `${name}.tar.gz`), '-C', dir, name]);
       const bytes = readFileSync(join(dir, `${name}.tar.gz`));
       const digest = createHash('sha256').update(bytes).digest('hex');
@@ -280,6 +283,7 @@ describe('requestUpdate: turns do not hold an install', () => {
           ? new Response(JSON.stringify(manifest))
           : new Response(bytes)) as unknown as typeof fetch;
       const order: string[] = [];
+      let onProbation: unknown;
       await applyUpdate({
         serverUrl: 'http://s',
         internalToken: 'secret-internal-token',
@@ -288,6 +292,11 @@ describe('requestUpdate: turns do not hold an install', () => {
         patchHome: join(dir, 'home'),
         logger,
         fetchImpl,
+        startWatchdog: () => {
+          order.push('watchdog');
+          // On probation by the time the watchdog starts, with the old installer as the way back.
+          onProbation = readProbation(join(dir, 'home'));
+        },
         onInstallStart: (v) => {
           order.push(`start:${v}`);
         },
@@ -295,7 +304,10 @@ describe('requestUpdate: turns do not hold an install', () => {
           order.push('install');
         },
       });
-      expect(order).toEqual(['start:0.2.0', 'install']);
+      expect(order).toEqual(['start:0.2.0', 'watchdog', 'install']);
+      expect(onProbation).toMatchObject({ from: '0.1.0', to: '0.2.0' });
+      // This installer did not move `current`, so the update did not take: no probation left behind.
+      expect(readProbation(join(dir, 'home'))).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
