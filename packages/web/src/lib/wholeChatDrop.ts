@@ -9,6 +9,7 @@
 
 import type { RefObject } from 'react';
 import { useState } from 'react';
+import { getDesktopBridge } from './desktopBridge.js';
 import {
   dragHasFiles,
   filesFromDataTransfer,
@@ -26,7 +27,27 @@ export interface WholeChatDropZone {
   };
 }
 
-export function useWholeChatDrop(composerRef: RefObject<ComposerHandle | null>): WholeChatDropZone {
+/** The real paths of the folders in a drop, read synchronously (the drop's
+ *  data is gone once the event returns). Empty in a browser, which cannot
+ *  learn a path, so a dropped folder there is attached as files instead. */
+export function droppedFolderPaths(dt: DataTransfer): string[] {
+  const pathForFile = getDesktopBridge()?.pathForFile;
+  if (!pathForFile) return [];
+  const paths: string[] = [];
+  for (const item of Array.from(dt.items ?? [])) {
+    if (item.kind !== 'file' || typeof item.webkitGetAsEntry !== 'function') continue;
+    if (!item.webkitGetAsEntry()?.isDirectory) continue;
+    const file = item.getAsFile();
+    if (file) paths.push(pathForFile(file));
+  }
+  return paths;
+}
+
+export function useWholeChatDrop(
+  composerRef: RefObject<ComposerHandle | null>,
+  /** New chat only: a dropped folder is the chat's folder, not an attachment. */
+  onFolderDrop?: (paths: string[]) => void,
+): WholeChatDropZone {
   const [dragDepth, setDragDepth] = useState(0);
   const dropBlocked = composerRef.current?.isDropBlocked() ?? false;
 
@@ -50,6 +71,13 @@ export function useWholeChatDrop(composerRef: RefObject<ComposerHandle | null>):
     e.preventDefault();
     setDragDepth(0);
     const dt = e.dataTransfer;
+    if (onFolderDrop) {
+      const folders = droppedFolderPaths(dt);
+      if (folders.length > 0) {
+        onFolderDrop(folders);
+        return;
+      }
+    }
     void filesFromDataTransfer(dt).then((files) => composerRef.current?.attachFiles(files));
   }
 

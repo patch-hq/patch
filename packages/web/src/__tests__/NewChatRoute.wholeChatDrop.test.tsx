@@ -57,4 +57,27 @@ describe('NewChatRoute — whole-chat drop zone', () => {
     await waitFor(() => expect(screen.getByTestId('composer-attachment')).toBeInTheDocument());
     expect(screen.queryByTestId('chat-drop-hint')).toBeNull();
   });
+  it('dropping a folder in the desktop app makes it the chat folder, not an attachment', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      pathForFile: () => '/Users/me/dropped-project',
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      renderNew();
+      const main = screen.getByTestId('new-chat-main');
+      const dir = new File([''], 'dropped-project');
+      const item = {
+        kind: 'file',
+        webkitGetAsEntry: () => ({ isDirectory: true, isFile: false }),
+        getAsFile: () => dir,
+      };
+      fireEvent.drop(main, { dataTransfer: { types: ['Files'], items: [item], files: [dir] } });
+      await waitFor(() =>
+        expect(screen.getByTestId('new-chat-folder-pill')).toHaveTextContent('dropped-project'),
+      );
+      expect(screen.queryByTestId('composer-attachment')).toBeNull();
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
 });

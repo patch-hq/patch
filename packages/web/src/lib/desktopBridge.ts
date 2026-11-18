@@ -28,6 +28,12 @@ export interface PatchDesktopBridge {
    * no shell and no window chrome to compensate for.
    */
   overlayTitleBar?: boolean;
+  /**
+   * The real filesystem path of a File dropped onto the window — how a dropped
+   * folder becomes a chat's working folder. Absent in a browser, which never
+   * learns a path, and on shells that predate it.
+   */
+  pathForFile?(file: File): string;
   /** The per-device master notifications switch, owned by main (the tray menu flips it too). */
   notificationsOff?(): Promise<boolean>;
   setNotificationsOff?(off: boolean): Promise<void>;
