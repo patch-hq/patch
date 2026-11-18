@@ -4381,7 +4381,7 @@ describe('ChatRoute regression', () => {
         seq: 3,
         kind: 'tool_call',
         tool: 'mcp__patch__patch_agent',
-        toolArgs: { prompt: 'go' },
+        toolArgs: { title: 'Spawned helper', prompt: 'go' },
         callId: 'g',
         at: 0,
       },
@@ -4400,9 +4400,9 @@ describe('ChatRoute regression', () => {
     // The lone calls either side are single rows, not a run: nothing is folded,
     // and the agent start is one of the visible top-level rows.
     expect(screen.queryAllByTestId('tool-group')).toHaveLength(0);
-    expect(screen.getAllByTestId('tool-call').some((c) => /agent/i.test(c.textContent ?? ''))).toBe(
-      true,
-    );
+    expect(
+      screen.getAllByTestId('tool-call').some((c) => /spawned helper/i.test(c.textContent ?? '')),
+    ).toBe(true);
   });
 
   it('expands a tool-run group into the individual call and result rows', () => {
