@@ -348,6 +348,23 @@ describe('a durable turn', () => {
     retireTurn(second.dir);
   }, 20000);
 
+  it('says why a runner that died before claude ran died, from its log', async () => {
+    const { cfg, cwd } = fresh();
+    const dying = join(root, 'dying-runner.mjs');
+    writeFileSync(dying, "console.error('turn-runner: fatal: kaboom-reason'); process.exit(1);\n");
+    const turn = new DurableTurn({
+      config: { ...cfg, runner: { command: process.execPath, args: [dying] } },
+      chatId: 'c-dead',
+      localId: 'L1',
+      log,
+    });
+    const proc = turn.spawn({ ...spawnOpts, cwd });
+    const err = await new Promise<Error>((r) => proc.once('error', r));
+    expect(err.message).toContain('exited (1)');
+    expect(err.message).toContain('kaboom-reason');
+    turn.release();
+  }, 20000);
+
   it('ends a turn nobody is attached to once claude has been silent too long', async () => {
     const { cfg, cwd } = fresh();
     process.env['PATCH_TURN_ORPHAN_IDLE_MS'] = '800';

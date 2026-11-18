@@ -103,6 +103,22 @@ const KEPT_STDERR_BYTES = 32 * 1024;
 /** The field each replayed/live line carries to `oneShotRun`, then loses. */
 export const OFFSET_FIELD = '__patchOffset';
 
+/**
+ * The last of a runner's log, for an error about a runner that died: the
+ * runner's own fatal message is the only account of why, and the log sits in a
+ * directory that is gone once the turn is retired.
+ */
+export function runnerLogTail(logPath: string, maxChars = 600): string {
+  let text: string;
+  try {
+    text = readFileSync(logPath, 'utf8').trim();
+  } catch {
+    return `; no runner log at ${logPath}`;
+  }
+  if (text === '') return `; the runner log ${logPath} is empty`;
+  return `: ${text.length > maxChars ? text.slice(-maxChars) : text}`;
+}
+
 export function turnDirFor(config: DurableTurnConfig, chatId: string): string {
   return join(config.turnsDir, chatId);
 }
@@ -473,7 +489,7 @@ export class DurableTurn {
       } else if (!proc.finished && !proc.connected && !detaching) {
         proc.fail(
           new Error(
-            `the turn runner exited (${code ?? signal}) without reporting claude's exit; see ${join(this.dir, RUNNER_LOG)}`,
+            `the turn runner exited (${code ?? signal}) without reporting claude's exit${runnerLogTail(join(this.dir, RUNNER_LOG))}`,
           ),
         );
       }
