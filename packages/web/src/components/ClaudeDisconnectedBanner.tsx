@@ -16,6 +16,7 @@
 // straight to signing in (routes/ConnectRoute), never to a settings page with
 // the button somewhere below.
 
+import { providerLabelForModel } from '@patch/wire';
 import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
@@ -25,7 +26,7 @@ export const CONNECT_PATH = '/connect';
 
 /** Which provider a model needs, by the name its sign-in uses. */
 export function providerNameForModel(model: string | null | undefined): string {
-  return model?.startsWith('openai/') ? 'Codex' : 'Claude';
+  return providerLabelForModel(model);
 }
 
 export function ClaudeDisconnectedBanner({ model }: { model?: string }): JSX.Element | null {

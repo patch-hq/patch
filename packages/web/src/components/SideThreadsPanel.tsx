@@ -23,7 +23,7 @@ import {
 } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { ExternalLink, GitFork, PanelRight } from 'lucide-react';
-import type { ChatBranch } from '@patch/wire';
+import { modelHasCapability, type ChatBranch } from '@patch/wire';
 import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { resolvePane, useLayoutStore } from '../stores/layoutStore.js';
@@ -369,6 +369,7 @@ function SideThreadTab({ chatId, branch }: { chatId: string; branch: ChatBranch 
   const queryClient = useQueryClient();
   const mainTimeline = useChatStore((s) => s.timelines[chatId]);
   const branchGraph = useChatStore((s) => s.branchGraphs[chatId]);
+  const canInterrupt = useChatStore((s) => modelHasCapability(s.chats[chatId]?.model, 'interrupt'));
   const permissions = useChatStore(
     (s) => s.sideThreadPermissions[`${chatId}::${branchId}`] ?? EMPTY_PERMISSIONS,
   );
@@ -478,7 +479,7 @@ function SideThreadTab({ chatId, branch }: { chatId: string; branch: ChatBranch 
         ))}
       </div>
       <div className="stp-tfoot">
-        {branch.running ? (
+        {branch.running && canInterrupt ? (
           <button
             type="button"
             className="stp-stop"

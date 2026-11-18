@@ -35,6 +35,7 @@ import {
   pickAvailableModel,
   type EffortLevel,
   type PermissionMode,
+  accountsKeyForModel,
 } from '@patch/wire';
 import { useModelCatalog } from '../src/lib/models';
 import { api, ApiError } from '../src/api/rest';
@@ -169,13 +170,10 @@ export default function NewChat(): React.ReactElement {
   // preferred account); null leaves it to the strategy.
   const [preferredAccountId, setPreferredAccountId] = React.useState<string | null>(null);
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
-  const preferable = React.useMemo(
-    () =>
-      (
-        (effectiveModel?.startsWith('openai/') ? sharedSecrets?.codex : sharedSecrets?.claude) ?? []
-      ).filter((a) => a.connected),
-    [sharedSecrets, effectiveModel],
-  );
+  const preferable = React.useMemo(() => {
+    const key = accountsKeyForModel(effectiveModel);
+    return ((key !== null ? sharedSecrets?.[key] : undefined) ?? []).filter((a) => a.connected);
+  }, [sharedSecrets, effectiveModel]);
   React.useEffect(() => {
     if (preferredAccountId !== null && !preferable.some((a) => a.id === preferredAccountId)) {
       setPreferredAccountId(null);

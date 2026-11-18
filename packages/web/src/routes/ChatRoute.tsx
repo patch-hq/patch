@@ -2364,7 +2364,13 @@ export function ChatRoute({
           // the moment a promote or remove reorders it.
           queuePos={entry.queued ? i - queuedFrom + 1 : undefined}
           {...(entry.queued
-            ? { release: queueRelease(timeline.slice(queuedFrom), i - queuedFrom) }
+            ? {
+                release: queueRelease(
+                  timeline.slice(queuedFrom),
+                  i - queuedFrom,
+                  modelHasCapability(row.model, 'steer'),
+                ),
+              }
             : {})}
           hostOnline={hostOnline}
           onPermission={handlePermission}
@@ -2376,7 +2382,7 @@ export function ChatRoute({
           onQuestionCancel={handleQuestionCancel}
           onQuestionActivity={handleQuestionActivity}
           onUnqueue={handleUnqueue}
-          onPromote={handlePromote}
+          {...(modelHasCapability(row.model, 'interrupt') ? { onPromote: handlePromote } : {})}
           onQueuedDraft={handleQueuedDraft}
           onEditQueued={handleEditQueued}
           {...(queuedEdit !== null && entry.queued && entry.localId === queuedEdit.localId
@@ -2644,7 +2650,7 @@ export function ChatRoute({
               checking={hookChecking}
               {...(meetingShown ? { placeholder: 'Ask about the meeting…' } : {})}
               running={isStoppable(row)}
-              onStop={handleStop}
+              {...(modelHasCapability(row.model, 'interrupt') ? { onStop: handleStop } : {})}
             />
           </>
         )}
@@ -3296,18 +3302,20 @@ function MessageEntry({
   // agent)". Same settled-turn restriction as the edit pencil (above), minus
   // the user-only role check: a seq the host has no persisted record of yet
   // has no fork point to hang a side thread off (NO FALLBACK).
-  const canSideThread =
+  const settledTurn =
     (entry.role === 'user' || entry.role === 'assistant') &&
     entry.localId === undefined &&
     !entry.queued &&
     !entry.transcribing &&
     !entry.streaming &&
     text.length > 0;
+  // A side thread is a branch at a turn: offered only where the provider declares it.
+  const canSideThread = settledTurn && modelHasCapability(metaModel, 'branchAtTurn');
   // A settled turn can be retried from the hover button or the context menu —
   // same settled-turn rule as the side-thread trigger. A user turn is sent again
   // as a brand new turn (spec/12 § turn retry); an assistant reply re-runs the
   // user turn it answered.
-  const canRetry = canSideThread && onRetryTurn !== undefined;
+  const canRetry = settledTurn && onRetryTurn !== undefined;
   // Copy needs only some text on a user or agent turn; unlike side thread and
   // retry it has no persisted-seq requirement, so a streaming reply can be copied.
   const canCopy =
@@ -3317,7 +3325,7 @@ function MessageEntry({
   return (
     <div
       className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}${editAnchor ? ' msg-edit-anchor' : ''}`}
-      {...(canSideThread
+      {...(settledTurn
         ? {
             onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
               // A link keeps the platform's own menu (Copy Link Address, Open Link in
@@ -3727,7 +3735,7 @@ function MessageEntry({
       {entry.systemContext && entry.systemContext.length > 0 ? (
         <SystemContextDisclosures items={entry.systemContext} />
       ) : null}
-      {canSideThread ? (
+      {settledTurn ? (
         <ContextMenu
           anchor={sideThreadMenu.anchor}
           onClose={sideThreadMenu.close}
@@ -3756,12 +3764,16 @@ function MessageEntry({
                   .catch((err: unknown) => console.error('Copy failed', err));
               },
             },
-            {
-              id: 'open-side-thread',
-              label: 'Open side thread',
-              icon: <GitFork size={14} aria-hidden="true" />,
-              run: () => openSideThreadDraft(chatId, entry.seq, text),
-            },
+            ...(canSideThread
+              ? [
+                  {
+                    id: 'open-side-thread',
+                    label: 'Open side thread',
+                    icon: <GitFork size={14} aria-hidden="true" />,
+                    run: () => openSideThreadDraft(chatId, entry.seq, text),
+                  },
+                ]
+              : []),
             {
               id: 'quote',
               label: 'Quote',

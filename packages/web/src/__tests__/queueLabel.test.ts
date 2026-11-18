@@ -68,9 +68,14 @@ describe('release event', () => {
 
   it('holds everything behind a turn that needs its own run', () => {
     const block = [{}, { queuedOwnTurn: true }, {}];
-    expect(queueRelease(block, 0)).toBe('tool');
-    expect(queueRelease(block, 1)).toBe('turn');
-    expect(queueRelease(block, 2)).toBe('turn');
+    expect(queueRelease(block, 0, true)).toBe('tool');
+    expect(queueRelease(block, 1, true)).toBe('turn');
+    expect(queueRelease(block, 2, true)).toBe('turn');
+  });
+
+  it('waits for the turn to end on a provider that does not declare steer', () => {
+    expect(queueRelease([{}, {}], 0, false)).toBe('turn');
+    expect(queueRelease([{}, {}], 1, false)).toBe('turn');
   });
 });
 

@@ -85,6 +85,8 @@ import {
   providerDescriptor,
   providerForModel,
   SPECIAL_THREAD_IDS,
+  accountServesModel,
+  providerLabelForModel,
 } from '@patch/wire';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
 import { hostOutage } from '../lib/usage.js';
@@ -599,11 +601,7 @@ export const Composer = forwardRef(function Composer(
   );
   const [usageNow, setUsageNow] = useState(() => Date.now());
   const outage = hostOutage(
-    (hostAccounts?.accounts ?? []).filter(
-      (a) =>
-        !accountModel?.startsWith('openai/') ||
-        (a.kind ?? 'chatgpt') === (accountModel.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
-    ),
+    (hostAccounts?.accounts ?? []).filter((a) => accountServesModel(a, accountModel)),
     usageNow,
   );
   const outOfUsage = !claudeDisconnected && outage !== null;

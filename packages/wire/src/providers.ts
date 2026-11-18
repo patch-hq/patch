@@ -57,6 +57,9 @@ export interface ProviderSettingDescriptor {
   readonly providerDefault: number;
 }
 
+/** The kinds an account can be: a subscription sign-in or a paid API key. */
+export type AccountKind = 'chatgpt' | 'apiKey';
+
 export interface ProviderDescriptor {
   /** Stable id; persisted in history logs, so never renamed. */
   readonly id: string;
@@ -76,6 +79,22 @@ export interface ProviderDescriptor {
    * (a local model server): it has no credential store, strategy or usage.
    */
   readonly accountsKey: string | null;
+  /**
+   * For a provider whose accounts come in kinds a model picks between (a
+   * subscription and a paid API key): the kind a model runs on is that of the
+   * first prefix it starts with, else `default`. `null` when its accounts have
+   * no kinds.
+   */
+  readonly accountKinds: {
+    readonly default: AccountKind;
+    readonly byModelPrefix: readonly { readonly prefix: string; readonly kind: AccountKind }[];
+  } | null;
+  /**
+   * How Settings → Hosts signs a host in to the provider: a pasted token
+   * (`pasteToken`), or the provider's own account flow on the accounts page
+   * (`accountFlow`). `null` for a provider with nothing to sign in to.
+   */
+  readonly hostSignIn: 'pasteToken' | 'accountFlow' | null;
   /** Other names the CLI accepts for it (`openai` for codex). */
   readonly aliases: readonly string[];
   /** Does the provider honour the per-chat reasoning-effort control? */
@@ -112,6 +131,8 @@ export const PROVIDERS = [
     permissionModes: 'all',
     backendId: 'claude-code',
     accountsKey: 'claude',
+    accountKinds: null,
+    hostSignIn: 'pasteToken',
     aliases: ['claude-code'],
     supportsEffort: true,
     loginRequiredCode: 'claude_oauth_missing',
@@ -154,7 +175,8 @@ export const PROVIDERS = [
       branchAtTurn: true,
       disableNativeTools: true,
       interrupt: true,
-      steer: false,
+      // The Agent SDK's PostToolBatch hook hands waiting input to the agent at a tool boundary.
+      steer: true,
     },
     settings: [
       {
@@ -185,6 +207,11 @@ export const PROVIDERS = [
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     backendId: 'codex',
     accountsKey: 'codex',
+    accountKinds: {
+      default: 'chatgpt',
+      byModelPrefix: [{ prefix: 'openai/api/', kind: 'apiKey' }],
+    },
+    hostSignIn: 'accountFlow',
     aliases: ['openai', 'chatgpt'],
     supportsEffort: false,
     loginRequiredCode: 'chatgpt_login_required',
@@ -225,6 +252,8 @@ export const PROVIDERS = [
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     backendId: 'local',
     accountsKey: null,
+    accountKinds: null,
+    hostSignIn: null,
     aliases: ['ollama', 'llamacpp', 'lmstudio'],
     supportsEffort: false,
     loginRequiredCode: 'local_endpoint_missing',
@@ -236,7 +265,8 @@ export const PROVIDERS = [
       branchAtTurn: false,
       disableNativeTools: false,
       interrupt: true,
-      steer: false,
+      // The adapter puts waiting input in front of the model between tool steps.
+      steer: true,
     },
     settings: [],
     nativeDuplicates: [],
@@ -351,6 +381,60 @@ export function modelHasCapability(
 export function patchToolsOmittedFor(model: string | null | undefined): readonly string[] {
   const p = providerDescriptor(providerForModel(model));
   return p.capabilities.disableNativeTools ? [] : p.nativeDuplicates;
+}
+
+/** How every screen names the provider a model runs on. */
+export function providerLabelForModel(model: string | null | undefined): string {
+  return providerDescriptor(providerForModel(model)).label;
+}
+
+/** Where the model's provider keeps its accounts in the shared settings; null when it has none. */
+export function accountsKeyForModel(model: string | null | undefined): ProviderAccountsKey | null {
+  return providerDescriptor(providerForModel(model)).accountsKey as ProviderAccountsKey | null;
+}
+
+/**
+ * The kind of account a model runs on, for a provider whose accounts have kinds
+ * (`accountKinds`); null for one whose accounts do not.
+ */
+export function accountKindForModel(model: string | null | undefined): AccountKind | null {
+  const kinds = providerDescriptor(providerForModel(model)).accountKinds;
+  if (kinds === null) return null;
+  const hit = kinds.byModelPrefix.find((k) => model?.startsWith(k.prefix) === true);
+  return hit ? hit.kind : kinds.default;
+}
+
+/**
+ * Does this account serve the model? Always, for a provider whose accounts have
+ * no kinds; otherwise only an account of the kind the model runs on. An account
+ * that states no kind is of its provider's default kind.
+ */
+export function accountServesModel(
+  account: { kind?: AccountKind | undefined },
+  model: string | null | undefined,
+): boolean {
+  const kinds = providerDescriptor(providerForModel(model)).accountKinds;
+  if (kinds === null) return true;
+  return (account.kind ?? kinds.default) === accountKindForModel(model);
+}
+
+/**
+ * Is an account connected that a chat on `model` can run on? `secrets` is the
+ * shared settings' account lists, keyed by `accountsKey`. A provider with no
+ * accounts (a local endpoint) has nothing to sign in to, so it is never signed out.
+ */
+export function modelAccountConnected(
+  secrets: Partial<
+    Record<
+      ProviderAccountsKey,
+      ReadonlyArray<{ connected: boolean; kind?: AccountKind | undefined }>
+    >
+  >,
+  model: string | null | undefined,
+): boolean {
+  const key = accountsKeyForModel(model);
+  if (key === null) return true;
+  return (secrets[key] ?? []).some((a) => a.connected && accountServesModel(a, model));
 }
 
 /** Does the model's provider honour the reasoning-effort control? */

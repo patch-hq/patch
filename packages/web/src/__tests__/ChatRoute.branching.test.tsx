@@ -118,6 +118,24 @@ describe('editing a user turn forks a track', () => {
     expect(screen.queryAllByTestId('msg-edit')).toHaveLength(0);
   });
 
+  it('offers no side thread on a provider that does not declare branchAtTurn', () => {
+    seedChat('c-fork', [
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    renderChat('c-fork');
+    expect(screen.getAllByTestId('msg-side-thread-trigger').length).toBeGreaterThan(0);
+    cleanup();
+    useChatStore.setState((s) => ({
+      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'local/qwen' } },
+    }));
+    renderChat('c-fork');
+    expect(screen.queryAllByTestId('msg-side-thread-trigger')).toHaveLength(0);
+    // The message menu stays (copy, quote), without the side-thread item.
+    fireEvent.contextMenu(screen.getAllByTestId('msg')[0]!);
+    expect(screen.getByTestId('msg-context-menu').textContent).not.toContain('Open side thread');
+  });
+
   const WS = () =>
     ({ send: vi.fn(), requestReplay() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
 

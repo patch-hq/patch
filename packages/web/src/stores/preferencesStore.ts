@@ -10,7 +10,7 @@
 // the account's.
 
 import { create } from 'zustand';
-import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { DEFAULT_SHARED_SETTINGS, ACCOUNT_PROVIDERS, modelAccountConnected } from '@patch/wire';
 import { setAutoUpdateHosts } from '../lib/autoUpdatePref.js';
 import { api, type AccountPreferences, type SharedState } from '../api/rest.js';
 
@@ -93,7 +93,8 @@ export function addressWordOrNull(): string | null {
  * Whether a chat on `model` has a connected provider account to run on. The
  * accounts are the server's, shared by every host (spec/10), so this never
  * names a host. `null` until the shared state has loaded: not known yet is
- * not "signed out".
+ * not "signed out". A provider with no accounts (a local endpoint) has nothing
+ * to sign in to, so it is never signed out.
  */
 export function providerConnectedForModel(
   shared: PreferencesState['shared'],
@@ -101,18 +102,14 @@ export function providerConnectedForModel(
 ): boolean | null {
   const secrets = shared?.secrets;
   if (!secrets) return null;
-  const openai = model?.startsWith('openai/') === true;
-  const list = openai ? secrets.codex : secrets.claude;
-  if (!openai) return list.some((a) => a.connected);
-  const kind = model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt';
-  return secrets.codex.some((a) => a.connected && a.kind === kind);
+  return modelAccountConnected(secrets, model);
 }
 
 /** Any provider at all connected, for any model. `null` until loaded. */
 export function anyProviderConnected(shared: PreferencesState['shared']): boolean | null {
   const secrets = shared?.secrets;
   if (!secrets) return null;
-  return [...secrets.claude, ...secrets.codex].some((a) => a.connected);
+  return ACCOUNT_PROVIDERS.some((p) => secrets[p.accountsKey].some((a) => a.connected));
 }
 
 usePreferencesStore.subscribe((s) => setAutoUpdateHosts(s.preferences.autoUpdateHosts));

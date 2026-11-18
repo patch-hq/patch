@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type SharedState } from '../../api/rest.js';
-import { backendStatus } from '@patch/wire';
+import { backendStatus, providerDescriptor, providerForBackendId } from '@patch/wire';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { PairingCode } from '../../components/PairingCode.js';
@@ -220,8 +220,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       pushError(`${name} is offline. Sign in once it reconnects.`);
       return;
     }
-    if (backendId === 'codex') {
-      // ChatGPT sign-in is an account flow; it lives with the accounts.
+    if (providerDescriptor(providerForBackendId(backendId)).hostSignIn === 'accountFlow') {
+      // The provider's own sign-in is an account flow; it lives with the accounts.
       useUiStore.getState().setCodexSignInHost(host.hostId);
       navigate('/settings/usage');
       return;

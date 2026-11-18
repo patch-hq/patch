@@ -22,7 +22,12 @@
 
 import { useEffect, useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
-import { backendIdForModel, harnessForModel } from '@patch/wire';
+import {
+  backendIdForModel,
+  harnessForModel,
+  accountServesModel,
+  providerLabelForModel,
+} from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { getModelCatalog, loadModels } from '../lib/models.js';
@@ -57,13 +62,7 @@ export function OutOfUsageBanner({
   // the figure is never visibly stale, and it costs one render.
   const [now, setNow] = useState(() => Date.now());
   const pushError = useUiStore((s) => s.pushError);
-  const outage = hostOutage(
-    (account?.accounts ?? []).filter(
-      (a) =>
-        !model?.startsWith('openai/') ||
-        (a.kind ?? 'chatgpt') === (model.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
-    ),
-  );
+  const outage = hostOutage((account?.accounts ?? []).filter((a) => accountServesModel(a, model)));
   // Every other connected provider with usage left: the same options the
   // limit card's "Change provider" menu lists.
   const shared = usePreferencesStore((s) => s.shared);
@@ -121,7 +120,7 @@ export function OutOfUsageBanner({
           // NO FALLBACK on the time: an invented reset is worse than none,
           // because the whole value of this banner is knowing when to come back.
           <span data-testid="out-of-usage-reset">
-            {model?.startsWith('openai/') ? 'Codex' : 'Anthropic'} gave no reset time.
+            {providerLabelForModel(model)} gave no reset time.
           </span>
         )}{' '}
         <Link to="/settings/usage">Usage</Link>
