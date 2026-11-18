@@ -6,9 +6,10 @@ import { useUiStore } from '../stores/uiStore';
 
 export async function playVoiceLiveCue(): Promise<void> {
   try {
-    const { sound } = await Audio.Sound.createAsync(require('../../assets/sounds/voice_live.wav'), {
-      shouldPlay: true,
-    });
+    // Metro asset: static require is the only way to bundle it.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const asset = require('../../assets/sounds/voice_live.wav');
+    const { sound } = await Audio.Sound.createAsync(asset, { shouldPlay: true });
     sound.setOnPlaybackStatusUpdate((s) => {
       if (s.isLoaded && s.didJustFinish) void sound.unloadAsync();
     });
