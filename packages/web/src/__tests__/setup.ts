@@ -2,7 +2,6 @@
 import { useJobDraftStore } from '../stores/jobDraftStore.js';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach } from 'vitest';
-import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { cleanup, configure } from '@testing-library/react';
 import { useUiStore } from '../stores/uiStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
@@ -40,7 +39,11 @@ if (typeof Element.prototype.scrollIntoView !== 'function') {
 // Dictation and calls sit behind Settings → Experimental features (off by
 // default). Tests exercise them, so they start with the switch on; the tests
 // about the switch itself reset to the product default.
-beforeEach(() => {
+// Imported lazily: a static import here would load the store (and api/rest)
+// before each test file's vi.mock is registered, defeating those mocks.
+beforeEach(async () => {
+  const { usePreferencesStore, DEFAULT_PREFERENCES } =
+    await import('../stores/preferencesStore.js');
   usePreferencesStore.setState({
     preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
   });
