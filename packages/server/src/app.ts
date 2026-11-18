@@ -46,6 +46,7 @@ import { NewChatDraftStore } from './new-chat-drafts.js';
 import { DraftAttachmentStore } from './draft-attachments.js';
 import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
 import { ChatLogStore } from './chat-log-store.js';
+import { removeRetiredChatMirror } from './retired-chat-mirror.js';
 import { CommitAcks } from './commit-acks.js';
 import { LogSync } from './log-sync.js';
 import { ManagerHome, ManagerHomeError } from './manager-home.js';
@@ -69,7 +70,6 @@ import { FolderRegistry } from './folder-registry.js';
 import { registerFolderRoutes, requireAuth } from './folder-routes.js';
 import { registerHostFilesRoutes } from './host-files-routes.js';
 import { registerChatMoveRoutes } from './chat-move-routes.js';
-import { ChatMirror } from './chat-mirror.js';
 import { registerChatSearchRoutes } from './chat-search-routes.js';
 
 /**
@@ -641,14 +641,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   const specialThreadHost = (): string | null => registry.managerHostId();
 
-  // Durable copy of message text so an offline host's chats stay searchable.
-  const chatMirror = registry.dataDir
-    ? new ChatMirror({
-        dataDir: registry.dataDir,
-        logger: log.child({ component: 'chat-mirror' }),
-      })
-    : undefined;
-  if (chatMirror) hostLink.onEvent((event) => chatMirror.observe(event));
+  // The chat mirror's folder, from before search read the record (spec/01 § Chat record).
+  if (registry.dataDir) {
+    removeRetiredChatMirror(registry.dataDir, log.child({ component: 'retired-chat-mirror' }));
+  }
 
   // The Manager's home host (spec/06 § Where special threads run, § Changing home).
   app.get('/api/manager/home', async (req, reply) => {
@@ -2109,7 +2105,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     registry,
     hostLink,
     chatRegistry,
-    ...(chatMirror ? { mirror: chatMirror } : {}),
+    chatLogStore,
     idGenerator,
   });
 

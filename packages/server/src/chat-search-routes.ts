@@ -4,10 +4,10 @@
 //                         &includeArchived=<true|false>&includeHidden=<true|false>
 //
 // Searches every chat on every host (archived and hidden ones only on request) — names and the full text of what was
-// said. The transcripts live on the hosts (the server holds none), so this
-// fans one `patch.chat_search.request` out to each ONLINE host, merges what
-// comes back under the one shared ranking (`compareChatSearchHits`), and pages
-// the merged list.
+// said. Each ONLINE host is asked with one `patch.chat_search.request`; a host
+// that is offline is answered for from the server's own record of its chats
+// (`chat-log-store.ts`). What comes back is merged under the one shared ranking
+// (`compareChatSearchHits`) and paged.
 //
 // NO SILENT OMISSION: every registered host is named in `hosts[]` with what
 // happened to it — searched, offline (not asked), timed out, or failed — so a
@@ -34,7 +34,7 @@ import {
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
-import type { ChatMirror } from './chat-mirror.js';
+import type { ChatLogStore } from './chat-log-store.js';
 import { requireAuth } from './folder-routes.js';
 
 export interface ChatSearchRoutesDeps {
@@ -42,8 +42,8 @@ export interface ChatSearchRoutesDeps {
   registry: Registry;
   hostLink: HostLink;
   chatRegistry: ChatRegistry;
-  /** The server's copy of message text, used for chats whose host is offline. */
-  mirror?: ChatMirror;
+  /** The server's record of every chat, searched for chats whose host is offline. */
+  chatLogStore: Pick<ChatLogStore, 'holds' | 'searchMessages'>;
   idGenerator: () => string;
 }
 
@@ -132,10 +132,11 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
 
   /**
    * An offline host cannot answer, so answer for it from what the server holds:
-   * the chat registry's names and the mirrored message text. Hits are flagged
-   * `mirrored` so a surface can say the host is not reachable right now.
+   * the chat registry's names and the server's record of what was said. Hits
+   * are flagged `mirrored` (the wire's name for "answered by the server") so a
+   * surface can say the host is not reachable right now.
    */
-  function searchMirror(
+  function searchRecord(
     hostId: string,
     query: string,
     fullText: boolean,
@@ -144,22 +145,20 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
   ): HostOutcome {
     const hostName = deps.registry.hostName(hostId) ?? null;
     const offline = { hostId, hostName, state: 'offline' as const };
-    if (!deps.mirror) return { status: offline, hits: [], total: 0 };
     const terms = parseSearchQuery(query);
     const now = Date.now();
     const hits: ChatSearchHit[] = [];
-    let mirroredChats = 0;
-    const mirrored = new Set(deps.mirror.chatIds());
+    let recordedChats = 0;
     for (const chat of deps.chatRegistry.list({ includeArchived: true, includeSnoozed: true })) {
       if (chat.hostId !== hostId || chat.status === 'deleted') continue;
       if (chat.status === 'archived' && !includeArchived) continue;
       if (chat.hidden && !includeHidden) continue;
-      if (!mirrored.has(chat.chatId) && chat.name === null) continue;
-      mirroredChats++;
+      if (chat.name === null && !deps.chatLogStore.holds(chat.chatId)) continue;
+      recordedChats++;
       const name = chat.name ?? '';
       const lowerName = name.toLowerCase();
       const nameMatch = terms.length > 0 && terms.every((t) => lowerName.includes(t));
-      const found = fullText ? deps.mirror.search(query, chat.chatId) : null;
+      const found = fullText ? deps.chatLogStore.searchMessages(chat.chatId, terms) : null;
       const idQuery = query.trim().toLowerCase();
       const idMatch = /^[a-z0-9_-]+$/.test(idQuery) && chat.chatId.toLowerCase().includes(idQuery);
       if (!nameMatch && !found && !idMatch) continue;
@@ -184,7 +183,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     }
     hits.sort(compareChatSearchHits);
     return {
-      status: mirroredChats > 0 ? { ...offline, mirroredChats } : offline,
+      status: recordedChats > 0 ? { ...offline, mirroredChats: recordedChats } : offline,
       hits,
       total: hits.length,
     };
@@ -201,7 +200,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
   ): Promise<HostOutcome> {
     const hostName = deps.registry.hostName(hostId) ?? null;
     if (!deps.hostLink.isOnline(hostId)) {
-      return searchMirror(hostId, query, fullText, includeArchived, includeHidden);
+      return searchRecord(hostId, query, fullText, includeArchived, includeHidden);
     }
     const requestId = deps.idGenerator();
     const result = await new Promise<Response | 'timeout'>((resolve) => {

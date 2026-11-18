@@ -87,7 +87,6 @@ function seedConfig(voiceConfig: VoiceConfig): void {
     data: {
       devices: [],
       push: { tokenCount: 0 },
-      telegram: { connected: false, chatId: null, botUsername: null },
       google: { configured: false, connected: false, scope: null },
       preferences: { addressWord: 'patch', voiceConfig },
     } as unknown as SettingsResponse,

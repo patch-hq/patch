@@ -306,9 +306,8 @@ export function AppShell(): JSX.Element {
       .catch((e: Error) => pushError(`failed to load settings: ${e.message}`));
   }, [pushError]);
 
-  // Clear transient toasts on route change so a stale error (e.g. a failed
-  // "Pair Telegram" submit) does not persist across navigations until manually
-  // dismissed. Toasts also auto-expire on a timer (uiStore) as a backstop.
+  // Clear transient toasts on route change so a stale error does not persist
+  // across navigations until manually dismissed. Toasts also auto-expire on a timer (uiStore) as a backstop.
   useEffect(() => {
     useUiStore.getState().clearToasts();
   }, [location.pathname]);

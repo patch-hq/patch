@@ -8442,9 +8442,9 @@ export const ChatSearchHit = z
     /** The most recent matching message, or `null` for a name-only match. */
     snippet: ChatSearchSnippet.nullable(),
     /**
-     * `true` when the server answered from its own copy of the chat because
-     * the chat's host is offline (spec/04 § History — server mirror). Absent
-     * on a hit the host itself returned.
+     * `true` when the server answered from its own record of the chat because
+     * the chat's host is offline (spec/01 § Chat record). Absent on a hit the
+     * host itself returned. The name predates the record.
      */
     mirrored: z.boolean().optional(),
   })
@@ -8523,7 +8523,7 @@ export const ChatSearchHostResult = z
     transcriptsMissing: z.number().int().nonnegative().optional(),
     /**
      * On an `offline` host: how many of its chats the server searched from its
-     * own mirror instead. Absent when the host was asked directly.
+     * own record instead. Absent when the host was asked directly.
      */
     mirroredChats: z.number().int().nonnegative().optional(),
   })

@@ -66,7 +66,6 @@ function seedSettings(suppressProviderSwitchWarning: boolean): void {
     data: {
       devices: [],
       push: { tokenCount: 0 },
-      telegram: { connected: false, chatId: null, botUsername: null },
       google: { configured: false, connected: false, scope: null },
       preferences: { ...BASE_PREFERENCES, suppressProviderSwitchWarning },
     },

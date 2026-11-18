@@ -1,4 +1,5 @@
 import { cutoffMs } from './cleanup.js';
+import { removeRetiredNativeCopies } from './retiredNativeCopies.js';
 import { applyClaudeProviderSettings } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
@@ -3981,6 +3982,19 @@ async function startHost(
 
   // 4. Host (chat_state owner).
   const metaStore = createMetaStore(config.patchHome);
+  // Once: the pre-migration copies of chats' Claude transcripts (spec/04 § History).
+  removeRetiredNativeCopies({
+    patchHome: config.patchHome,
+    folderOf: (chatId) => {
+      try {
+        return metaStore.read(chatId)?.folder;
+      } catch (err) {
+        logger.warn({ chatId, err: (err as Error).message }, 'chat meta unreadable');
+        return undefined;
+      }
+    },
+    logger,
+  });
   // Durable record of every cross-chat tool call this host has made or
   // served (Settings → Activity, spec/06 § Cross-chat toolset).
   const toolLogStore = new ToolLogStore(config.patchHome);

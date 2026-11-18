@@ -19,6 +19,7 @@ import {
 import { createMetaStore, type MetaStore } from '../src/meta.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
 import { createHistoryReader, encodeFolder, type HistoryReader } from '../src/history.js';
+import { chatTranscriptPath } from '../src/claudeSessionStore.js';
 import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
@@ -1046,7 +1047,7 @@ describe('Host ChatRunner', () => {
     expect(daemon.chatState.get('resumable-chat')?.activity).toBe('idle');
   });
 
-  it("F1: a session only Patch's mirror holds still resumes (no rebuild-and-compress loop)", async () => {
+  it("F1: a session only the chat's own config dir holds still resumes (no rebuild-and-compress loop)", async () => {
     // A turn resumed through the session store runs from a throwaway config
     // dir, so Claude Code's own transcript never lands in ~/.claude/projects.
     // Treating that as an orphan rebuilt the session from the whole chat log
@@ -1078,10 +1079,14 @@ describe('Host ChatRunner', () => {
       createdAt: 1,
       updatedAt: 2,
     });
-    const nativeDir = join(dirname(metaStore.pathFor('mirror-chat')), 'native', 'claude');
-    mkdirSync(nativeDir, { recursive: true });
+    const ownFile = chatTranscriptPath(
+      dirname(metaStore.pathFor('mirror-chat')),
+      folder,
+      'mirror-only-sess',
+    );
+    mkdirSync(dirname(ownFile), { recursive: true });
     writeFileSync(
-      join(nativeDir, 'mirror-only-sess.jsonl'),
+      ownFile,
       JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }) + '\n',
     );
     daemon.hydrate();

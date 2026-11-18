@@ -409,7 +409,7 @@ describe('history reader', () => {
     expect(reader.hasSession({ folder, sessionId: 'now-here' })).toBe(true);
   });
 
-  it("hasSession() counts a non-empty conversation file in the chat's own dir, and a not-yet-migrated old mirror", () => {
+  it("hasSession() counts a non-empty conversation file in the chat's own dir, never a retired native copy", () => {
     const root = mkdtempSync(join(tmpdir(), 'patch-history-'));
     const chatDir = mkdtempSync(join(tmpdir(), 'patch-chat-'));
     const folder = '/work/proj';
@@ -423,7 +423,7 @@ describe('history reader', () => {
     expect(reader.hasSession({ folder, sessionId: 'live', chatDir })).toBe(true);
     expect(reader.hasSession({ folder, sessionId: 'live' })).toBe(false);
     writeFileSync(join(chatDir, 'native', 'claude', 'old.jsonl'), '{"type":"user"}\n', 'utf8');
-    expect(reader.hasSession({ folder, sessionId: 'old', chatDir })).toBe(true);
+    expect(reader.hasSession({ folder, sessionId: 'old', chatDir })).toBe(false);
   });
 
   it('createHistoryReader() defaults to ~/.claude/projects when no override is given', () => {

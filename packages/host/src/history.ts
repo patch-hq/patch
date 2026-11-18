@@ -89,7 +89,7 @@ export interface ForkPointOptions {
    * The chat's own dir (`~/.patch/chats/<id>`). A chat's Claude runs under
    * `<chatDir>/claude`, so its conversation file lives there; the fork point is
    * resolved against the same file the chat resumes (`findTranscript`: the
-   * chat's own file, then the pre-migration mirror, then the shared store).
+   * chat's own file, then the shared store).
    */
   chatDir?: string;
 }
