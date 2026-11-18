@@ -13,7 +13,8 @@
 import type { JSX, KeyboardEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CONNECT_PATH, providerNameForModel } from '../components/ClaudeDisconnectedBanner.js';
 import { useQuery } from '@tanstack/react-query';
 import {
   folderName,
@@ -1088,6 +1089,12 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       {/* One labelled row per decision, in the order they are taken: host,
           project, model, account (spec/14 §8). A row with nothing to decide —
           one host, one account — is absent rather than drawn with one chip. */}
+      {signedOut ? (
+        <p className="new-chat-setup-reason" data-testid="new-chat-setup-reason" role="status">
+          Project and model are unavailable until you sign in to{' '}
+          {providerNameForModel(effectiveModel)}. <Link to={CONNECT_PATH}>Sign in</Link>
+        </p>
+      ) : null}
       <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
         {/* Where the chat runs. An offline host is listed so its absence is
             visible, and cannot be chosen. */}
@@ -1154,7 +1161,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
               browsed path, or one past the chips); otherwise the pill is the
               way to the rest of the list and says so. No tooltip. */}
-              <span className={`folder-pill-label ${folderIsQuick ? '' : 'mono'}`}>
+              <span className="folder-pill-label">
                 {folderIsQuick ? 'Other…' : folder ? folderName(folder) : 'Choose a folder…'}
               </span>
               <span className="folder-pill-caret" aria-hidden>
@@ -1565,7 +1572,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               the pickers sit directly under the "New chat" title rather than
               drifting to the foot of the panel. */}
             <div className="new-chat-intro">
-              <EmptyChat title="New chat" />
+              <EmptyChat title="" />
               <FirstRunIntro />
               {/* Not signed in is said by the banner and in the composer,
                   where sending fails — not a third time here. */}

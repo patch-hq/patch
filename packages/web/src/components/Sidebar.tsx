@@ -707,6 +707,7 @@ function RegularSidebar({
     channelsRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [channelsOpen]);
 
+  const hasChats = useChatStore((s) => Object.keys(s.chats).length > 0);
   return (
     <>
       {/* The chat search field (spec/14 § Chat search). Filtering to only
@@ -725,7 +726,8 @@ function RegularSidebar({
         </div>
         {/* A lifecycle view is its own list: the chat list's view and sort
             controls do not apply to it. */}
-        {openKind === null ? (
+        {/* Nothing to filter or sort until there is a chat. */}
+        {openKind === null && hasChats ? (
           <div className="sidebar-controls">
             <SidebarViewMenu />
             <SidebarSortMenu />

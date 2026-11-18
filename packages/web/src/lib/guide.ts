@@ -15,6 +15,13 @@ export const GUIDE_PURPOSE = 'Patch runs your coding agents, on this machine or 
 
 export const GUIDE_ITEMS: readonly GuideItem[] = [
   {
+    id: 'connect',
+    title: 'Connect an AI',
+    line: 'Sign in to Claude or ChatGPT. Nothing can be sent until you do.',
+    to: '/connect',
+    action: 'Sign in',
+  },
+  {
     id: 'chat',
     title: 'Start a chat in a folder',
     line: 'Pick a folder under New chat and send a message.',

@@ -48,7 +48,7 @@ export function EmptyChat({
           strokeLinecap="round"
         />
       </svg>
-      <h2 className="empty-chat-title">{title}</h2>
+      {title ? <h2 className="empty-chat-title">{title}</h2> : null}
       {line ? (
         <p className="empty-chat-line" data-testid="empty-chat-line">
           {line}

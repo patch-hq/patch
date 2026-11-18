@@ -2883,11 +2883,6 @@ export const Composer = forwardRef(function Composer(
               // credential is the one case that disables the field itself:
               // that turn can never run at all.
               disabled={claudeDisconnected}
-              {...(claudeDisconnected
-                ? {
-                    title: `${accountModel?.startsWith('openai/') ? 'Codex' : 'Claude'} isn’t connected. Connect in Settings.`,
-                  }
-                : {})}
               rows={1}
             />
             {/* Dictate sits inside the field, bottom-right, so the action row

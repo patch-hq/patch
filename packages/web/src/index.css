@@ -3161,7 +3161,8 @@ button.nav-row {
   gap: 20px;
 }
 .new-chat-intro .empty-chat {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-height: 0;
   margin: 0;
   padding: 0 24px;
 }
@@ -3169,6 +3170,11 @@ button.nav-row {
    Project, Model, Account — as a two-column grid, labels in a quiet right-
    aligned column so the rows scan as a form rather than a cloud of pills. The
    usage block sits beneath, apart from the selections. */
+.new-chat-setup-reason {
+  margin: 0;
+  text-align: center;
+  color: var(--text-muted, inherit);
+}
 .new-chat-setup {
   display: flex;
   flex-direction: column;
