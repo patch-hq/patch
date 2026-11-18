@@ -112,7 +112,7 @@ function PromptRow({
           </div>
         </>
       ) : (
-        <pre className="set-pre" data-testid={`prompt-${id}-shown`}>
+        <pre className={custom ? 'set-pre' : 'set-pre default'} data-testid={`prompt-${id}-shown`}>
           {current}
         </pre>
       )}

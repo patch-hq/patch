@@ -53,6 +53,8 @@ export function useBehind(): BehindItem[] {
     .map((host) => ({ kind: 'host' as const, host }));
   const hostRowsExplain = items.length > 0;
   for (const d of report?.drift ?? []) {
+    // Under the Vite dev server the UI is served by Vite, so the server has none.
+    if (import.meta.env.DEV && d.kind === 'web-missing') continue;
     // The agent lagging the server is the same fact as a host being behind; the
     // host row already says it (and whether it is only waiting on chats).
     if (d.kind === 'daemon-server-mismatch' && hostRowsExplain) continue;
@@ -67,6 +69,22 @@ export function useBehind(): BehindItem[] {
   return items;
 }
 
+/**
+ * What a drift means, said plainly. The server's own detail can carry build
+ * hashes and its remedy developer commands, so neither is shown.
+ */
+const DRIFT_WORDS: Record<string, string> = {
+  'web-missing': 'The server has no copy of the web app to serve',
+  'web-unstamped': 'The web app on the server has no version, so it may be out of date',
+  'web-server-mismatch': 'The web app on the server is a different version from the server',
+  'version-scheme-mismatch': 'Parts of Patch report their versions in different formats',
+  'daemon-server-mismatch': 'A host is on a different version from the server',
+  'host-unstamped': 'A host reports no version',
+  'host-unsupported': 'A host is too old to work with this server',
+  'client-version-unknown': 'A device reports a version that can’t be compared',
+  'client-behind': 'A device is on an older version; reload it',
+};
+
 function isNewer(candidate: string, running: string): boolean {
   const parse = (v: string): number[] | null => {
     const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
@@ -79,8 +97,7 @@ function isNewer(candidate: string, running: string): boolean {
   return false;
 }
 
-export const AUTO_ON_HINT =
-  'Controls when hosts and server move to a new version. Updates are synchronised between all components.';
+export const AUTO_ON_HINT = 'Hosts and server update together';
 export const DEV_CHANNEL_WARNING =
   'Development builds are unstable and can break things. You get every build as soon as it is made, not just tagged releases.';
 export const UPDATE_ALL_HINT = 'Chats run in their own processes and keep running.';
@@ -139,9 +156,20 @@ export function UpdatesPage(): JSX.Element {
     );
   };
 
+  // The nav marks Updates for drift too, so the page says what it is.
+  const drift = behind.flatMap((b) => (b.kind === 'drift' ? [b] : []));
+  const statusSub =
+    drift.length > 0
+      ? [
+          ...new Set(
+            drift.map((d) => DRIFT_WORDS[d.driftKind] ?? 'Parts of Patch are out of step'),
+          ),
+        ].join('. ')
+      : undefined;
   let status = 'Up to date';
   if (!report) status = 'Checking…';
   else if (updating || newer || hostsBehind) status = 'Updating…';
+  else if (drift.length > 0) status = 'Needs attention';
 
   return (
     <SettingsPage
@@ -208,7 +236,7 @@ export function UpdatesPage(): JSX.Element {
         </Row>
         {autoUpdate ? (
           <>
-            <Row title="Status" testid="version-status">
+            <Row title="Status" sub={statusSub} testid="version-status">
               <span className="set-val" data-testid="update-status">
                 {status}
               </span>
@@ -241,7 +269,7 @@ export function UpdatesPage(): JSX.Element {
                 testid="update-all-row"
               />
             ) : (
-              <Row title="Status" testid="version-status">
+              <Row title="Status" sub={statusSub} testid="version-status">
                 <span className="set-val" data-testid="update-status">
                   {status}
                 </span>

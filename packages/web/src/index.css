@@ -9814,6 +9814,10 @@ button.view-file-download {
 }
 /* With the sidebar collapsed its expand button sits over the top-left corner
    of the content (`.sidebar-expand-btn`, 8px + 28px); the titles step past it. */
+/* The same chevron sits over the first pane's first tab. */
+.three-col.sidebar-collapsed .group-row > .group-card:first-child .pane:first-child .pane-tab-bar {
+  padding-left: 44px;
+}
 .three-col.sidebar-collapsed .set-nav h1,
 .three-col.sidebar-collapsed .set-head {
   padding-left: 32px;
@@ -9865,6 +9869,7 @@ button.view-file-download {
 }
 .set-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   min-height: 52px;
@@ -9874,6 +9879,11 @@ button.view-file-download {
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
+}
+/* A stacked row is a column, so the label's 10em basis below would be its
+   height: the label sizes to its text instead. */
+.set-row.stack > .set-row-text {
+  flex: none;
 }
 /* Choice rows: the label owns its own line, the chips sit under it. */
 .set-row.set-row-choices > .set-row-ctrl {
@@ -9891,8 +9901,10 @@ button.view-file-download {
   gap: 14px;
   width: 100%;
 }
+/* The label claims ~10em before the control drops below it, at every width:
+   the settings pane can be narrow beside the sidebar on a wide window. */
 .set-row-text {
-  flex: 1;
+  flex: 1 1 10em;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -9947,6 +9959,7 @@ button.set-row-open:focus-visible {
   gap: 8px;
   flex: none;
   max-width: 100%;
+  margin-left: auto;
 }
 .set-note {
   margin: 0;
@@ -9955,9 +9968,13 @@ button.set-row-open:focus-visible {
   font-size: 14px;
 }
 .set-val,
-.set-unit {
+.set-unit,
+.set-state {
   color: var(--ink-3);
   font-size: 14px;
+}
+.set-state.ok {
+  color: var(--accent-strong);
 }
 .set-slider {
   display: inline-flex;
@@ -10028,6 +10045,10 @@ button.set-row-open:focus-visible {
   font-size: var(--text-min);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* The built-in prompt, read-only: greyed so a customised one stands out. */
+.set-pre.default {
+  color: var(--ink-faint);
 }
 .set-inline {
   display: flex;
@@ -10601,33 +10622,33 @@ button.set-row-open:focus-visible {
     margin: 18px 4px 6px;
   }
   /* One bordered block per group: rows share borders, the ends are rounded. */
-  .set-nav button {
+  .set-nav > button {
     padding: 14px 16px;
     margin-top: -1px;
     border: 1px solid var(--line-soft);
     border-radius: 0;
     background: var(--bg-elevated);
   }
-  .set-nav .set-label + button {
+  .set-nav > .set-label + button {
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
-  .set-nav button:has(+ .set-label),
-  .set-nav button:last-child {
+  .set-nav > button:has(+ .set-label),
+  .set-nav > button:last-child {
     border-bottom-left-radius: var(--radius-lg);
     border-bottom-right-radius: var(--radius-lg);
   }
-  .set-nav .set-label + button:has(+ .set-label) {
+  .set-nav > .set-label + button:has(+ .set-label) {
     border-radius: var(--radius-lg);
   }
-  .set-nav button.on {
+  .set-nav > button.on {
     background: var(--bg-elevated);
     color: var(--ink-2);
   }
-  .set-nav button::after {
+  .set-nav > button::after {
     content: '›';
     color: var(--ink-faint);
   }
-  .set-nav button > span {
+  .set-nav > button > span {
     flex: 1;
   }
   .set-pip {
@@ -10661,17 +10682,9 @@ button.set-row-open:focus-visible {
   .set-head > :not(h1, .set-back) {
     margin-left: 0;
   }
-  .set-row {
-    flex-wrap: wrap;
-  }
-  /* The label claims ~10em before the control drops below it. At a basis of
-     0 the row never wrapped: a wide control ("15 · min with no new output")
-     kept its place and squeezed "Stalled after" to one letter per line. */
-  .set-row-text {
-    flex: 1 1 10em;
-  }
   .set-row-ctrl {
     justify-content: flex-start;
+    margin-left: 0;
   }
   .set-row-ctrl .set-pills + .set-pills {
     margin-left: 0;
@@ -18891,6 +18904,22 @@ a.drop-target {
   list-style: none;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  position: relative;
+  padding-right: 40px;
+}
+.set-optional > summary::after {
+  content: '›';
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-faint);
+  font-size: 18px;
+}
+.set-optional[open] > summary::after {
+  transform: translateY(-50%) rotate(90deg);
 }
 .set-optional > summary::-webkit-details-marker {
   display: none;

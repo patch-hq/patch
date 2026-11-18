@@ -274,7 +274,17 @@ export interface IssueReportingStatus {
   tokenConfigured: boolean;
   pending: number;
   filed: number;
+  /** Newest first. Older servers leave it out. */
+  issues?: FiledIssue[];
   lastError: string | null;
+}
+
+export interface FiledIssue {
+  number: number;
+  url: string;
+  title: string | null;
+  count: number;
+  at: number | null;
 }
 
 export interface ManualIssueReport {

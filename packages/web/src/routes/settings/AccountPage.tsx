@@ -91,7 +91,7 @@ export function AccountPage(): JSX.Element {
         </Row>
       </Group>
       <Group label="This device" testid="settings-session">
-        <Row title="Sign this device out">
+        <Row title="Deactivate this device">
           <button
             type="button"
             className="set-btn danger"
