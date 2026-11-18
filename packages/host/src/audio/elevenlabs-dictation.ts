@@ -20,6 +20,8 @@ import type { VoiceSessionLike } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 
 const SAMPLE_RATE = 16000;
+/** New streams opened after Scribe itself ended one (queue_overflow, a dropped socket). */
+const MAX_RESTARTS = 3;
 
 export interface ElevenLabsDictationDeps {
   logger: Logger;
@@ -34,6 +36,10 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
   private readonly sessionId: string;
   private readonly chatId: string;
   private stream: ScribeRealtimeStream | null = null;
+  /** Words from streams Scribe has ended; the live stream's words follow them. */
+  private carried = '';
+  private restarts = 0;
+  private audioSecondsEnded = 0;
   private closed = false;
   private failed = false;
   private lastSent = '';
@@ -52,16 +58,49 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
   onSessionStart(): void {
     // Accepted: the mic is live from here, and audio is held until the stream opens.
     this.deps.sendAudio({ type: 'audio.state', sessionId: this.sessionId, state: 'listening' });
-    this.stream = new ScribeRealtimeStream(
+    this.openStream([]);
+  }
+
+  private openStream(unsent: Int16Array[]): void {
+    const stream = new ScribeRealtimeStream(
       {
         apiKey: this.deps.apiKey,
         logger: this.deps.logger,
         ...(this.deps.wsCtor ? { wsCtor: this.deps.wsCtor } : {}),
         ...(this.deps.wsUrl ? { wsUrl: this.deps.wsUrl } : {}),
       },
-      { onText: (text) => this.emit(text), onError: (m) => this.fail(m) },
+      {
+        onText: (text) => {
+          if (stream === this.stream) this.emit(this.joined(text));
+        },
+        onError: (m, restartable) => {
+          if (stream !== this.stream) return;
+          if (restartable && this.restarts < MAX_RESTARTS) this.restart(stream, m);
+          else this.fail(m);
+        },
+      },
     );
-    this.stream.start();
+    this.stream = stream;
+    stream.start();
+    for (const pcm of unsent) stream.push(pcm);
+  }
+
+  /** Scribe ended the session itself: keep its words, open a new one, resend what it never got. */
+  private restart(old: ScribeRealtimeStream, reason: string): void {
+    this.restarts += 1;
+    this.deps.logger.warn(
+      { reason, restarts: this.restarts },
+      'scribe dictation: restarting stream',
+    );
+    this.carried = this.joined(old.text());
+    this.audioSecondsEnded += old.audioSeconds;
+    this.openStream(old.takeUnsent());
+    // The words so far stay on screen while the new stream starts.
+    this.emit(this.carried);
+  }
+
+  private joined(text: string): string {
+    return [this.carried, text].filter((p) => p.length > 0).join(' ');
   }
 
   async onMicFrame(pcm: Int16Array): Promise<void> {
@@ -78,12 +117,17 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
   /** The user has stopped: commit what Scribe still holds and answer with the whole dictation. */
   async finishDictation(): Promise<void> {
     if (this.closed || this.failed || !this.stream) return;
-    await this.stream.commit();
-    if (this.failed) return;
+    // A restart during the commit swaps the stream; commit the new one too.
+    let committed: ScribeRealtimeStream;
+    do {
+      committed = this.stream;
+      await committed.commit();
+      if (this.failed || this.closed) return;
+    } while (committed !== this.stream);
     this.deps.sendAudio({
       type: 'audio.transcript_final',
       sessionId: this.sessionId,
-      text: this.stream.text(),
+      text: this.joined(this.stream.text()),
     });
   }
 
@@ -147,7 +191,7 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
     };
   }
   engineCosting(): EngineCosting {
-    const seconds = this.stream?.audioSeconds ?? 0;
+    const seconds = this.audioSecondsEnded + (this.stream?.audioSeconds ?? 0);
     return {
       backend: 'local',
       model: SCRIBE_MODEL,
