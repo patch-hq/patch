@@ -38,6 +38,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
+import { programDir } from './installPaths.js';
+import { clearProbation, spawnWatchdog, writeProbation } from './updateProbation.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -611,6 +613,8 @@ export async function applyUpdate(opts: {
    * is restarting into that version: it is down, so nothing can be fetched.
    */
   stagedVersion?: string;
+  /** Watchdog-spawn override — test hook, so a unit test starts no process. */
+  startWatchdog?: (logFd: number) => void;
   /** Installer-runner override — test hook, so a unit test starts no process. */
   runInstaller?: (cmd: string, args: string[], fd: number, timeoutMs?: number) => Promise<void>;
   logger: Logger;
@@ -671,6 +675,34 @@ export async function applyUpdate(opts: {
       },
       'self-update: installer start',
     );
+    // Put the new build on probation BEFORE it is installed: the watchdog (this
+    // build, which is known good) keeps it only if it connects and stays up, and
+    // otherwise re-runs this build's installer. See updateProbation.ts.
+    const rollbackInstaller = join(opts.patchHome, 'versions', opts.currentVersion, 'install');
+    if (!existsSync(rollbackInstaller)) {
+      closeSync(out);
+      const message =
+        `self-update refused: the running version ${opts.currentVersion} is not kept at ` +
+        `${rollbackInstaller}, so a failed update could not be rolled back`;
+      opts.logger.error({ rollbackInstaller }, message);
+      return { applied: false, message };
+    }
+    writeProbation(opts.patchHome, {
+      from: opts.currentVersion,
+      to: version,
+      startedAt: Date.now(),
+      rollbackInstaller,
+      serverUrl: base,
+    });
+    (
+      opts.startWatchdog ??
+      ((fd: number) =>
+        spawnWatchdog({
+          nodePath: process.execPath,
+          programPath: join(programDir, 'host.mjs'),
+          logFd: fd,
+        }))
+    )(out);
     let installerFailure: string | undefined;
     try {
       await (opts.runInstaller ?? runDetached)(
@@ -706,6 +738,7 @@ export async function applyUpdate(opts: {
       );
       return { applied: true, message: `updated ${opts.currentVersion} → ${version}` };
     }
+    clearProbation(opts.patchHome);
     opts.logger.warn(
       { installedAfter: installed, wanted: version },
       'self-update: did not take — this machine is not on the wanted version',

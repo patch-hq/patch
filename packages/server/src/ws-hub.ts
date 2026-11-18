@@ -2086,6 +2086,21 @@ export class WsHub {
       this.beginHostRestart(event.hostId);
       return;
     }
+    // A host rolled an update back: its own record of why. Logged at error so it
+    // is visible; not forwarded to surfaces.
+    if (event.type === 'host.update_failed') {
+      this.deps.logger.error(
+        {
+          hostId: event.hostId,
+          from: event.from,
+          to: event.to,
+          at: event.at,
+          reason: event.reason,
+        },
+        'host update rolled back: the new version did not come up healthy',
+      );
+      return;
+    }
     // The server is the log of record (spec/01 § Message log): a finished event
     // is written before anything is broadcast, so what a surface sees live is
     // already on the server's disk. A resend of one it holds is not broadcast

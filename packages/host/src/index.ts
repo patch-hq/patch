@@ -38,6 +38,7 @@ import {
   chmodSync,
   realpathSync,
   readFileSync,
+  readlinkSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -175,6 +176,13 @@ import {
   type SpecialThreadId,
 } from './specialThreads.js';
 import { BUILD_TARGET, BUILT_AT, GIT_SHA, VERSION } from './version.js';
+import {
+  WATCHDOG_FLAG,
+  currentVersionOf,
+  recordAlive,
+  runWatchdog,
+  takeUpdateFailure,
+} from './updateProbation.js';
 import { countUpdateAttempt, recordShutdown, recordStart, signalContext } from './runDiag.js';
 import {
   applyUpdate,
@@ -2391,6 +2399,18 @@ async function startHost(
   const healthTimer = setInterval(() => void reportHealth(), HOST_HEALTH_INTERVAL_MS);
   healthTimer.unref();
 
+  // Update probation: while this build is the one on trial, prove it is
+  // connected, every 10s. The watchdog (another process) is the judge.
+  const probationTimer = setInterval(() => {
+    if (!linkOnline) return;
+    try {
+      recordAlive(config.patchHome, VERSION);
+    } catch (err) {
+      logger.error({ err }, 'self-update: could not record the probation heartbeat');
+    }
+  }, 10_000);
+  probationTimer.unref();
+
   // The one-off send of what the server's record lacks (spec/01 § Chat record).
   // Built once the chats are loaded, below; started by a server that takes it.
   let recordImport: RecordImport | undefined;
@@ -2420,6 +2440,16 @@ async function startHost(
     onServerRestarting: swapToStaged,
     onAuthed: (sender, greeting) => {
       linkOnline = true;
+      // A rollback happened while this host was away: say so, so it is visible.
+      try {
+        const failed = takeUpdateFailure(config.patchHome);
+        if (failed) {
+          logger.error({ ...failed }, 'self-update: the last update was rolled back');
+          sender({ type: 'host.update_failed', hostId: selfHostId, ...failed });
+        }
+      } catch (err) {
+        logger.error({ err }, 'self-update: could not read the rolled-back update record');
+      }
       // Adopt the account's host roster from the greeting, so a cross-chat
       // call naming another host knows whether that host is up.
       onlineHosts.clear();
@@ -7912,7 +7942,21 @@ function isProcessEntrypoint(moduleUrl: string): boolean {
   }
 }
 
-if (isProcessEntrypoint(import.meta.url)) {
+if (isProcessEntrypoint(import.meta.url) && process.argv.includes(WATCHDOG_FLAG)) {
+  // The update watchdog: this same build, run as the judge of the update it just started.
+  const home = join(process.env['HOME'] ?? homedir(), '.patch');
+  runWatchdog({
+    home,
+    installedVersion: () => currentVersionOf(home, readlinkSync),
+    log: (line) => console.log(`[update-watchdog] ${new Date().toISOString()} ${line}`),
+  }).then(
+    () => process.exit(0),
+    (err: unknown) => {
+      console.error('[update-watchdog] fatal:', err);
+      process.exit(1);
+    },
+  );
+} else if (isProcessEntrypoint(import.meta.url)) {
   main().catch((err: unknown) => {
     console.error('[patch-daemon] fatal:', err);
     process.exit(1);

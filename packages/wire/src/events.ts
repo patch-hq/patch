@@ -5427,6 +5427,22 @@ export const HostRestartingEvent = z
   .strict();
 export type HostRestartingEvent = z.infer<typeof HostRestartingEvent>;
 
+/**
+ * Host → server, on the first connection after an update was rolled back: the
+ * new build did not come up healthy, so the host went back to `from`.
+ */
+export const HostUpdateFailedEvent = z
+  .object({
+    type: z.literal('host.update_failed'),
+    ...hostIdField,
+    from: z.string().min(1),
+    to: z.string().min(1),
+    reason: z.string().min(1),
+    at: z.string().min(1),
+  })
+  .strict();
+export type HostUpdateFailedEvent = z.infer<typeof HostUpdateFailedEvent>;
+
 /** Surface → host: designate a project root on that host (spec/04 § Folders). */
 export const HostFolderAddEvent = z
   .object({
@@ -9935,6 +9951,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostUpdateEvent,
   HostStageEvent,
   HostRestartingEvent,
+  HostUpdateFailedEvent,
   HostFolderAddEvent,
   HostFolderRemoveEvent,
   HostClaudeMemoryDeleteEvent,
@@ -10268,6 +10285,7 @@ export const EVENT_SCHEMAS = {
   'host.update': HostUpdateEvent,
   'host.stage': HostStageEvent,
   'host.restarting': HostRestartingEvent,
+  'host.update_failed': HostUpdateFailedEvent,
   'host.folder_add': HostFolderAddEvent,
   'host.folder_remove': HostFolderRemoveEvent,
   'host.claude_memory_delete': HostClaudeMemoryDeleteEvent,
