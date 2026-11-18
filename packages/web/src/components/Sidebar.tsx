@@ -1260,6 +1260,7 @@ function BottomNav(): JSX.Element {
   const onJobs = section(['jobs', 'job'], '/jobs');
   const onSettings = section(['settings'], '/settings');
   const onTriage = section(['triage'], '/triage');
+  const onInbox = section(['inbox'], '/inbox');
   return (
     <>
       <nav className="sb-bottom" data-testid="bottom-nav">
@@ -1280,6 +1281,16 @@ function BottomNav(): JSX.Element {
               data-testid="nav-triage"
             >
               Triage
+            </OpenableLink>
+          )}
+          {experimentalNav && (
+            <OpenableLink
+              to="/inbox"
+              opens={{ kind: 'page', page: 'inbox' }}
+              className={`nav-row ${onInbox ? 'active' : ''}`}
+              data-testid="nav-inbox"
+            >
+              Inbox
             </OpenableLink>
           )}
           <OpenableLink
