@@ -399,3 +399,97 @@ describe('server-owned host controls', () => {
     }
   });
 });
+
+describe('POST /api/hosts/update', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-hosts-update-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function boot() {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(7));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({
+      surfaceId: 'srf-upd',
+      surfaceKind: 'terminal',
+      label: 'cli',
+      issuedAt: 1,
+    });
+    registry.setDaemonKey({ hostId: 'host-a', publicKey: user.publicKey, issuedAt: 1 });
+    registry.setDaemonKey({ hostId: 'host-b', publicKey: user.publicKey, issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-upd',
+      surfaceKind: 'terminal',
+      label: 'cli',
+    });
+    const link = new InProcessHostLink();
+    const built = await buildAll({ dataDir: dir, registry, hostLink: link, jobsWatch: false });
+    return { app: built.app, link, jwt };
+  }
+
+  it('relays host.update to the named machine', async () => {
+    const { app, link, jwt } = await boot();
+    try {
+      link.addOnlineHost('host-b');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/hosts/update',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { hostId: 'host-b' },
+      });
+      expect(res.statusCode).toBe(202);
+      expect(link.sent).toContainEqual(
+        expect.objectContaining({
+          hostId: 'host-b',
+          event: { type: 'host.update', hostId: 'host-b' },
+        }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('names an unregistered machine and an offline one instead of sending', async () => {
+    const { app, link, jwt } = await boot();
+    try {
+      const headers = { authorization: `Bearer ${jwt}` };
+      const unknown = await app.inject({
+        method: 'POST',
+        url: '/api/hosts/update',
+        headers,
+        payload: { hostId: 'nope' },
+      });
+      expect(unknown.statusCode).toBe(404);
+      const offline = await app.inject({
+        method: 'POST',
+        url: '/api/hosts/update',
+        headers,
+        payload: { hostId: 'host-b' },
+      });
+      expect(offline.statusCode).toBe(503);
+      expect(offline.json().error).toBe('host_offline');
+      expect(link.sent.filter((f) => f.event.type === 'host.update')).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses an unauthenticated caller', async () => {
+    const { app } = await boot();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/hosts/update',
+        payload: { hostId: 'host-a' },
+      });
+      expect(res.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+});
