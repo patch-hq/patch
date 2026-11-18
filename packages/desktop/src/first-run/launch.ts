@@ -12,7 +12,14 @@ import { joinServer } from './join.js';
 import type { LocalServer } from './local-server.js';
 
 /** What the first-run page lets the user choose between. */
-export type Choice = { kind: 'local'; name: string } | { kind: 'remote'; input: string };
+export type Choice =
+  | { kind: 'local'; name: string }
+  | {
+      kind: 'remote';
+      input: string;
+      /** Also install a host on this computer, under this name, so agents run here too. */
+      host?: { name: string };
+    };
 
 /** The first-run page, as the launch sees it. */
 export interface SetupUi {
@@ -47,6 +54,8 @@ export interface LaunchOptions {
     progress: (message: string) => void,
     name?: string,
   ): Promise<{ saved: SavedConnection; server: LocalServer }>;
+  /** Install a host on this computer that serves the account `credential` on `origin`. */
+  installHost(origin: string, credential: string, name: string): Promise<void>;
 }
 
 async function bridgeFor(
@@ -112,8 +121,22 @@ export async function launchPatch(opts: LaunchOptions): Promise<Launch> {
       }
       opts.ui.progress('pair');
       const joined = await joinServer(choice.input, { label: opts.label });
+      const launched = await resume(joined, opts);
+      if (choice.host) {
+        try {
+          opts.ui.progress('host');
+          await opts.installHost(
+            new URL(launched.appUrl).origin,
+            joined.credential,
+            choice.host.name,
+          );
+        } catch (e) {
+          await launched.stop();
+          throw e;
+        }
+      }
       writeSaved(opts.file, joined);
-      return { ...(await resume(joined, opts)), firstRun: true };
+      return { ...launched, firstRun: true };
     } catch (e) {
       opts.ui.fail(e instanceof Error ? e.message : String(e));
     }

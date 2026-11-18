@@ -10,7 +10,7 @@ import { RelayHost } from '@patch/relay/host';
 import { createRelayServer, type RelayServerHandle } from '@patch/relay/server';
 import { encodePairingUri } from '@patch/wire';
 import { readSaved, writeSaved } from './connection.js';
-import { launchPatch, type Launch, type SetupUi } from './launch.js';
+import { launchPatch, type Choice, type Launch, type SetupUi } from './launch.js';
 
 let server: Server;
 let origin: string;
@@ -31,7 +31,7 @@ afterEach(async () => {
   await new Promise<void>((r) => server.close(() => r()));
 });
 
-function ui(choices: Array<{ kind: 'local', name: 'Test Mac' } | { kind: 'remote'; input: string }>) {
+function ui(choices: Array<Choice>) {
   const log: string[] = [];
   const impl: SetupUi = {
     choose: async () => {
@@ -49,6 +49,7 @@ const base = () => ({
   file: join(scratch, 'connection.json'),
   label: 'Test Mac',
   startLocal: async () => assert.fail('no local server expected'),
+  installHost: async () => assert.fail('no host install expected'),
 });
 
 test('with a connection remembered it goes straight to the server, asking nothing', async () => {
@@ -72,6 +73,47 @@ test('a first run asks, and "on my server" pairs with the code, remembers the an
     connection: { mode: 'remote', server: origin },
     credential: 'cred.jwt.value',
   });
+  await launch.stop();
+});
+
+test('joining with "run agents here" installs a host for the joined account, then remembers it', async () => {
+  const installed: unknown[] = [];
+  const asked = ui([
+    {
+      kind: 'remote',
+      input: encodePairingUri({ nonce: 'n1', server: origin }),
+      host: { name: 'Work Mac' },
+    },
+  ]);
+  const launch = await launchPatch({
+    ...base(),
+    ui: asked.impl,
+    installHost: async (o, credential, name) => void installed.push([o, credential, name]),
+  });
+  assert.deepEqual(installed, [[origin, 'cred.jwt.value', 'Work Mac']]);
+  assert.ok(asked.log.includes('progress:host'));
+  assert.equal(readSaved(join(scratch, 'connection.json'))?.credential, 'cred.jwt.value');
+  await launch.stop();
+});
+
+test('a failed host install is reported, nothing is remembered, and the question is asked again', async () => {
+  const code = () => encodePairingUri({ nonce: 'n1', server: origin });
+  const asked = ui([
+    { kind: 'remote', input: code(), host: { name: 'Work Mac' } },
+    { kind: 'remote', input: code() },
+  ]);
+  let first = true;
+  const launch = await launchPatch({
+    ...base(),
+    ui: asked.impl,
+    installHost: async () => {
+      if (first) {
+        first = false;
+        throw new Error('Installing the host failed (1)');
+      }
+    },
+  });
+  assert.match(asked.log.find((l) => l.startsWith('fail:')) ?? '', /Installing the host failed/);
   await launch.stop();
 });
 
@@ -145,7 +187,10 @@ test('a later launch of a local setup starts the same server on the same port', 
 });
 
 test('a failed local setup is reported on the page and can be tried again', async () => {
-  const asked = ui([{ kind: 'local', name: 'Test Mac' }, { kind: 'local', name: 'Test Mac' }]);
+  const asked = ui([
+    { kind: 'local', name: 'Test Mac' },
+    { kind: 'local', name: 'Test Mac' },
+  ]);
   let tries = 0;
   const launch = await launchPatch({
     ...base(),
@@ -164,7 +209,10 @@ test('a failed local setup is reported on the page and can be tried again', asyn
 });
 
 test('a retry carries on from what the failed attempt had already saved, rather than starting the account again', async () => {
-  const asked = ui([{ kind: 'local', name: 'Test Mac' }, { kind: 'local', name: 'Test Mac' }]);
+  const asked = ui([
+    { kind: 'local', name: 'Test Mac' },
+    { kind: 'local', name: 'Test Mac' },
+  ]);
   const given: unknown[] = [];
   const launch = await launchPatch({
     ...base(),
