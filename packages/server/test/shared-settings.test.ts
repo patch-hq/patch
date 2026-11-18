@@ -124,6 +124,33 @@ describe('SharedSettingsService', () => {
     });
   });
 
+  it('limit behaviour: today’s behaviour by default, and an older file keeps what it meant', () => {
+    // On (the old default) was failover plus resume at reset: other_account.
+    expect(service.current().limitBehaviour).toBe('other_account');
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ autoResumeRateLimit: true }));
+    expect(make().current().limitBehaviour).toBe('other_account');
+    // Off asked the user before anything ran again.
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ autoResumeRateLimit: false }));
+    expect(make().current().limitBehaviour).toBe('switch_provider');
+    // A file that already has the new setting is taken at its word.
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ autoResumeRateLimit: true, limitBehaviour: 'resume_at_reset' }),
+    );
+    expect(make().current().limitBehaviour).toBe('resume_at_reset');
+  });
+
+  it('limit behaviour: keeps the retired on/off in step for older hosts and surfaces', () => {
+    service.update({ limitBehaviour: 'switch_provider' });
+    expect(service.current().autoResumeRateLimit).toBe(false);
+    service.update({ limitBehaviour: 'resume_at_reset' });
+    expect(service.current().autoResumeRateLimit).toBe(true);
+    // An older client writing only the old setting gets the behaviour it meant.
+    service.update({ autoResumeRateLimit: false });
+    expect(service.current().limitBehaviour).toBe('switch_provider');
+    expect(() => service.update({ limitBehaviour: 'sometimes' as never })).toThrow(SettingsError);
+  });
+
   it('accepts 0 for the sweep interval (Instant) and refuses a negative one', () => {
     expect(service.update({ sweepIntervalMinutes: 0 }).sweepIntervalMinutes).toBe(0);
     expect(() => service.update({ sweepIntervalMinutes: -5 })).toThrow();

@@ -89,6 +89,10 @@ export interface ChatRow {
   rateLimitResumingAt?: number | null;
   resumeKind?: 'rate_limit' | 'overloaded' | null;
   limitBlock?: { resetsAt?: number } | null;
+  /** What releases the pause (`chat.state.limitNext`); null when nothing is paused. */
+  limitNext?: 'resume_at_reset' | 'other_account' | 'switch_provider' | 'ask' | null;
+  /** Credit is back for a chat that stopped for it; the limit bar offers Continue. */
+  creditReturned?: boolean;
   /**
    * The chat's wake time (spec/04 § Snooze), ms epoch, or `null` when it is not
    * snoozed. Never read as a boolean — snoozed is `snoozedUntil > now`, derived

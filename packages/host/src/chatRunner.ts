@@ -65,6 +65,9 @@ import {
   providerForSessionId,
   modelSupportsEffort,
   ChatErrorCode,
+  heldMessageExpiredText,
+  DEFAULT_LIMIT_BEHAVIOUR,
+  type LimitBehaviour,
   type ReminderEvery,
 } from '@patch/wire';
 import type {
@@ -1282,6 +1285,9 @@ function parseAttachmentBlock(content: string): {
  * Single source of truth lives in `@patch/wire` (the wire `ChatErrorEvent.seq`
  * schema admits this exact sentinel); re-exported here for daemon-local use.
  */
+/** What releases a paused chat, as surfaces are told it (`chat.state.limitNext`). */
+type LimitNext = NonNullable<ChatStateEvent['limitNext']>;
+
 export { OUT_OF_BAND_SEQ } from '@patch/wire';
 import {
   HARNESS_PERMISSION_MODES,
@@ -2566,10 +2572,21 @@ export class Daemon {
   >();
 
   /**
-   * Whether this host auto-resumes turns blocked by a Claude API usage/rate
-   * limit. Set by `setAutoResumeRateLimit`; read in the runQuery catch block.
+   * What a turn does after it pauses on a temporary limit (spec/10 § When an
+   * account hits a limit). The shared `limitBehaviour`, set by
+   * `setLimitBehaviour`; read in the runQuery catch block.
    */
-  private autoResumeRateLimitEnabled = false;
+  private limitBehaviour: LimitBehaviour = DEFAULT_LIMIT_BEHAVIOUR;
+  /**
+   * What releases each paused chat, as surfaces are told it (`limitNext` on
+   * `chat.state`). Cleared with the pause.
+   */
+  private readonly limitNext = new Map<string, LimitNext>();
+  /**
+   * Chats stopped for credit on which credit has since been seen. Patch does not
+   * run their turn again (decision 25); the surface offers Continue.
+   */
+  private readonly creditReturned = new Set<string>();
   /** Settings → token use: whether the one-shot title / status summaries run at all. */
   private titleGenerationEnabled = true;
   private statusGenerationEnabled = true;
@@ -2644,7 +2661,7 @@ export class Daemon {
    * dropped. Every in-process resume path did this, so the parked half of the
    * credit machinery was a no-op end to end — which is exactly the reported
    * symptom, a chat that never picks back up while the errored ones (which have
-   * always minted a fresh id, see `resumeErroredOnExhaustedAccount`) do.
+   * always minted a fresh id, see `offerErroredOnExhaustedAccount`) do.
    *
    * Nothing is lost by re-identifying it. The surface drops its optimistic
    * localId the moment the turn's `chat.message` lands, which happens BEFORE
@@ -2677,7 +2694,9 @@ export class Daemon {
     // still lists.
     const pending =
       this.rateLimitPendingTurns.get(chatId) ??
-      (this.limitBlocks.has(chatId)
+      // A chat offered Continue because credit came back owes the turn on disk
+      // even when no pause is in memory (an errored chat, a restart).
+      (this.limitBlocks.has(chatId) || this.creditReturned.has(chatId)
         ? (this.parkedTurns.get(chatId) ?? this.opts.metaStore.read(chatId)?.pendingTurns?.[0])
         : undefined);
     const timer = this.rateLimitTimers.get(chatId);
@@ -2690,6 +2709,7 @@ export class Daemon {
       // strength of that.
       this.rateLimitResumingAt.delete(chatId);
       this.limitBlocks.delete(chatId);
+      this.clearLimitWait(chatId);
       this.resumeKindMap.delete(chatId);
       this.emitState(chatId);
       this.opts.logger.info(
@@ -2702,6 +2722,7 @@ export class Daemon {
     this.rateLimitTimers.delete(chatId);
     this.rateLimitResumingAt.delete(chatId);
     this.limitBlocks.delete(chatId);
+    this.clearLimitWait(chatId);
     this.resumeKindMap.delete(chatId);
     this.rateLimitPendingTurns.delete(chatId);
     this.unparkTurn(chatId);
@@ -2815,6 +2836,7 @@ export class Daemon {
     this.rateLimitTimers.delete(chatId);
     this.rateLimitResumingAt.delete(chatId);
     this.limitBlocks.delete(chatId);
+    this.clearLimitWait(chatId);
     this.resumeKindMap.delete(chatId);
     this.rateLimitPendingTurns.delete(chatId);
     this.unparkTurn(chatId);
@@ -2858,11 +2880,32 @@ export class Daemon {
     );
   }
 
-  /** Returns how many chats are owed a turn and now in the resume line. */
+  /**
+   * Credit is back somewhere: a stated reset passed, a key was added or signed
+   * in again, or a reading found credit. Each parked chat is released or not by
+   * what it is waiting for (spec/10 § Limits):
+   *
+   *   resume_at_reset, other_account   released: the owed turn runs on whichever
+   *                                    account it may use has credit now.
+   *   switch_provider                  not: the user chooses.
+   *   ask                              not: out of credit stops and asks. It is
+   *                                    offered Continue instead (`creditReturned`).
+   *
+   * A park restored from an older host with no `limitNext` follows the current
+   * setting, as it would have before.
+   *
+   * Returns how many chats are owed a turn and now in the resume line.
+   */
   resumeAllRateLimited(): number {
     let owed = 0;
     for (const chatId of [...this.rateLimitPendingTurns.keys()]) {
       if (!harnessTraitsForModel(this.chatState.get(chatId)?.model).rateLimitSweeps) continue;
+      const next = this.limitNext.get(chatId) ?? this.limitBehaviour;
+      if (next === 'ask') {
+        this.offerCreditReturned(chatId);
+        continue;
+      }
+      if (next === 'switch_provider') continue;
       owed += 1;
       this.enqueueResume(chatId, () => this.releaseParkedChat(chatId, 'acct'));
     }
@@ -2870,97 +2913,55 @@ export class Daemon {
   }
 
   /**
-   * Chats that ERRORED on a spent account, re-run.
+   * Chats that ERRORED on a spent account, told that credit is back.
    *
-   * Distinct from the parked ones above: before the spend-limit wording was
-   * recognised as a rate limit at all, those turns were not parked — they errored,
-   * exhausted their retries and stopped, with the turn recorded in the chat's
-   * `pendingTurns` on disk. A new key has to pick those up too, or the very chats
-   * that hit the problem first are the ones it does not fix.
+   * Distinct from the parked ones above: a turn blocked on credit whose failure
+   * said nothing about a limit (a killed `claude`, a dropped socket on a host
+   * whose every key is spent) is parked by the tail, in `parkedTurns` and NOT in
+   * `rateLimitPendingTurns`, so `resumeAllRateLimited` cannot see it.
    *
-   * The case it ACTUALLY has to carry is a turn blocked on credit that never
-   * reached the rate-limit park at all — because its failure said nothing about
-   * a limit. A killed `claude`, a dropped socket, any fault on a host whose
-   * every key is spent: no structured limit is stated, so the park path is skipped
-   * and the turn is parked by the tail instead, which puts it in `parkedTurns`
-   * and NOT in `rateLimitPendingTurns`. `resumeAllRateLimited` therefore cannot
-   * see it, ever. This list is the only thing that can.
+   * These used to be re-sent here. Out of credit now stops and asks (decision
+   * 25): the turn stays owed on disk, the chat shows that credit is back, and
+   * Continue re-sends it. The failure is read off META first because a credit
+   * park keeps its lifecycle status `active`, and a persisted `lastError` is only
+   * rehydrated for a chat whose stored status says errored.
    *
-   * It could not see it either. The filter was `state.status === 'errored'`, and
-   * a credit park deliberately leaves the lifecycle status `active` — a chat
-   * with work owed is not a dead chat — so it matched nothing a limit had ever
-   * produced, and the second half of CreditResume was dead for the exact case
-   * it was written for. Chat 01M3Y2GYHVQB6N1N3MV6WH6P32 sat errored for
-   * thirteen hours through a credit top-up because of it.
-   *
-   * The failure is read off META first because that is the copy that survives,
-   * and because a persisted `lastError` is only rehydrated into chat state for a
-   * chat whose stored status says errored — which, per the above, this never is.
-   * (A restart is NOT this method's problem: `hydrate` re-sends every
-   * `pendingTurns` entry on boot, so a park lost to a restart is re-run, fails
-   * again if there is still no credit, and parks again.)
+   * Returns how many chats were newly offered Continue.
    */
-  resumeErroredOnExhaustedAccount(maxAgeMs: number = STALE_RETRY_CUTOFF_MS): number {
+  offerErroredOnExhaustedAccount(maxAgeMs: number = STALE_RETRY_CUTOFF_MS): number {
     const now = this.opts.now();
-    let resumed = 0;
+    let offered = 0;
     let skippedStale = 0;
     for (const state of this.chatState.list()) {
       if (!harnessTraitsForModel(state.model).rateLimitSweeps) continue;
-      // Anything the PARKED sweep owns is not also this sweep's to re-send.
-      // `resumeWaitingWork` runs the two back to back and a park's re-send is
-      // async, so a chat in both lists would be read here as still errored with
-      // its resumed turn already queued — and sent a second time. A chat with
-      // its own armed timer is the same story with a different owner.
+      // Anything the PARKED sweep owns is not also this sweep's.
       if (this.rateLimitPendingTurns.has(state.chatId)) continue;
       if (this.rateLimitTimers.has(state.chatId)) continue;
-      // Nothing to resume into: a turn is already running or waiting to.
+      // Nothing to offer: a turn is already running or waiting to.
       if (this.runs.has(state.chatId) || this.hasQueuedTurns(state.chatId)) continue;
       const meta = this.opts.metaStore.read(state.chatId);
-      // Disk first, memory second — see this method's note. On disk it is the
-      // record a restart kept; in memory it is all there is for a park whose
-      // host never went down.
+      // Disk first, memory second — see this method's note.
       const last = (meta?.lastError as ChatLastError | undefined) ?? state.lastError;
       if (!last || last.outOfCredit !== true) continue;
-      // A CUTOFF, so nothing ancient springs back to life. A turn that failed
-      // days ago is about a world that has moved on — a deploy since superseded,
-      // a task already done by hand, a purchase no longer wanted — and firing it
-      // now is worse than leaving it failed. It stays errored and VISIBLE; a
-      // person can re-send it deliberately.
+      // Nothing ancient is offered again: a turn that failed days ago is about
+      // a world that has moved on. It stays errored and visible.
       if (now - last.at > maxAgeMs) {
         skippedStale += 1;
         continue;
       }
-      const pending = meta?.pendingTurns?.[0];
-      if (pending === undefined) continue;
-      // Same as the parked path: credit has returned, so every key is worth a
-      // go again.
-      const erroredChatId = state.chatId;
-      const originOfTurn = state.turnOrigin;
-      this.enqueueResume(erroredChatId, () => {
-        // Re-checked at release: the chat may have been picked up since.
-        if (this.runs.has(erroredChatId) || this.hasQueuedTurns(erroredChatId)) return undefined;
-        this.failoverTriedAccounts.delete(erroredChatId);
-        this.owedResend.add(erroredChatId);
-        return this.sendInput({
-          chatId: erroredChatId,
-          message: pending.message,
-          localId: `acct-resume-errored-${erroredChatId}-${this.opts.now()}`,
-          ...(originOfTurn === 'machine' ? { origin: 'machine' as const } : {}),
-          // spec/12 § A turn is owed until it settles — the turn already has a
-          // bubble from the attempt that errored, so fold onto it.
-          ...(pending.retryOfSeq !== undefined ? { retryOfSeq: pending.retryOfSeq } : {}),
-        });
-      });
-      resumed += 1;
+      if (meta?.pendingTurns?.[0] === undefined) continue;
+      // Out of credit stops and asks (decision 25): the turn is NOT re-sent.
+      // The chat is told credit is back and offers Continue, which re-sends it
+      // (`resumeRateLimitedNow`).
+      if (this.offerCreditReturned(state.chatId)) offered += 1;
     }
     if (skippedStale > 0) {
-      // Said out loud: chats deliberately left behind must not look forgotten.
       this.opts.logger.info(
         { skippedStale, cutoffHours: Math.round(maxAgeMs / 3_600_000) },
-        'account resume: left stale failed turns alone — too old to re-fire safely',
+        'credit returned: left stale failed turns alone — too old to offer again',
       );
     }
-    return resumed;
+    return offered;
   }
 
   /** Settings: turn the AI chat-title one-shot on or off; takes effect on the next message. */
@@ -2973,8 +2974,27 @@ export class Daemon {
     this.statusGenerationEnabled = enabled;
   }
 
-  setAutoResumeRateLimit(enabled: boolean): void {
-    this.autoResumeRateLimitEnabled = enabled;
+  setLimitBehaviour(behaviour: LimitBehaviour): void {
+    this.limitBehaviour = behaviour;
+  }
+
+  /** The pause is over: forget what was to release it. */
+  private clearLimitWait(chatId: string): void {
+    this.limitNext.delete(chatId);
+    this.creditReturned.delete(chatId);
+  }
+
+  /**
+   * Credit is back somewhere, and this chat stopped for credit. It is told, not
+   * re-run (decision 25: out of credit stops and asks): the surface turns its
+   * pause into a Continue. Returns whether the chat changed.
+   */
+  private offerCreditReturned(chatId: string): boolean {
+    if (this.creditReturned.has(chatId)) return false;
+    this.creditReturned.add(chatId);
+    if (!this.limitNext.has(chatId)) this.limitNext.set(chatId, 'ask');
+    this.emitState(chatId);
+    return true;
   }
 
   /** Per-host harness config (Task 3). Updated via `setHarnessConfig`. */
@@ -3764,6 +3784,7 @@ export class Daemon {
         if (head) {
           this.parkedTurns.set(m.chatId, head);
           this.rateLimitPendingTurns.set(m.chatId, head);
+          if (head.limitNext !== undefined) this.limitNext.set(m.chatId, head.limitNext);
           // The turns queued behind it were owed too; put them back in order.
           for (const q of recorded.slice(1)) {
             this.enqueueQueued(
@@ -8171,6 +8192,7 @@ export class Daemon {
      */
     retryOfSeq: number | undefined,
     waitingFor: 'credit' | 'retry',
+    limitNext?: LimitNext,
   ): void {
     // spec/09 § Whose turn it was — a park is the SAME turn waiting to go round
     // again, so it keeps the origin it already had. Read off chat state, which
@@ -8182,6 +8204,7 @@ export class Daemon {
       ...(origin && origin !== 'user' ? { origin } : {}),
       ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
       waitingFor,
+      ...(limitNext !== undefined ? { limitNext } : {}),
     });
     this.persistPendingTurns(chatId);
   }
@@ -10455,6 +10478,7 @@ export class Daemon {
     }
     this.rateLimitResumingAt.delete(chatId);
     this.limitBlocks.delete(chatId);
+    this.clearLimitWait(chatId);
     this.resumeKindMap.delete(chatId);
     this.rateLimitPendingTurns.delete(chatId);
 
@@ -11122,6 +11146,11 @@ export class Daemon {
         let hostOutOfCredit =
           harnessTraitsForModel(state.model).hostCreditAggregate &&
           this.opts.hostOutOfCredit?.(chatId) === true;
+        // spec/10 § Limits: a turn pauses only when no account it may use has
+        // credit. Which accounts it may use is the route's business — every
+        // account for an Automatic chat, its own for a locked one unless the
+        // limit behaviour is `other_account` (`resumeOnAnyAccount`) — so the
+        // walk below is the same for all three behaviours.
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
@@ -11175,8 +11204,10 @@ export class Daemon {
             'account out of credit and no other untried account has any — waiting for the reset',
           );
         }
+        // A limit always pauses visibly (spec/12 § A usage or rate limit); what
+        // follows is the user's `limitBehaviour`, or the user when the account
+        // is out of credit.
         if (
-          this.autoResumeRateLimitEnabled &&
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           (!harnessTraitsForModel(state.model).limitMustStateReset ||
             this.opts.accountLimitInfo?.(this.runningOnAccount.get(chatId))?.resetsAt !==
@@ -11212,6 +11243,8 @@ export class Daemon {
            */
           let resumeAt: number | undefined;
           let resumeKind: 'rate_limit' | 'overloaded';
+          /** What releases the pause, said to surfaces as `limitNext`. */
+          let next: LimitNext | undefined;
           /**
            * The reset the provider actually STATED, which is not the same thing
            * as the instant a resume was armed for. Only a stated one may reach
@@ -11256,20 +11289,34 @@ export class Daemon {
               (t): t is number => t !== undefined && t > now,
             );
             const soonest = candidates.length > 0 ? Math.min(...candidates) : undefined;
-            // The fallback is for a limit on a host that still has credit
-            // SOMEWHERE — one key refused, the rotation has another, and a
-            // prompt re-run lands on it. Where there is none, a minute is not a
-            // short wait for the right thing, it is the wrong thing repeated.
-            const FALLBACK_DELAY_MS = 60_000;
-            resumeAt = soonest ?? (hostOutOfCredit ? undefined : now + FALLBACK_DELAY_MS);
             statedResetsAt = soonest;
             resumeKind = 'rate_limit';
+            if (soonest === undefined) {
+              // No reset stated: the account is out (billing or credit), not
+              // limited until a time. Out of credit stops and asks (decision 25):
+              // no timer, and no guessed minute — a pause is never retried on a
+              // timer before its reset (spec/10 § Limits). Any account that
+              // could take it has already been tried above.
+              resumeAt = undefined;
+              next = 'ask';
+            } else if (this.limitBehaviour === 'switch_provider') {
+              // Paused with its reset showing; the chat offers the provider
+              // switch and nothing runs until the user chooses.
+              resumeAt = undefined;
+              next = 'switch_provider';
+            } else {
+              resumeAt = soonest;
+              next = this.limitBehaviour;
+            }
           }
           // Surface "paused — resuming at HH:MM" before the timer fires. Only
           // ever a real instant: a park with nothing to arm for has no HH:MM to
           // show, and showing one would promise a resume nobody scheduled.
           if (resumeAt !== undefined) this.rateLimitResumingAt.set(chatId, resumeAt);
           this.resumeKindMap.set(chatId, resumeKind);
+          if (next !== undefined) this.limitNext.set(chatId, next);
+          else this.limitNext.delete(chatId);
+          this.creditReturned.delete(chatId);
           if (resumeKind === 'rate_limit') {
             this.setLimitBlock(chatId, errMsg, limit, statedResetsAt);
           }
@@ -11279,7 +11326,7 @@ export class Daemon {
               localId,
               ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
             });
-            this.parkTurn(chatId, prompt, localId, turnAnchorSeq, 'credit');
+            this.parkTurn(chatId, prompt, localId, turnAnchorSeq, 'credit', next);
           }
           // A usage limit is a failed turn that happens to be owed, not a
           // finished one: `idle` drew the green tick and rang "finished". The
@@ -11326,7 +11373,7 @@ export class Daemon {
             // DETAIL has to survive a restart. Chat state is memory: a host
             // restarted during a limit forgot both the park and the reason for
             // it, which left the turn on disk with nothing able to say it had
-            // ever been about credit. `resumeErroredOnExhaustedAccount` and the
+            // ever been about credit. `offerErroredOnExhaustedAccount` and the
             // boot re-arm both read this back.
             this.opts.metaStore.update(chatId, (m) => ({
               ...m,
@@ -11346,8 +11393,12 @@ export class Daemon {
           if (resumeAt === undefined) {
             this.rateLimitTimers.delete(chatId);
             this.opts.logger.warn(
-              { chatId, resumeKind },
-              'out of credit with no stated reset — turn parked, waiting for credit to return rather than retrying',
+              // The provider's own sentence, in full, for diagnosis: the chat
+              // shows Patch's words.
+              { chatId, resumeKind, next, errMsg },
+              next === 'switch_provider'
+                ? 'limit hit — turn paused until the reset; the chat offers a provider switch and nothing runs until the user chooses'
+                : 'out of credit or no stated reset — turn parked until the user continues it',
             );
             return false;
           }
@@ -11364,6 +11415,7 @@ export class Daemon {
             if (!this.rateLimitPendingTurns.has(chatId)) {
               this.rateLimitResumingAt.delete(chatId);
               this.limitBlocks.delete(chatId);
+              this.clearLimitWait(chatId);
               this.resumeKindMap.delete(chatId);
               this.unparkTurn(chatId);
               this.emitState(chatId);
@@ -11540,7 +11592,7 @@ export class Daemon {
         // A failure that stated NOTHING about a limit, on a host with no credit
         // on any account, is still a turn blocked on credit — and it must be
         // RECORDED as one. A chat's stored `lastError` is the only evidence the
-        // credit-return sweep has (`resumeErroredOnExhaustedAccount` classifies
+        // credit-return sweep has (`offerErroredOnExhaustedAccount` classifies
         // it by text, and so does the re-arm at boot), so a message that says
         // only "Claude Code process exited with code 143" is a turn that can
         // never be picked up again however much credit arrives.
@@ -12440,6 +12492,29 @@ export class Daemon {
    * doesn't just vanish. The raw API JSON stays in the log — it names no action
    * the person reading the chat can take. Callers settle the chat's activity.
    */
+  /**
+   * A message the server held for this host while it was offline expired
+   * undelivered (spec/12 § Host-offline UX). Said in the chat as a logged
+   * `chat.error`, so it is part of the chat's record rather than only a notice
+   * the server sent surfaces at the time. A chat this host no longer has is
+   * logged and left: there is nowhere to write it.
+   */
+  recordHeldInputExpired(chatId: string, text: string, hostName: string): void {
+    if (!this.chatState.get(chatId)) {
+      this.opts.logger.warn(
+        { chatId },
+        'held message expired for a chat this host does not have — nothing to record it in',
+      );
+      return;
+    }
+    this.emit({
+      type: 'chat.error',
+      chatId,
+      error: { code: 'held_message_expired', message: heldMessageExpiredText(hostName, text) },
+      seq: this.bumpSeq(chatId),
+    });
+  }
+
   private emitCredentialRejected(
     chatId: string,
     rawMessage: string,
@@ -16249,6 +16324,10 @@ export class Daemon {
       // Not gated on a resume time: a limit nobody parked is still a limit, and
       // the block is the whole structured account of it (spec/12).
       limitBlock: this.limitBlocks.get(chatId) ?? null,
+      // spec/12 § A usage or rate limit — what releases the pause, and whether
+      // credit has come back for a chat that stopped for it.
+      limitNext: this.limitNext.get(chatId) ?? null,
+      creditReturned: this.creditReturned.has(chatId),
       // spec/02 § Background task completions — how many of this chat's
       // patch_watch tasks are still running after the turn that launched them
       // ended. Read straight off the persisted watch records (watch.ts), not

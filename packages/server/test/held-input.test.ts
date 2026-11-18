@@ -1,7 +1,7 @@
 // A person's message to a chat whose host is offline is held by the server and
 // delivered when the host comes back. It has to survive a server restart.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -92,13 +92,23 @@ describe('messages held for an offline host', () => {
     expect(socket.sent).toEqual([]);
   });
 
-  it('does not deliver a message that waited longer than the limit', () => {
+  it('does not deliver a message that waited longer than the limit — the host is told instead', () => {
     let now = 1_000;
     makeLink(() => now).sendTo('d1', 'srf-1', input('L1'));
     now += HELD_INPUT_MAX_AGE_MS + 1;
     const socket = new FakeSocket();
     makeLink(() => now).attach(socket as never, 'd1');
-    expect(socket.sent).toEqual([]);
+    // Not the message: the notice that it expired, for the chat's own writer to
+    // record (spec/12 § Host-offline UX).
+    expect(socket.sent).toEqual([
+      {
+        type: 'chat.held_input_expired',
+        chatId: 'c1',
+        text: 'text L1',
+        heldAt: 1_000,
+        hostName: 'd1',
+      },
+    ]);
   });
 
   it('drops a message past the limit from memory and disk, not just from view', () => {
@@ -111,10 +121,19 @@ describe('messages held for an offline host', () => {
     store.add('d2', 'srf-1', input('L2'));
     const onDisk = JSON.parse(readFileSync(join(dir, 'held-input.json'), 'utf8')) as {
       hostId: string;
+      event: WireEvent;
     }[];
-    expect(onDisk.map((h) => h.hostId)).toEqual(['d2']);
+    // The message is gone; a small notice for d1 stands in its place until d1
+    // takes it, so the expiry is never silent.
+    expect(onDisk.map((h) => [h.hostId, h.event.type])).toEqual([
+      ['d1', 'chat.held_input_expired'],
+      ['d2', 'chat.input'],
+    ]);
     const reloaded = new HeldInputStore({ dataDir: dir, logger, now: () => now });
-    expect(reloaded.all().map((h) => h.hostId)).toEqual(['d2']);
+    expect(reloaded.all().map((h) => [h.hostId, h.event.type])).toEqual([
+      ['d1', 'chat.held_input_expired'],
+      ['d2', 'chat.input'],
+    ]);
   });
 
   it('starts empty and says so when the held file is damaged', () => {
@@ -163,5 +182,79 @@ describe('messages held for an offline host', () => {
   it('reads a saved file that is valid JSON but not a list as nothing held', () => {
     writeFileSync(join(dir, 'held-input.json'), '{"not":"a list"}');
     expect(new HeldInputStore({ dataDir: dir, logger }).all()).toEqual([]);
+  });
+});
+
+describe('a held message that expires is said in its chat, never dropped silently', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-held-exp-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('tells every surface in the chat at the moment it expires, by timer', async () => {
+    let now = 1_000;
+    const store = new HeldInputStore({
+      dataDir: dir,
+      logger,
+      now: () => now,
+      hostName: () => 'Studio Mac',
+    });
+    const told: string[] = [];
+    const link = new InboundHostLink({
+      logger,
+      heldInputs: store,
+      onHeldExpired: (expired) => told.push(...expired.map((e) => e.notice.event.chatId)),
+    });
+    const seen: WireEvent[] = [];
+    link.onEvent((e) => seen.push(e));
+    vi.useFakeTimers();
+    try {
+      link.sendTo('d1', 'srf-1', input('L1'));
+      now += HELD_INPUT_MAX_AGE_MS + 1;
+      vi.advanceTimersByTime(HELD_INPUT_MAX_AGE_MS + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(told).toEqual(['c1']);
+    expect(seen).toHaveLength(1);
+    const err = seen[0] as Extract<WireEvent, { type: 'chat.error' }>;
+    expect(err.type).toBe('chat.error');
+    expect(err.chatId).toBe('c1');
+    expect(err.error.code).toBe('held_message_expired');
+    expect(err.error.message).toMatch(/Not delivered/);
+    expect(err.error.message).toMatch(/Studio Mac/);
+    expect(err.error.message).toMatch(/text L1/);
+
+    // And when the host does come back, it gets the notice, not the message.
+    const socket = new FakeSocket();
+    link.attach(socket as never, 'd1');
+    expect(socket.sent.map((e) => e.type)).toEqual(['chat.held_input_expired']);
+    // Taken once: nothing is held for d1 any more.
+    expect(store.all()).toEqual([]);
+    store.stop();
+  });
+
+  it('reports a message that expired while the server was down once the server checks', () => {
+    let now = 1_000;
+    new HeldInputStore({ dataDir: dir, logger, now: () => now }).add('d1', 'srf-1', input('L1'));
+    now += HELD_INPUT_MAX_AGE_MS + 1;
+    const store = new HeldInputStore({ dataDir: dir, logger, now: () => now });
+    const told: string[] = [];
+    // Building the link does not report it yet: nothing is wired to hear it.
+    new InboundHostLink({
+      logger,
+      heldInputs: store,
+      onHeldExpired: (expired) => told.push(...expired.map((e) => e.notice.event.chatId)),
+    });
+    expect(told).toEqual([]);
+    store.expireDue();
+    expect(told).toEqual(['c1']);
+    // Reported once.
+    store.expireDue();
+    expect(told).toEqual(['c1']);
+    store.stop();
   });
 });

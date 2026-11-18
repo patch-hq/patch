@@ -4702,7 +4702,7 @@ describe('Host ChatRunner', () => {
       };
     }
 
-    it('when disabled (default): a rate-limit throw leaves the chat errored', async () => {
+    it('under switch_provider: a rate-limit throw leaves the chat errored, with nothing armed', async () => {
       const { home, folder, metaStore, events } = setup();
       const backend = makeThrowingBackend('API Error: 429 (too many requests)', []);
       let id = 0;
@@ -4716,12 +4716,13 @@ describe('Host ChatRunner', () => {
         now: () => 1_700_000_000_000,
         generateChatId: () => `chat-rl-${++id}`,
       });
+      daemon.setLimitBehaviour('switch_provider');
       void home;
       const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 40));
       daemon.shutdown();
 
-      // Chat should be in the errored activity state when auto-resume is off.
+      // Chat should be in the errored activity state when nothing will resume it.
       // (status='active' since setActivity('errored') sets activity, not status)
       const state = daemon.chatState.get(chatId);
       expect(state?.activity).toBe('errored');
@@ -4735,7 +4736,7 @@ describe('Host ChatRunner', () => {
       expect(lastState?.rateLimitResumingAt ?? null).toBeNull();
     });
 
-    it('when enabled: a rate-limit throw arms an auto-resume timer and emits rateLimitResumingAt on chat.state', async () => {
+    it('a rate-limit throw that states no reset pauses visibly and arms no guessed retry', async () => {
       const home = mkdtempSync(join(tmpdir(), 'patch-rl-'));
       const folder2 = realpathSync(mkdtempSync(join(tmpdir(), 'patch-rl-f-')));
       mkdirSync(folder2, { recursive: true });
@@ -4760,22 +4761,25 @@ describe('Host ChatRunner', () => {
         now: () => NOW,
         generateChatId: () => `chat-rl2-${++id2}`,
       });
-      host2.setAutoResumeRateLimit(true);
+      host2.setLimitBehaviour('other_account');
 
       const chatId2 = await host2.spawnChat({ folder: folder2, prompt: 'try me' });
       // Let the initial failing turn run.
       await new Promise((r) => setTimeout(r, 40));
 
-      // chat.state should carry a non-null rateLimitResumingAt (fallback = NOW + 60s).
+      // spec/10 § Limits: never retried on a timer before its reset. With no
+      // stated reset there is none, so nothing is armed (the old 60s guess is
+      // gone) and the chat waits for the user.
       const stateEvents2 = events2.filter(
         (e) => e.type === 'chat.state' && (e as { chatId: string }).chatId === chatId2,
       );
-      const pausedState = stateEvents2.find(
+      const armed = stateEvents2.find(
         (e) =>
-          (e as { rateLimitResumingAt?: number | null }).rateLimitResumingAt !== null &&
-          (e as { rateLimitResumingAt?: number | null }).rateLimitResumingAt !== undefined,
-      ) as { rateLimitResumingAt: number } | undefined;
-      expect(pausedState?.rateLimitResumingAt).toBeGreaterThan(NOW);
+          ((e as { rateLimitResumingAt?: number | null }).rateLimitResumingAt ?? null) !== null,
+      );
+      expect(armed).toBeUndefined();
+      const last = stateEvents2.at(-1) as { limitNext?: string | null } | undefined;
+      expect(last?.limitNext).toBe('ask');
 
       // Parked, but a usage limit is a failed turn: errored (triangle), not idle (green tick).
       const state2 = host2.chatState.get(chatId2);
@@ -4831,7 +4835,7 @@ describe('Host ChatRunner', () => {
         generateChatId: () => `chat-rl3-${++id3}`,
         onRateLimit: () => {},
       });
-      host3.setAutoResumeRateLimit(true);
+      host3.setLimitBehaviour('other_account');
 
       const chatId3 = await host3.spawnChat({ folder: folder3, prompt: 'test' });
       await new Promise((r) => setTimeout(r, 40));
@@ -4890,7 +4894,7 @@ describe('Host ChatRunner', () => {
         generateChatId: () => `chat-rl3b-${++id3b}`,
         onRateLimit: () => {},
       });
-      host3b.setAutoResumeRateLimit(true);
+      host3b.setLimitBehaviour('other_account');
 
       await host3b.spawnChat({ folder: folder3b, prompt: 'test' });
       await new Promise((r) => setTimeout(r, 40));
@@ -4963,7 +4967,7 @@ describe('Host ChatRunner', () => {
         generateChatId: () => `chat-rl3c-${++id3c}`,
         onRateLimit: () => {},
       });
-      host3c.setAutoResumeRateLimit(true);
+      host3c.setLimitBehaviour('other_account');
 
       await host3c.spawnChat({ folder: folder3c, prompt: 'test' });
       await new Promise((r) => setTimeout(r, 40));
@@ -4980,7 +4984,7 @@ describe('Host ChatRunner', () => {
       host3c.shutdown();
     });
 
-    it('setAutoResumeRateLimit toggle: enabling mid-session arms subsequent rate-limit errors', async () => {
+    it('setLimitBehaviour: the shared choice reaches the runner, other_account by default', async () => {
       const home4 = mkdtempSync(join(tmpdir(), 'patch-rl4-'));
       const metaStore4 = createMetaStore(home4);
       const events4: WireEvent[] = [];
@@ -4999,11 +5003,11 @@ describe('Host ChatRunner', () => {
         now: () => 1_700_000_000_000,
         generateChatId: () => `chat-rl4-${++id4}`,
       });
-      // Off by default.
-      expect(host4['autoResumeRateLimitEnabled']).toBe(false);
-      // Toggle on.
-      host4.setAutoResumeRateLimit(true);
-      expect(host4['autoResumeRateLimitEnabled']).toBe(true);
+      // Today's behaviour by default: move to another account, else wait for a reset.
+      expect(host4['limitBehaviour']).toBe('other_account');
+      host4.setLimitBehaviour('resume_at_reset');
+      expect(host4['limitBehaviour']).toBe('resume_at_reset');
+      host4.setLimitBehaviour('other_account');
 
       const chatId4 = await host4.spawnChat({ folder: folder4, prompt: 'go' });
       await new Promise((r) => setTimeout(r, 40));
@@ -5047,7 +5051,7 @@ describe('Host ChatRunner', () => {
         now: () => 1_700_000_000_000,
         generateChatId: () => `chat-rl5-${++id5}`,
       });
-      host5.setAutoResumeRateLimit(true);
+      host5.setLimitBehaviour('other_account');
 
       await host5.spawnChat({ folder: folder5, prompt: 'go' });
       await new Promise((r) => setTimeout(r, 40));

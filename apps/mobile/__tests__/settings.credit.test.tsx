@@ -321,17 +321,10 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     expect(query(r, 'add-claude-account')).not.toBeNull();
   });
 
-  it('auto-resume reads and writes the shared setting', async () => {
-    vi.mocked(api.setPreferences).mockImplementation(async (patch) => ({
-      preferences: { ...DEFAULT_SHARED_SETTINGS, ...patch },
-    }));
+  it('no longer carries the limit setting: it is under Agent behaviour', async () => {
     const r = await render();
-    expect(get(r, 'auto-resume-rate-limit').props.value).toBe(true);
-    await actAsync(async () => {
-      get(r, 'auto-resume-rate-limit').props.onValueChange(false);
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenCalledWith({ autoResumeRateLimit: false });
+    expect(query(r, 'auto-resume-rate-limit')).toBeNull();
+    expect(query(r, 'limit-behaviour-other_account')).toBeNull();
   });
 
   it('no longer carries the chat title and summary toggles', async () => {

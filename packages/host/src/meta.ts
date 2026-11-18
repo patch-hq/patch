@@ -368,6 +368,15 @@ export const ChatMeta = z
              * never merely because the host restarted.
              */
             waitingFor: z.enum(['credit', 'retry']).optional(),
+            /**
+             * For a credit wait, what releases it (spec/10 § When an account
+             * hits a limit): the host by itself at a reset or on another
+             * account, or only the user. Kept so a restart cannot turn a turn
+             * that was waiting for the user into one that runs on its own.
+             */
+            limitNext: z
+              .enum(['resume_at_reset', 'other_account', 'switch_provider', 'ask'])
+              .optional(),
           })
           .strict(),
       )

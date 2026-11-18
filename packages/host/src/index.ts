@@ -72,8 +72,9 @@ import type {
   PatchActivityResponseEvent,
   PatchSearchChatsResponseEvent,
   ProviderId,
+  LimitBehaviour,
 } from '@patch/wire';
-import { providerForSessionId } from '@patch/wire';
+import { limitBehaviourFromAutoResume, providerForSessionId } from '@patch/wire';
 import {
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
@@ -981,6 +982,14 @@ async function startHost(
    * not.
    */
   let autoResumeRateLimit = persistedHostState.autoResumeRateLimit ?? true;
+  /**
+   * What a turn does after a temporary limit (spec/10 § When an account hits a
+   * limit), from the shared `limitBehaviour`. A host state written before the
+   * setting reads as what its `autoResumeRateLimit` meant, until the server's
+   * first snapshot says.
+   */
+  let limitBehaviour: LimitBehaviour =
+    persistedHostState.limitBehaviour ?? limitBehaviourFromAutoResume(autoResumeRateLimit);
   // Whether the scheduled check installs a published build itself. A manual
   // `host.update` and an unreadable server greeting always apply.
   let autoUpdateHosts = persistedHostState.autoUpdateHosts ?? true;
@@ -2212,8 +2221,13 @@ async function startHost(
     }
     if (shared.autoResumeRateLimit !== autoResumeRateLimit) {
       autoResumeRateLimit = shared.autoResumeRateLimit;
-      daemon.setAutoResumeRateLimit(autoResumeRateLimit);
       hostStateStore.update({ autoResumeRateLimit });
+    }
+    if (shared.limitBehaviour !== limitBehaviour) {
+      limitBehaviour = shared.limitBehaviour;
+      daemon.setLimitBehaviour(limitBehaviour);
+      hostStateStore.update({ limitBehaviour });
+      logger.info({ limitBehaviour }, 'limit behaviour changed');
     }
     if (shared.autoUpdateHosts !== autoUpdateHosts) {
       autoUpdateHosts = shared.autoUpdateHosts;
@@ -2399,6 +2413,7 @@ async function startHost(
             titleGenerationEnabled,
             statusGenerationEnabled,
             autoResumeRateLimit,
+            limitBehaviour,
             questionExpiry,
             questionExpirySeconds,
             questionExpiredPrompt,
@@ -4300,7 +4315,7 @@ async function startHost(
   const creditResume = new CreditResume({
     rotation: accountRotation,
     resumeParked: () => daemon.resumeAllRateLimited(),
-    resumeErrored: () => daemon.resumeErroredOnExhaustedAccount(),
+    offerErrored: () => daemon.offerErroredOnExhaustedAccount(),
     refreshUsage: () => void accountUsage?.refreshAll(true),
     hasOrphanedParks: () => daemon.hasOrphanedCreditParks(),
     hasCreditParks: () => daemon.hasCreditParks(),
@@ -4336,7 +4351,9 @@ async function startHost(
       strategy: accountStrategy.claude,
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
       ...(sessionAccountId !== undefined ? { sessionAccount: sessionAccountId } : {}),
-      resumeOnAnyAccount: autoResumeRateLimit,
+      // A chat locked to one account may run elsewhere while it is spent only
+      // when the user chose to continue on another account.
+      resumeOnAnyAccount: limitBehaviour === 'other_account',
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
@@ -5097,7 +5114,7 @@ async function startHost(
       logger: logger.child({ component: 'app-browser' }),
     }),
     // Initialized from persisted state; toggled by `host.settings`.
-    // Not passed here — `setAutoResumeRateLimit` is called after construction.
+    // Not passed here — `setLimitBehaviour` is called after construction.
     // spec/10 § Backend credentials — multiple accounts: validates/resolves a
     // spawn's `accountId` against what this host actually has stored. Reads
     // the store fresh each call (not cached) so an account added/removed
@@ -5287,7 +5304,7 @@ async function startHost(
   // restored from disk get the right setting immediately.
   daemon.setTitleGenerationEnabled(titleGenerationEnabled);
   daemon.setStatusGenerationEnabled(statusGenerationEnabled);
-  daemon.setAutoResumeRateLimit(autoResumeRateLimit);
+  daemon.setLimitBehaviour(limitBehaviour);
   daemon.setQuestionExpiry({
     enabled: questionExpiry,
     seconds: questionExpirySeconds,
@@ -8011,6 +8028,13 @@ export async function handleServerEvent(
       }
       case 'chat.tool_cancel_request': {
         await daemon.cancelToolCall(event.chatId, event.callId);
+        return;
+      }
+      case 'chat.held_input_expired': {
+        // spec/12 § Host-offline UX — a message the server held for this host
+        // while it was away expired undelivered. Recorded in the chat, by the
+        // chat's own writer, so it stays in the record.
+        daemon.recordHeldInputExpired(event.chatId, event.text, event.hostName);
         return;
       }
       case 'chat.resume_now_request': {

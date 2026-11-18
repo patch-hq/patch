@@ -59,7 +59,7 @@ function setup(opts: { err: () => Error; accountResetsAt?: number }) {
       ...(opts.accountResetsAt !== undefined ? { resetsAt: opts.accountResetsAt } : {}),
     }),
   });
-  daemon.setAutoResumeRateLimit(true);
+  daemon.setLimitBehaviour('other_account');
   return { daemon, events, folder };
 }
 
@@ -70,14 +70,17 @@ const stated = (facts: LimitFacts) => (): TurnFailedError =>
   new TurnFailedError(NO_RESET_SENTENCE, facts);
 
 describe('the reset a limit notice is allowed to state', () => {
-  it('states none when nothing stated one, even though a resume is armed', async () => {
+  it('states none when nothing stated one, and arms nothing either', async () => {
     const { daemon, events, folder } = setup({ err: stated({ kind: 'rate_limit' }) });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
     const s = lastState(events);
-    // The pause is real and the wake-up is armed for the invented minute…
-    expect(s?.rateLimitResumingAt).toBe(INVENTED);
-    expect(s?.resumeKind).toBe('rate_limit');
+    // The pause is real, but nothing is armed: with no stated reset the account
+    // is out, and out of credit waits for the user (spec/10 § Limits) — the
+    // invented minute this used to arm for is gone.
+    expect(s?.rateLimitResumingAt ?? null).toBeNull();
+    expect(s?.rateLimitResumingAt).not.toBe(INVENTED);
+    expect(s?.limitNext).toBe('ask');
     expect(s?.limitBlock?.scope).toBe('session');
     // …but the limit itself made no promise, so the notice makes none either.
     // With no reset the surface draws no countdown at all, which is the point:

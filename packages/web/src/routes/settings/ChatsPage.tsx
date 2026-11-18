@@ -2,13 +2,15 @@
 // summarising where it has got to after each turn. Both spend tokens, which
 // is why they are switches; neither is about an account or a limit, which is
 // why they are not on Usage. Shared settings (spec/01 § Settings).
+//
+// Session retention is not here: it is each provider's own setting, shown once,
+// under Settings → Providers (spec/10 § Provider settings).
 
 import type { JSX } from 'react';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { CHAT_SORTS, type GroupSort } from '../../lib/chatGroups.js';
-import { DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
 import { patchShared } from './sharedWrite.js';
 import { hourLabel } from '../../lib/snoozePresets.js';
 import { Group, Row, SettingsPage } from './ui.js';
@@ -20,7 +22,6 @@ export function ChatsPage(): JSX.Element {
   const statusGen = usePreferencesStore((s) => s.preferences.statusGenerationEnabled);
   const morning = usePreferencesStore((s) => s.preferences.snoozeMorningHour);
   const evening = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
-  const cleanupDays = usePreferencesStore((s) => s.preferences.cleanupPeriodDays);
   const loaded = usePreferencesStore((s) => s.loaded);
   const groupSort = useUiStore((s) => s.groupSort);
   const setGroupSort = useUiStore((s) => s.setGroupSort);
@@ -46,38 +47,6 @@ export function ChatsPage(): JSX.Element {
             }
             testid="status-generation-toggle"
           />
-        </Row>
-      </Group>
-      <Group label="Cleanup" testid="settings-cleanup">
-        <Row title="Never delete chats or agent worktrees" testid="cleanup-never">
-          <Toggle
-            checked={cleanupDays === 0}
-            disabled={!loaded}
-            onChange={(never) =>
-              void patchShared('cleanup period', {
-                cleanupPeriodDays: never ? 0 : DEFAULT_CLEANUP_PERIOD_DAYS,
-              })
-            }
-            testid="cleanup-never-toggle"
-          />
-        </Row>
-        <Row title="Delete chats and stale agent worktrees after" testid="cleanup-period">
-          <input
-            type="number"
-            min={1}
-            className="set-num"
-            aria-label="Cleanup period (days)"
-            data-testid="cleanup-period-days"
-            key={cleanupDays}
-            defaultValue={cleanupDays === 0 ? '' : cleanupDays}
-            disabled={!loaded || cleanupDays === 0}
-            onBlur={(e) => setCleanupDays(e.target.value, cleanupDays)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter')
-                setCleanupDays((e.target as HTMLInputElement).value, cleanupDays);
-            }}
-          />
-          <span className="set-unit">days</span>
         </Row>
       </Group>
       <Group label="Sidebar" testid="settings-sidebar">
@@ -119,12 +88,6 @@ export function ChatsPage(): JSX.Element {
       </Group>
     </SettingsPage>
   );
-}
-
-function setCleanupDays(raw: string, current: number): void {
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n === current) return;
-  void patchShared('cleanup period', { cleanupPeriodDays: n });
 }
 
 function HourSelect(props: {

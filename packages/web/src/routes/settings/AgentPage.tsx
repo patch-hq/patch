@@ -12,6 +12,8 @@ import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_LINK_SUMMARY_PROMPT,
   HARNESS_PERMISSION_MODES,
+  LIMIT_BEHAVIOUR_LABELS,
+  LimitBehaviour,
   PROVIDERS,
   type PermissionMode,
   permissionModeOptionLabel,
@@ -279,6 +281,23 @@ function ChatsGroup(): JSX.Element {
   };
   return (
     <Group label="Chats" testid="settings-transcript">
+      {/* spec/10 § Limits — what a turn does after it pauses on a temporary
+          limit. Out of credit and signed out always wait for the user. */}
+      <Row title="When a turn hits a usage limit" testid="limit-behaviour">
+        <select
+          aria-label="When a turn hits a usage limit"
+          value={preferences.limitBehaviour}
+          disabled={!loaded}
+          data-testid="limit-behaviour-select"
+          onChange={(e) => write({ limitBehaviour: LimitBehaviour.parse(e.target.value) })}
+        >
+          {LimitBehaviour.options.map((b) => (
+            <option key={b} value={b}>
+              {LIMIT_BEHAVIOUR_LABELS[b]}
+            </option>
+          ))}
+        </select>
+      </Row>
       {/* spec/12 § Continue — a turn cut off by its machine going down waits for
           Continue unless this is on. */}
       <Row title="Continue interrupted turns automatically">

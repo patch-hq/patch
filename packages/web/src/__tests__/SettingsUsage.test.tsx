@@ -507,16 +507,25 @@ describe('Settings → Chats → snooze defaults', () => {
   });
 });
 
-describe('Settings → Usage → auto-resume', () => {
-  it('reads and writes the shared setting', async () => {
+describe('Settings → Agent → when a turn hits a usage limit', () => {
+  it('reads and writes the one shared limit behaviour', async () => {
     const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
-    loadShared({ settings: { autoResumeRateLimit: true } });
-    renderSettings('/settings/usage');
-    const toggle = screen.getByTestId('auto-resume-rate-limit-toggle');
-    expect(toggle).toBeChecked();
-    fireEvent.click(toggle);
-    await waitFor(() => expect(server.writes).toContainEqual({ autoResumeRateLimit: false }));
+    loadShared({ settings: { limitBehaviour: 'other_account' } });
+    renderSettings('/settings/agent');
+    const select = (await screen.findByTestId('limit-behaviour-select')) as HTMLSelectElement;
+    expect(select.value).toBe('other_account');
+    expect([...select.options].map((o) => o.value)).toEqual([
+      'resume_at_reset',
+      'other_account',
+      'switch_provider',
+    ]);
+    fireEvent.change(select, { target: { value: 'switch_provider' } });
+    await waitFor(() =>
+      expect(server.writes).toContainEqual({ limitBehaviour: 'switch_provider' }),
+    );
+    // The old on/off is gone: there is one setting.
+    expect(screen.queryByTestId('auto-resume-rate-limit-toggle')).toBeNull();
   });
 });
 

@@ -62,7 +62,7 @@ function setup(opts: { err: () => Error; autoResume?: boolean }) {
     generateChatId: () => 'chat-1',
     accountLimitInfo: () => ({ label: 'Default', scope: 'week' as const, resetsAt: RESETS_AT }),
   });
-  if (opts.autoResume === true) daemon.setAutoResumeRateLimit(true);
+  daemon.setLimitBehaviour(opts.autoResume === true ? 'other_account' : 'switch_provider');
   return { daemon, events, logs, folder, metaStore, runs };
 }
 

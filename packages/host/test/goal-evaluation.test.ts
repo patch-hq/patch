@@ -528,7 +528,7 @@ describe('maybeEvaluateGoal — pauses on a usage limit and resumes', () => {
         : { verdict: 'not_met', reason: 'Keep going' };
     };
     const { daemon, folder } = setup(evaluateGoal, { backend });
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
     const chatId = await daemon.spawnChat({ folder });
     await tick();
     await daemon.setGoal(chatId, 'Finish the job');

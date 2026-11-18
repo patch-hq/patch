@@ -25,8 +25,9 @@
 
 import type WebSocket from 'ws';
 import type { Logger } from 'pino';
-import type { HeldInputStore } from './held-input-store.js';
+import type { ExpiredHeldInput, HeldInputStore } from './held-input-store.js';
 import {
+  heldMessageExpiredText,
   decode,
   encode,
   isReservedSpecialThread,
@@ -139,6 +140,8 @@ export interface InboundHostLinkOptions {
    * does not lose it. Absent keeps such messages in memory only.
    */
   heldInputs?: HeldInputStore;
+  /** A held message expired undelivered (after the link has told surfaces). */
+  onHeldExpired?: (expired: readonly ExpiredHeldInput[]) => void;
   /** A person's message to this chat is now held for its offline host (spec/12 § Chat status). */
   onHeld?: (chatId: string) => void;
   /**
@@ -272,8 +275,10 @@ export class InboundHostLink implements HostLink {
 
   constructor(private readonly opts: InboundHostLinkOptions) {
     // Messages held for an offline host before this process started go back in
-    // front of that host's buffer, so they flush when it attaches.
-    for (const held of opts.heldInputs?.all() ?? []) {
+    // front of that host's buffer, so they flush when it attaches. Read without
+    // the expiry check: one that expired while the server was down is reported
+    // once the server is wired to tell anyone (`heldInputsExpired`).
+    for (const held of opts.heldInputs?.snapshot() ?? []) {
       const link = this.linkFor(held.hostId);
       let buf = link.buffers.get(held.surfaceId);
       if (!buf) {
@@ -282,6 +287,16 @@ export class InboundHostLink implements HostLink {
       }
       buf.push(held.event);
     }
+    // The link owns what an expiry means for its buffers and tells surfaces;
+    // `onHeldExpired` lets the server move the chat's status as well. Not
+    // checked here: the server runs the first check once it is wired.
+    opts.heldInputs?.setOnExpired(
+      (expired) => {
+        this.heldInputsExpired(expired);
+        opts.onHeldExpired?.(expired);
+      },
+      { checkNow: false },
+    );
   }
 
   private linkFor(hostId: string): HostLinkState {
@@ -485,6 +500,9 @@ export class InboundHostLink implements HostLink {
     const link = this.hosts.get(hostId);
     /* v8 ignore next */
     if (!link?.socket) return;
+    // Expire first: a message past its holding time is not delivered now, the
+    // notice that replaces it is (`heldInputsExpired`).
+    this.opts.heldInputs?.all();
     const socket = link.socket;
     for (const [surfaceId, buf] of link.buffers.entries()) {
       while (buf.length > 0) {
@@ -614,6 +632,45 @@ export class InboundHostLink implements HostLink {
       const t = setTimeout(resolve, ms);
       t.unref();
     });
+  }
+
+  /**
+   * Held messages have expired undelivered (spec/12 § Host-offline UX). Each
+   * leaves its host's buffer and the notice that replaces it takes its place —
+   * sent at once if the host is here — and every surface is told in the chat
+   * with a `held_message_expired` error. Never silent.
+   */
+  heldInputsExpired(expired: readonly ExpiredHeldInput[]): void {
+    for (const { expired: old, notice } of expired) {
+      const link = this.linkFor(old.hostId);
+      const buf = link.buffers.get(old.surfaceId);
+      if (buf) {
+        const i = buf.indexOf(old.event);
+        if (i !== -1) buf.splice(i, 1);
+      }
+      if (link.socket && link.status === 'online') {
+        link.socket.send(encode(notice.event));
+      } else {
+        let target = link.buffers.get(notice.surfaceId);
+        if (!target) {
+          target = [];
+          link.buffers.set(notice.surfaceId, target);
+        }
+        if (!target.includes(notice.event)) target.push(notice.event);
+      }
+      const error: WireEvent = {
+        type: 'chat.error',
+        chatId: notice.event.chatId,
+        error: {
+          code: 'held_message_expired',
+          message: heldMessageExpiredText(notice.event.hostName, notice.event.text),
+        },
+        seq: OUT_OF_BAND_SEQ,
+      };
+      fanOut(this.eventHandlers, error, null, (err) =>
+        this.opts.logger.error({ err: err.message, type: error.type }, 'event handler threw'),
+      );
+    }
   }
 
   sendTo(hostId: string, surfaceId: string, event: WireEvent): void {

@@ -281,6 +281,21 @@ describe('Agent page: Chats', () => {
     expect(r.root.findAll((n) => n.props.testID === 'provider-switch-warning')).toHaveLength(0);
   });
 
+  // spec/10 § Limits — one shared choice of what a turn does after a limit.
+  it('When a turn hits a usage limit offers the three behaviours and writes limitBehaviour', async () => {
+    seedSettings({
+      preferences: { ...settingsFixture().preferences, limitBehaviour: 'other_account' },
+    });
+    const r = await renderAgent();
+    expect(query(r, 'limit-behaviour-resume_at_reset')).not.toBeNull();
+    expect(query(r, 'limit-behaviour-other_account')).not.toBeNull();
+    await actAsync(async () => {
+      get(r, 'limit-behaviour-switch_provider').props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ limitBehaviour: 'switch_provider' });
+  });
+
   // spec/12 § Continue — off by default; one preference write turns it on.
   it('Continue interrupted turns automatically is off by default and writes autoContinueInterrupted', async () => {
     seedSettings({

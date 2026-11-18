@@ -374,6 +374,10 @@ export const ChatErrorCode = z.enum([
   'handoff_overflow',
   'fork_empty_message',
   'capability_unsupported',
+  // spec/12 § Host-offline UX — a message the server held for an offline host
+  // waited the full holding time (`HELD_INPUT_MAX_AGE_MS`) and was not
+  // delivered. Said in the chat it was sent to; never dropped in silence.
+  'held_message_expired',
 ]);
 export type ChatErrorCode = z.infer<typeof ChatErrorCode>;
 
@@ -1888,6 +1892,25 @@ export const ChatStateEvent = z
      */
     resumeKind: z.enum(['rate_limit', 'overloaded']).optional(),
     /**
+     * What happens next for a chat paused on a limit or stopped for credit
+     * (spec/12 § A usage or rate limit). `resume_at_reset` and `other_account`
+     * mean the host will run the turn again by itself (`rateLimitResumingAt`
+     * says when, where an instant is known); `switch_provider` means the chat
+     * is waiting for the user to choose a provider to switch to; `ask` means the
+     * account is out of credit or stated no reset, and nothing runs until the
+     * user presses Continue. Null or absent when nothing is paused.
+     */
+    limitNext: z
+      .enum(['resume_at_reset', 'other_account', 'switch_provider', 'ask'])
+      .nullable()
+      .optional(),
+    /**
+     * Credit has been seen on an account since this chat stopped for credit.
+     * Patch does not re-run the turn on its own (decision 25): the surface
+     * offers Continue. Absent or false otherwise.
+     */
+    creditReturned: z.boolean().optional(),
+    /**
      * ms-epoch since when this chat's turn has been held because its host is
      * in a dark wake (a Mac with its lid shut, waking briefly for maintenance).
      * The turn runs as soon as the host is fully awake; `null` when nothing
@@ -2408,6 +2431,43 @@ export const DICTATION_PAUSE_CHOICES = ['2', '3', '5', '8', '10', '15'] as const
 /** Same default as Claude Code's `cleanupPeriodDays`. */
 export const DEFAULT_CLEANUP_PERIOD_DAYS = 30;
 
+/**
+ * What happens after a turn meets a TEMPORARY limit (spec/10 § When an account
+ * hits a limit). The turn always pauses visibly with the reset time first; then
+ * exactly one of these applies:
+ *
+ *   resume_at_reset  the turn waits on its own account and runs again at the reset.
+ *   other_account    the turn moves to another account of the same provider that
+ *                    has room; when none has, it waits for the first of them to
+ *                    reset and runs there.
+ *   switch_provider  the turn waits, and the chat offers a switch to another
+ *                    provider (the provider-switch flow, decision 13). Nothing is
+ *                    switched without the user.
+ *
+ * Out of credit and signed out are not limits: they stop and ask whatever this says.
+ */
+export const LimitBehaviour = z.enum(['resume_at_reset', 'other_account', 'switch_provider']);
+export type LimitBehaviour = z.infer<typeof LimitBehaviour>;
+export const DEFAULT_LIMIT_BEHAVIOUR: LimitBehaviour = 'other_account';
+
+/** How Settings names each behaviour, the same on every surface. */
+export const LIMIT_BEHAVIOUR_LABELS: Record<LimitBehaviour, string> = {
+  resume_at_reset: 'Resume when the limit resets',
+  other_account: 'Continue on another account',
+  switch_provider: 'Offer to switch provider',
+};
+
+/**
+ * The limit behaviour an older settings file meant, from the two settings it
+ * replaced: account failover was always on, and `autoResumeRateLimit` decided
+ * whether a turn waited for the reset by itself. On (the default) is exactly
+ * `other_account`. Off asked the user before anything ran again, which is
+ * what `switch_provider` does now; it no longer moves accounts by itself.
+ */
+export function limitBehaviourFromAutoResume(autoResume: boolean): LimitBehaviour {
+  return autoResume ? 'other_account' : 'switch_provider';
+}
+
 export const SharedSettings = z
   .object({
     /** Whether half-finished features (the Manager, Batch, Meeting mode) are shown. Off by default; Settings → Experimental features. */
@@ -2561,7 +2621,14 @@ export const SharedSettings = z
      */
     snoozeMorningHour: z.number().int().min(0).max(23),
     snoozeEveningHour: z.number().int().min(0).max(23),
+    /**
+     * Retired by `limitBehaviour`, and kept only so a host or surface older
+     * than it still reads a settings snapshot. The server keeps it in step:
+     * true unless the behaviour is `switch_provider`.
+     */
     autoResumeRateLimit: z.boolean(),
+    /** What a turn does after it pauses on a temporary limit (`LimitBehaviour`). */
+    limitBehaviour: LimitBehaviour,
     /**
      * Whether an interrupted turn is continued as soon as its host is back,
      * without waiting for the Continue action (spec/12 § Continue). Off by default.
@@ -2699,6 +2766,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // On: a chat that hits a limit waits for the reset rather than being
   // silently abandoned mid-task.
   autoResumeRateLimit: true,
+  limitBehaviour: DEFAULT_LIMIT_BEHAVIOUR,
   autoUpdateHosts: true,
   syncPosition: true,
   questionExpiry: true,
@@ -3956,6 +4024,38 @@ export const ChatContinueRequestEvent = z
   })
   .strict();
 export type ChatContinueRequestEvent = z.infer<typeof ChatContinueRequestEvent>;
+
+/**
+ * Server → host: a message the server held for this chat while its host was
+ * offline waited the full holding time and was not delivered (spec/12 §
+ * Host-offline UX). Held for the host like the message was, so the chat's own
+ * writer records it in the chat as a `chat.error` (`held_message_expired`) when
+ * it returns. A host older than this event drops it as an unknown type; the
+ * server has already told surfaces and set the chat's status either way.
+ */
+export const ChatHeldInputExpiredEvent = z
+  .object({
+    type: z.literal('chat.held_input_expired'),
+    chatId: z.string().min(1),
+    /** The message that was not delivered, as the user wrote it. */
+    text: z.string(),
+    /** ms-epoch the server began holding it. */
+    heldAt: z.number().int().nonnegative(),
+    /** The host's name as the server knows it, so the chat names the machine. */
+    hostName: z.string().min(1),
+  })
+  .strict();
+export type ChatHeldInputExpiredEvent = z.infer<typeof ChatHeldInputExpiredEvent>;
+
+/** How long the server holds a message for an offline host before it expires. */
+export const HELD_INPUT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** What a chat says about a message its offline host never received. */
+export function heldMessageExpiredText(hostName: string, text: string): string {
+  const days = Math.round(HELD_INPUT_MAX_AGE_MS / 86_400_000);
+  const quoted = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+  return `Not delivered: this message waited ${days} days for ${hostName} to come back online. Send it again when ${hostName} is online. “${quoted}”`;
+}
 
 export const ChatStopRequestEvent = z
   .object({
@@ -10235,6 +10335,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatSpawnRequestEvent,
   ChatStopRequestEvent,
   ChatContinueRequestEvent,
+  ChatHeldInputExpiredEvent,
   ChatToolCancelRequestEvent,
   ChatUnqueueRequestEvent,
   ChatResumeNowRequestEvent,
@@ -10573,6 +10674,7 @@ export const EVENT_SCHEMAS = {
   'chat.spawn_request': ChatSpawnRequestEvent,
   'chat.stop_request': ChatStopRequestEvent,
   'chat.continue_request': ChatContinueRequestEvent,
+  'chat.held_input_expired': ChatHeldInputExpiredEvent,
   'chat.tool_cancel_request': ChatToolCancelRequestEvent,
   'chat.unqueue_request': ChatUnqueueRequestEvent,
   'chat.resume_now_request': ChatResumeNowRequestEvent,

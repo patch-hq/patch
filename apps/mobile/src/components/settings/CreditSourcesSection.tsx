@@ -33,8 +33,8 @@ import { SettingsPage } from './SettingsPage';
 import { ChatGPTSignInFlow, ClaudeSignInFlow } from './SignInFlows';
 import { UsageHistorySection } from './UsageHistorySection';
 import { PROVIDERS, type ProviderSpec, type SharedRow } from './providers';
-import { patchShared, writeShared } from './sharedWrite';
-import { Chips, ErrorLine, Muted, Row, ToggleRow, WithSettings } from './ui';
+import { writeShared } from './sharedWrite';
+import { Chips, ErrorLine, Muted, Row } from './ui';
 
 export { CLAUDE_ACK_TIMEOUT_MS } from './accountRows';
 
@@ -83,18 +83,6 @@ export function UsagePage(): React.ReactElement {
           ))}
         </>
       )}
-      <WithSettings testID="auto-resume">
-        {(data) => (
-          <SettingsSection testID="settings-auto-resume">
-            <ToggleRow
-              label="Resume automatically when a limit resets"
-              testID="auto-resume-rate-limit"
-              value={data.preferences.autoResumeRateLimit}
-              onChange={(next) => void patchShared('Auto-resume', { autoResumeRateLimit: next })}
-            />
-          </SettingsSection>
-        )}
-      </WithSettings>
     </SettingsPage>
   );
 }

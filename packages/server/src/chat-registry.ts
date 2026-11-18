@@ -858,6 +858,34 @@ export class ChatRegistry {
     return { ...this.stateEventOf(next), activity: 'errored', lastError };
   }
 
+  /**
+   * A message the server held for this chat's offline host expired undelivered
+   * (spec/12 § Host-offline UX). The chat reads failed, with the reason and the
+   * words, until its host speaks for it again. This is the server's own fact,
+   * and the one way a chat goes from `queued_offline` to `failed`: a HOST report
+   * of that change is still a fault (`advance`). Returns the `chat.state` to
+   * broadcast, or null for a chat the registry does not know.
+   */
+  markHeldExpired(chatId: string, message: string, at: number): ChatStateEvent | null {
+    const existing = this.chats.get(chatId);
+    if (!existing) return null;
+    const lastError = { code: 'held_message_expired' as const, message, at };
+    const next: ChatSummary = {
+      ...existing,
+      activity: 'errored',
+      lastError,
+      chatStatus: nextStatus(
+        existing.chatStatus ?? null,
+        { state: 'failed', reason: 'held_message_expired', message },
+        this.now(),
+      ),
+      feedPos: ++this.feedCounter,
+    };
+    this.chats.set(chatId, next);
+    this.markDirty();
+    return { ...this.stateEventOf(next), activity: 'errored', lastError };
+  }
+
   /** The account feed's latest position (spec/03 § Account feed). */
   feedPosition(): number {
     return this.feedCounter;
