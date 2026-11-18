@@ -132,7 +132,7 @@ describe('chat-detail — permission mode padlock', () => {
     const labels = findAllHost(r.root, (i) => i.props['accessibilityRole'] === 'menuitem').map(
       (i) => i.props['accessibilityLabel'] as string,
     );
-    expect(labels).toEqual(['Ask first', 'Allow edits', 'Plan only', 'Auto', 'Never ask']);
+    expect(labels).toEqual(['Ask first', 'Allow edits', 'Auto', 'Plan only', 'Never ask']);
     expect(option(r.root, 'plan').props['accessibilityState']).toMatchObject({ selected: true });
     expect(option(r.root, 'default').props['accessibilityState']).toMatchObject({
       selected: false,
