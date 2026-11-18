@@ -2899,7 +2899,7 @@ export const Composer = forwardRef(function Composer(
               aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
               title={
                 !offline && !hostOnline
-                  ? 'Voice unavailable while the agent is offline (audio can’t be queued)'
+                  ? 'Voice unavailable while the host is offline (audio can’t be queued)'
                   : dictationBlockedReason !== null
                     ? dictationBlockedReason
                     : noteMode
@@ -3008,7 +3008,7 @@ export const Composer = forwardRef(function Composer(
                   onCall
                     ? 'End call'
                     : voiceDisabled
-                      ? 'Voice unavailable while the agent is offline'
+                      ? 'Voice unavailable while the host is offline'
                       : 'Call'
                 }
                 onClick={() => void handleCall()}

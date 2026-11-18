@@ -35,7 +35,7 @@ describe('HostOfflineBanner', () => {
     usePresenceStore.setState({ connection: 'connected', hostOnline: false });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-      'Agent offline. Messages are queued and sent when it reconnects.',
+      'No host is online. Messages are queued and sent when one reconnects.',
     );
   });
 
