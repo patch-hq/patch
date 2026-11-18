@@ -12,6 +12,7 @@
 // claims a backend it does not have sends every chat spawned on it into a
 // failure that names the wrong cause.
 
+import type { ElevenLabsTtsModel } from './audio/elevenlabs.js';
 import { platform, arch } from 'node:os';
 import { CLAUDE_BACKEND_ID } from '@patch/wire';
 import type {
@@ -70,6 +71,7 @@ export interface HostDescriptionInput {
   kokoroVoice?: string | undefined;
   ttsBackend?: 'kokoro' | 'elevenlabs' | undefined;
   elevenLabsVoice?: string | undefined;
+  elevenLabsModel?: ElevenLabsTtsModel | undefined;
   elevenLabsVoices?: { id: string; name: string; category?: string }[] | undefined;
   elevenLabsVoicesError?: string | undefined;
   /** Which hosted-voice provider keys this host holds (`host.host.voiceKeys`). */
@@ -150,6 +152,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.kokoroVoice !== undefined ? { kokoroVoice: input.kokoroVoice } : {}),
     ...(input.ttsBackend !== undefined ? { ttsBackend: input.ttsBackend } : {}),
     ...(input.elevenLabsVoice !== undefined ? { elevenLabsVoice: input.elevenLabsVoice } : {}),
+    ...(input.elevenLabsModel !== undefined ? { elevenLabsModel: input.elevenLabsModel } : {}),
     ...(input.elevenLabsVoices !== undefined ? { elevenLabsVoices: input.elevenLabsVoices } : {}),
     ...(input.elevenLabsVoicesError !== undefined
       ? { elevenLabsVoicesError: input.elevenLabsVoicesError }

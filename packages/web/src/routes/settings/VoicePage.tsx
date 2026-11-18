@@ -601,11 +601,19 @@ const KOKORO_VOICES: { id: string; label: string }[] = [
   { id: 'bm_lewis', label: 'Lewis (British M)' },
 ];
 
+const ELEVENLABS_MODELS = [
+  { id: 'eleven_flash_v2_5', label: 'Flash v2.5 (fastest)' },
+  { id: 'eleven_turbo_v2_5', label: 'Turbo v2.5' },
+  { id: 'eleven_multilingual_v2', label: 'Multilingual v2 (richer)' },
+  { id: 'eleven_v3', label: 'v3 (most expressive)' },
+] as const;
+
 /** How Patch speaks on every host: the engine and its voice, and how often the chat's title is refreshed. */
 function SpeakingGroup(): JSX.Element {
   const kokoroVoice = usePreferencesStore((s) => s.preferences.kokoroVoice);
   const ttsBackend = usePreferencesStore((s) => s.preferences.ttsBackend) ?? 'kokoro';
   const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
+  const elevenLabsModel = usePreferencesStore((s) => s.preferences.elevenLabsModel);
   const chatNameInterval = usePreferencesStore((s) => s.preferences.chatNameInterval);
   const loaded = usePreferencesStore((s) => s.loaded);
   const hosts = usePresenceStore((s) => s.hosts);
@@ -661,7 +669,37 @@ function SpeakingGroup(): JSX.Element {
             ))}
           </select>
         </Row>
-      ) : (
+      ) : null}
+      {ttsBackend === 'elevenlabs' ? (
+        <Row
+          title="Model"
+          sub={
+            elevenLabsModel === undefined
+              ? 'Fast for conversation, richer for announcements'
+              : undefined
+          }
+        >
+          <select
+            aria-label="Model"
+            data-testid="elevenlabs-model"
+            value={elevenLabsModel ?? ''}
+            disabled={!loaded}
+            onChange={(e) =>
+              void patchShared('model', {
+                elevenLabsModel: e.target.value as (typeof ELEVENLABS_MODELS)[number]['id'],
+              })
+            }
+          >
+            {elevenLabsModel === undefined ? <option value="">Automatic</option> : null}
+            {ELEVENLABS_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+      ) : null}
+      {ttsBackend === 'elevenlabs' ? null : (
         <Row
           title="Voice"
           sub={kokoroVoice === undefined ? 'Each host’s Kokoro default' : undefined}

@@ -1,5 +1,6 @@
 import { cutoffMs } from './cleanup.js';
 import { removeRetiredNativeCopies } from './retiredNativeCopies.js';
+import type { ElevenLabsTtsModel } from './audio/elevenlabs.js';
 import { applyClaudeProviderSettings } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
@@ -878,6 +879,8 @@ async function startHost(
   let ttsBackend: 'kokoro' | 'elevenlabs' = persistedHostState.ttsBackend ?? 'kokoro';
   /** The ElevenLabs voice id in use (`host.settings` → `elevenLabsVoice`). */
   let elevenLabsVoice: string | undefined = persistedHostState.elevenLabsVoice;
+  /** The ElevenLabs speech model (`host.settings` → `elevenLabsModel`); absent keeps the per-purpose defaults. */
+  let elevenLabsModel: ElevenLabsTtsModel | undefined = persistedHostState.elevenLabsModel;
   /** The account's ElevenLabs voices, or why they could not be listed. */
   let elevenLabsVoices: ElevenLabsVoice[] | undefined;
   let elevenLabsVoicesError: string | undefined;
@@ -1364,6 +1367,7 @@ async function startHost(
       ...(kokoroVoice !== undefined ? { kokoroVoice } : {}),
       ttsBackend,
       ...(elevenLabsVoice !== undefined ? { elevenLabsVoice } : {}),
+      ...(elevenLabsModel !== undefined ? { elevenLabsModel } : {}),
       ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
       ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
@@ -1466,6 +1470,7 @@ async function startHost(
   // so loudly when it cannot.
   const elevenlabs = createElevenLabs({
     apiKey: () => providerKeys.get('elevenlabs'),
+    getModel: () => elevenLabsModel,
     logger: logger.child({ component: 'elevenlabs' }),
     onUsage: (usage) => {
       voiceLedger.recordSpeech(usage);
@@ -2042,6 +2047,11 @@ async function startHost(
       hostStateStore.update({ elevenLabsVoice });
       logger.info({ elevenLabsVoice }, 'elevenlabs voice changed');
     }
+    if (shared.elevenLabsModel !== undefined && shared.elevenLabsModel !== elevenLabsModel) {
+      elevenLabsModel = shared.elevenLabsModel;
+      hostStateStore.update({ elevenLabsModel });
+      logger.info({ elevenLabsModel }, 'elevenlabs model changed');
+    }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
       daemon.setManagerContextWindow(managerContextWindow);
@@ -2316,6 +2326,7 @@ async function startHost(
             ...(state.kokoroVoice ? { kokoroVoice: state.kokoroVoice } : {}),
             ...(state.ttsBackend ? { ttsBackend: state.ttsBackend } : {}),
             ...(state.elevenLabsVoice ? { elevenLabsVoice: state.elevenLabsVoice } : {}),
+            ...(state.elevenLabsModel ? { elevenLabsModel: state.elevenLabsModel } : {}),
             chatNameInterval,
             titleGenerationEnabled,
             statusGenerationEnabled,

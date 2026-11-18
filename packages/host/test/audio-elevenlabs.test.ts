@@ -69,6 +69,18 @@ describe('ElevenLabsBackend.synthesize', () => {
     ]);
   });
 
+  test('a model chosen in Settings applies to every purpose', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(streamOf([1, 0]));
+    const b = createElevenLabs({
+      apiKey: 'k'.repeat(20),
+      getModel: () => 'eleven_v3',
+      logger,
+      fetchImpl,
+    });
+    await b.synthesize('Hi', 'v', { purpose: 'announce' });
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1].body).model_id).toBe('eleven_v3');
+  });
+
   test('announcements use the higher-quality model', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(streamOf([1, 0]));
     const b = createElevenLabs({ apiKey: 'k'.repeat(20), logger, fetchImpl });
