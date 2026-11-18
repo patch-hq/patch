@@ -30,7 +30,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
   const now = opts.now ?? ((): number => clock.t);
   const rotation = new AccountRotation(now);
   const resumeParked = vi.fn(() => 1);
-  const resumeErrored = vi.fn(() => 2);
+  const offerErrored = vi.fn(() => 2);
   const refreshUsage = vi.fn();
   const report = vi.fn();
   const orphans = { n: 0 };
@@ -40,7 +40,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
   const credit = new CreditResume({
     rotation,
     resumeParked,
-    resumeErrored,
+    offerErrored,
     refreshUsage,
     report,
     readings: () => readings,
@@ -59,7 +59,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
     rotation,
     credit,
     resumeParked,
-    resumeErrored,
+    offerErrored,
     refreshUsage,
     report,
     readings,
@@ -83,8 +83,8 @@ describe('a limit resetting resumes BOTH the parked chats and the errored ones',
     const counts = h.credit.limitReset();
 
     expect(h.resumeParked).toHaveBeenCalledTimes(1);
-    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
-    expect(counts).toEqual({ parked: 1, errored: 2 });
+    expect(h.offerErrored).toHaveBeenCalledTimes(1);
+    expect(counts).toEqual({ parked: 1, offered: 2 });
     // Surfaces are told: the host's credit situation just changed.
     expect(h.report).toHaveBeenCalled();
   });
@@ -103,7 +103,7 @@ describe('a limit resetting resumes BOTH the parked chats and the errored ones',
     h.credit.limitReset();
 
     expect(h.resumeParked).toHaveBeenCalledTimes(1);
-    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
+    expect(h.offerErrored).toHaveBeenCalledTimes(1);
     // a1's record is gone (its reset passed), a2's stands and is waited for.
     expect(h.rotation.isExhausted('a1')).toBe(false);
     expect(h.rotation.isExhausted('a2')).toBe(true);
@@ -160,7 +160,7 @@ describe('a usage reading showing credit is back', () => {
     expect(believed).toBe(true);
     expect(h.rotation.isExhausted('a1')).toBe(false);
     expect(h.resumeParked).toHaveBeenCalledTimes(1);
-    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
+    expect(h.offerErrored).toHaveBeenCalledTimes(1);
   });
 
   it('believes the TURN, not the reading, when the refusal is seconds old', () => {
@@ -204,10 +204,10 @@ describe('a person pressing Refresh', () => {
 
     const counts = h.credit.resumeIfCreditReturned({ force: true });
 
-    expect(counts).toEqual({ parked: 1, errored: 2 });
+    expect(counts).toEqual({ parked: 1, offered: 2 });
     expect(h.rotation.isExhausted('a1')).toBe(false);
     expect(h.resumeParked).toHaveBeenCalledTimes(1);
-    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
+    expect(h.offerErrored).toHaveBeenCalledTimes(1);
   });
 
   it('resumes nothing when every reading still says blocked', () => {
@@ -217,7 +217,7 @@ describe('a person pressing Refresh', () => {
     h.rotation.markExhausted('a1', 'spend limit', undefined);
     h.readings.push({ accountId: 'a1', blocked: true, at: h.clock.t + 500 });
 
-    expect(h.credit.resumeIfCreditReturned({ force: true })).toEqual({ parked: 0, errored: 0 });
+    expect(h.credit.resumeIfCreditReturned({ force: true })).toEqual({ parked: 0, offered: 0 });
     expect(h.rotation.isExhausted('a1')).toBe(true);
     expect(h.resumeParked).not.toHaveBeenCalled();
   });
@@ -232,7 +232,7 @@ describe('a parked chat nothing is armed for (host restarted past the reset)', (
     h.orphans.n = 1;
     expect(h.credit.observedUsable('a1', h.clock.t)).toBe(false);
     expect(h.resumeParked).toHaveBeenCalledTimes(1);
-    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
+    expect(h.offerErrored).toHaveBeenCalledTimes(1);
   });
 
   it('resumes nothing when no chat is parked without a timer', () => {
@@ -267,9 +267,9 @@ describe('a key added or reconnected', () => {
     h.rotation.markExhausted('a1', 'spend limit', h.clock.t + HOUR);
     h.rotation.clearAll();
 
-    expect(h.credit.credentialChanged('account added')).toEqual({ parked: 1, errored: 2 });
+    expect(h.credit.credentialChanged('account added')).toEqual({ parked: 1, offered: 2 });
     expect(h.resumeParked).toHaveBeenCalledTimes(1);
-    expect(h.resumeErrored).toHaveBeenCalledTimes(1);
+    expect(h.offerErrored).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -313,7 +313,7 @@ describe('the real turn path', () => {
         ]);
       },
     });
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
 
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     const settle = async (): Promise<void> => {
@@ -327,9 +327,12 @@ describe('the real turn path', () => {
     // One go on each key, then parked — the existing rule.
     expect(runs.n).toBe(2);
 
-    // Credit comes back and the parked turn is resumed.
+    // Credit comes back. An out-of-credit park (no stated reset) is not re-run
+    // by the host (decision 25): it is offered Continue, and the user presses it.
     rotation.clearAll();
-    expect(daemon.resumeAllRateLimited()).toBe(1);
+    expect(daemon.resumeAllRateLimited()).toBe(0);
+    expect(runs.n).toBe(2);
+    expect(daemon.resumeRateLimitedNow(chatId)).toBe(true);
     await settle();
     // It tried BOTH keys again. Without clearing the tried set it ran once and
     // parked straight back.
@@ -387,7 +390,7 @@ describe('the real turn path', () => {
     const credit = new CreditResume({
       rotation,
       resumeParked: () => daemon.resumeAllRateLimited(),
-      resumeErrored: () => daemon.resumeErroredOnExhaustedAccount(),
+      offerErrored: () => daemon.offerErroredOnExhaustedAccount(),
       refreshUsage: () => undefined,
       report: () => undefined,
       now: () => clock.t,
@@ -414,7 +417,7 @@ describe('the real turn path', () => {
         ]);
       },
     });
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
 
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     await new Promise((r) => setTimeout(r, 60));
@@ -495,7 +498,7 @@ describe('the idempotency guard must not eat the resume', () => {
       // Nowhere to fail over to, so the turn parks rather than moving on.
       nextAccountAfterExhausted: () => undefined,
     });
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
 
     const chatId = await daemon.spawnChat({ folder });
     // The id a surface would have generated for this message.
@@ -508,8 +511,12 @@ describe('the idempotency guard must not eat the resume', () => {
     await settle();
     expect(runs.n).toBe(1);
 
-    // Credit is back somewhere: every parked chat is re-sent.
-    expect(daemon.resumeAllRateLimited()).toBe(1);
+    // Credit is back somewhere. Out of credit stops and asks, so nothing runs
+    // until Continue — which must not be eaten by the idempotency guard.
+    expect(daemon.resumeAllRateLimited()).toBe(0);
+    await settle();
+    expect(runs.n).toBe(1);
+    expect(daemon.resumeRateLimitedNow(chatId)).toBe(true);
     await settle();
     // It actually RAN. Under the old id this stayed at 1 for ever.
     expect(runs.n).toBe(2);
@@ -549,5 +556,155 @@ describe('a reset read off a failed chat after a restart names no account', () =
     clock.t += 4 * HOUR + 10_000;
     credit.limitReset();
     expect(resumeParked).toHaveBeenCalled();
+  });
+});
+
+describe('decision 25: out of credit stops and asks; a temporary limit follows the setting', () => {
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 12; i++) await new Promise((r) => setTimeout(r, 25));
+  };
+
+  /** A chat on one account whose first turn fails as `firstFailure`, then succeeds. */
+  async function oneAccountChat(
+    behaviour: 'resume_at_reset' | 'other_account' | 'switch_provider',
+    firstFailure: () => Error,
+  ) {
+    const home = mkdtempSync(join(tmpdir(), 'patch-d25-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-d25f-')));
+    const events: WireEvent[] = [];
+    const runs = { n: 0 };
+    const daemon = new Daemon({
+      hostId: 'd-d25',
+      metaStore: createMetaStore(home),
+      sdkBackend: {
+        run: (): AsyncGenerator<SdkEnvelope> => {
+          runs.n += 1;
+          const first = runs.n === 1;
+          async function* gen(): AsyncGenerator<SdkEnvelope> {
+            if (first) throw firstFailure();
+            yield { type: 'assistant', content: 'done', raw: {} };
+            yield { type: 'result', sessionId: 'sess-1', content: 'done', raw: {} };
+          }
+          return gen();
+        },
+      },
+      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => Date.now(),
+      generateChatId: () => 'chat-d25',
+      nextAccountAfterExhausted: () => undefined,
+      hostOutOfCredit: () => true,
+    });
+    daemon.setLimitBehaviour(behaviour);
+    const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
+    await settle();
+    const lastState = () =>
+      [...events].reverse().find((e) => e.type === 'chat.state' && e.chatId === chatId) as
+        | Extract<WireEvent, { type: 'chat.state' }>
+        | undefined;
+    return { daemon, chatId, runs, lastState };
+  }
+
+  const outOfCredit = () =>
+    limitError("Claude Code returned an error result: You've hit your monthly spend limit");
+  const weeklyLimit = (resetsAt: number) =>
+    new TurnFailedError("Claude Code returned an error result: You've hit your weekly limit", {
+      kind: 'rate_limit',
+      status: 'rejected',
+      rateLimitType: 'seven_day',
+      resetsAt,
+    });
+
+  it('out of credit is offered Continue when credit returns, and never re-run by the host', async () => {
+    const c = await oneAccountChat('other_account', outOfCredit);
+    expect(c.runs.n).toBe(1);
+    expect(c.lastState()?.limitNext).toBe('ask');
+    expect(c.lastState()?.rateLimitResumingAt ?? null).toBeNull();
+
+    // Every credit event the host has: none of them runs the turn.
+    expect(c.daemon.resumeAllRateLimited()).toBe(0);
+    expect(c.daemon.resumeAllRateLimited()).toBe(0);
+    await settle();
+    expect(c.runs.n).toBe(1);
+    // The chat now says so, and Continue is what runs it.
+    expect(c.lastState()?.creditReturned).toBe(true);
+    expect(c.daemon.resumeRateLimitedNow(c.chatId)).toBe(true);
+    await settle();
+    expect(c.runs.n).toBe(2);
+    expect(c.lastState()?.creditReturned).toBe(false);
+    expect(c.lastState()?.limitNext ?? null).toBeNull();
+    c.daemon.shutdown();
+  });
+
+  it('switch_provider pauses with the reset showing and runs nothing on its own', async () => {
+    const resetsAt = Date.now() + 5 * HOUR;
+    const c = await oneAccountChat('switch_provider', () => weeklyLimit(resetsAt));
+    const state = c.lastState();
+    expect(state?.limitNext).toBe('switch_provider');
+    expect(state?.limitBlock?.resetsAt).toBe(resetsAt);
+    // No timer: the reset is shown, not acted on.
+    expect(state?.rateLimitResumingAt ?? null).toBeNull();
+    expect(c.daemon.resumeAllRateLimited()).toBe(0);
+    expect(c.daemon.resumeAllRateLimited()).toBe(0);
+    await settle();
+    expect(c.runs.n).toBe(1);
+    c.daemon.shutdown();
+  });
+
+  it('resume_at_reset arms its own reset, and runs when credit returns however it returned', async () => {
+    const resetsAt = Date.now() + 5 * HOUR;
+    const c = await oneAccountChat('resume_at_reset', () => weeklyLimit(resetsAt));
+    expect(c.lastState()?.limitNext).toBe('resume_at_reset');
+    expect(c.lastState()?.rateLimitResumingAt).toBe(resetsAt);
+    expect(c.runs.n).toBe(1);
+    // A reset passing, a key added, a reading finding credit (spec/10 § Limits).
+    expect(c.daemon.resumeAllRateLimited()).toBe(1);
+    await settle();
+    expect(c.runs.n).toBe(2);
+    c.daemon.shutdown();
+  });
+
+  it('other_account is released by any credit event', async () => {
+    const resetsAt = Date.now() + 5 * HOUR;
+    const c = await oneAccountChat('other_account', () => weeklyLimit(resetsAt));
+    expect(c.lastState()?.limitNext).toBe('other_account');
+    expect(c.daemon.resumeAllRateLimited()).toBe(1);
+    await settle();
+    expect(c.runs.n).toBe(2);
+    c.daemon.shutdown();
+  });
+
+  it('a credit park restored after a restart keeps waiting for the user', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-d25r-'));
+    const meta = createMetaStore(home);
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-d25rf-')));
+    const make = () =>
+      new Daemon({
+        hostId: 'd-d25r',
+        metaStore: meta,
+        sdkBackend: {
+          run: (): AsyncGenerator<SdkEnvelope> => {
+            async function* gen(): AsyncGenerator<SdkEnvelope> {
+              throw outOfCredit();
+              yield { type: 'result', raw: {} };
+            }
+            return gen();
+          },
+        },
+        resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
+        emit: () => undefined,
+        logger: silent,
+        now: () => Date.now(),
+        generateChatId: () => 'chat-d25r',
+        nextAccountAfterExhausted: () => undefined,
+        hostOutOfCredit: () => true,
+      });
+    const first = make();
+    first.setLimitBehaviour('other_account');
+    const chatId = await first.spawnChat({ folder, prompt: 'go' });
+    await settle();
+    expect(meta.read(chatId)?.pendingTurns?.[0]?.limitNext).toBe('ask');
+    first.shutdown();
   });
 });

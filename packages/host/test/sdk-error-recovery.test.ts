@@ -96,7 +96,7 @@ describe('a usage limit is recognised from its structured fields', () => {
       ),
       'structured',
     );
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
     const chatId = await daemon.spawnChat({ folder, prompt: 'do the task' });
     await new Promise((r) => setTimeout(r, 40));
 
@@ -108,7 +108,7 @@ describe('a usage limit is recognised from its structured fields', () => {
 
   it('is not recognised from wording alone: the same sentence with no fields is a plain failure', async () => {
     const { daemon, folder, events } = makeHost(throwingOnce(REAL_LIMIT), 'prose');
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     await new Promise((r) => setTimeout(r, 40));
     expect(resumingAt(events, chatId) ?? null).toBeNull();
@@ -245,7 +245,7 @@ describe('a restart mid-wait does not lose the turn', () => {
     // inside that window. The timer dies with the process — meta.json is what
     // the next host reads, so the park has to be written there too.
     const { daemon, folder, metaStore } = makeHost(throwingOnce(REAL_LIMIT), 'park');
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
     const chatId = await daemon.spawnChat({ folder, prompt: 'owed work' });
     await new Promise((r) => setTimeout(r, 40));
 

@@ -230,6 +230,14 @@ export interface ChatRow {
    * every row the app actually builds carries it.
    */
   limitBlock?: ChatStateEvent['limitBlock'] | null;
+  /**
+   * What releases the pause (`chat.state.limitNext`, spec/12 § A usage or rate
+   * limit): the host by itself, the user choosing a provider, or the user
+   * pressing Continue. `null` when nothing is paused.
+   */
+  limitNext?: ChatStateEvent['limitNext'] | null;
+  /** Credit is back for a chat that stopped for it; the card offers Continue. */
+  creditReturned?: boolean;
   /** Why the chat's last turn failed (`chat.state` while errored); `null` otherwise. */
   lastError?: ChatStateEvent['lastError'] | null;
   /**

@@ -88,7 +88,7 @@ function setup(opts: { failWith: string; hostOutOfCredit?: boolean; autoResume?:
   // "scheduling auto-resume" line comes from. The runner defaults it off, so a
   // test that left it off would exercise the no-park path instead and prove
   // nothing about the loop.
-  daemon.setAutoResumeRateLimit(opts.autoResume ?? true);
+  daemon.setLimitBehaviour((opts.autoResume ?? true) ? 'other_account' : 'switch_provider');
   return { daemon, events, folder, metaStore, runs };
 }
 
@@ -116,7 +116,7 @@ describe('out of credit with NO stated reset: park, do not guess a minute', () =
     daemon.shutdown();
   });
 
-  it('still OWES the turn — parked, so credit returning runs it', async () => {
+  it('still OWES the turn — parked, and credit returning offers Continue (decision 25)', async () => {
     const { daemon, folder, metaStore } = setup({ failWith: NO_RESET_SPEND_LIMIT });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
@@ -125,7 +125,9 @@ describe('out of credit with NO stated reset: park, do not guess a minute', () =
     expect(metaStore.read(chatId)?.pendingTurns?.[0]?.message).toBe('go');
     // ...and the credit-return path finds it. This is `resumeParked` in
     // `creditResume.ts`, the thing a key being added or a usage reading calls.
-    expect(daemon.resumeAllRateLimited()).toBe(1);
+    // Out of credit stops and asks, so it is offered Continue, not re-run.
+    expect(daemon.resumeAllRateLimited()).toBe(0);
+    expect(daemon.resumeRateLimitedNow(chatId)).toBe(true);
     daemon.shutdown();
   });
 
@@ -134,7 +136,7 @@ describe('out of credit with NO stated reset: park, do not guess a minute', () =
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
 
-    // `armCreditRetryFromDisk` and `resumeErroredOnExhaustedAccount` re-derive
+    // `armCreditRetryFromDisk` and `offerErroredOnExhaustedAccount` re-derive
     // everything from the PERSISTED failure. The park used to write nothing to
     // disk at all, so a restart during a limit left the turn in `pendingTurns`
     // with no record of why it was owed.
@@ -207,7 +209,9 @@ describe('a failure that says nothing, on a host with no credit, is still a cred
     // list used to filter on a lifecycle status a credit block never sets. This
     // is the exact turn that sat dead for thirteen hours.
     expect(daemon.resumeAllRateLimited()).toBe(0);
-    expect(daemon.resumeErroredOnExhaustedAccount()).toBe(1);
+    expect(daemon.offerErroredOnExhaustedAccount()).toBe(1);
+    // Offered once: a second credit event does not offer it again.
+    expect(daemon.offerErroredOnExhaustedAccount()).toBe(0);
     daemon.shutdown();
   });
 
@@ -229,11 +233,10 @@ describe('a failure that says nothing, on a host with no credit, is still a cred
     daemon.shutdown();
   });
 
-  it('parks and records it the same way with auto-resume turned OFF', async () => {
-    // With auto-resume off there is no park path to fall into at all — the
-    // failure goes straight to the tail that decides park-vs-ladder. A credit
-    // block has to be recoverable there too, or turning the setting off turns
-    // off the recovery with it.
+  it('parks and records it the same way under switch_provider', async () => {
+    // A failure that states no limit goes straight to the tail that decides
+    // park-vs-ladder, whatever the limit behaviour. A credit block has to be
+    // recoverable there too.
     const { daemon, folder, metaStore, runs } = setup({
       failWith: PROCESS_KILLED,
       hostOutOfCredit: true,
@@ -246,7 +249,7 @@ describe('a failure that says nothing, on a host with no credit, is still a cred
     const meta = metaStore.read(chatId);
     expect(meta?.lastError?.outOfCredit).toBe(true);
     expect(meta?.pendingTurns?.[0]?.message).toBe('go');
-    expect(daemon.resumeErroredOnExhaustedAccount()).toBe(1);
+    expect(daemon.offerErroredOnExhaustedAccount()).toBe(1);
     daemon.shutdown();
   });
 });

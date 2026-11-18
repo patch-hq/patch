@@ -24,6 +24,9 @@ import { limitError } from './limitErrors.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = Date.UTC(2023, 10, 14, 12, 0, 0);
+// A TEMPORARY limit with a stated reset: the parks the host itself releases
+// (`other_account`). An out-of-credit one waits for Continue (decision 25).
+const RESETS_AT = NOW + 3_600_000;
 const NO_RESET_SPEND_LIMIT =
   "Claude Code returned an error result: You've hit your monthly spend limit · " +
   'raise it at claude.ai/settings/usage?from=cc_cli_limit_message';
@@ -49,7 +52,7 @@ function backend(probe: Probe): SdkBackend {
           // A real turn takes time; without this a serial and a parallel
           // release would be indistinguishable.
           await new Promise((r) => setTimeout(r, 5));
-          if (probe.limited) throw limitError(NO_RESET_SPEND_LIMIT);
+          if (probe.limited) throw limitError(NO_RESET_SPEND_LIMIT, { resetsAt: RESETS_AT });
           yield { type: 'assistant', content: 'done', raw: {} };
           yield { type: 'result', sessionId: `s-${opts.prompt}`, content: 'done', raw: {} };
           probe.completed.push(opts.prompt);
@@ -81,7 +84,7 @@ async function parkChats(n: number) {
     generateChatId: () => `chat-${next++}`,
     nextAccountAfterExhausted: () => undefined,
   });
-  daemon.setAutoResumeRateLimit(true);
+  daemon.setLimitBehaviour('other_account');
   const ids: string[] = [];
   for (let i = 0; i < n; i += 1) {
     const chatId = await daemon.spawnChat({ folder });
@@ -153,7 +156,7 @@ describe('a turn resumed onto a session with no transcript', () => {
             reseed: transcriptFor(opts).length > 0,
           });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
-            if (mode.limited) throw limitError(NO_RESET_SPEND_LIMIT);
+            if (mode.limited) throw limitError(NO_RESET_SPEND_LIMIT, { resetsAt: RESETS_AT });
             // The session id the first attempt was handed never reached disk.
             if (opts.resumeSessionId === 'sess-dead') {
               throw new Error(
@@ -180,7 +183,7 @@ describe('a turn resumed onto a session with no transcript', () => {
       generateChatId: () => 'chat-dead',
       nextAccountAfterExhausted: () => undefined,
     });
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
     return { daemon, folder, seen, mode };
   };
 
@@ -237,7 +240,7 @@ describe('a chat that never answered anything', () => {
             reseed: transcriptFor(opts).length > 0,
           });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
-            if (limited) throw limitError(NO_RESET_SPEND_LIMIT);
+            if (limited) throw limitError(NO_RESET_SPEND_LIMIT, { resetsAt: RESETS_AT });
             yield { type: 'assistant', content: 'done', raw: {} };
             yield { type: 'result', sessionId: 'sess-ok', content: 'done', raw: {} };
           }
@@ -254,7 +257,7 @@ describe('a chat that never answered anything', () => {
       generateChatId: () => 'chat-husk',
       nextAccountAfterExhausted: () => undefined,
     });
-    daemon.setAutoResumeRateLimit(true);
+    daemon.setLimitBehaviour('other_account');
     const chatId = await daemon.spawnChat({ folder });
     // Its first and only turn dies on the limit: a user prompt in the log, no answer.
     await daemon.sendInput({ chatId, message: 'the prompt', localId: 'l1' });

@@ -94,6 +94,12 @@ export interface ProviderDescriptor {
   /** The provider's own settings Settings exposes (spec/10 § Provider settings). */
   readonly settings: readonly ProviderSettingDescriptor[];
   /**
+   * What Settings says about the provider's own session settings when it
+   * declares none that Patch can expose (spec/10 § Provider settings), so an
+   * empty list reads as the provider's fact rather than as Patch leaving it out.
+   */
+  readonly settingsNote?: string;
+  /**
    * The Patch tools the provider's own native tools duplicate (subagents,
    * self-wake, goals). Withheld from its chats when it cannot switch the native
    * ones off (`capabilities.disableNativeTools`).
@@ -213,7 +219,12 @@ export const PROVIDERS = [
       interrupt: true,
       steer: true,
     },
+    // Codex has no setting that deletes or expires its own sessions: it keeps
+    // every session until one is deleted (`codex delete`). Its `[history]`
+    // settings are about the prompt-recall file, not sessions.
     settings: [],
+    settingsNote:
+      'Codex has no setting to delete old sessions. It keeps every session until you delete it with Codex itself.',
     nativeDuplicates: ['patch_agent'],
   },
   {

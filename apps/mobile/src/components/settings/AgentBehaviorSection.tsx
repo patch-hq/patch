@@ -29,6 +29,8 @@ import {
   QUESTION_EXPIRY_SECONDS_MIN,
   DEFAULT_PROVIDER_ID,
   HARNESS_PERMISSION_MODES,
+  LIMIT_BEHAVIOUR_LABELS,
+  LimitBehaviour,
   permissionModeOptionLabel,
   PROVIDERS,
   type PermissionMode,
@@ -165,6 +167,18 @@ export function AgentPage(): React.ReactElement {
                 value={!data.preferences.suppressProviderSwitchWarning}
                 onChange={(next) => writePreferences({ suppressProviderSwitchWarning: !next })}
               />
+              {/* spec/10 § Limits — what a turn does after it pauses on a
+                  temporary limit. Out of credit and signed out always wait. */}
+              <Row testID="limit-behaviour" title="When a turn hits a usage limit" stack>
+                <Chips
+                  options={LimitBehaviour.options}
+                  selected={data.preferences.limitBehaviour}
+                  labelOf={(b) => LIMIT_BEHAVIOUR_LABELS[b]}
+                  testIDPrefix="limit-behaviour"
+                  labelPrefix="When a turn hits a usage limit"
+                  onSelect={(b) => writePreferences({ limitBehaviour: b })}
+                />
+              </Row>
               {/* spec/12 § Continue — a turn cut off by its machine going down
                   waits for Continue unless this is on. */}
               <ToggleRow

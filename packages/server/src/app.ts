@@ -23,6 +23,7 @@ import {
   type WireEvent,
   CLOSE_SERVER_RESTARTING,
   restartingReason,
+  heldMessageExpiredText,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
@@ -483,20 +484,40 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // chat lives on, and the mirror that knows is built just below.
   let chatRegistryRef: ChatRegistry | undefined;
   let wsHubRef: WsHub | undefined;
-  const hostLink: HostLink =
-    opts.hostLink ??
-    new InboundHostLink({
-      logger: log.child({ component: 'host-link' }),
-      heldInputs: new HeldInputStore({
+  // Messages held for offline hosts (spec/12 § Host-offline UX). Its expiry is
+  // switched on below, once the registry and the hub exist to tell anyone.
+  const heldInputs = opts.hostLink
+    ? undefined
+    : new HeldInputStore({
         ...((opts.dataDir ?? registry.dataDir)
           ? { dataDir: opts.dataDir ?? registry.dataDir }
           : {}),
         logger: log.child({ component: 'held-input' }),
-      }),
+        hostName: (hostId: string) => registry.hostName(hostId),
+      });
+  if (heldInputs) app.addHook('onClose', async () => heldInputs.stop());
+  const hostLink: HostLink =
+    opts.hostLink ??
+    new InboundHostLink({
+      logger: log.child({ component: 'host-link' }),
+      ...(heldInputs ? { heldInputs } : {}),
       resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.hostId ?? null,
       onHeld: (chatId: string) => {
         const state = chatRegistryRef?.markQueued(chatId);
         if (state) wsHubRef?.broadcastChatState(state);
+      },
+      // A held message that expires is said in its chat, never dropped in
+      // silence (spec/12 § Host-offline UX): the link puts a notice in for the
+      // host and tells surfaces; here the chat's status reads failed, with why.
+      onHeldExpired: (expired) => {
+        for (const { notice } of expired) {
+          const state = chatRegistryRef?.markHeldExpired(
+            notice.event.chatId,
+            heldMessageExpiredText(notice.event.hostName, notice.event.text),
+            notice.at,
+          );
+          if (state) wsHubRef?.broadcastChatState(state);
+        }
       },
       managerHostId: () => registry.managerHostId(),
       registeredHostIds: () => registry.registeredHostIds(),
@@ -1045,6 +1066,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: opts.helloTimeoutMs } : {}),
     onCallResponse: (surfaceId, event) => callOrchestrator.handleResponse(surfaceId, event),
   }));
+
+  // Messages that expired while the server was down are reported now that the
+  // registry and the hub exist to say so.
+  heldInputs?.expireDue();
   broadcastSettings = (event) => void wsHub.sendToAll(event);
   broadcastNotifications = (unread) =>
     void wsHub.sendToAll({ type: 'notifications.changed', unread });

@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { McpServerList, PermissionMode } from '@patch/wire';
+import { LimitBehaviour, McpServerList, PermissionMode } from '@patch/wire';
 import { DictationSetting, MeetingEngine } from '@patch/wire/audio';
 import type { Logger } from 'pino';
 
@@ -132,6 +132,8 @@ const HostStateFile = z
     titleGenerationEnabled: z.boolean().optional(),
     statusGenerationEnabled: z.boolean().optional(),
     autoResumeRateLimit: z.boolean().optional(),
+    /** The shared `limitBehaviour` as last applied (spec/10 § When an account hits a limit). */
+    limitBehaviour: LimitBehaviour.optional(),
     /** Whether this host installs a published build on its own (shared `autoUpdateHosts`). */
     autoUpdateHosts: z.boolean().optional(),
     /**

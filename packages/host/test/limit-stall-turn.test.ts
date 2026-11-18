@@ -52,7 +52,7 @@ function setup(script: (n: number) => 'hang' | 'carry-on', autoResume = false) {
     generateChatId: () => 'chat-1',
     limitStallGraceMs: GRACE,
   });
-  if (autoResume) daemon.setAutoResumeRateLimit(true);
+  daemon.setLimitBehaviour(autoResume ? 'other_account' : 'switch_provider');
   return { daemon, events, folder, runs };
 }
 

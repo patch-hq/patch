@@ -44,12 +44,16 @@ export function creditPause(
         rateLimitResumingAt?: number | null;
         resumeKind?: 'rate_limit' | 'overloaded' | null;
         limitBlock?: { resetsAt?: number } | null;
+        limitNext?: 'resume_at_reset' | 'other_account' | 'switch_provider' | 'ask' | null;
       }
     | undefined,
 ): CreditPause | null {
   if (!row) return null;
   if (row.resumeKind === 'overloaded' && !row.limitBlock) return null;
   if (!row.rateLimitResumingAt && !row.limitBlock) return null;
+  // A pause that waits for the user does not resume at any time (spec/10 §
+  // When an account hits a limit), so it is not given one to promise.
+  if (row.limitNext === 'switch_provider' || row.limitNext === 'ask') return { resetsAt: null };
   const at = row.limitBlock?.resetsAt ?? row.rateLimitResumingAt ?? null;
   return { resetsAt: at !== null && at > 0 ? at : null };
 }

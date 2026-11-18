@@ -23,7 +23,7 @@ test.describe('the limit notice when nothing was parked', () => {
       /Resets in .*h/,
     );
     await expect(page.locator('[data-testid="rate-limit-send"]')).toBeVisible();
-    await expect(page.locator('[data-testid="rate-limit-auto-resume"]')).toBeAttached();
+    await expect(page.locator('[data-testid="rate-limit-behaviour"]')).toBeAttached();
     await expect(page.locator('[data-testid="rate-limit-extra-usage"]')).toBeVisible();
     // In the transcript, under the turn it is about — not in the banner stack.
     await expect(page.locator('[data-testid="chat-stream"]')).toContainText(/Weekly limit/);

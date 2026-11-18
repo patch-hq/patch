@@ -1,4 +1,13 @@
-// Picking the stalled work back up the moment ANY account has credit again.
+// What happens to stalled work the moment ANY account has credit again.
+//
+// Decision 25 (spec/10 § When an account hits a limit): a temporary limit
+// pauses, then follows the user's `limitBehaviour`; out of credit stops and
+// asks, and is never retried. So this module RELEASES only the parks whose
+// behaviour says the host may run them again (`resume_at_reset` and
+// `other_account`), and OFFERS the rest: a chat stopped for
+// credit is told credit is back and shows Continue, and nothing runs until the
+// user presses it. The parked/errored split below is about where the owed turn
+// is kept, not about whether it runs.
 //
 // Two different things stop when a host runs out of credit, and for a long time
 // only one of them ever started again:
@@ -49,10 +58,16 @@ export interface AccountReading {
 
 export interface CreditResumeOpts {
   rotation: AccountRotation;
-  /** Un-park every chat waiting out a limit and re-send its turn. Returns how many. */
+  /**
+   * Release the parked chats the limit behaviour lets the host run again, and
+   * offer Continue to the ones stopped for credit. Returns how many were released.
+   */
   resumeParked: () => number;
-  /** Re-send the turns of chats that ERRORED on a spent account. Returns how many. */
-  resumeErrored: () => number;
+  /**
+   * Offer Continue to chats that ERRORED on a spent account. Never re-sends
+   * their turn. Returns how many were newly offered.
+   */
+  offerErrored: () => number;
   /** Re-read every account's real usage, past the per-account floor. */
   refreshUsage: () => void;
   /** Publish the host's account report to every surface. */
@@ -95,8 +110,10 @@ export interface CreditResumeOpts {
 
 /** What one resume did, so a caller can log a number rather than an intention. */
 export interface ResumeCounts {
+  /** Parked turns released to run again. */
   parked: number;
-  errored: number;
+  /** Chats stopped for credit, offered Continue instead of being re-run. */
+  offered: number;
 }
 
 /** setTimeout's signed-32-bit ceiling (~24.8 days), as in wake.ts. */
@@ -133,24 +150,27 @@ export class CreditResume {
     // ran out. Skipped by the caller that IS a reading.
     if (extra.refreshUsage !== false) this.opts.refreshUsage();
     const parked = this.opts.resumeParked();
-    const errored = this.opts.resumeErrored();
+    const offered = this.opts.offerErrored();
     const line = {
       reason,
       ...(extra.accountId !== undefined ? { accountId: extra.accountId } : {}),
       parked,
-      errored,
+      offered,
     };
     // Both counts, always — "resumed the parked ones" with the errored ones
     // silently left behind is the shape of the bug this replaced. A resume that
     // found nothing waiting is not news, so it goes to debug rather than
     // announcing itself on every routine probe.
-    if (parked > 0 || errored > 0) {
-      this.opts.logger.info(line, 'credit returned — resumed the work that was waiting on it');
+    if (parked > 0 || offered > 0) {
+      this.opts.logger.info(
+        line,
+        'credit returned — released the paused turns the limit behaviour allows, offered Continue to the rest',
+      );
     } else {
       this.opts.logger.debug(line, 'credit returned — nothing was waiting on it');
     }
     this.opts.report();
-    return { parked, errored };
+    return { parked, offered };
   }
 
   /**
@@ -225,7 +245,7 @@ export class CreditResume {
   resumeIfCreditReturned(opts: { force?: boolean } = {}): ResumeCounts {
     const readings = this.opts.readings?.() ?? [];
     let parked = 0;
-    let errored = 0;
+    let offered = 0;
     for (const reading of readings) {
       if (reading.blocked) continue;
       const markedAt = this.opts.rotation.markedAt(reading.accountId);
@@ -237,9 +257,9 @@ export class CreditResume {
         refreshUsage: false,
       });
       parked += counts.parked;
-      errored += counts.errored;
+      offered += counts.offered;
     }
-    return { parked, errored };
+    return { parked, offered };
   }
 
   /**

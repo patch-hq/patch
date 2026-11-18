@@ -126,7 +126,11 @@ describe('ChatRoute — the limit bubble', () => {
     renderChat();
     expect(screen.queryByTestId('rate-limit-change-model')).toBeNull();
     expect(screen.queryByTestId('rate-limit-retry')).toBeNull();
-    expect(screen.getByTestId('rate-limit-bar')).not.toHaveTextContent(/other accounts?/i);
+    // The card's own words — not the limit-behaviour choice, whose options name
+    // another account as one of the things the user can pick.
+    const words = screen.getByTestId('rate-limit-bar').cloneNode(true) as HTMLElement;
+    words.querySelector('[data-testid="rate-limit-behaviour"]')?.remove();
+    expect(words.textContent).not.toMatch(/other accounts?/i);
   });
 
   describe('the card', () => {
@@ -306,10 +310,10 @@ describe('ChatRoute — the limit bubble', () => {
       expect(sent).toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
     });
 
-    it('always shows the auto-resume toggle', () => {
+    it('always shows the limit-behaviour choice', () => {
       setup({ resetsAt: Date.now() + 60_000 });
       renderChat();
-      expect(screen.getByTestId('rate-limit-auto-resume')).toBeInTheDocument();
+      expect(screen.getByTestId('rate-limit-behaviour')).toBeInTheDocument();
     });
   });
 

@@ -43,7 +43,7 @@ describe('wake into a chat errored on credit', () => {
       now: () => Date.now(),
       generateChatId: () => 'chat-wake-err',
     });
-    daemon.setAutoResumeRateLimit(false);
+    daemon.setLimitBehaviour('switch_provider');
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     await sleep(80);
     // The errored-only shape: failed on credit, with no park or timer left

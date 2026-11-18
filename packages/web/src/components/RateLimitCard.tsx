@@ -7,7 +7,12 @@
 // account, so it cannot escape one.
 
 import { useEffect, useState, type JSX } from 'react';
-import { harnessForModel } from '@patch/wire';
+import {
+  harnessForModel,
+  LIMIT_BEHAVIOUR_LABELS,
+  LimitBehaviour,
+  type ChatStateEvent,
+} from '@patch/wire';
 import type { ChatRow } from '../stores/types.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -32,14 +37,16 @@ function capitalise(s: string): string {
 
 export function RateLimitCard({ row }: { row: ChatRow }): JSX.Element | null {
   // The body holds hooks that fetch; a chat with no limit must not run them.
-  if (!row.rateLimitResumingAt && !row.limitBlock) return null;
+  if (!row.rateLimitResumingAt && !row.limitBlock && row.creditReturned !== true) return null;
   return <RateLimitCardBody row={row} />;
 }
 
 function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
   const resumingAt = row.rateLimitResumingAt;
   const block = row.limitBlock ?? null;
-  const autoResume = usePreferencesStore((s) => s.preferences.autoResumeRateLimit);
+  const behaviour = usePreferencesStore((s) => s.preferences.limitBehaviour);
+  const limitNext = row.limitNext ?? null;
+  const creditReturned = row.creditReturned === true;
   const shared = usePreferencesStore((s) => s.shared);
   const suppressSwitchWarning = usePreferencesStore(
     (s) => s.preferences.suppressProviderSwitchWarning,
@@ -70,13 +77,19 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
     currentProviderId: providerId,
     rows: accountRows(hosts, shared),
     overageBlocked: block?.overageBlocked === true,
+    limitNext,
+    creditReturned,
   });
 
   const limitName = capitalise(LIMIT_NAME[block?.scope ?? 'unknown']);
   const account = block?.accountLabel ? ` · ${block.accountLabel}` : '';
-  const heading = isOverload
-    ? 'Claude is busy right now'
-    : `${limitName}${pastReset ? ' reset' : ''}${account}`;
+  const heading = creditReturned
+    ? `Credit available again${account}`
+    : isOverload
+      ? 'Claude is busy right now'
+      : `${limitName}${pastReset ? ' reset' : ''}${account}`;
+  const sendLabel = creditReturned || limitNext === 'ask' ? 'Continue' : 'Send';
+  const nextLine = isOverload ? null : limitNextText(limitNext, creditReturned);
 
   const send = (): void => {
     getActiveWs()?.send({ type: 'chat.resume_now_request', chatId: row.chatId });
@@ -162,6 +175,11 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
             Message not sent
           </p>
         ) : null}
+        {nextLine !== null ? (
+          <p className="limit-unsent" data-testid="rate-limit-next">
+            {nextLine}
+          </p>
+        ) : null}
 
         <div className="limit-actions">
           <button
@@ -174,7 +192,7 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
               if (controls.send.enabled) send();
             }}
           >
-            Send
+            {sendLabel}
           </button>
           <LimitMenu
             kind="account"
@@ -214,14 +232,22 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
             </span>
           )}
           <label className="limit-auto">
-            <input
-              type="checkbox"
-              role="switch"
-              checked={autoResume}
-              onChange={() => void patchShared('auto-resume', { autoResumeRateLimit: !autoResume })}
-              data-testid="rate-limit-auto-resume"
-            />
-            Auto-resume
+            <select
+              aria-label="When a limit is hit"
+              value={behaviour}
+              onChange={(e) =>
+                void patchShared('limit behaviour', {
+                  limitBehaviour: LimitBehaviour.parse(e.target.value),
+                })
+              }
+              data-testid="rate-limit-behaviour"
+            >
+              {LimitBehaviour.options.map((b) => (
+                <option key={b} value={b}>
+                  {LIMIT_BEHAVIOUR_LABELS[b]}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
       </div>
@@ -240,4 +266,24 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
       ) : null}
     </div>
   );
+}
+
+/** What happens next, in one line, for a paused chat (spec/12 § A usage or rate limit). */
+export function limitNextText(
+  next: ChatStateEvent['limitNext'] | null,
+  creditReturned: boolean,
+): string | null {
+  if (creditReturned) return 'Continue sends the message again.';
+  switch (next) {
+    case 'resume_at_reset':
+      return 'Resumes on its own when the limit resets.';
+    case 'other_account':
+      return 'Continues on the next account with usage left.';
+    case 'switch_provider':
+      return 'Waiting for you to switch provider or send again.';
+    case 'ask':
+      return 'Out of credit. Nothing runs until you continue.';
+    default:
+      return null;
+  }
 }

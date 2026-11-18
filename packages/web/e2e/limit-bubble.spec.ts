@@ -135,7 +135,7 @@ test.describe('the limit bubble', () => {
       'rate-limit-change-account',
       'rate-limit-change-provider',
       'rate-limit-extra-usage',
-      'rate-limit-auto-resume',
+      'rate-limit-behaviour',
     ]) {
       await expect(page.getByTestId(id)).toBeVisible();
     }
@@ -254,9 +254,9 @@ test.describe('the limit bubble', () => {
     expect(icon!.y).toBeLessThan(head!.y + head!.height);
   });
 
-  test('carries the auto-resume choice, ticked', async ({ page }) => {
+  test('carries the limit-behaviour choice', async ({ page }) => {
     await page.goto(HARNESS);
     await park(page, { scope: 'session' });
-    await expect(page.getByTestId('rate-limit-auto-resume')).toBeChecked();
+    await expect(page.getByTestId('rate-limit-behaviour')).toHaveValue('other_account');
   });
 });

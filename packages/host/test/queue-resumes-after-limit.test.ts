@@ -57,7 +57,7 @@ function setup() {
     generateChatId: () => 'chat-q',
     nextAccountAfterExhausted: () => undefined,
   });
-  daemon.setAutoResumeRateLimit(true);
+  daemon.setLimitBehaviour('other_account');
   return { daemon, events, folder, metaStore, state };
 }
 

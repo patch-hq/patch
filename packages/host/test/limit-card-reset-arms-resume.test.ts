@@ -52,7 +52,7 @@ function setup() {
     hostOutOfCredit: () => true,
     accountLimitInfo: () => ({ label: 'Default', scope: 'session', resetsAt: ACCOUNT_RESET }),
   });
-  daemon.setAutoResumeRateLimit(true);
+  daemon.setLimitBehaviour('other_account');
   return { daemon, events, folder };
 }
 
