@@ -759,7 +759,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       await tick();
 
       expect(r2.runs).toHaveLength(1);
-      expect(r2.runs[0]!.prompt.endsWith('Carry on')).toBe(true);
+      expect(r2.runs[0]!.prompt).toBe(CONTINUE_MESSAGE);
       // Nothing was answered, so there is no conversation to carry: Claude Code
       // would refuse an empty transcript ("No conversation found").
       expect(r2.runs[0]!.resumeSessionId).toBeUndefined();
@@ -792,8 +792,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       expect(r3.runs).toHaveLength(1);
       expect(r3.runs[0]!.resumeSessionId).toBeUndefined();
       expect(reseededTexts(r3.runs[0]!)).toEqual([]);
-      expect(r3.runs[0]!.prompt).toContain('original ask');
-      expect(r3.runs[0]!.prompt.match(/<\/system-reminder>/g)).toHaveLength(1);
+      expect(r3.runs[0]!.prompt).toBe(CONTINUE_MESSAGE);
       await r3.drain();
 
       // Reboot 3, after the turn settled: a plain resume with nothing pending.
