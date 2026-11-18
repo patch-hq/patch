@@ -132,7 +132,8 @@ jobs:
       - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
       # The browser layer is on here. It is off by default on the dev box, which
       # is too small for it (verify.mjs explains); a runner is not.
-      # 40 minutes: a shard normally takes 15-25, and one that hung for longer
+      # 55 minutes: a shard normally takes 25-40 (a slow runner took 43 and timed
+      # out a healthy merge-queue run at 40), and one that hung for longer
       # held every later check behind it.
       # Samples every 5s so a 137 can be traced to a process: memory, the
       # biggest resident processes, and the job's cgroup limit and OOM counter
@@ -156,7 +157,7 @@ jobs:
           echo 1 | sudo tee "$T/events/signal/signal_generate/enable" >/dev/null
           nohup sudo sh -c "cat $T/trace_pipe" > /tmp/sigtrace.log 2>&1 &
       - name: The gate
-        timeout-minutes: 40
+        timeout-minutes: 55
         env:
           PATCH_RUN_BROWSER_GATE: ${{ github.event_name == 'merge_group' && '1' || '0' }}
           PATCH_BROWSER_SHARD: ${{ matrix.shard }}
