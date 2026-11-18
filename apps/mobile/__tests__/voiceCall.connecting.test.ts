@@ -49,6 +49,8 @@ vi.mock('../src/lib/voiceTts', () => ({
   flushTtsPlayback: vi.fn(async () => undefined),
   stopTtsPlayback: stopTtsPlaybackMock,
 }));
+const { cueMock } = vi.hoisted(() => ({ cueMock: vi.fn(async () => undefined) }));
+vi.mock('../src/lib/voiceLiveCue', () => ({ playVoiceLiveCue: cueMock }));
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => prefs.addressWord,
   voiceConfigOrNull: () => null,
@@ -136,6 +138,20 @@ describe('connecting → failed after the timeout', () => {
     );
     vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS * 2);
     expect(useVoiceStore.getState().callError).toBeNull();
+  });
+
+  it('plays the live cue once, when the line first leaves connecting', async () => {
+    cueMock.mockClear();
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    sock.emitMessage(stateFrame('connecting'));
+    expect(cueMock).not.toHaveBeenCalled();
+    sock.emitMessage(stateFrame('listening'));
+    sock.emitMessage(stateFrame('thinking'));
+    expect(cueMock).toHaveBeenCalledTimes(1);
   });
 
   it('a setup failure already on screen is not overwritten by the timeout', async () => {
