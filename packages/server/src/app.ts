@@ -1788,6 +1788,55 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     return { ok: true, hosts: wsHub.hosts() };
   });
 
+  // Apply a host's available update (`patch hosts update --host`).
+  //
+  //   POST /api/hosts/update  {hostId, force?}  → 202 {ok, hostId}
+  //                                              | 400 hostId_required | 404 unknown_host | 503 host_offline
+  //
+  // The CLI called this path and the server never had it, so naming another
+  // host failed with route-not-found. It relays the same `host.update` frame a
+  // surface's "Update now" sends; the host installs the newest published build.
+  app.post<{ Body: { hostId?: string; force?: boolean } | undefined }>(
+    '/api/hosts/update',
+    async (req, reply) => {
+      let auth;
+      try {
+        auth = await requireAuth(req, registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: (e as Error).message });
+      }
+      const hostId = req.body?.hostId;
+      if (typeof hostId !== 'string' || hostId.length === 0) {
+        return reply
+          .code(400)
+          .send({ error: 'hostId_required', message: 'name the host this applies to' });
+      }
+      if (!registry.isRegisteredHost(hostId)) {
+        return reply.code(404).send({
+          error: 'unknown_host',
+          message: `no host registered with hostId: ${hostId}`,
+          hostId,
+          knownHosts: registry.registeredHostIds(),
+        });
+      }
+      if (!hostLink.isOnline(hostId)) {
+        return reply
+          .code(503)
+          .send({ error: 'host_offline', message: `${hostId} is offline`, hostId });
+      }
+      const force = req.body?.force === true;
+      hostLink.sendTo(hostId, auth.surfaceId, {
+        type: 'host.update',
+        hostId,
+        ...(force ? { force: true } : {}),
+      });
+      log.info({ hostId, requestedBy: auth.surfaceId, force }, 'host update requested');
+      return reply.code(202).send({ ok: true, hostId });
+    },
+  );
+
   // Renaming a host is SERVER-owned, even when the CLI naming it runs on
   // that very host (spec/17 § Hosts and the CLI). The registry holds the
   // name, so it must be written here and pushed to every surface — a
