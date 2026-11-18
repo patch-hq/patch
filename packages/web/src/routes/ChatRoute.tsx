@@ -2437,7 +2437,7 @@ export function ChatRoute({
         <GoalBanner row={row} />
         <FinishedGoalBanner
           row={row}
-          onNotMet={(condition) => void handleSend(`/goal ${condition}`)}
+          onReset={(condition) => void handleSend(`/goal ${condition}`)}
         />
         <BackgroundTaskBar chatId={chatId} />
         <StrayProcessBar chatId={chatId} />
