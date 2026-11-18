@@ -1309,7 +1309,7 @@ function BottomNav(): JSX.Element {
             data-testid="nav-getting-started"
             onClick={() => useUiStore.getState().setGuideOpen(true)}
           >
-            Getting started
+            Guide
           </button>
         </div>
       </nav>
