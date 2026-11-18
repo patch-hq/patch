@@ -33,7 +33,7 @@ export interface LocalDeps {
   recover(): SavedConnection | null;
   /** Which setup step has started: 'server' | 'account' | 'host' | 'connect'. The page words it. */
   progress(step: string): void;
-  /** What the server calls this app in its device list. */
+  /** What the server calls this app in its device list when no name was chosen (the chosen name wins). */
   label: string;
 }
 
@@ -54,7 +54,7 @@ export async function bringUpLocal(
       const made = await d.call(server.origin, '/api/auth/account', {
         clientType: 'surface-desktop',
         devicePublicKey: generateUserKeypair().publicKey,
-        label: d.label,
+        label: name ?? d.label,
       });
       if (made.status === 409) {
         throw new Error(

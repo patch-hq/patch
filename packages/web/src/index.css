@@ -18979,3 +18979,10 @@ a.drop-target {
   gap: 8px;
   justify-content: center;
 }
+
+.set-details > summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  color: var(--ink-3);
+  list-style-position: inside;
+}
