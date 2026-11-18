@@ -18,7 +18,7 @@ export function ExperimentalPage(): JSX.Element {
   return (
     <SettingsPage title="Experimental features" testid="settings-experimental-page">
       <Group testid="settings-experimental">
-        <Row title="Show experimental features" sub="Manager, Batch and Meeting mode">
+        <Row title="Show experimental features" sub="Manager, Batch, Meeting mode, dictation and calls">
           <Toggle
             checked={preferences.experimentalFeatures}
             disabled={!loaded}

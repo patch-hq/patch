@@ -28,6 +28,11 @@ describe('Experimental features — settings', () => {
     expect(visibleSettingsPages(false).map((p) => p.id)).toContain('experimental');
   });
 
+  it('hides the Voice page (dictation and calls) while off, and shows it when on', () => {
+    expect(visibleSettingsPages(false).map((p) => p.id)).not.toContain('voice');
+    expect(visibleSettingsPages(true).map((p) => p.id)).toContain('voice');
+  });
+
   it('the page toggle writes experimentalFeatures through to the server', async () => {
     const patches: unknown[] = [];
     vi.stubGlobal(

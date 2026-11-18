@@ -130,7 +130,7 @@ import { ModelPicker } from './ModelPicker';
 import { AccountMenu } from './AccountMenu';
 import { ProviderSwitchModal } from './ProviderSwitchModal';
 import { suppressProviderSwitchWarningOrFalse } from '../lib/preferences';
-import { useSettingsStore } from '../stores/settingsStore';
+import { useExperimentalFeatures, useSettingsStore } from '../stores/settingsStore';
 import {
   PERMISSION_MODE_ORDER,
   offeredPermissionModes,
@@ -352,6 +352,7 @@ export function Composer({
   autoFocus,
   edit,
 }: Props): React.ReactElement {
+  const experimental = useExperimentalFeatures();
   const colors = useTheme();
   // The new-chat screen's composer (`sendTarget` set) has no chat yet, so
   // `chatId` is a new-chat DRAFT's own id, not a chatId — its text is synced
@@ -2228,63 +2229,65 @@ export function Composer({
         ) : null}
         {/* Drawn after both mirrors so it sits on top of them and stays
             tappable. */}
-        <Pressable
-          onPressIn={() => {
-            if (disabled) return;
-            // A press-in lands ~350ms before onLongPress, so this is a free
-            // second chance to warm the audio plane if the mount-time attempt
-            // ran before the permission existed.
-            void warmDictation().catch(() => undefined);
-          }}
-          onPress={() => {
-            if (disabled) return;
-            if (dictModeOn) stopDictationMode();
-            else if (micState !== 'idle') void commitDictation();
-            else void beginDictation();
-          }}
-          onLongPress={() => {
-            if (disabled) return;
-            if (dictModeOn) stopDictationMode();
-            else if (micState === 'idle') setMicMenuOpen(true);
-          }}
-          disabled={disabled || micState === 'transcribing'}
-          delayLongPress={350}
-          hitSlop={MIC_HIT_SLOP}
-          pressRetentionOffset={MIC_PRESS_RETENTION}
-          testID="composer-mic"
-          style={({ pressed }) => ({
-            position: 'absolute',
-            right: FIELD_MIC_INSET,
-            bottom: FIELD_MIC_INSET,
-            width: FIELD_MIC_SIZE,
-            height: FIELD_MIC_SIZE,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: FIELD_MIC_SIZE / 2,
-            backgroundColor: pressed ? colors.divider : 'transparent',
-          })}
-          accessibilityRole="button"
-          accessibilityLabel={
-            disabled
-              ? `Dictate unavailable — ${disabledReason ?? 'disconnected'}`
-              : micState === 'transcribing'
-                ? 'Transcribing…'
-                : 'Dictate into message'
-          }
-        >
-          <ListeningRing active={micState === 'recording' || dictModeOn} color={colors.red} />
-          <Mic
-            size={FIELD_MIC_ICON_SIZE}
-            strokeWidth={ICON_STROKE}
-            color={
+        {experimental ? (
+          <Pressable
+            onPressIn={() => {
+              if (disabled) return;
+              // A press-in lands ~350ms before onLongPress, so this is a free
+              // second chance to warm the audio plane if the mount-time attempt
+              // ran before the permission existed.
+              void warmDictation().catch(() => undefined);
+            }}
+            onPress={() => {
+              if (disabled) return;
+              if (dictModeOn) stopDictationMode();
+              else if (micState !== 'idle') void commitDictation();
+              else void beginDictation();
+            }}
+            onLongPress={() => {
+              if (disabled) return;
+              if (dictModeOn) stopDictationMode();
+              else if (micState === 'idle') setMicMenuOpen(true);
+            }}
+            disabled={disabled || micState === 'transcribing'}
+            delayLongPress={350}
+            hitSlop={MIC_HIT_SLOP}
+            pressRetentionOffset={MIC_PRESS_RETENTION}
+            testID="composer-mic"
+            style={({ pressed }) => ({
+              position: 'absolute',
+              right: FIELD_MIC_INSET,
+              bottom: FIELD_MIC_INSET,
+              width: FIELD_MIC_SIZE,
+              height: FIELD_MIC_SIZE,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: FIELD_MIC_SIZE / 2,
+              backgroundColor: pressed ? colors.divider : 'transparent',
+            })}
+            accessibilityRole="button"
+            accessibilityLabel={
               disabled
-                ? colors.inkFaint
-                : micState === 'recording' || dictModeOn
-                  ? colors.red
-                  : colors.ink3
+                ? `Dictate unavailable — ${disabledReason ?? 'disconnected'}`
+                : micState === 'transcribing'
+                  ? 'Transcribing…'
+                  : 'Dictate into message'
             }
-          />
-        </Pressable>
+          >
+            <ListeningRing active={micState === 'recording' || dictModeOn} color={colors.red} />
+            <Mic
+              size={FIELD_MIC_ICON_SIZE}
+              strokeWidth={ICON_STROKE}
+              color={
+                disabled
+                  ? colors.inkFaint
+                  : micState === 'recording' || dictModeOn
+                    ? colors.red
+                    : colors.ink3
+              }
+            />
+          </Pressable>
+        ) : null}
         {/* + (spec/15 § Composer): what goes INTO the message — camera, photo,
             any file, sketch — at the field's bottom-left, the mirror of the
             mic. While a dictation runs it becomes Cancel, the far end of the

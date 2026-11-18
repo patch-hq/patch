@@ -57,7 +57,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
 export const DEFAULT_SETTINGS_PAGE: SettingsPageId = 'usage';
 
 /** Pages that only exist while Settings → Experimental features is on. */
-export const EXPERIMENTAL_SETTINGS_PAGES: readonly SettingsPageId[] = ['manager'];
+export const EXPERIMENTAL_SETTINGS_PAGES: readonly SettingsPageId[] = ['manager', 'voice'];
 
 export function visibleSettingsPages(experimental: boolean): typeof SETTINGS_PAGES {
   return SETTINGS_PAGES.filter((p) => experimental || !EXPERIMENTAL_SETTINGS_PAGES.includes(p.id));

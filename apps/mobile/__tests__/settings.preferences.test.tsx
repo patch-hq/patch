@@ -10,6 +10,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react-test-renderer';
+import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import {
   KOKORO_VOICES,
   ManagerPage,
@@ -474,7 +475,7 @@ describe('Manager page', () => {
   });
 
   it('Experimental features is off by default and its switch writes the account setting', async () => {
-    seedSettings();
+    seedSettings({ preferences: { ...DEFAULT_SHARED_SETTINGS } });
     const r = renderRN(<ExperimentalPage />);
     const toggle = findHost(r.root, byTestId('experimental-features'));
     expect(toggle.props.value).toBe(false);

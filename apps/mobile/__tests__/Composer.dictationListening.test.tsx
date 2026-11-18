@@ -112,10 +112,13 @@ describe('Composer — the dictation engine follows the account setting', () => 
     const load = vi.fn(async () => {
       useSettingsStore.setState({ error: 'offline' });
     });
-    useSettingsStore.setState({ data: null, error: null, load });
     const { factory } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
-    await actAsync(() => mic(r)['onPress']!());
+    // The mic only shows once settings say experimental features are on, so
+    // grab its handler, then lose the settings before pressing.
+    const press = mic(r)['onPress']!;
+    useSettingsStore.setState({ data: null, error: null, load });
+    await actAsync(() => press());
     expect(load).toHaveBeenCalled();
     expect(factory).not.toHaveBeenCalled();
     expect(useUiStore.getState().errors.at(-1)?.message).toContain(
@@ -126,7 +129,7 @@ describe('Composer — the dictation engine follows the account setting', () => 
       seedDictation('device');
     });
     useSettingsStore.setState({ data: null, error: null });
-    await actAsync(() => mic(r)['onPress']!());
+    await actAsync(() => press());
     expect(started(factory)).toEqual({ engine: 'phone', tidy: false });
     useSettingsStore.setState({ load: realLoad });
   });
