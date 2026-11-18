@@ -173,6 +173,10 @@ describe('host-addressing gate', () => {
         { type: 'host.backend_usage_refresh', hostId: UNREGISTERED, backendId: 'claude-code' },
       ],
       [
+        'patch.backends.request',
+        { type: 'patch.backends.request', requestId: 'r1', hostId: UNREGISTERED },
+      ],
+      [
         'patch.models.request',
         { type: 'patch.models.request', requestId: 'r1', hostId: UNREGISTERED },
       ],

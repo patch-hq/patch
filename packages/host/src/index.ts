@@ -2751,6 +2751,17 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'patch.backends.request') {
+        sender({
+          type: 'patch.backends.response',
+          requestId: event.requestId,
+          hostId: selfHostId,
+          backends: describeHost().backends as unknown as Record<string, unknown>[],
+          accounts: buildAccountReport().accounts as unknown as Record<string, unknown>[],
+          ...(event.forSurfaceId ? { forSurfaceId: event.forSurfaceId } : {}),
+        });
+        return;
+      }
       if (event.type === 'patch.models.request') {
         void handleModelsRequest(
           event,

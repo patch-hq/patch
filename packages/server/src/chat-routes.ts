@@ -2206,6 +2206,55 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     });
   });
 
+  // ---- GET /api/hosts/backends?hostId= ----
+  // A machine's backends and its view of the shared accounts, asked of that
+  // host over the link (`patch.backends.request`). NO FALLBACK: timeout → 504.
+  const backendsPending = new Map<
+    string,
+    {
+      resolve: (ev: Extract<WireEvent, { type: 'patch.backends.response' }>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
+  deps.hostLink.onEvent((event: WireEvent) => {
+    if (event.type !== 'patch.backends.response') return;
+    const w = backendsPending.get(event.requestId);
+    if (!w) return;
+    backendsPending.delete(event.requestId);
+    clearTimeout(w.timeout);
+    w.resolve(event);
+  });
+  app.get('/api/hosts/backends', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const q = ModelsQuery.safeParse(req.query);
+    if (!q.success) {
+      return reply.code(400).send({ error: 'invalid query', issues: q.error.issues });
+    }
+    const { hostId } = q.data;
+    const unknownHost = checkRegisteredHost(deps.registry, hostId);
+    if (unknownHost) return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
+    const requestId = deps.idGenerator();
+    const result = await new Promise<
+      Extract<WireEvent, { type: 'patch.backends.response' }> | 'timeout'
+    >((resolveP) => {
+      const timeout = setTimeout(() => {
+        backendsPending.delete(requestId);
+        resolveP('timeout');
+      }, MODELS_REQUEST_TIMEOUT_MS);
+      backendsPending.set(requestId, { resolve: resolveP, timeout });
+      deps.hostLink.send(auth.surfaceId, { type: 'patch.backends.request', requestId, hostId });
+    });
+    if (result === 'timeout') return reply.code(504).send({ error: 'daemon_timeout' });
+    return reply.code(200).send({ backends: result.backends, accounts: result.accounts });
+  });
+
   // ---- POST /api/chats/:id/stop ----
   app.post<{ Params: { id: string } }>('/api/chats/:id/stop', async (req, reply) => {
     let auth;

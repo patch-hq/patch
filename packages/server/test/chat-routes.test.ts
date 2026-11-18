@@ -3892,6 +3892,47 @@ describe('chat REST routes', () => {
   // host where nothing resolved is a 502 carrying the reason, never a baked-in
   // list. Partial failure is covered separately below — it is a 200, because a
   // backend failing is not the host failing.
+  it("GET /api/hosts/backends relays the named host's backends and accounts", async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
+        origSend(surfaceId, event);
+        if (event.type === 'patch.backends.request') {
+          setImmediate(() => {
+            hostLink.emit({
+              type: 'patch.backends.response',
+              hostId: 'd1',
+              requestId: event.requestId,
+              backends: [{ id: 'claude-code', version: '2.0.0' }],
+              accounts: [{ id: 'a1' }],
+            });
+          });
+        }
+      };
+      const res = await built.app.inject({
+        method: 'GET',
+        url: '/api/hosts/backends?hostId=d1',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        backends: [{ id: 'claude-code', version: '2.0.0' }],
+        accounts: [{ id: 'a1' }],
+      });
+      const missing = await built.app.inject({
+        method: 'GET',
+        url: '/api/hosts/backends',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(missing.statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('GET /api/models returns the host catalogue, and maps a total failure to 502', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();

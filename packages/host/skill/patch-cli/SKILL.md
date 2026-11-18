@@ -29,7 +29,7 @@ patch chats list --json                          # active chats
 patch chats get <id> --json                      # one chat: state, last activity
 patch chats spawn <folder> [--host H] [--model M] [--prompt P] --json
 patch chats send-to <id> <message> --json        # deliver a user turn into a chat
-patch history <id> [--limit N] --json            # transcript
+patch history <id> [--limit N] --json            # transcript; finds the chat on any host by id (no --host)
 patch chats stop <id> --json
 patch chats archive <id> --json
 patch chats move <id> --host H --folder F --json  # to another host, running in F there
