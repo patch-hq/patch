@@ -443,7 +443,8 @@ describe('Composer', () => {
     );
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
-    expect(input.title).toMatch(/Claude isn’t connected/);
+    // No native tooltip: the reason is on screen below.
+    expect(input.title).toBe('');
     // Said on screen, not only on hover, with the way straight to signing in.
     const notice = screen.getByTestId('composer-signed-out');
     expect(notice).toHaveTextContent('Sign in to Claude to send messages.');

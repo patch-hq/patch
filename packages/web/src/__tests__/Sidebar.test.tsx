@@ -2246,7 +2246,14 @@ describe('Sidebar', () => {
   // `permission` (paused, needs yes/no). `working` (still going) and `read`
   // (already seen) are NOT attention.
 
+  it('hides the view and sort controls until there is a chat', () => {
+    renderInRouter();
+    expect(screen.queryByTestId('sidebar-view-trigger')).toBeNull();
+    expect(document.querySelector('.sidebar-controls')).toBeNull();
+  });
+
   it('the view dropdown reads "All chats" by default and "Unread" once selected', () => {
+    useChatStore.getState().hydrate([rowFixture({ chatId: 'c-view' })]);
     renderInRouter();
     const trigger = screen.getByTestId('sidebar-view-trigger');
     expect(trigger.textContent).toContain('All chats');
