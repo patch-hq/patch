@@ -67,7 +67,8 @@ const RULES: readonly Rule[] = [
   {
     reason: 'claude_missing',
     kind: 'permanent',
-    test: /claude code (executable|native binary) not found|spawn claude ENOENT/i,
+    test:
+      /claude code (executable|native binary) not found|native cli binary for .{1,40} not found|spawn claude ENOENT/i,
   },
   // The kernel OOM killer SIGKILLs the child (exit 137). Running the same turn
   // again re-grows the same memory, so it settles errored at once, not laddered.

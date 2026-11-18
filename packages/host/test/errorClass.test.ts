@@ -12,6 +12,10 @@ describe('classifyFailure', () => {
     ['Your credit balance is too low to access the Anthropic API', 'permanent'],
     ['API Error: 413 request_too_large', 'permanent'],
     ["ENOENT: no such file or directory, open '/x'", 'permanent'],
+    [
+      'Native CLI binary for darwin-arm64 not found. Reinstall @anthropic-ai/claude-agent-sdk without --omit=optional, or set options.pathToClaudeCodeExecutable.',
+      'permanent',
+    ],
     ['API Error: 529 overloaded_error', 'transient'],
     ['API Error: 429 rate_limit_error', 'transient'],
     ['API Error: 500 api_error', 'transient'],
