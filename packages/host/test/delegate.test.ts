@@ -29,6 +29,7 @@ function setup() {
   const sdk = createMockSdkBackend();
   let id = 0;
   const daemon = new Daemon({
+    delegateOrphanSweepMs: 20,
     hostId: 'd1',
     metaStore,
     sdkBackend: sdk,
@@ -58,6 +59,21 @@ function messagesOn(events: WireEvent[], chatId: string) {
 }
 
 describe('patch_delegate', () => {
+  it('fails a subagent to its parent when its session ends without reporting', async () => {
+    const { daemon, sdk, events, folder } = setup();
+    const parentChatId = await daemon.spawnChat({ folder });
+    // The end-of-turn hook never runs: the session died.
+    (daemon as unknown as { maybeSettleDelegate: () => void }).maybeSettleDelegate = () => {};
+    sdk.enqueue([{ type: 'assistant', content: 'partial' }, { type: 'result' }]);
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'work' });
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${id}] FAILED`)),
+    );
+    expect(
+      messagesOn(events, parentChatId).find((m) => m.content.includes('FAILED'))!.content,
+    ).toContain('the session ended without returning a result');
+  });
+
   it("runs a child on the parent's pinned account, and leaves an unpinned parent's child automatic", async () => {
     const { daemon, sdk, folder } = setup();
     const spawned: Array<{ preferredAccountId?: string; subagent?: unknown }> = [];

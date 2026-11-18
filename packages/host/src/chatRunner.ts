@@ -732,6 +732,8 @@ export interface HostOptions {
   queuedStallMs?: number;
   /** How often the stall check runs. Defaults to {@link QUEUED_STALL_SWEEP_MS}. */
   queuedStallSweepMs?: number;
+  /** Test seam: how often unsettled subagents are checked for a dead session. */
+  delegateOrphanSweepMs?: number;
   /**
    * How long a turn may sit silent after the provider reports a window
    * `rejected` before it is failed as a hit limit. Defaults to
@@ -1389,6 +1391,8 @@ const SNOOZE_SWEEP_MS = 30_000;
 const QUEUED_STALL_MS = 180_000;
 /** How often queued messages are checked against {@link QUEUED_STALL_MS}. */
 const QUEUED_STALL_SWEEP_MS = 15_000;
+/** How often unsettled subagents are checked for a dead session. */
+const DELEGATE_ORPHAN_SWEEP_MS = 60_000;
 
 /** The agent's built-in question tool (spec/02 § Questions are not approvals). */
 const ASK_USER_QUESTION = 'AskUserQuestion';
@@ -2633,6 +2637,9 @@ export class Daemon {
   /** When each chat's current run began, from the first state emit that showed it running. */
   private readonly runningSince = new Map<string, number>();
   private queuedStallSweep: ReturnType<typeof setInterval> | null = null;
+  private delegateOrphanSweep: ReturnType<typeof setInterval> | null = null;
+  /** Unsettled subagents seen with no turn running on the previous sweep. */
+  private readonly delegateOrphanSeen = new Set<string>();
   /** chatId → callId → start time of tool calls that have not returned yet. */
   private readonly toolsInFlight = new Map<string, Map<string, number>>();
   /** Spots an agent re-running the same failing tool call (repeatFailureGuard.ts). */
@@ -3222,6 +3229,8 @@ export class Daemon {
     this.liveTrimTimer = null;
     if (this.queuedStallSweep !== null) clearInterval(this.queuedStallSweep);
     this.queuedStallSweep = null;
+    if (this.delegateOrphanSweep !== null) clearInterval(this.delegateOrphanSweep);
+    this.delegateOrphanSweep = null;
     for (const t of this.rateLimitTimers.values()) clearTimeout(t);
     this.rateLimitTimers.clear();
     for (const t of this.sdkRetryTimers.values()) clearTimeout(t);
@@ -3602,6 +3611,7 @@ export class Daemon {
     this.flagUnresumedInterruptions(owned);
     this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
+    this.ensureDelegateOrphanSweep();
   }
 
   /**
@@ -4935,6 +4945,7 @@ export class Daemon {
       throw err;
     }
     if (this.chatState.has(opts.parentChatId)) this.emitState(opts.parentChatId);
+    this.ensureDelegateOrphanSweep();
     return { id: chatId, label, ...(result ? { result } : {}) };
   }
 
@@ -5230,7 +5241,11 @@ export class Daemon {
    * re-checked here too since `stopDelegatesOf`/`stopDelegate` can reach the
    * same chat by a different path.
    */
-  private finishDelegate(chatId: string, outcome: 'done' | 'failed' | 'stopped'): void {
+  private finishDelegate(
+    chatId: string,
+    outcome: 'done' | 'failed' | 'stopped',
+    failure?: string,
+  ): void {
     const state = this.chatState.get(chatId);
     if (!state?.subagent || state.subagent.outcome !== undefined) return;
     const { parentChatId, label } = state.subagent;
@@ -5248,7 +5263,7 @@ export class Daemon {
       outcome === 'done'
         ? lastAssistantMessage(state)?.content.trim() || '(no reply)'
         : outcome === 'failed'
-          ? `FAILED — ${state.lastError?.message ?? 'the turn ended in error'}`
+          ? `FAILED — ${failure ?? state.lastError?.message ?? 'the turn ended in error'}`
           : 'stopped';
     // A caller blocked on this subagent (`wait: true`) gets the result as its
     // tool result, so it is not ALSO delivered as a turn.
@@ -6667,6 +6682,40 @@ export class Daemon {
       }
     }, this.opts.queuedStallSweepMs ?? QUEUED_STALL_SWEEP_MS);
     this.queuedStallSweep.unref?.();
+  }
+
+  /**
+   * A subagent normally reports to its parent from the end of its own turn
+   * (`maybeSettleDelegate`). If its session dies without that hook running, the
+   * parent would wait for ever. A subagent with no turn running or queued, not
+   * waiting on approval or credit, still unsettled on two sweeps in a row, is
+   * failed to its parent.
+   */
+  private ensureDelegateOrphanSweep(): void {
+    if (this.delegateOrphanSweep !== null) return;
+    this.delegateOrphanSweep = setInterval(() => {
+      const seen = new Set<string>();
+      for (const state of this.chatState.list()) {
+        const chatId = state.chatId;
+        if (!state.subagent || state.subagent.outcome !== undefined) continue;
+        if (this.runs.has(chatId) || this.hasQueuedTurns(chatId)) continue;
+        if (state.activity === 'awaiting-permission') continue;
+        if (this.limitBlocks.has(chatId) || this.rateLimitPendingTurns.has(chatId)) continue;
+        if (this.sdkRetryTimers.has(chatId) || state.turnRetrying) continue;
+        if (this.delegateOrphanSeen.has(chatId)) {
+          this.opts.logger.warn(
+            { chatId },
+            'subagent session ended without reporting: failing it to its parent',
+          );
+          this.finishDelegate(chatId, 'failed', 'the session ended without returning a result');
+        } else {
+          seen.add(chatId);
+        }
+      }
+      this.delegateOrphanSeen.clear();
+      for (const id of seen) this.delegateOrphanSeen.add(id);
+    }, this.opts.delegateOrphanSweepMs ?? DELEGATE_ORPHAN_SWEEP_MS);
+    this.delegateOrphanSweep.unref?.();
   }
 
   private ensureSnoozeSweep(): void {
