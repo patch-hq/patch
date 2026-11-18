@@ -3,7 +3,9 @@
 // the bundle's sources use ES-module packages this CommonJS project's compiler
 // cannot resolve; `src/first-run/tsconfig.json` type-checks the other side.
 
-export type SetupChoice = { kind: 'local'; name: string } | { kind: 'remote'; input: string };
+export type SetupChoice =
+  | { kind: 'local'; name: string }
+  | { kind: 'remote'; input: string; host?: { name: string } };
 
 export interface FirstRunApi {
   launch(env: {
