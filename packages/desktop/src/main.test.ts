@@ -524,6 +524,12 @@ test('preload.ts exposes the patch bridge via contextBridge', () => {
   assert.match(src, /patch:start-voice-note/);
 });
 
+test('preload.ts exposes pathForFile through webUtils.getPathForFile', () => {
+  const src = readFileSync(join(here, 'preload.ts'), 'utf8');
+  assert.match(src, /pathForFile\(file: File\): string/);
+  assert.match(src, /webUtils\.getPathForFile\(file\)/);
+});
+
 test('main.ts raises the main window on an incoming call via patch:request-raise IPC (spec/14)', () => {
   const src = readFileSync(join(here, 'main.ts'), 'utf8');
   // The IPC handler is wired, the raise helper foregrounds + steals focus on

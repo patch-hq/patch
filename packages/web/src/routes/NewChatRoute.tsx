@@ -51,6 +51,7 @@ import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
+import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { FirstRunIntro } from '../components/FirstRunIntro.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
@@ -227,7 +228,6 @@ export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
 function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }): JSX.Element {
   // Whole-screen drop zone (spec/14 § Composer): reaches the composer by ref.
   const composerRef = useRef<ComposerHandle>(null);
-  const chatDrop = useWholeChatDrop(composerRef);
   const navigate = useNavigate();
   // E6: the sidebar's Recent folders rows start a new chat in a specific folder
   // via `/chats/new?folder=<path>`. When present it preselects that folder
@@ -965,6 +965,29 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     setChosenHostId(pickerHostId);
     setPickerOpen(false);
   }
+
+  // A folder dropped on the screen (desktop app only — a browser never learns
+  // a path) becomes the chat's folder, on this computer's host.
+  function dropFolder(paths: string[]): void {
+    const dropped = paths[0];
+    const status = getDesktopBridge()?.localHost?.status();
+    if (!dropped || !status) return;
+    void status.then(
+      (st) => {
+        if (!st.installed || !st.hostId) {
+          pushError('No Patch host on this computer, so a dropped folder cannot be opened.');
+          return;
+        }
+        userEditedFolder.current = true;
+        setFolder(dropped);
+        setFolderHostId(st.hostId);
+        setChosenHostId(st.hostId);
+        setPickerOpen(false);
+      },
+      (err: unknown) => pushError(`Could not read this computer's host: ${String(err)}`),
+    );
+  }
+  const chatDrop = useWholeChatDrop(composerRef, dropFolder);
 
   // Choosing the host. Its folders are not the last host's, so the folder
   // becomes the first one in this host's list, and the browser goes back to
