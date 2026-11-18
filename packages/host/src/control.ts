@@ -528,6 +528,15 @@ const GoalSetBody = z
   })
   .strict();
 
+// patch_goal_clear: the agent's claim for the goal judge to test, never a bare clear.
+const GoalFinishBody = z
+  .object({
+    chatId: z.string().min(1),
+    verdict: z.enum(['met', 'impossible']),
+    reason: z.string().min(1),
+  })
+  .strict();
+
 // patch_watch. The MCP child bakes `chatId` from PATCH_CHAT_ID, same as wake —
 // a watch always belongs to the chat that started it.
 const WatchStartBody = z
@@ -2564,7 +2573,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
     const { chatId, goal, then, remindEvery, checkInEvery } = parsed.data;
-    const tool = goal === null ? 'patch_goal_clear' : 'patch_goal_set';
+    const tool = 'patch_goal_set';
     try {
       await opts.daemon!.setGoal(chatId, goal, {
         ...(then !== undefined ? { then } : {}),
@@ -2576,6 +2585,40 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'invalid_input';
       toolLog({ tool, callerChatId: chatId, durationMs: Date.now() - start, ok: false, err: code });
+      return reply
+        .code(code === 'chat_not_found' ? 404 : 400)
+        .send({ error: code, message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // patch_goal_clear — the agent asks to end its goal as met/impossible; the
+  // goal judge must agree (spec/04 § Goals). A bare clear is not available here.
+  app.post('/internal/goal/finish', async (req, reply) => {
+    const start = Date.now();
+    if (require503(reply)) return;
+    const parsed = GoalFinishBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const { chatId, verdict, reason } = parsed.data;
+    try {
+      const out = await opts.daemon!.claimGoalOutcome(chatId, verdict, reason);
+      toolLog({
+        tool: 'patch_goal_clear',
+        callerChatId: chatId,
+        durationMs: Date.now() - start,
+        ok: true,
+      });
+      return { ok: out.accepted, ...out };
+    } catch (err) {
+      const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'invalid_input';
+      toolLog({
+        tool: 'patch_goal_clear',
+        callerChatId: chatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: code,
+      });
       return reply
         .code(code === 'chat_not_found' ? 404 : 400)
         .send({ error: code, message: err instanceof Error ? err.message : String(err) });
