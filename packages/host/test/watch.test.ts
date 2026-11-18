@@ -577,6 +577,52 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
     }
   });
 
+  it('leaves a watch stopped during a slow delivery stopped, and never reports it killed', async () => {
+    let t = 1_000_000;
+    let stopper: (() => void) | undefined;
+    const deps = makeDeps({ now: () => t });
+    const base = deps.deliver;
+    deps.deliver = async (chatId: string, message: string) => {
+      base(chatId, message);
+      await new Promise((r) => setTimeout(r, 50));
+      stopper?.();
+      if (stopper) await new Promise((r) => setTimeout(r, 100)); // let the killed process disappear
+    };
+    const scheduler = mkScheduler(deps);
+    try {
+      const a = scheduler.start({
+        chatId: 'c-st',
+        command: 'sleep 30',
+        description: 'a',
+        timeoutSec: 86_400,
+        checkInSec: 60,
+        cwd: deps.home,
+      });
+      const b = scheduler.start({
+        chatId: 'c-st',
+        command: 'sleep 30',
+        description: 'b',
+        timeoutSec: 86_400,
+        checkInSec: 60,
+        cwd: deps.home,
+      });
+      stopper = () => {
+        scheduler.stop('c-st', a.taskId);
+        scheduler.stop('c-st', b.taskId);
+      };
+      t += 120_000; // both check-ins due; delivering the first stops both mid-tick
+      await flushUntil(() => deps.delivered.length >= 1);
+      await new Promise((r) => setTimeout(r, 400));
+      for (const r of scheduler.list('c-st')) {
+        expect(r.status).toBe('stopped');
+        expect(r.killed).toBeUndefined();
+      }
+      expect(deps.delivered.some((d) => /killed/.test(d.message))).toBe(false);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
   it('does not re-run a watch that finished while the host was down; reports its real exit code', async () => {
     const depsA = makeDeps();
     const schedulerA = mkScheduler(depsA);
