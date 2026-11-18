@@ -1313,7 +1313,10 @@ reports the key, which Settings → Providers sets without a restart.
     writes through to that host and settles when its `claude_settings.updated`
     arrives; aimed at an offline host it is refused up front naming it.
   - Remove host — confirmed, naming how many chats live on it
-    (`10-auth.md` § Revocation).
+    (`10-auth.md` § Revocation). The Manager's home is not removed while
+    another host remains: Remove says so and offers Choose new home, which
+    opens Settings → Manager (`06-threads-manager-speakers.md` § Where special
+    threads run).
 
   Above the list, Add host asks the server for a daemon-registration nonce
   (`10-auth.md` § Host registration) and shows it as a QR and a short code,
@@ -1350,7 +1353,10 @@ reports the key, which Settings → Providers sets without a restart.
   pattern as the Patch tools prompt, § Agent behavior above). Account-wide, not
   per-surface: the sweep runs on the server and the Manager host.
 - Manager — the home host (`06-threads-manager-speakers.md` § Where special
-  threads run), the quiet hours during which no sweep flag is delivered, and the address word
+  threads run), a picker of every registered host; choosing another opens the
+  handover under it, the server's drafted message in an editable box with
+  Cancel and Move to <host>, and nothing changes until Move
+  (§ Changing home). Then the quiet hours during which no sweep flag is delivered, and the address word
   that makes a spoken utterance a turn while a session is in `hands-free`
   (`07-voice-app.md` § Session modes), defaulting to `patch`.
 - Manager & Speakers — the model those two threads run on

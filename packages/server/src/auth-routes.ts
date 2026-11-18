@@ -32,6 +32,7 @@ import {
 import { SignInRequestStore, TooManySignInRequestsError } from './signin-requests.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SettingsError, type SharedSettingsService } from './shared-settings.js';
+import { ManagerHomeError } from './manager-home-error.js';
 
 /** Validate that `s` decodes from base64url to exactly 32 bytes (Ed25519 pub key). */
 function isValidEd25519PublicKey(s: string): boolean {
@@ -704,6 +705,13 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
     try {
       deps.registry.revoke(parsed.data.id);
     } catch (e) {
+      // The Manager's home host is not revoked while another host remains
+      // (spec/06 § Changing home): the user chooses the new home first.
+      if (e instanceof ManagerHomeError && e.code === 'is_home') {
+        return reply
+          .code(409)
+          .send({ error: 'manager_home', message: e.message, hostId: parsed.data.id });
+      }
       return reply.code(404).send({ error: (e as Error).message });
     }
     // spec/10: invalidate the JWT (registry.revoke, above) AND terminate the

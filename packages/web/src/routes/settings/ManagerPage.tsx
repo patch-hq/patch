@@ -17,6 +17,7 @@ import { patchShared } from './sharedWrite.js';
 import { failed } from '../../lib/errorCopy.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
 import { DeliverySlider } from './DeliverySlider.js';
+import { ManagerHomeGroup } from './ManagerHomeGroup.js';
 
 export function ManagerPage(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -39,6 +40,8 @@ export function ManagerPage(): JSX.Element {
 
   return (
     <SettingsPage title="Manager" testid="settings-manager-page">
+      <ManagerHomeGroup />
+
       <Group label="Sweep" testid="settings-sweep">
         <Row title="Enabled">
           <Toggle

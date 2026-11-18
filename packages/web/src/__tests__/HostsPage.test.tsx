@@ -46,6 +46,7 @@ function renderPage(page: Page): void {
           <Route path="/settings/agent" element={<AgentPage />} />
           <Route path="/settings/memories" element={<MemoriesPage />} />
           <Route path="/settings/usage" element={<div data-testid="usage-page" />} />
+          <Route path="/settings/manager" element={<div data-testid="manager-page" />} />
         </Routes>
       </MemoryRouter>
       <ErrorToasts />
@@ -596,6 +597,9 @@ describe('Settings → Hosts → remove', () => {
   beforeEach(() => {
     reportHost('host-a', { hostName: 'laptop' });
     reportHost('host-b', { hostName: 'beta', runsManager: false });
+    // A third host is the Manager's home, so removing either of these is plain.
+    reportHost('host-c', { hostName: 'home-box' });
+    fetchRoutes['GET /api/manager/home'] = () => json(200, { hostId: 'host-c' });
   });
 
   const hostRemoveCalls = (): Array<{ url: string; method: string }> =>
@@ -660,6 +664,45 @@ describe('Settings → Hosts → remove', () => {
     expect(usePresenceStore.getState().hosts['host-a']).toBeDefined();
     expect(screen.getByTestId('host-host-a')).toBeInTheDocument();
     expect(screen.getByTestId('host-detail-host-a')).toBeInTheDocument();
+  });
+
+  // spec/06 § Changing home: the Manager never moves by itself.
+  it('the Manager home is not removed: it asks for a new home first and sends no DELETE', async () => {
+    fetchRoutes['GET /api/manager/home'] = () => json(200, { hostId: 'host-a' });
+    renderPage('hosts');
+    openRow('host-a');
+    fireEvent.click(screen.getByTestId('host-host-a-remove'));
+    const modal = await screen.findByTestId('confirm-modal');
+    expect(modal).toHaveTextContent("laptop is the Manager's home");
+    fireEvent.click(screen.getByTestId('confirm-ok'));
+    expect(await screen.findByTestId('manager-page')).toBeInTheDocument();
+    expect(hostRemoveCalls()).toEqual([]);
+    expect(usePresenceStore.getState().hosts['host-a']).toBeDefined();
+  });
+
+  it("the server's refusal to remove the home is said in its own words", async () => {
+    const said = "laptop is the Manager's home. Choose a new home in Settings → Manager.";
+    fetchRoutes['DELETE /api/hosts/host-a'] = () =>
+      json(409, { error: 'manager_home', message: said, hostId: 'host-a' });
+    renderPage('hosts');
+    openRow('host-a');
+    fireEvent.click(screen.getByTestId('host-host-a-remove'));
+    fireEvent.click(await screen.findByTestId('confirm-ok'));
+    await waitFor(() => expect(errors()).toContain(`remove failed: ${said}`));
+    expect(usePresenceStore.getState().hosts['host-a']).toBeDefined();
+  });
+
+  it('the only host can be removed without asking about the Manager', async () => {
+    clearHosts();
+    reportHost('host-a', { hostName: 'laptop' });
+    fetchRoutes['DELETE /api/hosts/host-a'] = () => json(200, { ok: true, hosts: [] });
+    renderPage('hosts');
+    openRow('host-a');
+    fireEvent.click(screen.getByTestId('host-host-a-remove'));
+    expect(await screen.findByTestId('confirm-modal')).toHaveTextContent('Remove laptop');
+    fireEvent.click(screen.getByTestId('confirm-ok'));
+    await waitFor(() => expect(usePresenceStore.getState().hosts['host-a']).toBeUndefined());
+    expect(fetchCalls.some((c) => c.url === '/api/manager/home')).toBe(false);
   });
 });
 

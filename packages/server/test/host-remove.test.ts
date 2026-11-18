@@ -196,31 +196,48 @@ describe('DELETE /api/hosts/:hostId', () => {
     }
   });
 
-  it('passes the Manager to the next host when its host is removed, and tells that host', async () => {
+  it('refuses to remove the Manager home while another host remains, and moves nothing', async () => {
     const hostLink = new InProcessHostLink();
     hostLink.setHostId('host-a');
     hostLink.addOnlineHost('host-b');
     const s = await setup({ hostLink });
     s.registry.setManagerHostId('host-b');
-    const surface = new WireTestClient({ url: s.url, auth: s.surfaceJwt });
+    s.registry.setHostName('host-b', 'box-b');
     try {
-      await surface.connect();
-      await surface.waitFor('auth.ok');
       const before = hostLink.sent.length;
-
-      expect((await s.remove('host-b')).statusCode).toBe(200);
-
-      expect(hostLink.forgotten).toEqual(['host-b']);
-      expect(s.registry.managerHostId()).toBe('host-a');
-      // The host now running the Manager is told, so its own flag agrees.
+      const res = await s.remove('host-b');
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ error: 'manager_home', hostId: 'host-b' });
+      expect(res.json().message).toMatch(/box-b is the Manager's home.*Settings → Manager/);
+      // Nothing happened: still registered, still home, nobody told to move.
+      expect(s.registry.registeredHostIds()).toEqual(['host-a', 'host-b']);
+      expect(s.registry.managerHostId()).toBe('host-b');
+      expect(hostLink.forgotten).toEqual([]);
       expect(
-        hostLink.sent
-          .slice(before)
-          .filter((m) => m.event.type === 'host.set_manager')
-          .map((m) => [m.hostId, (m.event as { hostId: string }).hostId]),
-      ).toEqual([['host-a', 'host-a']]);
+        hostLink.sent.slice(before).filter((m) => m.event.type === 'host.set_manager'),
+      ).toEqual([]);
     } finally {
-      await surface.close().catch(() => undefined);
+      await s.built.app.close();
+    }
+  });
+
+  it('removes the home once the user has moved it, and the last host even when it is home', async () => {
+    const s = await setup();
+    s.registry.setManagerHostId('host-b');
+    try {
+      const moved = await s.built.app.inject({
+        method: 'PUT',
+        url: '/api/manager/home',
+        headers: { authorization: `Bearer ${s.surfaceJwt}` },
+        payload: { hostId: 'host-a', message: '' },
+      });
+      expect(moved.statusCode).toBe(200);
+      expect((await s.remove('host-b')).statusCode).toBe(200);
+      expect(s.registry.managerHostId()).toBe('host-a');
+      // host-a is now the only host: nowhere else to go, so it can be removed.
+      expect((await s.remove('host-a')).statusCode).toBe(200);
+      expect(s.registry.managerHostId()).toBeNull();
+    } finally {
       await s.built.app.close();
     }
   });
@@ -266,6 +283,24 @@ describe('POST /api/auth/revoke of one host', () => {
     } finally {
       await a.close().catch(() => undefined);
       await b.close().catch(() => undefined);
+      await s.built.app.close();
+    }
+  });
+
+  it('refuses to revoke the Manager home (here the default, never chosen) while another host remains', async () => {
+    const s = await setup();
+    try {
+      const res = await s.built.app.inject({
+        method: 'POST',
+        url: '/api/auth/revoke',
+        headers: { authorization: `Bearer ${s.surfaceJwt}` },
+        payload: { id: 'host-a' },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ error: 'manager_home', hostId: 'host-a' });
+      expect(s.registry.isRevoked('host-a')).toBe(false);
+      expect(s.registry.managerHostId()).toBe('host-a');
+    } finally {
       await s.built.app.close();
     }
   });

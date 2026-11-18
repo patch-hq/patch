@@ -27,6 +27,8 @@ import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
 import { ClaudeSettingsEditor } from './ProvidersPage.js';
 import { PROVIDERS, type SharedRow } from './providers.js';
 import { KeepRunningGroup } from './KeepRunningGroup.js';
+import { serverSays } from './ManagerHomeGroup.js';
+import { failed } from '../../lib/errorCopy.js';
 
 /**
  * The server's refusal, said in words. It answers a machine-readable `error`
@@ -245,6 +247,29 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   }
 
   async function removeHost(): Promise<void> {
+    // The Manager never moves by itself (spec/06 § Changing home): its home is
+    // removed only after the user has chosen another one.
+    const others = Object.keys(usePresenceStore.getState().hosts).filter(
+      (id) => id !== host.hostId,
+    );
+    if (others.length > 0) {
+      let home: string | null;
+      try {
+        home = (await api.managerHome()).hostId;
+      } catch (e) {
+        pushError(failed('remove'), undefined, serverSays(e));
+        return;
+      }
+      if (home === host.hostId) {
+        const choose = await useUiStore.getState().confirm({
+          title: `${name} is the Manager's home`,
+          message: `Choose a new home for the Manager before removing ${name}.`,
+          confirmLabel: 'Choose new home',
+        });
+        if (choose) navigate('/settings/manager');
+        return;
+      }
+    }
     const ok = await useUiStore.getState().confirm({
       title: `Remove ${name}`,
       message: `Remove ${name} from this account? Its chats stop, and it has to be added again to come back.`,
@@ -262,7 +287,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       pushError(
         unknown
           ? `remove failed: the server has no host ${host.hostId}`
-          : `remove failed: ${(e as Error).message}`,
+          : `remove failed: ${serverSays(e)}`,
       );
     }
   }

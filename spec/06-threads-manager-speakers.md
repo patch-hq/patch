@@ -37,7 +37,7 @@ server accepts entries for them from no other host (one writer,
 `patch_history` addressed to a special thread reach it through the server,
 whichever host the caller is on.
 
-The threads never move host by themselves: there is no failover (§ Changing home). While the home host is offline both threads show that
+The threads never move host by themselves: there is no failover (§ Changing home). Removing the home host is refused while any other host is registered, on every route that can remove one (Settings → Hosts → Remove, `patch hosts remove`, `DELETE /api/hosts/:hostId`, `POST /api/auth/revoke`; 409 `manager_home`), with a message saying to choose a new home first; the surfaces ask for that up front and take the user to Settings → Manager. The last host can be removed; the account then has no home until a host is paired. Speakers follows the home, so the same holds for it. While the home host is offline both threads show that
 status (`12-error-and-offline.md`), stay readable from the server's record, and
 take messages, which the server holds and delivers when the home host returns.
 
@@ -228,7 +228,9 @@ This is the equivalent of "reply-all goes to the sender" in email. It removes th
 
 ## Changing home
 
-Changing the home host is a visible handover, made only by the user. The surface
+Changing the home host is a visible handover, made only by the user, from
+Settings → Manager → Home host (web, desktop and mobile) or `patch manager home
+--set` (`17-cli.md`). Picking another host changes nothing yet: the surface
 asks the server for a draft (`GET /api/manager/home/draft?hostId=`): the thread's
 recent conversation, the last `managerContextWindow` messages, which the user
 edits or clears before confirming (`PUT /api/manager/home` `{hostId, message}`).
