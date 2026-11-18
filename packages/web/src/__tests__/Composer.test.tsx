@@ -3219,7 +3219,7 @@ describe('Composer', () => {
       expect(startVoiceCall).not.toHaveBeenCalled();
     });
 
-    it('is disabled while the agent is offline, same as the mic', () => {
+    it('is disabled while the host is offline, same as the mic', () => {
       usePresenceStore.getState().setHostOnline('d1', false);
       render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       expect(screen.getByTestId('call-btn')).toBeDisabled();

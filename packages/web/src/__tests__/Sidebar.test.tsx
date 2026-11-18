@@ -216,7 +216,7 @@ describe('Sidebar', () => {
   // Patch Updates: "Dot should show status" — the WS link to the server can be
   // 'connected' while every host is unreachable (spec/12 § Surface
   // connection state model). The dot must not read as healthy in that case.
-  it('the connection dot shows offline styling + "Agent offline" tooltip when the WS is connected but the host is not', () => {
+  it('the connection dot shows offline styling + host-offline tooltip when the WS is connected but the host is not', () => {
     usePresenceStore.setState({ connection: 'connected', hostOnline: false });
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');

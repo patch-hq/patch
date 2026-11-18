@@ -11,8 +11,8 @@ import { SHORTCUT_TABLE } from '../lib/shortcuts.js';
 //      sentence case — never a sentence explaining what the control does
 //      ("Edit", not "Edit — forks a new track from here").
 //   2. Visible copy does not join two clauses with an em dash. The dash is
-//      helper text wearing punctuation: "Agent offline. Messages are queued…",
-//      never "Agent offline — messages will be queued…".
+//      helper text wearing punctuation: "No host is online. Messages are queued…",
+//      never "No host is online — messages will be queued…".
 //
 // Only STATIC attributes are scanned, PLUS every `shortcutTitle('Name', 'chord')`
 // call — a control with a shortcut writes its tooltip through that helper rather

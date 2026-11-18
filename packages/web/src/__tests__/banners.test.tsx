@@ -39,7 +39,7 @@ describe('HostOfflineBanner', () => {
     usePresenceStore.setState({ connection: 'connected', hostOnline: false, hostsSeeded: true });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toBeTruthy();
-    expect(screen.getByText(/Agent offline/)).toBeTruthy();
+    expect(screen.getByText(/No host is online/)).toBeTruthy();
   });
 });
 

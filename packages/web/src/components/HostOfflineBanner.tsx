@@ -46,7 +46,7 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
         {updating
           ? `${hostName} is being updated to ${updatingTo}. Messages to this chat are queued and sent when it is back.`
           : hostId === undefined
-            ? 'Agent offline. Messages are queued and sent when it reconnects.'
+            ? 'No host is online. Messages are queued and sent when one reconnects.'
             : `${describeHostOffline(hostName, offlineReason)}. Messages to this chat are queued and sent when it reconnects.`}
       </span>
       {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible

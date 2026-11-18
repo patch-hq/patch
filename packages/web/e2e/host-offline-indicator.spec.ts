@@ -44,7 +44,7 @@ test.describe('host offline indicator', () => {
 
     await setHostOnline(page, false);
     await expect(page.getByTestId('daemon-offline-banner')).toBeVisible();
-    await expect(page.getByTestId('daemon-offline-banner')).toContainText('Agent offline');
+    await expect(page.getByTestId('daemon-offline-banner')).toContainText('No host is online');
 
     // And clears once the host is back, without leaving the Jobs page.
     await setHostOnline(page, true);
