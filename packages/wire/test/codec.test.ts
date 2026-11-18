@@ -19,6 +19,13 @@ import {
 } from '../src/index.js';
 
 const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
+  'chat.held_input_expired': {
+    type: 'chat.held_input_expired',
+    chatId: 'c1',
+    text: 'hello',
+    heldAt: 1_700_000_000_000,
+    hostName: 'host-a',
+  },
   'chat.question_activity': { type: 'chat.question_activity', chatId: 'c1' },
   'chat.spawned': {
     type: 'chat.spawned',
