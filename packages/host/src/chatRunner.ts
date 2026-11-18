@@ -856,6 +856,8 @@ export type DelegateStatus = 'running' | 'awaiting-permission' | 'done' | 'faile
 export interface DelegateResult {
   status: 'done' | 'failed' | 'stopped';
   reply: string;
+  /** The account the subagent's last turn ran on (label); absent when it ran on none. */
+  account?: string;
 }
 
 export interface DelegateSummary {
@@ -4724,6 +4726,11 @@ export class Daemon {
     title?: string;
     model?: string;
     folder?: string;
+    /**
+     * A stored account id to lock the subagent to, already resolved by the
+     * caller. Absent: it follows the parent's lock, or automatic routing.
+     */
+    preferredAccountId?: string;
     /** Tools withheld from this subagent (SDK tool names or `mcp__…` ids). */
     disallowedTools?: string[];
     /**
@@ -4752,9 +4759,11 @@ export class Daemon {
         // A parent locked to an account is on it for a reason (often a move off
         // a spent one); the child follows it. An unlocked parent leaves the
         // child on automatic routing, which skips exhausted accounts.
-        ...(parent.preferredAccountId !== undefined
-          ? { preferredAccountId: parent.preferredAccountId }
-          : {}),
+        ...(opts.preferredAccountId !== undefined
+          ? { preferredAccountId: opts.preferredAccountId }
+          : parent.preferredAccountId !== undefined
+            ? { preferredAccountId: parent.preferredAccountId }
+            : {}),
         prompt: opts.prompt,
         subagent: {
           parentChatId: opts.parentChatId,
@@ -5087,7 +5096,12 @@ export class Daemon {
     const waiters = this.delegateWaiters.get(chatId);
     this.delegateWaiters.delete(chatId);
     if (waiters?.length) {
-      for (const w of waiters) w({ status: outcome, reply });
+      const ranOn = this.runningOnAccount.get(chatId);
+      const account =
+        ranOn !== undefined ? (this.opts.accountLabel?.(state.model, ranOn) ?? ranOn) : undefined;
+      for (const w of waiters) {
+        w({ status: outcome, reply, ...(account !== undefined ? { account } : {}) });
+      }
     } else if (outcome !== 'stopped') {
       // A wake that adds no assistant message would re-send the same report.
       const last = outcome === 'done' ? lastAssistantMessage(state) : undefined;

@@ -77,6 +77,21 @@ describe('patch_delegate', () => {
     expect(children[1]?.preferredAccountId).toBeUndefined();
   });
 
+  it("locks a child to an explicitly named account, over the parent's own", async () => {
+    const { daemon, sdk, folder } = setup();
+    const spawned: Array<{ preferredAccountId?: string; subagent?: unknown }> = [];
+    const realSpawn = daemon.spawnChat.bind(daemon);
+    daemon.spawnChat = ((req) => {
+      spawned.push(req);
+      return realSpawn(req);
+    }) as typeof daemon.spawnChat;
+    const parent = await daemon.spawnChat({ folder, preferredAccountId: 'acc-2' });
+    sdk.enqueue([{ type: 'assistant', content: 'ok' }, { type: 'result' }]);
+    await daemon.createDelegate({ parentChatId: parent, prompt: 'a', preferredAccountId: 'acc-3' });
+    const children = spawned.filter((r) => r.subagent !== undefined);
+    expect(children[0]?.preferredAccountId).toBe('acc-3');
+  });
+
   it('uses the given title as the label instead of the prompt', async () => {
     const { daemon, sdk, events, folder } = setup();
     const parentChatId = await daemon.spawnChat({ folder });
