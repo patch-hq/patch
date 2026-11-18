@@ -16,6 +16,7 @@ import type { ChatRow } from '../stores/types.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { api } from '../api/rest.js';
 import * as newWindowLib from '../lib/newWindow.js';
@@ -88,6 +89,10 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
 
 describe('ChatHeader', () => {
   beforeEach(() => {
+    // Files, Editor, Terminal and Browser are experimental: on for these tests.
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     // Kebab open-state lives in the shared chat store; reset between tests so a
     // prior test's open kebab doesn't toggle the next one closed.
     useChatStore.getState()._reset();
@@ -114,6 +119,17 @@ describe('ChatHeader', () => {
   });
   afterEach(() => {
     cleanup();
+  });
+
+  it('draws no Editor, Files or Terminal entry while experimental features are off', () => {
+    usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
+    render(<ChatHeader row={row()} />);
+    expect(screen.queryByTestId('action-editor')).toBeNull();
+    fireEvent.click(screen.getByTestId('action-hamburger'));
+    expect(screen.queryByTestId('hamburger-editor')).toBeNull();
+    expect(screen.queryByTestId('quicklink-files')).toBeNull();
+    expect(screen.queryByTestId('quicklink-terminal')).toBeNull();
+    expect(screen.getByTestId('hamburger-tools')).toBeInTheDocument();
   });
 
   it('has no workers pill beside the title', () => {

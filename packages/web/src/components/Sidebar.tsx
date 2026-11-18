@@ -1264,14 +1264,18 @@ function BottomNav(): JSX.Element {
     <>
       <nav className="sb-bottom" data-testid="bottom-nav">
         <div className="nav-tabs" data-testid="nav-tabs">
-          <button
-            type="button"
-            className={`nav-row ${filesActive ? 'active' : ''}`}
-            data-testid="nav-files"
-            onClick={() => useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' })}
-          >
-            Files
-          </button>
+          {experimentalNav && (
+            <button
+              type="button"
+              className={`nav-row ${filesActive ? 'active' : ''}`}
+              data-testid="nav-files"
+              onClick={() =>
+                useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' })
+              }
+            >
+              Files
+            </button>
+          )}
           {experimentalNav && (
             <OpenableLink
               to="/triage"

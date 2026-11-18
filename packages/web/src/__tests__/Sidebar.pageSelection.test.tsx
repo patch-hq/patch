@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -48,6 +49,9 @@ function renderAt(path: string, ui: JSX.Element = <Sidebar />): void {
 
 describe('Sidebar selection tracks the page you are actually on', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     window.localStorage.clear();
     useChatStore.getState()._reset();
     useLayoutStore.getState()._reset();

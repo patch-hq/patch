@@ -43,6 +43,7 @@ import {
 import {
   anyProviderConnected,
   providerConnectedForModel,
+  useExperimentalFeatures,
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
 import { startVoiceCall } from '../lib/voiceController.js';
@@ -231,6 +232,7 @@ export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
 function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }): JSX.Element {
   // Whole-screen drop zone (spec/14 § Composer): reaches the composer by ref.
   const composerRef = useRef<ComposerHandle>(null);
+  const experimental = useExperimentalFeatures();
   const navigate = useNavigate();
   // E6: the sidebar's Recent folders rows start a new chat in a specific folder
   // via `/chats/new?folder=<path>`. When present it preselects that folder
@@ -262,6 +264,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // always has, just driven by this component's own state now instead of a
   // store shared with a pane system that doesn't reach this far.
   const [terminalTakesPanel, setTerminalTakesPanel] = useState(false);
+  const terminalOn = experimental && terminalTakesPanel;
 
   // Whether a chat creation is in flight (send, voice-note-starts-a-chat, or a
   // header action).
@@ -1516,53 +1519,62 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             new-chat header reads identically; Call lives in the composer
             below, same as a live chat. */}
         <div className="chat-head-actions" data-testid="chat-head-actions">
-          <button
-            type="button"
-            className="head-action"
-            data-testid="new-chat-action-editor"
-            aria-label="Editor"
-            title="Editor"
-            onClick={() =>
-              void createThenRun((chatId) => {
-                // Show the chat in the focused group first, so the files page
-                // opens beside its chat tab rather than racing the route's own
-                // showChat (which is then a no-op: a group already shows it).
-                const layout = useLayoutStore.getState();
-                layout.showChat(chatId);
-                layout.openTab({ kind: 'page', page: 'files', chatId });
-              })
-            }
-          >
-            <Edit3 size={HEAD_ICON} aria-hidden />
-          </button>
+          {experimental ? (
+            <button
+              type="button"
+              className="head-action"
+              data-testid="new-chat-action-editor"
+              aria-label="Editor"
+              title="Editor"
+              onClick={() =>
+                void createThenRun((chatId) => {
+                  // Show the chat in the focused group first, so the files page
+                  // opens beside its chat tab rather than racing the route's own
+                  // showChat (which is then a no-op: a group already shows it).
+                  const layout = useLayoutStore.getState();
+                  layout.showChat(chatId);
+                  layout.openTab({ kind: 'page', page: 'files', chatId });
+                })
+              }
+            >
+              <Edit3 size={HEAD_ICON} aria-hidden />
+            </button>
+          ) : null}
         </div>
       </header>
       {/* spec/14 § Terminal — the Chat / Terminal strip. This screen has no
           pane/tab system of its own (it is the pre-chat draft screen), so the
           switch is local state, not a `layoutStore` tab. */}
-      <div className="terminal-tabs" role="tablist" aria-label="Panel" data-testid="terminal-tabs">
-        <button
-          type="button"
-          role="tab"
-          className={`terminal-tab ${terminalTakesPanel ? '' : 'active'}`}
-          data-testid="terminal-tab-chat"
-          aria-selected={!terminalTakesPanel}
-          onClick={() => setTerminalTakesPanel(false)}
+      {experimental ? (
+        <div
+          className="terminal-tabs"
+          role="tablist"
+          aria-label="Panel"
+          data-testid="terminal-tabs"
         >
-          Chat
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`terminal-tab ${terminalTakesPanel ? 'active' : ''}`}
-          data-testid="terminal-tab-terminal"
-          aria-selected={terminalTakesPanel}
-          onClick={() => setTerminalTakesPanel(true)}
-        >
-          Terminal
-        </button>
-      </div>
-      {terminalTakesPanel ? null : (
+          <button
+            type="button"
+            role="tab"
+            className={`terminal-tab ${terminalTakesPanel ? '' : 'active'}`}
+            data-testid="terminal-tab-chat"
+            aria-selected={!terminalTakesPanel}
+            onClick={() => setTerminalTakesPanel(false)}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`terminal-tab ${terminalTakesPanel ? 'active' : ''}`}
+            data-testid="terminal-tab-terminal"
+            aria-selected={terminalTakesPanel}
+            onClick={() => setTerminalTakesPanel(true)}
+          >
+            Terminal
+          </button>
+        </div>
+      ) : null}
+      {terminalOn ? null : (
         <section className="chat-stream" data-testid="chat-stream">
           {/* Same measured column as the real transcript, so the pending message
             does not flash full width before the chat route takes over. */}
@@ -1611,8 +1623,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           because the folder you want does not exist on the host yet, and a
           shell is how you clone it there. Rooted by the daemon (no folder
           claimed), so it opens even with nothing selected. */}
-      {terminalTakesPanel ? <TerminalPanel chatId="new" ws={ws} /> : null}
-      {terminalTakesPanel ? null : (
+      {terminalOn ? <TerminalPanel chatId="new" ws={ws} /> : null}
+      {terminalOn ? null : (
         <Composer
           // Keyed by draftId so switching drafts remounts the composer and
           // re-seeds its text from the newly-active draft.
