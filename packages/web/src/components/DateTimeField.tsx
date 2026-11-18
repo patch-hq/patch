@@ -5,6 +5,7 @@
 // also accepts typing; the calendar button opens the popover.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
+import { CalendarDays } from 'lucide-react';
 import { TimeDial } from './TimeDial.js';
 
 const MONTHS = [
@@ -149,7 +150,7 @@ export function DateTimeField({
               data-testid={`${testId}-open`}
               onClick={() => (open ? setOpen(false) : openPopover())}
             >
-              ▾
+              <CalendarDays size={16} aria-hidden="true" />
             </button>
           )}
         </span>

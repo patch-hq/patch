@@ -105,7 +105,7 @@ describe('JobsRoute', () => {
     expect(screen.getByTestId('job-trigger-bus')).toHaveTextContent('weekdays at 8:57am');
     expect(screen.getByTestId('job-action-bus')).toHaveTextContent('spawn · skill');
     expect(screen.getByTestId('job-action-bus')).toHaveTextContent('bus-watch');
-    expect(screen.getByTestId('job-trigger-gh')).toHaveTextContent('github webhook');
+    expect(screen.getByTestId('job-trigger-gh')).toHaveTextContent('GitHub webhook');
     expect(screen.getByTestId('job-action-gh')).toHaveTextContent('message · prompt');
   });
 
@@ -353,7 +353,7 @@ describe('JobsRoute', () => {
     await waitFor(() =>
       expect(screen.getByTestId('job-last-fired-recent')).toHaveTextContent(/ago/),
     );
-    expect(screen.getByTestId('job-last-fired-unrun').textContent).toBe('never');
+    expect(screen.getByTestId('job-last-fired-unrun').textContent).toBe('Never run');
   });
 
   it('shows a loading state before the jobs list resolves', async () => {
@@ -549,7 +549,7 @@ describe('JobsRoute', () => {
     await waitFor(() => expect(screen.getByTestId('job-bus')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('job-runs-toggle-bus'));
     await waitFor(() => {
-      expect(screen.getByTestId('inline-runs-bus')).toHaveTextContent('failed to load runs');
+      expect(screen.getByTestId('inline-runs-bus')).toHaveTextContent("Couldn't load runs");
     });
   });
 

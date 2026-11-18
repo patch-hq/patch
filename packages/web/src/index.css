@@ -8906,6 +8906,10 @@ button.view-file-download {
   height: auto;
   min-height: 52px;
   padding-block: 10px;
+  /* The page is a flex column that scrolls, so a long list squeezed the head
+     back to its 52px minimum and a wrapped second row of filters spilled over
+     the list below. */
+  flex-shrink: 0;
 }
 .jobs-route .route-head .nav-history,
 .pads-route .route-head .nav-history {
@@ -9099,9 +9103,29 @@ button.view-file-download {
   flex-direction: column;
   gap: 8px;
 }
-/* The headers of the two folded-away sections, Expired and Archived. */
+/* The headers of the two folded-away sections, Expired and Archived. They
+   fold like Defaults for all jobs above, so they carry the same chevron. */
 .jobs-fold-toggle {
   cursor: pointer;
+  font-family: inherit;
+}
+.jobs-fold-toggle::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  margin-right: -2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.jobs-fold-toggle[aria-expanded='true']::before {
+  transform: rotate(45deg);
+}
+/* A folded section is the last thing on the page; keep its header off the
+   panel's bottom edge. */
+.jobs-section:last-child {
+  padding-bottom: 28px;
 }
 .jobs-fold-toggle:hover {
   color: var(--ink-2);
@@ -9250,6 +9274,12 @@ button.view-file-download {
   font-size: 15px;
   color: var(--ink-3);
   margin-right: 6px;
+}
+/* Enabled and Disabled take the same width, so flipping a switch (or a
+   disabled row among enabled ones) doesn't shift the row's actions sideways. */
+.job-row .toggle-label {
+  display: inline-block;
+  min-width: 4.4em;
 }
 .job-row .job-last-fired {
   font-size: 15px;
@@ -9613,16 +9643,10 @@ button.view-file-download {
 .job-editor form > .form-group:first-child {
   border-top: none;
 }
-/* The collapsed Advanced row is one line, not a block: full group padding left
-   a large empty gap before Trigger's own divider. */
+/* The collapsed Advanced row is one line, not a block: full group padding
+   left a large empty gap between it and the Save row below. */
 .job-editor details.form-group {
-  padding: 12px 0 0;
-}
-.job-editor details.form-group:not([open]) {
-  margin-bottom: -12px;
-}
-.job-editor details.form-group:not([open]) + .form-group {
-  padding-top: 16px;
+  padding: 16px 0 4px;
 }
 .job-editor details.form-group[open] {
   padding-bottom: 24px;
@@ -12806,9 +12830,31 @@ main.empty-state p {
 .recent-runs h3 {
   margin: 0;
   font-size: 15px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+/* The time and the status are single tokens: wrapping them mid-word
+   ("dispatch-" / "error") made each run two ragged lines. The error text
+   beside them is what wraps. */
+.run-row-head > span:first-child,
+.run-row-head > .status {
+  white-space: nowrap;
+}
+/* On a narrow window the error drops under the time and status instead of
+   being squeezed into a sliver beside them. */
+.run-row-head {
+  flex-wrap: wrap;
+}
+.run-row-head > .run-error {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.recent-runs .empty {
+  margin: 0;
+  font-size: 15px;
 }
 .recent-runs ul {
   list-style: none;
@@ -16133,6 +16179,12 @@ select.permission-mode.is-pending {
   padding: 0 10px;
   font: inherit;
   cursor: pointer;
+}
+.dtf-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
 }
 .dtf-popover {
   position: absolute;

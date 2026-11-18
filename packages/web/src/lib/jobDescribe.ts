@@ -9,7 +9,7 @@
 // — and name the zone whenever it is not the reader's own, because "9am" on a
 // row for a job that fires at 10:00 local is worse than no label at all.
 
-import type { Job, JobAction, JobTrigger } from '@patch/wire/jobs';
+import type { Job, JobAction, JobTrigger, WebhookTrigger } from '@patch/wire/jobs';
 import { ensureChatId } from '@patch/wire/jobs';
 import {
   cronZoneLabel,
@@ -58,6 +58,16 @@ export function describeRecurrenceRule(rrule: string): string {
   return recurrencePhrase(rrule) || `recurrence · ${rrule}`;
 }
 
+/** How each webhook scheme reads in a trigger label — product names as written. */
+const WEBHOOK_SCHEME_LABEL: Record<WebhookTrigger['scheme'], string> = {
+  none: 'Unsigned',
+  bearer: 'Bearer',
+  'hmac-sha256': 'HMAC',
+  github: 'GitHub',
+  stripe: 'Stripe',
+  todoist: 'Todoist',
+};
+
 /**
  * Natural-language label for any trigger.
  *
@@ -75,8 +85,7 @@ export function describeTrigger(trigger: JobTrigger, viewerTimeZone?: string): s
       return zone === null ? label : `${label} · ${zone}`;
     }
     case 'webhook': {
-      const scheme = trigger.scheme === 'none' ? 'unsigned' : trigger.scheme;
-      return `${scheme} webhook`;
+      return `${WEBHOOK_SCHEME_LABEL[trigger.scheme]} webhook`;
     }
     case 'todoist':
       return trigger.filter ? `Todoist task ${trigger.filter}` : 'Todoist task tagged @claude';
