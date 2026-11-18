@@ -2141,13 +2141,18 @@ describe('Composer', () => {
         usePreferencesStore.setState({
           preferences: {
             ...DEFAULT_PREFERENCES,
+            experimentalFeatures: true,
             voiceConfig: {
               ...DEFAULT_PREFERENCES.voiceConfig,
               dictation: { ...DEFAULT_PREFERENCES.voiceConfig.dictation, computer },
             },
           },
         });
-      afterEach(() => usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES }));
+      afterEach(() =>
+        usePreferencesStore.setState({
+          preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+        }),
+      );
 
       it("stopping lands the host's tidied transcript and uploads nothing", async () => {
         setEngine('deepgram');

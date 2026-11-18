@@ -1,7 +1,8 @@
 // Vitest setup — jsdom + jest-dom matchers.
 import { useJobDraftStore } from '../stores/jobDraftStore.js';
 import '@testing-library/jest-dom/vitest';
-import { afterEach } from 'vitest';
+import { afterEach, beforeEach } from 'vitest';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { cleanup, configure } from '@testing-library/react';
 import { useUiStore } from '../stores/uiStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
@@ -35,6 +36,15 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 if (typeof Element.prototype.scrollIntoView !== 'function') {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }
+
+// Dictation and calls sit behind Settings → Experimental features (off by
+// default). Tests exercise them, so they start with the switch on; the tests
+// about the switch itself reset to the product default.
+beforeEach(() => {
+  usePreferencesStore.setState({
+    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+  });
+});
 
 afterEach(() => {
   cleanup();

@@ -123,13 +123,15 @@ describe('composer dictation mode', () => {
 
   it('cuts utterances at the pause set in Settings', () => {
     usePreferencesStore.setState({
-      preferences: { ...DEFAULT_PREFERENCES, dictationPauseSeconds: 8 },
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true, dictationPauseSeconds: 8 },
       loaded: true,
     });
     mount();
     keepDictating();
     expect(factory.mock.calls[0]![0].segmenter).toEqual({ silenceMs: 8000 });
-    usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
   });
 
   it('sends each utterance and stays open', () => {
@@ -184,13 +186,19 @@ describe('composer dictation mode', () => {
     expect(typeof factory.mock.calls[0]![0].turnCheck).toBe('function');
     cleanupUnmount();
     usePreferencesStore.setState({
-      preferences: { ...DEFAULT_PREFERENCES, dictationTurnDetection: false },
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        experimentalFeatures: true,
+        dictationTurnDetection: false,
+      },
       loaded: true,
     });
     mount();
     keepDictating();
     expect(factory.mock.calls[1]![0].turnCheck).toBeUndefined();
-    usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
   });
 
   it('releases the mic on unmount', () => {

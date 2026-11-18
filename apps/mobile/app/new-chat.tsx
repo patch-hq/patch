@@ -43,7 +43,7 @@ import { FolderPickerSheet } from '../src/components/FolderPickerSheet';
 import { draftDictationChatId } from '@patch/wire/audio';
 import { Composer, type NewChatSetup } from '../src/components/Composer';
 import { FirstRunIntro } from '../src/components/FirstRunIntro';
-import { useSettingsStore } from '../src/stores/settingsStore';
+import { useExperimentalFeatures, useSettingsStore } from '../src/stores/settingsStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useFolderStore } from '../src/stores/folderStore';
 import { useUiStore } from '../src/stores/uiStore';
@@ -168,6 +168,7 @@ export default function NewChat(): React.ReactElement {
   // The shared accounts a chat on this model could start on (spec/10 —
   // preferred account); null leaves it to the strategy.
   const [preferredAccountId, setPreferredAccountId] = React.useState<string | null>(null);
+  const experimental = useExperimentalFeatures();
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
   const preferable = React.useMemo(
     () =>
@@ -357,24 +358,28 @@ export default function NewChat(): React.ReactElement {
             <ChevronDown size={14} color={colors.ink3} />
           </Pressable>
         </View>
-        <Pressable
-          testID="new-chat-call"
-          onPress={() => void startCall('call')}
-          style={{ padding: space.sm }}
-          accessibilityRole="button"
-          accessibilityLabel="Start voice call"
-        >
-          <Phone size={20} color={colors.ink} />
-        </Pressable>
-        <Pressable
-          testID="new-chat-hands-free"
-          onPress={() => void startCall('hands-free')}
-          style={{ padding: space.sm }}
-          accessibilityRole="button"
-          accessibilityLabel="Start hands-free"
-        >
-          <Ear size={20} color={colors.ink} />
-        </Pressable>
+        {experimental ? (
+          <Pressable
+            testID="new-chat-call"
+            onPress={() => void startCall('call')}
+            style={{ padding: space.sm }}
+            accessibilityRole="button"
+            accessibilityLabel="Start voice call"
+          >
+            <Phone size={20} color={colors.ink} />
+          </Pressable>
+        ) : null}
+        {experimental ? (
+          <Pressable
+            testID="new-chat-hands-free"
+            onPress={() => void startCall('hands-free')}
+            style={{ padding: space.sm }}
+            accessibilityRole="button"
+            accessibilityLabel="Start hands-free"
+          >
+            <Ear size={20} color={colors.ink} />
+          </Pressable>
+        ) : null}
       </View>
 
       <KeyboardAvoidingView

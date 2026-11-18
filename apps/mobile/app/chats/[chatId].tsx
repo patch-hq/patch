@@ -84,6 +84,7 @@ import { DelegateTranscript } from '../../src/components/DelegateTranscript';
 import { DelegateStrip } from '../../src/components/DelegateStrip';
 import { DELEGATE_STATUS_LABEL, delegateStatusColor } from '../../src/lib/delegateStatus';
 import { usePresenceStore } from '../../src/stores/presenceStore';
+import { useExperimentalFeatures } from '../../src/stores/settingsStore';
 import { deliveryTracker } from '../../src/lib/deliveryTracker';
 import { permissionDeliveryTracker } from '../../src/lib/permissionDeliveryTracker';
 import { openExistingSideThread } from '../../src/lib/sideThreadActions';
@@ -272,6 +273,7 @@ export default function ChatDetailScreen(): React.ReactElement {
 }
 
 function ChatDetailBody(): React.ReactElement {
+  const experimental = useExperimentalFeatures();
   const colors = useTheme();
   const router = useRouter();
   // `seq` — opened from a search hit (spec/03 § Chat search): land on that
@@ -1218,7 +1220,7 @@ function ChatDetailBody(): React.ReactElement {
             voice call, so it is hidden there. A long press starts hands-free
             instead — the same sustained session with the line left open
             (spec/07 § Session modes). */}
-        {!readOnlyMirror ? (
+        {experimental && !readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId)}
             onLongPress={() => setCallMenuOpen(true)}
