@@ -313,10 +313,23 @@ export function registerHostsCommands(program: Command): void {
     .action(async (opts: CommonOpts & { os: string }) => {
       await run(opts, async () => {
         const t = getTransport({ ...opts, remote: true });
-        const code = await t.post<{ code: string; expiresAt: number }>(
-          '/api/auth/daemon/pair/start',
-          {},
-        );
+        let code: { code: string; expiresAt: number };
+        try {
+          code = await t.post<{ code: string; expiresAt: number }>(
+            '/api/auth/daemon/pair/start',
+            {},
+          );
+        } catch (err) {
+          // On a host machine the CLI always goes through the host, and the
+          // server refuses to relay pairing. Say where to do it instead.
+          if (err instanceof Error && err.message.includes('path_not_relayable')) {
+            throw new Error(
+              'hosts add cannot run from a host machine, because a host cannot mint registration codes. ' +
+                'Add a machine from the Patch app: Settings → Hosts → Add host.',
+            );
+          }
+          throw err;
+        }
         // The install command comes from the SERVER — never composed here out of
         // this CLI's idea of the server's address or of how a build is named.
         const install = await t.get<{ command: string; version: string }>(
