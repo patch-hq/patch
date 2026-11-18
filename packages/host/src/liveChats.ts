@@ -23,6 +23,8 @@ import type { ChatMeta } from './meta.js';
 export function metaHasLiveWork(m: ChatMeta): boolean {
   if ((m.pendingTurns?.length ?? 0) > 0) return true;
   if (m.status === 'deleted') return false;
+  // A turn cut off by a restart leaves the chat interrupted until its user continues it.
+  if (m.interrupted === true) return true;
   if (m.snoozedUntil !== undefined && m.snoozedUntil !== null) return true;
   // A snooze that came back stays one set until its first interaction clears
   // it (spec/04 § Snooze → Back): every member must be loaded to clear together.
