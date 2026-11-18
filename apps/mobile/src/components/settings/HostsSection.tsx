@@ -18,7 +18,9 @@ import React from 'react';
 import { Alert, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
+  acpBackendStatus,
   backendStatus,
+  isAcpBackendRow,
   providerDescriptor,
   providerForBackendId,
   providerKeyInfo,
@@ -288,10 +290,9 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
     <SettingsSection title="Agents" testID={`host-${hostId}-backends`}>
       {report.backends.map((b) => {
         const provider = PROVIDERS.find((p) => p.id === b.id);
-        const status = backendStatus(
-          b,
-          shared === null ? null : (provider?.rows(shared.secrets) ?? []),
-        );
+        const status = isAcpBackendRow(b.id)
+          ? acpBackendStatus(b)
+          : backendStatus(b, shared === null ? null : (provider?.rows(shared.secrets) ?? []));
         return (
           <Row
             key={b.id}

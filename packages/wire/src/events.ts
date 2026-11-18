@@ -40,6 +40,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
 import { HostProviderKey, ProviderKeyCheck, ProviderKeyId } from './provider-keys.js';
+import { AcpAgentConfig } from './acpAgents.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -254,8 +255,8 @@ export const ChatErrorCode = z.enum([
   'chatgpt_login_required',
   // A local model chat on a host with no local model endpoint configured.
   'local_endpoint_missing',
-  // A Gemini chat on a host with no Gemini CLI installed, or one that is signed out.
-  'gemini_login_required',
+  // An ACP agent refused to start a session for want of a sign-in or key.
+  'acp_agent_signed_out',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.
@@ -2490,6 +2491,13 @@ export const SharedSettings = z
      * `127.0.0.1` means that host. Empty clears it.
      */
     localModelBaseUrl: z.union([z.literal(''), z.string().url()]).optional(),
+    /**
+     * Agent Client Protocol agents this account adds to the built-in ones, or
+     * replaces by id (spec/02 § Provider adapters): each the command that
+     * starts it speaking ACP, its label, and which provider keys it reads.
+     * Absent: only the built-in agents. Each host offers the ones it can run.
+     */
+    acpAgents: z.array(AcpAgentConfig).max(32).optional(),
     /**
      * The values the user chose for each provider's OWN settings, keyed by
      * provider id then the setting's key (spec/10 § Provider settings). Only a

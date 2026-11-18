@@ -55,11 +55,6 @@ export interface MakeTitleGeneratorOptions {
     sdkBackend: SdkBackend;
     resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
   };
-  /** The same for a Gemini (ACP) chat. */
-  gemini?: {
-    sdkBackend: SdkBackend;
-    resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
-  };
   logger?: Logger;
 }
 
@@ -159,13 +154,20 @@ export function makeTitleGenerator(
 ): (input: GenerateTitleInput) => Promise<string | null> {
   return async function generateTitle(input: GenerateTitleInput): Promise<string | null> {
     // A provider with its own title route runs titles on the chat's own model.
-    const ownByProvider: Record<HarnessId, { dep: typeof opts.codex; name: string } | undefined> = {
+    // `null`: the provider's chats get no generated title. An ACP agent would
+    // run the title as a turn of its own, in a session the agent keeps in its
+    // own history, with its own tools to hand.
+    const ownByProvider: Record<
+      HarnessId,
+      { dep: typeof opts.codex; name: string } | undefined | null
+    > = {
       claude: undefined,
       codex: { dep: opts.codex, name: 'Codex' },
       local: { dep: opts.local, name: 'local model' },
-      gemini: { dep: opts.gemini, name: 'Gemini' },
+      acp: null,
     };
     const own = ownByProvider[providerForModel(input.chatModel)];
+    if (own === null) return null;
     if (own) {
       const model = input.chatModel!;
       if (!own.dep) {

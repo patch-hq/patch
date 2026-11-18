@@ -6,13 +6,8 @@ import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { HARNESS_TRAITS } from './harnesses.js';
 import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
-import {
-  findGemini,
-  GEMINI_BACKEND_ID,
-  GEMINI_MISSING,
-  geminiModels,
-  makeGeminiBackend,
-} from './geminiAgent.js';
+import { ACP_BACKEND_ID, AcpRegistry } from './acpRegistry.js';
+import { AcpBackend } from './acpBackend.js';
 import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
@@ -68,7 +63,7 @@ import { ChatMoveError } from './chatMove.js';
 import { expandHome } from './expandHome.js';
 import { gitDirtyPaths } from './git-dirty.js';
 import { listFilesRecursive } from './files-recursive.js';
-import { agentHeldHistory, createHistoryReader } from './history.js';
+import { createHistoryReader } from './history.js';
 import type {
   ChatErrorCode,
   McpServerConfig,
@@ -122,6 +117,7 @@ import {
   assessHostHealth,
   HOST_HEALTH_INTERVAL_MS,
   providerDescriptor,
+  parseAcpModel,
   providerForModel,
 } from '@patch/wire';
 import type { ChatInputEvent } from '@patch/wire';
@@ -801,6 +797,7 @@ async function startHost(
       claudeProjectsRoot: config.claudeProjectsRoot,
       codexHistoryRoot: join(config.patchHome, 'openai-history'),
       localHistoryRoot: localHistoryDir(config.patchHome),
+      acpHistoryRoot: join(config.patchHome, 'acp-history'),
       seqIndexPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'seqindex.jsonl'),
       now: () => Date.now(),
       onCorruptLine: ({ path, message }) =>
@@ -842,7 +839,19 @@ async function startHost(
     undefined,
     localAgent,
   );
-  const geminiBackend = makeGeminiBackend();
+  // ACP agents (spec/02 § Provider adapters): which agents exist is the shared
+  // `acpAgents` setting over the built-in list; this host offers those whose
+  // command it has. Their credential is a shared provider key.
+  let onAcpChange: () => void = () => undefined;
+  const acpRegistry = new AcpRegistry({
+    providerKey: (id) => providerKeys.get(id),
+    baseEnv: () => ({ ...process.env }),
+    scratchDir: join(config.patchHome, 'acp-probe'),
+    clientVersion: VERSION,
+    onChange: () => onAcpChange(),
+  });
+  const acpHistory = new CodexHistory(join(config.patchHome, 'acp-history'), 'acp');
+  const acpBackend = new AcpBackend(acpRegistry, acpHistory, VERSION);
   const routedBackend: SdkBackend = {
     run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
   };
@@ -1362,6 +1371,7 @@ async function startHost(
           credentialOk,
           ...(oauth.error ? { error: oauth.error.message } : {}),
         }),
+        ...acpRegistry.backendEntries(),
       ],
       components: components.describe(),
       ...(kokoroVoice !== undefined ? { kokoroVoice } : {}),
@@ -1462,6 +1472,11 @@ async function startHost(
   const publishHost = (): void => {
     link.send(describeHost());
   };
+  // An ACP agent's sign-in state or the configured list changed: Settings →
+  // Hosts shows the fresh rows.
+  onAcpChange = publishHost;
+  // A provider key an ACP agent reads changed: its next probe sees the new one.
+  providerKeys.onChange(() => publishHost());
   // A provider key set or revoked from Settings: every surface's Keys block and
   // Settings → Voice's "not configured" line follow from the fresh report, and
   // the log says which configured surfaces are now without a key.
@@ -2020,6 +2035,7 @@ async function startHost(
       logger.error({ err }, 'Claude Code settings not written: settings.json cannot be edited');
     }
     localModels.setBaseUrl(shared.localModelBaseUrl);
+    acpRegistry.setConfigured(shared.acpAgents);
     setDefaultModel(shared.defaultModel);
     if (shared.specialThreadModel !== specialThreadModel) {
       specialThreadModel = shared.specialThreadModel;
@@ -2904,7 +2920,7 @@ async function startHost(
           selfHostId,
           codexAccounts,
           localModels,
-          () => geminiModels(geminiBackend, process.cwd()),
+          acpRegistry,
         );
         return;
       }
@@ -4427,11 +4443,23 @@ async function startHost(
       nextAccountAfterExhausted: () => undefined,
       accountRouting: () => undefined,
     },
-    // An ACP agent holds its own sign-in; the host only checks it is installed.
-    gemini: {
-      run: (opts) => geminiBackend.run(opts),
-      resolveCredential: async () =>
-        findGemini() ? { ok: true, accessToken: '' } : { ok: false, reason: GEMINI_MISSING },
+    // An ACP agent's credential is its provider key or its own sign-in, which
+    // only the agent can judge: a turn is refused here only for an agent that
+    // is not installed, or one the agent itself last said was signed out.
+    acp: {
+      run: (opts) => acpBackend.run(opts),
+      resolveCredential: async (model) => {
+        const agentId = parseAcpModel(model)?.agentId;
+        const agent = agentId !== undefined ? acpRegistry.agent(agentId) : undefined;
+        if (!agent)
+          return {
+            ok: false,
+            reason: `${model ?? 'This model'} is not an ACP agent this account has.`,
+          };
+        if (!acpRegistry.command(agent))
+          return { ok: false, reason: `${agent.label} is not installed on this host.` };
+        return { ok: true, accessToken: '' };
+      },
       heldAccounts: () => [],
       accountLabel: () => undefined,
       accountSpent: () => ({ spent: false }),
@@ -4676,6 +4704,7 @@ async function startHost(
         modelCatalog.get().then((r) => r.models),
         codexAccounts.models(),
         localModels.configured ? localModels.models() : Promise.resolve([]),
+        acpRegistry.models().then((r) => r.models),
       ]);
       const models = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
       if (!models.length)
@@ -4710,7 +4739,7 @@ async function startHost(
         claude: claudeHistory,
         codex: codexHistory,
         local: localHistory,
-        gemini: agentHeldHistory,
+        acp: acpHistory,
       };
       const readerFor = (sessionId: string) => readers[providerForSessionId(sessionId)!];
       return {
@@ -4807,7 +4836,6 @@ async function startHost(
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       local: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
-      gemini: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
     }),
     // patch/todo.md § Features to add — "Current status": after each turn
@@ -6455,7 +6483,7 @@ export async function handleModelsRequest(
   hostId: string,
   codex?: CodexAccounts,
   local?: LocalModels,
-  gemini?: () => Promise<{ id: string; label: string }[]>,
+  acp?: AcpRegistry,
 ): Promise<void> {
   // Every entry names the backend serving it, and a backend that failed is
   // returned as an error AGAINST THAT BACKEND alongside the models that did
@@ -6469,8 +6497,6 @@ export async function handleModelsRequest(
       { backend: CLAUDE_BACKEND_ID, load: catalog.get().then((s) => s.models) },
       { backend: CODEX_BACKEND_ID, load: codex.models() },
       ...(local?.configured ? [{ backend: LOCAL_BACKEND_ID, load: local.models() }] : []),
-      // Only asked when the Gemini CLI is installed: a host without it has no error to report.
-      ...(gemini && findGemini() ? [{ backend: GEMINI_BACKEND_ID, load: gemini() }] : []),
     ];
     const outcomes = await Promise.allSettled(sources.map((src) => src.load));
     const models: { id: string; label: string; backend: string }[] = [];
@@ -6481,6 +6507,13 @@ export async function handleModelsRequest(
         models.push(...result.value.map((m) => ({ ...m, backend })));
       else errors.push({ backend, code: 'upstream', message: String(result.reason) });
     });
+    // Each installed ACP agent offers its models or says, against itself, why not.
+    if (acp) {
+      const offered = await acp.models();
+      models.push(...offered.models.map((m) => ({ ...m, backend: ACP_BACKEND_ID })));
+      for (const e of offered.errors)
+        errors.push({ backend: ACP_BACKEND_ID, code: 'upstream', message: e.message });
+    }
     sender({
       type: 'patch.models.response',
       requestId: event.requestId,

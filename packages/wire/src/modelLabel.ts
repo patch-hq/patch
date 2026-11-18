@@ -3,6 +3,8 @@
 // where there is room for about "Opus 5.5" and not for "Claude Opus 5.5" or
 // `claude-opus-5-5-20260101`.
 
+import { parseAcpModel } from './acpAgents.js';
+
 /**
  * The catalogue's own label when there is one, minus the brand prefix every
  * Claude model shares; otherwise the id itself reduced the same way
@@ -13,6 +15,9 @@ export function compactModelLabel(modelId: string, catalogueLabel?: string): str
   if (catalogueLabel !== undefined && catalogueLabel !== '') {
     return catalogueLabel.replace(/^Claude\s+/i, '');
   }
+  // An ACP agent's model (`acp/<agent>/<model>`) reads as the agent's own id.
+  const acp = parseAcpModel(modelId);
+  if (acp !== undefined) return acp.modelId;
   const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(modelId);
   if (m === null) return modelId;
   const family = m[1] ?? '';

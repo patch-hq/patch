@@ -44,3 +44,31 @@ export function backendStatus(
   if (b.state === 'installing') return { text: 'Installing…', needsSignIn };
   return { text: account, needsSignIn };
 }
+
+/** Is this host backend row an ACP agent (`acp:<agent id>`)? */
+export function isAcpBackendRow(id: string): boolean {
+  return id.startsWith('acp:');
+}
+
+/**
+ * An ACP agent's row (spec/02 § Provider adapters). Its sign-in is its provider
+ * key or the agent's own login on the host, which the host learns by asking
+ * the agent, so the row says what the host reported. There is no sign-in
+ * button: the key is added under Settings → Providers.
+ */
+export function acpBackendStatus(b: { state: string; error?: string | undefined }): {
+  text: string;
+  needsSignIn: boolean;
+  details?: string;
+} {
+  if (b.state === 'logged-out')
+    return { text: 'Not signed in · add its key under Settings → Providers', needsSignIn: false };
+  if (b.state === 'failed')
+    return {
+      text: 'Not working on this machine',
+      needsSignIn: false,
+      ...(b.error ? { details: b.error } : {}),
+    };
+  if (b.state === 'absent') return { text: 'Not installed on this machine', needsSignIn: false };
+  return { text: 'Ready', needsSignIn: false };
+}

@@ -1,6 +1,10 @@
 # Providers
 
-A provider is an agent harness a chat can run on (today: `claude`, `codex`, `local`).
+A provider is an agent harness a chat can run on (today: `claude`, `codex`, `local`, `acp`).
+
+## Adding an ACP agent
+
+An agent that speaks the Agent Client Protocol needs no code: it is an entry in the shared `acpAgents` setting (`packages/wire/src/acpAgents.ts`), `{ id, label, command, args, keys?, modes? }`, e.g. `{ "id": "goose", "label": "Goose", "command": "goose", "args": ["acp"] }`. `keys` maps an environment variable to a shared provider key; `modes` maps Patch's permission modes to the agent's own session modes. Gemini CLI is built in. Its models appear as `acp/<id>/<model>` on every host that has the command (spec/02 § ACP agents).
 
 ## Adding one
 
@@ -18,7 +22,7 @@ Cost note: any paid API needs Tom's sign-off and a spend cap before first use.
 
 | Provider                               | Prefix        | Route                                           | Notes                                                                         |
 | -------------------------------------- | ------------- | ----------------------------------------------- | ----------------------------------------------------------------------------- |
-| Gemini                                 | `google/`     | Gemini CLI (agentic) or API                     | Key already stored (`gemini`); free tier is limited; paid use needs approval. |
+| Gemini                                 | `acp/gemini/` | Gemini CLI over ACP (built in)                  | Key already stored (`gemini`); free tier is limited; paid use needs approval. |
 | DeepSeek                               | `deepseek/`   | OpenAI-compatible API through a generic harness | Very cheap per token; key needed.                                             |
 | Local (Ollama / llama.cpp / LM Studio) | `local/`      | OpenAI-compatible endpoint on the host          | Free, private; capability depends on model; endpoint URL is host config.      |
 | OpenRouter                             | `openrouter/` | OpenAI-compatible API                           | One key reaches many models; good catch-all.                                  |

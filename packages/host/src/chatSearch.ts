@@ -72,6 +72,8 @@ export interface ChatSearchIndexOptions {
   codexHistoryRoot: string;
   /** Where local-model sessions' history lives (same format as Codex's). */
   localHistoryRoot: string;
+  /** Where ACP agents' turns are recorded (`acpBackend.ts`). */
+  acpHistoryRoot?: string;
   /** A chat's canonical-seq sidecar — read, never written. */
   seqIndexPath: (chatId: string) => string;
   now: () => number;
@@ -196,8 +198,6 @@ export class ChatSearchIndex {
     const sessionId = chat.claudeSessionId;
     if (!sessionId) return null;
     // Where each provider's adapter keeps its transcripts, and in which format.
-    // An ACP agent's session is its own and is not read: only the chat's name
-    // and preview are searchable here (the server searches its record).
     const transcripts: Record<ProviderId, () => { path: string; kind: 'claude' | 'codex' } | null> =
       {
         claude: () => ({
@@ -212,7 +212,10 @@ export class ChatSearchIndex {
           path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`),
           kind: 'codex',
         }),
-        gemini: () => null,
+        acp: () =>
+          this.opts.acpHistoryRoot
+            ? { path: join(this.opts.acpHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' }
+            : null,
       };
     return transcripts[providerForSessionId(sessionId)!]();
   }
