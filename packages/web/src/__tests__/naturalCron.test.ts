@@ -173,7 +173,8 @@ describe('describeCron', () => {
   });
 
   it('returns empty string for unfamiliar shapes', () => {
-    expect(describeCron('5 4 1 1 *')).toBe('');
+    expect(describeCron('5 4 1 1 1')).toBe('');
+    expect(describeCron('5 4 * 1 *')).toBe('');
     expect(describeCron('not a cron')).toBe('');
   });
 
