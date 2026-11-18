@@ -538,11 +538,16 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   // ---- 3. Put the artifact under the user's own ~/.patch ----------------
   const patchHome = join(home, '.patch');
   const installDir = join(patchHome, 'versions', build.version);
-  mkdirSync(installDir, { recursive: true });
   if (resolve(ctx.artifactDir) !== resolve(installDir)) {
+    // Start from an empty dir: cpSync cannot merge a symlink onto one left by
+    // an earlier install of this version (EEXIST).
+    rmSync(installDir, { recursive: true, force: true });
+    mkdirSync(installDir, { recursive: true });
     // verbatimSymlinks: without it Node rewrites relative links as absolute
     // paths into the (temporary) source dir, which dangle once it is deleted.
     cpSync(ctx.artifactDir, installDir, { recursive: true, verbatimSymlinks: true });
+  } else {
+    mkdirSync(installDir, { recursive: true });
   }
   const dangling = findDanglingSymlinks(installDir);
   if (dangling.length > 0) {
