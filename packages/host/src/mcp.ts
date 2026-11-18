@@ -573,16 +573,23 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_goal_clear',
     {
       description:
-        "Clear THIS chat's goal without judging it — no met/impossible verdict is recorded, the " +
-        'evaluator simply stops. No-op if none is set. Use when the goal is no longer relevant (the ' +
-        'user changed direction) rather than letting the evaluator eventually call it impossible.',
-      inputSchema: {},
+        "Ask to clear THIS chat's goal by claiming it is `met` or `impossible`. You cannot just drop " +
+        'a goal: the goal judge tests your claim against the conversation now, and the goal clears ' +
+        "only if the judge agrees (the outcome it records is the judge's, not yours). If it " +
+        'disagrees the goal stays set and you get its reason back. No-op if no goal is set. To ' +
+        'change direction, ask the user (they can clear it with /goal).',
+      inputSchema: {
+        outcome: z
+          .enum(['met', 'impossible'])
+          .describe('Your claim: the goal is achieved, or cannot be.'),
+        reason: z.string().min(1).describe('The evidence for the claim, for the judge to test.'),
+      },
     },
-    async () => {
+    async ({ outcome, reason }) => {
       const res = await uds<unknown>({
         method: 'POST',
-        path: '/internal/goal',
-        body: { chatId: callerChatId, goal: null },
+        path: '/internal/goal/finish',
+        body: { chatId: callerChatId, verdict: outcome, reason },
       });
       return toolResult(res);
     },

@@ -5525,6 +5525,57 @@ export class Daemon {
   }
 
   /**
+   * The agent asks to end its OWN goal as `met` or `impossible`. It is never
+   * taken on trust: the goal judge is asked the same question with the claim
+   * in front of it, and the goal only ends when the judge reaches the same
+   * verdict. Otherwise the goal stays set and the judge's reason comes back to
+   * the agent. NO FALLBACK: a judge that cannot answer refuses the claim.
+   */
+  async claimGoalOutcome(
+    chatId: string,
+    claimed: 'met' | 'impossible',
+    claim: string,
+  ): Promise<{ accepted: boolean; verdict?: string; reason: string }> {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    const condition = state.goal;
+    if (condition === null) return { accepted: false, reason: 'This chat has no goal set.' };
+    const evaluator = this.opts.evaluateGoal;
+    if (!evaluator) {
+      return {
+        accepted: false,
+        reason: 'No goal judge is configured, so the goal cannot be ended.',
+      };
+    }
+    const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
+    const result = await evaluator({
+      chatId,
+      condition,
+      transcript: renderGoalTranscript(state.lastMessages),
+      turnsEvaluated,
+      folder: state.folder,
+      background: this.describeBackgroundForGoal(chatId),
+      userScope: renderUserScope(state.lastMessages),
+      agentStatement:
+        `The agent is asking to end the goal as "${claimed}" and says: ${claim}\n` +
+        'The transcript may not yet include its latest tool calls. Judge the claim yourself: ' +
+        `answer "${claimed}" only if it is really true, otherwise answer not_met.\n\n` +
+        renderAgentStatement(state.lastMessages),
+    });
+    if (result === null) {
+      return {
+        accepted: false,
+        reason: 'The goal judge gave no answer, so the goal was not ended. Try again.',
+      };
+    }
+    if (result.verdict !== claimed) {
+      return { accepted: false, verdict: result.verdict, reason: result.reason };
+    }
+    this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
+    return { accepted: true, verdict: result.verdict, reason: result.reason };
+  }
+
+  /**
    * Put `goal` (and the plan around it) in force: fresh counters, the agent
    * told on its next turn, persisted. Shared by `setGoal` and the sequence
    * advancing to its next goal (spec/04 § Goals — sequence).
