@@ -10645,8 +10645,8 @@ export class Daemon {
     this.clearInterrupted(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
-    if (state.goalProgress?.pausedByStop)
-      state.goalProgress = { ...state.goalProgress, pausedByStop: false };
+    if (state.goalProgress?.pausedByStop || state.goalProgress?.waitingOnUser)
+      state.goalProgress = { ...state.goalProgress, pausedByStop: false, waitingOnUser: false };
     this.emitState(chatId);
 
     // Record the turn as in-flight BEFORE the SDK is asked to run it. Everything
@@ -12638,7 +12638,22 @@ export class Daemon {
       }
     }
 
-    if (result.verdict === 'refused' || result.verdict === 'blocked') {
+    if (result.verdict === 'blocked') {
+      // spec/04 § Goals — the agent needs something only the user can give. Hold
+      // the goal (no resubmit: nothing the agent can do), put the chat in front of
+      // the user as a question, and carry on when their next turn starts.
+      state.goalRefusalStreak = 0;
+      state.goalProgress = { ...state.goalProgress, waitingOnUser: true };
+      this.emitState(chatId);
+      void this.declareStatus(chatId, 'question', `Goal waiting on you: ${result.reason}`).catch(
+        (err) => {
+          this.opts.logger.warn({ chatId, err }, 'goal waiting on user: declareStatus failed');
+        },
+      );
+      return;
+    }
+
+    if (result.verdict === 'refused') {
       state.goalRefusalStreak += 1;
       if (state.goalRefusalStreak >= this.goalRefusalLimit) {
         // Deadlock: the agent keeps declining. Stop pushing, keep the goal, and
@@ -12648,9 +12663,7 @@ export class Daemon {
         void this.declareStatus(
           chatId,
           'report',
-          result.verdict === 'blocked'
-            ? `Goal deadlocked: the agent said it is blocked on you ${this.goalRefusalLimit} times running. ${result.reason}`
-            : `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
+          `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
         ).catch((err) => {
           this.opts.logger.warn({ chatId, err }, 'goal deadlock guard: declareStatus failed');
         });
@@ -12664,11 +12677,7 @@ export class Daemon {
       state.goalRefusalStreak = 0;
     }
 
-    if (
-      result.verdict === 'not_met' ||
-      result.verdict === 'refused' ||
-      result.verdict === 'blocked'
-    ) {
+    if (result.verdict === 'not_met' || result.verdict === 'refused') {
       this.emitState(chatId);
       // A turn is already running, so the agent is not stopping; the goal is
       // re-evaluated when that turn settles. Nudging now would only queue noise.
