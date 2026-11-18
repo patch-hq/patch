@@ -124,6 +124,24 @@ describe('ChatRoute — /goal command + goal banner', () => {
     expect(screen.getByTestId('goal-pill')).toHaveTextContent('Paused');
   });
 
+  it('never shows the goal as working when the chat is archived', () => {
+    seed('Ship the release', {
+      startedAt: Date.now(),
+      turnsEvaluated: 1,
+      tokensSpent: 0,
+      lastVerdict: null,
+      lastReason: null,
+      pausedByStop: false,
+    });
+    useChatStore.setState((s) => ({
+      chats: { ...s.chats, c1: { ...s.chats['c1']!, status: 'archived' } },
+    }));
+    renderChat();
+    expect(screen.getByTestId('goal-pill')).toHaveTextContent('Paused');
+    expect(screen.getByTestId('goal-pill')).not.toHaveTextContent('Working');
+    expect(screen.getByTestId('goal-banner-paused-note')).toHaveTextContent('archived');
+  });
+
   it('does not show the goal as paused while it is running', () => {
     seed('Ship the release', {
       startedAt: Date.now(),

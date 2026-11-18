@@ -83,7 +83,10 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
     }
   }
 
-  const paused = progress?.pausedByStop === true;
+  // An archived chat has stopped all its work (spec/04 § Lifecycle), so its goal
+  // is on hold whatever the goal progress says: never drawn as Working.
+  const archived = row.status === 'archived';
+  const paused = archived || progress?.pausedByStop === true;
   const meta = progress
     ? `${formatElapsed(now - progress.startedAt)} · ${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}${(row.goalQueue ?? []).length > 0 ? ` · ${(row.goalQueue ?? []).length} to follow` : ''}`
     : null;
@@ -106,7 +109,9 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
       <>
         {paused && (
           <div data-testid="goal-banner-paused-note">
-            You stopped the chat. Send a message to resume.
+            {archived
+              ? 'This chat is archived. Unarchive it to resume.'
+              : 'You stopped the chat. Send a message to resume.'}
           </div>
         )}
         {expanded && (queue.length > 0 || remind !== null || checkInEvery !== null) && (
