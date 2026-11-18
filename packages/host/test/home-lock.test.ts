@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -28,8 +28,23 @@ describe('acquireHomeLock', () => {
     expect(() => acquireHomeLock(home).release()).not.toThrow();
   });
 
-  it('fails loudly on a lock file it cannot understand', () => {
-    writeFileSync(join(home, 'daemon.lock'), 'garbage');
-    expect(() => acquireHomeLock(home)).toThrow(/unreadable/);
+  it.each([
+    ['empty', ''],
+    ['garbage', 'garbage'],
+  ])('replaces an %s lock left by a crash, with a log line', (_n, body) => {
+    const lock = join(home, 'daemon.lock');
+    writeFileSync(lock, body);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    const logs: string[] = [];
+    const held = acquireHomeLock(home, (m) => logs.push(m));
+    expect(logs.join()).toMatch(/stale/);
+    expect(readFileSync(lock, 'utf8').trim()).toBe(String(process.pid));
+    held.release();
+  });
+
+  it('does not steal an empty lock that was only just created', () => {
+    writeFileSync(join(home, 'daemon.lock'), '');
+    expect(() => acquireHomeLock(home)).toThrow(/just created/);
   });
 });

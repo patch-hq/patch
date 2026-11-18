@@ -17,6 +17,7 @@
 // half-updated: everything is downloaded and checked in a staging directory
 // first, then moved into place, manifests last.
 
+import { pruneDownloads } from './release-prune.js';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -374,6 +375,11 @@ export function startReleaseMirror(
     } catch (err: unknown) {
       log(`release mirror FAILED: ${err instanceof Error ? err.message : String(err)}`);
       return;
+    }
+    try {
+      pruneDownloads(opts.downloadsDir, log);
+    } catch (err: unknown) {
+      log(`release prune FAILED: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
       opts.afterCheck?.();

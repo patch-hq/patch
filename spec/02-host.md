@@ -893,7 +893,7 @@ not pass through the outbox. The frames are in `03-wire-protocol.md` § Host out
 
 ## One host per state directory
 
-A host takes `<state dir>/daemon.lock` (its pid) before it reads or writes anything, and a second host on the same directory exits at once naming the first. Two hosts on one directory would number the same chats and the same outbox independently, and the server would refuse one of them. A lock whose owner is no longer alive is taken over; it is released on shutdown.
+A host takes `<state dir>/daemon.lock` (its pid) before it reads or writes anything, and a second host on the same directory exits at once naming the first. Two hosts on one directory would number the same chats and the same outbox independently, and the server would refuse one of them. A lock whose owner is no longer alive, or that is empty or unreadable (a full disk leaves it so), is taken over with a log line; it is released on shutdown.
 
 ## Host identity
 
