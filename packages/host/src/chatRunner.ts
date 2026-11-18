@@ -96,6 +96,7 @@ import type {
   RateLimitWindow,
   HarnessId,
   LoggedEvent,
+  LogRecord,
   NativeRef,
   PermissionDecisionBy,
   TurnOutcome,
@@ -1354,6 +1355,7 @@ import {
 import { identityHash, readSeqIndexFile } from './seqIndex.js';
 import { ChatLog, HistoryWriteError } from './chatLog.js';
 import { readTrack, readTrackRecords } from './readTrack.js';
+import { recordEntries, turnBoundaryOf } from './recordEntries.js';
 import { toClaudeSessionEntries, estimateTokens, type TrackEntry } from './nativeReconstruct.js';
 import {
   buildMoveBundle,
@@ -2556,6 +2558,10 @@ export class Daemon {
         logger: options.logger,
         now: this.opts.now,
       });
+    // spec/01 § Chat record — a turn's start and end reach the server's record
+    // the moment the log writes them, including the end a restart writes for a
+    // turn its process left open.
+    this.chatLog.onRecord((chatId, record) => this.sendTurnBoundary(chatId, record));
     this.claudeProjectsRoot = options.claudeProjectsRoot ?? defaultClaudeProjectsRoot();
     this.historyReader =
       options.historyReader ?? createHistoryReader({ claudeProjectsRoot: this.claudeProjectsRoot });
@@ -16458,14 +16464,18 @@ export class Daemon {
    * its seq. Returns false when the event is a harness re-send of one this turn
    * already logged, in which case it is not shown either.
    */
-  private logEmitted(chatId: string, event: WireEvent, seq: number): boolean {
+  private logEmitted(
+    chatId: string,
+    event: WireEvent,
+    seq: number,
+  ): false | { nativeRef?: NativeRef } {
     if (isLoggedEvent(event)) {
       // A tool-run summary is Patch's own and lands whenever the model answers,
       // often in a later turn — it belongs to no harness message, so it takes
       // no native ref (and no dedupe key derived from one).
       const ref =
         event.type === 'chat.tool_run_summary' ? undefined : this.envelopeRefs.get(chatId);
-      return this.logRecord(
+      const logged = this.logRecord(
         chatId,
         { k: 'event', event: stripSurfaceId(event) },
         {
@@ -16475,6 +16485,8 @@ export class Daemon {
           ...(ref !== undefined ? { nativeRef: ref, dedupeKey: nativeDedupeKey(ref, event) } : {}),
         },
       );
+      if (!logged) return false;
+      return ref !== undefined ? { nativeRef: ref } : {};
     }
     if (event.type === 'chat.permission_request') {
       this.logRecord(
@@ -16491,10 +16503,47 @@ export class Daemon {
         },
         { seq },
       );
-      return true;
+      return {};
     }
     this.logRecord(chatId, { k: 'seq.reserve' }, { seq });
-    return true;
+    return {};
+  }
+
+  /**
+   * Send a turn record the log just wrote to the server's record (spec/01 §
+   * Chat record) through the outbox. A subagent's turns are not on the wire,
+   * like the rest of it.
+   */
+  private sendTurnBoundary(chatId: string, record: LogRecord): void {
+    const boundary = turnBoundaryOf(chatId, record);
+    if (!boundary) return;
+    if (this.chatState.get(chatId)?.subagent) return;
+    this.opts.emit(boundary);
+  }
+
+  /**
+   * The chat's whole record as the server takes it, for the one-time record
+   * import (spec/01 § Chat record): every entry of its log, whole and with its
+   * provider id, every turn boundary and every settled question. Transcript the
+   * log never held is brought into it first, as a replay would.
+   */
+  recordForImport(chatId: string): WireEvent[] {
+    if (!this.chatState.get(chatId)) throw new ChatNotFoundError(chatId);
+    this.importLegacyTranscript(chatId);
+    let unreadable = 0;
+    const entries = recordEntries(chatId, this.chatLog.read(chatId), {
+      rehydrate: (result) => this.chatLog.rehydrate(result),
+      onUnreadable: () => {
+        unreadable += 1;
+      },
+    });
+    if (unreadable > 0) {
+      this.opts.logger.warn(
+        { chatId, unreadable },
+        'record import: tool results whose stored body is missing are sent as references',
+      );
+    }
+    return entries;
   }
 
   /**
@@ -16580,20 +16629,25 @@ export class Daemon {
     }
     const chatId = (event as { chatId?: unknown }).chatId;
     const seq = (event as { seq?: unknown }).seq;
+    // The provider's own id for what was logged, for the server's record.
+    let nativeRef: NativeRef | undefined;
     if (
       !o.skipHistory &&
       typeof chatId === 'string' &&
       chatId.length > 0 &&
       typeof seq === 'number' &&
       seq >= 0 &&
-      this.chatState.has(chatId) &&
-      !this.logEmitted(chatId, event, seq)
+      this.chatState.has(chatId)
     ) {
-      this.opts.logger.info(
-        { chatId, seq, type: event.type },
-        'history: dropped a harness re-send of an event this turn already logged',
-      );
-      return;
+      const logged = this.logEmitted(chatId, event, seq);
+      if (!logged) {
+        this.opts.logger.info(
+          { chatId, seq, type: event.type },
+          'history: dropped a harness re-send of an event this turn already logged',
+        );
+        return;
+      }
+      nativeRef = logged.nativeRef;
     }
     if (typeof chatId === 'string' && chatId.length > 0 && typeof seq === 'number' && seq >= 0) {
       // Persisted-class events (messages / tool calls / tool results) are the
@@ -16631,7 +16685,7 @@ export class Daemon {
       if (!o.skipHistory) this.trackToolRun(event);
       return;
     }
-    this.opts.emit(event);
+    this.opts.emit(nativeRef !== undefined ? ({ ...event, nativeRef } as WireEvent) : event);
     if (!o.skipHistory) this.trackToolRun(event);
     this.trackHookToolTally(event);
     this.trackRunningBash(event);

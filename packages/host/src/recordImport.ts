@@ -1,31 +1,42 @@
-// Sending the server the history its record did not keep (spec/01 § Chat record).
+// The one-time import of a host's chats into the server's record (spec/01 §
+// Chat record).
 //
-// A server's record of a chat once held only messages, tool calls, results and
-// errors. Artifacts, tool-run summaries and answered questions lived only in
-// the host's log, so a chat opened from the server's record would lack them.
-// Once, per chat, the host sends exactly those, and the server takes them in
-// without broadcasting. One chat at a time, each acknowledged before the next,
-// so it never floods the link or the server; a chat is marked done only on the
-// server's acknowledgement, and an interrupted run carries on at the next
-// connect.
+// The server's record is the source for every surface, so it must hold every
+// chat the host holds, whole: every logged entry with its provider id
+// (`nativeRef`), every turn boundary, every answered question, including chats
+// the server has never seen. Once, per chat, the host sends the chat's whole log
+// and the server takes it in without broadcasting; the server keeps each entry
+// by its seq, so a resend of one it holds changes nothing. One chat at a time,
+// each acknowledged before the next, so it never floods the link or the server;
+// a chat is marked done only on the server's acknowledgement, and an
+// interrupted run carries on at the next connect.
+//
+// Progress is versioned. A host whose earlier import (which sent only what the
+// record then lacked) finished runs this one once more over every chat, which
+// tops the record up with turn boundaries and provider ids, and then stops.
 
 import * as nodeFs from 'node:fs';
 import { dirname } from 'node:path';
 import type { Logger } from 'pino';
 import { REPLAY_BATCH_BYTES, type WireEvent } from '@patch/wire';
 
-/** The question tool, whose answered cards are history (spec/04 § Questions). */
-const QUESTION_TOOL = 'AskUserQuestion';
 /** Give up on this connection if a chat's acknowledgement takes longer than this. */
 export const RECORD_IMPORT_ACK_TIMEOUT_MS = 30_000;
+/** The progress file's version: a file of an earlier one means the import runs again. */
+export const RECORD_IMPORT_VERSION = 2;
+/** Most events in one `host.record_import` frame. */
+const EVENTS_PER_FRAME = 200;
 
 export interface RecordImportOptions {
   /** `<patchHome>/record-import.json`: which chats are done, and whether all are. */
   path: string;
   logger: Pick<Logger, 'info' | 'warn'>;
   listChats: () => string[];
-  /** The host's own replay of a chat, from the start. */
-  replayChat: (chatId: string, emit: (event: WireEvent) => void) => void;
+  /**
+   * Every entry of the chat's own record, in log order, as the server takes it;
+   * null when the chat is no longer on the host. Throws when it cannot be read.
+   */
+  recordOf: (chatId: string) => WireEvent[] | null;
   send: (event: WireEvent) => void;
   fs?: Pick<
     typeof nodeFs,
@@ -36,23 +47,23 @@ export interface RecordImportOptions {
   defer?: (fn: () => void) => void;
 }
 
-/** What of a replay the record lacked: artifacts, final summaries, answered questions. */
-export function importable(events: readonly WireEvent[]): WireEvent[] {
-  const questions = new Set<string>();
-  const out: WireEvent[] = [];
-  for (const e of events) {
-    if (e.type === 'chat.artifact') out.push(e);
-    else if (e.type === 'chat.tool_run_summary' && e.live !== true) out.push(e);
-    else if (e.type === 'chat.permission_request' && e.request.tool === QUESTION_TOOL) {
-      questions.add(e.requestId);
-      out.push(e);
-    } else if (e.type === 'chat.permission_response' && questions.has(e.requestId)) out.push(e);
-  }
-  return out.map((e) => {
-    const { forSurfaceId: _route, ...whole } = e as WireEvent & { forSurfaceId?: string };
+/** Split a chat's entries into frames no bigger than a replay batch. */
+export function framesOf(events: readonly WireEvent[]): WireEvent[][] {
+  const frames: WireEvent[][] = [[]];
+  let bytes = 0;
+  for (const raw of events) {
+    const { forSurfaceId: _route, ...e } = raw as WireEvent & { forSurfaceId?: string };
     void _route;
-    return whole as WireEvent;
-  });
+    const size = JSON.stringify(e).length;
+    const open = frames[frames.length - 1]!;
+    if (open.length > 0 && (open.length >= EVENTS_PER_FRAME || bytes + size > REPLAY_BATCH_BYTES)) {
+      frames.push([]);
+      bytes = 0;
+    }
+    frames[frames.length - 1]!.push(e as WireEvent);
+    bytes += size;
+  }
+  return frames;
 }
 
 export class RecordImport {
@@ -63,6 +74,8 @@ export class RecordImport {
   /** The chat whose acknowledgement is awaited, and its timeout. */
   private waiting: { chatId: string; timer: NodeJS.Timeout } | null = null;
   private queue: string[] = [];
+  /** Chats this run could not read: the import is not complete until they are sent. */
+  private unread = 0;
 
   constructor(private readonly opts: RecordImportOptions) {
     this.fs = opts.fs ?? nodeFs;
@@ -73,10 +86,11 @@ export class RecordImport {
   start(): void {
     if (this.complete || this.running) return;
     this.running = true;
+    this.unread = 0;
     this.queue = this.opts.listChats().filter((id) => !this.done.has(id));
     this.opts.logger.info(
-      { chats: this.queue.length },
-      'record import: sending what the server record lacks',
+      { chats: this.queue.length, done: this.done.size },
+      'record import: sending every chat to the server record',
     );
     this.next();
   }
@@ -111,38 +125,34 @@ export class RecordImport {
     const chatId = this.queue.shift();
     if (chatId === undefined) {
       this.running = false;
-      this.complete = true;
+      this.complete = this.unread === 0;
       this.save();
-      this.opts.logger.info({}, 'record import: complete');
+      if (this.complete) this.opts.logger.info({}, 'record import: complete');
+      else
+        this.opts.logger.warn(
+          { unread: this.unread },
+          'record import: some chats could not be read; trying them again at the next connect',
+        );
       return;
     }
-    let events: WireEvent[] = [];
+    let events: WireEvent[] | null;
     try {
-      const all: WireEvent[] = [];
-      this.opts.replayChat(chatId, (e) => all.push(e));
-      events = importable(all);
+      events = this.opts.recordOf(chatId);
     } catch (err) {
-      // A chat the host cannot read is reported and left out; nothing more can
-      // be sent for it, and it must not hold up every chat after it.
+      // A chat the host cannot read is reported and left out of this run, not
+      // marked done: the next connect tries it again. It must not hold up
+      // every chat after it.
+      this.unread += 1;
       this.opts.logger.warn({ chatId, err }, 'record import: could not read the chat; skipped');
+      this.schedule();
+      return;
     }
-    if (events.length === 0) {
+    if (events === null || events.length === 0) {
       this.markDone(chatId);
       this.schedule();
       return;
     }
-    const chunks: WireEvent[][] = [[]];
-    let bytes = 0;
-    for (const e of events) {
-      const size = JSON.stringify(e).length;
-      const open = chunks[chunks.length - 1]!;
-      if (open.length > 0 && (open.length >= 200 || bytes + size > REPLAY_BATCH_BYTES)) {
-        chunks.push([]);
-        bytes = 0;
-      }
-      chunks[chunks.length - 1]!.push(e);
-      bytes += size;
-    }
+    const chunks = framesOf(events);
     const timer = setTimeout(() => {
       this.opts.logger.warn(
         { chatId },
@@ -173,9 +183,19 @@ export class RecordImport {
     if (!this.fs.existsSync(this.opts.path)) return;
     try {
       const saved = JSON.parse(this.fs.readFileSync(this.opts.path, 'utf8')) as {
+        version?: unknown;
         done?: unknown;
         complete?: unknown;
       };
+      if (saved.version !== RECORD_IMPORT_VERSION) {
+        // An earlier import sent only part of each chat: this one sends all of
+        // it, once, for every chat.
+        this.opts.logger.info(
+          { path: this.opts.path, was: saved.version ?? 1 },
+          'record import: an earlier import ran; importing every chat in full once',
+        );
+        return;
+      }
       if (Array.isArray(saved.done))
         for (const id of saved.done) if (typeof id === 'string') this.done.add(id);
       this.complete = saved.complete === true;
@@ -192,7 +212,14 @@ export class RecordImport {
     try {
       this.fs.mkdirSync(dirname(path), { recursive: true });
       const tmp = `${path}.tmp`;
-      this.fs.writeFileSync(tmp, JSON.stringify({ complete: this.complete, done: [...this.done] }));
+      this.fs.writeFileSync(
+        tmp,
+        JSON.stringify({
+          version: RECORD_IMPORT_VERSION,
+          complete: this.complete,
+          done: [...this.done],
+        }),
+      );
       this.fs.renameSync(tmp, path);
     } catch (err) {
       this.opts.logger.warn({ err, path }, 'record import: could not save progress');

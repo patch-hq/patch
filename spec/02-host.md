@@ -929,6 +929,14 @@ events. After a reconnect the host resends everything after the last
 acknowledgement, oldest first; the server drops a resend it already holds. There
 is no per-chat comparison and the server never asks a host for history.
 
+A turn's start and end go into the outbox the moment the chat's own log writes
+them, with each entry's `nativeRef`, so the end a restarted host writes for a
+turn its process left open (`interrupted`) reaches the server too. A server that
+does not keep them (no `recordComplete` in `auth.ok`) is sent neither; the
+entries still go to it. Chats the host held before the server's record kept
+everything are sent once, whole, by the record import (`01-server.md` § Record
+import); its progress is `<state dir>/record-import.json`.
+
 A turn runs with the link down: its events wait in the outbox, which survives a
 host restart. Live streaming (text deltas, tool progress) is not durable and does
 not pass through the outbox. The frames are in `03-wire-protocol.md` § Host outbox.

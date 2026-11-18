@@ -7,6 +7,12 @@
 // cannot double a message. Live streaming (deltas, state, progress) is not part
 // of the transcript and never touches this.
 //
+// Each entry's provider id (`nativeRef`) is kept with it on disk and held beside
+// the log in memory, so nothing read out of the store for a surface carries it.
+// Turn boundaries (`chat.turn_started`, `chat.turn_ended`) are kept beside the
+// entries too, by turn id: each sits at the chat's highest seq when it happened
+// and takes no seq of its own, so it can never collide with an entry.
+//
 // While a chat's host is online the host's own log answers replays; the server's
 // copy answers them when it is not, and is what rebuilds a host's log that was
 // lost (`patch.log_restore`).
@@ -30,7 +36,15 @@ import {
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
-import { headCodePoints, LOGGED_EVENT_TYPES, type WireEvent } from '@patch/wire';
+import {
+  headCodePoints,
+  LOGGED_EVENT_TYPES,
+  TURN_BOUNDARY_TYPES,
+  type ChatTurnEndedEvent,
+  type ChatTurnStartedEvent,
+  type NativeRef,
+  type WireEvent,
+} from '@patch/wire';
 import {
   matchMessages,
   RecordTextIndex,
@@ -88,6 +102,30 @@ export function isTranscriptEvent(event: WireEvent): boolean {
   }
 }
 
+/** A turn as the record holds it: its start and its end, once each has arrived. */
+export interface RecordedTurn {
+  turnId: string;
+  started?: ChatTurnStartedEvent;
+  ended?: ChatTurnEndedEvent;
+}
+
+function sameRef(a: NativeRef | undefined, b: NativeRef | undefined): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** The event without the provider id it may carry. */
+function withoutRef<E extends WireEvent>(event: E): { bare: E; ref: NativeRef | undefined } {
+  const { nativeRef, ...bare } = event as E & { nativeRef?: NativeRef };
+  return { bare: bare as E, ref: nativeRef };
+}
+
+/** What a surface is sent of a host's event: everything but the provider id. */
+export function forSurfaces<E extends WireEvent>(event: E): E {
+  return (event as { nativeRef?: unknown }).nativeRef === undefined
+    ? event
+    : withoutRef(event).bare;
+}
+
 /** The tool whose question the user answers in a card rather than approves (spec/04 § Questions). */
 export const QUESTION_TOOL = 'AskUserQuestion';
 
@@ -137,6 +175,10 @@ export class ChatLogStore {
   private readonly logger: Pick<Logger, 'warn'>;
   private readonly maxEvents: number;
   private readonly chats = new Map<string, Map<number, WireEvent>>();
+  /** Each held entry's provider id, by chat and seq. */
+  private readonly refs = new Map<string, Map<number, NativeRef>>();
+  /** Each chat's turns, by turn id. */
+  private readonly turnsByChat = new Map<string, Map<string, RecordedTurn>>();
   /**
    * How far a host's log of each chat is known to reach with events the server
    * does not keep (a tool-run summary, an artifact). Without it the server's
@@ -174,6 +216,9 @@ export class ChatLogStore {
    * or `conflict`.
    */
   commit(event: WireEvent): CommitOutcome {
+    if (event.type === 'chat.turn_started' || event.type === 'chat.turn_ended') {
+      return this.commitTurn(event);
+    }
     if (!isTranscriptEvent(event)) {
       // History the server does not keep still says how far the host's log reaches.
       if (LOGGED_EVENT_TYPES.has(event.type as never)) {
@@ -190,28 +235,110 @@ export class ChatLogStore {
     // Drop the routing tag a replay frame carries; it is not part of the event.
     const { forSurfaceId: _route, ...whole } = event as WireEvent & { forSurfaceId?: string };
     void _route;
+    const { bare, ref: sent } = withoutRef(whole as WireEvent);
     // A big tool result is kept as a reference to a stored body, so one of them
     // never weighs down the log or a replay of it.
-    const stored = this.externalize(whole as WireEvent);
+    const stored = this.externalize(bare);
     const log = this.load(chatId);
     const had = log.get(seq);
     const json = JSON.stringify(stored);
+    const heldRef = this.refs.get(chatId)?.get(seq);
+    // A resend without the provider id (an older host) never takes it away.
+    const ref = sent ?? (had !== undefined ? heldRef : undefined);
     let outcome: CommitOutcome = 'new';
     if (had !== undefined) {
-      if (identityOf(had) !== identityOf(stored as WireEvent)) {
+      if (identityOf(had) !== identityOf(stored)) {
         this.logger.warn(
-          { chatId, seq, held: identityOf(had), got: identityOf(stored as WireEvent) },
+          { chatId, seq, held: identityOf(had), got: identityOf(stored) },
           'chat-log-store: a different event already holds this seq; not committed',
         );
         return 'conflict';
       }
-      if (JSON.stringify(had) === json) return 'duplicate';
+      if (JSON.stringify(had) === json) {
+        if (sameRef(heldRef, ref)) return 'duplicate';
+        // Only the provider id is new (a record import topping it up): kept,
+        // and nothing a surface shows has changed.
+        this.setRef(chatId, seq, ref);
+        this.append(chatId, lineOf(stored, ref), false);
+        return 'duplicate';
+      }
       outcome = 'updated';
     }
-    log.set(seq, stored as WireEvent);
+    log.set(seq, stored);
+    this.setRef(chatId, seq, ref);
     this.trim(log);
-    this.append(chatId, json, event.type === 'chat.message' && event.role === 'user');
+    this.append(
+      chatId,
+      lineOf(stored, ref),
+      event.type === 'chat.message' && event.role === 'user',
+    );
     return outcome;
+  }
+
+  /**
+   * Keep a turn boundary, durably. The same boundary sent again is a
+   * duplicate; a different one for a turn's start or end that is already held
+   * replaces it (a host closing a turn its restart found open says so last).
+   */
+  private commitTurn(event: ChatTurnStartedEvent | ChatTurnEndedEvent): CommitOutcome {
+    const { forSurfaceId: _route, ...whole } = event as typeof event & { forSurfaceId?: string };
+    void _route;
+    const boundary = whole as ChatTurnStartedEvent | ChatTurnEndedEvent;
+    const turns = this.turnsOf(boundary.chatId);
+    const turn = turns.get(boundary.turnId) ?? { turnId: boundary.turnId };
+    const held = boundary.type === 'chat.turn_started' ? turn.started : turn.ended;
+    const json = JSON.stringify(boundary);
+    if (held !== undefined && JSON.stringify(held) === json) return 'duplicate';
+    if (boundary.type === 'chat.turn_started') turn.started = boundary;
+    else turn.ended = boundary;
+    turns.set(boundary.turnId, turn);
+    this.append(boundary.chatId, JSON.stringify({ turn: boundary }), true);
+    return held === undefined ? 'new' : 'updated';
+  }
+
+  /**
+   * The chat's turns as the record holds them, in the order they began (a turn
+   * whose start never arrived is placed at its end).
+   */
+  turns(chatId: string): RecordedTurn[] {
+    const placeOf = (t: RecordedTurn): [number, number] => {
+      const b = t.started ?? t.ended!;
+      return [b.seq, b.at];
+    };
+    return [...this.turnsOf(chatId).values()].sort((a, b) => {
+      const [sa, ta] = placeOf(a);
+      const [sb, tb] = placeOf(b);
+      return sa - sb || ta - tb;
+    });
+  }
+
+  /** The provider's own id for the entry at `seq`, when the host sent one. */
+  nativeRef(chatId: string, seq: number): NativeRef | undefined {
+    this.load(chatId);
+    return this.refs.get(chatId)?.get(seq);
+  }
+
+  private turnsOf(chatId: string): Map<string, RecordedTurn> {
+    this.load(chatId);
+    let turns = this.turnsByChat.get(chatId);
+    if (!turns) {
+      turns = new Map();
+      this.turnsByChat.set(chatId, turns);
+    }
+    return turns;
+  }
+
+  private setRef(chatId: string, seq: number, ref: NativeRef | undefined): void {
+    let refs = this.refs.get(chatId);
+    if (ref === undefined) {
+      refs?.delete(seq);
+      return;
+    }
+    if (!refs) {
+      refs = new Map();
+      this.refs.set(chatId, refs);
+    }
+    refs.set(seq, ref);
   }
 
   /** Take in events that are not new to surfaces: a replay, or a batch of one. */
@@ -511,10 +638,22 @@ export class ChatLogStore {
         const event = JSON.parse(line) as WireEvent;
         const seq = (event as { seq?: unknown }).seq;
         const reach = (event as { reach?: unknown }).reach;
-        const rec = event as { question?: WireEvent; answer?: WireEvent };
+        const rec = event as { question?: WireEvent; answer?: WireEvent; turn?: WireEvent };
         // A torn last line from a crash, or a record that is not an event, is skipped.
-        if (typeof seq === 'number') log.set(seq, event);
-        else if (rec.question?.type === 'chat.permission_request') {
+        if (typeof seq === 'number') {
+          const { bare, ref } = withoutRef(event);
+          log.set(seq, bare);
+          // The latest line for a seq says what is kept, provider id included.
+          this.setRef(chatId, seq, ref);
+        } else if (rec.turn !== undefined && TURN_BOUNDARY_TYPES.has(rec.turn.type)) {
+          const b = rec.turn as ChatTurnStartedEvent | ChatTurnEndedEvent;
+          const turns = this.turnsByChat.get(chatId) ?? new Map<string, RecordedTurn>();
+          this.turnsByChat.set(chatId, turns);
+          const turn = turns.get(b.turnId) ?? { turnId: b.turnId };
+          if (b.type === 'chat.turn_started') turn.started = b;
+          else turn.ended = b;
+          turns.set(b.turnId, turn);
+        } else if (rec.question?.type === 'chat.permission_request') {
           const q = rec.question;
           const asked = this.questions.get(chatId) ?? new Map();
           this.questions.set(chatId, asked);
@@ -550,6 +689,11 @@ export class ChatLogStore {
     const seqs = [...log.keys()].sort((a, b) => a - b);
     for (const seq of seqs.slice(0, excess)) log.delete(seq);
   }
+}
+
+/** One log line: the entry, with its provider id when it has one. */
+function lineOf(event: WireEvent, ref: NativeRef | undefined): string {
+  return JSON.stringify(ref === undefined ? event : { ...event, nativeRef: ref });
 }
 
 /** A chat id is a ULID or a fixed thread name, but never trust it as a path segment. */
