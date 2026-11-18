@@ -646,7 +646,7 @@ function JobRow({
           </span>
         </OpenableLink>
         <span className="job-last-fired" data-testid={`job-last-fired-${job.id}`}>
-          {latest ? relativeTime(latest.ts) : 'never'}
+          {latest ? relativeTime(latest.ts) : 'Never run'}
         </span>
         {job.queued ? (
           <span className="job-queued" data-testid={`job-queued-${job.id}`}>
@@ -661,7 +661,7 @@ function JobRow({
             data-testid={`job-chat-${job.id}`}
             title="Open chat"
           >
-            open chat
+            Open chat
           </OpenableLink>
         ) : null}
         <button
@@ -671,7 +671,7 @@ function JobRow({
           aria-expanded={runsOpen}
           onClick={() => setRunsOpen((v) => !v)}
         >
-          {runsOpen ? 'hide runs' : 'runs'}
+          {runsOpen ? 'Hide runs' : 'Runs'}
         </button>
         <button
           type="button"
@@ -681,7 +681,7 @@ function JobRow({
           disabled={actions.runningId === job.id}
           onClick={() => actions.onRun(job.id)}
         >
-          run now
+          Run now
         </button>
         {/* The two ways to get a job off the list (spec/14 § Jobs view).
             Archive is reversible and undone by this same control, so it asks
@@ -694,7 +694,7 @@ function JobRow({
           title={archived ? 'Unarchive' : 'Archive'}
           onClick={() => actions.onArchive(job.id, !archived)}
         >
-          {archived ? 'unarchive' : 'archive'}
+          {archived ? 'Unarchive' : 'Archive'}
         </button>
         <button
           type="button"
@@ -703,7 +703,7 @@ function JobRow({
           title="Delete"
           onClick={() => actions.onDelete(job.id)}
         >
-          delete
+          Delete
         </button>
         {/* An expired or archived job does not fire, so its switch is dead
             rather than gone: the row keeps the same shape as every other one,
@@ -732,7 +732,7 @@ function InlineRuns({ jobId }: { jobId: string }): JSX.Element {
   return (
     <div className="inline-runs" data-testid={`inline-runs-${jobId}`}>
       {error ? (
-        <p className="error">failed to load runs: {(error as Error).message}</p>
+        <p className="error">Couldn't load runs: {(error as Error).message}</p>
       ) : !data || data.runs.length === 0 ? (
         <p className="empty">No runs yet.</p>
       ) : (
@@ -747,7 +747,7 @@ function InlineRuns({ jobId }: { jobId: string }): JSX.Element {
                   to={`/chats/${r.action.chatId}`}
                   opens={{ kind: 'chat', chatId: r.action.chatId }}
                 >
-                  open chat
+                  Open chat
                 </OpenableLink>
               ) : null}
               {r.error ? <span className="run-error">{r.error}</span> : null}

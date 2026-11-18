@@ -21,6 +21,7 @@
 // `cronZoneLabel`.
 
 const DOW_LABEL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // --- clock formatting ------------------------------------------------------
 //
@@ -228,9 +229,23 @@ export function describeCron(expression: string): string {
     string,
   ];
 
-  // A month restriction ("only in June") has no short phrase and is vanishingly
-  // rare; refuse rather than drop it from the label.
-  if (monthField !== '*') return '';
+  // A single date — a fixed minute, hour, day and month with any weekday — is
+  // how a one-off job is written (`0 8 24 9 *`), so it reads as that date.
+  if (monthField !== '*') {
+    const single = /^\d+$/;
+    if (![minField, hourField, domField, monthField].every((f) => single.test(f))) return '';
+    if (dowField !== '*') return '';
+    const [m, h, d, mo] = [minField, hourField, domField, monthField].map(Number) as [
+      number,
+      number,
+      number,
+      number,
+    ];
+    if (m > 59 || h > 23 || d < 1 || d > 31 || mo < 1 || mo > 12) return '';
+    return `${d} ${MONTHS[mo - 1]} at ${clock(h, m)}`;
+  }
+  // Any other month restriction ("only in June") has no short phrase and is
+  // vanishingly rare; refuse rather than drop it from the label.
 
   const dow = parseDow(dowField);
   if (dow === null) return '';

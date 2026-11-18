@@ -217,11 +217,20 @@ describe('describeCron — day-of-month ordinals', () => {
   });
 });
 
+describe('describeCron — a single date (one-off jobs)', () => {
+  test('a fixed day and month reads as that date', () => {
+    expect(describeCron('0 8 24 9 *')).toBe('24 Sep at 8am');
+    expect(describeCron('30 21 2 10 *')).toBe('2 Oct at 9:30pm');
+  });
+});
+
 // NO FALLBACK: a shape this cannot phrase exactly returns '' and the caller
 // shows the raw expression. Never a confident wrong answer.
 describe('describeCron — shapes it refuses to phrase', () => {
   test('a month restriction', () => {
     expect(describeCron('0 8 * 6 *')).toBe('');
+    expect(describeCron('0 8 24 9 1')).toBe('');
+    expect(describeCron('*/5 8 24 9 *')).toBe('');
   });
   test('a non-numeric field', () => {
     expect(describeCron('x 8 * * 2')).toBe('');

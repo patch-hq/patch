@@ -1581,53 +1581,9 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           handleSubmit(e);
         }}
       >
-        {/* The autonomy prompt (spec/08 § Autonomy prompt). The account-wide
-            prompt is edited once in Settings → Jobs; a job only shows it here
-            under a collapsed "Advanced", where it can be overridden for this
-            job alone. Opens by itself when the job already carries an
-            override, so a customised job never hides its own text. The toggle
-            switches the box between read-only (showing the account prompt) and
-            editable; there is no "off" state. */}
-        <details
-          className="form-group"
-          data-testid="group-autonomy-prompt"
-          open={autonomyOpen}
-          onToggle={(e) => setAutonomyOpen(e.currentTarget.open)}
-        >
-          <summary className="form-group-title" data-testid="job-advanced-toggle">
-            Advanced
-          </summary>
-          <Toggle
-            checked={form.autonomyPromptCustom}
-            onChange={(on) =>
-              setForm((f) => ({
-                ...f,
-                autonomyPromptCustom: on,
-                // Starting an override from the account prompt (rather than
-                // blank) makes this an EDIT of it — ticking back off and on
-                // keeps whatever was typed, same as `gateCommand`.
-                ...(on && f.autonomyPromptText === ''
-                  ? { autonomyPromptText: accountAutonomyPrompt }
-                  : {}),
-              }))
-            }
-            label="Override autonomy prompt for this job"
-            testid="job-autonomy-prompt-custom"
-          />
-          <textarea
-            value={form.autonomyPromptCustom ? form.autonomyPromptText : accountAutonomyPrompt}
-            onChange={(e) => {
-              const next = e.target.value;
-              setForm((f) => ({ ...f, autonomyPromptText: next }));
-            }}
-            disabled={!form.autonomyPromptCustom}
-            data-testid="job-autonomy-prompt-text"
-            rows={2}
-          />
-        </details>
-
-        <section className="form-group" data-testid="group-trigger">
-          <h2 className="form-group-title">Trigger</h2>
+        {/* Name and group say what the job IS, so they lead the form under no
+            heading of their own rather than sitting under Trigger. */}
+        <section className="form-group" data-testid="group-name">
           <label>
             Name
             {/* No native `required`: we validate in handleSubmit so a blank
@@ -1681,6 +1637,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               />
             ) : null}
           </label>
+        </section>
+
+        <section className="form-group" data-testid="group-trigger">
+          <h2 className="form-group-title">Trigger</h2>
           <label>
             Trigger type
             <select
@@ -1691,12 +1651,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               }}
               data-testid="job-trigger-type"
             >
-              <option value="cron">cron</option>
-              <option value="recurrence">recurrence</option>
-              <option value="webhook">webhook</option>
-              <option value="follows">follows another job</option>
+              <option value="cron">Cron</option>
+              <option value="recurrence">Recurrence</option>
+              <option value="webhook">Webhook</option>
+              <option value="follows">After another job</option>
               {form.triggerType === 'todoist' ? (
-                <option value="todoist">todoist (legacy)</option>
+                <option value="todoist">Todoist (legacy)</option>
               ) : null}
             </select>
           </label>
@@ -2220,9 +2180,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               placeholder="240"
               data-testid="job-timeout-minutes"
             />
-            <p className="field-hint">
-              A fire still holding its slot after this long is stopped. Empty means 240 (4 hours).
-            </p>
+            <p className="field-hint">Empty means 240 (4 hours).</p>
           </label>
         </section>
 
@@ -2538,7 +2496,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <Toggle
                     checked={form.includePayload}
                     onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
-                    label="Send agent trigger payload"
+                    label="Include trigger payload in prompt"
                     testid="job-include-payload"
                   />
                 ) : null}
@@ -2602,9 +2560,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     placeholder="{{payload.event_data.id}}"
                   />
                   <p className="field-hint" data-testid="job-ensure-key-hint">
-                    Mustache template evaluated against each fire's payload. Each distinct key gets
-                    its own durable chat, created on first fire and reused after — leave empty for a
-                    fresh chat every fire.
+                    Mustache template on the fire's payload. One chat per key, reused on later
+                    fires. Empty means a new chat each fire.
                   </p>
                 </label>
                 {form.actionType === 'continue' ? (
@@ -2653,7 +2610,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 <Toggle
                   checked={form.spawnNotifyOnComplete}
                   onChange={(next) => setForm((f) => ({ ...f, spawnNotifyOnComplete: next }))}
-                  label="Notify when job complete"
+                  label="Notify when job completes"
                   testid="job-spawn-notify-on-complete"
                 />
               </>
@@ -2687,7 +2644,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <Toggle
                     checked={form.includePayload}
                     onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
-                    label="Send agent trigger payload"
+                    label="Include trigger payload in prompt"
                     testid="job-include-payload"
                   />
                 ) : null}
@@ -2705,6 +2662,51 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                 existing job from the per-row toggle on the Jobs list. */}
           </>
         </section>
+
+        {/* The autonomy prompt (spec/08 § Autonomy prompt). The account-wide
+            prompt is edited once in Settings → Jobs; a job only shows it here
+            under a collapsed "Advanced", where it can be overridden for this
+            job alone. Opens by itself when the job already carries an
+            override, so a customised job never hides its own text. The toggle
+            switches the box between read-only (showing the account prompt) and
+            editable; there is no "off" state. */}
+        <details
+          className="form-group"
+          data-testid="group-autonomy-prompt"
+          open={autonomyOpen}
+          onToggle={(e) => setAutonomyOpen(e.currentTarget.open)}
+        >
+          <summary className="form-group-title" data-testid="job-advanced-toggle">
+            Advanced
+          </summary>
+          <Toggle
+            checked={form.autonomyPromptCustom}
+            onChange={(on) =>
+              setForm((f) => ({
+                ...f,
+                autonomyPromptCustom: on,
+                // Starting an override from the account prompt (rather than
+                // blank) makes this an EDIT of it — ticking back off and on
+                // keeps whatever was typed, same as `gateCommand`.
+                ...(on && f.autonomyPromptText === ''
+                  ? { autonomyPromptText: accountAutonomyPrompt }
+                  : {}),
+              }))
+            }
+            label="Override autonomy prompt for this job"
+            testid="job-autonomy-prompt-custom"
+          />
+          <textarea
+            value={form.autonomyPromptCustom ? form.autonomyPromptText : accountAutonomyPrompt}
+            onChange={(e) => {
+              const next = e.target.value;
+              setForm((f) => ({ ...f, autonomyPromptText: next }));
+            }}
+            disabled={!form.autonomyPromptCustom}
+            data-testid="job-autonomy-prompt-text"
+            rows={2}
+          />
+        </details>
 
         <div className="form-actions">
           {/* Dead while its own request is in flight, like Run now beside it.
@@ -2891,12 +2893,12 @@ function RecentRunsPanel({ job }: { job: Job }): JSX.Element {
         ) : null}
         {chatId ? (
           <Link to={`/chats/${chatId}`} className="job-chat-link" data-testid="recent-runs-chat">
-            open chat
+            Open chat
           </Link>
         ) : null}
       </div>
       {error ? (
-        <p className="error">failed to load runs: {(error as Error).message}</p>
+        <p className="error">Couldn't load runs: {(error as Error).message}</p>
       ) : runs.length === 0 ? (
         <p className="empty">No runs yet.</p>
       ) : visible.length === 0 ? (

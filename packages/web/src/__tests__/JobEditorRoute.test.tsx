@@ -1464,7 +1464,7 @@ describe('JobEditorRoute (single-page form)', () => {
   // one boolean on this form that starts ON, which inverts everything the Hide
   // chat tests above pin: TICKED is the absent-field state, so it is unticking
   // that writes a key.
-  describe('Notify when job complete', () => {
+  describe('Notify when job completes', () => {
     it('is offered by both actions that create a chat, and by neither that does not', () => {
       renderNew();
       expect(screen.getByTestId('job-spawn-notify-on-complete')).toBeTruthy();
@@ -1485,14 +1485,14 @@ describe('JobEditorRoute (single-page form)', () => {
       expect(label).not.toBeNull();
       expect(label?.classList.contains('toggle')).toBe(true);
       expect(label?.querySelector('.toggle-track .toggle-knob')).not.toBeNull();
-      expect(label?.querySelector('.toggle-label')?.textContent).toBe('Notify when job complete');
+      expect(label?.querySelector('.toggle-label')?.textContent).toBe('Notify when job completes');
     });
 
     // spec/14 § Copy — no helper text. the user's house style: the label names the
     // setting and nothing explains it.
     it('carries no explainer caption', () => {
       renderNew();
-      expect(screen.getByText('Notify when job complete')).toBeTruthy();
+      expect(screen.getByText('Notify when job completes')).toBeTruthy();
       expect(screen.queryByText(/push|doorbell|when the run finishes/i)).toBeNull();
     });
 
@@ -1709,7 +1709,7 @@ describe('JobEditorRoute (single-page form)', () => {
       expect(
         toggle.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
-      expect(screen.getByText('Send agent trigger payload')).toBeTruthy();
+      expect(screen.getByText('Include trigger payload in prompt')).toBeTruthy();
     });
 
     it('unticking Send agent trigger payload posts action.includePayload = false', async () => {
@@ -4219,7 +4219,7 @@ describe('JobEditorRoute (single-page form)', () => {
       </QueryClientProvider>,
     );
     await waitFor(() => {
-      expect(screen.getByTestId('recent-runs')).toHaveTextContent(/failed to load runs/i);
+      expect(screen.getByTestId('recent-runs')).toHaveTextContent(/couldn't load runs/i);
     });
   });
 
