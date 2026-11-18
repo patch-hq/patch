@@ -50,6 +50,7 @@
 // engine when one fails (`describeVoiceError`) — a hosted engine's failure is
 // never answered by running local instead.
 
+import { playVoiceLiveCue } from './voiceLiveCue';
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent, type AudioSessionMode } from '@patch/wire/audio';
 import { api } from '../api/rest';
@@ -307,7 +308,11 @@ export function startVoiceCall(
             // call bar's LISTENING → TRANSCRIBING → THINKING → SPEAKING indicator.
             console.log(`[patch-voice] call state → ${frame.state}`);
             if (frame.state !== 'connecting') clearConnectTimer();
-            useVoiceStore.getState().setCallPhase(frame.state);
+            {
+              const wasLive = useVoiceStore.getState().callConnectedAt !== null;
+              useVoiceStore.getState().setCallPhase(frame.state);
+              if (!wasLive && frame.state !== 'connecting') void playVoiceLiveCue();
+            }
             break;
           case 'audio.transcript_partial':
             // Live interim STT — the call bar shows it as the trailing line of the
