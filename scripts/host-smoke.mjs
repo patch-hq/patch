@@ -156,7 +156,7 @@ export async function main(argv) {
     const patchHome = join(home, '.patch');
     const installDir = join(patchHome, 'versions', info.version);
     mkdirSync(installDir, { recursive: true });
-    cpSync(extracted, installDir, { recursive: true });
+    cpSync(extracted, installDir, { recursive: true, verbatimSymlinks: true });
     for (const exe of ['node', 'install']) {
       const p = join(installDir, exe);
       if (existsSync(p)) chmodSync(p, 0o755);
@@ -165,7 +165,7 @@ export async function main(argv) {
     mkdirSync(runtimeDir, { recursive: true });
     let nodePath;
     if (info.target.startsWith('darwin')) {
-      cpSync(join(installDir, 'Patch Host.app'), join(runtimeDir, 'Patch Host.app'), { recursive: true });
+      cpSync(join(installDir, 'Patch Host.app'), join(runtimeDir, 'Patch Host.app'), { recursive: true, verbatimSymlinks: true });
       nodePath = join(runtimeDir, 'Patch Host.app', 'Contents', 'MacOS', 'patch-host');
     } else {
       nodePath = join(runtimeDir, 'patch-host');
