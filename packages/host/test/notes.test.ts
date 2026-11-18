@@ -14,7 +14,6 @@ import {
 } from '../src/todos.js';
 import { buildBroadcastNote } from '../src/specialThreads.js';
 import {
-  INTERRUPTED_TURN_REMINDER,
   MODEL_SWITCH_TURN_REMINDER,
   SESSION_RESTART_TURN_REMINDER,
   VOICE_HANDOFF_REMINDER,
@@ -76,7 +75,6 @@ describe('every note Patch sends the model is plain visible text, not a <system-
       'broadcast',
       buildBroadcastNote([{ ts: 0, message: 'hi', sourceChatName: 'ops' }] as never, 1000) ?? '',
     ],
-    ['Turn interrupted by restart', 'restart', INTERRUPTED_TURN_REMINDER],
     ['Turn moved to another model', 'model switch', MODEL_SWITCH_TURN_REMINDER],
     ['Turn restarted on a new session', 'session restart', SESSION_RESTART_TURN_REMINDER],
     ['Voice hand-off', 'voice hand-off', VOICE_HANDOFF_REMINDER],
@@ -91,12 +89,15 @@ describe('every note Patch sends the model is plain visible text, not a <system-
   });
 
   it('a restart re-send keeps the original prompt inside the note and still reads back', () => {
-    const resend = interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'do the thing [End note] now');
+    const resend = interruptedTurnResend(
+      SESSION_RESTART_TURN_REMINDER,
+      'do the thing [End note] now',
+    );
     const { notes, rest } = splitLeadingNotes(resend);
     expect(rest).toBe('Carry on');
     expect(notes[0]?.text).toContain('do the thing');
     // A second restart re-supplies the real original, not the previous note.
-    const again = interruptedTurnResend(INTERRUPTED_TURN_REMINDER, resend);
+    const again = interruptedTurnResend(SESSION_RESTART_TURN_REMINDER, resend);
     expect(splitLeadingNotes(again).notes[0]?.text).toContain('do the thing [End note] now');
   });
 });
