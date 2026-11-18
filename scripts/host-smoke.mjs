@@ -156,7 +156,7 @@ export async function main(argv) {
     const patchHome = join(home, '.patch');
     const installDir = join(patchHome, 'versions', info.version);
     mkdirSync(installDir, { recursive: true });
-    cpSync(extracted, installDir, { recursive: true });
+    cpSync(extracted, installDir, { recursive: true, verbatimSymlinks: true });
     for (const exe of ['node', 'install']) {
       const p = join(installDir, exe);
       if (existsSync(p)) chmodSync(p, 0o755);
