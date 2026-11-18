@@ -46,6 +46,7 @@ import {
   encode,
   isOutboxEvent,
   restartingVersion,
+  TURN_BOUNDARY_TYPES,
   type AuthOkEvent,
   type WireEvent,
   WireDecodeError,
@@ -295,6 +296,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let online = false;
   // Whether the server on this connection takes `host.outbox` frames.
   let serverTakesOutbox = false;
+  // A server that keeps turn boundaries and provider ids (`recordComplete`).
+  let serverKeepsRecord = false;
   // Down since the host started until the first auth.ok, then since each loss.
   let offlineSince: number | null = Date.now();
   let lastDrop: LinkDrop | undefined;
@@ -321,7 +324,14 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   }
 
   /** Send one outbox entry the way this connection's server takes it. */
-  function sendOutboxEntry(position: number, event: WireEvent): void {
+  function sendOutboxEntry(position: number, outboxed: WireEvent): void {
+    // An older server's reader refuses what it does not know: it is sent no
+    // turn boundaries and no provider ids. The outbox keeps them either way.
+    if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(outboxed.type)) {
+      if (!serverTakesOutbox) opts.outbox?.ack(position);
+      return;
+    }
+    const event = serverKeepsRecord ? outboxed : withoutNativeRef(outboxed);
     if (serverTakesOutbox) {
       rawSend({ type: 'host.outbox', position, event });
       return;
@@ -495,6 +505,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         attempt = 0;
         restartingUntil = 0;
         serverTakesOutbox = event.hostOutbox === true;
+        serverKeepsRecord = event.recordComplete === true;
         log.info('server-link: authenticated (auth.ok)');
         flushOutbox();
         flushBuffer();
@@ -559,12 +570,16 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         if (open) sendOutboxEntry(position, event);
         return;
       }
+      // With no outbox, only a server known to keep them is sent turn
+      // boundaries and provider ids.
+      if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(event.type)) return;
+      const sendable = serverKeepsRecord ? event : withoutNativeRef(event);
       // `online` stays true until the socket's `close` event, but a socket that
       // is already closing no longer writes: buffer for the reconnect.
       if (open) {
-        rawSend(event);
+        rawSend(sendable);
       } else {
-        buffer.push(event);
+        buffer.push(sendable);
       }
     },
     isOnline(): boolean {
@@ -649,4 +664,12 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       }
     },
   };
+}
+
+/** The event without the provider id it may carry (spec/01 § Chat record). */
+function withoutNativeRef(event: WireEvent): WireEvent {
+  if ((event as { nativeRef?: unknown }).nativeRef === undefined) return event;
+  const { nativeRef: _ref, ...rest } = event as WireEvent & { nativeRef?: unknown };
+  void _ref;
+  return rest as WireEvent;
 }

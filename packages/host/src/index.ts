@@ -2598,7 +2598,10 @@ async function startHost(
       // spec/15 § Secrets: publish the host-owned secret set so every
       // surface's editor is populated from the same source on (re)connect.
       sender({ type: 'secrets.list', secrets: secretsStore.list() });
-      if (greeting.recordImport === true) recordImport?.start();
+      // Only a server that keeps the whole record takes the full import.
+      if (greeting.recordImport === true && greeting.recordComplete === true) {
+        recordImport?.start();
+      }
     },
     onFrame: async (event, sender) => {
       // Host addressing, checked once for the whole inbound stream: ANY frame
@@ -4932,8 +4935,20 @@ async function startHost(
   recordImport = new RecordImport({
     path: join(config.patchHome, 'record-import.json'),
     logger,
-    listChats: () => daemon.list().map((c) => c.chatId),
-    replayChat: (chatId, emit) => daemon.replayChat(chatId, -1, emit),
+    // A subagent's chats are never on the wire, so not in the server's record.
+    listChats: () =>
+      daemon
+        .list()
+        .map((c) => c.chatId)
+        .filter((id) => !daemon.isSubagent(id)),
+    recordOf: (chatId) => {
+      try {
+        return daemon.recordForImport(chatId);
+      } catch (err) {
+        if (err instanceof ChatNotFoundError) return null;
+        throw err;
+      }
+    },
     send: (event) => link.send(event),
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });

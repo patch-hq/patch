@@ -666,6 +666,85 @@ describe('WS hub relay', () => {
     }
   });
 
+  describe('the whole record: turn boundaries and provider ids (spec/01 § Chat record)', () => {
+    const ref = { harness: 'claude' as const, sessionId: 'S1', id: 'u-1' };
+    const boundaries = (chatId: string) =>
+      [
+        { type: 'chat.turn_started', chatId, turnId: 't1', seq: -1, at: 1, origin: 'user' },
+        {
+          type: 'chat.message',
+          chatId,
+          role: 'assistant',
+          content: 'hi',
+          seq: 0,
+          nativeRef: ref,
+        },
+        { type: 'chat.turn_ended', chatId, turnId: 't1', seq: 0, at: 2, outcome: 'completed' },
+      ] as const;
+
+    it('keeps them from the live stream, and sends surfaces neither', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(17));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      try {
+        h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+        const watcher = await makeAuthedClient(h, user, 'srf-turns');
+        const seen: Record<string, unknown>[] = [];
+        for (const type of ['chat.message', 'chat.turn_started', 'chat.turn_ended'] as const) {
+          watcher.on(type, (e) => seen.push(e as unknown as Record<string, unknown>));
+        }
+        // Following the chat, so its live stream reaches this surface.
+        watcher.replay('chat-1', -1);
+        await new Promise((r) => setTimeout(r, 50));
+        for (const e of boundaries('chat-1')) h.hostLink.emit(e as never);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(seen.map((e) => e['type'])).toEqual(['chat.message']);
+        expect(seen[0]).not.toHaveProperty('nativeRef');
+
+        const store = h.built.chatLogStore;
+        expect(store.nativeRef('chat-1', 0)).toEqual(ref);
+        expect(store.read('chat-1', -1)[0]).not.toHaveProperty('nativeRef');
+        const turns = store.turns('chat-1');
+        expect(turns).toHaveLength(1);
+        expect(turns[0]).toMatchObject({
+          turnId: 't1',
+          started: { seq: -1, origin: 'user' },
+          ended: { seq: 0, outcome: 'completed' },
+        });
+        await watcher.close();
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('takes a chat it has never seen whole from a record import', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(18));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      try {
+        h.hostLink.emit({
+          type: 'host.record_import',
+          chatId: 'unseen',
+          events: [...boundaries('unseen')] as never,
+          done: true,
+        });
+        await new Promise((r) => setTimeout(r, 50));
+        const store = h.built.chatLogStore;
+        expect(store.read('unseen', -1).map((e) => e.type)).toEqual(['chat.message']);
+        expect(store.nativeRef('unseen', 0)).toEqual(ref);
+        expect(store.turns('unseen')[0]?.ended?.outcome).toBe('completed');
+        expect(h.hostLink.sent.map((s) => s.event)).toContainEqual({
+          type: 'host.record_import_ack',
+          chatId: 'unseen',
+        });
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
   describe('chat history and the account feed', () => {
     const say = (seq: number) =>
       ({

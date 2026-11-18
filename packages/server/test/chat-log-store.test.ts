@@ -562,3 +562,105 @@ describe('ChatLogStore', () => {
     });
   });
 });
+
+describe('ChatLogStore: turn boundaries and provider ids (spec/01 § Chat record)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-chatlog-record-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const ref = { harness: 'claude' as const, sessionId: 'S1', id: 'u-1' };
+  const started = (turnId: string, seq: number, at = 1): WireEvent =>
+    ({ type: 'chat.turn_started', chatId: 'c1', turnId, seq, at, origin: 'user' }) as WireEvent;
+  const ended = (turnId: string, seq: number, outcome = 'completed', at = 2): WireEvent =>
+    ({ type: 'chat.turn_ended', chatId: 'c1', turnId, seq, at, outcome }) as WireEvent;
+  const withRef = (seq: number, r = ref): WireEvent =>
+    ({ ...message('c1', seq), nativeRef: r }) as WireEvent;
+
+  test('keeps turn boundaries by turn id, durably, in the order the turns began', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    expect(store.commit(started('t2', 1, 5))).toBe('new');
+    expect(store.commit(started('t1', -1))).toBe('new');
+    expect(store.commit(ended('t1', 1))).toBe('new');
+    expect(store.commit(ended('t1', 1))).toBe('duplicate');
+    // A boundary takes no seq: it never collides with the entry at its seq.
+    expect(store.commit(message('c1', 1))).toBe('new');
+    expect(store.read('c1', -1)).toHaveLength(1);
+
+    const reopened = new ChatLogStore({ dataDir: dir, logger });
+    const turns = reopened.turns('c1');
+    expect(turns.map((t) => t.turnId)).toEqual(['t1', 't2']);
+    expect(turns[0]!.ended).toMatchObject({ outcome: 'completed', seq: 1 });
+    expect(turns[1]!.ended).toBeUndefined();
+    expect(reopened.read('c1', -1)).toHaveLength(1);
+  });
+
+  test("a turn's end said again with a different outcome replaces it", () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(started('t1', 0));
+    store.commit(ended('t1', 0, 'interrupted'));
+    expect(store.commit(ended('t1', 0, 'failed', 3))).toBe('updated');
+    expect(new ChatLogStore({ dataDir: dir, logger }).turns('c1')[0]!.ended?.outcome).toBe(
+      'failed',
+    );
+  });
+
+  test('keeps the provider id beside the entry, and never in what it reads out', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    expect(store.commit(withRef(0))).toBe('new');
+    expect(store.nativeRef('c1', 0)).toEqual(ref);
+    expect(store.read('c1', -1)[0]).toEqual(message('c1', 0));
+    expect(store.replay('c1', -1)[0]).not.toHaveProperty('nativeRef');
+    expect(store.page('c1', { limit: 10 }).entries[0]).not.toHaveProperty('nativeRef');
+    const reopened = new ChatLogStore({ dataDir: dir, logger });
+    expect(reopened.nativeRef('c1', 0)).toEqual(ref);
+    expect(reopened.read('c1', -1)[0]).toEqual(message('c1', 0));
+  });
+
+  test('an entry it holds, sent again with its provider id, gains it without being new to surfaces', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(message('c1', 0));
+    expect(store.commit(withRef(0))).toBe('duplicate');
+    expect(store.commit(withRef(0))).toBe('duplicate');
+    expect(new ChatLogStore({ dataDir: dir, logger }).nativeRef('c1', 0)).toEqual(ref);
+  });
+
+  test('a resend without the provider id does not take it away', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(withRef(0));
+    expect(store.commit(message('c1', 0))).toBe('duplicate');
+    expect(store.commit(message('c1', 0, 'edited'))).toBe('updated');
+    expect(store.nativeRef('c1', 0)).toEqual(ref);
+    expect(new ChatLogStore({ dataDir: dir, logger }).nativeRef('c1', 0)).toEqual(ref);
+  });
+
+  test('a different entry at a held seq is still refused, provider id or not', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(withRef(0));
+    const other = {
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'user',
+      content: 'x',
+      seq: 0,
+      nativeRef: { ...ref, id: 'u-2' },
+    } as WireEvent;
+    expect(store.commit(other)).toBe('conflict');
+    expect(store.nativeRef('c1', 0)).toEqual(ref);
+  });
+
+  test('a record import of a chat it has never seen takes every entry and boundary', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.observe({
+      type: 'chat.replay_batch',
+      chatId: 'c1',
+      events: [started('t1', -1), withRef(0), message('c1', 1), ended('t1', 1)],
+    } as WireEvent);
+    expect(store.read('c1', -1).map((e) => (e as { seq: number }).seq)).toEqual([0, 1]);
+    expect(store.turns('c1')).toHaveLength(1);
+    expect(store.nativeRef('c1', 0)).toEqual(ref);
+  });
+});
