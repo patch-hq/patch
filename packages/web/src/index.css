@@ -9875,6 +9875,10 @@ button.view-file-download {
   align-items: stretch;
   gap: 10px;
 }
+/* In a column the text block must not grow, or it opens a gap above the control. */
+.set-row.stack > .set-row-text {
+  flex: 0 0 auto;
+}
 /* Choice rows: the label owns its own line, the chips sit under it. */
 .set-row.set-row-choices > .set-row-ctrl {
   flex-direction: column;

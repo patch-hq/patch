@@ -12,7 +12,7 @@ import {
   type MeetingEngine,
   type PhoneDictationEngine,
 } from '@patch/wire/audio';
-import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
+import { DICTATION_PAUSE_CHOICES, type SpeechBackendSetting } from '@patch/wire';
 import { type VoiceBackend, type VoiceHandoff, type VoiceLayer } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
@@ -146,39 +146,35 @@ export function voiceCellStatus(
 export function VoicePage(): JSX.Element {
   return (
     <SettingsPage title="Voice" testid="settings-voice">
-      <DictationEnginesGroup />
-      <MeetingEngineGroup />
-      <EngineGroup />
       <DictationGroup />
-      <ShortcutGroup />
-      <MeetingNamesGroup />
+      <EngineGroup />
       <SpeakingGroup />
+      <MeetingEngineGroup />
+      <TranscriptionGroup />
       <VoiceDevicesGroup />
     </SettingsPage>
   );
 }
 
 /** Meeting mode: whether Patch asks for Accessibility to name who is speaking. Desktop only. */
-function MeetingNamesGroup(): JSX.Element | null {
+function MeetingNamesRow(): JSX.Element | null {
   const declined = useMeetingSetup((s) => s.namesDeclined);
   if (!getDesktopBridge()?.getMeetingPermissions) return null;
   return (
-    <Group label="Meetings" testid="settings-voice-meetings">
-      <Row
-        title="Name speakers on calls"
-        sub="Reads Teams, Zoom and Meet through macOS Accessibility. Off, speakers show as Unknown."
-        testid="meeting-names-row"
-      >
-        <Toggle
-          checked={!declined}
-          onChange={(next) => {
-            if (next) void reenableSpeakerNames();
-            else setNamesDeclined(true);
-          }}
-          testid="meeting-names-toggle"
-        />
-      </Row>
-    </Group>
+    <Row
+      title="Name speakers on calls"
+      sub="Reads Teams, Zoom and Meet through macOS Accessibility. Off, speakers show as Unknown."
+      testid="meeting-names-row"
+    >
+      <Toggle
+        checked={!declined}
+        onChange={(next) => {
+          if (next) void reenableSpeakerNames();
+          else setNamesDeclined(true);
+        }}
+        testid="meeting-names-toggle"
+      />
+    </Row>
   );
 }
 
@@ -186,13 +182,17 @@ function MeetingNamesGroup(): JSX.Element | null {
  * Dictation mode (spec/07 § Dictation mode): whether Smart Turn decides when
  * the speaker has finished, and the silence that sends regardless.
  */
-function DictationGroup(): JSX.Element {
+function DictationBehaviourRows(): JSX.Element {
   const pause = usePreferencesStore((s) => s.preferences.dictationPauseSeconds);
   const detect = usePreferencesStore((s) => s.preferences.dictationTurnDetection);
   const loaded = usePreferencesStore((s) => s.loaded);
   return (
-    <Group label="Dictation mode" testid="settings-voice-dictation">
-      <Row title="Detect when I've finished" testid="dictation-turn-detection">
+    <>
+      <Row
+        title="Detect when I've finished"
+        sub="Sends as soon as you stop talking, instead of waiting out the pause below."
+        testid="dictation-turn-detection"
+      >
         <Toggle
           checked={detect}
           disabled={!loaded}
@@ -200,7 +200,10 @@ function DictationGroup(): JSX.Element {
           testid="dictation-turn-detection-toggle"
         />
       </Row>
-      <Row title={detect ? 'Send anyway after a pause of' : 'Send after a pause of'}>
+      <Row
+        title={detect ? 'Send anyway after a pause of' : 'Send after a pause of'}
+        className="stack set-row-choices"
+      >
         <Pills
           label="Dictation pause"
           options={DICTATION_PAUSE_CHOICES}
@@ -213,7 +216,7 @@ function DictationGroup(): JSX.Element {
           }
         />
       </Row>
-    </Group>
+    </>
   );
 }
 
@@ -223,7 +226,7 @@ function DictationGroup(): JSX.Element {
  * in the capture phase and stops the event there, so the chord being recorded
  * doesn't also fire whatever it is bound to.
  */
-function ShortcutGroup(): JSX.Element {
+function ShortcutRow(): JSX.Element {
   const chord = useUiStore((s) => s.dictateChord);
   const setChord = useUiStore((s) => s.setDictateChord);
   const [recording, setRecording] = useState(false);
@@ -247,22 +250,20 @@ function ShortcutGroup(): JSX.Element {
   }, [recording, setChord]);
 
   return (
-    <Group label="Shortcut" testid="settings-voice-shortcut">
-      <Row title="Dictate">
-        <kbd className="set-chord" data-testid="dictate-chord">
-          {recording ? 'Press keys…' : shortcutLabel(chordGlyphs(chord))}
-        </kbd>
-        <button
-          type="button"
-          className="set-btn"
-          data-testid="dictate-chord-change"
-          aria-pressed={recording}
-          onClick={() => setRecording(!recording)}
-        >
-          {recording ? 'Cancel' : 'Change'}
-        </button>
-      </Row>
-    </Group>
+    <Row title="Dictate shortcut" sub="This computer only.">
+      <kbd className="set-chord" data-testid="dictate-chord">
+        {recording ? 'Press keys…' : shortcutLabel(chordGlyphs(chord))}
+      </kbd>
+      <button
+        type="button"
+        className="set-btn"
+        data-testid="dictate-chord-change"
+        aria-pressed={recording}
+        onClick={() => setRecording(!recording)}
+      >
+        {recording ? 'Cancel' : 'Change'}
+      </button>
+    </Row>
   );
 }
 
@@ -329,7 +330,7 @@ function LocalSttStatus(): JSX.Element {
  * for the phone app, one for web and desktop, and whether Whisper tidies up a
  * live engine's words as dictation goes on.
  */
-function DictationEnginesGroup(): JSX.Element {
+function DictationGroup(): JSX.Element {
   const dictation = usePreferencesStore((s) => s.preferences.voiceConfig.dictation);
   const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
   const loaded = usePreferencesStore((s) => s.loaded);
@@ -354,11 +355,12 @@ function DictationEnginesGroup(): JSX.Element {
     ) : undefined;
   };
   return (
-    <Group label="Dictation" testid="settings-voice-dictation-engines">
+    <Group label="Dictation" testid="settings-voice-dictation">
       <Row
-        title="Phone"
+        title="Phone engine"
         sub={keys(dictation.phone, 'dictation-phone-keys')}
         testid="dictation-phone"
+        className="stack set-row-choices"
       >
         <Pills
           label="Phone dictation"
@@ -371,7 +373,8 @@ function DictationEnginesGroup(): JSX.Element {
         />
       </Row>
       <Row
-        title="Computer"
+        title="Computer engine"
+        className="stack set-row-choices"
         sub={
           dictation.computer === 'local' ? (
             <LocalSttStatus />
@@ -391,7 +394,11 @@ function DictationEnginesGroup(): JSX.Element {
           onChange={(computer) => write({ computer })}
         />
       </Row>
-      <Row title="Tidy up with Whisper" testid="dictation-tidy-row">
+      <Row
+        title="Tidy up with Whisper"
+        sub="Corrects a live engine's words once you finish."
+        testid="dictation-tidy-row"
+      >
         <Toggle
           checked={dictation.tidy}
           disabled={!loaded}
@@ -399,6 +406,8 @@ function DictationEnginesGroup(): JSX.Element {
           testid="dictation-tidy-toggle"
         />
       </Row>
+      <DictationBehaviourRows />
+      <ShortcutRow />
     </Group>
   );
 }
@@ -420,7 +429,7 @@ function MeetingEngineGroup(): JSX.Element {
   return (
     <Group label="Meetings" testid="settings-voice-meeting">
       <Row
-        title="Transcription"
+        title="Meeting transcription"
         sub={
           status ? (
             <span className="set-sub-line set-sub-error" data-testid="meeting-engine-keys">
@@ -429,6 +438,7 @@ function MeetingEngineGroup(): JSX.Element {
           ) : undefined
         }
         testid="meeting-engine"
+        className="stack set-row-choices"
       >
         <Pills
           label="Meeting transcription"
@@ -444,6 +454,7 @@ function MeetingEngineGroup(): JSX.Element {
           }
         />
       </Row>
+      <MeetingNamesRow />
     </Group>
   );
 }
@@ -471,7 +482,7 @@ function EngineGroup(): JSX.Element {
   };
 
   return (
-    <Group label="Engine" testid="settings-voice-config">
+    <Group label="Voice calls" testid="settings-voice-config">
       {SURFACES.map(({ key: surface, label }) => {
         const cell = voiceConfig[surface];
         const { backend, layer, handoff } = cell;
@@ -628,8 +639,8 @@ function SpeakingGroup(): JSX.Element {
   }
 
   return (
-    <Group label="Speaking" testid="voice-speaking">
-      <Row title="Speech engine">
+    <Group label="Patch’s voice" testid="voice-speaking">
+      <Row title="Speech engine" sub="What Patch speaks with, on every host.">
         <Pills
           label="Speech engine"
           value={ttsBackend}
@@ -686,7 +697,7 @@ function SpeakingGroup(): JSX.Element {
           </select>
         </Row>
       )}
-      <Row title="Say the chat name every">
+      <Row title="Say the chat name every" sub="0 never says it.">
         <input
           type="number"
           min={0}
@@ -702,6 +713,49 @@ function SpeakingGroup(): JSX.Element {
           }}
         />
         <span className="set-unit">replies</span>
+      </Row>
+    </Group>
+  );
+}
+
+const SPEECH_BACKENDS: readonly SpeechBackendSetting[] = [
+  'auto',
+  'local',
+  'parakeet',
+  'groq',
+  'elevenlabs',
+  'off',
+];
+const SPEECH_BACKEND_LABELS: Record<SpeechBackendSetting, string> = {
+  auto: 'Automatic',
+  local: 'Whisper (local)',
+  parakeet: 'Parakeet (local)',
+  groq: 'Groq',
+  elevenlabs: 'ElevenLabs',
+  off: 'Off',
+};
+
+/** The engine every host transcribes speech with (spec/02 § Speech set-up). */
+function TranscriptionGroup(): JSX.Element {
+  const value = usePreferencesStore((s) => s.preferences.speechBackend);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  return (
+    <Group label="Transcription on hosts" testid="settings-voice-transcription">
+      <Row
+        title="Speech-to-text engine"
+        sub="Automatic uses a local model if the host has one, otherwise a Groq key. Off turns transcription off."
+        testid="speech-backend"
+        className="stack set-row-choices"
+      >
+        <Pills
+          label="Speech-to-text engine"
+          options={SPEECH_BACKENDS}
+          labels={SPEECH_BACKEND_LABELS}
+          value={value}
+          disabled={!loaded}
+          testid="speech-backend-pills"
+          onChange={(next) => void patchShared('speech engine', { speechBackend: next })}
+        />
       </Row>
     </Group>
   );
