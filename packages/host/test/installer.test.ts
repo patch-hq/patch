@@ -323,6 +323,25 @@ describe('pairing failures are named, not lumped together', () => {
     expect((r as { message: string }).message).toContain('http://unreachable.invalid');
   });
 
+  it('names a re-signed TLS connection instead of a bare "fetch failed"', async () => {
+    const r = await redeemPairingCode({
+      serverUrl: 'https://patch.example',
+      code: 'c',
+      identity,
+      label: 'm',
+      fetchImpl: (async () => {
+        throw Object.assign(new Error('fetch failed'), {
+          cause: Object.assign(new Error('self-signed certificate in certificate chain'), {
+            code: 'SELF_SIGNED_CERT_IN_CHAIN',
+          }),
+        });
+      }) as unknown as typeof fetch,
+    });
+    const message = (r as { message: string }).message;
+    expect(message).toContain("re-signs secure connections with a certificate Patch doesn't trust");
+    expect(message).not.toMatch(/: fetch failed$/);
+  });
+
   it('submits the code together with this host’s public key, and mints nothing', async () => {
     let seen: unknown;
     await redeemPairingCode({

@@ -56,4 +56,22 @@ if [ ! -x "$NODE" ]; then
   exit 65
 fi
 
+# Company networks re-sign TLS with a CA that lives in the OS trust store, and
+# route traffic through a proxy. Node ignores both by default; without these a
+# network call fails with a bare "fetch failed" while curl works.
+export NODE_USE_SYSTEM_CA=1
+export NODE_USE_ENV_PROXY=1
+
+# macOS keeps its proxy in System Settings rather than the environment.
+if [ "$OS" = darwin ] && [ -z "${HTTPS_PROXY:-}${https_proxy:-}" ]; then
+  SCUTIL=$(scutil --proxy 2>/dev/null || true)
+  if printf '%s\n' "$SCUTIL" | grep -q 'HTTPSEnable : 1'; then
+    P_HOST=$(printf '%s\n' "$SCUTIL" | sed -n 's/.*HTTPSProxy : //p' | head -n 1)
+    P_PORT=$(printf '%s\n' "$SCUTIL" | sed -n 's/.*HTTPSPort : //p' | head -n 1)
+    if [ -n "$P_HOST" ] && [ -n "$P_PORT" ]; then
+      export HTTPS_PROXY="http://$P_HOST:$P_PORT"
+    fi
+  fi
+fi
+
 exec "$NODE" "$DIR/install.mjs" "$@"
