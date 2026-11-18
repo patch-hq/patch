@@ -51,8 +51,9 @@ interface AnthropicModel {
 
 export interface ModelCatalogOptions {
   /**
-   * The host's AI-call gate (spec/10) — re-read per refresh, never cached.
-   * Walks the stored accounts so a spent key does not empty the model picker.
+   * Runs the read on a connected account — re-read per refresh, never cached.
+   * The host passes an ungated runner: listing models costs nothing, so a
+   * usage-limited account must not empty the model picker.
    */
   runOnAccountWithCredit: RunOnAccountWithCredit;
   /** Injected in tests; defaults to global fetch. */
@@ -122,7 +123,9 @@ export class ModelCatalog {
       this.fetchCatalogue(accessToken),
     );
     if (snapshot === null) {
-      throw new Error('Claude OAuth unavailable for the model catalogue: no account has credit');
+      throw new Error(
+        'Claude OAuth unavailable for the model catalogue: no connected account has a usable credential',
+      );
     }
     this.onRefreshed?.();
     return snapshot;

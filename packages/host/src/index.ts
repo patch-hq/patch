@@ -4317,6 +4317,43 @@ async function startHost(
   };
 
   /**
+   * For calls that spend no credit — the model catalogue is an auth-only
+   * `GET /v1/models`. The credit gate above would refuse them whenever every
+   * account is sidelined by a usage limit, which emptied the Claude half of the
+   * model picker exactly when someone opens it to pick another model. Here
+   * every connected account is tried in stored order, sidelining ignored, and
+   * the first that answers wins. A failure on one (revoked token, 5xx) moves to
+   * the next; if none answers the last error is thrown, so nothing is hidden.
+   * Null only when no account holds a usable credential.
+   */
+  const runOnAnyAccount: RunOnAccountWithCredit = async <T>(
+    label: string,
+    run: (accessToken: string) => Promise<T>,
+  ): Promise<T | null> => {
+    const store = readPatchStore(oauthOpts);
+    const ids: Array<string | undefined> =
+      store && store.accounts.length > 0
+        ? store.accounts.filter((a) => a.credential !== null).map((a) => a.id)
+        : [undefined];
+    let lastError: unknown;
+    for (const accountId of ids) {
+      const resolved = await resolveOAuth(accountId);
+      if (!resolved.ok) {
+        logger.warn({ label, accountId, reason: resolved.reason }, 'ai call: no usable credential');
+        continue;
+      }
+      try {
+        return await run(resolved.accessToken);
+      } catch (err) {
+        lastError = err;
+        logger.warn({ label, accountId, err }, 'ungated call failed on this account');
+      }
+    }
+    if (lastError !== undefined) throw lastError;
+    return null;
+  };
+
+  /**
    * Every stored account's usage, kept current whether or not it can run a
    * turn (spec/10 § Surface in Settings — Usage).
    *
@@ -4369,7 +4406,9 @@ async function startHost(
 
   const modelLimits = new ModelLimits();
   const modelCatalog = new ModelCatalog({
-    runOnAccountWithCredit,
+    // Not the credit gate: listing models costs nothing, so a usage-limited
+    // account must not empty the picker.
+    runOnAccountWithCredit: runOnAnyAccount,
     limits: modelLimits,
     // The Manager's model is refused while there is no catalogue (no AI
     // connected yet); the first real read after a sign-in puts it on it.
