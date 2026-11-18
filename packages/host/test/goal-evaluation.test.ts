@@ -252,10 +252,14 @@ describe('maybeEvaluateGoal — relentless until met, stopped only by a deadlock
     expect(state?.declaredStatus?.text).toContain('It will not run the migration');
   });
 
-  it('stops when the agent says it is blocked on the user three times running', async () => {
-    const evaluateGoal = vi.fn(
-      async (): Promise<GoalVerdict> => ({ verdict: 'blocked', reason: 'Needs the prod password' }),
-    );
+  it('holds the goal when the agent is blocked on the user, and carries on when they reply', async () => {
+    let n = 0;
+    const evaluateGoal: EvaluateGoal = async () => {
+      n += 1;
+      return n === 1
+        ? { verdict: 'blocked', reason: 'Needs the prod password' }
+        : { verdict: 'met', reason: 'deployed' };
+    };
     const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('I need the password') });
     const chatId = await daemon.spawnChat({ folder });
     await tick();
@@ -263,11 +267,21 @@ describe('maybeEvaluateGoal — relentless until met, stopped only by a deadlock
     await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
     await tick(300);
 
-    expect(evaluateGoal).toHaveBeenCalledTimes(3);
-    const state = daemon.chatState.get(chatId);
+    // Held: judged once, not resubmitted, surfaced as a question.
+    expect(n).toBe(1);
+    let state = daemon.chatState.get(chatId);
     expect(state?.goal).toBe('Deploy it');
-    expect(state?.declaredStatus?.text).toContain('blocked on you 3 times');
+    expect(state?.goalProgress?.waitingOnUser).toBe(true);
+    expect(state?.declaredStatus?.kind).toBe('question');
     expect(state?.declaredStatus?.text).toContain('Needs the prod password');
+
+    // The user's reply starts a turn: the hold lifts and the goal is judged again.
+    await daemon.sendInput({ chatId, message: 'the password is hunter2', localId: 'u2' });
+    await tick(300);
+    expect(n).toBe(2);
+    state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBeNull();
+    expect(state?.lastGoal?.outcome).toBe('met');
   });
 
   it('presses on after the first two refusals, resubmitting the reason as guidance', async () => {

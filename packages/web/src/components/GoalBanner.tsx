@@ -86,7 +86,8 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
   // An archived chat has stopped all its work (spec/04 § Lifecycle), so its goal
   // is on hold whatever the goal progress says: never drawn as Working.
   const archived = row.status === 'archived';
-  const paused = archived || progress?.pausedByStop === true;
+  const waiting = !archived && progress?.waitingOnUser === true;
+  const paused = archived || progress?.pausedByStop === true || waiting;
   const meta = progress
     ? `${formatElapsed(now - progress.startedAt)} · ${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}${(row.goalQueue ?? []).length > 0 ? ` · ${(row.goalQueue ?? []).length} to follow` : ''}`
     : null;
@@ -111,7 +112,9 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
           <div data-testid="goal-banner-paused-note">
             {archived
               ? 'This chat is archived. Unarchive it to resume.'
-              : 'You stopped the chat. Send a message to resume.'}
+              : waiting
+                ? `Needs you: ${progress?.lastReason ?? 'the agent is blocked'}. Reply to continue.`
+                : 'You stopped the chat. Send a message to resume.'}
           </div>
         )}
         {expanded && (queue.length > 0 || remind !== null || checkInEvery !== null) && (
@@ -174,7 +177,7 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
           onToggle={() => setExpanded((v) => !v)}
           label={expanded ? 'Hide goal details' : 'Show goal details'}
         >
-          {paused ? 'Paused' : 'Working'}
+          {waiting ? 'Needs you' : paused ? 'Paused' : 'Working'}
         </StatusPill>
         <button
           type="button"
