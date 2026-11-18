@@ -3173,7 +3173,7 @@ button.nav-row {
 .new-chat-setup-reason {
   margin: 0;
   text-align: center;
-  color: var(--text-muted, inherit);
+  color: var(--text-muted);
 }
 .new-chat-setup {
   display: flex;
