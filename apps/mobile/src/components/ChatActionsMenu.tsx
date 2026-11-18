@@ -42,6 +42,7 @@ import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { isHidden, isSnoozed, type ChatRow } from '../stores/types';
 import { space, useTheme } from '../lib/theme';
+import { WakeSheet } from './WakeSheet';
 import { markLeavingForArchive } from '../lib/leaveArchived';
 
 /** The route of a chat's full-screen Tools page. */
@@ -60,6 +61,7 @@ export function ChatActionsMenu({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const readAll = useReadAloud((s) => s.readAll);
+  const [wakeOpen, setWakeOpen] = useState(false);
 
   const items = chatKebabItems(chatId, {
     pinned: row?.pinned ?? false,
@@ -109,6 +111,9 @@ export function ChatActionsMenu({
         return;
       case 'Add tasks':
         useUiStore.getState().setTaskAddChatId(chatId);
+        return;
+      case 'Loop or wake…':
+        setWakeOpen(true);
         return;
       case 'Move to…':
         router.push(`/chats/${chatId}/move`);
@@ -172,6 +177,7 @@ export function ChatActionsMenu({
         onSelect={onSelect}
         onDismiss={() => setOpen(false)}
       />
+      {wakeOpen ? <WakeSheet chatId={chatId} onClose={() => setWakeOpen(false)} /> : null}
     </>
   );
 }

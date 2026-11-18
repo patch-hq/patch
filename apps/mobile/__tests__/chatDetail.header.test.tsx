@@ -521,6 +521,7 @@ describe('chat-detail — kebab menu', () => {
       'Tools',
       'Documents',
       'Add tasks',
+      'Loop or wake…',
       'Pin chat',
       'Snooze chat',
       'Archive chat',
@@ -641,6 +642,7 @@ describe('chat-detail — kebab menu', () => {
       'Tools',
       'Documents',
       'Add tasks',
+      'Loop or wake…',
       'Pin chat',
       'Snooze chat',
       'Unarchive chat',
@@ -665,6 +667,7 @@ describe('chat-detail — kebab menu', () => {
       'Tools',
       'Documents',
       'Add tasks',
+      'Loop or wake…',
       'Disable',
       'Clear context',
     ]);
