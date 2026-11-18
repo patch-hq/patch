@@ -101,8 +101,8 @@ describe('Sidebar — shift-click multi-select', () => {
     useUiStore.getState().setSearchQuery('');
     useUiStore.getState().resolveConfirm(false);
     useSelectionStore.setState({ order: [], anchor: null, selected: [] });
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
 
   afterEach(() => {

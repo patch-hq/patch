@@ -70,11 +70,17 @@ export function snoozedRowsForStore(chats: unknown[]): Array<
 
 /** Fold every snoozed chat into the store, a page at a time. */
 export async function loadSnoozedChats(): Promise<void> {
-  let offset = 0;
+  let cursor: string | undefined;
   for (;;) {
-    const page = await api.listChatsSnoozed({ limit: 200, offset });
+    const page = await api.listChatsSnoozed(
+      cursor === undefined ? { limit: 200 } : { limit: 200, cursor },
+    );
     useChatStore.getState().mergeChats(snoozedRowsForStore(page.chats));
-    if (page.nextOffset === null) return;
-    offset = page.nextOffset;
+    if (page.nextCursor === null) return;
+    // Never "start again from the top": that is a loop that never ends.
+    if (typeof page.nextCursor !== 'string') {
+      throw new Error('snoozed chats: the server said nothing about a next page');
+    }
+    cursor = page.nextCursor;
   }
 }

@@ -76,10 +76,16 @@ const ALL_STEPS = [
   { label: 'unit + contract + integration', argv: ['pnpm', 'run', 'test'] },
   {
     label: 'browser',
-    argv:
-      BROWSER_SHARD === undefined
-        ? ['pnpm', '--filter', '@patch/web', 'run', 'test:ui']
-        : ['pnpm', '--filter', '@patch/web', 'exec', 'playwright', 'test', `--shard=${BROWSER_SHARD}`],
+    argv: [
+      'pnpm',
+      '--filter',
+      '@patch/web',
+      'exec',
+      'playwright',
+      'test',
+      '--project=chromium',
+      ...(BROWSER_SHARD === undefined ? [] : [`--shard=${BROWSER_SHARD}`]),
+    ],
     env: BROWSER_ENV,
     // The one step that is skippable, and only on the narrowest of grounds: it
     // exercises the SPA in a real browser, so a commit that cannot reach the SPA
@@ -88,6 +94,28 @@ const ALL_STEPS = [
     // they catch, and cross-package breakage is exactly what they exist for.
     skippableWhenUntouched: BROWSER_GATE_PATHS,
   },
+  // The load targets (spec/19 § Load targets) time the real app against a real
+  // server, so they run alone, after the rest of the browser layer: a
+  // one-second target measured while other workers hold the CPU measures the
+  // CPU. Once per gate — on the first shard — not split across shards.
+  ...(BROWSER_SHARD === undefined || BROWSER_SHARD.startsWith('1/')
+    ? [
+        {
+          label: 'load targets',
+          argv: [
+            'pnpm',
+            '--filter',
+            '@patch/web',
+            'exec',
+            'playwright',
+            'test',
+            '--project=load-targets',
+          ],
+          env: BROWSER_ENV,
+          skippableWhenUntouched: BROWSER_GATE_PATHS,
+        },
+      ]
+    : []),
   { label: 'mock leakage', argv: ['node', 'scripts/mock-check.mjs', '--quiet'] },
   // Patch is a public product: no one person's hosts or ids in what a stranger runs.
   { label: 'personal strings', argv: ['node', 'scripts/personal-check.mjs'] },
@@ -130,14 +158,15 @@ if (SKIP_BROWSER_GATE_TEMP) {
   console.warn(
     '\n!!! verify: skipping the browser/e2e layer UNCONDITIONALLY (box-size workaround, ' +
       'maintainer approved 2026-09-17, widened 2026-09-18 — the box cannot reliably run this suite ' +
-      "at all right now). Whatever is broken in the browser layer ships without being caught. " +
+      'at all right now). Whatever is broken in the browser layer ships without being caught. ' +
       'Set PATCH_RUN_BROWSER_GATE=1 to run it anyway for one invocation. Remove this flag and ' +
       'this block once the box is upgraded. !!!\n',
   );
 }
 
 const STEPS = ALL_STEPS.filter((step) => {
-  if (SKIP_BROWSER_GATE_TEMP && step.label === 'browser') return false;
+  if (SKIP_BROWSER_GATE_TEMP && (step.label === 'browser' || step.label === 'load targets'))
+    return false;
   if (!changed || !step.skippableWhenUntouched) return true;
   const touched = changed.some((f) => step.skippableWhenUntouched.some((p) => f.startsWith(p)));
   if (!touched) {
@@ -159,6 +188,12 @@ if (process.env['PATCH_REAL_CLAUDE'] !== '1') {
       'they spend tokens.\n      Run them deliberately: ' +
       'PATCH_REAL_CLAUDE=1 pnpm --filter @patch/host exec vitest run test/real-backend.integration.test.ts',
   );
+}
+
+// `--plan`: name the layers this invocation would run, and run none of them.
+if (process.argv.includes('--plan')) {
+  for (const step of STEPS) console.log(`${step.label}: ${step.argv.join(' ')}`);
+  process.exit(0);
 }
 
 for (const [i, step] of STEPS.entries()) {

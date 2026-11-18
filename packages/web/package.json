@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run",
-    "test:ui": "playwright test",
+    "test:ui": "playwright test --project=chromium && playwright test --project=load-targets",
     "test:integration": "vitest run src/__tests__/chatTranscript.integration.test.tsx"
   },
   "dependencies": {

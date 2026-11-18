@@ -15,8 +15,8 @@ describe('SidebarWindowRoute', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
 
   afterEach(() => {

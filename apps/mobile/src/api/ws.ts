@@ -9,6 +9,8 @@ import { useNotificationsStore } from '../stores/notificationsStore';
 import { useViewPositionStore } from '../stores/viewPositionStore';
 import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import {
+  FEED_CATCH_UP_REQUEST_ID,
+  FEED_LAST_SCREEN_REQUEST_ID,
   CLOSE_AUTH_FAILED,
   CLOSE_SERVER_RESTARTING,
   RESTART_RETRY_MS,
@@ -20,6 +22,7 @@ import {
 import { clearCredential, loadCredential, store as feedStore } from '../lib/credential';
 import { useChatStore } from '../stores/chatStore';
 import {
+  heldChatIds,
   heldCursor,
   markSynced,
   needsOfflineSync,
@@ -146,6 +149,15 @@ export class PatchWs {
   private prefetchTries = new Map<string, number>();
   /** Debounces live roster changes into one `syncTranscripts` sweep. */
   private syncDebounce: TimerHandle | null = null;
+  /**
+   * The chats the server was last told this phone follows, on this socket
+   * (`feed.resume` / `feed.follow`, spec/03 § Account feed). `null` until the
+   * feed has been resumed on the current connection.
+   */
+  private followed: Set<string> | null = null;
+  /** Coalesces store changes into one `feed.follow` check. */
+  private followTimer: TimerHandle | null = null;
+  private storeUnsub: (() => void) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -163,11 +175,24 @@ export class PatchWs {
     this.closed = false;
     this.openOnce();
     this.appStateSub = AppState.addEventListener('change', this.handleAppState);
+    // Opening or leaving a chat, and the list changing, change what this
+    // phone follows; the server hears about it with `feed.follow`.
+    this.storeUnsub = useChatStore.subscribe((now, prev) => {
+      if (now.activeChatId !== prev.activeChatId || now.chats !== prev.chats)
+        this.scheduleFollowSync();
+    });
   }
 
   close(): void {
     this.closed = true;
     this.clearConnectTimer();
+    this.storeUnsub?.();
+    this.storeUnsub = null;
+    if (this.followTimer !== null) {
+      clearTimeout(this.followTimer);
+      this.followTimer = null;
+    }
+    this.followed = null;
     if (this.syncDebounce !== null) {
       clearTimeout(this.syncDebounce);
       this.syncDebounce = null;
@@ -273,33 +298,102 @@ export class PatchWs {
   }
 
   /**
-   * After every connect to a server that runs the feed: the last feed position
-   * this phone holds, and the chats it follows with the position held in each
-   * — the chat on screen, every chat in the offline copy, and the most recent
-   * on the list (spec/03 § Account feed).
+   * The chats this phone follows: the chat on screen, the most recent on the
+   * list, and every chat it holds a transcript of (spec/03 § Account feed,
+   * spec/05 § Loading). Cheap — it reads no transcript — because it is
+   * re-checked as the list changes.
    */
-  private resumeFeed(): void {
-    this.flushStoreQueue();
+  private followIds(): Set<string> {
     const { chats, timelines, activeChatId } = useChatStore.getState();
-    const follow = new Map<string, number>();
-    const cursorOf = (chatId: string): number =>
-      (timelines[chatId]?.length ?? 0) > 0 ? this.replayCursor(chatId) : heldCursor(chatId);
-    if (activeChatId !== null) follow.set(activeChatId, cursorOf(activeChatId));
+    const ids = new Set<string>();
+    if (activeChatId !== null) ids.add(activeChatId);
     const recent = Object.values(chats)
       .sort((a, b) => b.lastUpdated - a.lastUpdated)
       .slice(0, FEED_RECENT_CHATS);
-    for (const row of recent) follow.set(row.chatId, cursorOf(row.chatId));
+    for (const row of recent) ids.add(row.chatId);
+    const held = heldChatIds();
     for (const chatId of Object.keys(chats)) {
-      const held = cursorOf(chatId);
-      if (held >= 0) follow.set(chatId, held);
+      if (held.has(chatId) || (timelines[chatId]?.length ?? 0) > 0) ids.add(chatId);
     }
-    for (const [chatId, after] of follow) this.lastReplayCursor.set(chatId, after);
+    return ids;
+  }
+
+  /** The followed chats with the position held in each. */
+  private followList(ids: Set<string>): Map<string, number> {
+    this.flushStoreQueue();
+    const { timelines } = useChatStore.getState();
+    const follow = new Map<string, number>();
+    for (const chatId of ids) {
+      follow.set(
+        chatId,
+        (timelines[chatId]?.length ?? 0) > 0 ? this.replayCursor(chatId) : heldCursor(chatId),
+      );
+    }
+    return follow;
+  }
+
+  /**
+   * After every connect to a server that runs the feed: the last feed position
+   * this phone holds, and the chats it follows with the position held in each.
+   */
+  private resumeFeed(): void {
+    const ids = this.followIds();
+    const follow = this.followList(ids);
+    this.noteFollowedCursors(follow, new Set());
+    this.followed = ids;
     const after = loadFeedPos();
     this.ws?.send(
       JSON.stringify({
         type: 'feed.resume',
         ...(after !== null ? { after } : {}),
         follow: [...follow].map(([chatId, a]) => ({ chatId, after: a })),
+      }),
+    );
+  }
+
+  /**
+   * The server answers each newly followed chat, so opening one need not ask
+   * again from the same cursor — except a chat held nothing of and not on
+   * screen: its answer went to the offline copy, so opening it asks for its
+   * last screen itself.
+   */
+  private noteFollowedCursors(follow: Map<string, number>, already: Set<string>): void {
+    const { activeChatId } = useChatStore.getState();
+    for (const [chatId, after] of follow) {
+      if (already.has(chatId)) continue;
+      if (after < 0 && chatId !== activeChatId) continue;
+      this.lastReplayCursor.set(chatId, after);
+    }
+  }
+
+  private scheduleFollowSync(): void {
+    if (this.followTimer !== null) return;
+    this.followTimer = setTimeout(() => {
+      this.followTimer = null;
+      this.syncFollow();
+    }, FOLLOW_SYNC_MS);
+  }
+
+  /**
+   * Tell the server when the set of chats this phone follows has changed — a
+   * chat opened, a new chat at the top of the list, one dropped off it — with
+   * `feed.follow`, which replaces the set. Without it the server keeps the set
+   * from connect time: a chat that became recent since gets no entries until
+   * it is opened, and one that fell away keeps sending them.
+   */
+  syncFollow(): void {
+    if (!this.accountFeed || this.followed === null) return;
+    if (!this.ws || this.ws.readyState !== 1) return;
+    const ids = this.followIds();
+    const followed = this.followed;
+    if (ids.size === followed.size && [...ids].every((c) => followed.has(c))) return;
+    const follow = this.followList(ids);
+    this.noteFollowedCursors(follow, followed);
+    this.followed = ids;
+    this.ws.send(
+      JSON.stringify({
+        type: 'feed.follow',
+        follow: [...follow].map(([chatId, after]) => ({ chatId, after })),
       }),
     );
   }
@@ -551,6 +645,8 @@ export class PatchWs {
     // A new socket has heard nothing: every held chat may need its replay
     // again, including one whose request died with the old connection.
     this.lastReplayCursor.clear();
+    // Nothing is followed on a new socket until `feed.resume` says so.
+    this.followed = null;
     ws.onopen = (): void => {
       this.clearConnectTimer();
       this.lastInboundAt = Date.now();
@@ -1160,9 +1256,19 @@ export class PatchWs {
         store.orderTimelineBySeq(event.chatId);
         store.setHistoryLoadingEarlier(event.chatId, false);
       }
-      if (ask?.kind === 'last' || ask?.kind === 'before')
+      // `more` running backwards: older pages remain above what is held. A
+      // followed chat this phone held nothing of comes as its last screen.
+      if (
+        ask?.kind === 'last' ||
+        ask?.kind === 'before' ||
+        event.requestId === FEED_LAST_SCREEN_REQUEST_ID
+      )
         store.setHistoryMore(event.chatId, event.more);
-      if ((ask?.kind === 'after' || event.requestId === 'feed') && event.more && shown) {
+      if (
+        (ask?.kind === 'after' || event.requestId === FEED_CATCH_UP_REQUEST_ID) &&
+        event.more &&
+        shown
+      ) {
         this.askHistory(event.chatId, { after: this.replayCursor(event.chatId) });
       }
       return;
@@ -1290,6 +1396,8 @@ export function resetWs(): void {
 const HISTORY_PAGE = 100;
 /** How many of the most recently active chats the phone follows besides its offline copy. */
 const FEED_RECENT_CHATS = 30;
+/** How long store changes are gathered before checking whether the followed set changed. */
+const FOLLOW_SYNC_MS = 300;
 const FEED_POS_KEY = 'patch.feedPos';
 const ACCOUNT_FEED_KEY = 'patch.accountFeed';
 

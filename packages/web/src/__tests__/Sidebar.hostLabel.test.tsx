@@ -66,8 +66,8 @@ describe('Sidebar host label on ambiguous titles', () => {
     useUiStore.getState().setAttentionOnly(false);
     reportHost('d1', { hostName: 'Hetzner' });
     reportHost('d2', { hostName: 'Mac' });
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
   afterEach(() => {
     cleanup();

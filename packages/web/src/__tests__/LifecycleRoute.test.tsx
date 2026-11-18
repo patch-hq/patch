@@ -26,8 +26,8 @@ function renderAt(kind: string): void {
 describe('LifecycleRoute', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
 
   afterEach(() => {
@@ -102,7 +102,7 @@ describe('LifecycleRoute', () => {
             statusKind: null,
           },
         ],
-        nextOffset: 1,
+        nextCursor: 'cur-1',
       })
       .mockResolvedValueOnce({
         chats: [
@@ -125,7 +125,7 @@ describe('LifecycleRoute', () => {
             statusKind: null,
           },
         ],
-        nextOffset: null,
+        nextCursor: null,
       });
     renderAt('hidden');
     await screen.findByTestId('chat-row-h1');
@@ -138,7 +138,7 @@ describe('LifecycleRoute', () => {
     fireEvent.scroll(route);
 
     await waitFor(() => expect(listChatsHidden).toHaveBeenCalledTimes(2));
-    expect(listChatsHidden).toHaveBeenLastCalledWith({ limit: 30, offset: 1 });
+    expect(listChatsHidden).toHaveBeenLastCalledWith({ limit: 30, cursor: 'cur-1' });
     await screen.findByTestId('chat-row-h2');
   });
   describe('search', () => {

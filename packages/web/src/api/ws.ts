@@ -8,6 +8,8 @@
 //     chat.archive_request, chat.pin_request, chat.call_response, etc.)
 
 import {
+  FEED_CATCH_UP_REQUEST_ID,
+  FEED_LAST_SCREEN_REQUEST_ID,
   CLOSE_AUTH_FAILED,
   CLOSE_SERVER_RESTARTING,
   RESTART_RETRY_MS,
@@ -1455,10 +1457,15 @@ export class PatchWs {
         store.setHistoryLoadingEarlier(event.chatId, false);
       }
       // `more` running backwards: older pages remain above what is shown.
-      if (ask?.kind === 'last' || ask?.kind === 'before')
+      // A followed chat this device held nothing of comes as its last screen.
+      if (
+        ask?.kind === 'last' ||
+        ask?.kind === 'before' ||
+        event.requestId === FEED_LAST_SCREEN_REQUEST_ID
+      )
         store.setHistoryMore(event.chatId, event.more);
       // Catching up runs forwards in pages until it is level.
-      if ((ask?.kind === 'after' || event.requestId === 'feed') && event.more) {
+      if ((ask?.kind === 'after' || event.requestId === FEED_CATCH_UP_REQUEST_ID) && event.more) {
         const held = store.timelines[event.chatId] ?? [];
         const after = held.reduce(
           (max, e) => (e.localId === undefined && e.seq > max ? e.seq : max),

@@ -158,22 +158,22 @@ describe('api.* methods — URL/method/body contracts', () => {
   // spec/14 § Sidebar item 6: every lifecycle list pages ("load a limited
   // number... then load more on scroll"); Automations additionally
   // pages oldest-first, matching its FIFO display order.
-  it('the five lifecycle lists carry limit/offset, and Automations carries order=asc', async () => {
+  it('the five lifecycle lists carry limit/cursor, and Automations carries order=asc', async () => {
     await api.listChatsArchived();
     expect(lastCall()[0]).toBe('/api/chats?archived=only');
-    await api.listChatsArchived({ limit: 30, offset: 30 });
-    expect(lastCall()[0]).toBe('/api/chats?archived=only&limit=30&offset=30');
+    await api.listChatsArchived({ limit: 30, cursor: 'eyJ2Ijox' });
+    expect(lastCall()[0]).toBe('/api/chats?archived=only&limit=30&cursor=eyJ2Ijox');
 
     await api.listChatsDeleted({ limit: 20 });
     expect(lastCall()[0]).toBe('/api/chats?deleted=only&limit=20');
 
-    await api.listChatsSnoozed({ offset: 10 });
-    expect(lastCall()[0]).toBe('/api/chats?snoozed=only&offset=10');
+    await api.listChatsSnoozed({ cursor: 'abc' });
+    expect(lastCall()[0]).toBe('/api/chats?snoozed=only&cursor=abc');
 
     await api.listChatsHidden();
     expect(lastCall()[0]).toBe('/api/chats?hidden=only');
-    await api.listChatsHidden({ limit: 30, offset: 0 });
-    expect(lastCall()[0]).toBe('/api/chats?hidden=only&limit=30&offset=0');
+    await api.listChatsHidden({ limit: 30 });
+    expect(lastCall()[0]).toBe('/api/chats?hidden=only&limit=30');
 
     await api.listChatsAutomations();
     expect(lastCall()[0]).toBe('/api/chats?automations=only&order=asc');

@@ -114,8 +114,8 @@ describe('archiving the open chat moves you on', () => {
     useSelectionStore.setState({ order: [], anchor: null, selected: [] });
     vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
     vi.spyOn(api, 'archiveChat').mockResolvedValue(undefined as never);
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
 
   afterEach(() => {

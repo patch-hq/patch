@@ -38,8 +38,8 @@ describe('Sidebar — hover freezes the order', () => {
     usePresenceStore.getState().setConnection('connected');
     useVoiceStore.setState({ activeDevices: {} });
     useUiStore.setState({ chatSort: 'recent', groupSort: 'same-as-chats', forgottenFolders: [] });
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
   afterEach(() => {
     vi.restoreAllMocks();

@@ -146,6 +146,33 @@ describe('PatchWs with the account feed', () => {
     ws.close();
   });
 
+  it('takes a followed chat it held nothing of as its last screen, with older pages above', async () => {
+    const { ws, fake } = await connect();
+    useChatStore.getState().hydrate([row('c1', 1)]);
+    useChatStore.getState().setActiveChat('c1');
+    fake.receive(authOk);
+    expect(frames(fake, 'feed.resume')[0]!['follow']).toEqual([{ chatId: 'c1', after: -1 }]);
+    fake.receive({
+      type: 'chat.history',
+      requestId: 'feed.last',
+      chatId: 'c1',
+      entries: [msg('c1', 98), msg('c1', 99)],
+      more: true,
+      through: 99,
+      pending: [],
+      queued: [],
+    });
+    vi.advanceTimersByTime(100);
+    const st = useChatStore.getState();
+    expect(st.timelines['c1']?.map((e) => e.seq)).toEqual([98, 99]);
+    expect(st.historyMore['c1']).toBe(true);
+    // `more` runs backwards here: no forward catch-up is asked for.
+    expect(frames(fake, 'chat.history_request').filter((f) => f['after'] !== undefined)).toEqual(
+      [],
+    );
+    ws.close();
+  });
+
   it('keeps the feed position it is sent, and reloads the index on a reset', async () => {
     const { ws, fake } = await connect();
     fake.receive(authOk);

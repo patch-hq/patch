@@ -3204,7 +3204,8 @@ if (archiveSize > 0) {
     if (!url.includes('/api/chats?archived=only')) return prevFetch(input, init);
     const q = new URL(url, window.location.origin).searchParams;
     const limit = Number(q.get('limit') ?? 30);
-    const offset = Number(q.get('offset') ?? 0);
+    // The cursor is opaque to the client; this stub encodes its position as a number.
+    const offset = Number(q.get('cursor') ?? 0);
     const end = Math.min(offset + limit, archiveSize);
     const chats = Array.from({ length: end - offset }, (_, k) => ({
       chatId: `arch-${offset + k}`,
@@ -3223,7 +3224,7 @@ if (archiveSize > 0) {
       statusKind: null,
     }));
     return Promise.resolve(
-      new Response(JSON.stringify({ chats, nextOffset: end < archiveSize ? end : null }), {
+      new Response(JSON.stringify({ chats, nextCursor: end < archiveSize ? String(end) : null }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),

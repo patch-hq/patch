@@ -37,6 +37,12 @@ import type { ChatErrorCode, ChatSpawnRequestEvent, ReportedBackend, WireEvent }
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
+import { chatOrderKey, compareChatOrder } from './chat-registry.js';
+import {
+  decodeChatIndexCursor,
+  encodeChatIndexCursor,
+  type ChatIndexCursor,
+} from './chat-index-cursor.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
 import type { DraftAttachmentStore } from './draft-attachments.js';
@@ -478,10 +484,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       }
     }
     // Pagination (spec/14 § Sidebar item 6: "load a limited number... then
-    // load more on scroll"). `limit` absent → every matching chat, as before
-    // every existing caller (the default active list included) relies on.
-    // Present, it must be a `1..200` integer — same bound and NO-FALLBACK
-    // strictness as `GET /api/chats/:id/history`'s own `limit`.
+    // load more on scroll"; spec/01 § GET /api/chats). `limit` absent →
+    // every matching chat, as before every existing caller (the default
+    // active list included) relies on. Present, it must be a `1..200` integer
+    // — same bound and NO-FALLBACK strictness as
+    // `GET /api/chats/:id/history`'s own `limit`.
     let limit: number | undefined;
     const limitParam = url.searchParams.get('limit');
     if (limitParam !== null) {
@@ -491,8 +498,39 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       }
       limit = n;
     }
-    let offset = 0;
+    // The next page starts after a position in the sort order (`cursor`, the
+    // key of the last row the client already holds), not after a count of
+    // rows. A chat that moves or disappears between two page fetches would
+    // shift every later row's index, so an offset skips or repeats rows; a
+    // position does not. `offset` is still accepted for clients released
+    // before the cursor existed — remove it one release after.
+    const cursorParam = url.searchParams.get('cursor');
     const offsetParam = url.searchParams.get('offset');
+    if (cursorParam !== null && offsetParam !== null) {
+      return reply.code(400).send({ error: 'pass cursor or offset, not both' });
+    }
+    const filterKey = [
+      archivedParam,
+      deletedParam,
+      snoozedParam,
+      hiddenParam,
+      automationsParam,
+      order ?? 'desc',
+    ].join('|');
+    let after: ChatIndexCursor | undefined;
+    if (cursorParam !== null) {
+      const decoded = decodeChatIndexCursor(cursorParam);
+      if (decoded === null) {
+        return reply.code(400).send({ error: 'cursor is not a valid chat index cursor' });
+      }
+      after = decoded;
+      if (after.filter !== filterKey) {
+        return reply
+          .code(400)
+          .send({ error: 'cursor belongs to a different list (filter or order changed)' });
+      }
+    }
+    let offset = 0;
     if (offsetParam !== null) {
       const n = Number(offsetParam);
       if (!Number.isInteger(n) || n < 0) {
@@ -512,10 +550,23 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       automationsOnly,
       order,
     });
-    const chats = full.slice(offset, limit === undefined ? undefined : offset + limit);
-    const nextOffset =
-      limit !== undefined && offset + chats.length < full.length ? offset + chats.length : null;
-    return reply.code(200).send({ chats, nextOffset });
+    let start = offset;
+    if (after !== undefined) {
+      const key = after.key;
+      const idx = full.findIndex((c) => compareChatOrder(chatOrderKey(c), key, order) > 0);
+      start = idx === -1 ? full.length : idx;
+    }
+    const chats = full.slice(start, limit === undefined ? undefined : start + limit);
+    const more = limit !== undefined && start + chats.length < full.length;
+    const last = chats[chats.length - 1];
+    const nextCursor =
+      more && last !== undefined
+        ? encodeChatIndexCursor({ filter: filterKey, key: chatOrderKey(last) })
+        : null;
+    // `nextOffset` is only for pre-cursor clients; its value is only
+    // meaningful when the client paged by offset.
+    const nextOffset = more ? start + chats.length : null;
+    return reply.code(200).send({ chats, nextCursor, nextOffset });
   });
 
   // ---- GET /api/chats/folders ----

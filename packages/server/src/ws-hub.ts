@@ -22,6 +22,8 @@ import {
 import {
   decode,
   encode,
+  FEED_CATCH_UP_REQUEST_ID,
+  FEED_LAST_SCREEN_REQUEST_ID,
   isHostAddressedSurfaceEvent,
   isReadOnlyMirrorThread,
   OUT_OF_BAND_SEQ,
@@ -95,6 +97,14 @@ interface ConnectedSurface {
    * `chat.focus_change` first.
    */
   watchedChats: Set<string>;
+  /**
+   * The chats the device follows on the account feed (`feed.resume` /
+   * `feed.follow`, spec/03 § Account feed). Always a subset of
+   * `watchedChats`; `chat.focus_change {chatId: null}` drops what the device
+   * merely had open, not what it follows. Absent until the device resumes
+   * the feed.
+   */
+  followedChats?: Set<string>;
 }
 
 /**
@@ -666,16 +676,22 @@ export class WsHub {
     }
   }
 
-  /** A device follows these chats: their entries flow to it, and it is caught up on each. */
+  /**
+   * A device follows these chats: their entries flow to it, and it is caught
+   * up on each. A chat it holds nothing of gets its last screen rather than
+   * its first entries (spec/05 § Loading: a chat opens on its last screen).
+   */
   private follow(conn: ConnectedSurface, follow: readonly FeedFollow[]): void {
     for (const f of follow) {
       conn.watchedChats.add(f.chatId);
+      const holdsNothing = f.after < 0 && f.branchId === undefined;
       this.sendHistory(conn, {
-        requestId: 'feed',
+        requestId: holdsNothing ? FEED_LAST_SCREEN_REQUEST_ID : FEED_CATCH_UP_REQUEST_ID,
         chatId: f.chatId,
         ...(f.branchId !== undefined ? { branchId: f.branchId } : {}),
-        after: f.after,
-        limit: HISTORY_PAGE_MAX,
+        ...(holdsNothing
+          ? { limit: HISTORY_PAGE_DEFAULT }
+          : { after: f.after, limit: HISTORY_PAGE_MAX }),
       });
     }
   }
@@ -1651,8 +1667,11 @@ export class WsHub {
         this.deps.presence.setFocus(conn.accountId, conn.surfaceId, event.chatId);
         this.deps.activity?.recordFocus(conn.surfaceId, event.chatId);
         if (event.chatId === null) {
-          // Unsubscribe from everything.
+          // Unsubscribe from everything the device is not following on the
+          // account feed: a chat closed or an app backgrounded must not stop
+          // the followed chats' entries reaching the device's copy.
           conn.watchedChats.clear();
+          for (const chatId of conn.followedChats ?? []) conn.watchedChats.add(chatId);
         } else {
           conn.watchedChats.add(event.chatId);
         }
@@ -1960,11 +1979,13 @@ export class WsHub {
             if (state) conn.socket.send(encode(state));
           }
         }
+        conn.followedChats = new Set(event.follow.map((f) => f.chatId));
         this.follow(conn, event.follow);
         return;
       }
       case 'feed.follow': {
         const now = new Set(event.follow.map((f) => f.chatId));
+        conn.followedChats = now;
         for (const chatId of [...conn.watchedChats])
           if (!now.has(chatId)) conn.watchedChats.delete(chatId);
         this.follow(

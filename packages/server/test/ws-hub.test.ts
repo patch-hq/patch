@@ -774,6 +774,74 @@ describe('WS hub relay', () => {
       }
     });
 
+    it('feed.follow replaces what a device follows, and closing a chat keeps the followed ones', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(20));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      const msg = (chatId: string, seq: number) =>
+        ({ type: 'chat.message', chatId, role: 'assistant', content: `m${seq}`, seq }) as const;
+      try {
+        for (const id of ['chat-a', 'chat-b', 'chat-c'])
+          h.hostLink.emit({ type: 'chat.spawned', chatId: id, hostId: 'd1', folder: '/w' });
+        h.hostLink.emit(msg('chat-b', 0));
+        h.hostLink.emit(msg('chat-b', 1));
+        const c = await makeAuthedClient(h, user, 'srf-follow');
+        const live: string[] = [];
+        c.on('chat.message', (e) => live.push(`${e.chatId}:${(e as { seq: number }).seq}`));
+        const caughtUp: string[] = [];
+        c.on('chat.history', (e) =>
+          caughtUp.push(...e.entries.map((x) => `${e.chatId}:${(x as { seq: number }).seq}`)),
+        );
+        c.send({ type: 'feed.resume', follow: [{ chatId: 'chat-a', after: -1 }] });
+        await new Promise((r) => setTimeout(r, 50));
+
+        // Opening and leaving chat-c, or backgrounding, drops chat-c only.
+        c.send({ type: 'chat.focus_change', chatId: 'chat-c' });
+        c.send({ type: 'chat.focus_change', chatId: null });
+        await new Promise((r) => setTimeout(r, 50));
+        h.hostLink.emit(msg('chat-a', 0));
+        h.hostLink.emit(msg('chat-c', 0));
+        await new Promise((r) => setTimeout(r, 50));
+        expect(live).toEqual(['chat-a:0']);
+
+        // Following chat-b catches it up at once; chat-a is no longer followed.
+        c.send({ type: 'feed.follow', follow: [{ chatId: 'chat-b', after: 0 }] });
+        await new Promise((r) => setTimeout(r, 50));
+        expect(caughtUp).toEqual(['chat-b:1']);
+        h.hostLink.emit(msg('chat-a', 1));
+        h.hostLink.emit(msg('chat-b', 2));
+        await new Promise((r) => setTimeout(r, 50));
+        expect(live).toEqual(['chat-a:0', 'chat-b:2']);
+        await c.close();
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('a followed chat the device holds nothing of comes as its last screen, not its first entries', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(21));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      try {
+        h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+        for (let seq = 0; seq < 250; seq++) h.hostLink.emit(say(seq));
+        const c = await makeAuthedClient(h, user, 'srf-last');
+        const got: Array<{ requestId: string; first: number; last: number; more: boolean }> = [];
+        c.on('chat.history', (e) => {
+          const seqs = e.entries.map((x) => (x as { seq: number }).seq);
+          got.push({ requestId: e.requestId, first: seqs[0]!, last: seqs.at(-1)!, more: e.more });
+        });
+        c.send({ type: 'feed.resume', follow: [{ chatId: 'chat-1', after: -1 }] });
+        await new Promise((r) => setTimeout(r, 80));
+        expect(got).toEqual([{ requestId: 'feed.last', first: 150, last: 249, more: true }]);
+        await c.close();
+      } finally {
+        await h.close();
+      }
+    });
+
     it('refuses a history request that names both directions', async () => {
       const user = generateUserKeypair(() => new Uint8Array(32).fill(19));
       const registry = Registry.load(dir);

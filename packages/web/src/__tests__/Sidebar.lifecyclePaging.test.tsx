@@ -70,9 +70,9 @@ describe('Sidebar — lifecycle icon row: selected state', () => {
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.setState({ forgottenFolders: [], errors: [], lifecycleScrollTick: 0 });
     useUiStore.getState().setSearchQuery('');
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsHidden').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsHidden').mockResolvedValue({ chats: [], nextCursor: null });
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -118,30 +118,33 @@ describe('Sidebar — lifecycle sections: paged, load more on scroll', () => {
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.setState({ forgottenFolders: [], errors: [], lifecycleScrollTick: 0 });
     useUiStore.getState().setSearchQuery('');
-    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
-    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextCursor: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextCursor: null });
   });
   afterEach(() => {
     vi.restoreAllMocks();
     cleanup();
   });
 
-  it('fetches one page (limit 30, offset 0) on expand, not the whole list', async () => {
+  it('fetches one page (limit 30, no cursor) on expand, not the whole list', async () => {
     const listChatsHidden = vi
       .spyOn(api, 'listChatsHidden')
-      .mockResolvedValue({ chats: [hiddenRow('h1', 1)], nextOffset: null });
+      .mockResolvedValue({ chats: [hiddenRow('h1', 1)], nextCursor: null });
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));
     await screen.findByTestId('chat-row-h1');
     expect(listChatsHidden).toHaveBeenCalledTimes(1);
-    expect(listChatsHidden).toHaveBeenCalledWith({ limit: 30, offset: 0 });
+    expect(listChatsHidden).toHaveBeenCalledWith({ limit: 30 });
   });
 
   it('loads the next page when the shared band scrolls near its bottom, and folds it in', async () => {
     const listChatsHidden = vi
       .spyOn(api, 'listChatsHidden')
-      .mockResolvedValueOnce({ chats: [hiddenRow('h1', 1), hiddenRow('h2', 2)], nextOffset: 2 })
-      .mockResolvedValueOnce({ chats: [hiddenRow('h3', 3)], nextOffset: null });
+      .mockResolvedValueOnce({
+        chats: [hiddenRow('h1', 1), hiddenRow('h2', 2)],
+        nextCursor: 'cur-2',
+      })
+      .mockResolvedValueOnce({ chats: [hiddenRow('h3', 3)], nextCursor: null });
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));
     await screen.findByTestId('chat-row-h1');
@@ -151,7 +154,7 @@ describe('Sidebar — lifecycle sections: paged, load more on scroll', () => {
     scrollNearBottom(screen.getByTestId('sb-lifecycle'));
 
     await waitFor(() => expect(listChatsHidden).toHaveBeenCalledTimes(2));
-    expect(listChatsHidden).toHaveBeenLastCalledWith({ limit: 30, offset: 2 });
+    expect(listChatsHidden).toHaveBeenLastCalledWith({ limit: 30, cursor: 'cur-2' });
     await screen.findByTestId('chat-row-h3');
     // The first page's rows are still there — a page folds in, it doesn't replace.
     expect(screen.getByTestId('chat-row-h1')).toBeInTheDocument();
@@ -161,7 +164,7 @@ describe('Sidebar — lifecycle sections: paged, load more on scroll', () => {
   it('does not fetch again once the section reports nothing further', async () => {
     const listChatsHidden = vi
       .spyOn(api, 'listChatsHidden')
-      .mockResolvedValue({ chats: [hiddenRow('h1', 1)], nextOffset: null });
+      .mockResolvedValue({ chats: [hiddenRow('h1', 1)], nextCursor: null });
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));
     await screen.findByTestId('chat-row-h1');
@@ -176,7 +179,7 @@ describe('Sidebar — lifecycle sections: paged, load more on scroll', () => {
   it('a scroll that is not near the bottom does not trigger a further page', async () => {
     const listChatsHidden = vi
       .spyOn(api, 'listChatsHidden')
-      .mockResolvedValueOnce({ chats: [hiddenRow('h1', 1)], nextOffset: 1 });
+      .mockResolvedValueOnce({ chats: [hiddenRow('h1', 1)], nextCursor: 'cur-1' });
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));
     await screen.findByTestId('chat-row-h1');

@@ -142,25 +142,26 @@ interface RequestInit2 extends Omit<RequestInit, 'body'> {
 
 /**
  * Page size + cursor for a sidebar lifecycle list (spec/14 § Sidebar item 6:
- * "load a limited number... then load more on scroll"). Omitted `limit`
- * fetches the whole list in one call, as every caller did before pagination —
- * only the Sidebar/LifecycleRoute sections pass one.
+ * "load a limited number... then load more on scroll"; spec/04 § Chat index
+ * paging). Omitted `limit` fetches the whole list in one call, as every caller
+ * did before pagination — only the Sidebar/LifecycleRoute sections pass one.
+ * `cursor` is the previous page's `nextCursor`, opaque to the client.
  */
 export interface LifecyclePageOpts {
   limit?: number;
-  offset?: number;
+  cursor?: string;
 }
 
-/** A lifecycle list response: the page's rows, plus the next page's `offset` (`null` once nothing is left). */
+/** A lifecycle list response: the page's rows, plus the next page's cursor (`null` once nothing is left). */
 export interface LifecycleListResponse {
   chats: Array<unknown>;
-  nextOffset: number | null;
+  nextCursor: string | null;
 }
 
 function pageParams(opts: LifecyclePageOpts): string {
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
-  if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+  if (opts.cursor !== undefined) params.set('cursor', opts.cursor);
   const s = params.toString();
   return s === '' ? '' : `&${s}`;
 }

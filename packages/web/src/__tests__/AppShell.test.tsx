@@ -216,7 +216,7 @@ function makeFetch(chats: ChatRow[] = []): ReturnType<typeof vi.fn> {
     if (u === '/api/chats/folders') return json({ folders: [] });
     // Snoozed chats follow the snapshot in at boot (the sidebar folds them into
     // their project) — none in these fixtures.
-    if (u.startsWith('/api/chats?snoozed=only')) return json({ chats: [], nextOffset: null });
+    if (u.startsWith('/api/chats?snoozed=only')) return json({ chats: [], nextCursor: null });
     // The section totals the collapsed sidebar rows badge (spec/04 § Section
     // counts) — also loaded at boot. Cold storage is empty in these fixtures.
     if (u === '/api/chats/counts') {

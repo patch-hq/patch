@@ -441,9 +441,14 @@ export const api = {
   // GET /api/chats?archived=only — the Archived section's own list, fetched
   // when the section opens or a search starts (spec/15 ## Chats tab §7). The
   // cold-start roster above excludes archived chats, and they are unbounded.
-  listArchivedChats: (opts: { limit: number; offset: number }) =>
-    request<{ chats: ChatListEntry[]; nextOffset: number | null }>(
-      `/api/chats?archived=only&limit=${opts.limit}&offset=${opts.offset}`,
+  // Paged by position (spec/01 § GET /api/chats): `cursor` is the previous
+  // page's `nextCursor`, opaque here. A server released before the cursor
+  // answers with `nextOffset` only, and is paged by `offset`.
+  listArchivedChats: (opts: { limit: number; cursor?: string; offset?: number }) =>
+    request<{ chats: ChatListEntry[]; nextCursor?: string | null; nextOffset?: number | null }>(
+      `/api/chats?archived=only&limit=${opts.limit}` +
+        (opts.cursor === undefined ? '' : `&cursor=${encodeURIComponent(opts.cursor)}`) +
+        (opts.offset === undefined ? '' : `&offset=${opts.offset}`),
     ),
   // GET /api/chats?hidden=only — the Hidden section's own list (spec/04 §
   // Hidden), fetched when the section opens or a search starts. The cold-start
