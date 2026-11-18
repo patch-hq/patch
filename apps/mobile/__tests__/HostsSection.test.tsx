@@ -109,6 +109,7 @@ function setSharedClaude(
 ) {
   useSettingsStore.setState({
     data: {
+      preferences: { experimentalFeatures: false },
       shared: {
         version: 1,
         settings: {},
@@ -657,7 +658,21 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   // spec/15 § Host files and terminal — a host's files and a shell on it,
   // straight from its page, with no chat in between.
   describe('Tools', () => {
+    const setExperimental = (on: boolean): void =>
+      useSettingsStore.setState((st) => ({
+        data: { ...st.data, preferences: { experimentalFeatures: on } } as never,
+      }));
+
+    it('are absent while experimental features are off', () => {
+      setExperimental(false);
+      reportHost('host-a', { hostName: 'laptop' });
+      const r = render(<HostDetail hostId="host-a" />);
+      expect(r.root.findAll(byTestId('host-host-a-files'))).toHaveLength(0);
+      expect(r.root.findAll(byTestId('host-host-a-terminal'))).toHaveLength(0);
+    });
+
     it('opens that host’s Files and Terminal', () => {
+      setExperimental(true);
       reportHost('host-a', { hostName: 'laptop' });
       const r = render(<HostDetail hostId="host-a" />);
       findHost(r.root, byTestId('host-host-a-files')).props.onPress();
@@ -673,6 +688,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     });
 
     it('are unpressable while the host is offline or the link is down', () => {
+      setExperimental(true);
       reportHost('host-a', { hostName: 'laptop' }, false);
       const offline = render(<HostDetail hostId="host-a" />);
       expect(findHost(offline.root, byTestId('host-host-a-files')).props.onPress).toBeUndefined();

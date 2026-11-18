@@ -25,7 +25,7 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { getActiveWs } from '../api/ws.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { AUTO_CALL_KEY } from '../routes/MenubarRoute.js';
-import { DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import type { ChatRow } from '../stores/types.js';
 
 // A minimal fake DiffEditor so the file.write save flow (EditorRail's
@@ -265,6 +265,9 @@ async function renderShell(
 
 describe('AppShell', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     document.head.innerHTML = '<link rel="icon" href="/app/favicon.svg" />';
     useChatStore.getState()._reset();
     useBatchStore.getState()._reset();

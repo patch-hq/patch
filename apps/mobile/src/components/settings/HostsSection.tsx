@@ -25,7 +25,7 @@ import {
   type ProviderKeyId,
 } from '@patch/wire';
 import { api, ApiError, type SharedState } from '../../api/rest';
-import { useSettingsStore } from '../../stores/settingsStore';
+import { useExperimentalFeatures, useSettingsStore } from '../../stores/settingsStore';
 import { patchShared, writeShared } from './sharedWrite';
 import { filesRoute, formatSize, terminalRoute } from '../../lib/hostFiles';
 import { fonts, space, typography, useTheme } from '../../lib/theme';
@@ -448,9 +448,10 @@ function HostComponents({ host }: { host: HostPresence }): React.ReactElement | 
  * Unpressable while the host or the link is down: a screen that opened only
  * to fail would be a worse answer than a dimmed row.
  */
-function HostTools({ host }: { host: HostPresence }): React.ReactElement {
+function HostTools({ host }: { host: HostPresence }): React.ReactElement | null {
   const router = useRouter();
   const colors = useTheme();
+  const experimental = useExperimentalFeatures();
   const conn = usePresenceStore((s) => s.connection);
   const reachable = conn === 'connected' && host.online;
   const tool = (key: 'files' | 'terminal', label: string, go: () => void): React.ReactElement => (
@@ -463,6 +464,7 @@ function HostTools({ host }: { host: HostPresence }): React.ReactElement {
       right={<Chevron />}
     />
   );
+  if (!experimental) return null;
   return (
     <SettingsSection title="Tools" testID={`host-${host.hostId}-tools`}>
       {tool('files', 'Files', () => router.push(filesRoute(host.hostId)))}

@@ -16,7 +16,7 @@ export function ExperimentalPage(): React.ReactElement {
           <SettingsSection testID="settings-experimental">
             <ToggleRow
               label="Show experimental features"
-              subtitle="Manager, Batch, dictation and calls"
+              subtitle="Manager, Batch, Files, Terminal, dictation and calls"
               testID="experimental-features"
               value={data.preferences.experimentalFeatures}
               onChange={(next) => writePreferences({ experimentalFeatures: next })}
