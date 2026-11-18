@@ -111,6 +111,43 @@ describe('ElevenLabs dictation', () => {
     await s.close();
   });
 
+  test('a backlog is paced to real time, not sent in one burst', async () => {
+    const fake = await fakeScribe();
+    open.push(fake);
+    const { s } = session(fake);
+    s.onSessionStart();
+    await fake.socket();
+    // 20 s of audio arrives at once, as when a phone flushes after reconnecting.
+    for (let i = 0; i < 200; i++) await s.onMicFrame(new Int16Array(1600).fill(500));
+    await tick(300);
+    // Only the head start (about a second and a bit) may have gone out.
+    expect(fake.chunks.length).toBeGreaterThan(0);
+    expect(fake.chunks.length).toBeLessThan(25);
+    await s.close();
+  });
+
+  test('queue_overflow starts a new session and keeps the words so far', async () => {
+    const fake = await fakeScribe();
+    open.push(fake);
+    const { s, events } = session(fake);
+    s.onSessionStart();
+    const sock = await fake.socket();
+    sock.send(JSON.stringify({ message_type: 'committed_transcript', text: 'first part' }));
+    await until(() => events.some((e) => e.type === 'audio.transcript_partial'), 'partial');
+    sock.send(
+      JSON.stringify({
+        message_type: 'queue_overflow',
+        error: 'audio data is being sent too frequently',
+      }),
+    );
+    sock.close();
+    await tick(300);
+    expect(events.some((e) => e.type === 'audio.error')).toBe(false);
+    await s.onMicFrame(new Int16Array(1600).fill(500));
+    await until(() => fake.chunks.length >= 1, 'audio on the new session');
+    await s.close();
+  });
+
   test('a missing key fails, not falls back', async () => {
     const fake = await fakeScribe();
     open.push(fake);
