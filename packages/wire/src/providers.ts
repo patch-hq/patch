@@ -241,6 +241,32 @@ export const PROVIDERS = [
     settings: [],
     nativeDuplicates: [],
   },
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    modelPrefix: 'gemini/',
+    sessionIdPrefix: 'gemini-',
+    // Reached over ACP, which has no classifier-driven approval, so no `auto`.
+    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    backendId: 'gemini',
+    // The Gemini CLI holds its own sign-in; Patch keeps no accounts for it.
+    accountsKey: null,
+    aliases: ['google'],
+    supportsEffort: false,
+    loginRequiredCode: 'gemini_login_required',
+    builtinCommands: [],
+    capabilities: {
+      resume: true,
+      editAtMessage: false,
+      rewind: false,
+      branchAtTurn: false,
+      disableNativeTools: false,
+      interrupt: true,
+      steer: false,
+    },
+    settings: [],
+    nativeDuplicates: [],
+  },
 ] as const satisfies readonly ProviderDescriptor[];
 
 export type ProviderId = (typeof PROVIDERS)[number]['id'];

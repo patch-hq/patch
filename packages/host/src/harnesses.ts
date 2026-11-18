@@ -17,6 +17,7 @@ import {
 import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
 import { LOCAL_BACKEND_ID } from './localModels.js';
+import { GEMINI_BACKEND_ID } from './geminiAgent.js';
 
 export interface HarnessTraits {
   /** The `backendId` this provider's credentials report under (`host.unauthenticated`). */
@@ -102,6 +103,24 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     sessionMovable: false,
     buildsAccountReport: false,
     reseedOption: 'localReseed',
+    appendOption: null,
+    signedOutMessage: (_hostId, reason) => reason,
+  },
+  // An ACP agent keeps its own session, account and quota; Patch sees none of them.
+  gemini: {
+    backendId: GEMINI_BACKEND_ID,
+    resolvesPermissionModeByModel: false,
+    generatesStatus: false,
+    rateLimitSweeps: false,
+    turnRetrySafe: () => false,
+    limitMustStateReset: false,
+    ownsSessionFile: false,
+    sessionBoundToAccount: false,
+    detachedTurnRunner: false,
+    hostCreditAggregate: false,
+    sessionMovable: false,
+    buildsAccountReport: false,
+    reseedOption: null,
     appendOption: null,
     signedOutMessage: (_hostId, reason) => reason,
   },

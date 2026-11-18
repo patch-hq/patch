@@ -19,6 +19,7 @@
     "meeting:e2e": "bash scripts/nightly-meeting-e2e.sh"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^2.8.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@patch/auth": "workspace:*",
     "@patch/wire": "workspace:*",

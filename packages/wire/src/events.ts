@@ -228,6 +228,8 @@ export const ChatErrorCode = z.enum([
   'chatgpt_login_required',
   // A local model chat on a host with no local model endpoint configured.
   'local_endpoint_missing',
+  // A Gemini chat on a host with no Gemini CLI installed, or one that is signed out.
+  'gemini_login_required',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.

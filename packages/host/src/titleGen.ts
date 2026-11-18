@@ -55,6 +55,11 @@ export interface MakeTitleGeneratorOptions {
     sdkBackend: SdkBackend;
     resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
   };
+  /** The same for a Gemini (ACP) chat. */
+  gemini?: {
+    sdkBackend: SdkBackend;
+    resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
+  };
   logger?: Logger;
 }
 
@@ -158,6 +163,7 @@ export function makeTitleGenerator(
       claude: undefined,
       codex: { dep: opts.codex, name: 'Codex' },
       local: { dep: opts.local, name: 'local model' },
+      gemini: { dep: opts.gemini, name: 'Gemini' },
     };
     const own = ownByProvider[providerForModel(input.chatModel)];
     if (own) {
