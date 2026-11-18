@@ -79,6 +79,7 @@ mac:
 # drag it across. build/background.png and its @2x are combined into one
 # Retina-ready image; the icon positions are where the arrow in it points from and to.
 dmg:
+  title: Patch
   background: build/background.png
   window:
     width: 540

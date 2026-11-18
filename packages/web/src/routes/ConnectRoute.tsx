@@ -25,6 +25,10 @@ export function ConnectRoute(): JSX.Element {
       <main className="welcome-card">
         <section className="welcome-step">
           <h1>Connect an AI</h1>
+          <p className="welcome-note">
+            Works with a Claude Pro or Max plan, or a ChatGPT Plus or Pro plan. An API key is billed
+            separately by the provider.
+          </p>
           <ProviderCards />
           <div className="welcome-footer">
             {connected > 0 ? (

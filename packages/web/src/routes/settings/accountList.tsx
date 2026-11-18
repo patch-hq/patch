@@ -339,7 +339,7 @@ export function UsageBars({
         );
       })}
       {showReadAt && usage.at !== undefined && (
-        <span className="set-sub" data-testid={`${testId}-read-at`}>
+        <span className="set-sub set-bars-read-at" data-testid={`${testId}-read-at`}>
           read {formatReset(usage.at)}
         </span>
       )}
