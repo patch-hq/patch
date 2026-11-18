@@ -361,7 +361,27 @@ export function registerHostsCommands(program: Command): void {
         // aimed at a host by default (spec/17 § Hosts and the CLI).
         const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
-        emitJson(await t.post<unknown>('/api/auth/revoke', { id: hostId }));
+        try {
+          emitJson(await t.post<unknown>('/api/auth/revoke', { id: hostId }));
+        } catch (err) {
+          // Revocation is deliberately not relayable through a host, and the
+          // CLI runs on a host — so say where it can be done.
+          if (isNotRelayable(err)) {
+            throw new Error(
+              'a host cannot revoke machines. Remove it in the Patch app: Settings → Hosts → Remove.',
+            );
+          }
+          throw err;
+        }
       });
     });
+}
+
+export function isNotRelayable(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const body = (err as { body?: unknown }).body;
+  return (
+    err.message.includes('path_not_relayable') ||
+    (body !== undefined && JSON.stringify(body).includes('path_not_relayable'))
+  );
 }
