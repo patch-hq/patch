@@ -390,6 +390,8 @@ export function AppShell(): JSX.Element {
     if (bridge.onMeetingSignal) {
       offs.push(
         bridge.onMeetingSignal(({ phase }) => {
+          // Experimental: with experimental features off the shell's call detection is ignored.
+          if (!usePreferencesStore.getState().preferences.experimentalFeatures) return;
           if (phase === 'ended') {
             const capturing = useMeetingStore.getState().capturingChatId;
             if (capturing) endMeeting(capturing);
