@@ -79,6 +79,18 @@ beforeEach(() => {
   usePresenceStore.getState().setHost('online');
 });
 
+describe('ChatBars — space', () => {
+  it('stacks inside its own capped, non-overlapping box above the transcript', () => {
+    seed();
+    const r = renderRN(<Harness />);
+    const box = findHost(r.root, byTestId('chat-bars'));
+    const style = box.props.style as Record<string, number>;
+    expect(style.maxHeight).toBe(320); // 40% of the stub's 800pt window
+    expect(style.flexShrink).toBe(0);
+    expect(style.flexGrow).toBe(0);
+  });
+});
+
 describe('ChatBars — an ordinary chat', () => {
   it('draws none of the bars when there is nothing to say', () => {
     seed();

@@ -7,6 +7,7 @@
 // component so the screen mounts one thing and the order lives in one place.
 
 import React, { type ReactElement } from 'react';
+import { ScrollView, useWindowDimensions } from 'react-native';
 import type { ChatRow } from '../stores/types';
 import { OfflineBanner } from './OfflineBanner';
 import { HostOfflineBanner } from './HostOfflineBanner';
@@ -35,8 +36,17 @@ export function ChatBars({
   chatId: string;
   row: ChatRow | undefined;
 }): ReactElement {
+  // The bars take their own space above the transcript, capped at 40% of the
+  // window and scrolling inside that cap, so a tall stack (six background
+  // tasks, the stray-process list) can never push into or over the transcript.
+  const { height } = useWindowDimensions();
   return (
-    <>
+    <ScrollView
+      testID="chat-bars"
+      style={{ flexGrow: 0, flexShrink: 0, maxHeight: Math.round(height * 0.4) }}
+      nestedScrollEnabled
+      keyboardShouldPersistTaps="handled"
+    >
       {/* WS-reconnecting and daemon-offline are DISTINCT states, each with its
           own self-gating banner (spec/12 § Daemon-offline UX). */}
       <OfflineBanner />
@@ -60,6 +70,6 @@ export function ChatBars({
           runs on. */}
       {row ? <ClaudeDisconnectedBar model={row.model} /> : null}
       {row ? <ChatSignInBar status={row.chatStatus} model={row.model} /> : null}
-    </>
+    </ScrollView>
   );
 }
