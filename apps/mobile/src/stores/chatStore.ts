@@ -585,7 +585,10 @@ function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatR
     snoozeRecords: r.snoozeRecords !== undefined ? r.snoozeRecords : base.snoozeRecords,
     runningSince: r.runningSince !== undefined ? r.runningSince : base.runningSince,
     hidden: r.hidden !== undefined ? r.hidden : base.hidden,
-    backgroundTasks: r.backgroundTasks !== undefined ? r.backgroundTasks : base.backgroundTasks,
+    // `null` is the server's "not measured" (cold registry), not zero — it must
+    // not wipe a live count the chat's own state events already delivered, or
+    // the background-task bar vanishes while tasks are still running.
+    backgroundTasks: r.backgroundTasks ?? base.backgroundTasks,
     runningAgents: r.runningAgents !== undefined ? r.runningAgents : base.runningAgents,
     ...((r.chatStatus ?? base.chatStatus) ? { chatStatus: r.chatStatus ?? base.chatStatus } : {}),
     context: r.context !== undefined ? r.context : base.context,
@@ -644,6 +647,7 @@ function rowsToRecord(
             reminderEvery: prior.reminderEvery,
             todos: prior.todos,
             disabled: prior.disabled,
+            backgroundTasks: prior.backgroundTasks,
             preview: prior.preview,
             lastReadSeq: Math.max(fresh.lastReadSeq, prior.lastReadSeq),
             // A snapshot that settles the chat means no call is in flight.
