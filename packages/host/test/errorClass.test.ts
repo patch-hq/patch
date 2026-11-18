@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyFailure, backoffMs } from '../src/errorClass.js';
+import { classifyFailure, backoffMs, isSessionAbort } from '../src/errorClass.js';
 
 describe('classifyFailure', () => {
   it.each([
@@ -44,5 +44,23 @@ describe('backoffMs', () => {
     expect([1, 2, 3, 10].map((a) => backoffMs(a, 5_000, 60_000))).toEqual([
       5_000, 10_000, 20_000, 60_000,
     ]);
+  });
+});
+
+describe('isSessionAbort', () => {
+  it('matches an AbortError thrown by the SDK iterator', () => {
+    const e = new Error('aborted');
+    e.name = 'AbortError';
+    expect(isSessionAbort(e, 'aborted')).toBe(true);
+  });
+  it("matches Claude Code's own AbortError crash report arriving as a plain Error", () => {
+    const msg =
+      'Claude Code returned an error result: [session_crash] error_name=AbortError api_error_status=none cause_name=none';
+    expect(isSessionAbort(new Error(msg), msg)).toBe(true);
+  });
+  it('does not match other crashes or errors', () => {
+    const msg = '[session_crash] error_name=TypeError api_error_status=none cause_name=none';
+    expect(isSessionAbort(new Error(msg), msg)).toBe(false);
+    expect(isSessionAbort(new Error('fetch failed'), 'fetch failed')).toBe(false);
   });
 });

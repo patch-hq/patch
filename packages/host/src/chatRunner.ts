@@ -212,7 +212,7 @@ import {
 import type { LimitFacts } from './sdkBackend.js';
 import type { SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
 import { isOverloadedError, limitFailureMessage, statedLimitOf } from './limitFailure.js';
-import { classifyFailure, backoffMs as overloadBackoffMs } from './errorClass.js';
+import { classifyFailure, isSessionAbort, backoffMs as overloadBackoffMs } from './errorClass.js';
 import { describeTurnFailure } from './failureCopy.js';
 import { CLAUDE_BACKEND_ID } from './host.js';
 import {
@@ -11562,7 +11562,7 @@ export class Daemon {
         // same wedged state and cannot succeed, so it is skipped. Re-send at
         // once, resuming the session; if that aborts too, restart the turn on
         // a fresh session; only then leave the chat errored.
-        if (err instanceof Error && err.name === 'AbortError') {
+        if (isSessionAbort(err, errMsg)) {
           const aborts = (this.sessionAbortCount.get(chatId) ?? 0) + 1;
           if (aborts <= SESSION_ABORT_RESTARTS) {
             this.sessionAbortCount.set(chatId, aborts);
@@ -11761,7 +11761,7 @@ export class Daemon {
             !blockedOnCredit &&
             failureClass.kind === 'transient' &&
             !isSessionInvalid &&
-            !(err instanceof Error && err.name === 'AbortError') &&
+            !isSessionAbort(err, errMsg) &&
             (this.sdkRetryCount.get(chatId) ?? 0) < SDK_RETRY_BACKOFF_MS.length;
         }
         this.emitState(chatId);
@@ -11792,7 +11792,7 @@ export class Daemon {
             { chatId, errMsg, reason: failureClass.reason },
             'failure classified permanent — not retrying',
           );
-        } else if (err instanceof Error && err.name === 'AbortError') {
+        } else if (isSessionAbort(err, errMsg)) {
           this.opts.logger.error(
             { chatId, errMsg },
             'session aborted again after its restarts — leaving the chat errored',
