@@ -688,7 +688,7 @@ describe('shared settings routes', () => {
         meetingAnalysisModel: 'claude-haiku-4-5-20251001',
         meetingCleanupModel: 'claude-haiku-4-5-20251001',
         meetingTranscriptionModel: '',
-        meetingAnalyseSeconds: 15,
+        meetingAnalyseSeconds: 45,
         meetingResearchModel: 'claude-haiku-4-5-20251001',
         meetingResearchSeconds: 60,
       });
