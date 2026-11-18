@@ -260,7 +260,7 @@ export function FinishedGoalBanner({
               type="button"
               className="status-link status-link-underline"
               data-testid="finished-goal-reset"
-              title="Reset goal and work on it again"
+              title="Reset goal"
               onClick={() => onReset(last!.condition)}
             >
               Reset
