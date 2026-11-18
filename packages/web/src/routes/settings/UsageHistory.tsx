@@ -156,10 +156,7 @@ export function UsageHistory(): JSX.Element {
         ) : isLoading || !data ? (
           <Note testid="usage-loading">Reading…</Note>
         ) : series.length === 0 ? (
-          <Note testid="usage-history-empty">
-            No readings in this period. Usage fills in once a provider account is connected and a
-            chat has run.
-          </Note>
+          <Note testid="usage-history-empty">No readings in this period</Note>
         ) : (
           <>
             <Burndown series={series} since={data.since} until={data.until} />

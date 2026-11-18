@@ -134,7 +134,8 @@ function AccountEntry({
   // When the reading was taken sits beside the name, where the eye lands
   // first; the sub-line is what the account IS (its email, its kind).
   const ago = formatAgo(reading?.usage?.at);
-  const sub = [row.email ?? null, row.kind === 'apiKey' ? 'API key' : null].filter(
+  const email = row.email === row.label ? null : (row.email ?? null);
+  const sub = [email, row.kind === 'apiKey' ? 'API key' : null].filter(
     (x): x is string => x !== null,
   );
 

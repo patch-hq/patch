@@ -80,6 +80,15 @@ describe('IssueFiler', () => {
     expect(body.body).not.toContain('/home/tom');
     expect(body.body).toContain('patch-fp-');
     expect(filer.status()).toMatchObject({ pending: 0, filed: 1, lastError: null });
+    expect(filer.status().issues).toEqual([
+      {
+        number: 7,
+        url: 'https://github.com/o/r/issues/7',
+        title: body.title,
+        count: 2,
+        at: expect.any(Number),
+      },
+    ]);
   });
 
   it('does not file when GitHub search already has the fingerprint', async () => {

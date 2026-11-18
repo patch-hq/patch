@@ -11,7 +11,8 @@ import { BUILD_INFO } from '../../lib/buildInfo.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { problemText } from './sharedWrite.js';
-import { Group, Row, SettingsPage } from './ui.js';
+import { formatAgo } from '../../lib/usage.js';
+import { Group, Note, Row, SettingsPage } from './ui.js';
 
 type Draft = ManualIssueReport;
 
@@ -96,7 +97,11 @@ export function BugReportsPage(): JSX.Element {
   return (
     <SettingsPage title="Bug reports" testid="settings-bugs">
       <Group>
-        <Row title="File errors automatically" testid="issue-reporting">
+        <Row
+          title="File errors automatically"
+          sub="Server errors and app crashes become GitHub issues. Only the error, build and platform are sent, never chats, ids or paths."
+          testid="issue-reporting"
+        >
           <Toggle
             checked={status?.enabled ?? false}
             disabled={!status}
@@ -114,14 +119,44 @@ export function BugReportsPage(): JSX.Element {
             {status.lastError}
           </p>
         ) : null}
-        {status ? (
-          <Row title="Filed / waiting" testid="issue-reporting-counts">
-            <span data-testid="issue-reporting-counts-value">
-              {status.filed} / {status.pending}
+        {status && status.pending > 0 ? (
+          <Row
+            title="Not filed yet"
+            sub="Kept until GitHub accepts them"
+            testid="issue-reporting-pending"
+          >
+            <span className="set-val" data-testid="issue-reporting-pending-value">
+              {status.pending}
             </span>
           </Row>
         ) : null}
       </Group>
+      {status ? (
+        <Group label="Filed" testid="issue-reporting-filed">
+          {(status.issues ?? []).length === 0 ? (
+            <Note testid="issue-reporting-none">Nothing filed yet</Note>
+          ) : (
+            (status.issues ?? []).map((issue) => (
+              <Row
+                key={issue.number}
+                title={
+                  <a href={issue.url} target="_blank" rel="noreferrer" className="set-link">
+                    {issue.title ?? `#${issue.number}`}
+                  </a>
+                }
+                sub={[
+                  `#${issue.number}`,
+                  issue.count > 1 ? `seen ${issue.count} times` : null,
+                  formatAgo(issue.at ?? undefined),
+                ]
+                  .filter((x): x is string => x !== null)
+                  .join(' · ')}
+                testid={`issue-reporting-issue-${issue.number}`}
+              />
+            ))
+          )}
+        </Group>
+      ) : null}
       <Group>
         <div className="set-row">
           <button
