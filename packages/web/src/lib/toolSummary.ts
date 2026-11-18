@@ -113,6 +113,12 @@ function toolCallPhrase(tool: string, args: Record<string, unknown>): string {
     case 'ToolSearch':
       return 'Loading tools';
   }
+  // A background agent row names the agent (its title, else the start of its
+  // prompt), not the tool that started it: "Using patch agent" said nothing.
+  if (/^(mcp__patch__)?patch_(agent|delegate)$/.test(tool)) {
+    const label = str(args, 'title') ?? str(args, 'prompt');
+    return label ? clip(label, MAX_DESCRIPTION) : 'Starting an agent';
+  }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
   if (mcp) return `Using ${words(mcp[1] === 'patch' ? mcp[2]! : `${mcp[1]} ${mcp[2]}`)}`;
   return `Using ${words(tool)}`;
