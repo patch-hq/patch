@@ -598,6 +598,9 @@ describe('/chats/new', () => {
     );
     usePresenceStore.getState().setConnection('connected');
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    usePreferencesStore.setState((st) => ({
+      preferences: { ...st.preferences, experimentalFeatures: true },
+    }));
     render(
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={['/chats/new']}>

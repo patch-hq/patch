@@ -238,7 +238,7 @@ function makeFetch(chats: ChatRow[] = []): ReturnType<typeof vi.fn> {
     // the address word a quiet call carries), so /api/settings has to answer.
     if (u === '/api/settings') {
       return json({
-        preferences: DEFAULT_PREFERENCES,
+        preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
       });
     }
     return json({});

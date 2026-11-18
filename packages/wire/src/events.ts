@@ -2334,7 +2334,7 @@ export const DEFAULT_CLEANUP_PERIOD_DAYS = 30;
 
 export const SharedSettings = z
   .object({
-    /** Whether half-finished features (the Manager, Batch) are shown. Off by default; Settings → Experimental features. */
+    /** Whether half-finished features (the Manager, Batch, Meeting mode) are shown. Off by default; Settings → Experimental features. */
     experimentalFeatures: z.boolean(),
     /** Whether the first-run intro on a new chat has been dismissed. Per account; the "Getting started" guide stays reachable either way. */
     introDismissed: z.boolean(),

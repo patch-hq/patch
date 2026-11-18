@@ -1245,7 +1245,9 @@ export const Composer = forwardRef(function Composer(
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
   // The Manager coordinates other chats; it takes no meeting notes. Meeting
   // permissions are asked for only when Meeting is pressed (lib/meetingSetup).
+  const experimental = usePreferencesStore((s) => s.preferences.experimentalFeatures);
   const hasMeetingButton =
+    (experimental || inMeeting) &&
     !edit &&
     chatId !== SPECIAL_THREAD_IDS.manager &&
     (chatId !== 'new' || onStartMeeting !== undefined);
