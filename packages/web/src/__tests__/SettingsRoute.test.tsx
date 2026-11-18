@@ -857,7 +857,7 @@ describe('Settings → Voice', () => {
       });
       renderSettings('/settings/voice');
       expect(await screen.findByTestId('meeting-engine-pills-local')).toHaveTextContent(
-        'On this computer',
+        'Free, on device',
       );
       expect(screen.queryByTestId('meeting-engine-keys')).toBeNull();
       fireEvent.click(screen.getByTestId('meeting-engine-pills-assemblyai'));
@@ -1047,23 +1047,14 @@ describe('Settings → Voice', () => {
       expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Each host’s Kokoro default');
     });
 
-    it('writes a new chat-name interval on blur and on Enter, and refuses a negative one', async () => {
+    it('offers chat title refresh as a choice and writes it', async () => {
       const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      loadShared({ settings: { chatNameInterval: 3 } });
+      loadShared({ settings: { chatNameInterval: 0 } });
       renderSettings('/settings/voice');
-      const input = (await screen.findByTestId('chat-name-interval')) as HTMLInputElement;
-      expect(input.value).toBe('3');
-      fireEvent.blur(input);
-      fireEvent.change(input, { target: { value: '5' } });
-      fireEvent.blur(input);
+      expect(await screen.findByTestId('chat-name-interval-0')).toHaveTextContent('Set once');
+      fireEvent.click(screen.getByTestId('chat-name-interval-5'));
       await waitFor(() => expect(server.writes).toContainEqual({ chatNameInterval: 5 }));
-      fireEvent.change(screen.getByTestId('chat-name-interval'), { target: { value: '-1' } });
-      fireEvent.blur(screen.getByTestId('chat-name-interval'));
-      expect(server.writes).toHaveLength(1);
-      await waitFor(() =>
-        expect(errors()).toContain('Chat name interval must be a non-negative integer'),
-      );
     });
   });
 
