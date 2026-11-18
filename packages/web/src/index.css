@@ -18489,9 +18489,12 @@ a.drop-target {
 .welcome {
   min-height: 100%;
   display: grid;
-  place-items: center;
+  /* Top-aligned, not centred: the dots and the footer sit in the same place on
+     every step. The top padding clears the macOS traffic-light buttons. */
+  justify-items: center;
+  align-content: stretch;
   background: var(--bg-app);
-  padding: 48px 24px;
+  padding: 64px 24px 32px;
   box-sizing: border-box;
 }
 .welcome-drag {
@@ -18502,7 +18505,8 @@ a.drop-target {
 }
 .welcome-card {
   width: min(480px, 100%);
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 24px;
 }
 .welcome-dots {
@@ -18522,7 +18526,9 @@ a.drop-target {
   background: var(--accent);
 }
 .welcome-step {
-  display: grid;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 16px;
 }
 .welcome-step h1 {
@@ -18614,7 +18620,14 @@ a.drop-target {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 8px;
+  /* Pinned to the bottom of the card, so Continue stays put between steps. */
+  margin-top: auto;
+  padding-top: 8px;
+}
+/* A card whose buttons wrap (the Claude sign-in waiting state) keeps the
+   sibling button on the first line rather than centring it against the card. */
+.welcome-provider .set-inline {
+  align-items: flex-start;
 }
 .welcome-primary {
   font: inherit;
