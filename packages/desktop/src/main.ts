@@ -144,6 +144,8 @@ const LOCAL_MACHINE_ARG = '--patch-local-machine';
 // without rebuilding.
 /** A second, isolated Patch for the synthetic meeting test; null in every normal run. */
 const QUIET = quietInstanceFromEnv(process.env);
+/** How long starting the server may take before a "Starting Patch…" window shows. */
+const SLOW_START_MS = 1500;
 if (QUIET) app.setPath('userData', QUIET.userDataDir);
 
 const GLOBAL_HOTKEY = process.env['PATCH_GLOBAL_HOTKEY'] ?? 'Control+Space';
@@ -2162,7 +2164,10 @@ function isAppEntry(): boolean {
  * a small window of its own asking where Patch runs, answered over IPC. With
  * `offerMove` it first asks to move the app to Applications.
  */
-function showSetupWindow(offerMove = false): {
+function showSetupWindow(
+  offerMove = false,
+  starting = false,
+): {
   window: BrowserWindow;
   ui: {
     choose(): Promise<SetupChoice>;
@@ -2186,7 +2191,10 @@ function showSetupWindow(offerMove = false): {
       nodeIntegration: false,
     },
   });
-  void window.loadFile(join(__dirname, 'setup.html'), offerMove ? { hash: 'move' } : {});
+  void window.loadFile(
+    join(__dirname, 'setup.html'),
+    offerMove ? { hash: 'move' } : starting ? { hash: 'starting' } : {},
+  );
   let pending: ((c: SetupChoice) => void) | null = null;
   let pendingMove: ((yes: boolean) => void) | null = null;
   const onChoose = (event: { sender: unknown }, choice: SetupChoice): void => {
@@ -2231,8 +2239,8 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
   const firstRun = loadFirstRun();
   const userData = app.getPath('userData');
   let setup: ReturnType<typeof showSetupWindow> | null = null;
-  const openSetup = (offerMove: boolean): ReturnType<typeof showSetupWindow> => {
-    const opened = showSetupWindow(offerMove);
+  const openSetup = (offerMove: boolean, starting = false): ReturnType<typeof showSetupWindow> => {
+    const opened = showSetupWindow(offerMove, starting);
     // Closing the question unanswered is declining to use the app.
     opened.window.once('closed', () => {
       if (!activeLaunch) app.exit(0);
@@ -2247,6 +2255,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
     progress: (m: string) => setup?.ui.progress(m),
     fail: (m: string) => setup?.ui.fail(m),
   };
+  let slowStart: ReturnType<typeof setTimeout> | null = null;
   try {
     if (
       shouldOfferMove({
@@ -2261,6 +2270,15 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
       if (await offerMoveToApplications(setup.ui)) return 'stop';
     }
     console.log('[patch] start: bringing up the server');
+    // Bringing the server up can take a while (a slow disk, a first run being
+    // vetted by security software). Show that Patch is alive rather than nothing:
+    // a window after SLOW_START_MS if no other window has opened by then.
+    slowStart =
+      QUIET === null && !openedAtLogin()
+        ? setTimeout(() => {
+            if (!setup) setup = openSetup(false, true);
+          }, SLOW_START_MS)
+        : null;
     const launched = await firstRun.launch({
       userData,
       home: app.getPath('home'),
@@ -2273,6 +2291,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
         installLocalHost({ serverUrl: origin, code, name, home: app.getPath('home') }),
       hostInstalled: () => localHostStatus(app.getPath('home')).installed,
     });
+    if (slowStart) clearTimeout(slowStart);
     activeLaunch = launched;
     console.log(`[patch] start: ${launched.mode} server at ${new URL(launched.appUrl).origin}`);
     if (launched.mode === 'local') startKeepRunning(userData);
@@ -2287,6 +2306,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
     // A remembered connection that cannot be brought up, or a damaged file: say
     // so and stop. Carrying on with no server would be a window with nothing in it.
     // In the log too: the dialog is all a person sees, and nothing else records it.
+    if (slowStart) clearTimeout(slowStart);
     console.error('[patch] could not start:', err instanceof Error ? err.message : String(err));
     dialog.showErrorBox('Patch could not start', err instanceof Error ? err.message : String(err));
     app.exit(1);

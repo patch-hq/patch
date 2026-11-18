@@ -450,6 +450,12 @@
         choose.hidden = true;
         move.hidden = false;
       }
+      // Opened only because starting the server is taking a while: no question to ask.
+      if (location.hash === '#starting') {
+        choose.hidden = true;
+        busy(true);
+        say('Starting Patch…');
+      }
       $('move-yes').addEventListener('click', () => {
         error.hidden = true;
         busy(true);

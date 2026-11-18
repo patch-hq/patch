@@ -1356,3 +1356,9 @@ kbd {
     display: none;
   }
 }
+
+.start-help {
+  grid-template-columns: 1fr;
+  max-width: 560px;
+  margin-top: 32px;
+}
