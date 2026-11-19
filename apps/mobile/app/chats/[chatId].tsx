@@ -1575,7 +1575,7 @@ function PermissionOutcome({
   const label =
     resolved === 'approve'
       ? entry.permissionCancelled
-        ? 'Approved, cancelled by interrupt'
+        ? 'Not run: the turn was stopped before your approval arrived'
         : running
           ? 'Approved, running'
           : 'Approved'

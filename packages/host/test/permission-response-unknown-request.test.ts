@@ -15,7 +15,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 
-function setup() {
+function setup(lines: Array<Record<string, unknown>> = []) {
   const home = mkdtempSync(join(tmpdir(), 'patch-unknown-resp-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-unknown-resp-folder-')));
   const events: WireEvent[] = [];
@@ -26,7 +26,10 @@ function setup() {
     sdkBackend: createMockSdkBackend(),
     oauthAccessToken: 'fake-token',
     emit: (e) => events.push(e),
-    logger: pino({ level: 'silent' }),
+    logger: pino(
+      { level: 'info' },
+      { write: (l: string) => void lines.push(JSON.parse(l) as Record<string, unknown>) },
+    ),
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
     permissionModeDefault: 'default',
@@ -87,5 +90,28 @@ describe('a permission response for a request the host no longer holds', () => {
     expect(all[1]?.approve).toBe(true);
     expect(all[1]?.decision).toBe('approve_with_edits');
     expect(all[1]?.chatId).toBe(chatId);
+  });
+
+  it('logs each answer in arrival order, so an approve landing after a sweep is traceable', async () => {
+    const lines: Array<Record<string, unknown>> = [];
+    const { daemon, events, folder } = setup(lines);
+    const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+    await tick();
+    const req = events.find((e) => e.type === 'chat.permission_request') as unknown as {
+      requestId: string;
+    };
+    daemon.submitPermissionResponse({
+      requestId: req.requestId,
+      chatId,
+      decision: 'deny',
+      by: 'cancelled',
+    });
+    daemon.submitPermissionResponse({ requestId: req.requestId, chatId, decision: 'approve' });
+    const answers = lines.filter((l) => l['msg'] === 'permission answer received');
+    expect(answers.map((l) => [l['decision'], l['by'], l['held']])).toEqual([
+      ['deny', 'cancelled', true],
+      ['approve', 'user', false],
+    ]);
+    expect(answers[1]?.['settledAs']).toBe('deny');
   });
 });
