@@ -216,7 +216,7 @@ describe('WatchScheduler — stop during a poll tick', () => {
       deliver: async (chatId: string, message: string) => {
         depsB.delivered.push({ chatId, message });
         if (message.includes('ALERT')) schedulerB!.stop('c-stop-race', rec.taskId);
-        await Promise.resolve();
+        await new Promise((r) => setTimeout(r, 100)); // let the killed process die
       },
     });
     schedulerB = mkScheduler(depsB);
