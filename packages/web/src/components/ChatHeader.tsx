@@ -62,6 +62,9 @@ import { folderLabel } from '../lib/folderLabel.js';
 import { navigateAfterArchive } from '../lib/archiveNav.js';
 import { openChatInNewWindow } from '../lib/newWindow.js';
 import { SnoozeMenu } from './SnoozeMenu.js';
+import { applySnooze } from '../lib/snoozeApply.js';
+import { UNTIL_COMPLETE_PRESET } from '../lib/snoozePresets.js';
+import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { MoveChatModal } from './MoveChatModal.js';
 import { GoalEditor, planOf, type GoalDraft } from './GoalEditor.js';
 import { WakeEditModal } from './WakeEditModal.js';
@@ -295,7 +298,7 @@ export function ChatHeader({
   function promptGoal(): void {
     setGoalOpen(true);
   }
-  function saveGoal(d: GoalDraft): void {
+  function saveGoal(d: GoalDraft, thenSnooze = false): void {
     const previous = row.goal ?? null;
     const previousPlan = planOf(row);
     setGoal(row.chatId, d.goal, d.plan);
@@ -303,10 +306,23 @@ export function ChatHeader({
       Object.keys(d.plan).length === 0
         ? api.setGoal(row.chatId, d.goal)
         : api.setGoal(row.chatId, d.goal, d.plan);
-    void send.catch((err) => {
-      setGoal(row.chatId, previous, previousPlan);
-      pushError(failed('setting goal'), undefined, (err as Error).message);
-    });
+    // Snooze only once the host has the goal: "until complete" needs a goal to wait for.
+    void send
+      .then(() => {
+        if (thenSnooze) {
+          applySnooze({
+            targets: [row],
+            until: UNTIL_COMPLETE_PRESET.resolve(),
+            name: stripMarkdown(deriveChatTitle(row.name ?? null)),
+            isProject: false,
+            navigate,
+          });
+        }
+      })
+      .catch((err) => {
+        setGoal(row.chatId, previous, previousPlan);
+        pushError(failed('setting goal'), undefined, (err as Error).message);
+      });
   }
 
   // Archive / unarchive (spec/04 § Lifecycle) — the header's default way to
@@ -998,6 +1014,7 @@ export function ChatHeader({
             goal={row.goal ?? null}
             plan={planOf(row)}
             onSave={saveGoal}
+            onSaveAndSnooze={(d) => saveGoal(d, true)}
             onClose={() => setGoalOpen(false)}
           />
         ) : null}
