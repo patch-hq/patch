@@ -203,6 +203,7 @@ import {
   describeUpdateRefusal,
   createUpdateGate,
   pruneStaged,
+  sweepUpdateWorkDirs,
   stageUpdate,
   stagedBuild,
   requestUpdate,
@@ -1113,6 +1114,9 @@ async function startHost(
   // A build staged ahead of the server's restart (spec/11 § Updates in
   // lockstep). Anything left from an older run that is no longer ahead goes.
   pruneStaged(config.patchHome, VERSION);
+  const sweptWork = sweepUpdateWorkDirs();
+  if (sweptWork.length)
+    logger.info({ removed: sweptWork }, 'self-update: swept leftover update folders');
   let staging: Promise<void> | null = null;
   const stageAhead = (version: string): void => {
     if (!autoUpdateHosts) {
