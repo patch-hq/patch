@@ -6,6 +6,7 @@ const external = Boolean(process.env['PATCH_RELAY_TEST_URL']);
 
 export default defineConfig({
   test: {
+    globalSetup: ['../../scripts/vitest/tmp-global-setup.ts'],
     testTimeout: external ? 30_000 : 5_000,
     hookTimeout: external ? 30_000 : 10_000,
   },

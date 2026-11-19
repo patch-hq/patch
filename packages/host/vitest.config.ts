@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    globalSetup: ['../../scripts/vitest/tmp-global-setup.ts'],
     include: ['test/**/*.test.ts'],
     // I/O-integration suite (spawns real sidecars, boots UDS/WSS). Transient
     // timing misses under host load retry rather than fail the whole run; a
