@@ -1,15 +1,18 @@
-// Move a chat to another host, or to another folder on its own (spec/04 § Moving a chat to another host,
-// spec/14 § Chat header). Pick the host, then the folder the chat will run
-// in there — offered from that host's own folders, the one with the same
-// name as the chat's current folder chosen first, else the first it offers —
-// or type a path. The chat
-// stays where it is until the server says it has arrived; a refusal keeps the
-// dialog open with the reason. When the chat's own host is offline the
-// same-named folder is only suggested, never filled in.
+// Move a chat to another host, or to another folder on its own (spec/04 §
+// Moving to another host, spec/14 § Chat header). Pick the host, then the
+// folder the new chat will run in there — offered from that host's own
+// folders, the one with the same name as the chat's current folder chosen
+// first, else the first it offers — or type a path. Moving starts a new chat
+// there, linked to this one: the server drafts it and it opens on the new-chat
+// screen with its first message ready to read, edit and send. Nothing is
+// copied and this chat stays as it is. A refusal keeps the dialog open with
+// the reason.
 
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { defaultMoveFolder } from '@patch/wire';
-import { api, ApiError } from '../api/rest.js';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../api/rest.js';
+import { adoptLinkedDraft, linkedChatError } from '../lib/linkedChat.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { ModalOverlay } from './ModalOverlay.js';
@@ -44,8 +47,7 @@ export function MoveChatModal({
     return hostId === row.hostId ? all.filter((x) => x !== row.folder) : all;
   }, [hosts, hostId, row.hostId, row.folder]);
   const current = hosts[row.hostId];
-  const offline = current !== undefined && !current.online;
-  const takeover = offline;
+  const navigate = useNavigate();
   const [folder, setFolder] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -60,17 +62,14 @@ export function MoveChatModal({
   // A new host offers its own folder — never the path typed for another one.
   useEffect(() => {
     typed.current = false;
-    setFolder(takeover ? '' : (defaultMoveFolder(row.folder, foldersRef.current) ?? ''));
+    setFolder(defaultMoveFolder(row.folder, foldersRef.current) ?? '');
     setError(null);
-  }, [hostId, row.folder, takeover]);
+  }, [hostId, row.folder]);
 
   // A folder list that arrives or changes refines the offer, until someone types.
   useEffect(() => {
-    if (!typed.current && !takeover) {
-      setFolder(defaultMoveFolder(row.folder, foldersRef.current) ?? '');
-    }
-  }, [foldersKey, row.folder, takeover]);
-  const suggestion = takeover ? defaultMoveFolder(row.folder, folders) : undefined;
+    if (!typed.current) setFolder(defaultMoveFolder(row.folder, foldersRef.current) ?? '');
+  }, [foldersKey, row.folder]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
@@ -85,11 +84,11 @@ export function MoveChatModal({
     setMoving(true);
     setError(null);
     try {
-      await api.moveChat(row.chatId, hostId, folder.trim());
+      const { draft } = await api.moveChat(row.chatId, hostId, folder.trim());
       onClose();
+      navigate(adoptLinkedDraft(draft));
     } catch (e) {
-      const body = e instanceof ApiError ? (e.body as { message?: unknown } | null) : null;
-      setError(typeof body?.message === 'string' ? body.message : (e as Error).message);
+      setError(linkedChatError(e));
     } finally {
       setMoving(false);
     }
@@ -153,20 +152,6 @@ export function MoveChatModal({
             void move();
           }}
         />
-        {suggestion ? (
-          <button
-            type="button"
-            className="modal-btn"
-            data-testid="move-chat-suggest"
-            disabled={moving}
-            onClick={() => {
-              typed.current = true;
-              setFolder(suggestion);
-            }}
-          >
-            Suggested: {suggestion}
-          </button>
-        ) : null}
         <datalist id="move-chat-folders">
           {folders.map((f) => (
             <option key={f} value={f} />
@@ -194,7 +179,7 @@ export function MoveChatModal({
             disabled={!hostId || folder.trim().length === 0 || moving}
             onClick={() => void move()}
           >
-            {moving ? 'Moving…' : takeover ? 'Continue' : 'Move'}
+            {moving ? 'Moving…' : 'Move'}
           </button>
         </div>
       </div>

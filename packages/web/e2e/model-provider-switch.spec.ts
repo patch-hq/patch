@@ -2,12 +2,11 @@ import { test, expect } from '@playwright/test';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import type { WireEvent } from '@patch/wire';
 
-// Real-browser e2e (dev harness, real ChatHeader + real CSS, no backend) for
-// the provider-switch confirmation (spec/04 § History): picking a model from
-// a different provider than the chat's current one shows a modal with the user's
-// exact copy before `chat.model_request` goes out. A same-provider change
-// never shows it. "Don't show again" persists as an account setting that
-// must survive across surfaces, so it round-trips through `/api/settings`.
+// Real-browser e2e (dev harness, real chat view + real CSS, no backend) for a
+// provider switch (spec/04 § Provider switches): picking another provider's
+// model drafts a new chat linked to this one (`POST /api/chats/:id/continue`)
+// and opens it on the new-chat screen with its first message ready to edit.
+// Nothing goes to the host. A same-provider pick is an ordinary model change.
 
 const CATALOGUE = {
   models: [
@@ -28,9 +27,8 @@ const BASE_PREFERENCES = { ...DEFAULT_SHARED_SETTINGS };
 
 async function mockSettings(
   page: import('@playwright/test').Page,
-  suppressProviderSwitchWarning: boolean,
 ): Promise<{ getPatches: () => Array<Record<string, unknown>> }> {
-  let preferences = { ...BASE_PREFERENCES, suppressProviderSwitchWarning };
+  let preferences = { ...BASE_PREFERENCES };
   const patches: Array<Record<string, unknown>> = [];
   await page.route('**/api/auth/me', (r) =>
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME) }),
@@ -74,133 +72,63 @@ async function sentModelRequests(
   }>;
 }
 
-test.describe('model control — provider-switch confirmation', () => {
+test.describe('model control — a provider switch starts a linked chat', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/models*', (route) =>
       route.fulfill({ json: CATALOGUE, contentType: 'application/json' }),
     );
   });
 
-  test('shows the exact confirmation copy on a cross-provider pick, and sends nothing until confirmed', async ({
+  test('a cross-provider pick opens the drafted linked chat on the new-chat screen, sending nothing to the host', async ({
     page,
   }) => {
-    await mockSettings(page, false);
+    await mockSettings(page);
+    const continued: Array<{ url: string; body: unknown }> = [];
+    await page.route('**/api/chats/*/continue', (r) => {
+      continued.push({ url: r.request().url(), body: r.request().postDataJSON() });
+      return r.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          draft: {
+            id: 'draft-linked-e2e',
+            hostId: 'd1',
+            folder: '/home/tom/projects/bus',
+            model: 'openai/gpt-5-codex',
+            text: 'This continues "Bus times". The last thing I asked: fix the departures list',
+            continuedFrom: 'chat_bus',
+            updatedAt: 1,
+          },
+        }),
+      });
+    });
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     await page.getByTestId('chat-model').click();
     await page.getByTestId('model-option-openai/gpt-5-codex').click();
 
-    const modal = page.getByTestId('provider-switch-modal');
-    await expect(modal).toBeVisible();
-    await expect(modal).toContainText(
-      'Switching provider may cost more due to lack of a cache, are you sure?',
-    );
-    await expect(page.getByTestId('provider-switch-cancel')).toBeVisible();
-    await expect(page.getByTestId('provider-switch-switch')).toBeVisible();
-    await expect(page.getByTestId('provider-switch-dont-show-again')).toBeVisible();
+    await expect(page.getByTestId('new-chat-main')).toBeVisible();
+    await expect(page.getByTestId('new-chat-continues')).toBeVisible();
+    await expect(page.getByTestId('composer-input')).toHaveValue(/fix the departures list/);
+    expect(continued).toHaveLength(1);
+    expect(continued[0]!.url).toContain('/api/chats/chat_bus/continue');
+    expect(continued[0]!.body).toEqual({ model: 'openai/gpt-5-codex' });
     expect(await sentModelRequests(page)).toEqual([]);
   });
 
-  test('the dimming backdrop covers the whole window, sidebar included', async ({ page }) => {
-    await mockSettings(page, false);
-    await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await page.getByTestId('chat-model').click();
-    await page.getByTestId('model-option-openai/gpt-5-codex').click();
-    await expect(page.getByTestId('provider-switch-modal')).toBeVisible();
-
-    const box = await page.getByTestId('provider-switch-modal-backdrop').boundingBox();
-    const vp = page.viewportSize()!;
-    expect(box).toEqual({ x: 0, y: 0, width: vp.width, height: vp.height });
-    // A point inside the sidebar hits the backdrop, not a sidebar row.
-    const hit = await page.evaluate(() => {
-      const sb = document.querySelector('.sb')!.getBoundingClientRect();
-      return document
-        .elementFromPoint(sb.left + sb.width / 2, sb.top + sb.height / 2)!
-        .getAttribute('data-testid');
-    });
-    expect(hit).toBe('provider-switch-modal-backdrop');
-  });
-
-  test('never shows the modal for a same-provider model change', async ({ page }) => {
-    await mockSettings(page, false);
+  test('a same-provider pick is an ordinary model change', async ({ page }) => {
+    await mockSettings(page);
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     await page.getByTestId('chat-model').click();
     await page.getByTestId('model-option-claude-opus-4-1').click();
-
-    await expect(page.getByTestId('provider-switch-modal')).toHaveCount(0);
+    await expect(page.getByTestId('new-chat-main')).toHaveCount(0);
     expect(await sentModelRequests(page)).toEqual([
-      { type: 'chat.model_request', chatId: 'chat_bus', model: 'claude-opus-4-1' },
+      expect.objectContaining({ chatId: 'chat_bus', model: 'claude-opus-4-1' }),
     ]);
   });
 
-  test('Cancel closes the modal and sends nothing', async ({ page }) => {
-    await mockSettings(page, false);
-    await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await page.getByTestId('chat-model').click();
-    await page.getByTestId('model-option-openai/gpt-5-codex').click();
-    await page.getByTestId('provider-switch-cancel').click();
-
-    await expect(page.getByTestId('provider-switch-modal')).toHaveCount(0);
-    expect(await sentModelRequests(page)).toEqual([]);
-  });
-
-  test('Switch sends chat.model_request and closes the modal', async ({ page }) => {
-    await mockSettings(page, false);
-    await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await page.getByTestId('chat-model').click();
-    await page.getByTestId('model-option-openai/gpt-5-codex').click();
-    await page.getByTestId('provider-switch-switch').click();
-
-    await expect(page.getByTestId('provider-switch-modal')).toHaveCount(0);
-    expect(await sentModelRequests(page)).toEqual([
-      { type: 'chat.model_request', chatId: 'chat_bus', model: 'openai/gpt-5-codex' },
-    ]);
-  });
-
-  test('"Don\'t show again" persists as an account setting via PATCH /api/settings', async ({
-    page,
-  }) => {
-    const { getPatches } = await mockSettings(page, false);
-    await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await page.getByTestId('chat-model').click();
-    await page.getByTestId('model-option-openai/gpt-5-codex').click();
-    await page.getByTestId('provider-switch-dont-show-again').click();
-    await page.getByTestId('provider-switch-switch').click();
-
-    expect(getPatches()).toEqual([{ suppressProviderSwitchWarning: true }]);
-    expect(await sentModelRequests(page)).toEqual([
-      { type: 'chat.model_request', chatId: 'chat_bus', model: 'openai/gpt-5-codex' },
-    ]);
-  });
-
-  test('never shows the modal once the account setting is already on', async ({ page }) => {
-    await mockSettings(page, true);
-    const settingsLoaded = page.waitForResponse('**/api/settings');
-    await page.goto('/app/dev-harness.html?chat=chat_bus');
-    // The boot load of preferences is async (mirrors AppShell); the picker's
-    // cross-provider decision reads it at click time, so the click must wait
-    // for the real load to land or it bakes in the default (false).
-    await settingsLoaded;
-    await page.getByTestId('chat-model').click();
-    await page.getByTestId('model-option-openai/gpt-5-codex').click();
-
-    await expect(page.getByTestId('provider-switch-modal')).toHaveCount(0);
-    expect(await sentModelRequests(page)).toEqual([
-      { type: 'chat.model_request', chatId: 'chat_bus', model: 'openai/gpt-5-codex' },
-    ]);
-  });
-
-  test('Settings has a toggle to bring the warning back', async ({ page }) => {
-    const { getPatches } = await mockSettings(page, true);
-    // Settings → Agent → Chats.
+  test('Settings no longer has a provider-switch warning', async ({ page }) => {
+    await mockSettings(page);
     await page.goto('/app/dev-harness.html?route=/settings/agent');
-    const toggle = page.getByTestId('provider-switch-warning');
-    await expect(toggle).toBeVisible();
-    // Warning currently suppressed -> the "warn" toggle reads OFF.
-    await expect(toggle).not.toBeChecked();
-    // The visible control is the track+knob painted over the real (visually
-    // hidden) checkbox — same click pattern every other Toggle e2e test here
-    // uses (e.g. batch-notify-all-complete.spec.ts).
-    await toggle.click({ force: true });
-    await expect.poll(() => getPatches()).toEqual([{ suppressProviderSwitchWarning: false }]);
+    await expect(page.getByTestId('provider-switch-warning')).toHaveCount(0);
   });
 });

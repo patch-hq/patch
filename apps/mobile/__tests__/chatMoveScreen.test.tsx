@@ -1,6 +1,7 @@
-// Move page (spec/04 § Moving a chat to another host, spec/15 § Chat detail →
-// Move to…): the other hosts, the same-named folder offered, and a refusal
-// kept on screen with the server's reason.
+// Move page (spec/04 § Moving to another host, spec/15 § Chat detail → Move
+// to…): the other hosts, the same-named folder offered; moving opens the
+// linked chat's draft on the new-chat screen, and a refusal is kept on screen
+// with the server's reason.
 
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -11,6 +12,7 @@ import { useChatStore } from '../src/stores/chatStore';
 import { useFolderStore } from '../src/stores/folderStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { ApiError } from '../src/api/rest';
+import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 
 const { moveSpy } = vi.hoisted(() => ({ moveSpy: vi.fn() }));
 vi.mock('../src/api/rest', async (orig) => ({
@@ -94,20 +96,26 @@ describe('Chat Move screen', () => {
     expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/srv/custom');
   });
 
-  it('moves, then goes back to the chat', async () => {
+  it('moves by opening the linked chat’s draft on the new-chat screen', async () => {
     moveSpy.mockResolvedValue({
-      ok: true,
-      chatId: 'c1',
-      hostId: 'box',
-      folder: '/home/tom/Unite',
+      draft: {
+        id: 'draft-linked-7',
+        hostId: 'box',
+        folder: '/home/tom/Unite',
+        text: 'This continues a chat',
+        continuedFrom: 'c1',
+        updatedAt: 1,
+      },
     });
     const r = renderRN(<ChatMove />);
     press(r.root, 'move-confirm');
     await flush();
     expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
-    expect(
-      routerMock.back.mock.calls.length + routerMock.replace.mock.calls.length,
-    ).toBeGreaterThan(0);
+    expect(routerMock.replace).toHaveBeenCalledWith('/new-chat?draftId=draft-linked-7');
+    expect(useNewChatDraftStore.getState().get('draft-linked-7')).toMatchObject({
+      hostId: 'box',
+      continuedFrom: 'c1',
+    });
   });
 
   it('a refusal stays on the page and says why', async () => {
@@ -137,33 +145,10 @@ describe('Chat Move screen', () => {
     expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/projects');
   });
 
-  describe('from the server copy', () => {
-    const OK = { ok: true, chatId: 'c1', hostId: 'box', folder: '/srv/x' };
-    const hasAny = (r: ReturnType<typeof renderRN>, id: string): boolean => {
-      try {
-        findHost(r.root, byTestId(id));
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    it('an offline host: folder empty, suggestion applied only when tapped', async () => {
-      usePresenceStore.getState().setHostOnline('mac', false);
-      moveSpy.mockResolvedValue(OK);
-      const r = renderRN(<ChatMove />);
-      expect(hasAny(r, 'move-takeover-note')).toBe(false);
-      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('');
-      expect(hasText(findHost(r.root, byTestId('move-confirm')), 'Continue')).toBe(true);
-      expect(findHost(r.root, byTestId('move-confirm')).props.disabled).toBe(true);
-      expect(
-        hasText(findHost(r.root, byTestId('move-suggest')), 'Suggested: /home/tom/Unite'),
-      ).toBe(true);
-      press(r.root, 'move-suggest');
-      expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
-      press(r.root, 'move-confirm');
-      await flush();
-      expect(moveSpy).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
-    });
+  it('a chat whose own host is offline is moved the same way, its same-named folder filled in', async () => {
+    usePresenceStore.getState().setHostOnline('mac', false);
+    const r = renderRN(<ChatMove />);
+    expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
+    expect(hasText(findHost(r.root, byTestId('move-confirm')), 'Move')).toBe(true);
   });
 });

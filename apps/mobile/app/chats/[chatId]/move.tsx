@@ -1,19 +1,21 @@
-// Move page — move a chat to another host (spec/04 § Moving a chat to
-// another host, spec/15 § Chat detail → Move to…), reached from the chat's ⋯
-// menu. Pick the host, then the folder the chat will run in there: that
-// host's own folders are listed, the one with the same name as the chat's
-// current folder chosen first, and any path can be typed. The chat stays where
-// it is until the server says it has arrived; a refusal stays on this page
-// with the reason. When the chat's own host is offline the folder starts
-// empty and the same-named folder is only suggested.
+// Move page — move a chat to another host (spec/04 § Moving to another host,
+// spec/15 § Chat detail → Move to…), reached from the chat's ⋯ menu. Pick the
+// host, then the folder the new chat will run in there: that host's own
+// folders are listed, the one with the same name as the chat's current folder
+// chosen first, and any path can be typed. Moving starts a new chat there,
+// linked to this one: the server drafts it and it opens on the new-chat
+// screen with its first message ready to read, edit and send. Nothing is
+// copied and this chat stays as it is. A refusal stays on this page with the
+// reason.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import { defaultMoveFolder } from '@patch/wire';
-import { api, ApiError } from '../../../src/api/rest';
+import { api } from '../../../src/api/rest';
+import { adoptLinkedDraft, linkedChatError } from '../../../src/lib/linkedChat';
 import { useChatStore } from '../../../src/stores/chatStore';
 import { useFolderStore } from '../../../src/stores/folderStore';
 import { usePresenceStore, type HostPresence } from '../../../src/stores/presenceStore';
@@ -51,9 +53,8 @@ export default function ChatMoveScreen(): React.ReactElement {
     // On its own machine the folder it already runs in is not a place to move to.
     return hostId === row?.hostId ? all.filter((x) => x !== row?.folder) : all;
   }, [byHost, hostId, row?.hostId, row?.folder]);
+  const router = useRouter();
   const current = row ? hosts[row.hostId] : undefined;
-  const offline = current !== undefined && !current.online;
-  const takeover = offline;
   const [folder, setFolder] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -70,10 +71,9 @@ export default function ChatMoveScreen(): React.ReactElement {
       chosenRef.current = false;
     }
     if (chosenRef.current) return;
-    setFolder(row && !takeover ? (defaultMoveFolder(row.folder, folders) ?? '') : '');
+    setFolder(row ? (defaultMoveFolder(row.folder, folders) ?? '') : '');
     setError(null);
-  }, [hostId, folders, row?.folder, takeover]);
-  const suggestion = takeover && row ? defaultMoveFolder(row.folder, folders) : undefined;
+  }, [hostId, folders, row?.folder]);
   const chooseFolder = (f: string): void => {
     chosenRef.current = true;
     setFolder(f);
@@ -86,11 +86,10 @@ export default function ChatMoveScreen(): React.ReactElement {
     setMoving(true);
     setError(null);
     try {
-      await api.moveChat(chatId, hostId, folder.trim());
-      goBack();
+      const { draft } = await api.moveChat(chatId, hostId, folder.trim());
+      router.replace(adoptLinkedDraft(draft) as Href);
     } catch (e) {
-      const body = e instanceof ApiError ? (e.body as { message?: unknown } | null) : null;
-      setError(typeof body?.message === 'string' ? body.message : (e as Error).message);
+      setError(linkedChatError(e));
     } finally {
       setMoving(false);
     }
@@ -193,19 +192,6 @@ export default function ChatMoveScreen(): React.ReactElement {
             backgroundColor: colors.paperRaised,
           }}
         />
-        {suggestion ? (
-          <Pressable
-            testID="move-suggest"
-            accessibilityRole="button"
-            disabled={moving}
-            onPress={() => chooseFolder(suggestion)}
-            style={{ alignSelf: 'flex-start', paddingVertical: space.sm }}
-          >
-            <Text style={{ ...typography.secondary, color: colors.leaf }}>
-              Suggested: {suggestion}
-            </Text>
-          </Pressable>
-        ) : null}
         {folders.length > 0 ? (
           <View style={{ gap: space.xs }}>
             {folders.map((f) => (
@@ -256,7 +242,7 @@ export default function ChatMoveScreen(): React.ReactElement {
         >
           {moving ? <ActivityIndicator size="small" color={colors.onAccent} /> : null}
           <Text style={{ ...typography.label, color: colors.onAccent }}>
-            {moving ? 'Moving…' : takeover ? 'Continue' : 'Move'}
+            {moving ? 'Moving…' : 'Move'}
           </Text>
         </Pressable>
       </ScrollView>

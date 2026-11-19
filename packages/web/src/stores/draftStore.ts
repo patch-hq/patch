@@ -55,6 +55,12 @@ export interface Draft {
   /** SDK `--model` override for the chat this draft will spawn (spec/13). */
   model?: string;
   /**
+   * The chat this draft continues (spec/04 § Provider switches, § Moving to
+   * another host). Set only on a draft the server drafted as a linked chat;
+   * sending it spawns the chat linked to that one.
+   */
+  continuedFrom?: string;
+  /**
    * Why the chat this draft tried to start was refused (spec/04 § Spawn). Set
    * when a first send fails, so the message stays in the sidebar as a failed
    * chat with its error and a resend. Device-local: never sent to the server.
@@ -91,6 +97,7 @@ function load(): { drafts: Record<string, Draft>; order: string[] } {
             text: dd.text,
             ...(typeof dd.model === 'string' ? { model: dd.model } : {}),
             ...(typeof dd.hostId === 'string' ? { hostId: dd.hostId } : {}),
+            ...(typeof dd.continuedFrom === 'string' ? { continuedFrom: dd.continuedFrom } : {}),
             ...(isFailure(dd.failure) ? { failure: dd.failure } : {}),
             updatedAt: typeof dd.updatedAt === 'number' ? dd.updatedAt : 0,
           };
@@ -148,6 +155,7 @@ function toBody(d: Draft): NewChatDraftBody {
     text: d.text,
     ...(d.hostId ? { hostId: d.hostId } : {}),
     ...(d.model ? { model: d.model } : {}),
+    ...(d.continuedFrom ? { continuedFrom: d.continuedFrom } : {}),
   };
 }
 
@@ -365,6 +373,7 @@ function fromBody(b: NewChatDraftBody, updatedAt: number): Draft {
     text: b.text,
     ...(b.model ? { model: b.model } : {}),
     ...(b.hostId ? { hostId: b.hostId } : {}),
+    ...(b.continuedFrom ? { continuedFrom: b.continuedFrom } : {}),
     updatedAt,
   };
 }

@@ -279,14 +279,6 @@ function ChatsGroup(): JSX.Element {
   };
   return (
     <Group label="Chats" testid="settings-transcript">
-      <Row title="Warn before switching provider">
-        <Toggle
-          checked={!preferences.suppressProviderSwitchWarning}
-          disabled={!loaded}
-          onChange={(next) => write({ suppressProviderSwitchWarning: !next })}
-          testid="provider-switch-warning"
-        />
-      </Row>
       {/* spec/12 § Continue — a turn cut off by its machine going down waits for
           Continue unless this is on. */}
       <Row title="Continue interrupted turns automatically">

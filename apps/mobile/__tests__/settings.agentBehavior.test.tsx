@@ -275,18 +275,10 @@ describe('Agent page: Questions', () => {
 });
 
 describe('Agent page: Chats', () => {
-  it('Warn before switching provider writes the inverse, suppressProviderSwitchWarning', async () => {
-    seedSettings({
-      preferences: { ...settingsFixture().preferences, suppressProviderSwitchWarning: false },
-    });
+  it('has no provider-switch warning: a switch starts a new linked chat', async () => {
+    seedSettings({ preferences: { ...settingsFixture().preferences } });
     const r = await renderAgent();
-    expect(get(r, 'provider-switch-warning').props.value).toBe(true);
-    await actAsync(async () => {
-      get(r, 'provider-switch-warning').props.onValueChange(false);
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenCalledWith({ suppressProviderSwitchWarning: true });
-    expect(get(r, 'provider-switch-warning').props.value).toBe(false);
+    expect(r.root.findAll((n) => n.props.testID === 'provider-switch-warning')).toHaveLength(0);
   });
 
   // spec/12 § Continue — off by default; one preference write turns it on.

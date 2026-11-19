@@ -6,6 +6,7 @@
 // locally until it answers. Mirrors the web sidebar shape (spec/15 ## Chats tab).
 
 import React from 'react';
+import { withoutContinued } from '../../src/lib/chatThreads';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import {
@@ -616,7 +617,7 @@ function buildSections(
 
   // A row known only from a reconnecting host's re-announcement has no status
   // yet (`ChatRow.awaitingState`); listing it would flash archived chats in.
-  const all = Object.values(chats).filter((c) => c.awaitingState !== true);
+  const all = withoutContinued(Object.values(chats).filter((c) => c.awaitingState !== true));
   const manager = all.find((c) => c.chatId === MANAGER_ID);
   const channels = all.filter((c) => c.chatId === SPEAKERS_ID);
   const channelIds = new Set<string>([MANAGER_ID, SPEAKERS_ID]);

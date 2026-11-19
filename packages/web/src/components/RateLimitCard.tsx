@@ -19,7 +19,8 @@ import { EXTRA_USAGE_URL, LIMIT_NAME, formatReset, formatResetDetail } from '../
 import { formatSpanShort, limitControls, type LimitControl } from '../lib/limitControls.js';
 import { accountRows } from './UsagePopover.js';
 import { LimitMenu } from './LimitMenu.js';
-import { ProviderSwitchModal } from './ProviderSwitchModal.js';
+import { useNavigate } from 'react-router-dom';
+import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
 
 const EXTRA_USAGE_URLS: Record<string, string> = {
   claude: EXTRA_USAGE_URL,
@@ -41,9 +42,7 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
   const block = row.limitBlock ?? null;
   const autoResume = usePreferencesStore((s) => s.preferences.autoResumeRateLimit);
   const shared = usePreferencesStore((s) => s.shared);
-  const suppressSwitchWarning = usePreferencesStore(
-    (s) => s.preferences.suppressProviderSwitchWarning,
-  );
+  const navigate = useNavigate();
   const hosts = usePresenceStore((s) => s.hosts);
   const pushError = useUiStore((s) => s.pushError);
 
@@ -59,7 +58,6 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
     return () => window.clearInterval(id);
   }, [resetsAt]);
 
-  const [switchTarget, setSwitchTarget] = useState<string | null>(null);
   const pastReset = resetsAt !== null && resetsAt <= now;
   const isOverload = row.resumeKind === 'overloaded';
   const providerId = harnessForModel(row.model);
@@ -88,31 +86,26 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
     ws?.send({ type: 'chat.account_request', chatId: row.chatId, preferredAccountId: accountId });
     send();
   };
+  // spec/04 § Provider switches — another provider is a new chat linked to
+  // this one. The draft's first message carries the request that met the
+  // limit (still unanswered), for the user to read, edit and send.
   const moveToProvider = (target: string): void => {
     const model = getModelCatalog().models.find((m) => harnessForModel(m.id) === target);
     if (!model) {
       pushError(`No ${target} model is available on this host to switch to`);
       return;
     }
-    // The re-send rides on the model change (`retry`): the host applies the model
-    // first, then runs the owed turn on it. A separate resume-now raced the
-    // change and re-ran the turn on the old account, hitting the limit again.
-    getActiveWs()?.send({
-      type: 'chat.model_request',
-      chatId: row.chatId,
-      model: model.id,
-      retry: true,
-    });
+    draftLinkedChat(row.chatId, model.id).then(
+      (path) => navigate(path),
+      (err: unknown) => pushError(`Could not start a linked chat: ${linkedChatError(err)}`),
+    );
   };
   // The catalogue is how "Change provider" finds a model to move to; it is
   // fetched when that menu opens, not for every card.
   const loadCatalogue = (): void => {
     if (row.hostId !== '') void loadModels(row.hostId);
   };
-  const chooseProvider = (target: string): void => {
-    if (suppressSwitchWarning) moveToProvider(target);
-    else setSwitchTarget(target);
-  };
+  const chooseProvider = (target: string): void => moveToProvider(target);
 
   const btn = (key: 'account' | 'provider' | 'send'): string =>
     controls.main === key ? 'limit-btn limit-btn-main' : 'limit-btn';
@@ -225,19 +218,6 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
           </label>
         </div>
       </div>
-      {switchTarget !== null ? (
-        <ProviderSwitchModal
-          onCancel={() => setSwitchTarget(null)}
-          onSwitch={(dontShowAgain) => {
-            const target = switchTarget;
-            setSwitchTarget(null);
-            if (dontShowAgain) {
-              void usePreferencesStore.getState().update({ suppressProviderSwitchWarning: true });
-            }
-            moveToProvider(target);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

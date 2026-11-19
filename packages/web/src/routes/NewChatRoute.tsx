@@ -250,6 +250,11 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   const draftFolder = useDraftStore((s) => s.drafts[draftId]?.folder) ?? '';
   const draftHostId = useDraftStore((s) => s.drafts[draftId]?.hostId);
   const draftModel = useDraftStore((s) => s.drafts[draftId]?.model);
+  // spec/04 § Provider switches — a linked chat's draft names the chat it continues.
+  const continuedFrom = useDraftStore((s) => s.drafts[draftId]?.continuedFrom);
+  const continuedFromName = useChatStore((s) =>
+    continuedFrom !== undefined ? (s.chats[continuedFrom]?.name ?? null) : null,
+  );
   const seedRef = useRef<{ id: string; text: string } | null>(null);
   if (seedRef.current?.id !== draftId) {
     seedRef.current = { id: draftId, text: useDraftStore.getState().drafts[draftId]?.text ?? '' };
@@ -736,6 +741,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
         folder: trimmed,
         ...(model === null ? {} : { model }),
         ...(preferredAccountId !== null ? { preferredAccountId } : {}),
+        ...(continuedFrom !== undefined ? { continuedFrom } : {}),
       })) as { chatId: string };
       // Created before anything is sent into it: if the user leaves it
       // empty, it goes (spec/14 § New chat drafts).
@@ -1099,6 +1105,19 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
         </p>
       ) : null}
       <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
+        {/* A linked chat (spec/04 § Provider switches, § Moving to another
+            host): the chat it continues. Only the first message below carries
+            anything over. */}
+        {continuedFrom !== undefined ? (
+          <>
+            <span className="new-chat-setup-label">Continues</span>
+            <div className="new-chat-setup-row" data-testid="new-chat-continues">
+              <Link to={`/chats/${encodeURIComponent(continuedFrom)}`}>
+                {continuedFromName ?? 'New chat'}
+              </Link>
+            </div>
+          </>
+        ) : null}
         {/* Where the chat runs. An offline host is listed so its absence is
             visible, and cannot be chosen. */}
         {hosts.length > 1 ? (

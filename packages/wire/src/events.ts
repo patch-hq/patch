@@ -316,6 +316,12 @@ export const ChatErrorCode = z.enum([
   // catalogue does not offer. The chat stays on the model it was already
   // running; NEVER rounded to a near match or dropped to the host's last-used.
   'unknown_model',
+  // spec/04 § Model — a `chat.model_request` named a model of ANOTHER
+  // provider. A chat keeps one provider for its life; a provider switch starts
+  // a new linked chat (`POST /api/chats/:id/continue`), so the host refuses
+  // the change and the chat stays on its model. Only an older surface, which
+  // still sends the switch as a model change, meets this.
+  'provider_switch_needs_new_chat',
   // spec/02 § Permission mode — Claude Code resolved the turn onto a DIFFERENT
   // permission mode than the one the chat was given, because the one asked for
   // is unavailable to it (an old `claude` build, or a model that does not
@@ -1520,6 +1526,17 @@ export const ChatStateEvent = z
      * a host predating the field never sends it, and a surface keeps what it knew.
      */
     createdAt: z.number().int().nonnegative().optional(),
+    /**
+     * spec/04 § Provider switches, § Moving to another host — the chat this
+     * one continues (a provider switch or a move started it as a new chat
+     * linked to the old one), and the chat that continues this one. Both are
+     * recorded by the server when the linked chat is spawned and stamped on
+     * every `chat.state` it sends; a host never sets them. Surfaces show the
+     * two as one thread: one list row (the newest chat) and a divider where
+     * one hands on to the other.
+     */
+    continuedFrom: z.string().min(1).optional(),
+    continuedIn: z.string().min(1).optional(),
     /**
      * The EFFECTIVE permission mode the NEXT turn will use — already resolved
      * by the host through chat override → host default → `auto`
@@ -4291,6 +4308,13 @@ export const NewChatDraftBody = z
     hostId: z.string().min(1).optional(),
     text: z.string(),
     model: z.string().min(1).optional(),
+    /**
+     * spec/04 § Provider switches — the chat this draft continues. Set by the
+     * server when it drafts a linked chat (a provider switch, a move to
+     * another host, or a chat whose provider session is gone); sending the
+     * draft spawns the chat with it, which links the two.
+     */
+    continuedFrom: z.string().min(1).optional(),
   })
   .strict();
 export type NewChatDraftBody = z.infer<typeof NewChatDraftBody>;

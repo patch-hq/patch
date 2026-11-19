@@ -99,6 +99,12 @@ export default function NewChat(): React.ReactElement {
   const [sendRequest, setSendRequest] = React.useState(0);
   const [openedDraft] = React.useState(() => useNewChatDraftStore.getState().get(draftId));
   const reopened = hereDraftId !== null && openedDraft !== undefined && openedDraft.text !== '';
+  // spec/04 § Provider switches — a linked chat's draft names the chat it continues.
+  const continuedFrom = openedDraft?.continuedFrom;
+  const continuedFromName = useChatStore((s) =>
+    continuedFrom !== undefined ? (s.chats[continuedFrom]?.name ?? null) : null,
+  );
+  const linkRouter = useRouter();
   React.useEffect(() => {
     return () => {
       // A blank draft opened and left untouched is not something the user
@@ -236,6 +242,7 @@ export default function NewChat(): React.ReactElement {
         ...(model === null ? {} : { model }),
         ...(mode === null ? {} : { permissionMode: mode }),
         ...(preferredAccountId === null ? {} : { preferredAccountId }),
+        ...(continuedFrom !== undefined ? { continuedFrom } : {}),
       });
       // Seed the row BEFORE the composer echoes into it and before navigating
       // (spec/15 § New chat flow): a chat with no store row is invisible to
@@ -329,6 +336,17 @@ export default function NewChat(): React.ReactElement {
           >
             New chat
           </Text>
+          {continuedFrom !== undefined ? (
+            <Pressable
+              testID="new-chat-continues"
+              accessibilityRole="link"
+              onPress={() => linkRouter.push(`/chats/${continuedFrom}`)}
+            >
+              <Text numberOfLines={1} style={{ ...typography.secondary, color: colors.inkFaint }}>
+                Continues {continuedFromName ?? 'New chat'}
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             testID="new-chat-folder-pill"
             onPress={() => setFolderSheetOpen(true)}

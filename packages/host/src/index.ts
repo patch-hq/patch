@@ -2987,8 +2987,7 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.chat_move.request') {
-        // spec/04 § Moving a chat to another host — one step of a move the
-        // server is driving: export / import / retire / release.
+        // spec/04 § Moving to another host — retire an old moved copy.
         handleChatMoveRequest(event, daemon, sender, logger, selfHostId);
         return;
       }
@@ -7606,9 +7605,9 @@ export async function handleDocExportRequest(
 }
 
 /**
- * One step of moving a chat between hosts (spec/04 § Moving a chat to another
- * host). Every outcome is answered — the server is waiting on it with the chat
- * frozen, so a refusal must come back as a refusal, not as silence.
+ * A server's request to retire this host's old copy of a chat that a move
+ * before linked chats took over (spec/04 § Moving to another host). Every
+ * outcome is answered, so a refusal comes back as a refusal, not as silence.
  */
 export function handleChatMoveRequest(
   event: import('@patch/wire').PatchChatMoveRequestEvent,
@@ -7625,41 +7624,20 @@ export function handleChatMoveRequest(
     op: event.op,
   };
   try {
-    if (event.op === 'export') {
-      const bundle = daemon.exportChatForMove(event.chatId);
-      sender({ ...base, ok: true, bundle });
-      return;
-    }
-    if (event.op === 'import') {
-      if (event.bundle === undefined || event.folder === undefined) {
-        throw new ChatMoveError('internal', 'an import needs a bundle and a folder');
-      }
-      if (event.bundle.chatId !== event.chatId) {
-        throw new ChatMoveError('internal', 'the bundle is for a different chat');
-      }
-      daemon.importMovedChat(event.bundle, event.folder);
-      sender({ ...base, ok: true });
-      return;
-    }
-    if (event.op === 'refolder') {
-      if (event.folder === undefined) {
-        throw new ChatMoveError('internal', 'a refolder needs a folder');
-      }
-      daemon.refolderChat(event.chatId, event.folder);
-      sender({ ...base, ok: true });
-      return;
-    }
+    // A server only asks one thing any more: retire an old copy a move before
+    // linked chats left here (spec/04 § Moving to another host).
     if (event.op === 'retire' && event.force === true) {
-      // A takeover stops running work, which takes a moment: answer when done.
+      // Stopping running work takes a moment: answer when done.
       void daemon
         .retireTakenOverChat(event.chatId)
         .then(() => sender({ ...base, ok: true }))
         .catch(refuse);
       return;
     }
-    if (event.op === 'retire') daemon.retireMovedChat(event.chatId);
-    else daemon.releaseMovedChat(event.chatId);
-    sender({ ...base, ok: true });
+    throw new ChatMoveError(
+      'unsupported',
+      `this host no longer copies chats between hosts (${event.op}); moving starts a new linked chat`,
+    );
   } catch (err) {
     refuse(err);
   }
