@@ -35,7 +35,6 @@ import {
   chatTranscriptPath,
   createClaudeSessionStore,
 } from '../src/claudeSessionStore.js';
-import { encodeFolder } from '../src/history.js';
 import { createRealSdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
 import { REAL_CLAUDE_SKIP_REASON, realClaudeEnabled } from './helpers/real-claude.js';
 
