@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render as rtlRender, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { ReactElement } from 'react';
+import type { ComponentProps } from 'react';
 import type { PermissionMode, WireEvent } from '@patch/wire';
 import { Composer } from '../components/Composer.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -22,7 +22,8 @@ import { setActiveWs } from '../api/ws.js';
 import type { ChatRow } from '../stores/types.js';
 
 /** The composer always sits inside the app's router (its model control can open a new chat). */
-const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
+const render = (ui: ComponentProps<typeof MemoryRouter>['children']) =>
+  rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 function fakeWs(sent: WireEvent[]) {
   return { send: (e: WireEvent) => sent.push(e) } as unknown as Parameters<typeof setActiveWs>[0];

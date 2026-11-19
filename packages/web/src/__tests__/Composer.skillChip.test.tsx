@@ -6,7 +6,7 @@ import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render as rtlRender, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { ReactElement } from 'react';
+import type { ComponentProps } from 'react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { reportAccount } from './presenceHelpers.js';
@@ -16,7 +16,8 @@ import { useChatStore } from '../stores/chatStore.js';
 import { api } from '../api/rest.js';
 
 /** The composer always sits inside the app's router (its model control can open a new chat). */
-const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
+const render = (ui: ComponentProps<typeof MemoryRouter>['children']) =>
+  rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 function seedChat(folder = '/proj', model?: string): void {
   useChatStore.getState().hydrate([
