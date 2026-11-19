@@ -50,6 +50,7 @@ import type { WhisperBackend } from './whisper.js';
 import type { SpeechToTextResolution } from './stt-engines.js';
 import type { KokoroBackend } from './kokoro.js';
 import { GeminiLiveSession, geminiLiveModelFor, type GeminiContextTurn } from './gemini-live.js';
+import { isManagerCall, type ManagerVoiceTools } from './managerVoice.js';
 import {
   OpenAIRealtimeSession,
   openaiRealtimeModelFor,
@@ -226,6 +227,12 @@ export interface AudioServerOptions {
    * messages in the chat that match a few words. Absent means the voice is not given the tool.
    */
   lookBack?: (chatId: string, query: string) => string;
+  /**
+   * spec/07 § A call to the Manager — the tools a hosted voice is given on a
+   * call to the Manager chat, in place of handing off to the Manager's agent.
+   * A hosted call to the Manager on a server without them is refused.
+   */
+  managerVoice?: ManagerVoiceTools;
   /**
    * Existence check for the chat declared in `audio.session_start` (E1-d3).
    * A voice session must be bound to a real chat BEFORE any audio is
@@ -818,6 +825,22 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           }
         };
 
+        // spec/07 § A call to the Manager: a hosted voice on the Manager chat is the manager
+        // itself. Fixed for the session from the chat it opened on.
+        const hosted =
+          voiceSurface !== 'dictation' &&
+          (cell.backend === 'gemini' || cell.backend === 'openai' || cell.backend === 'elevenlabs');
+        const managerCall = hosted && isManagerCall(start.chatId);
+        if (managerCall && !opts.managerVoice) {
+          rejectConn(
+            ws,
+            'voice_config_not_implemented',
+            'a hosted voice call to the Manager needs the manager tools, which this host has not wired',
+          );
+          return;
+        }
+        const managerDeps = managerCall ? { manager: opts.managerVoice! } : {};
+
         if (voiceSurface !== 'dictation' && cell.backend === 'gemini') {
           const geminiKey = readKey(opts.geminiApiKey);
           if (geminiKey === undefined) {
@@ -849,6 +872,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             onFatal,
             ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
             ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
+            ...managerDeps,
             ...(opts.geminiWsCtor ? { wsCtor: opts.geminiWsCtor } : {}),
             ...(opts.geminiWsUrl ? { wsUrl: opts.geminiWsUrl } : {}),
           });
@@ -874,6 +898,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             onFatal,
             ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
             ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
+            ...managerDeps,
             ...(opts.openaiWsCtor ? { wsCtor: opts.openaiWsCtor } : {}),
             ...(opts.openaiWsUrl ? { wsUrl: opts.openaiWsUrl } : {}),
           });
@@ -899,6 +924,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             onFatal,
             ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
             ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
+            ...managerDeps,
             ...(opts.elevenLabsWsCtor ? { wsCtor: opts.elevenLabsWsCtor } : {}),
             ...(opts.elevenLabsFetch ? { fetchImpl: opts.elevenLabsFetch } : {}),
             ...(opts.elevenLabsApiBase ? { apiBase: opts.elevenLabsApiBase } : {}),

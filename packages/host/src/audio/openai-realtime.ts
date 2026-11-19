@@ -75,8 +75,21 @@ import {
   DISPATCH_TOOL_DESCRIPTION,
   DISPATCH_TOOL_NAME,
   hostedVoiceInstruction,
+  managerHostedInstruction,
   type GeminiContextTurn,
 } from './gemini-live.js';
+import {
+  CHAT_STATUS_DESCRIPTION,
+  CHAT_STATUS_TOOL_NAME,
+  FIND_CHATS_DESCRIPTION,
+  FIND_CHATS_TOOL_NAME,
+  ManagerChatLookupError,
+  MANAGER_TOOL_NAMES,
+  MANAGER_TOOL_PARAMS,
+  SEND_TO_CHAT_BLOCKING_DESCRIPTION,
+  SEND_TO_CHAT_TOOL_NAME,
+  type ManagerVoiceTools,
+} from './managerVoice.js';
 
 /** Realtime models per layer, as documented 2026-09-24 (developers.openai.com/api/docs/models). */
 export const DEFAULT_OPENAI_REALTIME_MODELS = {
@@ -118,6 +131,8 @@ export interface OpenAIRealtimeDeps {
   handoff?: VoiceHandoff;
   /** The `look_back` tool's search over this chat. Absent means the voice is not given the tool. */
   lookBack?: (chatId: string, query: string) => string;
+  /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
+  manager?: ManagerVoiceTools;
   transcribeModel?: string;
   voice?: string;
   getChatContext?: (chatId: string) => Promise<GeminiContextTurn[]> | GeminiContextTurn[];
@@ -327,7 +342,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       session: {
         type: 'realtime',
         instructions: withBriefing(
-          hostedVoiceInstruction(handoff) +
+          (this.deps.manager ? managerHostedInstruction(false) : hostedVoiceInstruction(handoff)) +
             (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : ''),
           this.briefing,
         ),
@@ -347,25 +362,27 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
           },
         },
         tools: [
-          ...(handoff === 'never'
-            ? []
-            : [
-                {
-                  type: 'function',
-                  name: DISPATCH_TOOL_NAME,
-                  description: DISPATCH_TOOL_DESCRIPTION,
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      request: {
-                        type: 'string',
-                        description: 'What Patch should do or look up, in plain language.',
+          ...(this.deps.manager
+            ? managerRealtimeTools()
+            : handoff === 'never'
+              ? []
+              : [
+                  {
+                    type: 'function',
+                    name: DISPATCH_TOOL_NAME,
+                    description: DISPATCH_TOOL_DESCRIPTION,
+                    parameters: {
+                      type: 'object',
+                      properties: {
+                        request: {
+                          type: 'string',
+                          description: 'What Patch should do or look up, in plain language.',
+                        },
                       },
+                      required: ['request'],
                     },
-                    required: ['request'],
                   },
-                },
-              ]),
+                ]),
           ...(this.deps.lookBack !== undefined
             ? [
                 {
@@ -386,7 +403,10 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
               ]
             : []),
         ],
-        tool_choice: handoff === 'always' && this.deps.lookBack === undefined ? 'required' : 'auto',
+        tool_choice:
+          handoff === 'always' && this.deps.lookBack === undefined && !this.deps.manager
+            ? 'required'
+            : 'auto',
       },
     };
   }
@@ -572,7 +592,11 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         return;
       }
       case 'response.function_call_arguments.done':
-        if (ev.name === DISPATCH_TOOL_NAME && ev.call_id) {
+        if (this.deps.manager && ev.call_id && ev.name && MANAGER_TOOL_NAMES.has(ev.name)) {
+          this.responseHadToolCall = true;
+          void this.handleManagerTool(this.deps.manager, ev.call_id, ev.name, ev.arguments ?? '{}');
+        }
+        if (ev.name === DISPATCH_TOOL_NAME && ev.call_id && !this.deps.manager) {
           this.responseHadToolCall = true;
           void this.handleDispatch(ev.call_id, ev.arguments ?? '{}');
         }
@@ -785,6 +809,61 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     this.sendJson({ type: 'response.create' });
   }
 
+  /**
+   * A Manager call's tools (spec/07 § A call to the Manager). The call stays
+   * open until the tool has its answer — for `send_to_chat`, until the chat
+   * has replied — the same way `dispatch_to_patch` does on this engine.
+   */
+  private async handleManagerTool(
+    manager: ManagerVoiceTools,
+    callId: string,
+    name: string,
+    rawArgs: string,
+  ): Promise<void> {
+    let args: Record<string, unknown> = {};
+    try {
+      args = JSON.parse(rawArgs) as Record<string, unknown>;
+    } catch {
+      /* the tool reports the missing arguments itself */
+    }
+    const arg = (k: string): string => (typeof args[k] === 'string' ? (args[k] as string) : '');
+    const isSend = name === SEND_TO_CHAT_TOOL_NAME;
+    if (isSend) this.dispatchesInFlight += 1;
+    this.deps.logger.info(
+      { sessionId: this.init.sessionId, tool: name, args },
+      'openai-realtime: manager tool',
+    );
+    let result: string;
+    try {
+      if (name === FIND_CHATS_TOOL_NAME) result = await manager.findChats(arg('query'));
+      else if (name === CHAT_STATUS_TOOL_NAME) result = await manager.chatStatus(arg('chat'));
+      else {
+        const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
+        result =
+          sent.reply === null
+            ? `Sent to "${sent.name}". It is on another computer, so its reply will be in that chat, not here.`
+            : `"${sent.name}" replied: ${sent.reply}`;
+      }
+    } catch (err) {
+      const reason = (err as Error).message;
+      result =
+        isSend && !(err instanceof ManagerChatLookupError)
+          ? `Not sent or failed: ${reason}`
+          : reason;
+      if (!(err instanceof ManagerChatLookupError)) {
+        this.reportError(`${name} failed: ${reason}`);
+      }
+    } finally {
+      if (isSend) this.dispatchesInFlight -= 1;
+    }
+    if (this.closed || this.fatal) return;
+    this.sendJson({
+      type: 'conversation.item.create',
+      item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result }) },
+    });
+    this.sendJson({ type: 'response.create' });
+  }
+
   private onWsClose(code: number, reason: Buffer | string): void {
     if (this.closed) return;
     const why = typeof reason === 'string' ? reason : reason?.toString('utf8');
@@ -838,4 +917,33 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       /* already closed */
     }
   }
+}
+
+/** The Manager call's tools, in Realtime's function shape. */
+function managerRealtimeTools(): Array<Record<string, unknown>> {
+  const fn = (
+    name: string,
+    description: string,
+    params: Record<string, string>,
+    required: string[] = Object.keys(params),
+  ): Record<string, unknown> => ({
+    type: 'function',
+    name,
+    description,
+    parameters: {
+      type: 'object',
+      properties: Object.fromEntries(
+        Object.entries(params).map(([k, d]) => [k, { type: 'string', description: d }]),
+      ),
+      required,
+    },
+  });
+  return [
+    fn(FIND_CHATS_TOOL_NAME, FIND_CHATS_DESCRIPTION, { query: MANAGER_TOOL_PARAMS.query }, []),
+    fn(CHAT_STATUS_TOOL_NAME, CHAT_STATUS_DESCRIPTION, { chat: MANAGER_TOOL_PARAMS.chat }),
+    fn(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_BLOCKING_DESCRIPTION, {
+      chat: MANAGER_TOOL_PARAMS.chat,
+      message: MANAGER_TOOL_PARAMS.message,
+    }),
+  ];
 }
