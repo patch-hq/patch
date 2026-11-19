@@ -156,36 +156,6 @@ describe('voiceRecorder', () => {
     expect(new DataView(buf).getUint32(40, true)).toBe(6 * 2);
   });
 
-  it('does not report a quiet stretch as a mic fault', async () => {
-    FakeAudioContext.instances = [];
-    const rec = await start();
-    const ctx = FakeAudioContext.instances[FakeAudioContext.instances.length - 1]!;
-    const reasons: string[] = [];
-    rec.onSilent((r) => reasons.push(r));
-    const quiet = new Array(48_000).fill(0.0002);
-    for (let i = 0; i < 6; i++) fire(ctx, quiet);
-    expect(reasons).toHaveLength(0);
-    rec.cancel();
-  });
-
-  it('reports a track the device muted, or one that is already muted', async () => {
-    const track = new FakeTrack();
-    const rec = await start({ getUserMedia: async () => fakeStream(undefined, track) });
-    const reasons: string[] = [];
-    rec.onSilent((r) => reasons.push(r));
-    track.dispatchEvent(new Event('mute'));
-    expect(reasons).toEqual(['the microphone was muted by the device']);
-    rec.cancel();
-
-    const muted = new FakeTrack();
-    muted.muted = true;
-    const rec2 = await start({ getUserMedia: async () => fakeStream(undefined, muted) });
-    const early: string[] = [];
-    rec2.onSilent((r) => early.push(r));
-    expect(early).toEqual([]);
-    rec2.cancel();
-  });
-
   it('a throwing preview listener cannot stop the recording', async () => {
     // The preview is expendable; the clip is not. A listener that blows up must
     // not take the next captured buffer with it.

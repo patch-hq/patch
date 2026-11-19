@@ -1581,7 +1581,6 @@ export const Composer = forwardRef(function Composer(
           return;
         }
         recordingRef.current = rec;
-        rec.onSilent((reason) => pushError(`voice: ${reason}. Check the mic and try again.`));
         rec.onLevel(feedMicLevel);
         startLivePreview(rec, gen, previewChatId);
       } catch (e) {
