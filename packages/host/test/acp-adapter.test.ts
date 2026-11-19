@@ -39,7 +39,7 @@ describe('the acp provider', () => {
     expect(providerForModel('acp/gemini/gemini-2.5-pro')).toBe('acp');
     expect(providerForSessionId('acp-gemini-r-123')).toBe('acp');
     expect(providerCapabilities('acp/gemini/x')).toEqual({
-      resume: false,
+      resume: true,
       editAtMessage: false,
       rewind: false,
       branchAtTurn: false,

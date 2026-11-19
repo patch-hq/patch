@@ -296,7 +296,9 @@ export const PROVIDERS = [
     loginRequiredCode: 'acp_agent_signed_out',
     builtinCommands: [],
     capabilities: {
-      resume: false,
+      // Per agent: the adapter reopens a saved session where the agent offers
+      // session/load or session/resume, and refuses with a clear error where not.
+      resume: true,
       editAtMessage: false,
       rewind: false,
       branchAtTurn: false,
