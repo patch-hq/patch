@@ -273,3 +273,23 @@ test('an app-started server from before the move is stopped so the agent can tak
     for (const c of children) c.kill('SIGKILL');
   }
 });
+
+test('a restart waits for launchd to finish unloading before it bootstraps', async () => {
+  const calls: string[] = [];
+  let loaded = true;
+  let stillLoadedPrints = 2;
+  const fn: Launchctl = async (args) => {
+    calls.push(args[0]);
+    if (args[0] === 'print') {
+      if (!loaded) return { ok: false, output: '' };
+      if (calls.includes('bootout') && stillLoadedPrints-- <= 0) loaded = false;
+      return { ok: true, output: '' };
+    }
+    if (args[0] === 'bootstrap' && loaded)
+      return { ok: false, output: 'Bootstrap failed: 5: Input/output error' };
+    return { ok: true, output: '' };
+  };
+  const svc = serviceControl({ userHome: scratch(), uid: 501, launchctl: fn });
+  await svc.install('<plist/>', true);
+  assert.equal(calls[calls.length - 1], 'bootstrap');
+});
