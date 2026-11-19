@@ -7307,9 +7307,10 @@ export class Daemon {
       await this.setHidden(req.chatId, false);
     }
     // A person writing to a chat that came back is the first interaction with
-    // its set; an agent's patch_send_to into a snoozed chat ends the snooze.
+    // its set; an agent's patch_send_to into a snoozed chat ends the snooze —
+    // unless the chat has a goal: it stays away until the goal is done.
     if (req.fromUser === true) this.clearSnoozeBack(req.chatId);
-    if (req.fromAgent === true && state.snoozedUntil !== null) {
+    if (req.fromAgent === true && state.snoozedUntil !== null && (state.goal ?? null) === null) {
       await this.setSnoozed(req.chatId, null, { byAgent: true });
     }
 

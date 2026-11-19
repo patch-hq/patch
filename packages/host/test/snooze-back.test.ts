@@ -184,6 +184,23 @@ describe('snooze records and outcome', () => {
     daemon.shutdown();
   });
 
+  it('an agent’s patch_send_to does not end a snooze while the chat has a goal', async () => {
+    const { daemon, folder } = setup();
+    const id = await daemon.spawnChat({ folder });
+    await daemon.setGoal(id, 'ship it');
+    await daemon.setSnoozed(id, T0 + 60_000);
+    await daemon.submitInput({
+      chatId: id,
+      message: 'hi',
+      localId: 'L1',
+      origin: 'machine',
+      fromAgent: true,
+    });
+    await sleep(40);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(T0 + 60_000);
+    daemon.shutdown();
+  });
+
   it('a person unsnoozing leaves nothing to say: no Back state', async () => {
     const { daemon, folder } = setup();
     const id = await daemon.spawnChat({ folder });
