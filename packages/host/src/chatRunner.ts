@@ -4967,6 +4967,9 @@ export class Daemon {
       this.delegateWaiters.delete(chatId);
       throw err;
     }
+    // Announce the child as running now, so the parent's agent row and strip
+    // appear while it works (a waited call has no ack to key them on).
+    this.emitDelegateUpdate(opts.parentChatId, chatId, label, 'running');
     if (this.chatState.has(opts.parentChatId)) this.emitState(opts.parentChatId);
     this.ensureDelegateOrphanSweep();
     return { id: chatId, label, ...(result ? { result } : {}) };

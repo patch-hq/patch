@@ -605,6 +605,15 @@ describe('patch_delegate', () => {
     await stopping;
   });
 
+  it('announces a new subagent as running the moment it is created', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    expect(events.filter((e) => e.type === 'chat.delegate_update' && e.delegateId === id)).toEqual([
+      expect.objectContaining({ chatId: parentChatId, status: 'running' }),
+    ]);
+  });
+
   it("replays each subagent's live state to a surface that (re)connects, so a running one stays visible", async () => {
     const { daemon, folder } = setupHanging();
     const parentChatId = await daemon.spawnChat({ folder });
