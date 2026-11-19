@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderRN, actSync, findHost, findAllHost, byTestId, textOf } from './testUtils/render';
+import { renderRN, findHost, findAllHost, byTestId, textOf } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { __setLocalSearchParams } from './stubs/expo-router';
