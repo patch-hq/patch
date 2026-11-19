@@ -9,7 +9,6 @@
 // that has credit. So what a failure has to name is the key the turn RAN on,
 // which arrives on the credential itself — nothing is stamped on the chat.
 
-import { transcriptFor } from './helpers/chatTranscript.js';
 import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -361,8 +360,8 @@ describe('which account a turn ran on is said (spec/10 § Backend credentials)',
   });
 });
 
-describe('an account switch carries the conversation over', () => {
-  it('reseeds the new account’s session from the chat log and does not replay the message', async () => {
+describe('an account switch resumes the same session (spec/10 § Limits)', () => {
+  it('re-runs the turn on the new account resuming the same session, and does not replay the message', async () => {
     const home = mkdtempSync(join(tmpdir(), 'patch-failover-carry-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-failover-carryf-')));
     const events: WireEvent[] = [];
@@ -402,7 +401,6 @@ describe('an account switch carries the conversation over', () => {
     });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    // The reseed carries what the chat answered, so the answer must be logged first.
     await vi.waitFor(() =>
       expect(events.some((e) => e.type === 'chat.message' && e.role === 'assistant')).toBe(true),
     );
@@ -411,7 +409,9 @@ describe('an account switch carries the conversation over', () => {
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
     const rerun = seen[2]!;
-    expect(transcriptFor(rerun).length).toBeGreaterThan(0);
+    // Nothing is rebuilt: the provider's own resume carries the session across.
+    expect(rerun.resumeSessionId).toBe('sess-a');
+    expect(rerun.accountId).toBe('a2');
     // The message is folded into its original bubble, not drawn a second time.
     const userMsgs = events.filter(
       (e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'second question',
@@ -420,48 +420,6 @@ describe('an account switch carries the conversation over', () => {
     expect(
       userMsgs.slice(1).every((e) => e.type === 'chat.message' && e.retryOfSeq !== undefined),
     ).toBe(true);
-  });
-});
-
-describe('an account switch on a chat with no recorded session id', () => {
-  it('still reseeds the new account’s session from the chat log', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'patch-switch-nosess-'));
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-switch-nosessf-')));
-    const seen: SdkRunOptions[] = [];
-    let account = 'a1';
-    let id = 0;
-    const daemon = new Daemon({
-      hostId: 'd1',
-      metaStore: createMetaStore(home),
-      sdkBackend: {
-        run: (opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> => {
-          seen.push(opts);
-          async function* gen(): AsyncGenerator<SdkEnvelope> {
-            // The first turn answers but the provider never hands back a session id.
-            yield {
-              type: 'assistant',
-              content: 'reply',
-              raw: { type: 'assistant', message: { usage: { input_tokens: 5 } } },
-            };
-            yield { type: 'result', content: 'reply', raw: {} };
-          }
-          return gen();
-        },
-      },
-      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: account }),
-      emit: () => {},
-      logger: silent,
-      now: () => Date.now(),
-      generateChatId: () => `chat-${++id}`,
-    });
-    const chatId = await daemon.spawnChat({ folder });
-    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    await vi.waitFor(() => expect(seen.length).toBe(1));
-    await vi.waitFor(() => expect(daemon.chatState.get(chatId)?.activity).toBe('idle'));
-    account = 'a2';
-    await daemon.sendInput({ chatId, message: 'follow up', localId: 'l2' });
-    await vi.waitFor(() => expect(seen.length).toBe(2));
-    expect(transcriptFor(seen[1]!).length).toBeGreaterThan(0);
   });
 });
 

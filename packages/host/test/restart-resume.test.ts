@@ -103,7 +103,7 @@ async function chatWithHistory(daemon: Daemon, folder: string, g: ReturnType<typ
 }
 
 describe('resuming turns a host restart interrupted', () => {
-  it('rebuilds from Patch history instead of sending account A session to account B', async () => {
+  it('resumes the same session on account B, the provider carrying it across accounts', async () => {
     const firstBackend = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, firstBackend.backend, 'account-a');
@@ -130,7 +130,7 @@ describe('resuming turns a host restart interrupted', () => {
     await tick(50);
 
     expect(seenResumeIds).toHaveLength(1);
-    expect(seenResumeIds[0]).not.toBe('sess');
+    expect(seenResumeIds[0]).toBe('sess');
     expect(second.metaStore.read(chatId)?.claudeSessionAccountId).toBe('account-b');
     expect(second.metaStore.read(chatId)?.claudeSessionId).toBe('account-b-session');
   });
@@ -699,7 +699,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
   // Patch's own log is the record; the provider session is only a cache of it.
   // A restart must hand the model the whole conversation whether or not a native
   // session survives — not a contextless session that sees only "Carry on".
-  describe('rebuilds the model context from the chat log', () => {
+  describe('a provider session that is gone stays gone (spec/04 § Resume)', () => {
     type Opts = Parameters<SdkBackend['run']>[0];
 
     /** Records every run's options and holds each turn open until released. */
@@ -744,20 +744,23 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
 
     function hostWith(home: string, backend: SdkBackend, extra: Record<string, unknown> = {}) {
       const metaStore = createMetaStore(home);
+      const events: WireEvent[] = [];
       let id = 0;
       const daemon = new Daemon({
         hostId: 'd1',
         metaStore,
         sdkBackend: backend,
         oauthAccessToken: 'fake-token',
-        emit: () => undefined,
+        emit: (e: WireEvent) => void events.push(e),
         logger: silent,
         now: () => 1_700_000_000_000,
         generateChatId: () => `chat-${++id}`,
         ...extra,
       } as ConstructorParameters<typeof Daemon>[0]);
-      return { daemon, metaStore };
+      return { daemon, metaStore, events };
     }
+    const goneDividers = (events: WireEvent[]) =>
+      events.filter((e) => e.type === 'chat.message' && e.role === 'system' && e.sessionGone);
 
     it('first-turn interruption: nothing was answered, so the owed turn restarts as a fresh session with no reseed', async () => {
       const r1 = recordingBackend(null);
@@ -823,7 +826,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       expect(r4.runs).toEqual([]);
     });
 
-    it('missing native transcript: a session id with no transcript on disk is rebuilt from the log', async () => {
+    it('missing native transcript: the turn starts a fresh session, nothing rebuilt, and the record says the memory ended', async () => {
       const g1 = recordingBackend('sess-old');
       const { home, folder } = setup();
       const first = hostWith(home, g1.backend);
@@ -845,15 +848,19 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       await tick();
 
       expect(g2.runs).toHaveLength(1);
-      expect(g2.runs[0]!.resumeSessionId).not.toBe('sess-old');
-      const texts = reseededTexts(g2.runs[0]!);
-      expect(texts).toContain('turn one');
-      expect(texts).toContain('reply:turn one');
-      expect(texts).toContain('turn two');
+      expect(g2.runs[0]!.resumeSessionId).toBeUndefined();
+      expect(reseededTexts(g2.runs[0]!)).toEqual([]);
+      expect(goneDividers(second.events)).toHaveLength(1);
+      // The record is untouched and still readable.
+      const replayed: WireEvent[] = [];
+      second.daemon.replayChat(chatId, 0, (ev) => replayed.push(ev));
+      expect(
+        replayed.some((e) => e.type === 'chat.message' && e.content === 'reply:turn one'),
+      ).toBe(true);
       await g2.drain();
     });
 
-    it('provider switch: a restart onto a Codex model rebuilds the Codex thread from the same log', async () => {
+    it('a Claude session is never carried into Codex: a chat on a Codex model starts a fresh session', async () => {
       const g1 = recordingBackend('sess-claude');
       const { home, folder } = setup();
       const first = hostWith(home, g1.backend);
@@ -877,12 +884,8 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       await tick();
 
       expect(g2.runs).toHaveLength(1);
-      const events = (g2.runs[0]!.codexReseed ?? g2.runs[0]!.codexAppendItems)?.events ?? [];
-      const texts = events
-        .filter((t) => t.event.type === 'chat.message')
-        .map((t) => (t.event as { content: string }).content);
-      expect(texts).toContain('turn one');
-      expect(texts).toContain('turn two');
+      expect(g2.runs[0]!.resumeSessionId).toBeUndefined();
+      expect(goneDividers(second.events)).toHaveLength(1);
       await g2.drain();
     });
   });

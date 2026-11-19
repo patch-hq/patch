@@ -48,16 +48,6 @@ export interface HarnessTraits {
   readonly sessionMovable: boolean;
   /** Does the host build this provider's account report itself, rather than a bare connected flag? */
   readonly buildsAccountReport: boolean;
-  /**
-   * The adapter's run options that carry a reseed of Patch's history into a
-   * fresh session; null when the provider takes none this way.
-   */
-  readonly reseedRunOptions: ((track: Track) => Partial<SdkRunOptions>) | null;
-  /**
-   * The adapter's run options that append items to an existing session on a
-   * provider switch; null when the provider takes none.
-   */
-  readonly appendRunOptions: ((track: Track) => Partial<SdkRunOptions>) | null;
   /** What a turn refused for want of a sign-in says. `reason` is the credential check's own. */
   readonly signedOutMessage: (hostId: string, reason: string) => string;
 }
@@ -76,8 +66,6 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: true,
     sessionMovable: true,
     buildsAccountReport: true,
-    reseedRunOptions: null,
-    appendRunOptions: null,
     signedOutMessage: (hostId) =>
       `${hostId} isn't signed in to Claude, so this turn can't run. Sign in from Settings → Hosts.`,
   },
@@ -94,8 +82,6 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
-    reseedRunOptions: (events) => ({ codexReseed: { events } }),
-    appendRunOptions: (events) => ({ codexAppendItems: { events } }),
     signedOutMessage: (_hostId, reason) => reason,
   },
   // A local endpoint has no account, no quota and no status model of its own.
@@ -113,8 +99,6 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
-    reseedRunOptions: (events) => ({ localReseed: { events } }),
-    appendRunOptions: null,
     signedOutMessage: (_hostId, reason) => reason,
   },
   // An ACP agent (acpBackend.ts): its turn runs under the detached runner, its

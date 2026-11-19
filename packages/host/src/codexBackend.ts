@@ -1,61 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { LimitFacts, SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
-import {
-  HandoffOverflowError,
-  TurnFailedError,
-  reportedContextLimit,
-  trackLiveRun,
-} from './sdkBackend.js';
+import { TurnFailedError, trackLiveRun } from './sdkBackend.js';
 import { isAccountExhausted } from './accountFailover.js';
 import { persistedUserContent } from './history.js';
 import { CodexAccounts } from './codexAccounts.js';
 import { CodexHistory } from './codexHistory.js';
 import type { CodexNotification, RpcObject } from './codexClient.js';
 import { discoverSkills, skillCatalogueText } from './projectSkills.js';
-import { toResponsesItems, type TrackEntry } from './nativeReconstruct.js';
 import { DurableCodexProcess } from './codexDurable.js';
 import { keepRunnerLog, retireTurn, turnDirFor } from './durableTurn.js';
-
-/**
- * Whether a `thread/inject_items` failure is the injected track not fitting
- * the model's context window, as opposed to a real bug (a malformed item, a
- * dead connection) that trimming and retrying would only hide.
- */
-export function isContextOverflowError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /context.{0,20}(window|length)|too (many(?! requests)|long|large)|token.{0,10}limit|exceeds.{0,20}(context|limit)/i.test(
-    message,
-  );
-}
-
-/**
- * Injects a reseed track's Responses items, trimming the OLDEST track
- * entries and retrying when the target rejects the payload as too big for
- * its context window (spec/04 § History — Codex has no auto-compaction of
- * its own for a freshly-injected thread, unlike Claude Code's own resume).
- * Returns the number of TRACK ENTRIES cut from the front (0 if none).
- * Rethrows any error that isn't a context-overflow shape unchanged.
- */
-export async function injectWithTrim(
-  events: readonly TrackEntry[],
-  inject: (items: ReturnType<typeof toResponsesItems>) => Promise<unknown>,
-): Promise<number> {
-  let remaining = events;
-  let trimmed = 0;
-  for (;;) {
-    const items = toResponsesItems(remaining);
-    if (items.length === 0) return trimmed;
-    try {
-      await inject(items);
-      return trimmed;
-    } catch (error) {
-      if (!isContextOverflowError(error) || remaining.length <= 1) throw error;
-      const cut = Math.max(1, Math.ceil(remaining.length / 2));
-      remaining = remaining.slice(cut);
-      trimmed += cut;
-    }
-  }
-}
 
 export function codexPermission(mode: SdkRunOptions['permissionMode']): {
   approvalPolicy: string;
@@ -260,14 +213,11 @@ export class CodexBackend implements SdkBackend {
         : undefined;
     try {
       const prior = opts.resumeSessionId;
-      // A non-Codex `prior` is only meaningful as a reconstruction source
-      // (spec/04 § History — a seamless switch onto Codex, or reseeding a
-      // Codex thread that's gone): `codexReseed` carries the chat's own track
-      // to inject into a brand-new thread. Without it, a non-Codex prior is a
-      // caller bug — resuming a Claude session id as a Codex thread id would
-      // otherwise fail confusingly deep inside the RPC call instead of here.
-      if (prior && !prior.startsWith('codex-') && !opts.codexReseed) {
-        throw new Error('A Claude session cannot be resumed with Codex without a reseed');
+      // Patch never carries another provider's session into Codex (spec/04 §
+      // Provider switches): a non-Codex prior here is a caller bug, refused
+      // before it fails confusingly deep inside the RPC call.
+      if (prior && !prior.startsWith('codex-')) {
+        throw new Error('A session of another provider cannot be resumed with Codex');
       }
       const config: RpcObject = {};
       const mcpServers = codexMcpServers(opts);
@@ -281,8 +231,7 @@ export class CodexBackend implements SdkBackend {
         ...(opts.toolsPrompt ? { developerInstructions: opts.toolsPrompt } : {}),
       };
       const point = opts.fork?.resumeAtUuid;
-      const reseeding = Boolean(opts.codexReseed);
-      const fresh = !prior || (opts.fork && point === null) || reseeding;
+      const fresh = !prior || (opts.fork && point === null);
       const codexPrior = prior && prior.startsWith('codex-') ? prior : undefined;
       const params = fresh
         ? base
@@ -308,36 +257,7 @@ export class CodexBackend implements SdkBackend {
       const sessionId = 'codex-' + threadId;
       this.history.begin(sessionId, response.thread.path);
       if (!attached && codexPrior && point) this.history.fork(codexPrior, sessionId, point);
-      // spec/04 § History — preserve the cached prefix: `codexReseed` rebuilds
-      // a fresh thread from the whole track (no prior session on this
-      // harness); `codexAppendItems` hands over only the delta into a thread
-      // that was just RESUMED above, riding its own existing prompt cache.
-      const appendEvents = attached
-        ? undefined
-        : (opts.codexReseed?.events ?? opts.codexAppendItems?.events);
-      let seedTrim = 0;
-      if (appendEvents && opts.handoffStrict) {
-        // A budgeted handoff is never trimmed to fit: an over-window rejection
-        // is surfaced typed so the host re-plans once (spec/04 § Handoff budget).
-        const items = toResponsesItems(appendEvents);
-        if (items.length > 0) {
-          try {
-            await client.request('thread/inject_items', { threadId, items });
-          } catch (error) {
-            if (isContextOverflowError(error))
-              throw new HandoffOverflowError(
-                (error as Error).message,
-                reportedContextLimit((error as Error).message),
-              );
-            throw error;
-          }
-        }
-      } else if (appendEvents) {
-        seedTrim = await injectWithTrim(appendEvents, (items) =>
-          client.request('thread/inject_items', { threadId, items }),
-        );
-      }
-      yield { type: 'system', sessionId, ...(seedTrim > 0 ? { seedTrim } : {}) };
+      yield { type: 'system', sessionId };
       const queue: CodexNotification[] = [];
       let wake: (() => void) | undefined;
       // No elapsed-time limit: a long tool is not a failure and the host cannot tell slow from stuck.
@@ -352,8 +272,6 @@ export class CodexBackend implements SdkBackend {
       // A turn reattached after a restart may have run anything: never re-plan it.
       let toolsStarted = Boolean(attached);
       let consumedOffset: number | undefined;
-      // Any assistant output at all: past this, a failure is surfaced, never re-planned.
-      let outputBegan = false;
       let interruption: Promise<void> | undefined;
       const interrupt = (): void => {
         if (turnId && !interruption)
@@ -553,7 +471,6 @@ export class CodexBackend implements SdkBackend {
             envelope = codexItem(message.params.item, message.method === 'item/completed');
           }
           if (envelope?.type === 'tool_use') toolsStarted = true;
-          if (envelope) outputBegan = true;
           if (message.method === 'thread/tokenUsage/updated') {
             const usage = message.params.tokenUsage as RpcObject | undefined;
             const window = usage?.modelContextWindow;
@@ -619,18 +536,6 @@ export class CodexBackend implements SdkBackend {
           this.accounts.markExhausted(accountId);
           void this.accounts.refresh();
         }
-        // A budgeted handoff the target refused as over its window, before any
-        // output: nothing ran, so the host may re-plan it once.
-        if (
-          opts.handoffStrict &&
-          !outputBegan &&
-          !(error instanceof HandoffOverflowError) &&
-          isContextOverflowError(error)
-        )
-          throw new HandoffOverflowError(
-            (error as Error).message,
-            reportedContextLimit((error as Error).message),
-          );
         throw error;
       } finally {
         unsubscribe();

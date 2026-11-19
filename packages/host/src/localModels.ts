@@ -12,16 +12,7 @@ import type { DurableTurnRequest } from './durableTurn.js';
 import { keepRunnerLog, retireTurn, turnDirFor } from './durableTurn.js';
 import type { SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
 import { CodexHistory } from './codexHistory.js';
-import { DurableCodexProcess } from './codexDurable.js';
-import type { LocalAgentFailure, LocalAgentStart } from './localAgent.js';
-import {
-  OpenAICompatBackend,
-  OpenAICompatError,
-  openaiCompatPermission,
-  type Message,
-} from './openaiCompatBackend.js';
-import { toChatCompletionMessages } from './nativeReconstruct.js';
-import { RUNNER_OUT } from './turnRunner.js';
+import { OpenAICompatBackend } from './openaiCompatBackend.js';
 
 const LOCAL = providerDescriptor('local');
 const LOCAL_MODEL_PREFIX = LOCAL.modelPrefix!;
@@ -131,7 +122,6 @@ export class LocalBackend implements SdkBackend {
       sessionDir,
       sessionPrefix: LOCAL.sessionIdPrefix!,
       resolveEndpoint: (opts) => this.local.resolveEndpoint(opts.model),
-      seedMessages: (opts) => this.seed(opts),
       ...(fetchImpl ? { fetchImpl } : {}),
     });
   }

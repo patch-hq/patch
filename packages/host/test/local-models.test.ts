@@ -168,21 +168,6 @@ describe('LocalBackend', () => {
     expect(events).toHaveLength(4);
   });
 
-  it('starts a switched-in chat from its track', async () => {
-    const { backend } = setup();
-    const track = [
-      { event: { type: 'chat.message', role: 'user', content: 'earlier question' } },
-      { event: { type: 'chat.message', role: 'assistant', content: 'earlier answer' } },
-    ] as any;
-    await collect(backend.run(opts({ prompt: 'next', localReseed: { events: track } })));
-    const sent = requests.find((r) => r.path === '/v1/chat/completions')!.body.messages;
-    expect(sent.map((m: any) => [m.role, m.content])).toEqual([
-      ['user', 'earlier question'],
-      ['assistant', 'earlier answer'],
-      ['user', 'next'],
-    ]);
-  });
-
   it('fails loudly with no endpoint, and refuses to branch', async () => {
     const history = new CodexHistory(join(dir, 'history'), 'local');
     const backend = new LocalBackend(new LocalModels(), history, join(dir, 'sessions'));

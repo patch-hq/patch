@@ -268,6 +268,10 @@ The home host puts both threads on `specialThreadModel` when they are created an
 
 The chat's own id (`thread_manager`, etc.) never changes — only the session underneath it — so pinning, ingress wiring and sidebar identity are untouched. A digest generation failure skips that day's rotation rather than starting a fresh session with nothing carried over (NO FALLBACK, `12-error-and-offline.md` § Principles).
 
+## Bounded context
+
+The Manager's record grows forever, but its provider session carries at most the account's `managerContextWindow` messages (Settings → Manager). The host records the seq each session began on (`sessionFromSeq` in the thread's meta). When a Manager turn starts and the current session has carried more than the window, the host retires the session, writes a divider ("New session · the last N messages carried over"), and puts the last N messages of the record, quoted as `User:` and `Manager:` lines, at the front of the turn as a `Handoff` note (`04-chats-and-folders.md` § Notes to the agent). The turn then starts a fresh session. The note is an entry like any other, so what the new session was given is in the record; nothing is rebuilt and no provider session file is written. Ordinary chats are never bounded this way.
+
 ## Sidebar placement
 
 - Manager sits pinned at the top of the sidebar — it is the only special thread the user actively drives from the surface they're on.

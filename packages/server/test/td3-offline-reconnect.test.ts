@@ -587,12 +587,10 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
   // blocked every deploy for everyone. Now it holds the new contract: no
   // session, start one, run the turn.
   //
-  // The fresh session is MINTED, not absent. The host rebuilds the lost
-  // context from Patch's own log into a brand-new session id, exactly as a
-  // provider switch does, rather than handing the model a contextless session
-  // that can only see this one prompt. So the resume argument is a new id
-  // carrying a reseed — never the id that went missing. The host's own twin
-  // asserts the same pair (packages/host/test/restart-resume.test.ts).
+  // The fresh session is genuinely fresh (spec/04 § Resume): Patch does not
+  // rebuild the lost context into it. The turn runs with no resume id and
+  // nothing reseeded; the record stays readable. The host's own twin asserts
+  // the same (packages/host/test/restart-resume.test.ts).
   it('D3-7: a chat whose claudeSessionId has gone starts a fresh session and runs the turn', async () => {
     const surface = await connectSurface();
     const chatId = await spawnChat(surface, folder);
@@ -624,10 +622,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     await online;
     await waitFor(() => restarted.daemon.listAll().some((c) => c.chatId === chatId));
 
-    // The next message RUNS. It runs on a session the host mints for it — not
-    // on the one that went missing, and not on nothing — with the chat's own
-    // prior track reseeded into it. That is the whole change: a fresh session,
-    // not a refusal.
+    // The next message RUNS, on a fresh session: no resume id, nothing rebuilt.
     restarted.sdk.enqueue([
       { type: 'assistant', content: 'ran on a fresh session' },
       { type: 'result', sessionId: 'sess-fresh' },
@@ -635,11 +630,8 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     surface.sendInput({ chatId, message: 'after-corrupt', localId: 'd7-2' });
     await waitFor(() => restarted.sdk.lastOptions() !== undefined);
     const runOpts = restarted.sdk.lastOptions()!;
-    expect(runOpts.resumeSessionId).toBeTruthy();
-    expect(runOpts.resumeSessionId).not.toBe('sess-to-corrupt');
-    // And it is not contextless: the earlier turn is in the new session's file.
-    const reseeded = transcriptTexts(runOpts);
-    expect(reseeded).toContain('turn1');
+    expect(runOpts.resumeSessionId).toBeUndefined();
+    expect(transcriptTexts(runOpts)).toEqual([]);
 
     // No error reaches the surface, and the host is still alive and idle.
     // `chat.error` never arriving is the assertion; a wait that times out would

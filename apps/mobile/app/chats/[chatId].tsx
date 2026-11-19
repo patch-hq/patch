@@ -168,6 +168,7 @@ import {
 import { useLocalUri } from '../../src/lib/servedFile';
 import { copyableText } from '../../src/lib/messageText';
 import { EmptyChatArt } from '../../src/components/EmptyChatArt';
+import { draftLinkedChat, linkedChatError } from '../../src/lib/linkedChat';
 import { ContinuationDivider } from '../../src/components/ContinuationDivider';
 import { fixed, fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 import { startVoiceCall } from '../../src/lib/voiceCall';
@@ -2986,6 +2987,49 @@ function HandoffRow({ entry }: { entry: ChatEventEntry }): React.ReactElement {
   );
 }
 
+/** spec/04 § Resume — where the model's memory of the chat ends, with Start a linked chat. */
+function SessionGoneRow({
+  entry,
+  chatId,
+}: {
+  entry: ChatEventEntry;
+  chatId: string;
+}): React.ReactElement {
+  const router = useRouter();
+  const colors = useTheme();
+  const continued = useChatStore((s) => s.chats[chatId]?.continuedIn !== undefined);
+  const [drafting, setDrafting] = React.useState(false);
+  return (
+    <View testID="session-gone" style={{ marginVertical: space.sm, gap: space.xs }}>
+      <Text style={{ color: colors.ink3, fontSize: textMin, textAlign: 'center' }}>
+        {entry.content}
+      </Text>
+      {continued ? null : (
+        <Pressable
+          testID="session-gone-linked-chat"
+          accessibilityRole="button"
+          disabled={drafting}
+          onPress={() => {
+            setDrafting(true);
+            draftLinkedChat(chatId).then(
+              (route) => router.push(route as Href),
+              (err: unknown) => {
+                setDrafting(false);
+                useUiStore
+                  .getState()
+                  .pushError(`Could not start a linked chat: ${linkedChatError(err)}`);
+              },
+            );
+          }}
+          style={{ alignSelf: 'center' }}
+        >
+          <Text style={{ color: colors.leaf, fontSize: textMin }}>Start a linked chat</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
@@ -3411,6 +3455,11 @@ const TimelineItem = React.memo(function TimelineItem({
       </View>
     );
   }
+  if (entry.kind === 'session_gone') {
+    // spec/04 § Resume — the provider session is gone: the record stays
+    // readable and Start a linked chat carries the context over, visibly.
+    return <SessionGoneRow entry={entry} chatId={chatId} />;
+  }
   if (entry.kind === 'handoff' || entry.kind === 'handoff_link') {
     // spec/04 § Handoff budget — the provider-switch divider (the host's own
     // one-line record) and the row saying the chat was continued in a linked
@@ -3494,30 +3543,6 @@ const TimelineItem = React.memo(function TimelineItem({
             >
               <Text style={{ color: colors.red, textDecorationLine: 'underline' }}>Continue</Text>
             </Pressable>
-          </View>
-        ) : null}
-        {entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
-          <View
-            style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginTop: space.sm }}
-          >
-            {(
-              [
-                ['retry', 'Retry'],
-                ['switch_back', 'Switch back'],
-                ['linked_chat', 'Continue in a linked fresh chat'],
-              ] as const
-            ).map(([action, label]) => (
-              <Pressable
-                key={action}
-                accessibilityRole="button"
-                testID={`handoff-${action.replace('_', '-')}`}
-                onPress={() =>
-                  getWs().send({ type: 'chat.handoff_recover_request', chatId, action })
-                }
-              >
-                <Text style={{ color: colors.red, textDecorationLine: 'underline' }}>{label}</Text>
-              </Pressable>
-            ))}
           </View>
         ) : null}
       </View>

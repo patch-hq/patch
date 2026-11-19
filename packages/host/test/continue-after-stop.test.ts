@@ -1,8 +1,7 @@
-// "Continue" after a stop must not lose the question it continues.
-//
-// A turn stopped before the model answered leaves a track of bare prompts; the
-// session store drops those, so the next send used to start a fresh session
-// that saw only the word "Continue".
+// "Continue" after a stop sends exactly what the user typed (principles.md §
+// No hidden prompt content). The host used to fold the stopped turn's
+// unanswered prompts into it unseen; nothing reaches the model the record
+// does not show.
 
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, realpathSync } from 'node:fs';
@@ -16,7 +15,7 @@ import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
 const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 
 describe('continue after a stopped, unanswered turn', () => {
-  it('hands the model the question it never answered', async () => {
+  it('sends the model exactly the message the user sent', async () => {
     const prompts: string[] = [];
     const backend: SdkBackend = {
       run: (opts): AsyncGenerator<SdkEnvelope> => {
@@ -58,8 +57,7 @@ describe('continue after a stopped, unanswered turn', () => {
     await settle(1000);
 
     expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain('dog, fox or poodle?');
-    expect(prompts[1]).toContain('Continue');
+    expect(prompts[1]).toBe('Continue');
     daemon.shutdown();
   });
 });

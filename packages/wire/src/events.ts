@@ -934,9 +934,19 @@ export const ChatMessageEvent = z
      */
     createdAt: z.number().int().nonnegative().optional(),
     /**
+     * Present ONLY on the `system` divider saying the chat's provider session
+     * is gone (spec/04 § Resume): the provider deleted it, refused to resume
+     * it, or it was never recorded. Patch does not rebuild it, so the model's
+     * memory of the chat ends at this divider; the next message starts a new
+     * session. Surfaces offer "Start a linked chat" beside it (§ Provider
+     * switches). Additive/optional for the same reason as `compaction`.
+     */
+    sessionGone: z.literal(true).optional(),
+    /**
      * Present ONLY on the `system` message marking that the chat moved onto a
      * new harness session — another harness or model, seeded from the chat's
-     * own history (spec/04 § History). `seededMessages` is how many of the
+     * own history (spec/04 § History). Written by hosts before linked chats;
+     * still read from older records, never written now. `seededMessages` is how many of the
      * chat's messages the new session was given. Additive/optional for the same
      * reason as `compaction`.
      */

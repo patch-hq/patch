@@ -258,11 +258,21 @@ export const ChatMeta = z
       .object({ model: z.string().min(1).nullable() })
       .strict()
       .optional(),
-    /** The chat this one was continued from as a linked fresh chat (spec/04 § Handoff budget). */
+    /**
+     * The chat this one was continued from as a linked fresh chat, written by
+     * hosts before linked chats were server-owned (spec/04 § Provider switches
+     * now keeps the link on the server). Read from old meta, never written.
+     */
     continuedFrom: z
       .object({ chatId: z.string().min(1) })
       .strict()
       .optional(),
+    /**
+     * The seq of the turn the chat's current provider session began on. The
+     * Manager starts a fresh session once the current one has carried more
+     * than its window of messages (spec/06 § Manager conversation).
+     */
+    sessionFromSeq: z.number().int().nonnegative().optional(),
     /** Which track the chat IS right now (spec/04 § Branching). */
     activeBranchId: z.string().min(1).optional(),
     /** Per-chat monotonic sequence — next value to stamp. Strictly increasing. */

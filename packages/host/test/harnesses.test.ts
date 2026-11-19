@@ -43,26 +43,6 @@ describe('the chat core does not branch on a provider name', () => {
     const src = readFileSync(new URL('../src/chatRunner.ts', import.meta.url), 'utf8');
     expect(src.match(/[!=]==\s*'(claude|codex|local)'/g) ?? []).toEqual([]);
   });
-
-  it('each adapter builds the run options it reseeds and appends through, or has none', () => {
-    const track = [] as unknown as Parameters<
-      NonNullable<(typeof HARNESS_TRAITS)['codex']['reseedRunOptions']>
-    >[0];
-    expect(HARNESS_TRAITS.codex.reseedRunOptions?.(track)).toEqual({
-      codexReseed: { events: track },
-    });
-    expect(HARNESS_TRAITS.codex.appendRunOptions?.(track)).toEqual({
-      codexAppendItems: { events: track },
-    });
-    expect(HARNESS_TRAITS.local.reseedRunOptions?.(track)).toEqual({
-      localReseed: { events: track },
-    });
-    expect(HARNESS_TRAITS.local.appendRunOptions).toBeNull();
-    expect(HARNESS_TRAITS.claude.reseedRunOptions).toBeNull();
-    expect(HARNESS_TRAITS.claude.appendRunOptions).toBeNull();
-    expect(HARNESS_TRAITS.codex.sessionMovable).toBe(false);
-    expect(HARNESS_TRAITS.claude.ownsSessionFile).toBe(true);
-  });
 });
 
 describe('host wiring reads provider adapters', () => {

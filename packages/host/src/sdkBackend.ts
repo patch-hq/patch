@@ -30,7 +30,6 @@ import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { discoverSkills, skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
 import { readSidecar, type DocMode } from './docSidecar.js';
-import type { TrackEntry } from './nativeReconstruct.js';
 // Type-only import — erased at runtime, so it does NOT trigger the heavy lazy
 // SDK load (the package is still imported dynamically in the real backend).
 import type {
@@ -121,14 +120,6 @@ export interface SdkEnvelope {
    * replay so the live and replayed shapes can't drift.
    */
   providerContext?: { providerType: string; label: string; text: string };
-  /**
-   * Set on the `system` envelope opening a reseeded Codex thread when the
-   * full track didn't fit and the oldest records were dropped to make it fit
-   * (spec/04 § History — Codex has no auto-compaction of its own, unlike
-   * Claude Code, so patch trims instead of erroring the switch). The count of
-   * TRACK ENTRIES (not raw Responses items) cut from the front.
-   */
-  seedTrim?: number;
   /**
    * What the harness reported about the request it just ran (spec/04 § Handoff
    * budget): the model's real context window and the input tokens of the
@@ -307,35 +298,6 @@ export interface SdkRunOptions {
    * its own default config dir.
    */
   claudeConfigDir?: string;
-  /**
-   * Set only for a switch onto Codex (or reseeding a Codex chat whose thread
-   * is gone): starts a FRESH thread and injects the chat's own track as
-   * Responses API items (`thread/inject_items`, codexBackend.ts) before the
-   * turn runs, instead of resuming `resumeSessionId` normally.
-   */
-  codexReseed?: { events: readonly TrackEntry[] };
-  /**
-   * The seeded track is a budgeted handoff (spec/04 § Handoff budget): the
-   * backend must NOT trim it to fit. A target that rejects it as over its
-   * window before any output is a `HandoffOverflowError`, so the host can
-   * re-plan once rather than resend or silently cut.
-   */
-  handoffStrict?: boolean;
-  /**
-   * Set only when resuming a track's OWN prior Codex thread after a return
-   * trip through another harness (spec/04 § History — preserve the cached
-   * prefix): `resumeSessionId` names that real `codex-…` thread, and this
-   * carries just the DELTA — what happened elsewhere since — to inject into
-   * it before the turn runs. Unlike `codexReseed`, this does NOT force a
-   * fresh thread; it rides the resumed thread's own existing prompt cache.
-   */
-  codexAppendItems?: { events: readonly TrackEntry[] };
-  /**
-   * Set only for a turn that starts a local-model session from a chat's
-   * existing track (a switch onto a local model). The track becomes the
-   * session's opening messages; there is no native session to resume.
-   */
-  localReseed?: { events: readonly TrackEntry[] };
 }
 
 export interface SdkBackend {
@@ -1795,31 +1757,6 @@ export class TurnFailedError extends Error {
     this.name = 'TurnFailedError';
     this.limit = limit;
   }
-}
-
-/**
- * The target rejected a budgeted handoff as over its context window, before it
- * produced any output (so no tool ran and re-planning is safe). `reportedLimit`
- * is the window the provider named, when it named one.
- */
-export class HandoffOverflowError extends TurnFailedError {
-  readonly reportedLimit: number | undefined;
-  constructor(message: string, reportedLimit: number | undefined) {
-    super(message, undefined);
-    this.name = 'HandoffOverflowError';
-    this.reportedLimit = reportedLimit;
-  }
-}
-
-/** The window a provider's overflow message names ("maximum context length is 272000 tokens"). */
-export function reportedContextLimit(message: string): number | undefined {
-  const m =
-    /(?:maximum|max(?:imum)?)\s+context\s+(?:length|window)\s+(?:is|of)\s+([\d,]+)/i.exec(
-      message,
-    ) ?? /limit\s+of\s+([\d,]+)\s+tokens/i.exec(message);
-  if (!m) return undefined;
-  const n = Number(m[1]!.replace(/,/g, ''));
-  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /**

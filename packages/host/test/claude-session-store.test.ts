@@ -1,5 +1,6 @@
 // A chat's own Claude conversation file (spec/04 § History): one file under the
-// chat's own config dir, migrated once, reseeded, stripped and resumed in place.
+// chat's own config dir, migrated once and resumed in place. Patch never edits
+// it: no reseed, no stripping, nothing written into it.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {
@@ -14,7 +15,6 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import type { LoggedEvent } from '@patch/wire';
 import {
   chatClaudeDir,
   chatTranscriptPath,
@@ -24,7 +24,6 @@ import {
   transcriptSize,
 } from '../src/claudeSessionStore.js';
 import { encodeFolder } from '../src/history.js';
-import type { TrackEntry } from '../src/nativeReconstruct.js';
 
 const silent = pino({ level: 'silent' });
 const dirs: string[] = [];
@@ -36,10 +35,6 @@ function tmp(): string {
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
-
-function msg(role: 'user' | 'assistant', content: string): LoggedEvent {
-  return { type: 'chat.message', chatId: 'c1', role, content, seq: 0 };
-}
 
 /** A reply the model wrote — the store hands it back untouched. */
 const REAL_REPLY = {
@@ -56,7 +51,7 @@ const lines = (p: string): Array<Record<string, unknown>> =>
     .filter(Boolean)
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 
-function mk(extra: { reseed?: Parameters<typeof createClaudeSessionStore>[0]['reseed'] } = {}) {
+function mk() {
   const chatDir = join(tmp(), 'chats', 'c1');
   const claudeProjectsRoot = tmp();
   const store = createClaudeSessionStore({
@@ -65,7 +60,6 @@ function mk(extra: { reseed?: Parameters<typeof createClaudeSessionStore>[0]['re
     chatDir,
     claudeProjectsRoot,
     logger: silent,
-    ...extra,
   });
   return {
     chatDir,
@@ -81,47 +75,6 @@ describe('the chat’s own conversation file', () => {
     const { chatDir, own } = mk();
     expect(own('s1')).toBe(join(chatDir, 'claude', 'projects', encodeFolder('/w'), 's1.jsonl'));
     expect(chatClaudeDir(chatDir)).toBe(join(chatDir, 'claude'));
-  });
-
-  it('an append after a torn last line (crash mid-write) starts on its own line', async () => {
-    const { store, own } = mk();
-    mkdirSync(join(own('s1'), '..'), { recursive: true });
-    writeFileSync(
-      own('s1'),
-      `${JSON.stringify({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'hi' } })}\n{"type":"assis`,
-    );
-    await store.append(key('s1'), [
-      { type: 'user', uuid: 'u3', message: { role: 'user', content: 'again' } },
-    ]);
-    const got = readFileSync(own('s1'), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => {
-        try {
-          return (JSON.parse(l) as { uuid?: string }).uuid;
-        } catch {
-          return 'torn';
-        }
-      });
-    expect(got).toEqual(['u1', 'torn', 'u3']);
-  });
-
-  it('append dedupes by uuid across calls and across store instances', async () => {
-    const { store, own, chatDir, claudeProjectsRoot } = mk();
-    await store.append(key('s1'), [{ type: 'user', uuid: 'u1' }]);
-    await store.append(key('s1'), [
-      { type: 'user', uuid: 'u1' },
-      { type: 'assistant', uuid: 'u2' },
-    ]);
-    const again = createClaudeSessionStore({
-      chatId: 'c1',
-      folder: '/w',
-      chatDir,
-      claudeProjectsRoot,
-      logger: silent,
-    });
-    await again.append(key('s1'), [{ type: 'assistant', uuid: 'u2' }]);
-    expect(lines(own('s1'))).toHaveLength(2);
   });
 
   it('load returns null for a session that exists nowhere', async () => {
@@ -185,99 +138,40 @@ describe('migration of an existing chat, once', () => {
   });
 });
 
-describe('reseed', () => {
-  it('writes the chat’s own track into the file, which later appends chain onto', async () => {
-    const events: TrackEntry[] = [
-      { record: { seq: 0, at: 1 }, event: msg('user', 'plant a codeword') },
-      { record: { seq: 1, at: 2 }, event: msg('assistant', 'the codeword is banana') },
-    ];
-    const { chatDir, claudeProjectsRoot, store, own } = mk({
-      reseed: { sessionId: 'sess-new', events, model: 'claude-opus-5' },
-    });
-    await store.prepare('sess-new');
-    const seeded = lines(own('sess-new'));
-    expect(seeded).toHaveLength(2);
-    expect(JSON.stringify(seeded)).toContain('banana');
-    await store.append(key('sess-new'), [
-      {
-        type: 'assistant',
-        uuid: 'live-1',
-        parentUuid: seeded[1]!['uuid'] as string,
-        message: REAL_REPLY,
-      },
-    ]);
-    // A retried reseed rewrites the seed and keeps what came after it.
-    await store.prepare('sess-new');
-    expect(lines(own('sess-new'))).toHaveLength(3);
-    const plain = createClaudeSessionStore({
-      chatId: 'c1',
-      folder: '/w',
-      chatDir,
-      claudeProjectsRoot,
-      logger: silent,
-    });
-    expect(JSON.stringify(await plain.load(key('sess-new')))).toContain('banana');
-  });
-
-  it('replace: true drops a seed that was too big instead of keeping it', async () => {
-    const big: TrackEntry[] = [
-      { record: { seq: 0, at: 1 }, event: msg('user', 'first') },
-      { record: { seq: 1, at: 2 }, event: msg('assistant', 'second') },
-    ];
-    const small: TrackEntry[] = [{ record: { seq: 1, at: 2 }, event: msg('assistant', 'second') }];
-    const a = mk({ reseed: { sessionId: 'n', events: big, model: null } });
-    await a.store.prepare('n');
-    const b = createClaudeSessionStore({
-      chatId: 'c1',
-      folder: '/w',
-      chatDir: a.chatDir,
-      claudeProjectsRoot: a.claudeProjectsRoot,
-      logger: silent,
-      reseed: { sessionId: 'n', events: small, model: null, replace: true },
-    });
-    await b.prepare('n');
-    expect(JSON.stringify(lines(a.own('n')))).not.toContain('first');
-  });
-});
-
-describe('harness-written entries', () => {
-  it('are taken out of the file on resume and kept aside', async () => {
+describe('Patch never edits the file', () => {
+  it('prepare and load leave harness-written entries exactly as Claude Code wrote them', async () => {
     const { store, own } = mk();
     mkdirSync(join(own('s1'), '..'), { recursive: true });
-    writeFileSync(
-      own('s1'),
-      jl(
-        { type: 'user', uuid: 'u1', message: { role: 'user', content: 'do it' } },
-        { type: 'assistant', uuid: 'a1', parentUuid: 'u1', message: REAL_REPLY },
-        { type: 'user', uuid: 'u2', parentUuid: 'a1', message: { role: 'user', content: 'next' } },
-        {
-          type: 'assistant',
-          uuid: 'a2',
-          parentUuid: 'u2',
-          message: {
-            role: 'assistant',
-            model: '<synthetic>',
-            content: [{ type: 'text', text: 'No response requested.' }],
-          },
+    const written = jl(
+      { type: 'user', uuid: 'u1', message: { role: 'user', content: 'do it' } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', message: REAL_REPLY },
+      {
+        type: 'assistant',
+        uuid: 'a2',
+        parentUuid: 'a1',
+        message: {
+          role: 'assistant',
+          model: '<synthetic>',
+          content: [{ type: 'text', text: 'No response requested.' }],
         },
-      ),
+      },
     );
+    writeFileSync(own('s1'), written);
     await store.prepare('s1');
-    expect(JSON.stringify(lines(own('s1')))).not.toContain('No response requested.');
-    expect(readFileSync(`${own('s1')}.stripped`, 'utf8')).toContain('No response requested.');
-    // Running it again changes nothing.
-    const once = readFileSync(own('s1'), 'utf8');
-    await store.prepare('s1');
-    expect(readFileSync(own('s1'), 'utf8')).toBe(once);
+    expect(readFileSync(own('s1'), 'utf8')).toBe(written);
+    expect(existsSync(`${own('s1')}.stripped`)).toBe(false);
+    const loaded = await store.load(key('s1'));
+    expect(loaded?.map((e) => e.uuid)).toEqual(['u1', 'a1', 'a2']);
   });
 });
 
 describe('what Claude wrote after the host looked', () => {
   it('entriesSince returns only what was appended past a size', async () => {
-    const { store, own } = mk();
-    await store.append(key('s1'), [{ type: 'user', uuid: 'u1' }]);
+    const { own } = mk();
+    mkdirSync(join(own('s1'), '..'), { recursive: true });
+    writeFileSync(own('s1'), jl({ type: 'user', uuid: 'u1' }));
     const size = transcriptSize(own('s1'));
-    await store.append(key('s1'), [{ type: 'assistant', uuid: 'u2' }]);
+    writeFileSync(own('s1'), jl({ type: 'user', uuid: 'u1' }, { type: 'assistant', uuid: 'u2' }));
     expect(entriesSince(own('s1'), size).map((e) => e.uuid)).toEqual(['u2']);
     expect(entriesSince(join(own('s1'), 'nope'), 0)).toEqual([]);
   });

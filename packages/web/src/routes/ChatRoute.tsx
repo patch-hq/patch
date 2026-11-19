@@ -2982,6 +2982,9 @@ const TimelineEntry = memo(function TimelineEntry({
   if (entry.kind === 'handoff_link') {
     return <HandoffLinkLine entry={entry} />;
   }
+  if (entry.kind === 'session_gone') {
+    return <SessionGoneLine entry={entry} chatId={chatId} />;
+  }
   // (attachments render inline within the message branch above)
   if (entry.kind === 'tool_result') {
     return <ToolResult entry={entry} />;
@@ -3020,8 +3023,6 @@ const TimelineEntry = memo(function TimelineEntry({
           <Link className="turn-error-action" to={CONNECT_PATH} data-testid="turn-error-sign-in">
             Sign in
           </Link>
-        ) : entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (
-          <HandoffActions chatId={chatId} />
         ) : entry.errorCode !== undefined && entry.errorCode !== 'sdk_error' ? (
           <code className="turn-error-code">{entry.errorCode}</code>
         ) : null}
@@ -6337,40 +6338,51 @@ function CompactionLine({ entry }: { entry: ChatEventEntry }): JSX.Element {
   );
 }
 
-// spec/04 § Handoff budget — what a failed provider switch offers: run the
-// pending message again, go back to the model the chat left, or carry on in a
-// fresh chat linked to this one. The host does the work; each is one frame.
-function HandoffActions({ chatId }: { chatId: string }): JSX.Element {
-  const send = (action: 'retry' | 'switch_back' | 'linked_chat'): void => {
-    getActiveWs()?.send({ type: 'chat.handoff_recover_request', chatId, action });
-  };
+// spec/04 § Resume — the chat's provider session is gone. The record stays
+// readable and the next message starts a session that knows nothing of it;
+// Start a linked chat drafts a new chat whose first message carries the
+// context over, visibly, as a provider switch does. Offered only while the
+// chat has not already been continued.
+function SessionGoneLine({
+  entry,
+  chatId,
+}: {
+  entry: ChatEventEntry;
+  chatId: string;
+}): JSX.Element {
+  const navigate = useNavigate();
+  const pushError = useUiStore((s) => s.pushError);
+  const continued = useChatStore((s) => s.chats[chatId]?.continuedIn !== undefined);
+  const [drafting, setDrafting] = useState(false);
   return (
-    <span className="turn-error-actions">
-      <button
-        type="button"
-        className="turn-error-action"
-        data-testid="handoff-retry"
-        onClick={() => send('retry')}
-      >
-        Retry
-      </button>
-      <button
-        type="button"
-        className="turn-error-action"
-        data-testid="handoff-switch-back"
-        onClick={() => send('switch_back')}
-      >
-        Switch back
-      </button>
-      <button
-        type="button"
-        className="turn-error-action"
-        data-testid="handoff-linked-chat"
-        onClick={() => send('linked_chat')}
-      >
-        Continue in a linked fresh chat
-      </button>
-    </span>
+    <div className="mode-change" data-testid="session-gone">
+      <span className="mode-change-label">
+        {entry.content ?? ''}
+        {continued ? null : (
+          <>
+            {' '}
+            <button
+              type="button"
+              className="turn-error-action"
+              data-testid="session-gone-linked-chat"
+              disabled={drafting}
+              onClick={() => {
+                setDrafting(true);
+                draftLinkedChat(chatId).then(
+                  (path) => navigate(path),
+                  (err: unknown) => {
+                    setDrafting(false);
+                    pushError(`Could not start a linked chat: ${linkedChatError(err)}`);
+                  },
+                );
+              }}
+            >
+              Start a linked chat
+            </button>
+          </>
+        )}
+      </span>
+    </div>
   );
 }
 

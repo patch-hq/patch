@@ -326,7 +326,7 @@ describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
     daemon.shutdown();
   });
 
-  it('the fresh restart carries on the task in progress, not just the latest message', async () => {
+  it('the fresh restart says plainly the new session has no memory of the chat, and carries the message', async () => {
     const prompts: string[] = [];
     let calls = 0;
     const backend: SdkBackend = {
@@ -342,9 +342,10 @@ describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
     await daemon.spawnChat({ folder, prompt: 'latest question' });
     await new Promise((r) => setTimeout(r, 150));
     expect(calls).toBe(3);
-    // The resumed re-send repeats the prompt; the fresh one tells the model to continue.
-    expect(prompts[1]).not.toContain('carry on any unfinished task');
-    expect(prompts[2]).toContain('carry on any unfinished task');
+    // The resumed re-send repeats the prompt; the fresh one says, visibly, that
+    // the new session knows nothing of the chat (nothing is rebuilt).
+    expect(prompts[1]).not.toContain('no memory of this chat');
+    expect(prompts[2]).toContain('no memory of this chat');
     expect(prompts[2]).toContain('latest question');
     daemon.shutdown();
   });
