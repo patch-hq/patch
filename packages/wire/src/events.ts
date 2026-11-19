@@ -9,7 +9,7 @@
 
 import { AccountRefusal, AccountState } from './accountState.js';
 import { z } from 'zod';
-import { DictationSetting, MeetingEngine } from './audio.js';
+import { DictationSetting, MeetingEngine, SpeechToTextEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
@@ -2356,6 +2356,8 @@ const VoiceSurfaceSetting = z
 /** Per-surface voice config (spec/07 § Voice is a config matrix). */
 export const VoiceConfigSetting = z
   .object({
+    // Absent in settings saved before speech to text became a setting.
+    speechToText: SpeechToTextEngine.default('groq'),
     dictation: DictationSetting,
     // Absent in settings saved before the meeting engine was a setting.
     meeting: MeetingEngine.default('local'),
@@ -2691,6 +2693,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Every surface starts on the free, self-hosted pipeline talking straight to
   // Manager; each hosted cell is a deliberate opt-in.
   voiceConfig: {
+    speechToText: 'groq',
     dictation: { phone: 'device', computer: 'whisper', tidy: false },
     meeting: 'local',
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -3486,6 +3489,38 @@ export const VoiceCallEvent = z
   })
   .strict();
 export type VoiceCallEvent = z.infer<typeof VoiceCallEvent>;
+
+/**
+ * The complete set of live voice calls (spec/07 § A call can move between
+ * devices). `voice.call` is the change; this is the state, so a missed change
+ * cannot leave a call on screen that no longer exists.
+ *
+ * From a host (host → server), `hostId` is set and `calls` is every call that
+ * host holds right now — sent on every link (re)connect. From the server
+ * (server → surface), `hostId` is absent and `calls` is every live call on the
+ * account — sent in the auth.ok greeting and again whenever the server's set
+ * changes other than by a single `voice.call` (a host's snapshot replacing what
+ * it held, or a host going offline taking its calls with it). A surface
+ * replaces its whole list with it.
+ */
+export const VoiceCallsEvent = z
+  .object({
+    type: z.literal('voice.calls'),
+    hostId: z.string().min(1).optional(),
+    calls: z.array(
+      z
+        .object({
+          sessionId: z.string().min(1),
+          surfaceId: z.string().min(1),
+          surfaceKind: z.string().min(1),
+          chatId: z.string().min(1),
+          startedAt: z.number().int().nonnegative(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type VoiceCallsEvent = z.infer<typeof VoiceCallsEvent>;
 
 /**
  * Host-owned folder registry snapshot (host → server → surfaces).
@@ -10134,6 +10169,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostAccountEvent,
   DeviceSessionEvent,
   VoiceCallEvent,
+  VoiceCallsEvent,
   FoldersListEvent,
   FoldersUpdatedEvent,
   ClaudeSettingsListEvent,
@@ -10473,6 +10509,7 @@ export const EVENT_SCHEMAS = {
   'host.account': HostAccountEvent,
   'device.session': DeviceSessionEvent,
   'voice.call': VoiceCallEvent,
+  'voice.calls': VoiceCallsEvent,
   'folders.list': FoldersListEvent,
   'folders.updated': FoldersUpdatedEvent,
   'claude_settings.list': ClaudeSettingsListEvent,

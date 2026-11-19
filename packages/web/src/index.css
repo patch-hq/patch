@@ -18371,12 +18371,15 @@ select.permission-mode.is-pending {
   }
 }
 
+/* A slim strip under the chat header (ChatRoute / NewChatRoute), never across
+   the window's top row: there it sat on the desktop's traffic lights and the
+   header's own buttons. */
 .remote-call {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 10px;
+  padding: 4px 16px;
   background: #1f1c17;
   color: #f4f0e4;
   font-size: var(--text-min);
@@ -18395,7 +18398,7 @@ select.permission-mode.is-pending {
   color: #1f1c17;
   border: 0;
   border-radius: 6px;
-  padding: 4px 12px;
+  padding: 2px 10px;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -18929,11 +18932,18 @@ a.drop-target {
   filter: none;
 }
 @keyframes agent-glow {
-  0%, 100% { filter: drop-shadow(0 0 2px var(--waiting)); }
-  50% { filter: drop-shadow(0 0 6px var(--waiting)); }
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px var(--waiting));
+  }
+  50% {
+    filter: drop-shadow(0 0 6px var(--waiting));
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .agent-running-bar-icon { animation: none; }
+  .agent-running-bar-icon {
+    animation: none;
+  }
 }
 .agent-chevron-open {
   transform: rotate(180deg);
@@ -19066,4 +19076,96 @@ a.drop-target {
   padding: 12px 16px;
   color: var(--ink-3);
   list-style-position: inside;
+}
+
+/* Inbox (experimental): cards of agent questions and job reports. */
+.inbox-route {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.inbox-count {
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.inbox-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 28px calc(16px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.inbox-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+.inbox-card.is-done {
+  opacity: 0.6;
+  margin-top: 8px;
+}
+.inbox-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.inbox-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.inbox-card[data-kind='report'] .inbox-chip {
+  background: var(--bg-soft);
+  color: var(--ink-2);
+}
+.inbox-from {
+  flex: 1;
+}
+.inbox-prompt,
+.inbox-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+.inbox-title {
+  font-weight: 600;
+}
+.inbox-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.inbox-answered {
+  margin: 0;
+  color: var(--ink-3);
+}
+.inbox-tick {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.inbox-empty {
+  color: var(--ink-3);
+  text-align: center;
+  padding: 48px 16px;
+}
+@media (max-width: 700px) {
+  .inbox-list {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
 }

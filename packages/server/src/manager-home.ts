@@ -8,20 +8,13 @@
 import { headCodePoints, tailCodePoints, SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import type { ChatLogStore } from './chat-log-store.js';
 import type { Registry } from './registry.js';
+import { ManagerHomeError } from './manager-home-error.js';
+
+export { ManagerHomeError };
 
 const MESSAGE_CHARS = 2_000;
 const SUMMARY_CHARS = 24_000;
 const SERVER_SURFACE = '_server';
-
-export class ManagerHomeError extends Error {
-  constructor(
-    readonly code: 'unknown_host' | 'already_home' | 'no_home',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ManagerHomeError';
-  }
-}
 
 export interface ManagerHomeDeps {
   registry: Pick<

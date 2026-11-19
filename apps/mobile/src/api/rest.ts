@@ -67,8 +67,9 @@ export function errorMessageFrom(parsed: unknown, status: number): string {
   const code = obj && 'error' in obj ? String(obj.error) : `HTTP ${status}`;
   const detail = obj && typeof obj.message === 'string' ? obj.message : null;
   // A voice surface with no provider key on its host: the host's message is
-  // the complete sentence (key, host, Settings → Voice), shown as is.
-  if (code === 'voice_key_missing' && detail) return detail;
+  // the complete sentence (key, host, Settings → Voice), shown as is. So is
+  // the refusal to remove the Manager's home host (spec/06 § Changing home).
+  if ((code === 'voice_key_missing' || code === 'manager_home') && detail) return detail;
   return detail ? `${code}: ${detail}` : code;
 }
 
@@ -1072,6 +1073,16 @@ export const api = {
     request<SharedState>(`/api/accounts/${backendId}/adopt`, {
       method: 'POST',
       body: { hostId },
+    }),
+  // The Manager's home host (spec/06 § Changing home). Moving it is a visible
+  // handover: fetch the draft, let the user edit or clear it, then PUT it.
+  managerHome: () => request<{ hostId: string | null }>('/api/manager/home'),
+  managerHomeDraft: (hostId: string) =>
+    request<{ message: string }>(`/api/manager/home/draft?hostId=${encodeURIComponent(hostId)}`),
+  setManagerHome: (hostId: string, message: string) =>
+    request<{ hostId: string }>('/api/manager/home', {
+      method: 'PUT',
+      body: { hostId, message },
     }),
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   // Revokes its credential so it cannot reconnect without pairing again. Every

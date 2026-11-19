@@ -58,6 +58,7 @@ vi.mock('../src/lib/preferences', () => ({
 
 import {
   CALL_CONNECT_TIMEOUT_MS,
+  CALL_RECONNECT_DELAYS_MS,
   endVoiceCall,
   retryVoiceCall,
   setCallMode,
@@ -175,13 +176,81 @@ describe('connecting → failed after the timeout', () => {
 });
 
 describe('a dropped call says so', () => {
-  it('an unexpected socket close mid-call sets "Call dropped"', async () => {
-    startVoiceCall('c1');
+  async function liveCall(): Promise<FakeWebSocket> {
     await flush();
     const sock = FakeWebSocket.last();
     sock.emitOpen();
     await flush();
     sock.emitMessage(stateFrame('listening'));
+    return sock;
+  }
+
+  it('an unexpected socket close mid-call redials by itself, with no banner', async () => {
+    startVoiceCall('c1');
+    const sock = await liveCall();
+    const before = FakeWebSocket.instances.length;
+    sock.emitClose(1006);
+    expect(useVoiceStore.getState().callError).toBeNull();
+    expect(useVoiceStore.getState().callPhase).toBe('connecting');
+    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+    const again = FakeWebSocket.last();
+    again.emitOpen();
+    await flush();
+    again.emitMessage(stateFrame('listening'));
+    expect(useVoiceStore.getState().callPhase).toBe('listening');
+    expect(useVoiceStore.getState().callError).toBeNull();
+  });
+
+  it('a redialled call that stays up gets its full attempts again on the next drop', async () => {
+    startVoiceCall('c1');
+    let sock = await liveCall();
+    for (let i = 0; i < CALL_RECONNECT_DELAYS_MS.length + 1; i++) {
+      sock.emitClose(1006);
+      vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+      await flush();
+      sock = FakeWebSocket.last();
+      sock.emitOpen();
+      await flush();
+      sock.emitMessage(stateFrame('listening'));
+      expect(useVoiceStore.getState().callError).toBeNull();
+    }
+  });
+
+  it('gives up with "Call dropped" once every redial has failed', async () => {
+    startVoiceCall('c1');
+    let sock = await liveCall();
+    sock.emitClose(1006);
+    for (const delay of CALL_RECONNECT_DELAYS_MS) {
+      expect(useVoiceStore.getState().callError).toBeNull();
+      vi.advanceTimersByTime(delay);
+      await flush();
+      sock = FakeWebSocket.last();
+      sock.emitClose(1006);
+    }
+    expect(useVoiceStore.getState().callError).toBe('Call dropped — the audio connection closed');
+    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+  });
+
+  it('ending the call while waiting to redial cancels the redial', async () => {
+    startVoiceCall('c1');
+    const sock = await liveCall();
+    sock.emitClose(1006);
+    const before = FakeWebSocket.instances.length;
+    await endVoiceCall();
+    vi.advanceTimersByTime(60_000);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before);
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+  });
+
+  it('a call that never went live still fails straight away on close', async () => {
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
     sock.emitClose(1006);
     expect(useVoiceStore.getState().callError).toBe('Call dropped — the audio connection closed');
   });

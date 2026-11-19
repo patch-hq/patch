@@ -305,10 +305,12 @@ import {
   validateWhisperCredentials,
   UnsupportedClipFormatError,
   LocalWhisperBackend,
+  GroqWhisperBackend,
   UnconfiguredWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
 import { ParakeetWhisperBackend } from './audio/parakeet.js';
+import { createSpeechToTextResolver } from './audio/stt-engines.js';
 import { ParakeetLiveRecognizer } from './audio/parakeet-live.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
 import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
@@ -2615,6 +2617,11 @@ async function startHost(
       // memory entries on (re)connect, same snapshot-on-connect contract as
       // folders and secrets below.
       sender({ type: 'claude_settings.list', hostId: selfHostId, ...claudeSettingsSnapshot() });
+      // spec/07 § A call can move between devices — the calls this host holds
+      // right now. The server replaces whatever it last knew for this host, so
+      // a call that ended while the link was down does not stay on any
+      // surface. No audio server yet means no call can be open.
+      sender({ type: 'voice.calls', hostId: selfHostId, calls: audioServer?.liveCalls() ?? [] });
       // spec/02 § Agent backends — warm the catalogue on connect so a picker
       // opens on a real list rather than an empty one. It no longer SEEDS
       // anything: the model a model-less spawn takes is the account default the
@@ -5845,6 +5852,110 @@ async function startHost(
     });
   };
   installWhisper(buildWhisper());
+  // The account's `speechToText` choice (spec/07 § Speech to text): what reads
+  // speech on a turn-based call. Each engine is this host's own or it is
+  // refused by name — never swapped for the one WHISPER_BACKEND started with.
+  // Backends this resolver created itself (each opens connections or a sidecar,
+  // so one per engine); the host's own `whisper` is reused when it is that engine.
+  const ownStt = new Map<string, WhisperBackend>();
+  const own = (engine: string, make: () => WhisperBackend): WhisperBackend => {
+    let b = ownStt.get(engine);
+    if (!b) {
+      b = make();
+      ownStt.set(engine, b);
+    }
+    return b;
+  };
+  const sttEngineResolver = createSpeechToTextResolver({
+    build: (engine) => {
+      // WHISPER_BACKEND=mock is the test host: its one canned reader stands in
+      // for whichever engine the account picked, so no engine needs a key or model.
+      if (config.audio.whisperBackend === 'mock' && whisper !== undefined) return { whisper };
+      if (engine === 'groq') {
+        if (providerKeys.get('groq') === undefined) {
+          return {
+            unavailable: 'no Groq key is set on this host (add it in Settings → Providers)',
+          };
+        }
+        return {
+          whisper:
+            whisper instanceof GroqWhisperBackend
+              ? whisper
+              : own('groq', () =>
+                  createWhisper({
+                    backend: 'groq',
+                    logger: whisperLog,
+                    groqApiKey: () => providerKeys.get('groq'),
+                  }),
+                ),
+        };
+      }
+      if (engine === 'elevenlabs') {
+        if (providerKeys.get('elevenlabs') === undefined) {
+          return {
+            unavailable: 'no ElevenLabs key is set on this host (add it in Settings → Providers)',
+          };
+        }
+        return {
+          whisper:
+            whisper instanceof ElevenLabsScribeBackend
+              ? whisper
+              : own(
+                  'elevenlabs',
+                  () =>
+                    new ElevenLabsScribeBackend({
+                      logger: whisperLog,
+                      apiKey: () => providerKeys.get('elevenlabs'),
+                    }),
+                ),
+        };
+      }
+      if (engine === 'parakeet') {
+        const dir = config.audio.parakeetModelDir;
+        if (dir === undefined || !existsSync(dir)) {
+          return {
+            unavailable: 'the Parakeet model is not installed on this host (PARAKEET_MODEL_DIR)',
+          };
+        }
+        return {
+          whisper:
+            whisper instanceof ParakeetWhisperBackend
+              ? whisper
+              : own('parakeet', () =>
+                  createWhisper({ backend: 'parakeet', logger: whisperLog, parakeetModelDir: dir }),
+                ),
+        };
+      }
+      // engine === 'whisper'
+      if (whisper instanceof LocalWhisperBackend) return { whisper };
+      const modelDir = join(config.patchHome, 'components', 'whisper');
+      const installed =
+        components.describe().find((c) => c.id === 'whisper')?.state === 'installed' &&
+        existsSync(join(modelDir, 'model.bin'));
+      if (!installed) {
+        return {
+          unavailable:
+            'the Whisper model is not installed on this host (Settings → Hosts → Components)',
+        };
+      }
+      const sidecarDir = process.env['WHISPER_SIDECAR_CWD'] ?? bundledSidecarDir('whisper');
+      return {
+        whisper: own('whisper', () =>
+          createWhisper({
+            backend: 'local',
+            logger: whisperLog,
+            localModelPath: modelDir,
+            localSidecarCwd: sidecarDir,
+            localSidecarEnv: {
+              UV_PROJECT_ENVIRONMENT: components.runtimeDir('whisper'),
+              PYTHONPATH: join(sidecarDir, 'src'),
+            },
+            uvPath: uvCandidates(config.patchHome).find((p) => existsSync(p)) ?? 'uv',
+          }),
+        ),
+      };
+    },
+  });
   // The on-host model loads now: a broken install aborts the boot rather
   // than failing the first word someone says.
   // An installed host without the voice component boots anyway; Parakeet then
@@ -6132,6 +6243,11 @@ async function startHost(
       // first message and every delta after it. Armed by that message only: the chat
       // may be running some other turn right now, with this one queued behind it.
       const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId, onAccepted);
+      // The promise is awaited only after `sendInput` returns. A newer turn can supersede
+      // (reject) it before then, with nothing attached yet: Node would treat that as an
+      // unhandled rejection and exit the whole daemon. Mark it observed here; the real
+      // handling is still the `await replyPromise` below, which sees the same rejection.
+      replyPromise.catch(() => {});
       // Mark a hand-off in the chat, so a spoken "I've passed that on" can be checked against it.
       if (handoff === true) {
         chatVoice.handoffSent({ sessionId: localIdSuffix, chatId, request: message });
@@ -6178,6 +6294,7 @@ async function startHost(
     getKokoroVoice: () => (ttsBackend === 'elevenlabs' ? elevenLabsVoice : kokoroVoice),
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
+    resolveSpeechToText: sttEngineResolver,
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),

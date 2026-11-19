@@ -52,7 +52,7 @@ export async function startServer(
     : undefined;
   // One switch for every part of Patch; the app wires it to account settings.
   const updateControl = new UpdateControl({ dataDir: config.dataDir });
-  const { app, issueFiler } = await buildAll({
+  const { app, issueFiler, audioCalls } = await buildAll({
     logger,
     dataDir: config.dataDir,
     updateControl,
@@ -132,6 +132,7 @@ export async function startServer(
             home,
             downloadsDir,
             running,
+            busy: () => audioCalls.active() > 0,
             log: (msg) => app.log.info(msg),
           }),
         }

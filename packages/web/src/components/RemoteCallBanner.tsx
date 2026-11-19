@@ -8,6 +8,9 @@ import { Phone } from 'lucide-react';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { switchCallHere } from '../lib/voiceController.js';
+import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { deriveChatTitle } from '../lib/chatTitle.js';
+import { stripMarkdown } from '../lib/stripMarkdown.js';
 
 const DEVICE_LABEL: Record<string, string> = {
   mobile: 'your phone',
@@ -18,14 +21,18 @@ const DEVICE_LABEL: Record<string, string> = {
 export function RemoteCallBanner(): JSX.Element | null {
   const own = useVoiceStore((s) => s.call);
   const remote = useVoiceStore((s) => Object.values(s.remoteCalls)[0] ?? null);
-  const chatName = useChatStore((s) => (remote ? (s.chats[remote.chatId]?.name ?? null) : null));
+  const rawName = useChatStore((s) => (remote ? (s.chats[remote.chatId]?.name ?? null) : null));
   if (own || !remote) return null;
+  // The same title the sidebar and header show for this chat.
+  const chatName =
+    remote.chatId === SPECIAL_THREAD_IDS.manager
+      ? 'Manager'
+      : stripMarkdown(deriveChatTitle(rawName));
   return (
     <div className="remote-call" data-testid="remote-call" role="status">
       <Phone size={14} aria-hidden />
       <span className="rc-text">
-        Call in progress on {DEVICE_LABEL[remote.surfaceKind] ?? 'another device'} ·{' '}
-        {chatName ?? 'New chat'}
+        Call in progress on {DEVICE_LABEL[remote.surfaceKind] ?? 'another device'} · {chatName}
       </span>
       <button
         type="button"

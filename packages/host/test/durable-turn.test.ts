@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   readdirSync,
   readFileSync,
   utimesSync,
@@ -346,6 +347,31 @@ describe('a durable turn', () => {
     d2.send(prompt);
     await d2.until(() => texts(d2.lines).includes('a1'), 'a1');
     retireTurn(second.dir);
+  }, 20000);
+
+  it('a runner retired before it connected ends as killed, not as an unexplained runner exit', async () => {
+    const { cfg, cwd } = fresh();
+    const idle = join(root, 'idle-runner.mjs');
+    writeFileSync(
+      idle,
+      "require('node:fs').writeFileSync(process.argv[2] + '/runner.json', JSON.stringify({ pid: process.pid }));\nsetInterval(() => undefined, 1000);\n",
+    );
+    const idlePath = idle.replace(/\.mjs$/, '.cjs');
+    renameSync(idle, idlePath);
+    const turn = new DurableTurn({
+      config: { ...cfg, runner: { command: process.execPath, args: [idlePath] } },
+      chatId: 'c-retired',
+      localId: 'L1',
+      log,
+    });
+    const proc = turn.spawn({ ...spawnOpts, cwd });
+    const errors: Error[] = [];
+    proc.on('error', (e) => errors.push(e));
+    const ended = new Promise<void>((r) => proc.once('exit', () => r()));
+    for (let i = 0; i < 200 && !existsSync(join(turn.dir, 'runner.json')); i++) await sleep(25);
+    retireTurn(turn.dir);
+    await ended;
+    expect(errors).toEqual([]);
   }, 20000);
 
   it('says why a runner that died before claude ran died, from its log', async () => {

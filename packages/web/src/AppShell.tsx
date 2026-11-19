@@ -30,7 +30,6 @@ import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js
 import { IncomingCallBanner } from './components/IncomingCallBanner.js';
 import { SignInApprovalPrompt } from './components/SignInApprovalPrompt.js';
 import { VoiceBar } from './components/VoiceBar.js';
-import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { VoicePermissionBanner } from './components/VoicePermissionBanner.js';
 import { ShortcutCheatSheet } from './components/ShortcutCheatSheet.js';
@@ -49,6 +48,7 @@ import { AppErrorBoundary } from './components/AppErrorBoundary.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
+import { InboxPaneRoute } from './routes/InboxPaneRoute.js';
 import { PadsPaneRoute } from './routes/PadsPaneRoute.js';
 import { ViewPositionSync } from './components/ViewPositionSync.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
@@ -720,7 +720,6 @@ export function AppShell(): JSX.Element {
           what the open line is doing in either mode (spec/07 § Session
           modes). */}
       <VoiceBar />
-      <RemoteCallBanner />
       <div className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         {sidebarCollapsed ? null : sidebarMini ? <MiniSidebar /> : <Sidebar />}
         <SidebarBackdrop />
@@ -743,6 +742,7 @@ export function AppShell(): JSX.Element {
             <Route path="/pads/new" element={<PadsPaneRoute ws={wsRef.current} mode="new" />} />
             <Route path="/pads/:id" element={<PadsPaneRoute ws={wsRef.current} mode="open" />} />
             <Route path="/triage" element={<TriagePaneRoute ws={wsRef.current} />} />
+            <Route path="/inbox" element={<InboxPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs" element={<JobsPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs/new" element={<JobPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs/:id" element={<JobPaneRoute ws={wsRef.current} />} />

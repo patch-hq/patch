@@ -18,6 +18,8 @@ import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
 import {
+  SPEECH_TO_TEXT_LABEL,
+  SpeechToTextEngine,
   voiceKeyHostStatus,
   type ComputerDictationEngine,
   type DictationEngine,
@@ -32,6 +34,7 @@ import { SettingsSection } from '../SettingsSection';
 import { VoiceDevicesSection } from './DevicesSections';
 import { patchShared } from './sharedWrite';
 import { ModelChoice } from './ModelChoice';
+import { ManagerHomeSection } from './ManagerHomeSection';
 import { SettingsPage } from './SettingsPage';
 import { Chips, Field, Muted, Row, ToggleRow, WithSettings } from './ui';
 
@@ -93,6 +96,7 @@ export function ManagerPage(): React.ReactElement {
       <WithSettings testID="manager">
         {(data) => (
           <>
+            <ManagerHomeSection />
             <SettingsSection title="Manager" testID="settings-manager">
               <ManagerControls preferences={data.preferences} />
             </SettingsSection>
@@ -494,6 +498,24 @@ function DictationEngines(): React.ReactElement {
         };
         return (
           <>
+            <Row title="Speech to text" testID="stt-row" stack>
+              <Chips
+                options={SpeechToTextEngine.options}
+                selected={voiceConfig.speechToText}
+                labelOf={(e) => SPEECH_TO_TEXT_LABEL[e]}
+                disabled={busy}
+                testIDPrefix="stt-engine"
+                labelPrefix="Speech to text"
+                onSelect={(speechToText) => {
+                  setBusy(true);
+                  void useSettingsStore
+                    .getState()
+                    .updatePreferences({ voiceConfig: { ...voiceConfig, speechToText } })
+                    .catch((e: Error) => Alert.alert('Settings failed', e.message))
+                    .finally(() => setBusy(false));
+                }}
+              />
+            </Row>
             <Row
               title="Phone"
               testID="dictation-phone"
@@ -527,7 +549,7 @@ function DictationEngines(): React.ReactElement {
               />
             </Row>
             <ToggleRow
-              label="Tidy up with Whisper"
+              label={`Tidy up each phrase with ${SPEECH_TO_TEXT_LABEL[voiceConfig.speechToText]}`}
               testID="dictation-tidy"
               value={dictation.tidy}
               disabled={busy}

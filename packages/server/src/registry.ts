@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { generateUserKeypair, type RevocationStoreInterface, type UserKeypair } from '@patch/auth';
 import type { SurfaceKind } from '@patch/auth';
+import { ManagerHomeError } from './manager-home-error.js';
 
 const SurfaceRecord = z
   .object({
@@ -458,8 +459,12 @@ export class Registry implements RevocationStoreInterface {
    * `auth.revoked` and wipes its key — so the host learns it was removed
    * instead of retrying forever. It drops out of `registeredHostIds()` (and
    * so out of every roster and the host-addressing gate) at once. Pairing the
-   * host again replaces the tombstone (`setDaemonKey`). An explicit home
-   * choice naming it is cleared, so `managerHostId()` falls to the next host.
+   * host again replaces the tombstone (`setDaemonKey`).
+   *
+   * The Manager never moves by itself (spec/06 § Changing home): the home host
+   * is refused while another host remains, so the user picks the new home and
+   * sees the handover first. The last host can go; the account then has no
+   * home until a host is paired again.
    *
    * Throws naming the id when it is not a registered host.
    */
@@ -467,11 +472,24 @@ export class Registry implements RevocationStoreInterface {
     if (!this.isRegisteredHost(hostId)) {
       throw new Error(`Registry.removeHost: no host registered as ${hostId}`);
     }
+    this.refuseRemovingHome(hostId);
     const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;
     this.state.daemonKeys[idx] = { ...rec, revoked: true };
     if (this.state.managerHostId === hostId) this.state.managerHostId = null;
     this.flush();
+  }
+
+  /** Throws `ManagerHomeError('is_home')` when removing `hostId` would move the Manager. */
+  private refuseRemovingHome(hostId: string): void {
+    if (this.managerHostId() !== hostId) return;
+    if (this.registeredHostIds().length <= 1) return;
+    const name = this.hostName(hostId) ?? hostId;
+    throw new ManagerHomeError(
+      'is_home',
+      `${name} is the Manager's home. Choose a new home in Settings → Manager ` +
+        `(or \`patch manager home --set <host>\`) before removing it.`,
+    );
   }
 
   // --- revocation (RevocationStoreInterface) ---
@@ -495,6 +513,7 @@ export class Registry implements RevocationStoreInterface {
     }
     const dIdx = this.state.daemonKeys.findIndex((d) => d.hostId === id);
     if (dIdx >= 0) {
+      if (this.isRegisteredHost(id)) this.refuseRemovingHome(id);
       const rec = this.state.daemonKeys[dIdx] as DaemonKeyRecord;
       this.state.daemonKeys[dIdx] = { ...rec, revoked: true };
       this.flush();

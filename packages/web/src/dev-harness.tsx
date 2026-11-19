@@ -28,6 +28,8 @@ import { NewChatRoute } from './routes/NewChatRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
+import { useInboxStore } from './stores/inboxStore.js';
+import { InboxPaneRoute } from './routes/InboxPaneRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
@@ -44,7 +46,6 @@ import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useBatchStore } from './stores/batchStore.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
 import { VoiceBar } from './components/VoiceBar.js';
-import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
@@ -3940,6 +3941,51 @@ if (meetingParam === 'live' || meetingParam === 'paused' || meetingParam === 'en
 }
 
 // `?route=/settings` drives an arbitrary initial route (else a chat).
+// `?inbox=demo` seeds the Inbox page with sample cards (dev only).
+if (params.get('inbox') === 'demo') {
+  const now = Date.now();
+  useInboxStore.getState().set([
+    {
+      kind: 'question',
+      id: 'q1',
+      from: 'Portfolio chat',
+      at: now - 4 * 60_000,
+      prompt: 'The deploy finished with one warning. Ship it to production?',
+      options: ['Yes', 'No'],
+      defaultOption: 'Yes',
+      done: false,
+    },
+    {
+      kind: 'report',
+      id: 'r1',
+      from: 'Email job',
+      at: now - 50 * 60_000,
+      title: 'Morning email report',
+      body: '3 need a reply today:\n\n- Ruth: Saturday plans\n- Plumber: quote attached\n- Council: parking permit renewal\n\n12 newsletters skipped.',
+      done: false,
+    },
+    {
+      kind: 'question',
+      id: 'q2',
+      from: 'Garden chat',
+      at: now - 3 * 3_600_000,
+      prompt: 'Which bed should the new roses go in?',
+      options: ['Front', 'Back', 'Side'],
+      defaultOption: 'Front',
+      done: false,
+    },
+    {
+      kind: 'report',
+      id: 'r2',
+      from: 'Culture week',
+      at: now - 26 * 3_600_000,
+      title: 'This week in Bristol',
+      body: 'Three films worth booking now; one sells out Friday.',
+      done: true,
+    },
+  ]);
+}
+
 const initialRoute = params.get('route') ?? `/chats/${chatId}`;
 
 // The real global shortcut hook, wired to handlers that only record which
@@ -4217,6 +4263,7 @@ function Harness(): JSX.Element {
           <Route path="/jobs/new" element={<JobPaneRoute ws={harnessWs} />} />
           <Route path="/jobs/:id" element={<JobPaneRoute ws={harnessWs} />} />
           <Route path="/triage" element={<TriagePaneRoute ws={harnessWs} />} />
+          <Route path="/inbox" element={<InboxPaneRoute ws={harnessWs} />} />
           <Route path="/jobs" element={<JobsPaneRoute ws={harnessWs} />} />
           <Route path="/lifecycle/:kind" element={<LifecycleRoute />} />
           <Route path="/connect" element={<ConnectRoute />} />
@@ -4264,7 +4311,6 @@ function Harness(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }}>
       <VoiceBar />
-      <RemoteCallBanner />
       {withChrome}
     </div>
   );

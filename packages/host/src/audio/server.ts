@@ -29,6 +29,7 @@ import {
   DEFAULT_VOICE_CONFIG,
   type AudioErrorCode,
   type AudioSurfaceKind,
+  type SpeechToTextEngine,
   type VoiceBackend,
   type VoiceConfig,
   type VoiceHandoff,
@@ -46,6 +47,7 @@ import { MockVad, type Vad } from './vad.js';
 import { watchPeerLiveness } from './peer-liveness.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
+import type { SpeechToTextResolution } from './stt-engines.js';
 import type { KokoroBackend } from './kokoro.js';
 import { GeminiLiveSession, geminiLiveModelFor, type GeminiContextTurn } from './gemini-live.js';
 import {
@@ -152,6 +154,13 @@ export interface AudioServerOptions {
    * `direct`).
    */
   getVoiceConfig?: () => VoiceConfig;
+  /**
+   * Resolves the account's `speechToText` choice on this host (stt-engines.ts).
+   * Used for turn-based conversation sessions and the dictation tidy-up; a
+   * session whose engine this host can't run is refused with
+   * `whisper_unavailable`. Absent (in-process tests): `whisper` is used as is.
+   */
+  resolveSpeechToText?: (engine: SpeechToTextEngine) => SpeechToTextResolution;
   /**
    * GEMINI_API_KEY. Required to construct a `GeminiLiveSession` — absent (or
    * empty) on a surface configured for `backend: 'gemini'` rejects the
@@ -313,6 +322,19 @@ export interface AudioServerHandle {
    * sessions — those are `voice-device-conv`.
    */
   phoneCallActive(): boolean;
+  /**
+   * Every call this server has announced open and not yet closed — the state
+   * `onCallSession` reports changes to. Sent as the host's `voice.calls`
+   * snapshot on every link (re)connect (spec/07 § A call can move between
+   * devices).
+   */
+  liveCalls(): Array<{
+    sessionId: string;
+    surfaceId: string;
+    surfaceKind: string;
+    chatId: string;
+    startedAt: number;
+  }>;
   /** Inspect a session's state (test/diagnostics). */
   getSessionState(sessionId: string): SessionState | undefined;
   /** The open sessions currently aimed at `chatId` (live context sync). */
@@ -736,6 +758,12 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           voiceSurface === 'dictation'
             ? dictationEngineFor(voiceConfig.dictation, start.surfaceKind)
             : null;
+        // The account's speech-to-text engine, resolved on this host. Only
+        // asked of paths that read speech with it.
+        const resolveStt = (): SpeechToTextResolution =>
+          opts.resolveSpeechToText
+            ? opts.resolveSpeechToText(voiceConfig.speechToText)
+            : { ok: true, whisper: opts.whisper };
         const cell: { backend: VoiceBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } =
           voiceSurface === 'dictation'
             ? { backend: 'local' }
@@ -910,11 +938,20 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage('dictation', 'deepgram'));
             return;
           }
+          let tidyWhisper: WhisperBackend | undefined;
+          if (voiceConfig.dictation.tidy) {
+            const stt = resolveStt();
+            if (!stt.ok) {
+              rejectConn(ws, 'whisper_unavailable', stt.message);
+              return;
+            }
+            tidyWhisper = stt.whisper;
+          }
           session = new DeepgramDictationSession(sessionInit, {
             logger: sessionLog,
             apiKey: opts.deepgramApiKey,
             sendAudio: sendAudioFn,
-            ...(voiceConfig.dictation.tidy ? { tidyWith: opts.whisper } : {}),
+            ...(tidyWhisper ? { tidyWith: tidyWhisper } : {}),
             ...(opts.deepgramWsCtor ? { wsCtor: opts.deepgramWsCtor } : {}),
             ...(opts.deepgramWsUrl ? { wsUrl: opts.deepgramWsUrl } : {}),
           });
@@ -933,7 +970,15 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         } else {
           // The self-hosted pipeline — and a dictation on Whisper, or a phone
           // on its own recogniser whose dictation-mode preview still needs one.
-          const whisper: WhisperBackend = opts.whisper;
+          let whisper: WhisperBackend = opts.whisper;
+          if (voiceSurface !== 'dictation') {
+            const stt = resolveStt();
+            if (!stt.ok) {
+              rejectConn(ws, 'whisper_unavailable', stt.message);
+              return;
+            }
+            whisper = stt.whisper;
+          }
           const vad = buildVad();
           if (vad === null) return;
           const aec = (
@@ -1196,6 +1241,21 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         if (active.role === 'voice-call' && active.surfaceKind !== 'device') return true;
       }
       return false;
+    },
+    liveCalls() {
+      return [...sessions.values()].flatMap((entry) =>
+        entry.callAnnounced === true && entry.call
+          ? [
+              {
+                sessionId: entry.call.init.sessionId,
+                surfaceId: entry.surfaceId,
+                surfaceKind: String(entry.surfaceKind),
+                chatId: entry.call.init.chatId,
+                startedAt: entry.call.startedAt,
+              },
+            ]
+          : [],
+      );
     },
     sessionsOnChat(chatId: string): VoiceSessionLike[] {
       return [...sessions.values()]

@@ -41,6 +41,41 @@ describe('GoalEditor', () => {
     });
   });
 
+  it('Set goal and snooze saves the draft through its own handler, only when setting', () => {
+    const onSave = vi.fn();
+    const onSnooze = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <GoalEditor
+        goal={null}
+        plan={emptyPlan}
+        onSave={onSave}
+        onSaveAndSnooze={onSnooze}
+        onClose={onClose}
+      />,
+    );
+    const btn = screen.getByTestId('goal-edit-save-snooze') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId('goal-edit-input'), { target: { value: 'Ship it' } });
+    fireEvent.click(btn);
+    expect(onSnooze).toHaveBeenCalledWith({ goal: 'Ship it', plan: {} });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('no snooze button when editing an existing goal', () => {
+    render(
+      <GoalEditor
+        goal="Ship it"
+        plan={emptyPlan}
+        onSave={vi.fn()}
+        onSaveAndSnooze={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('goal-edit-save-snooze')).toBeNull();
+  });
+
   it('a plain goal saves with no plan at all', () => {
     const onSave = vi.fn();
     render(<GoalEditor goal={null} plan={emptyPlan} onSave={onSave} onClose={vi.fn()} />);

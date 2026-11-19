@@ -188,7 +188,7 @@ settings snapshot (§ Backend credentials).
 
 Any linked surface can be revoked from the app (Settings → Devices). Server invalidates the JWT and terminates the WebSocket.
 
-Revoking a host decommissions that host's install: its `daemonKey` is invalidated, its WebSocket dropped, and its chats stay readable from the server's record but can no longer run (`04-chats-and-folders.md` § History). Removing a host is confirmed, and the confirmation names how many chats live on it. Other hosts continue as they were.
+Revoking a host decommissions that host's install: its `daemonKey` is invalidated, its WebSocket dropped, and its chats stay readable from the server's record but can no longer run (`04-chats-and-folders.md` § History). Removing a host is confirmed, and the confirmation names how many chats live on it. Other hosts continue as they were. The Manager's home host is refused (409 `manager_home`) while another host is registered: the user moves the home first (`06-threads-manager-speakers.md` § Changing home).
 
 ## What's trusted vs untrusted
 

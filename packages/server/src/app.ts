@@ -261,6 +261,8 @@ export interface BuiltApp {
   /** The server's log of each chat's transcript. */
   chatLogStore: ChatLogStore;
   issueFiler: IssueFiler;
+  /** Voice calls open right now. */
+  audioCalls: { active(): number };
 }
 
 export async function build(opts: BuildOptions = {}): Promise<FastifyInstance> {
@@ -1769,10 +1771,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // revokes the host's credential (so its next hello is answered
   // `auth.revoked` and it wipes its key), its live link is closed and its
   // buffered frames dropped, the hub forgets every cached report about it and
-  // tells every surface `host.removed {hostId}`. If it ran the Manager,
-  // the Manager passes to the next registered one and every host and surface is
-  // told, as any Manager move would. Chats that ran on it are left as they
-  // are: their history is the account's, not the host's.
+  // tells every surface `host.removed {hostId}`. The Manager's home is refused
+  // with 409 `manager_home` while another host remains: the Manager never
+  // moves by itself, so the user chooses the new home first (spec/06 § Changing
+  // home). Chats that ran on it are left as they are: their history is the
+  // account's, not the host's.
   app.delete<{ Params: { hostId: string } }>('/api/hosts/:hostId', async (req, reply) => {
     let auth;
     try {
@@ -1791,19 +1794,18 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         knownHosts: registry.registeredHostIds(),
       });
     }
-    const managerBefore = registry.managerHostId();
-    registry.removeHost(hostId);
+    try {
+      registry.removeHost(hostId);
+    } catch (e) {
+      if (e instanceof ManagerHomeError && e.code === 'is_home') {
+        return reply.code(409).send({ error: 'manager_home', message: e.message, hostId });
+      }
+      throw e;
+    }
     const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
     const told = wsHub.removeHost(hostId);
-    const managerAfter = registry.managerHostId();
-    if (managerBefore === hostId && managerAfter !== null) {
-      for (const id of registry.registeredHostIds()) {
-        hostLink.sendTo(id, 'server', { type: 'host.set_manager', hostId: managerAfter });
-      }
-      wsHub.republishAllHosts();
-    }
     log.info(
-      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told, managerAfter },
+      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told },
       'host removed from the account',
     );
     return { ok: true, hosts: wsHub.hosts() };
@@ -2077,7 +2079,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   app.addHook('onClose', async () => {
     audioSessionRouter.clear();
   });
-  registerAudioRelayRoute(app, {
+  const audioCalls = registerAudioRelayRoute(app, {
     logger: log.child({ component: 'audio-relay' }),
     router: audioSessionRouter,
     hostLink,
@@ -2874,5 +2876,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     sweepRuns,
     chatLogStore,
     issueFiler,
+    audioCalls,
   };
 }

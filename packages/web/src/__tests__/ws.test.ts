@@ -1345,6 +1345,33 @@ describe('PatchWs dispatch — host presence', () => {
     expect(useVoiceStore.getState().remoteCalls).toEqual({});
     clearCredential();
   });
+
+  it("voice.calls replaces the whole list, dropping a call whose end was missed, and skips this surface's own", async () => {
+    const b64url = (o: unknown) =>
+      btoa(JSON.stringify(o)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    saveCredential(`${b64url({ alg: 'EdDSA' })}.${b64url({ surface_id: 'web-1' })}.sig`);
+    const stale = {
+      sessionId: 'old',
+      surfaceId: 'phone',
+      surfaceKind: 'mobile',
+      chatId: 'c0',
+      startedAt: 1,
+    };
+    useVoiceStore.setState({ remoteCalls: { old: stale } });
+    const { fake } = await connectAndOpen();
+    const call = { surfaceKind: 'mobile', chatId: 'c1', startedAt: 5 };
+    fake.receive({
+      type: 'voice.calls',
+      calls: [
+        { ...call, sessionId: 's1', surfaceId: 'phone' },
+        { ...call, sessionId: 's2', surfaceId: 'web-1' },
+      ],
+    });
+    expect(Object.keys(useVoiceStore.getState().remoteCalls)).toEqual(['s1']);
+    fake.receive({ type: 'voice.calls', calls: [] });
+    expect(useVoiceStore.getState().remoteCalls).toEqual({});
+    clearCredential();
+  });
 });
 
 describe('PatchWs dispatch — incoming call + chime', () => {

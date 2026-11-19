@@ -257,12 +257,11 @@ describe('Registry', () => {
     expect(r.getDaemonKey('daemon-1')?.revoked).toBe(true);
   });
 
-  it('removeHost tombstones the host (revoked), drops it from the roster, and clears it as home', () => {
+  it('removeHost tombstones the host (revoked) and drops it from the roster', () => {
     const r = Registry.load(dir);
     r.bootstrapAccount({ keypair: KP_A });
     r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
     r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 1 });
-    r.setManagerHostId('daemon-2');
     r.removeHost('daemon-2');
     expect(r.isRevoked('daemon-2')).toBe(true);
     expect(r.registeredHostIds()).toEqual(['daemon-1']);
@@ -270,13 +269,32 @@ describe('Registry', () => {
     // Durable: a reload agrees.
     const reloaded = Registry.load(dir);
     expect(reloaded.registeredHostIds()).toEqual(['daemon-1']);
-    expect(reloaded.snapshot().managerHostId).toBeNull();
     // Removing it again, or a host never registered, is refused naming it.
     expect(() => r.removeHost('daemon-2')).toThrow(/daemon-2/);
     expect(() => r.removeHost('nope')).toThrow(/nope/);
     // Pairing the host again brings it back.
     r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 2 });
     expect(r.registeredHostIds()).toEqual(['daemon-1', 'daemon-2']);
+  });
+
+  it('never moves the Manager by itself: the home is refused while another host remains', () => {
+    const r = Registry.load(dir);
+    r.bootstrapAccount({ keypair: KP_A });
+    r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
+    r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 1 });
+    r.setHostName('daemon-2', 'Mac');
+    r.setManagerHostId('daemon-2');
+    expect(() => r.removeHost('daemon-2')).toThrow(/Mac is the Manager's home/);
+    expect(() => r.revoke('daemon-2')).toThrow(/Manager's home/);
+    // Refused durably: a reload still has it registered and home.
+    const fresh = Registry.load(dir);
+    expect(fresh.managerHostId()).toBe('daemon-2');
+    expect(fresh.isRevoked('daemon-2')).toBe(false);
+    // Once the other host is gone, the home is the last one and may go.
+    r.removeHost('daemon-1');
+    r.removeHost('daemon-2');
+    expect(r.managerHostId()).toBeNull();
+    expect(Registry.load(dir).snapshot().managerHostId).toBeNull();
   });
 
   it('isRevoked returns false for a totally unknown id (not authoritative)', () => {
