@@ -13,6 +13,7 @@ import {
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   DEFAULT_SWEEP_PROMPT,
+  DEFAULT_VOICE_DEVICE_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
@@ -292,6 +293,17 @@ export function PromptsPage(): JSX.Element {
           onSave={(text) => patchShared('link summary prompt', { linkSummaryPrompt: text })}
           onDefault={() =>
             patchShared('link summary prompt', { linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT })
+          }
+        />
+        <PromptRow
+          id="voice-device"
+          title="Speaking aloud"
+          sub="What a voice device's voice and agent are told: they are heard out loud in a room, by whoever is there."
+          defaultText={DEFAULT_VOICE_DEVICE_PROMPT}
+          current={p.voiceDevicePrompt}
+          onSave={(text) => patchShared('speaking aloud prompt', { voiceDevicePrompt: text })}
+          onDefault={() =>
+            patchShared('speaking aloud prompt', { voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT })
           }
         />
         <PromptRow

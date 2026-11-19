@@ -92,6 +92,7 @@ const SETTING_KEYS: Record<string, string> = {
   memory: 'harnessMemoryEnabled',
   'small-job-models': 'smallJobModels',
   'speech-backend': 'speechBackend',
+  'voice-device-prompt': 'voiceDevicePrompt',
 };
 
 /** A value as typed: JSON where it parses (true, 60, "x"), else the text itself. */

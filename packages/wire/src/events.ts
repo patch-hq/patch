@@ -12,6 +12,13 @@ import { z } from 'zod';
 import { DictationSetting, MeetingEngine, SpeechToTextEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
+import {
+  DEFAULT_VOICE_DEVICE_PROMPT,
+  RecentVoice,
+  VOICE_PROFILES_MAX,
+  VOICEPRINT_DIM,
+  VoiceProfile,
+} from './voice-profiles.js';
 import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
@@ -2474,6 +2481,10 @@ export const SharedSettings = z
     jobAutonomyPrompt: z.string().min(1),
     // ---- applied on every host ----
     voiceConfig: VoiceConfigSetting,
+    /** What a voice device's engine is told about speaking aloud in a room (spec/16 § Speaking aloud). */
+    voiceDevicePrompt: z.string().min(1),
+    /** People recognised by voice on a voice device (spec/16 § Who is speaking). */
+    voiceProfiles: z.array(VoiceProfile).max(VOICE_PROFILES_MAX),
     /**
      * Dictation mode: quiet this long after speech sends what was said, finished
      * or not (spec/07 § Dictation mode). With turn detection on, this is the
@@ -2658,6 +2669,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
   },
+  voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
+  voiceProfiles: [],
   dictationPauseSeconds: 10,
   dictationTurnDetection: true,
   permissionModeDefault: 'auto',
@@ -8156,6 +8169,53 @@ export const HostFilesEntry = z
   .strict();
 export type HostFilesEntry = z.infer<typeof HostFilesEntry>;
 
+// ---------------------------------------------------------------------------
+// Voiceprints (spec/16 § Who is speaking): the server asks the Manager's home
+// host to turn a recorded sample into a voiceprint, or for the voices its
+// devices heard lately, so Settings can enrol a person. One request, one answer.
+// ---------------------------------------------------------------------------
+
+export const PatchVoiceprintRequestEvent = z
+  .object({
+    type: z.literal('patch.voiceprint.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** `embed` the sample in `pcm`, or list the `recent` voices this host's devices heard. */
+    op: z.enum(['embed', 'recent']),
+    /** `embed` only: base64 PCM16 mono at 16 kHz. */
+    pcm: z.string().min(1).optional(),
+  })
+  .strict();
+export type PatchVoiceprintRequestEvent = z.infer<typeof PatchVoiceprintRequestEvent>;
+
+export const PatchVoiceprintResponseEvent = z
+  .object({
+    type: z.literal('patch.voiceprint.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    ok: z.boolean(),
+    /** `embed`: the sample's voiceprint. */
+    voiceprint: z.array(z.number()).length(VOICEPRINT_DIM).optional(),
+    /** `embed`: seconds of audio the voiceprint came from. */
+    seconds: z.number().nonnegative().optional(),
+    /** `recent`: newest first. */
+    recent: z.array(RecentVoice).optional(),
+    error: z
+      .object({
+        /**
+         * - `too_short` — under the speech a voiceprint needs (→ 400).
+         * - `voice_component_missing` — this host cannot compute voiceprints (→ 503).
+         * - `internal` — anything else (→ 502).
+         */
+        code: z.enum(['too_short', 'voice_component_missing', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchVoiceprintResponseEvent = z.infer<typeof PatchVoiceprintResponseEvent>;
+
 export const PatchHostFilesRequestEvent = z
   .object({
     type: z.literal('patch.host_files.request'),
@@ -10056,6 +10116,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'patch.folders.browse.request',
   'patch.host_files.request',
   'patch.host_search.request',
+  'patch.voiceprint.request',
 ] as const satisfies readonly WireEventType[];
 
 export type HostAddressedSurfaceEventType = (typeof HOST_ADDRESSED_SURFACE_EVENTS)[number];
@@ -10314,6 +10375,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchFoldersBrowseResponseEvent,
   PatchHostFilesRequestEvent,
   PatchHostFilesResponseEvent,
+  PatchVoiceprintRequestEvent,
+  PatchVoiceprintResponseEvent,
   PatchHostSearchRequestEvent,
   PatchHostSearchCancelEvent,
   PatchHostSearchResultEvent,
@@ -10649,6 +10712,8 @@ export const EVENT_SCHEMAS = {
   'patch.folders.browse.response': PatchFoldersBrowseResponseEvent,
   'patch.host_files.request': PatchHostFilesRequestEvent,
   'patch.host_files.response': PatchHostFilesResponseEvent,
+  'patch.voiceprint.request': PatchVoiceprintRequestEvent,
+  'patch.voiceprint.response': PatchVoiceprintResponseEvent,
   'patch.host_search.request': PatchHostSearchRequestEvent,
   'patch.host_search.cancel': PatchHostSearchCancelEvent,
   'patch.host_search.result': PatchHostSearchResultEvent,

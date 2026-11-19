@@ -268,6 +268,8 @@ import {
 } from './voiceComponent.js';
 import { TerminalSessions } from './terminal.js';
 import { handleHostFilesRequest } from './hostFiles.js';
+import { handleVoiceprintRequest } from './voiceprints.js';
+import { RecentVoices, SpeakerId, speakerModelPath } from './audio/speakerId.js';
 import { HostSearchManager } from './hostSearch.js';
 import { handleBlobRequest } from './blobFetch.js';
 import { ToolLogStore } from './toolLog.js';
@@ -940,6 +942,10 @@ async function startHost(
    * account's own setting from the server doesn't truncate aggressively.
    */
   let managerContextWindow: number = persistedHostState.managerContextWindow ?? 200;
+  /** spec/16 § Speaking aloud — `host.settings` → `voiceDevicePrompt`. */
+  let voiceDevicePrompt: string = DEFAULT_SHARED_SETTINGS.voiceDevicePrompt;
+  /** spec/16 § Who is speaking — `host.settings` → `voiceProfiles`. */
+  let voiceProfiles: SharedSettings['voiceProfiles'] = [];
   // Settings → Goals (spec/04 § Goals): how the goal judge is asked, and when a goal gives up on a refusing agent.
   let meetingPrompts: MeetingPrompts = {
     now: DEFAULT_MEETING_NOW_PROMPT,
@@ -1544,6 +1550,14 @@ async function startHost(
   const voiceDir = voiceComponentDir(config.patchHome);
   const isArtifact = bundledBuildInfo() !== undefined;
   const voiceLoc = (): ReturnType<typeof voiceLocations> => voiceLocations(voiceDir, isArtifact);
+  // spec/16 § Who is speaking — voiceprints, from the `speaker` component's model
+  // and the voice component's sherpa-onnx; the voices devices heard lately.
+  const speakerId = new SpeakerId({
+    logger: logger.child({ component: 'speaker-id' }),
+    modelPath: () => speakerModelPath(join(config.patchHome, 'components')),
+    sherpaEntry: () => voiceLoc().sherpaEntry,
+  });
+  const recentVoices = new RecentVoices();
   /** Set once the audio stack exists (step 8): re-picks the STT engine when a component settles. */
   let onComponentsSettled = (): void => {};
   // Re-picks the speech engine when a speech key is added or removed.
@@ -2078,6 +2092,23 @@ async function startHost(
       elevenLabsModel = shared.elevenLabsModel;
       hostStateStore.update({ elevenLabsModel });
       logger.info({ elevenLabsModel }, 'elevenlabs model changed');
+    }
+    if (shared.voiceDevicePrompt !== voiceDevicePrompt) {
+      voiceDevicePrompt = shared.voiceDevicePrompt;
+      logger.info('voice device prompt changed');
+    }
+    if (JSON.stringify(shared.voiceProfiles) !== JSON.stringify(voiceProfiles)) {
+      voiceProfiles = shared.voiceProfiles;
+      logger.info(
+        {
+          profiles: voiceProfiles.map((p) => ({
+            name: p.name,
+            access: p.access,
+            samples: p.samples,
+          })),
+        },
+        'voice profiles changed',
+      );
     }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
@@ -3016,6 +3047,14 @@ async function startHost(
         // by absolute path on this host, with no chat in between.
         void handleHostFilesRequest(event, sender, logger, selfHostId, {
           onWritten: (absPath) => daemon.noteHostFileWritten(absPath),
+        });
+        return;
+      }
+      if (event.type === 'patch.voiceprint.request') {
+        // spec/16 § Who is speaking — enrolment from Settings.
+        void handleVoiceprintRequest(event, sender, logger, selfHostId, {
+          speakerId,
+          recent: recentVoices,
         });
         return;
       }
@@ -5039,6 +5078,8 @@ async function startHost(
     chatNameInterval,
     // spec/06 § Manager conversation — persisted global preference.
     managerContextWindow,
+    // spec/16 § Speaking aloud — a turn heard on a voice device is answered in a room.
+    voiceDevicePrompt: () => voiceDevicePrompt,
     onRateLimit: reportUsage,
     onTurnEnd: (_chatId, accountId) => {
       if (accountId !== undefined) void accountUsage?.refreshAfterTurn(accountId);
@@ -6445,6 +6486,13 @@ async function startHost(
     // A call's `look_back`: the chat's messages that match a few words, searched on the host.
     lookBack: (chatId, query) => daemon.searchChat(chatId, query),
     managerVoice,
+    // spec/16 — a device is heard out loud, and by whoever is in the room.
+    deviceVoice: () => ({
+      prompt: () => voiceDevicePrompt,
+      profiles: () => voiceProfiles,
+      ...(speakerId.available() ? { embed: (pcm: Int16Array) => speakerId.embed(pcm) } : {}),
+      recent: recentVoices,
+    }),
     makeTimeline: (init) => chatVoice.makeTimeline(init),
     onCallEnded: (info) => chatVoice.callEnded(info),
   });
@@ -6452,6 +6500,7 @@ async function startHost(
   if (config.sdkBackend === 'real') void codexAccounts.start();
 
   // 9. Graceful shutdown.
+  const shutdownSpeakerId = (): Promise<void> => speakerId.close();
   const shutdown = async (): Promise<void> => {
     // spec/12 § Chat status — every stop of the host is one it chose (a
     // self-update, a service restart, a signal), so the server hears it first
@@ -6461,6 +6510,7 @@ async function startHost(
     // nothing below ends a turn that is meant to carry on under the next host.
     clearInterval(healthTimer);
     healthSampler.stop();
+    void shutdownSpeakerId();
     daemon.beginShutdown();
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');

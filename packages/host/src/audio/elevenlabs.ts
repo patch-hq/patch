@@ -22,10 +22,7 @@ export const ELEVENLABS_LIVE_MODEL = 'eleven_flash_v2_5';
 export const ELEVENLABS_ANNOUNCE_MODEL = 'eleven_multilingual_v2';
 
 export type ElevenLabsTtsModel =
-  | 'eleven_flash_v2_5'
-  | 'eleven_turbo_v2_5'
-  | 'eleven_multilingual_v2'
-  | 'eleven_v3';
+  'eleven_flash_v2_5' | 'eleven_turbo_v2_5' | 'eleven_multilingual_v2' | 'eleven_v3';
 
 /** Voice Design model: turns a description into candidate voices. */
 export const ELEVENLABS_DESIGN_MODEL = 'eleven_ttv_v3';

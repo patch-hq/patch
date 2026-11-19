@@ -12,6 +12,7 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { AddVoiceDevice } from '../../components/AddVoiceDevice.js';
 import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
+import { VoiceProfilesGroup } from './VoiceProfilesGroup.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
 
@@ -104,6 +105,7 @@ export function VoicePage(): JSX.Element {
       <EngineGroup />
       <SpeakingGroup />
       <VoiceDevicesGroup />
+      <VoiceProfilesGroup />
     </SettingsPage>
   );
 }

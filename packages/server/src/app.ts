@@ -70,6 +70,7 @@ import { FolderRegistry } from './folder-registry.js';
 import { registerFolderRoutes, requireAuth } from './folder-routes.js';
 import { registerHostFilesRoutes } from './host-files-routes.js';
 import { registerChatContinueRoutes } from './chat-continue-routes.js';
+import { registerVoiceprintRoutes } from './voiceprint-routes.js';
 import { registerChatSearchRoutes } from './chat-search-routes.js';
 
 /**
@@ -2118,6 +2119,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     registry,
     hostLink,
     idGenerator,
+  });
+
+  // ---- voiceprints for enrolment (spec/16 § Who is speaking) ----
+  registerVoiceprintRoutes(app, {
+    logger: log.child({ component: 'voiceprint-routes' }),
+    registry,
+    hostLink,
+    idGenerator,
+    homeHostId: () => managerHome.current(),
   });
 
   // ---- one blob's bytes (spec/04 § History — blobs) ----

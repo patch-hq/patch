@@ -714,6 +714,11 @@ export interface HostOptions {
    */
   managerContextWindow?: number;
   /**
+   * spec/16 § Speaking aloud — what a turn heard on a voice device is told
+   * about being answered out loud in a room (`host.settings` → `voiceDevicePrompt`).
+   */
+  voiceDevicePrompt?: () => string;
+  /**
    * Ask the server what it is holding for this chat, at a tool boundary (spec/04
    * § Message queueing — the server-run queue). Absent, or an empty answer, means
    * nothing is waiting there.
@@ -7573,6 +7578,14 @@ export class Daemon {
     if (req.voicePrefix?.startsWith('[voice hand-off')) {
       if (head !== null) head = VOICE_HANDOFF_REMINDER + head;
       else rewrittenWhole = VOICE_HANDOFF_REMINDER + rewrittenWhole;
+    }
+
+    // spec/16 § Speaking aloud — heard on a voice device, answered out loud in a room.
+    const spokenAloud = this.opts.voiceDevicePrompt?.();
+    if (req.voicePrefix?.includes('• device') && spokenAloud) {
+      const note = noteBlock('Spoken aloud', spokenAloud);
+      if (head !== null) head = note + head;
+      else rewrittenWhole = note + rewrittenWhole;
     }
 
     // spec/14 § Document editor — comments both ways: a user comment or

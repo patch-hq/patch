@@ -70,6 +70,7 @@ import { DeepgramDictationSession } from './deepgram-dictation.js';
 import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
 import { HostDictationSession } from './host-dictation.js';
 import type { LiveRecognizer } from './parakeet-live.js';
+import type { DeviceVoiceDeps } from './deviceVoice.js';
 
 /** Spoken once when a local call opens, so the user is never left in silence. */
 const CALL_GREETING = 'Connected.';
@@ -233,6 +234,12 @@ export interface AudioServerOptions {
    * A hosted call to the Manager on a server without them is refused.
    */
   managerVoice?: ManagerVoiceTools;
+  /**
+   * A voice device's sessions (spec/16 § Speaking aloud, § Who is speaking):
+   * the spoken-aloud prompt, the voice profiles and the speaker model. Absent
+   * means a device's session is run like an app's.
+   */
+  deviceVoice?: () => DeviceVoiceDeps;
   /**
    * Existence check for the chat declared in `audio.session_start` (E1-d3).
    * A voice session must be bound to a real chat BEFORE any audio is
@@ -841,6 +848,20 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         }
         const managerDeps = managerCall ? { manager: opts.managerVoice! } : {};
 
+        // spec/16 — a device's session is heard out loud in a room, by whoever is there.
+        const device = voiceSurface === 'device' ? opts.deviceVoice?.() : undefined;
+        if (
+          device !== undefined &&
+          cell.backend !== 'openai' &&
+          device.profiles().some((p) => p.voiceprint !== undefined)
+        ) {
+          // Only the OpenAI engine recognises speakers so far. Said, not hidden:
+          // on this engine everyone in the room is answered alike.
+          sessionLog.warn(
+            { sessionId: start.sessionId, backend: cell.backend },
+            'voice profiles are not applied on this engine; switch the device to OpenAI to use them',
+          );
+        }
         if (voiceSurface !== 'dictation' && cell.backend === 'gemini') {
           const geminiKey = readKey(opts.geminiApiKey);
           if (geminiKey === undefined) {
@@ -870,6 +891,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
               heavy: opts.geminiLiveModelHeavy,
             }),
             onFatal,
+            ...(device ? { spokenAloud: device.prompt() } : {}),
             ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
             ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
             ...managerDeps,
@@ -896,6 +918,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
               heavy: opts.openaiRealtimeModelHeavy,
             }),
             onFatal,
+            ...(device ? { device } : {}),
             ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
             ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
             ...managerDeps,
@@ -922,6 +945,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
               heavy: opts.elevenLabsAgentLlmHeavy,
             }),
             onFatal,
+            ...(device ? { spokenAloud: device.prompt() } : {}),
             ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
             ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
             ...managerDeps,
@@ -1176,13 +1200,11 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             );
             return;
           }
-          if (
-            !(
-              session instanceof DeepgramDictationSession ||
-              session instanceof ElevenLabsDictationSession ||
-              session instanceof HostDictationSession
-            )
-          ) {
+          if (!(
+            session instanceof DeepgramDictationSession ||
+            session instanceof ElevenLabsDictationSession ||
+            session instanceof HostDictationSession
+          )) {
             send(ws, {
               type: 'audio.error',
               code: 'invalid_frame',
