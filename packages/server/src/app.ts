@@ -260,6 +260,8 @@ export interface BuiltApp {
   /** The server's log of each chat's transcript. */
   chatLogStore: ChatLogStore;
   issueFiler: IssueFiler;
+  /** Voice calls open right now. */
+  audioCalls: { active(): number };
 }
 
 export async function build(opts: BuildOptions = {}): Promise<FastifyInstance> {
@@ -2052,7 +2054,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   app.addHook('onClose', async () => {
     audioSessionRouter.clear();
   });
-  registerAudioRelayRoute(app, {
+  const audioCalls = registerAudioRelayRoute(app, {
     logger: log.child({ component: 'audio-relay' }),
     router: audioSessionRouter,
     hostLink,
@@ -2849,5 +2851,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     sweepRuns,
     chatLogStore,
     issueFiler,
+    audioCalls,
   };
 }

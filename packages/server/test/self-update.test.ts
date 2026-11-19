@@ -82,7 +82,7 @@ describe('createSelfUpdater', () => {
     );
   }
 
-  function updater(over: { now?: () => number } = {}) {
+  function updater(over: { now?: () => number; busy?: () => boolean } = {}) {
     const launches: { installer: string; home: string; unit: string }[] = [];
     const logs: string[] = [];
     const check = createSelfUpdater({
@@ -104,6 +104,20 @@ describe('createSelfUpdater', () => {
     expect(launches[0]!.installer).toBe(join(home, 'updates', 'patch-server-1.1.5', 'install'));
     expect(launches[0]!.home).toBe(home);
     expect(logs[0]).toContain(`journalctl --user -u ${launches[0]!.unit}`);
+  });
+
+  it('waits while a voice call is live, then installs once it ends', () => {
+    mirror('1.1.5');
+    let inCall = true;
+    const { check, launches, logs } = updater({ busy: () => inCall });
+    check();
+    check();
+    expect(launches).toHaveLength(0);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain('waits for the voice call');
+    inCall = false;
+    check();
+    expect(launches).toHaveLength(1);
   });
 
   it('leaves a current server alone', () => {
