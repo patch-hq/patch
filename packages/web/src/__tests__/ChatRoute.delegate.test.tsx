@@ -389,6 +389,21 @@ describe('ChatRoute — patch_delegate tool row', () => {
       expect(screen.queryByTestId('agent-running-bar')).toBeNull();
     });
 
+    it('expanding the bar lists agents above the header and hides its icon', () => {
+      seed();
+      renderChat();
+      update('sub-1', 'draft the email', 'running', 1);
+      update('sub-2', 'build the design', 'running', 2);
+      const bar = screen.getByTestId('agent-running-bar');
+      expect(bar.querySelectorAll('.agent-running-bar-icon')).toHaveLength(1);
+      fireEvent.click(screen.getByTestId('agent-running-bar-toggle'));
+      const rows = bar.querySelectorAll('.agent-running-bar-row');
+      expect(rows).toHaveLength(3);
+      expect(rows[0]?.getAttribute('data-testid')).toBe('agent-running-row');
+      expect(rows[2]?.querySelector('.agent-running-bar-icon')).toBeNull();
+      expect(bar.querySelectorAll('.agent-running-bar-icon')).toHaveLength(2);
+    });
+
     it('the bar controls an agent: pause, resume once paused, stop, open as its own chat', async () => {
       seed();
       renderChat();

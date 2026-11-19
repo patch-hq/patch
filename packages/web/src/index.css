@@ -18918,6 +18918,23 @@ a.drop-target {
   opacity: 0.5;
   cursor: default;
 }
+.agent-running-bar-icon {
+  flex: none;
+  color: var(--waiting);
+  filter: drop-shadow(0 0 4px var(--waiting));
+  animation: agent-glow 2s ease-in-out infinite;
+}
+.agent-running-bar-icon-paused {
+  animation: none;
+  filter: none;
+}
+@keyframes agent-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px var(--waiting)); }
+  50% { filter: drop-shadow(0 0 6px var(--waiting)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-running-bar-icon { animation: none; }
+}
 .agent-chevron-open {
   transform: rotate(180deg);
 }
