@@ -8,14 +8,15 @@ const HOSTS = '/app/dev-harness.html?route=/settings/hosts';
 test.describe('this Mac as a host', () => {
   test('installs the host with a code minted for it, and says when it fails', async ({ page }) => {
     await page.addInitScript(() => {
-      const w = window as unknown as { patch?: Record<string, unknown>; __installs: string[] };
+      const w = window as unknown as { patch?: Record<string, unknown>; __installs: string[][] };
       w.__installs = [];
       w.patch = {
         ...(w.patch ?? {}),
         localHost: {
           status: async () => ({ installed: false, hostId: null }),
-          install: async (code: string) => {
-            w.__installs.push(code);
+          defaultName: async () => 'E2E Mac',
+          install: async (code: string, name?: string) => {
+            w.__installs.push([code, name ?? '']);
             return { ok: false, exitCode: 75, output: 'patch install: the code expired' };
           },
         },
@@ -31,10 +32,12 @@ test.describe('this Mac as a host', () => {
     await page.goto(HOSTS);
 
     await page.getByTestId('this-mac-install').click();
+    await expect(page.getByTestId('this-mac-name')).toHaveValue('E2E Mac');
+    await page.getByTestId('this-mac-confirm').click();
     await expect(page.getByTestId('this-mac-error')).toHaveText('patch install: the code expired');
     expect(
-      await page.evaluate(() => (window as unknown as { __installs: string[] }).__installs),
-    ).toEqual(['e2e-code-0123456789']);
+      await page.evaluate(() => (window as unknown as { __installs: string[][] }).__installs),
+    ).toEqual([['e2e-code-0123456789', 'E2E Mac']]);
   });
 
   test('is not offered in a plain browser', async ({ page }) => {
