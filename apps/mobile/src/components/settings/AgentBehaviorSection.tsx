@@ -20,6 +20,7 @@ import {
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_SWEEP_PROMPT,
+  DEFAULT_VOICE_DEVICE_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
@@ -81,6 +82,7 @@ export type Layer =
   | 'watch-check-in'
   | 'sweep'
   | 'job-autonomy'
+  | 'voice-device'
   | 'question-expired'
   | 'meeting-now'
   | 'meeting-notes'
@@ -94,6 +96,7 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'watch-check-in': 'Background task check-in',
   sweep: 'Manager standing instructions',
   'job-autonomy': 'Job autonomy',
+  'voice-device': 'Speaking aloud',
   'question-expired': 'Question timed out',
   'meeting-now': 'Meeting: Now',
   'meeting-notes': 'Meeting: Notes',
@@ -109,6 +112,7 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'watch-check-in': 'Check-in prompt',
   sweep: 'Standing instructions',
   'job-autonomy': 'Autonomy prompt',
+  'voice-device': 'Speaking aloud prompt',
   'question-expired': 'Question timeout prompt',
   'meeting-now': 'Meeting Now prompt',
   'meeting-notes': 'Meeting notes prompt',
@@ -122,6 +126,7 @@ export const TEXT_PROMPTS = {
   'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
   sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
+  'voice-device': { key: 'voiceDevicePrompt', fallback: DEFAULT_VOICE_DEVICE_PROMPT },
   'question-expired': {
     key: 'questionExpiredPrompt',
     fallback: DEFAULT_QUESTION_EXPIRED_PROMPT,

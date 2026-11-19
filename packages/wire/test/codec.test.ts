@@ -1393,6 +1393,21 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     parent: '/Users/tom/.claude',
     entries: [{ name: 'plant', type: 'dir' }],
   },
+  'patch.voiceprint.request': {
+    type: 'patch.voiceprint.request',
+    requestId: 'vp1',
+    hostId: 'host-a',
+    op: 'embed',
+    pcm: 'AAAA',
+  },
+  'patch.voiceprint.response': {
+    type: 'patch.voiceprint.response',
+    requestId: 'vp1',
+    hostId: 'host-a',
+    ok: true,
+    voiceprint: Array.from({ length: 256 }, (_, i) => (i === 0 ? 1 : 0)),
+    seconds: 6.2,
+  },
   'patch.host_search.request': {
     type: 'patch.host_search.request',
     searchId: 'hs1',

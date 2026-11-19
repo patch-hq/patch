@@ -125,6 +125,8 @@ export interface GeminiContextTurn {
 
 export interface GeminiLiveDeps {
   logger: Logger;
+  /** A voice device's session: what it is told about speaking aloud (spec/16 § Speaking aloud). */
+  spokenAloud?: string;
   /** Local VAD + transcriber that decide which utterances reach Gemini (address-gate.ts). */
   gate?: { makeVad: () => Vad; transcriber: WhisperBackend };
   sendAudio: (ev: AudioEvent) => void;
@@ -472,6 +474,7 @@ function buildSetupMessage(
   lookBack: boolean,
   manualActivity: boolean,
   manager = false,
+  spokenAloud = '',
 ): GeminiSetupMessage {
   const declarations: GeminiFunctionDeclaration[] = [
     // A Manager call has its own tools and no agent behind it; `never` has no agent either.
@@ -525,7 +528,8 @@ function buildSetupMessage(
           {
             text: withBriefing(
               (manager ? managerHostedInstruction(true) : hostedVoiceInstruction(handoff, true)) +
-                (lookBack ? `\n\n${LOOK_BACK_RULE}` : ''),
+                (lookBack ? `\n\n${LOOK_BACK_RULE}` : '') +
+                (spokenAloud ? `\n\n${spokenAloud}` : ''),
               briefing,
             ),
           },
@@ -836,6 +840,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           this.deps.lookBack !== undefined,
           this.deps.gate !== undefined,
           this.deps.manager !== undefined,
+          this.deps.spokenAloud,
         ),
       ),
     );

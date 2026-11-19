@@ -31,7 +31,7 @@ export type LinkedChatDraft = import('@patch/wire').NewChatDraftBody & {
   updatedAt: number;
 };
 import type { Hook, HookCreateBody, HookPatchBody, HookCheckResponse } from '@patch/wire/hooks';
-import { assertVersionReport } from '@patch/wire';
+import { assertVersionReport, type RecentVoice } from '@patch/wire';
 import { loadCredential } from '../lib/credential.js';
 import { hookImages } from '../lib/hookImages.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
@@ -399,6 +399,14 @@ export type ChatGPTSignInStatus =
   | { status: 'failed'; error: string; code: string };
 
 export const api = {
+  /** spec/16 § Who is speaking — a recorded sample's voiceprint, from the Manager's home host. */
+  voiceprint: (pcm: string) =>
+    request<{ voiceprint: number[]; seconds: number }>('/api/voice/voiceprint', {
+      method: 'POST',
+      body: { pcm },
+    }),
+  /** The voices the voice devices heard lately, for enrolment. */
+  recentVoices: () => request<{ recent: RecentVoice[] }>('/api/voice/recent-voices'),
   issueReporting: () => request<IssueReportingStatus>('/api/issue-reporting'),
   setIssueReporting: (enabled: boolean) =>
     request<IssueReportingStatus>('/api/issue-reporting', { method: 'PUT', body: { enabled } }),

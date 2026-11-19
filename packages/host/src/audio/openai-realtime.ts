@@ -51,6 +51,18 @@ import type { Logger } from 'pino';
 import { WebSocket as WsImpl, type WebSocket as WsSocket } from 'ws';
 import type { AudioEvent, AudioSessionMode, VoiceHandoff, VoiceLayer } from '@patch/wire/audio';
 import { modeRequiresAddress } from '@patch/wire/audio';
+import { identifyVoice, type VoiceProfile } from '@patch/wire';
+import {
+  HANDOFF_REFUSED,
+  handoffSpeakerLine,
+  mayHearHistory,
+  mayUseAgent,
+  MicTape,
+  recognisesSpeakers,
+  speakerInstruction,
+  type DeviceVoiceDeps,
+} from './deviceVoice.js';
+import { MIN_VOICEPRINT_SECONDS } from './speakerId.js';
 import type { VoiceReplyWriter, VoiceTimeline } from './voice-session-like.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { addTokens, ZERO_TOKENS, type EngineCosting, type EngineTokens } from './voiceCost.js';
@@ -142,6 +154,8 @@ export interface OpenAIRealtimeDeps {
    * a dead engine and shows the failure.
    */
   onFatal?: (message: string) => void;
+  /** A voice device's session: the spoken-aloud prompt and who is speaking (spec/16). */
+  device?: DeviceVoiceDeps;
   /** Test seam: substitute the WebSocket constructor. */
   wsCtor?: OpenAIWsCtor;
   /** Test seam: override the connect URL. */
@@ -180,6 +194,9 @@ export function realtimeUsageTokens(u: RealtimeUsage): EngineTokens {
 interface RealtimeServerEvent {
   type: string;
   item_id?: string;
+  /** `input_audio_buffer.speech_started/stopped`: ms since the session's audio began. */
+  audio_start_ms?: number;
+  audio_end_ms?: number;
   delta?: string;
   transcript?: string;
   call_id?: string;
@@ -241,6 +258,16 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   /** What the chat is about, from the chat's own history; in the instructions. */
   private briefing = '';
   private tokens: EngineTokens = ZERO_TOKENS;
+  // --- who is speaking (spec/16 § Who is speaking) ---
+  /** Settled at session start: recognise speakers, and answer only once we know who it was. */
+  private gate = false;
+  /** Who is speaking now; null is nobody recognised. */
+  private speaker: VoiceProfile | null = null;
+  /** The microphone, kept so each utterance can be cut out for its voiceprint. */
+  private tape?: MicTape;
+  private speechStartMs = 0;
+  /** Recent-voice entry per conversation item, filled with the words once they land. */
+  private recentByItem = new Map<string, string>();
   // Stats.
   private micFrames = 0;
   private micSamples = 0;
@@ -251,6 +278,13 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     this.deps = deps;
     this.currentChatId = init.chatId;
     this.mode = init.mode ?? 'call';
+    this.gate = recognisesSpeakers(deps.device) && deps.device?.embed !== undefined;
+    if (deps.device?.embed !== undefined) this.tape = new MicTape();
+  }
+
+  /** Who this session takes the speaker to be (null: nobody recognised). */
+  getSpeaker(): VoiceProfile | null {
+    return this.speaker;
   }
 
   getMode(): AudioSessionMode {
@@ -330,22 +364,93 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     const answersEverything = !modeRequiresAddress(this.mode);
     return {
       type: 'server_vad',
-      create_response: answersEverything,
+      // Recognising speakers: we ask for the reply ourselves once we know who spoke.
+      create_response: answersEverything && !this.gate,
       interrupt_response: answersEverything,
     };
   }
 
-  private sessionConfig(): Record<string, unknown> {
+  /** The hand-off mode in force: someone who may not use the agent gets none. */
+  private effectiveHandoff(): VoiceHandoff {
     const handoff = this.deps.handoff ?? 'auto';
+    return this.gate && !mayUseAgent(this.speaker) ? 'never' : handoff;
+  }
+
+  /** Whether the chat's history (briefing, look-back, live notes) may reach this speaker. */
+  private historyAllowed(): boolean {
+    return !this.gate || mayHearHistory(this.speaker);
+  }
+
+  private instructions(): string {
+    let text =
+      (this.deps.manager
+        ? managerHostedInstruction(false)
+        : hostedVoiceInstruction(this.effectiveHandoff())) +
+      (this.deps.lookBack !== undefined && this.historyAllowed() ? `\n\n${LOOK_BACK_RULE}` : '');
+    if (this.deps.device) text += `\n\n${this.deps.device.prompt()}`;
+    if (this.gate) text += `\n\n${speakerInstruction(this.speaker)}`;
+    return withBriefing(text, this.historyAllowed() ? this.briefing : '');
+  }
+
+  /** The parts of the session that change with who is speaking. */
+  private speakerConfig(): Record<string, unknown> {
+    const handoff = this.effectiveHandoff();
+    const lookBack = this.deps.lookBack !== undefined && this.historyAllowed();
+    return {
+      instructions: this.instructions(),
+      tools: [
+        // A Manager call has its own tools and no agent behind it; `never` has no agent either.
+        ...(this.deps.manager
+          ? managerRealtimeTools()
+          : handoff === 'never'
+            ? []
+            : [
+                {
+                  type: 'function',
+                  name: DISPATCH_TOOL_NAME,
+                  description: DISPATCH_TOOL_DESCRIPTION,
+                  parameters: {
+                    type: 'object',
+                    properties: {
+                      request: {
+                        type: 'string',
+                        description: 'What Patch should do or look up, in plain language.',
+                      },
+                    },
+                    required: ['request'],
+                  },
+                },
+              ]),
+        ...(lookBack
+          ? [
+              {
+                type: 'function',
+                name: LOOK_BACK_TOOL_NAME,
+                description: LOOK_BACK_DESCRIPTION,
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    query: {
+                      type: 'string',
+                      description: 'A few key words to search the chat for.',
+                    },
+                  },
+                  required: ['query'],
+                },
+              },
+            ]
+          : []),
+      ],
+      tool_choice: handoff === 'always' && !lookBack && !this.deps.manager ? 'required' : 'auto',
+    };
+  }
+
+  private sessionConfig(): Record<string, unknown> {
     return {
       type: 'session.update',
       session: {
         type: 'realtime',
-        instructions: withBriefing(
-          (this.deps.manager ? managerHostedInstruction(false) : hostedVoiceInstruction(handoff)) +
-            (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : ''),
-          this.briefing,
-        ),
+        ...this.speakerConfig(),
         output_modalities: ['audio'],
         audio: {
           input: {
@@ -361,52 +466,6 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
             voice: this.deps.voice ?? DEFAULT_OPENAI_REALTIME_VOICE,
           },
         },
-        tools: [
-          ...(this.deps.manager
-            ? managerRealtimeTools()
-            : handoff === 'never'
-              ? []
-              : [
-                  {
-                    type: 'function',
-                    name: DISPATCH_TOOL_NAME,
-                    description: DISPATCH_TOOL_DESCRIPTION,
-                    parameters: {
-                      type: 'object',
-                      properties: {
-                        request: {
-                          type: 'string',
-                          description: 'What Patch should do or look up, in plain language.',
-                        },
-                      },
-                      required: ['request'],
-                    },
-                  },
-                ]),
-          ...(this.deps.lookBack !== undefined
-            ? [
-                {
-                  type: 'function',
-                  name: LOOK_BACK_TOOL_NAME,
-                  description: LOOK_BACK_DESCRIPTION,
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      query: {
-                        type: 'string',
-                        description: 'A few key words to search the chat for.',
-                      },
-                    },
-                    required: ['query'],
-                  },
-                },
-              ]
-            : []),
-        ],
-        tool_choice:
-          handoff === 'always' && this.deps.lookBack === undefined && !this.deps.manager
-            ? 'required'
-            : 'auto',
       },
     };
   }
@@ -491,6 +550,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       });
     }
     if (pcm.length === 0) return;
+    this.tape?.push(pcm);
     // Convert synchronously — `pcm` may be a view onto a pooled buffer.
     const up = upsample16kTo24k(pcm);
     const b64 = Buffer.from(up.buffer, up.byteOffset, up.byteLength).toString('base64');
@@ -529,7 +589,11 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         this.reportError(message);
         return;
       }
+      case 'input_audio_buffer.speech_stopped':
+        if (this.tape) void this.onUtteranceEnd(ev.item_id ?? '', ev.audio_end_ms ?? 0);
+        return;
       case 'input_audio_buffer.speech_started':
+        this.speechStartMs = ev.audio_start_ms ?? 0;
         this.awaitingUserWords = true;
         if (this.state === 'speaking' && !modeRequiresAddress(this.mode)) {
           // Barge-in — the server has already cancelled its reply
@@ -613,6 +677,60 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     }
   }
 
+  /**
+   * An utterance ended (the provider's VAD). Take its voiceprint, keep it for
+   * enrolment, and, when recognising speakers, settle who spoke before asking
+   * for the reply: the instructions and tools change with the speaker.
+   */
+  private async onUtteranceEnd(itemId: string, endMs: number): Promise<void> {
+    const device = this.deps.device!;
+    const pcm = this.tape!.slice(this.speechStartMs, endMs);
+    const seconds = pcm.length / 16000;
+    if (seconds >= MIN_VOICEPRINT_SECONDS && device.embed) {
+      try {
+        const voiceprint = await device.embed(pcm);
+        const profiles = device.profiles();
+        const match = identifyVoice(voiceprint, profiles);
+        const recentId = device.recent?.add({
+          at: Date.now(),
+          text: '',
+          seconds: Number(seconds.toFixed(1)),
+          voiceprint: voiceprint.map((x) => Math.round(x * 1e5) / 1e5),
+          ...(match.profile ? { matchedProfileId: match.profile.id } : {}),
+          score: Number(match.score.toFixed(3)),
+        });
+        if (recentId !== undefined) this.recentByItem.set(itemId, recentId);
+        this.deps.logger.info(
+          {
+            sessionId: this.init.sessionId,
+            seconds: Number(seconds.toFixed(1)),
+            speaker: match.profile?.name ?? null,
+            score: Number(match.score.toFixed(3)),
+          },
+          'openai-realtime: voice heard',
+        );
+        if (this.gate) this.setSpeaker(match.profile);
+      } catch (err) {
+        // The previous speaker stands; the reply still goes out.
+        this.deps.logger.warn(
+          { sessionId: this.init.sessionId, err: (err as Error).message },
+          'openai-realtime: voiceprint failed',
+        );
+      }
+    }
+    // Too short to tell ("yes", "thanks"): the previous speaker stands.
+    if (this.gate && !this.closed) this.sendJson({ type: 'response.create' });
+  }
+
+  private setSpeaker(next: VoiceProfile | null): void {
+    if ((next?.id ?? null) === (this.speaker?.id ?? null)) return;
+    this.speaker = next;
+    this.sendJson({
+      type: 'session.update',
+      session: { type: 'realtime', ...this.speakerConfig() },
+    });
+  }
+
   private onReplyText(delta: string): void {
     // The voice's words about an agent's answer are written too: the answer is already in
     // the chat as the agent's own message, and what the voice said of it is a separate
@@ -649,6 +767,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
 
   pushContext(role: 'user' | 'assistant', text: string): void {
     if (this.closed || !this.setupDone) return;
+    // The chat's live activity is its history: not for someone who may not hear it.
+    if (!this.historyAllowed()) return;
     // A short quiet note from the user's side, not the message replayed as if someone had said it.
     this.sendJson({
       type: 'conversation.item.create',
@@ -725,7 +845,15 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       return;
     }
     this.turns += 1;
-    this.deps.timeline.userSaid(this.currentChatId, text);
+    const recentId = this.recentByItem.get(itemId);
+    if (recentId !== undefined) {
+      this.recentByItem.delete(itemId);
+      this.deps.device?.recent?.setText(recentId, text);
+    }
+    this.deps.timeline.userSaid(
+      this.currentChatId,
+      this.gate ? `${this.speaker?.name ?? 'Unrecognised voice'}: ${text}` : text,
+    );
     this.releaseHeldReply();
     if (modeRequiresAddress(this.mode)) {
       // hands-free: the server VAD was told not to answer on its own.
@@ -773,6 +901,26 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     }
     // The chat reads in order: what the user said, the bridge, then the hand-off.
     this.finishReply();
+    if (this.gate && !mayUseAgent(this.speaker)) {
+      // Decided here, not by the model: the tool is withdrawn for such a
+      // speaker, and a call that arrives anyway (a race with a speaker change)
+      // never reaches the agent.
+      this.deps.logger.warn(
+        { sessionId: this.init.sessionId, request },
+        'openai-realtime: hand-off refused, speaker not recognised',
+      );
+      this.sendJson({
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: callId,
+          output: JSON.stringify({ result: HANDOFF_REFUSED }),
+        },
+      });
+      this.sendJson({ type: 'response.create' });
+      return;
+    }
+    if (this.gate && this.speaker !== null) request = handoffSpeakerLine(this.speaker) + request;
     this.dispatchesInFlight += 1;
     this.deps.logger.info(
       { sessionId: this.init.sessionId, chatId: this.currentChatId, request },

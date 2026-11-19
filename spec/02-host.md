@@ -495,8 +495,10 @@ rejecting the question, which is the same class of bug as an empty answer.
 
 ## Optional components (large models)
 
-The list is Kokoro TTS (~340 MB) and a local Whisper model (~1.5 GB): the two
-weights sets too large for the installer. The host downloads them on demand,
+The list is Kokoro TTS (~340 MB), a local Whisper model (~1.5 GB) and the
+speaker model for voice profiles (`speaker`, ~27 MB, WeSpeaker ResNet34 in
+sherpa-onnx's format, `16-voice-device.md` § Who is speaking): weights the
+installer does not carry. The host downloads them on demand,
 per host, driven from the app. The VAD model stays off this list — it is ~2 MB
 and ships in the artifact (§ Installation). Two entry points:
 

@@ -248,6 +248,18 @@ The gate is the folder browser's: a live surface credential and a registered hos
 | `patch.link_summary.request`  | server → host | `{requestId, hostId, prompt, url, text}` — backs `POST /api/link-summary` (`14-design-web.md` § Message links); `prompt` is the account's `linkSummaryPrompt`, `text` the page's readable text                                                                                                                                                                                                                                          |
 | `patch.link_summary.response` | host → server | `{requestId, hostId, ok, summary?, error?}` — consumed by the server, never relayed to surfaces                                                                                                                                                                                                                                                                                                                                         |
 
+### Voiceprints (server ↔ host)
+
+Enrolment for voice profiles (`16-voice-device.md` § Who is speaking). Both routes round-trip one request to the Manager's home host, where device conversations run. No home host, or an offline one, is a 503 (`no_home_host`, `host_offline`); no answer in 20 s is a 504.
+
+- `POST /api/voice/voiceprint` `{pcm}` (base64 PCM16 mono at 16 kHz, up to 2 MiB) → `{voiceprint, seconds}`
+- `GET /api/voice/recent-voices` → `{recent[]}`, newest first
+
+| Type                        | Direction     | Payload                                                                                                                                                                                                                                                 |
+| --------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `patch.voiceprint.request`  | server → host | `{requestId, hostId, op: 'embed'\|'recent', pcm?}` — `pcm` is `embed` only                                                                                                                                                                              |
+| `patch.voiceprint.response` | host → server | `{requestId, hostId, ok, voiceprint?, seconds?, recent?, error?}` — `recent[]` is `{id, at, text, seconds, voiceprint, matchedProfileId?, score}`; `error.code` (HTTP status) is `too_short` (400), `voice_component_missing` (503) or `internal` (502) |
+
 ### Host search (surface ↔ host)
 
 Backing the file browser's `⌘⇧F` search in files (`14-design-web.md` § File browser; behaviour in `02-host.md` § Host search). Unlike host files above, this is a SESSION the surface drives directly over the WS, like a terminal's: the surface mints `searchId`, the hub stamps `forSurfaceId` on `request` and `cancel` so results and `done` stream back to the asking surface alone, and `request` is the only frame that names a `hostId` — later frames route by `searchId`, exactly as terminal input/signal/close route by `sessionId`. Cancelling raises no `done`: the host simply stops sending for that `searchId`.

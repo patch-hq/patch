@@ -70,6 +70,33 @@ The target chat is persistent, so everything said by voice is there in text afte
 
 The device setting in Settings → Voice chooses how a device's conversation is answered, the same matrix as the app surfaces (`07-voice-app.md` § Voice is a config matrix). The device is unaffected by the choice: it streams the same audio either way.
 
+A hosted engine (OpenAI, Gemini, ElevenLabs) answers the device itself and hands real work to the Manager, so a reply does not wait for a Manager turn. OpenAI is the fastest of the three for a device: its session is ready in about a second, where ElevenLabs creates an agent per conversation and Gemini waits seconds for the end of speech.
+
+## Speaking aloud
+
+A device is heard out loud in a room, by whoever is there. Every device conversation, on any engine, carries the account's `voiceDevicePrompt`: the hosted voice has it in its instructions, and a turn that reaches the Manager from a device (a direct turn or a hand-off) carries it as a note. Patch's default asks for short spoken replies and nothing private said aloud unless the speaker may hear it. It is edited in Settings → Prompts → Speaking aloud, and with `patch settings set voice-device-prompt`, so the Manager can change it when asked.
+
+## Who is speaking
+
+A voice profile is a person Patch recognises by voice (`voiceProfiles` in the shared settings, at most 20): a name, an access level, notes for when they speak, and a voiceprint. A voiceprint is the mean speaker embedding of the person's samples: 256 numbers from WeSpeaker's ResNet34 model, run by sherpa-onnx on the host, which sit close together for the same voice. A match needs a cosine similarity of 0.6 or more and a lead of 0.05 over the next profile; otherwise the speaker is not recognised.
+
+| Access                   | The voice                                           | The agent                                                                                           |
+| ------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Owner                    | Has the chat's briefing, `look_back` and live notes | Hand-offs go through, headed `[Spoken by <name>, the account's owner. …]`                           |
+| Household                | No chat history                                     | Hand-offs go through, headed `[Spoken by <name>, a member of the household. About <name>: <notes>]` |
+| Guest, or not recognised | No chat history                                     | No hand-off tool; a hand-off that arrives anyway is refused by the host and never reaches the agent |
+
+Recognising speakers applies when the account has at least one profile with a voiceprint, the device runs on OpenAI, and the host has the speaker model (the `speaker` component, `02-host.md` § Optional components). Then:
+
+- The session starts treating the speaker as not recognised.
+- The provider's VAD no longer answers by itself. When an utterance ends, the host cuts it from its own copy of the microphone, takes its voiceprint (on a worker thread, 70–200 ms), settles who it was, updates the session's instructions and tools if the speaker changed, and only then asks for the reply.
+- An utterance under a second ("yes", "thanks") is too short to tell, and the previous speaker stands.
+- What the speaker said is written into the chat as `<name>: <words>`, or `Unrecognised voice: <words>`.
+
+On another engine the profiles are not applied and the host logs so for each session; Settings says so beside the profiles. The rules are enforced in the host, not left to the prompt: a stranger gets no history and no agent whatever they say.
+
+Every utterance on a device (with or without profiles) leaves its voiceprint and words in the host's recent voices, the last 20 in memory, so the user can enrol a person from what a device actually heard. Settings → Voice → Who is speaking adds people, sets their access and notes, and builds a voiceprint from either a sample recorded in the browser (8 s) or a recent voice ("This is Eleanor"). Each sample is folded into the running mean (`addVoiceSample`). The voiceprints are computed on the Manager's home host (`03-wire-protocol.md` § Voiceprints).
+
 ## Announcements
 
 `patch_speak` and `patch_notify(channel: 'speakers')` are spoken on a connected device (`09-notifications.md` § speakers). The server opens a session on the chosen device for the calling chat, with `conversational: false`, and asks that chat's host to speak the message as soon as the device joins. The device then behaves as after any reply: it stays open for the follow-up window. With no device reachable, the notify is pushed instead. `patch_call` rings the app surfaces only, never a voice device.
@@ -80,3 +107,4 @@ The device setting in Settings → Voice chooses how a device's conversation is 
 - The Manager: `06-threads-manager-speakers.md`
 - Audio relay over the host link: `03-wire-protocol.md`
 - Surface credentials and revocation: `10-auth.md`
+- Voiceprints over the host link: `03-wire-protocol.md` § Voiceprints

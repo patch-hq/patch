@@ -202,6 +202,7 @@ export * from './tool-runs.js';
 export * from './chat-move.js';
 export * from './sweep-prompt.js';
 export * from './link-summary-prompt.js';
+export * from './voice-profiles.js';
 export * from './question-expired-prompt.js';
 export * from './meeting-prompts.js';
 export * from './goal-prompt.js';

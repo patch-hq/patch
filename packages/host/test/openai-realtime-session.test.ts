@@ -16,6 +16,8 @@ import { DISPATCH_TOOL_NAME } from '../src/audio/gemini-live.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent } from '@patch/wire/audio';
 import { FakeTimeline } from './gemini-live-session.test.js';
+import type { VoiceProfile } from '@patch/wire';
+import { RecentVoices } from '../src/audio/speakerId.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -647,5 +649,193 @@ describe('one conversation with the chat', () => {
       tokens: { textIn: 110, audioIn: 170, cachedIn: 50, textOut: 0, audioOut: 35 },
       stt: null,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spec/16 § Speaking aloud, § Who is speaking — a voice device's session.
+// ---------------------------------------------------------------------------
+
+describe('a voice device session', () => {
+  const axis = (i: number): number[] => {
+    const v = new Array<number>(256).fill(0);
+    v[i] = 1;
+    return v;
+  };
+  const TOM: VoiceProfile = {
+    id: 'p-tom',
+    name: 'Tom',
+    access: 'owner',
+    context: 'Likes trains.',
+    voiceprint: axis(0),
+    samples: 3,
+  };
+  const ELEANOR: VoiceProfile = {
+    id: 'p-el',
+    name: 'Eleanor',
+    access: 'household',
+    context: 'Has a dentist on Fridays.',
+    voiceprint: axis(1),
+    samples: 3,
+  };
+  /** The fake speaker model: mic level 1000 is Tom, 2000 is Eleanor, anything else a stranger. */
+  const embed = vi.fn(async (pcm: Int16Array) =>
+    pcm[0] === 1000 ? axis(0) : pcm[0] === 2000 ? axis(1) : axis(7),
+  );
+
+  function deviceDeps(profiles: VoiceProfile[], extra: Partial<OpenAIRealtimeDeps> = {}) {
+    const recent = new RecentVoices();
+    const made = makeDeps({
+      device: { prompt: () => 'SPOKEN ALOUD RULES', profiles: () => profiles, embed, recent },
+      getChatContext: () => [{ role: 'user', text: 'my bank balance is private' }],
+      ...extra,
+    });
+    return { ...made, recent };
+  }
+
+  /** Two seconds of one voice, then the provider's VAD marks it. */
+  async function speak(
+    session: OpenAIRealtimeSession,
+    ws: FakeOpenAIWs,
+    level: number,
+    item: string,
+    startMs: number,
+  ): Promise<void> {
+    ws.serverSend({
+      type: 'input_audio_buffer.speech_started',
+      item_id: item,
+      audio_start_ms: startMs,
+    });
+    for (let i = 0; i < 100; i++) await session.onMicFrame(new Int16Array(320).fill(level));
+    ws.serverSend({
+      type: 'input_audio_buffer.speech_stopped',
+      item_id: item,
+      audio_end_ms: startMs + 2000,
+    });
+  }
+
+  const instructions = (ws: FakeOpenAIWs, i: number): string =>
+    (ws.ofType('session.update')[i] as { session: { instructions: string } }).session.instructions;
+  const toolNames = (ws: FakeOpenAIWs, i: number): string[] =>
+    (
+      ws.ofType('session.update')[i] as { session: { tools: Array<{ name: string }> } }
+    ).session.tools.map((t) => t.name);
+
+  test('is told it is heard out loud, and keeps each voice for enrolment', async () => {
+    const { deps, last, recent } = deviceDeps([]);
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    expect(instructions(ws, 0)).toContain('SPOKEN ALOUD RULES');
+    // No profiles: answered as before, by the provider's own VAD, history and all.
+    expect(instructions(ws, 0)).toContain('my bank balance is private');
+    await speak(session, ws, 3000, 'i1', 0);
+    await vi.waitFor(() => expect(recent.list()).toHaveLength(1));
+    expect(ws.ofType('response.create')).toHaveLength(0);
+    ws.serverSend({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'i1',
+      transcript: 'hello there',
+    });
+    expect(recent.list()[0]!.text).toBe('hello there');
+  });
+
+  test('with profiles, starts treating the speaker as a stranger: no history, no agent', async () => {
+    const { deps, last } = deviceDeps([TOM, ELEANOR]);
+    const ws = await open(
+      new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps),
+      last,
+    );
+    const first = instructions(ws, 0);
+    expect(first).toContain('someone you do not recognise');
+    expect(first).not.toContain('my bank balance is private');
+    expect(toolNames(ws, 0)).not.toContain(DISPATCH_TOOL_NAME);
+    const update = ws.ofType('session.update')[0] as {
+      session: { audio: { input: { turn_detection: { create_response: boolean } } } };
+    };
+    expect(update.session.audio.input.turn_detection.create_response).toBe(false);
+  });
+
+  test('recognises the owner before replying, and gives them the history and the agent', async () => {
+    const { deps, last, timeline } = deviceDeps([TOM, ELEANOR]);
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    await speak(session, ws, 1000, 'i1', 0);
+    await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(1));
+    // The speaker's session.update goes out before the reply is asked for.
+    const order = ws.sent.map((m) => m['type']).filter((t) => t !== 'input_audio_buffer.append');
+    expect(order.slice(-2)).toEqual(['session.update', 'response.create']);
+    expect(instructions(ws, 1)).toContain("Tom, the account's owner");
+    expect(instructions(ws, 1)).toContain('my bank balance is private');
+    expect(toolNames(ws, 1)).toContain(DISPATCH_TOOL_NAME);
+    expect(session.getSpeaker()?.name).toBe('Tom');
+    ws.serverSend({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'i1',
+      transcript: 'what is on today',
+    });
+    expect(timeline.log).toContain('user:chat-1:Tom: what is on today');
+  });
+
+  test("a household member's hand-off tells the agent who asked; the history stays out", async () => {
+    const { deps, last, submitUserTurn } = deviceDeps([TOM, ELEANOR]);
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    await speak(session, ws, 2000, 'i1', 0);
+    await vi.waitFor(() => expect(session.getSpeaker()?.name).toBe('Eleanor'));
+    expect(instructions(ws, 1)).not.toContain('my bank balance is private');
+    expect(toolNames(ws, 1)).toContain(DISPATCH_TOOL_NAME);
+    ws.serverSend({
+      type: 'response.function_call_arguments.done',
+      name: DISPATCH_TOOL_NAME,
+      call_id: 'c1',
+      arguments: JSON.stringify({ request: 'when is my dentist' }),
+    });
+    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalledTimes(1));
+    const message = (submitUserTurn.mock.calls[0]![0] as { message: string }).message;
+    expect(message).toMatch(
+      /^\[Spoken by Eleanor, a member of the household\. About Eleanor: Has a dentist/,
+    );
+    expect(message).toContain('when is my dentist');
+  });
+
+  test("a stranger's hand-off is refused in code and never reaches the agent", async () => {
+    const { deps, last, submitUserTurn } = deviceDeps([TOM]);
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    await speak(session, ws, 5000, 'i1', 0);
+    await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(1));
+    expect(session.getSpeaker()).toBeNull();
+    ws.serverSend({
+      type: 'response.function_call_arguments.done',
+      name: DISPATCH_TOOL_NAME,
+      call_id: 'c1',
+      arguments: JSON.stringify({ request: "what is Tom's bank balance" }),
+    });
+    await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(2));
+    expect(submitUserTurn).not.toHaveBeenCalled();
+    const out = ws.ofType('conversation.item.create').at(-1) as {
+      item: { type: string; output: string };
+    };
+    expect(out.item.type).toBe('function_call_output');
+    expect(out.item.output).toContain('Refused');
+  });
+
+  test('a word too short to tell keeps the speaker and still gets its reply', async () => {
+    const { deps, last } = deviceDeps([TOM]);
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    await speak(session, ws, 1000, 'i1', 0);
+    await vi.waitFor(() => expect(session.getSpeaker()?.name).toBe('Tom'));
+    embed.mockClear();
+    ws.serverSend({
+      type: 'input_audio_buffer.speech_started',
+      item_id: 'i2',
+      audio_start_ms: 3000,
+    });
+    for (let i = 0; i < 10; i++) await session.onMicFrame(new Int16Array(320).fill(5000));
+    ws.serverSend({ type: 'input_audio_buffer.speech_stopped', item_id: 'i2', audio_end_ms: 3200 });
+    await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(2));
+    expect(embed).not.toHaveBeenCalled();
+    expect(session.getSpeaker()?.name).toBe('Tom');
   });
 });

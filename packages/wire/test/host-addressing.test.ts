@@ -651,6 +651,7 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
         'patch.recurrence.translate.request',
         'patch.spawn',
         'patch.terminal.open',
+        'patch.voiceprint.request',
       ].sort(),
     );
   });

@@ -41,6 +41,7 @@ import type { HostComponent, HostComponentProgressEvent, WireEvent } from '@patc
 import { sidecarRuntimeReady } from './audio/sidecarRuntime.js';
 import { verifyArtifactSignature, type HostManifest } from './selfUpdate.js';
 import { VOICE_COMPONENT_ID, VOICE_SENTINEL } from './voiceComponent.js';
+import { SPEAKER_COMPONENT_ID, SPEAKER_MODEL_FILE } from './audio/speakerId.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -135,6 +136,22 @@ export const COMPONENT_SPECS: readonly ComponentSpec[] = [
         name: 'voices/af_heart.pt',
         url: `${HF}/hexgrad/Kokoro-82M/resolve/main/voices/af_heart.pt`,
         bytes: 523_425,
+      },
+    ],
+  },
+  {
+    // Recognising who is speaking on a voice device (spec/16 § Who is
+    // speaking): WeSpeaker's ResNet34 speaker model in sherpa-onnx's format.
+    // The code that runs it is in the voice component.
+    id: SPEAKER_COMPONENT_ID,
+    label: 'Speaker recognition (voice profiles)',
+    bytes: 26_530_550,
+    sentinel: SPEAKER_MODEL_FILE,
+    files: [
+      {
+        name: SPEAKER_MODEL_FILE,
+        url: `${HF}/csukuangfj/speaker-embedding-models/resolve/a8055d6daef723a6a4ecf4de233708575bf4994f/${SPEAKER_MODEL_FILE}`,
+        bytes: 26_530_550,
       },
     ],
   },

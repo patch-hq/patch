@@ -127,6 +127,8 @@ export type ElevenLabsFetch = (url: string, init: RequestInit) => Promise<Respon
 
 export interface ElevenLabsAgentDeps {
   logger: Logger;
+  /** A voice device's session: what it is told about speaking aloud (spec/16 § Speaking aloud). */
+  spokenAloud?: string;
   sendAudio: (ev: AudioEvent) => void;
   sendBinary: (pcm: Int16Array) => void;
   submitUserTurn: SessionDeps['submitUserTurn'];
@@ -389,7 +391,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
               (this.deps.manager
                 ? managerHostedInstruction(false)
                 : hostedVoiceInstruction(handoff)) +
-                (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : ''),
+                (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : '') +
+                (this.deps.spokenAloud ? `\n\n${this.deps.spokenAloud}` : ''),
               this.briefing,
             ),
             llm: this.deps.llm,
