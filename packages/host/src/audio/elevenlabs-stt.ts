@@ -35,6 +35,15 @@ export const SCRIBE_COMMIT_TIMEOUT_MS = 3000;
  */
 export const SCRIBE_SEND_RATE = 1.25;
 const SCRIBE_SEND_LEAD_MS = 1000;
+/**
+ * Scribe also rejects audio that arrives in many tiny messages ("audio data is
+ * being sent too frequently"). Mic frames are therefore merged and sent as
+ * one message per ~200 ms (never more than ~250 ms of audio in one message,
+ * except a backlog, which goes in larger pieces up to MAX).
+ */
+const SCRIBE_BATCH_MS = 200;
+const SCRIBE_BATCH_SAMPLES = (SAMPLE_RATE * SCRIBE_BATCH_MS) / 1000;
+const SCRIBE_BATCH_MAX_SAMPLES = SAMPLE_RATE;
 /** How long a commit waits for the paced backlog to be sent before giving up. */
 const SCRIBE_DRAIN_TIMEOUT_MS = 60_000;
 
@@ -80,6 +89,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
   private readonly queue: Int16Array[] = [];
   private sentSamples = 0;
   private paceStart = 0;
+  /** True while a commit waits for the queue, so a part-batch is sent at once. */
+  private flushing = false;
   private paceTimer: ReturnType<typeof setTimeout> | null = null;
   private drainWaiter: (() => void) | null = null;
   private readonly committed: string[] = [];
@@ -223,15 +234,19 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     if (!this.open || this.closed || this.failed) return;
     if (this.paceStart === 0) this.paceStart = Date.now();
     const budget = ((Date.now() - this.paceStart + SCRIBE_SEND_LEAD_MS) / 1000) * SAMPLE_RATE;
-    while (this.queue.length > 0) {
-      const next = this.queue[0]!;
-      if (this.sentSamples > 0 && this.sentSamples + next.length > budget * SCRIBE_SEND_RATE) break;
-      this.queue.shift();
-      this.sentSamples += next.length;
+    for (;;) {
+      const queued = this.queuedSamples();
+      if (queued === 0) break;
+      // Wait for a full batch, unless a commit is waiting on the drain.
+      if (queued < SCRIBE_BATCH_SAMPLES && !this.flushing) break;
+      const take = Math.min(queued, SCRIBE_BATCH_MAX_SAMPLES);
+      if (this.sentSamples > 0 && this.sentSamples + take > budget * SCRIBE_SEND_RATE) break;
+      const batch = this.takeSamples(take);
+      this.sentSamples += batch.length;
       this.ws!.send(
         JSON.stringify({
           message_type: 'input_audio_chunk',
-          audio_base_64: Buffer.from(next.buffer, next.byteOffset, next.byteLength).toString(
+          audio_base_64: Buffer.from(batch.buffer, batch.byteOffset, batch.byteLength).toString(
             'base64',
           ),
           commit: false,
@@ -240,10 +255,43 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
       );
     }
     if (this.queue.length > 0) {
-      this.paceTimer = setTimeout(() => this.drain(), 50);
+      // Either paced (retry soon) or a part-batch (send it when the batch window ends).
+      const wait = this.queuedSamples() >= SCRIBE_BATCH_SAMPLES ? 50 : SCRIBE_BATCH_MS;
+      this.paceTimer = setTimeout(() => {
+        this.paceTimer = null;
+        this.flushing = true;
+        this.drain();
+        this.flushing = this.drainWaiter !== null;
+      }, wait);
     } else {
       this.drainWaiter?.();
     }
+  }
+
+  private queuedSamples(): number {
+    let n = 0;
+    for (const q of this.queue) n += q.length;
+    return n;
+  }
+
+  /** Removes `n` samples from the front of the queue as one array. */
+  private takeSamples(n: number): Int16Array {
+    const out = new Int16Array(n);
+    let at = 0;
+    while (at < n) {
+      const head = this.queue[0]!;
+      const want = n - at;
+      if (head.length <= want) {
+        out.set(head, at);
+        at += head.length;
+        this.queue.shift();
+      } else {
+        out.set(head.subarray(0, want), at);
+        this.queue[0] = head.subarray(want);
+        at = n;
+      }
+    }
+    return out;
   }
 
   /**
@@ -266,7 +314,10 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     }
     // Audio still being paced out must reach Scribe before the commit does.
     if (this.queue.length > 0) {
+      this.flushing = true;
+      this.drain();
       await new Promise<void>((resolve) => {
+        if (this.queue.length === 0) return resolve();
         const timer = setTimeout(done, SCRIBE_DRAIN_TIMEOUT_MS);
         function done(): void {
           clearTimeout(timer);
@@ -275,6 +326,7 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
         this.drainWaiter = done;
       });
       this.drainWaiter = null;
+      this.flushing = false;
       if (this.closed || this.failed) return;
       if (this.queue.length > 0) {
         this.fail('the audio backlog did not reach ElevenLabs in time');
@@ -334,6 +386,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     this.commitWaiter?.();
     this.openWaiter?.();
     this.drainWaiter?.();
+    // A failed or restarted session must not leave its socket open.
+    this.ws?.close();
     this.deps.logger.error({ err: message }, 'scribe-realtime');
     this.handlers.onError(message, restartable);
   }
