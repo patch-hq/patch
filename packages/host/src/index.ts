@@ -6085,6 +6085,11 @@ async function startHost(
       // first message and every delta after it. Armed by that message only: the chat
       // may be running some other turn right now, with this one queued behind it.
       const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId, onAccepted);
+      // The promise is awaited only after `sendInput` returns. A newer turn can supersede
+      // (reject) it before then, with nothing attached yet: Node would treat that as an
+      // unhandled rejection and exit the whole daemon. Mark it observed here; the real
+      // handling is still the `await replyPromise` below, which sees the same rejection.
+      replyPromise.catch(() => {});
       // Mark a hand-off in the chat, so a spoken "I've passed that on" can be checked against it.
       if (handoff === true) {
         chatVoice.handoffSent({ sessionId: localIdSuffix, chatId, request: message });
