@@ -118,8 +118,6 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
-    reseedRunOptions: null,
-    appendRunOptions: null,
     signedOutMessage: (_hostId, reason) => reason,
   },
 };

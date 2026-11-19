@@ -12,7 +12,14 @@ import type { DurableTurnRequest } from './durableTurn.js';
 import { keepRunnerLog, retireTurn, turnDirFor } from './durableTurn.js';
 import type { SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
 import { CodexHistory } from './codexHistory.js';
-import { OpenAICompatBackend } from './openaiCompatBackend.js';
+import { DurableCodexProcess } from './codexDurable.js';
+import type { LocalAgentFailure, LocalAgentStart } from './localAgent.js';
+import {
+  OpenAICompatBackend,
+  OpenAICompatError,
+  openaiCompatPermission,
+} from './openaiCompatBackend.js';
+import { RUNNER_OUT } from './turnRunner.js';
 
 const LOCAL = providerDescriptor('local');
 const LOCAL_MODEL_PREFIX = LOCAL.modelPrefix!;
@@ -126,12 +133,6 @@ export class LocalBackend implements SdkBackend {
     });
   }
 
-  private seed(opts: SdkRunOptions): Message[] | undefined {
-    return opts.localReseed
-      ? (toChatCompletionMessages(opts.localReseed.events) as Message[])
-      : undefined;
-  }
-
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     if (opts.fork) throw new Error('Branching a chat is not supported on local models yet');
     const chatId = opts.chatId ?? 'local';
@@ -226,7 +227,6 @@ export class LocalBackend implements SdkBackend {
           sessionPrefix: prefix,
           ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
           ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
-          ...(opts.resumeSessionId ? {} : { seed: this.seed(opts) }),
           ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
           ...(opts.disabledTools ? { disabledTools: opts.disabledTools } : {}),
         };
