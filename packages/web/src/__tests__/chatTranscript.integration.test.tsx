@@ -268,7 +268,6 @@ function stubRecording(): VoiceRecording {
   return {
     onLevel: () => {},
     onPcm: () => {},
-    onSilent: () => {},
     stop: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/wav' }),
     cancel: () => {},
   };

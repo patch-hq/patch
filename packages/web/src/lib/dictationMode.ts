@@ -154,7 +154,6 @@ export function startDictationMode(
       return;
     }
     rec = r;
-    r.onSilent((reason) => cb.onError(`voice: ${reason}. Check the mic and try again.`));
     r.onLevel((level) => {
       if (!stopped) cb.onLevel?.(level);
     });

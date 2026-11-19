@@ -36,12 +36,6 @@ export interface VoiceRecording {
    * microphone, which is the one thing that could break the recording itself.
    */
   onPcm(cb: (pcm: Int16Array) => void): void;
-  /**
-   * Register a callback for a mic that is delivering nothing: the OS or
-   * browser muted the track, or it ended. Fires once. A quiet stretch is not
-   * a fault and is never reported.
-   */
-  onSilent(cb: (reason: string) => void): void;
   /** Stop capture and return the recorded clip as a WAV blob. */
   stop(): Promise<Blob>;
   /** Discard the recording without producing a clip. */
@@ -79,20 +73,7 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
   const chunks: Float32Array[] = [];
   let levelCb: ((level: number) => void) | null = null;
   let pcmCb: ((pcm: Int16Array) => void) | null = null;
-  let silentCb: ((reason: string) => void) | null = null;
   let stopped = false;
-  let silentReported = false;
-  function reportSilent(reason: string): void {
-    if (stopped || silentReported) return;
-    silentReported = true;
-    silentCb?.(reason);
-  }
-  const track = stream.getAudioTracks()[0];
-  if (track) {
-    track.addEventListener('mute', () => reportSilent('the microphone was muted by the device'));
-    track.addEventListener('ended', () => reportSilent('the microphone stopped'));
-    if (track.muted) reportSilent('the microphone is muted by the device');
-  }
   const downsample = createPcm16Downsampler(audioCtx.sampleRate);
 
   processor.onaudioprocess = (e: AudioProcessingEvent): void => {
@@ -143,9 +124,6 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
     },
     onPcm(cb: (pcm: Int16Array) => void): void {
       pcmCb = cb;
-    },
-    onSilent(cb: (reason: string) => void): void {
-      silentCb = cb;
     },
     async stop(): Promise<Blob> {
       const rate = audioCtx.sampleRate;
