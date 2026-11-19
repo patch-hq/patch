@@ -180,6 +180,8 @@ import {
   Square,
   Pause,
   Play,
+  Bot,
+  MessageSquareShare,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
@@ -5456,16 +5458,18 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
           ? btn('resume', 'Resume', <Play size={14} aria-hidden />)
           : btn('pause', 'Pause', <Pause size={14} aria-hidden />)}
         {btn('stop', 'Stop', <Square size={14} aria-hidden />)}
-        {btn('spin-off', 'Open as its own chat', <ExternalLink size={14} aria-hidden />)}
+        {btn('spin-off', 'Open as its own chat', <MessageSquareShare size={14} aria-hidden />)}
       </span>
     );
   };
-  const icon = (d: DelegateUpdateInfo): JSX.Element =>
-    d.paused ? (
-      <Pause size={14} aria-hidden />
-    ) : (
-      <LoaderCircle className="status-spinner" size={14} aria-hidden />
-    );
+  // Glowing orange agent icon; the glow stops while paused.
+  const icon = (d: DelegateUpdateInfo): JSX.Element => (
+    <Bot
+      className={`agent-running-bar-icon${d.paused ? ' agent-running-bar-icon-paused' : ''}`}
+      size={16}
+      aria-hidden
+    />
+  );
 
   const [firstId, first] = live[0] as [string, DelegateUpdateInfo];
   const paused = live.filter(([, d]) => d.paused).length;
@@ -5477,8 +5481,17 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
   return (
     <div className="agent-running-bar-wrap" data-testid="agent-running-bar-wrap">
       <div className="agent-running-bar" data-testid="agent-running-bar" role="status">
+        {open && live.length > 1
+          ? live.map(([id, d]) => (
+              <div className="agent-running-bar-row" key={id} data-testid="agent-running-row">
+                {icon(d)}
+                <span className="agent-running-bar-text">{d.label}</span>
+                {controls(id, d)}
+              </div>
+            ))
+          : null}
         <div className="agent-running-bar-row">
-          {icon(first)}
+          {open && live.length > 1 ? null : icon(first)}
           <span className="agent-running-bar-text">{text}</span>
           {live.length === 1 ? (
             controls(firstId, first)
@@ -5491,19 +5504,10 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
               aria-expanded={open}
               onClick={() => setOpen((v) => !v)}
             >
-              <ChevronDown size={14} aria-hidden className={open ? 'agent-chevron-open' : ''} />
+              <ChevronDown size={14} aria-hidden className={open ? '' : 'agent-chevron-open'} />
             </button>
           )}
         </div>
-        {open && live.length > 1
-          ? live.map(([id, d]) => (
-              <div className="agent-running-bar-row" key={id} data-testid="agent-running-row">
-                {icon(d)}
-                <span className="agent-running-bar-text">{d.label}</span>
-                {controls(id, d)}
-              </div>
-            ))
-          : null}
         {error ? (
           <div className="agent-running-bar-error" data-testid="agent-running-bar-error">
             {error}
