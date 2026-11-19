@@ -331,6 +331,11 @@ export function providerForSessionId(sessionId: string | null | undefined): Prov
   return DEFAULT_PROVIDER_ID;
 }
 
+/** A session id minted by the retired local-model loop; its history is read-only. */
+export function isRetiredLocalSessionId(sessionId: string | null | undefined): boolean {
+  return !!sessionId && sessionId.startsWith('local-');
+}
+
 /** The provider whose credentials are keyed by this backend id. */
 export function providerForBackendId(backendId: string): ProviderId {
   const p = (PROVIDERS as readonly ProviderDescriptor[]).find((d) => d.backendId === backendId);
