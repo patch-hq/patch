@@ -6,7 +6,7 @@
 import { markDictatedSend } from '../lib/dictatedSends.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { api, ApiError, type ChatSummaryRow } from '../api/rest.js';
@@ -705,6 +705,140 @@ describe('ChatRoute regression', () => {
       stream.dispatchEvent(new Event('scroll'));
       await streamMore('c-scroll-back-down', 3, 18000);
       expect(stream.scrollTop).toBe(18000);
+    });
+  });
+
+  describe('messages exchanged with other agents', () => {
+    function nameChat(chatId: string, name: string): void {
+      useChatStore.setState((s) => ({
+        chats: { ...s.chats, [chatId]: { ...s.chats['c-agents']!, chatId, name } },
+      }));
+    }
+    // The chat under test, or a stand-in page for any other chat a link opens.
+    function ChatOrOther() {
+      const { chatId } = useParams();
+      return chatId === 'c-agents' ? (
+        <ChatRoute ws={null} />
+      ) : (
+        <div data-testid="other-chat-page" />
+      );
+    }
+    function renderWithChatPage(chatId: string) {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
+            <Routes>
+              <Route path="/chats/:chatId" element={<ChatOrOther />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    }
+
+    it('draws a patch_send_to as one "Sent to" card that opens the target chat', () => {
+      seedChat('c-agents', [
+        {
+          seq: 1,
+          kind: 'tool_call',
+          tool: 'mcp__patch__patch_send_to',
+          callId: 'k1',
+          toolArgs: { chatId: 'c-target', message: 'Please **rebase** onto main' },
+          at: 0,
+        },
+        {
+          seq: 2,
+          kind: 'tool_result',
+          callId: 'k1',
+          tool: 'mcp__patch__patch_send_to',
+          toolResult: { ok: true, queued: true },
+          at: 1,
+        },
+      ]);
+      nameChat('c-target', 'Release notes');
+      renderWithChatPage('c-agents');
+      const card = screen.getByTestId('agent-msg-sent');
+      expect(card.textContent).toContain('Sent to');
+      expect(card.textContent).toContain('Release notes');
+      expect(card.querySelector('strong')?.textContent).toBe('rebase');
+      // One card: no tool row, no run, no separate result row.
+      expect(screen.queryByTestId('tool-call')).toBeNull();
+      expect(screen.queryByTestId('tool-group')).toBeNull();
+      expect(screen.queryByTestId('tool-result')).toBeNull();
+      expect(document.body.textContent).not.toContain('patch send to');
+      fireEvent.click(screen.getByTestId('agent-msg-link'));
+      expect(screen.getByTestId('other-chat-page')).toBeInTheDocument();
+    });
+
+    it('says when a send was refused', () => {
+      seedChat('c-agents', [
+        {
+          seq: 1,
+          kind: 'tool_call',
+          tool: 'mcp__patch__patch_send_to',
+          callId: 'k1',
+          toolArgs: { chatId: 'c-gone', message: 'hello' },
+          at: 0,
+        },
+        {
+          seq: 2,
+          kind: 'tool_result',
+          callId: 'k1',
+          tool: 'mcp__patch__patch_send_to',
+          toolResult: 'chat not found',
+          toolIsError: true,
+          at: 1,
+        },
+      ]);
+      renderWithChatPage('c-agents');
+      expect(screen.getByTestId('agent-msg-sent').textContent).toContain('another chat');
+      expect(screen.getByTestId('agent-msg-status').textContent).toBe('Not sent');
+    });
+
+    it('draws a reply another chat sent here as a "From" card that opens it', () => {
+      seedChat('c-agents', [
+        {
+          seq: 1,
+          kind: 'message',
+          role: 'user',
+          origin: 'machine',
+          content: '[from Old name; chat c-sender] Rebased, tests green.',
+          at: 0,
+        },
+      ]);
+      renderWithChatPage('c-agents');
+      const card = screen.getByTestId('agent-msg-from');
+      // The name it carried when the chat is not known here...
+      expect(card.textContent).toContain('Old name');
+      expect(card.textContent).toContain('Rebased, tests green.');
+      expect(card.textContent).not.toContain('[from');
+      expect(card.getAttribute('data-chat-id')).toBe('c-sender');
+      cleanup();
+      // ...and its current name when it is.
+      nameChat('c-sender', 'Release notes');
+      renderWithChatPage('c-agents');
+      expect(screen.getByTestId('agent-msg-from').textContent).toContain('Release notes');
+      fireEvent.click(screen.getByTestId('agent-msg-link'));
+      expect(screen.getByTestId('other-chat-page')).toBeInTheDocument();
+    });
+
+    it('draws a side thread\'s send-back as a "From" card', () => {
+      seedChat('c-agents', [
+        {
+          seq: 1,
+          kind: 'message',
+          role: 'system',
+          content: 'From Spike: The cache is the problem.',
+          branchSendBack: { fromBranchId: 'b1', fromBranchName: 'Spike' },
+          at: 0,
+        },
+      ]);
+      renderWithChatPage('c-agents');
+      const card = screen.getByTestId('branch-send-back');
+      expect(card.textContent).toContain('From');
+      expect(card.textContent).toContain('Spike');
+      expect(card.textContent).toContain('The cache is the problem.');
+      expect(card.textContent).not.toContain('Spike:');
     });
   });
 
@@ -3899,9 +4033,10 @@ describe('ChatRoute regression', () => {
         { seq: 1, kind: 'message', role: 'assistant', content: 'On it', voice: true, at: 1 },
       ]);
       renderChat('c-handoff-wait');
-      expect(screen.getByTestId('voice-handoff-pending').textContent).toContain(
-        'Asking the agent…',
-      );
+      const pending = screen.getByTestId('voice-handoff-pending');
+      expect(pending.textContent).toContain('Sent to');
+      expect(pending.textContent).toContain('add milk');
+      expect(screen.getByTestId('agent-msg-status').textContent).toBe('Waiting');
       cleanup();
       seedChat('c-handoff-done', [
         handoff,
@@ -3917,9 +4052,11 @@ describe('ChatRoute regression', () => {
       ]);
       renderChat('c-handoff-done');
       expect(screen.queryByTestId('voice-handoff-pending')).toBeNull();
-      expect(screen.getByTestId('voice-handoff').textContent).toContain(
-        'Asked the agent: add milk',
-      );
+      expect(screen.getByTestId('voice-handoff').textContent).toContain('add milk');
+      expect(screen.queryByTestId('agent-msg-status')).toBeNull();
+      const answer = screen.getByTestId('voice-handoff-answer');
+      expect(answer.textContent).toContain('From');
+      expect(answer.textContent).toContain('Done');
     });
 
     it('renders an impossible outcome labelled distinctly from met', () => {

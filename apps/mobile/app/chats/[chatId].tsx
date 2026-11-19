@@ -108,10 +108,14 @@ import {
 import {
   backRecord,
   parseAgentReturn,
+  parseChatSend,
+  sendToCall,
   todoCardItems,
   type AgentReturn,
+  type ChatSend,
   type TodoCardItem,
 } from '@patch/wire';
+import { AgentMessageCard, useChatName } from '../../src/components/AgentMessageCard';
 import { SnoozeDivider } from '../../src/components/SnoozeDivider';
 import { editQueuedMessage, promoteMessage, unqueueMessage } from '../../src/lib/queuedActions';
 import { getComposerDraft, setComposerDraft } from '../../src/lib/composerDraft';
@@ -941,6 +945,7 @@ function ChatDetailBody(): React.ReactElement {
             chatId={chatId}
             result={item.result}
             handoffPending={item.handoffPending === true}
+            handoffAnswer={item.handoffAnswer === true}
           />
         );
       if (item.key !== highlightKey) return cell;
@@ -1824,6 +1829,17 @@ function ToolCallItem({
       ? parseAskHuman(entry.toolArgs)
       : null;
   if (askHuman) return <AskHumanCard task={askHuman.task} why={askHuman.why} />;
+  // A message to another chat is one "Sent to <chat>" card (mirrors web).
+  const sendTo = sendToCall(entry.tool, entry.toolArgs);
+  if (sendTo) {
+    return (
+      <SentToCard
+        chatId={sendTo.chatId}
+        message={sendTo.message}
+        failed={result?.toolIsError === true}
+      />
+    );
+  }
   // A `Skill` call names the skill and opens its SKILL.md on tap (mirrors web).
   const skillName =
     entry.tool === 'Skill' && entry.toolArgs && typeof entry.toolArgs === 'object'
@@ -2921,6 +2937,34 @@ function AgentReturnItem({ agentReturn }: { agentReturn: AgentReturn }): React.R
   );
 }
 
+/** A `patch_send_to` this chat made: "Sent to <chat>" with the message. */
+function SentToCard({
+  chatId,
+  message,
+  failed,
+}: {
+  chatId: string;
+  message: string;
+  failed: boolean;
+}): React.ReactElement {
+  const name = useChatName(chatId);
+  return (
+    <AgentMessageCard
+      direction="sent"
+      name={name}
+      chatId={chatId}
+      text={message}
+      {...(failed ? { status: 'Not sent' } : {})}
+    />
+  );
+}
+
+/** Another chat's `patch_send_to` that landed here, tagged with its sender. */
+function FromChatCard({ send }: { send: ChatSend }): React.ReactElement {
+  const name = useChatName(send.chatId, send.title);
+  return <AgentMessageCard direction="from" name={name} chatId={send.chatId} text={send.message} />;
+}
+
 /** The line the host writes where a restart cut a turn off (spec/12 § Continue). */
 const INTERRUPTION_LINE = 'Turn interrupted by restart';
 
@@ -2991,6 +3035,7 @@ const TimelineItem = React.memo(function TimelineItem({
   chatId,
   result,
   handoffPending,
+  handoffAnswer,
   queuePos,
   release,
   queuedDraft,
@@ -3003,6 +3048,8 @@ const TimelineItem = React.memo(function TimelineItem({
   result?: ChatEventEntry;
   /** spec/07 — a voice hand-off the agent has not answered yet. */
   handoffPending?: boolean;
+  /** spec/07 — the agent's answer to a voice hand-off. */
+  handoffAnswer?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -3044,15 +3091,44 @@ const TimelineItem = React.memo(function TimelineItem({
   if (entry.kind === 'message' && (entry.role ?? 'assistant') === 'user') {
     const agentReturn = parseAgentReturn(entry.content ?? '');
     if (agentReturn) return <AgentReturnItem agentReturn={agentReturn} />;
+    // Another chat's `patch_send_to` landing here: "From <chat>", opening it.
+    const send = parseChatSend(entry.content ?? '');
+    if (send) return <FromChatCard send={send} />;
   }
   if (entry.kind === 'message' && entry.voiceHandoff) {
     return (
-      <Text
+      <AgentMessageCard
+        direction="sent"
+        name="agent"
+        text={(entry.content ?? '').replace(/^\[voice[^\]]*\]\s*/, '')}
         testID={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
-        style={{ fontSize: textMin, color: colors.ink3, marginBottom: space.sm }}
-      >
-        {`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
-      </Text>
+        {...(handoffPending ? { status: 'Waiting' } : {})}
+      />
+    );
+  }
+  // The agent's answer to a hand-off: the matching "From" card.
+  if (entry.kind === 'message' && entry.role === 'assistant' && handoffAnswer) {
+    return (
+      <AgentMessageCard
+        direction="from"
+        name="agent"
+        text={entry.content ?? ''}
+        testID="voice-handoff-answer"
+      />
+    );
+  }
+  // spec/04 § Send back — a side thread's conclusion arriving on this track.
+  if (entry.kind === 'message' && entry.role === 'system' && entry.branchSendBack) {
+    const from = entry.branchSendBack.fromBranchName ?? 'a side thread';
+    const prefix = `From ${from}: `;
+    const body = entry.content ?? '';
+    return (
+      <AgentMessageCard
+        direction="from"
+        name={from}
+        text={body.startsWith(prefix) ? body.slice(prefix.length) : body}
+        testID="branch-send-back"
+      />
     );
   }
   if (entry.kind === 'message' && entry.role === 'system' && entry.content === INTERRUPTION_LINE) {

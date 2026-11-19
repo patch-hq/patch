@@ -126,6 +126,8 @@ export interface ChatEventEntry {
    * voice handed to the agent, not the user's words. Drawn as a muted line.
    */
   voiceHandoff?: boolean;
+  /** spec/04 § Send back — the row a side thread posted into this track (`ChatMessageEvent.branchSendBack`). */
+  branchSendBack?: { fromBranchId: string; fromBranchName: string | null };
   /**
    * Idempotency key of an OUTGOING user turn (spec/03). Set on the optimistic
    * echo so the delivery state machine (below) can key its flags to it.
@@ -1285,6 +1287,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...(voice ? { voice: true } : {}),
             ...(handoff ? { voiceHandoff: true } : {}),
             ...(event.accountSwitch ? { accountSwitch: true } : {}),
+            ...(event.branchSendBack ? { branchSendBack: event.branchSendBack } : {}),
             ...(event.systemContext && event.systemContext.length > 0
               ? { systemContext: event.systemContext }
               : {}),

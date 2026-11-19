@@ -161,6 +161,7 @@ export interface VersionReport {
 }
 
 export * from './agent-return.js';
+export * from './chat-send.js';
 export * from './events.js';
 export * from './reminder-cadence.js';
 export * from './meeting.js';

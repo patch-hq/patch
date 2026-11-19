@@ -30,6 +30,7 @@ import {
   BACKEND_IDS,
   MeetingAgentNotesEdit,
   ReminderEvery,
+  formatChatSend,
   isReservedSpecialThread,
 } from '@patch/wire';
 import type {
@@ -2142,7 +2143,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // the main sidebar. Only a caller the user can already see reveals its target.
     // callerChatId is always present (required above); an unknown/stale id
     // still reveals, same safe default as before.
-    const revealTarget = opts.daemon!.chatState.get(callerChatId)?.hidden !== true;
+    const callerState = opts.daemon!.chatState.get(callerChatId);
+    const revealTarget = callerState?.hidden !== true;
+    // What lands in the target names where it came from (`@patch/wire`
+    // chat-send): the recipient's agent knows who to answer, and surfaces draw
+    // it as a "From <chat>" card. The audit record and dedupe keep the bare text.
+    const delivered = formatChatSend(callerChatId, callerState?.name ?? null, message);
     const localId = parsed.data.localId ?? randomUUID();
     const dedupeKey = JSON.stringify([
       callerChatId,
@@ -2199,7 +2205,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // wait out the target's.
       await opts.daemon!.submitInput({
         chatId,
-        message,
+        message: delivered,
         localId,
         ...(voicePrefix !== undefined ? { voicePrefix } : {}),
         // spec/09 § Whose turn it was — the destination of a `send_to` is an
@@ -2262,7 +2268,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           await opts.sendToRemoteChat({
             sourceChatId: callerChatId,
             targetChatId: chatId,
-            message,
+            message: delivered,
             revealTarget,
             ...(voicePrefix !== undefined ? { voicePrefix } : {}),
           });

@@ -381,3 +381,49 @@ describe('toolCallSummary — background agents name themselves', () => {
     ).toBe('Build A: server record complete');
   });
 });
+
+describe('agent message rows', () => {
+  const msg = (seq: number, role: 'user' | 'assistant', extra: Partial<ChatEventEntry> = {}) =>
+    ({ seq, kind: 'message', role, content: `m${seq}`, at: seq, ...extra }) as ChatEventEntry;
+
+  it("marks the agent's first own reply after a hand-off as its answer", () => {
+    const rows = groupToolRuns([
+      msg(1, 'user', { voiceHandoff: true }),
+      msg(2, 'assistant', { voice: true }),
+      msg(3, 'assistant'),
+      msg(4, 'assistant'),
+    ]);
+    expect(rows.map((r) => (r.kind === 'entry' ? r.handoffAnswer === true : null))).toEqual([
+      false,
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  it('keeps a patch_send_to and its result on one row, out of any run', () => {
+    const rows = groupToolRuns([
+      { seq: 1, kind: 'tool_call', tool: 'Bash', callId: 'a', toolArgs: { command: 'ls' }, at: 1 },
+      {
+        seq: 2,
+        kind: 'tool_call',
+        tool: 'mcp__patch__patch_send_to',
+        callId: 'b',
+        toolArgs: { chatId: 'c2', message: 'hi' },
+        at: 2,
+      },
+      { seq: 3, kind: 'tool_result', tool: 'Bash', callId: 'a', toolResult: '', at: 3 },
+      {
+        seq: 4,
+        kind: 'tool_result',
+        tool: 'mcp__patch__patch_send_to',
+        callId: 'b',
+        toolResult: {},
+        at: 4,
+      },
+    ] as ChatEventEntry[]);
+    const send = rows.find((r) => r.kind === 'entry' && r.entry.callId === 'b');
+    expect(send && send.kind === 'entry' ? send.result?.seq : null).toBe(4);
+    expect(rows.filter((r) => r.kind === 'entry' && r.entry.seq === 4)).toHaveLength(0);
+  });
+});

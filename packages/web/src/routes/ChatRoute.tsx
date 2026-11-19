@@ -48,9 +48,18 @@ import {
   type SystemContextItem,
 } from '@patch/wire';
 import { systemMessageSummary } from '../lib/systemMessageSummary';
-import { backRecord, parseAgentReturn, parseAskHuman, type AgentReturn } from '@patch/wire';
 import { harnessForModel, isReservedSpecialThread } from '@patch/wire';
 import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
+import {
+  backRecord,
+  parseAgentReturn,
+  parseAskHuman,
+  parseChatSend,
+  sendToCall,
+  type AgentReturn,
+  type ChatSend,
+} from '@patch/wire';
+import { AgentMessageCard, useChatName } from '../components/AgentMessageCard.js';
 import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import { ContinuationDivider } from '../components/ContinuationDivider.js';
 import type { WireEvent } from '@patch/wire';
@@ -2893,13 +2902,41 @@ const TimelineEntry = memo(function TimelineEntry({
   // asked the agent. Not the user's words (those are their own bubble above).
   if (entry.kind === 'message' && entry.role === 'user' && entry.voiceHandoff) {
     return (
-      <ToolDisclosure
+      <AgentMessageCard
+        direction="sent"
+        name="agent"
+        text={stripVoiceTag(entry.content ?? '')}
         testid={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
-        variant="trigger"
-        summary={`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
-        detail={<code>{entry.content ?? ''}</code>}
+        {...(handoffPending ? { status: 'Waiting' } : {})}
       />
     );
+  }
+  // spec/07 § The fast voice and the chat's agent — the agent's answer to a
+  // hand-off is what came back from the exchange: the matching "From" card.
+  if (entry.kind === 'message' && entry.role === 'assistant' && entry.handoffAnswer) {
+    return (
+      <AgentMessageCard
+        direction="from"
+        name="agent"
+        text={entry.content ?? ''}
+        testid="voice-handoff-answer"
+        {...(entry.streaming ? { status: 'Replying' } : {})}
+      />
+    );
+  }
+  // Another chat's `patch_send_to` landing here: "From <chat>", opening it.
+  if (entry.kind === 'message' && entry.role === 'user') {
+    const send = parseChatSend(entry.content ?? '');
+    if (send) return <FromChatCard send={send} />;
+  }
+  // spec/04 § Send back — a side thread's conclusion arriving on this track.
+  if (entry.kind === 'message' && entry.role === 'system' && entry.branchSendBack) {
+    const from = entry.branchSendBack.fromBranchName ?? 'a side thread';
+    const prefix = `From ${from}: `;
+    const text = (entry.content ?? '').startsWith(prefix)
+      ? (entry.content ?? '').slice(prefix.length)
+      : (entry.content ?? '');
+    return <AgentMessageCard direction="from" name={from} text={text} testid="branch-send-back" />;
   }
   // A background `patch_agent` finishing: the host delivers its reply as a
   // machine turn, but nobody typed it, so it is a quiet system row (queued or
@@ -4340,6 +4377,19 @@ function ToolCall({
       : null;
   if (askHuman)
     return <AskHumanCard task={askHuman.task} {...(askHuman.why ? { why: askHuman.why } : {})} />;
+
+  // A message to another chat is one "Sent to <chat>" card: the text that
+  // went, and the chat's name opening it. A refused send says so on the card.
+  const sendTo = sendToCall(entry.tool, entry.toolArgs);
+  if (sendTo) {
+    return (
+      <SentToCard
+        chatId={sendTo.chatId}
+        message={sendTo.message}
+        {...(result?.toolIsError ? { failed: true } : {})}
+      />
+    );
+  }
 
   if (entry.tool && toolLabel(entry.tool) === 'patch_notify') {
     const message = typeof args['message'] === 'string' ? args['message'] : '';
@@ -6004,6 +6054,7 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
       toolLabel(entry.tool) === 'patch_notify' ||
       toolLabel(entry.tool) === 'patch_agent' ||
       toolLabel(entry.tool) === 'patch_delegate' ||
+      sendToCall(entry.tool, entry.toolArgs) !== null ||
       (toolLabel(entry.tool) === 'patch_ask_human' && parseAskHuman(entry.toolArgs) !== null) ||
       (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null))
   );
@@ -6499,6 +6550,39 @@ function AgentReturnLine({ agentReturn }: { agentReturn: AgentReturn }): JSX.Ele
       />
     </div>
   );
+}
+
+// A `patch_send_to` this chat made: "Sent to <chat>" with the message.
+function SentToCard({
+  chatId,
+  message,
+  failed,
+}: {
+  chatId: string;
+  message: string;
+  failed?: boolean;
+}): JSX.Element {
+  const name = useChatName(chatId);
+  return (
+    <AgentMessageCard
+      direction="sent"
+      name={name}
+      chatId={chatId}
+      text={message}
+      {...(failed ? { status: 'Not sent' } : {})}
+    />
+  );
+}
+
+// Another chat's `patch_send_to` that landed here, tagged with its sender.
+function FromChatCard({ send }: { send: ChatSend }): JSX.Element {
+  const name = useChatName(send.chatId, send.title);
+  return <AgentMessageCard direction="from" name={name} chatId={send.chatId} text={send.message} />;
+}
+
+/** A voice turn's `[voice … • …] ` tag is plumbing, not part of what was said. */
+function stripVoiceTag(content: string): string {
+  return content.replace(/^\[voice[^\]]*\]\s*/, '');
 }
 
 // spec/20-hooks.md § On the agent's response, spec/14 § Agent-response

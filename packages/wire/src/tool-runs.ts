@@ -6,6 +6,7 @@
 // grouped, and its summary would have nowhere to go.
 
 import { parseAskHuman } from './action-text.js';
+import { sendToCall } from './chat-send.js';
 
 /**
  * Can this tool call fold into a run? A file edit keeps its own row for its
@@ -39,6 +40,9 @@ export function isGroupableToolCall(tool: string | undefined, args: unknown): bo
   ) {
     return false;
   }
+  // A message to another chat is drawn as a "Sent to" card: it is half of a
+  // conversation the user follows, not plumbing to fold away.
+  if (sendToCall(tool, args) !== null) return false;
   // The agent's plan is a checklist card in the transcript, not a command.
   if (tool === 'TodoWrite') return false;
   return !isEditToolCall(tool, args);

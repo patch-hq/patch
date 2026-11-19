@@ -20,6 +20,7 @@ export const ArchiveRestore = icon('ArchiveRestore');
 export const ArrowLeft = icon('ArrowLeft');
 export const ArrowDown = icon('ArrowDown');
 export const ArrowUp = icon('ArrowUp');
+export const ArrowUpRight = icon('ArrowUpRight');
 export const Camera = icon('Camera');
 export const Check = icon('Check');
 export const ChevronDown = icon('ChevronDown');

@@ -1414,8 +1414,10 @@ describe('voice call lines', () => {
     });
     const r = renderRN(<ChatDetailScreen />);
     // Unanswered: the row says the agent is being asked.
-    expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(1);
-    expect(hasText(r.root, 'Asking the agent… Add milk to the shopping list')).toBe(true);
+    const pending = findHost(r.root, byTestId('voice-handoff-pending'));
+    expect(hasText(pending, 'Sent to')).toBe(true);
+    expect(hasText(pending, 'Add milk to the shopping list')).toBe(true);
+    expect(hasText(pending, 'Waiting')).toBe(true);
     expect(findAllHost(r.root, byTestId('message-user'))).toHaveLength(0);
   });
 
@@ -1432,7 +1434,12 @@ describe('voice call lines', () => {
     const r = renderRN(<ChatDetailScreen />);
     expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
     expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(0);
-    expect(hasText(r.root, 'Asked the agent: Add milk to the shopping list')).toBe(true);
+    expect(findAllHost(r.root, byTestId('agent-msg-status'))).toHaveLength(0);
+    // The agent's answer is the matching "From" card, not a plain reply.
+    const answer = findHost(r.root, byTestId('voice-handoff-answer'));
+    expect(hasText(answer, 'From')).toBe(true);
+    expect(hasText(answer, 'Done')).toBe(true);
+    expect(findAllHost(r.root, byTestId('message-assistant'))).toHaveLength(0);
   });
 
   it('a failed hand-off shows under an agent failed label', () => {
@@ -1461,5 +1468,106 @@ describe('voice call lines', () => {
     expect(findAllHost(r.root, byTestId('call-summary'))).toHaveLength(1);
     expect(hasText(r.root, 'Call 0:52 · Gemini Flash · $0.017')).toBe(true);
     expect(findAllHost(r.root, byTestId('message-assistant'))).toHaveLength(0);
+  });
+});
+
+describe('messages exchanged with other agents', () => {
+  function nameChat(chatId: string, name: string): void {
+    useChatStore.setState((st) => ({
+      chats: { ...st.chats, [chatId]: { ...st.chats['c1']!, chatId, name } },
+    }));
+  }
+
+  it('a patch_send_to is one "Sent to" card that opens the target chat', async () => {
+    const { applyEvent } = useChatStore.getState();
+    applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'mcp__patch__patch_send_to',
+      callId: 'k1',
+      args: { chatId: 'c-target', message: 'Please rebase onto main' },
+    });
+    applyEvent({
+      type: 'chat.tool_result',
+      chatId: 'c1',
+      seq: 2,
+      tool: 'mcp__patch__patch_send_to',
+      callId: 'k1',
+      result: { ok: true, queued: true },
+    });
+    nameChat('c-target', 'Release notes');
+    const r = renderRN(<ChatDetailScreen />);
+    const card = findHost(r.root, byTestId('agent-msg-sent'));
+    expect(hasText(card, 'Sent to')).toBe(true);
+    expect(hasText(card, 'Release notes')).toBe(true);
+    expect(hasText(card, 'Please rebase onto main')).toBe(true);
+    expect(findAllHost(r.root, byTestId('tool-call'))).toHaveLength(0);
+    expect(findAllHost(r.root, byTestId('tool-result'))).toHaveLength(0);
+    const { routerMock } = await import('./stubs/expo-router');
+    actSync(() => findHost(card, byTestId('agent-msg-link')).props.onPress());
+    expect(routerMock.push).toHaveBeenCalledWith('/chats/c-target');
+  });
+
+  it('says when a send was refused', () => {
+    const { applyEvent } = useChatStore.getState();
+    applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'mcp__patch__patch_send_to',
+      callId: 'k1',
+      args: { chatId: 'c-gone', message: 'hello' },
+    });
+    applyEvent({
+      type: 'chat.tool_result',
+      chatId: 'c1',
+      seq: 2,
+      tool: 'mcp__patch__patch_send_to',
+      callId: 'k1',
+      result: 'chat not found',
+      isError: true,
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    const card = findHost(r.root, byTestId('agent-msg-sent'));
+    expect(hasText(card, 'another chat')).toBe(true);
+    expect(hasText(card, 'Not sent')).toBe(true);
+  });
+
+  it('a reply another chat sent here is a "From" card that opens it', async () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'user',
+      origin: 'machine',
+      content: '[from Release notes; chat c-sender] Rebased, tests green.',
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    const card = findHost(r.root, byTestId('agent-msg-from'));
+    expect(hasText(card, 'From')).toBe(true);
+    expect(hasText(card, 'Release notes')).toBe(true);
+    expect(hasText(card, 'Rebased, tests green.')).toBe(true);
+    expect(hasText(r.root, '[from')).toBe(false);
+    expect(findAllHost(r.root, byTestId('message-user'))).toHaveLength(0);
+    const { routerMock } = await import('./stubs/expo-router');
+    actSync(() => findHost(card, byTestId('agent-msg-link')).props.onPress());
+    expect(routerMock.push).toHaveBeenCalledWith('/chats/c-sender');
+  });
+
+  it('a side thread\'s send-back is a "From" card', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'system',
+      content: 'From Spike: The cache is the problem.',
+      branchSendBack: { fromBranchId: 'b1', fromBranchName: 'Spike' },
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    const card = findHost(r.root, byTestId('branch-send-back'));
+    expect(hasText(card, 'Spike')).toBe(true);
+    expect(hasText(card, 'The cache is the problem.')).toBe(true);
+    expect(hasText(card, 'Spike:')).toBe(false);
   });
 });
