@@ -441,6 +441,9 @@ export class ElevenLabsScribeBackend implements WhisperBackend {
     const form = new FormData();
     form.append('model_id', SCRIBE_MODEL);
     form.append('language_code', 'en');
+    // Scribe tags non-speech by default ("[coughs]", "[phone ringing]"), and a
+    // clip of only background noise came back as that tag and was sent as a turn.
+    form.append('tag_audio_events', 'false');
     form.append(
       'file',
       new Blob([new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)], {

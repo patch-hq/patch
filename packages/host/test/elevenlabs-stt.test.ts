@@ -192,6 +192,7 @@ describe('ElevenLabs clip backend', () => {
     expect(seen?.url).toBe('https://api.elevenlabs.io/v1/speech-to-text');
     expect((seen?.init.headers as Record<string, string>)['xi-api-key']).toBe('xi-key');
     expect((seen?.init.body as FormData).get('model_id')).toBe('scribe_v2');
+    expect((seen?.init.body as FormData).get('tag_audio_events')).toBe('false');
   });
 
   test('HTTP failure throws with the status', async () => {
