@@ -937,6 +937,7 @@ async function startHost(
   let voiceDevicePrompt: string = DEFAULT_SHARED_SETTINGS.voiceDevicePrompt;
   /** spec/16 § Who is speaking — `host.settings` → `voiceProfiles`. */
   let voiceProfiles: SharedSettings['voiceProfiles'] = [];
+  let voiceMatchThreshold: number = DEFAULT_SHARED_SETTINGS.voiceMatchThreshold;
   // Settings → Goals (spec/04 § Goals): how the goal judge is asked, and when a goal gives up on a refusing agent.
   let meetingPrompts: MeetingPrompts = {
     now: DEFAULT_MEETING_NOW_PROMPT,
@@ -2093,6 +2094,10 @@ async function startHost(
         },
         'voice profiles changed',
       );
+    }
+    if (shared.voiceMatchThreshold !== voiceMatchThreshold) {
+      voiceMatchThreshold = shared.voiceMatchThreshold;
+      logger.info({ voiceMatchThreshold }, 'voice match threshold changed');
     }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
@@ -6462,7 +6467,10 @@ async function startHost(
     deviceVoice: () => ({
       prompt: () => voiceDevicePrompt,
       profiles: () => voiceProfiles,
-      ...(speakerId.available() ? { embed: (pcm: Int16Array) => speakerId.embed(pcm) } : {}),
+      threshold: () => voiceMatchThreshold,
+      ...(speakerId.available()
+        ? { embed: (pcm: Int16Array) => speakerId.embed(pcm), warm: () => speakerId.warm() }
+        : {}),
       recent: recentVoices,
     }),
     makeTimeline: (init) => chatVoice.makeTimeline(init),

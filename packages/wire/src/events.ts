@@ -15,6 +15,7 @@ import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
   DEFAULT_VOICE_DEVICE_PROMPT,
   RecentVoice,
+  VOICE_MATCH_THRESHOLD,
   VOICE_PROFILES_MAX,
   VOICEPRINT_DIM,
   VoiceProfile,
@@ -2484,6 +2485,8 @@ export const SharedSettings = z
     voiceDevicePrompt: z.string().min(1),
     /** People recognised by voice on a voice device (spec/16 § Who is speaking). */
     voiceProfiles: z.array(VoiceProfile).max(VOICE_PROFILES_MAX),
+    /** How sure a voice match must be (cosine similarity); Settings offers relaxed, normal and strict. */
+    voiceMatchThreshold: z.number().min(0.5).max(0.99),
     /**
      * Dictation mode: quiet this long after speech sends what was said, finished
      * or not (spec/07 § Dictation mode). With turn detection on, this is the
@@ -2663,6 +2666,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   },
   voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
   voiceProfiles: [],
+  voiceMatchThreshold: VOICE_MATCH_THRESHOLD,
   dictationPauseSeconds: 10,
   dictationTurnDetection: true,
   permissionModeDefault: 'auto',

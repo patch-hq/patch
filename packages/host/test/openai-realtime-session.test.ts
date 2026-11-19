@@ -820,6 +820,62 @@ describe('a voice device session', () => {
     expect(out.item.output).toContain('Refused');
   });
 
+  test('words that land before the voiceprint wait for it: labelled right, kept for enrolment', async () => {
+    let release: () => void = () => {};
+    const slow = vi.fn(
+      (pcm: Int16Array) =>
+        new Promise<number[]>((resolve) => {
+          release = () => resolve(pcm[0] === 1000 ? axis(0) : axis(7));
+        }),
+    );
+    const recent = new RecentVoices();
+    const { deps, last, timeline } = makeDeps({
+      device: { prompt: () => '', profiles: () => [TOM], embed: slow, recent },
+    });
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    await speak(session, ws, 1000, 'i1', 0);
+    ws.serverSend({
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'i1',
+      transcript: 'good morning',
+    });
+    expect(timeline.log.filter((l) => l.startsWith('user:'))).toHaveLength(0);
+    release();
+    await vi.waitFor(() => expect(timeline.log).toContain('user:chat-1:Tom: good morning'));
+    expect(recent.list()[0]!.text).toBe('good morning');
+  });
+
+  test('a reply asked for while another is still being spoken follows it', async () => {
+    const { deps, last } = deviceDeps([TOM]);
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    ws.serverSend({ type: 'response.created' });
+    await speak(session, ws, 1000, 'i1', 0);
+    await vi.waitFor(() => expect(session.getSpeaker()?.name).toBe('Tom'));
+    expect(ws.ofType('response.create')).toHaveLength(0);
+    ws.serverSend({ type: 'response.done', response: { status: 'cancelled' } });
+    expect(ws.ofType('response.create')).toHaveLength(1);
+  });
+
+  test("a voice below the account's threshold is not recognised", async () => {
+    const near = axis(0).map((x, i) => (i === 1 ? 0.75 : x)); // cosine 0.8 to Tom
+    const { deps, last } = makeDeps({
+      device: {
+        prompt: () => '',
+        profiles: () => [TOM],
+        threshold: () => 0.85,
+        embed: async () => near,
+        recent: new RecentVoices(),
+      },
+    });
+    const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
+    const ws = await open(session, last);
+    await speak(session, ws, 1000, 'i1', 0);
+    await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(1));
+    expect(session.getSpeaker()).toBeNull();
+  });
+
   test('a word too short to tell keeps the speaker and still gets its reply', async () => {
     const { deps, last } = deviceDeps([TOM]);
     const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);

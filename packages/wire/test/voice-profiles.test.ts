@@ -51,6 +51,12 @@ describe('voice profiles', () => {
     expect(m.profile).toBeNull();
   });
 
+  it("holds a match to the account's threshold", () => {
+    const heard = vec(0, 1, 0.75); // cosine 0.8 to axis 0
+    expect(identifyVoice(heard, [profile('tom', vec(0))], 0.75).profile?.id).toBe('tom');
+    expect(identifyVoice(heard, [profile('tom', vec(0))], 0.85).profile).toBeNull();
+  });
+
   it('never matches a profile with no voiceprint yet', () => {
     expect(identifyVoice(vec(0), [profile('tom', undefined)]).profile).toBeNull();
   });

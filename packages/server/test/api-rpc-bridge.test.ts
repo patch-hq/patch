@@ -27,6 +27,9 @@ describe('isRelayablePath: chat archive', () => {
 describe('isRelayablePath', () => {
   it('allows management paths and refuses the rest', () => {
     expect(isRelayablePath('/api/settings/shared')).toBe(true);
+    // spec/16 § Who is speaking — the Manager enrols people with `patch voice`.
+    expect(isRelayablePath('/api/voice/recent-voices')).toBe(true);
+    expect(isRelayablePath('/api/voice/voiceprint')).toBe(true);
     expect(isRelayablePath('/api/accounts/claude-code/order')).toBe(true);
     expect(isRelayablePath('/api/hosts?x=1')).toBe(true);
     expect(isRelayablePath('/api/usage-report?period=week')).toBe(true);

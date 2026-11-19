@@ -93,6 +93,11 @@ export class SpeakerId {
     }
   }
 
+  /** Load the model now rather than on the first embed. A failure is the first embed's to report. */
+  warm(): void {
+    this.start().catch(() => undefined);
+  }
+
   private sherpa(): string {
     return this.opts.sherpaEntry?.() ?? createRequire(import.meta.url).resolve('sherpa-onnx-node');
   }

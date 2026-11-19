@@ -78,7 +78,7 @@ A device is heard out loud in a room, by whoever is there. Every device conversa
 
 ## Who is speaking
 
-A voice profile is a person Patch recognises by voice (`voiceProfiles` in the shared settings, at most 20): a name, an access level, notes for when they speak, and a voiceprint. A voiceprint is the mean speaker embedding of the person's samples: 256 numbers from WeSpeaker's ResNet34 model, run by sherpa-onnx on the host, which sit close together for the same voice. A match needs a cosine similarity of 0.6 or more and a lead of 0.05 over the next profile; otherwise the speaker is not recognised.
+A voice profile is a person Patch recognises by voice (`voiceProfiles` in the shared settings, at most 20): a name, an access level, notes for when they speak, and a voiceprint. A voiceprint is the mean speaker embedding of the person's samples: 256 numbers from WeSpeaker's ResNet34 model, run by sherpa-onnx on the host, which sit close together for the same voice. A match needs a cosine similarity of at least `voiceMatchThreshold` and a lead of 0.05 over the next profile; otherwise the speaker is not recognised. Settings offers it as How sure to be: Relaxed (0.65), Normal (0.75, the default) or Strict (0.85). The default leans strict because a wrong match hands a stranger someone else's access, where a missed one only treats a person as a guest until they speak again. Measured on synthetic voices, which sit closer together than real people: the same voice scores 0.92 or more across sentences, different voices up to 0.83. Recent voices show their score, so the level can be chosen from what the devices actually hear.
 
 | Access                   | The voice                                           | The agent                                                                                           |
 | ------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -89,6 +89,7 @@ A voice profile is a person Patch recognises by voice (`voiceProfiles` in the sh
 Recognising speakers applies when the account has at least one profile with a voiceprint, the device runs on OpenAI, and the host has the speaker model (the `speaker` component, `02-host.md` § Optional components). Then:
 
 - The session starts treating the speaker as not recognised.
+- One reply at a time: a reply asked for while another is still going (a hand-off's answer being spoken) follows it.
 - The provider's VAD no longer answers by itself. When an utterance ends, the host cuts it from its own copy of the microphone, takes its voiceprint (on a worker thread, 70–200 ms), settles who it was, updates the session's instructions and tools if the speaker changed, and only then asks for the reply.
 - An utterance under a second ("yes", "thanks") is too short to tell, and the previous speaker stands.
 - What the speaker said is written into the chat as `<name>: <words>`, or `Unrecognised voice: <words>`.

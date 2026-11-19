@@ -266,8 +266,16 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   /** The microphone, kept so each utterance can be cut out for its voiceprint. */
   private tape?: MicTape;
   private speechStartMs = 0;
+  /** Between response.created and response.done. */
+  private responseInFlight = false;
+  /** A reply asked for while another was still going. */
+  private replyQueued = false;
   /** Recent-voice entry per conversation item, filled with the words once they land. */
   private recentByItem = new Map<string, string>();
+  /** Words that landed before their utterance's voiceprint did. */
+  private wordsByItem = new Map<string, string>();
+  /** Utterances whose voiceprint is still being taken. */
+  private embedding = new Map<string, Promise<void>>();
   // Stats.
   private micFrames = 0;
   private micSamples = 0;
@@ -529,6 +537,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     this.setState('listening');
     const queued = this.micQueue;
     this.micQueue = [];
+    // Load the speaker model now, so the first utterance does not wait for it.
+    this.deps.device?.warm?.();
     for (const b64 of queued) this.sendJson({ type: 'input_audio_buffer.append', audio: b64 });
   }
 
@@ -590,7 +600,13 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         return;
       }
       case 'input_audio_buffer.speech_stopped':
-        if (this.tape) void this.onUtteranceEnd(ev.item_id ?? '', ev.audio_end_ms ?? 0);
+        if (this.tape) {
+          const id = ev.item_id ?? '';
+          const done = this.onUtteranceEnd(id, ev.audio_end_ms ?? 0).finally(() =>
+            this.embedding.delete(id),
+          );
+          this.embedding.set(id, done);
+        }
         return;
       case 'input_audio_buffer.speech_started':
         this.speechStartMs = ev.audio_start_ms ?? 0;
@@ -634,6 +650,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         if (this.state === 'transcribing') this.setState('listening');
         return;
       case 'response.created':
+        this.responseInFlight = true;
         if (this.state !== 'speaking') this.setState('thinking');
         return;
       case 'response.output_audio_transcript.delta':
@@ -670,7 +687,12 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         }
         return;
       case 'response.done':
+        this.responseInFlight = false;
         this.onResponseDone(ev.response ?? {});
+        if (this.replyQueued && !this.closed) {
+          this.replyQueued = false;
+          this.sendJson({ type: 'response.create' });
+        }
         return;
       default:
         return;
@@ -690,16 +712,18 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       try {
         const voiceprint = await device.embed(pcm);
         const profiles = device.profiles();
-        const match = identifyVoice(voiceprint, profiles);
+        const match = identifyVoice(voiceprint, profiles, device.threshold?.());
+        const words = this.wordsByItem.get(itemId);
+        this.wordsByItem.delete(itemId);
         const recentId = device.recent?.add({
           at: Date.now(),
-          text: '',
+          text: words ?? '',
           seconds: Number(seconds.toFixed(1)),
           voiceprint: voiceprint.map((x) => Math.round(x * 1e5) / 1e5),
           ...(match.profile ? { matchedProfileId: match.profile.id } : {}),
           score: Number(match.score.toFixed(3)),
         });
-        if (recentId !== undefined) this.recentByItem.set(itemId, recentId);
+        if (recentId !== undefined && words === undefined) this.recentByItem.set(itemId, recentId);
         this.deps.logger.info(
           {
             sessionId: this.init.sessionId,
@@ -719,7 +743,19 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       }
     }
     // Too short to tell ("yes", "thanks"): the previous speaker stands.
-    if (this.gate && !this.closed) this.sendJson({ type: 'response.create' });
+    if (this.gate && !this.closed) this.askForReply();
+  }
+
+  /**
+   * Ask for the reply to what was just said. One response at a time: with one
+   * still going (a hand-off's answer being spoken), this one follows it.
+   */
+  private askForReply(): void {
+    if (this.responseInFlight) {
+      this.replyQueued = true;
+      return;
+    }
+    this.sendJson({ type: 'response.create' });
   }
 
   private setSpeaker(next: VoiceProfile | null): void {
@@ -812,10 +848,17 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       type: 'conversation.item.create',
       item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result }) },
     });
-    this.sendJson({ type: 'response.create' });
+    this.askForReply();
   }
 
   private onTranscript(itemId: string, text: string): void {
+    // Recognising speakers: who said it is settled before the words are
+    // written. The reply waits for the same thing, so nothing reorders.
+    const pending = this.embedding.get(itemId);
+    if (this.gate && pending !== undefined) {
+      void pending.then(() => this.onTranscript(itemId, text));
+      return;
+    }
     this.partialByItem.delete(itemId);
     const addressed =
       !modeRequiresAddress(this.mode) ||
@@ -849,6 +892,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     if (recentId !== undefined) {
       this.recentByItem.delete(itemId);
       this.deps.device?.recent?.setText(recentId, text);
+    } else if (this.tape) {
+      this.wordsByItem.set(itemId, text);
     }
     this.deps.timeline.userSaid(
       this.currentChatId,
@@ -917,7 +962,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
           output: JSON.stringify({ result: HANDOFF_REFUSED }),
         },
       });
-      this.sendJson({ type: 'response.create' });
+      this.askForReply();
       return;
     }
     if (this.gate && this.speaker !== null) request = handoffSpeakerLine(this.speaker) + request;
@@ -954,7 +999,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result }) },
     });
     // The response this asks for speaks the agent's answer.
-    this.sendJson({ type: 'response.create' });
+    this.askForReply();
   }
 
   /**

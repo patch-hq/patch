@@ -28,6 +28,8 @@ const ALLOWED_PREFIXES = [
   '/api/hooks',
   '/api/threads',
   '/api/usage-report',
+  // spec/16 § Who is speaking — `patch voice recent`/`enrol`, so the Manager can enrol someone.
+  '/api/voice',
 ];
 
 export function isRelayablePath(path: string): boolean {
