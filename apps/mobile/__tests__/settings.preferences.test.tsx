@@ -698,7 +698,7 @@ describe('Dictation page: engines (shared)', () => {
 
   it('speech to text: the account picks the engine and the tidy-up row names it', async () => {
     seedSettings();
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     expect(textOf(findHost(r.root, byTestId('stt-row')))).toMatch(
       /Speech to text.*Groq Whisper.*Whisper on host.*Parakeet on host.*ElevenLabs Scribe/,
     );
