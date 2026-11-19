@@ -1121,6 +1121,32 @@ describe('message dispatch', () => {
     expect(useVoiceStore.getState().remoteCalls).toEqual({});
   });
 
+  it("voice.calls replaces the whole list, dropping a call whose end was missed, and skips this phone's own", () => {
+    const sock = open();
+    usePresenceStore.getState().setIdentity('acc', 'phone-1');
+    const stale = {
+      sessionId: 'old',
+      surfaceId: 'web-1',
+      surfaceKind: 'web',
+      chatId: 'c0',
+      startedAt: 1,
+    };
+    useVoiceStore.setState({ remoteCalls: { old: stale } });
+    const call = { surfaceKind: 'web', chatId: 'c1', startedAt: 5 };
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'voice.calls',
+        calls: [
+          { ...call, sessionId: 's1', surfaceId: 'web-1' },
+          { ...call, sessionId: 's2', surfaceId: 'phone-1' },
+        ],
+      }),
+    );
+    expect(Object.keys(useVoiceStore.getState().remoteCalls)).toEqual(['s1']);
+    sock.emitMessage(JSON.stringify({ type: 'voice.calls', calls: [] }));
+    expect(useVoiceStore.getState().remoteCalls).toEqual({});
+  });
+
   it('chat.call_winner clears a matching incoming call', () => {
     const sock = open();
     useVoiceStore

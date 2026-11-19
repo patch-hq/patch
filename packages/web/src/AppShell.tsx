@@ -30,7 +30,6 @@ import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js
 import { IncomingCallBanner } from './components/IncomingCallBanner.js';
 import { SignInApprovalPrompt } from './components/SignInApprovalPrompt.js';
 import { VoiceBar } from './components/VoiceBar.js';
-import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { VoicePermissionBanner } from './components/VoicePermissionBanner.js';
 import { ShortcutCheatSheet } from './components/ShortcutCheatSheet.js';
@@ -721,7 +720,6 @@ export function AppShell(): JSX.Element {
           what the open line is doing in either mode (spec/07 § Session
           modes). */}
       <VoiceBar />
-      <RemoteCallBanner />
       <div className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         {sidebarCollapsed ? null : sidebarMini ? <MiniSidebar /> : <Sidebar />}
         <SidebarBackdrop />

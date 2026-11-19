@@ -118,6 +118,31 @@ describe('call handoff', () => {
     expect(calls.map((c) => c.active)).toEqual([true, false]);
   });
 
+  test('liveCalls lists exactly the calls announced open, for the reconnect snapshot', async () => {
+    const calls: CallInfo[] = [];
+    const s = await start(calls);
+    expect(s.liveCalls()).toEqual([]);
+    const a = await openCall(s.port, {
+      sessionId: 's1',
+      surfaceId: 'phone',
+      chatId: 'c1',
+      kind: 'mobile',
+    });
+    await wait(60);
+    expect(s.liveCalls()).toEqual([
+      {
+        sessionId: 's1',
+        surfaceId: 'phone',
+        surfaceKind: 'mobile',
+        chatId: 'c1',
+        startedAt: expect.any(Number),
+      },
+    ]);
+    a.ws.close();
+    await wait(60);
+    expect(s.liveCalls()).toEqual([]);
+  });
+
   test("takeOver closes the chat's other call as transferred, and only that one", async () => {
     const calls: CallInfo[] = [];
     const s = await start(calls);

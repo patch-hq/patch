@@ -172,6 +172,8 @@ interface VoiceState {
 
   /** Apply a `voice.call` event: add on active, remove on end. */
   setRemoteCall(call: RemoteCall, active: boolean): void;
+  /** Replace every remote call at once, from the server's `voice.calls` snapshot. */
+  setRemoteCalls(calls: RemoteCall[]): void;
 }
 
 export const useVoiceStore = create<VoiceState>((set) => ({
@@ -274,6 +276,9 @@ export const useVoiceStore = create<VoiceState>((set) => ({
     set({ permission: p });
   },
 
+  setRemoteCalls(calls) {
+    set({ remoteCalls: Object.fromEntries(calls.map((c) => [c.sessionId, c])) });
+  },
   setRemoteCall(call, active) {
     set((state) => {
       const next = { ...state.remoteCalls };

@@ -21,6 +21,7 @@ import {
 import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { OpenableLink } from '../components/OpenableLink.js';
+import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { railMarkers, nextFarState, isFar, type FarState } from '../lib/scrollRail.js';
 import { classifyTurnFailure } from '../lib/turnFailure.js';
@@ -2428,6 +2429,10 @@ export function ChatRoute({
         </div>
       ) : null}
       {groupDrawsHeader ? null : <ChatHeader row={row} />}
+      {/* Under the header, not across the top of the window: up there it sat
+          on the desktop's traffic lights and the header's buttons. Only the
+          focused pane draws it, so a split view shows it once. */}
+      {focused ? <RemoteCallBanner /> : null}
       <ChatFind
         key={chatId}
         streamRef={streamRef}

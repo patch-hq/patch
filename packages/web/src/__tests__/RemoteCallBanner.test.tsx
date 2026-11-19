@@ -8,6 +8,7 @@ import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { __setAudioOpenerForTests } from '../lib/voiceController.js';
+import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
 const remote = {
   sessionId: 's1',
@@ -29,6 +30,28 @@ describe('RemoteCallBanner', () => {
     act(() => useVoiceStore.getState().setRemoteCall(remote, true));
     expect(screen.getByTestId('remote-call').textContent).toContain('your phone');
     expect(screen.getByTestId('remote-call').textContent).toContain('New chat');
+  });
+
+  it('names the chat the way the sidebar does: Manager for the manager thread, markdown stripped', () => {
+    const chats = useChatStore.getState().chats;
+    useChatStore.setState({
+      chats: {
+        ...chats,
+        c1: { ...(chats['c1'] ?? {}), name: '**Fix** the boiler' } as never,
+        [SPECIAL_THREAD_IDS.manager]: { name: 'manager' } as never,
+      },
+    });
+    render(<RemoteCallBanner />);
+    act(() => useVoiceStore.getState().setRemoteCall(remote, true));
+    expect(screen.getByTestId('remote-call').textContent).toContain('Fix the boiler');
+    act(() => {
+      useVoiceStore.getState().setRemoteCall(remote, false);
+      useVoiceStore
+        .getState()
+        .setRemoteCall({ ...remote, chatId: SPECIAL_THREAD_IDS.manager }, true);
+    });
+    expect(screen.getByTestId('remote-call').textContent).toContain('· Manager');
+    useChatStore.setState({ chats });
   });
 
   it('disappears when the other call ends', () => {
