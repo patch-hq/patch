@@ -10,12 +10,15 @@ test.describe('this Mac as a host', () => {
     await page.addInitScript(() => {
       const w = window as unknown as { patch?: Record<string, unknown>; __installs: string[] };
       w.__installs = [];
+      (w as unknown as { __names: (string | undefined)[] }).__names = [];
       w.patch = {
         ...(w.patch ?? {}),
         localHost: {
           status: async () => ({ installed: false, hostId: null }),
-          install: async (code: string) => {
+          defaultName: async () => 'E2E Mac',
+          install: async (code: string, name?: string) => {
             w.__installs.push(code);
+            (w as unknown as { __names: (string | undefined)[] }).__names.push(name);
             return { ok: false, exitCode: 75, output: 'patch install: the code expired' };
           },
         },
@@ -31,10 +34,15 @@ test.describe('this Mac as a host', () => {
     await page.goto(HOSTS);
 
     await page.getByTestId('this-mac-install').click();
+    await expect(page.getByTestId('this-mac-name')).toHaveValue('E2E Mac');
+    await page.getByTestId('this-mac-confirm').click();
     await expect(page.getByTestId('this-mac-error')).toHaveText('patch install: the code expired');
     expect(
       await page.evaluate(() => (window as unknown as { __installs: string[] }).__installs),
     ).toEqual(['e2e-code-0123456789']);
+    expect(
+      await page.evaluate(() => (window as unknown as { __names: string[] }).__names),
+    ).toEqual(['E2E Mac']);
   });
 
   test('is not offered in a plain browser', async ({ page }) => {
