@@ -146,12 +146,12 @@ function runningFrom(path) {
 await until('DevTools endpoint', 60_000, async () =>
   (await fetch(`http://127.0.0.1:${port}/json/version`)).ok ? true : null,
 );
-// A launch that finds a server already running can keep the app's main process
-// busy past Playwright's 30s default; wait longer, and on failure say what the
-// app was doing instead of dying with a bare timeout.
-const browser = await chromium
-  .connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 90_000 })
-  .catch((e) => fail(`could not attach to the app's DevTools: ${e.message.split('\n')[0]}`));
+// A relaunched app's DevTools endpoint can answer a plain fetch and still leave
+// Playwright's own handshake hanging; retry the handshake in short attempts
+// until the deadline rather than waiting out one long one.
+const browser = await until('Playwright to attach over DevTools', 90_000, () =>
+  chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 10_000 }),
+);
 const pages = () => browser.contexts().flatMap((c) => c.pages());
 pagesNow = pages;
 
