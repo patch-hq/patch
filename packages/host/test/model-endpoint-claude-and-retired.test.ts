@@ -12,7 +12,12 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
-import { buildSdkEnv, createMockSdkBackend, type SdkRunOptions } from '../src/sdkBackend.js';
+import {
+  ENDPOINT_NO_KEY,
+  buildSdkEnv,
+  createMockSdkBackend,
+  type SdkRunOptions,
+} from '../src/sdkBackend.js';
 
 const base = {
   prompt: 'p',
@@ -41,8 +46,11 @@ describe('Claude Code on an Anthropic-compatible endpoint', () => {
         oauthAccessToken: '',
         modelEndpoint: { baseUrl: 'http://127.0.0.1:4000' },
       } as SdkRunOptions).env;
-      // No key: nothing of the host's own reaches the endpoint.
-      expect(keyless['ANTHROPIC_AUTH_TOKEN']).toBeUndefined();
+      // No key: nothing of the host's own reaches the endpoint, and a token is
+      // still set so Claude Code never falls back to a stored Claude login.
+      expect(keyless['ANTHROPIC_AUTH_TOKEN']).toBe(ENDPOINT_NO_KEY);
+      expect(keyless['CLAUDE_CODE_OAUTH_TOKEN']).toBeUndefined();
+      expect(keyless['ANTHROPIC_API_KEY']).toBeUndefined();
     } finally {
       process.env = before;
     }

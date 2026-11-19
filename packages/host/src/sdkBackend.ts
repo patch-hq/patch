@@ -1021,6 +1021,12 @@ type StdioMcpServerConfig =
 const IDLE_COMPACT_NEVER_TOKENS = 1_000_000_000;
 
 /**
+ * The bearer token a keyless model endpoint is sent. Keyless endpoints ignore
+ * it; its job is to stop Claude Code reaching for a stored Claude login.
+ */
+export const ENDPOINT_NO_KEY = 'no-key';
+
+/**
  * SDK env (OAuth, never an API key per spec/10) + the stdio MCP servers this
  * chat gets: `patch` (this host's own tools) always and first, then
  * `opts.extraMcpServers` in list order — the caller (`chatRunner.ts`) has
@@ -1048,8 +1054,10 @@ export function buildSdkEnv(opts: SdkRunOptions): {
     // A model endpoint: the endpoint's key, sent as a bearer token, and no
     // Claude credential at all — nor any token of the host's own.
     env['ANTHROPIC_BASE_URL'] = opts.modelEndpoint.baseUrl;
-    delete env['ANTHROPIC_AUTH_TOKEN'];
-    if (opts.modelEndpoint.key !== undefined) env['ANTHROPIC_AUTH_TOKEN'] = opts.modelEndpoint.key;
+    // Always set, even for an endpoint with no key (a local LiteLLM): with no
+    // token in its environment Claude Code falls back to a login stored on the
+    // machine and would send that Claude credential to the endpoint.
+    env['ANTHROPIC_AUTH_TOKEN'] = opts.modelEndpoint.key ?? ENDPOINT_NO_KEY;
   } else if (isAnthropicApiKey(opts.oauthAccessToken))
     env['ANTHROPIC_API_KEY'] = opts.oauthAccessToken;
   else env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
