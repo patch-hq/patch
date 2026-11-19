@@ -71,6 +71,8 @@ export interface SelfUpdaterOptions {
   home: string;
   downloadsDir: string;
   running: string;
+  /** True while something a restart would cut off is happening (a voice call). The install waits for the next check. */
+  busy?: () => boolean;
   log: (msg: string) => void;
   now?: () => number;
   /** Starts the installer; returns the transient unit's name. Replaced in tests. */
@@ -112,6 +114,7 @@ export function createSelfUpdater(opts: SelfUpdaterOptions): () => void {
   const launch = opts.launch ?? launchWithSystemd;
   const attempted = new Map<string, number>();
   const told = new Set<string>();
+  const deferred = new Set<string>();
   const tarball = join(opts.downloadsDir, 'server-release', 'patch-server.tar.gz');
 
   return () => {
@@ -123,6 +126,13 @@ export function createSelfUpdater(opts: SelfUpdaterOptions): () => void {
       userUnit: runsAsUserUnit(),
     });
     if (plan.kind === 'current') return;
+    if (plan.kind === 'install' && opts.busy?.()) {
+      if (!deferred.has(plan.to)) {
+        deferred.add(plan.to);
+        opts.log(`self-update: release ${plan.to} waits for the voice call in progress to end`);
+      }
+      return;
+    }
     if (plan.kind === 'manual') {
       if (told.has(plan.to)) return;
       told.add(plan.to);

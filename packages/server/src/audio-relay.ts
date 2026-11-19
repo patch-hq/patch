@@ -151,8 +151,14 @@ function pipeOnceOpen(a: RelaySocket, b: RelaySocket, afterFirst?: string): void
   });
 }
 
-export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDeps): void {
+/** Live voice calls: surface audio sockets currently open on this server. */
+export interface AudioCalls {
+  active(): number;
+}
+
+export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDeps): AudioCalls {
   const WsCtor = deps.wsCtor ?? WebSocket;
+  const open = new Set<RelaySocket>();
 
   /** sessionId → the tunnelled session's surface-facing socket + owning host, for as long as the bridge is open. */
   const tunnelled = new Map<string, { socket: RelaySocket; hostId: string }>();
@@ -247,6 +253,8 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     '/audio/:sessionId',
     { websocket: true },
     (socket: RelaySocket, req) => {
+      open.add(socket);
+      socket.on('close', () => open.delete(socket));
       const sessionId = req.params.sessionId;
       const hostId = deps.router.hostFor(sessionId);
       if (!hostId) {
@@ -295,4 +303,5 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       pipeOnceOpen(upstream, socket);
     },
   );
+  return { active: () => open.size };
 }

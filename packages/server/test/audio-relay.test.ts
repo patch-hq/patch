@@ -294,6 +294,7 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
 
   const HOST_ID = 'daemon-remote-1';
   const CHAT_ID = 'chat-on-remote-1';
+  let audioCalls: { active(): number };
 
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'patch-audio-relay-tunnel-'));
@@ -316,13 +317,14 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     hostLink = new InProcessHostLink();
     hostLink.setHostId(HOST_ID);
 
-    const { app } = await buildAll({
+    const { app, audioCalls: calls } = await buildAll({
       registry,
       presence: new PresenceTracker(),
       logger: false,
       internalToken: 'test-internal-token-not-for-prod-aaaa',
       hostLink,
     });
+    audioCalls = calls;
     await app.listen({ port: 0, host: '127.0.0.1' });
 
     // This host reports NO audioRelayHost at all — the real-world default for
@@ -457,6 +459,16 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
       code: 'host_unreachable',
     });
     await closePromise;
+  });
+
+  it('counts a live call while its socket is open, and none after it closes', async () => {
+    expect(audioCalls.active()).toBe(0);
+    const { audioUrl } = await mintToken();
+    const client = new WebSocket(`${serverUrl}${audioUrl}`);
+    await waitOpen(client);
+    await waitFor(() => (audioCalls.active() === 1 ? true : undefined));
+    client.close();
+    await waitFor(() => (audioCalls.active() === 0 ? true : undefined));
   });
 
   it('closing the surface socket tells the host to close its half of the bridge', async () => {
