@@ -3,13 +3,24 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { callTotalUsd, type CallCosting, type SpeechUsage } from './voiceCost.js';
+import { callTotalUsd, speechCredits, type CallCosting, type SpeechUsage } from './voiceCost.js';
 
 export interface VoiceUsageTotals {
   monthUsd: number;
   monthCalls: number;
   allUsd: number;
   allCalls: number;
+  /** Gemini and OpenAI tokens, as the providers reported them. */
+  monthTokens: number;
+  allTokens: number;
+  /** ElevenLabs credits: what each call was charged, plus speech at its per-character rate. */
+  monthCredits: number;
+  allCredits: number;
+}
+
+function callTokens(c: CallCosting): number {
+  const t = c.tokens;
+  return t ? t.textIn + t.audioIn + t.cachedIn + t.textOut + t.audioOut : 0;
 }
 
 export interface VoiceLedger {
@@ -52,19 +63,39 @@ export function createVoiceLedger(path: string): VoiceLedger {
     },
     totals(now: number): VoiceUsageTotals {
       const month = monthOf(now);
-      const t: VoiceUsageTotals = { monthUsd: 0, monthCalls: 0, allUsd: 0, allCalls: 0 };
+      const t: VoiceUsageTotals = {
+        monthUsd: 0,
+        monthCalls: 0,
+        allUsd: 0,
+        allCalls: 0,
+        monthTokens: 0,
+        allTokens: 0,
+        monthCredits: 0,
+        allCredits: 0,
+      };
       for (const e of entries) {
         const usd = callTotalUsd(e);
+        const tokens = callTokens(e);
+        const credits = e.real && 'credits' in e.real ? e.real.credits : 0;
         t.allUsd += usd;
         t.allCalls += 1;
+        t.allTokens += tokens;
+        t.allCredits += credits;
         if (monthOf(e.endedAt) === month) {
           t.monthUsd += usd;
           t.monthCalls += 1;
+          t.monthTokens += tokens;
+          t.monthCredits += credits;
         }
       }
       for (const u of speech) {
+        const credits = speechCredits(u.model, u.characters) ?? 0;
         t.allUsd += u.usd ?? 0;
-        if (monthOf(u.at) === month) t.monthUsd += u.usd ?? 0;
+        t.allCredits += credits;
+        if (monthOf(u.at) === month) {
+          t.monthUsd += u.usd ?? 0;
+          t.monthCredits += credits;
+        }
       }
       return t;
     },

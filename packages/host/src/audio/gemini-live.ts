@@ -140,6 +140,8 @@ export interface GeminiLiveDeps {
   model?: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
+  /** The prebuilt voice to speak in (`geminiVoice`). Absent: Gemini's own default. */
+  voice?: string;
   /** The `look_back` tool's search over this chat. Absent means the voice is not given the tool. */
   lookBack?: (chatId: string, query: string) => string;
   /**
@@ -173,7 +175,10 @@ export interface GeminiLiveDeps {
 interface GeminiSetupMessage {
   setup: {
     model: string;
-    generationConfig: { responseModalities: ['AUDIO'] };
+    generationConfig: {
+      responseModalities: ['AUDIO'];
+      speechConfig?: { voiceConfig: { prebuiltVoiceConfig: { voiceName: string } } };
+    };
     systemInstruction: { parts: [{ text: string }] };
     tools?: [{ functionDeclarations: GeminiFunctionDeclaration[] }];
     realtimeInputConfig: {
@@ -475,6 +480,7 @@ function buildSetupMessage(
   manualActivity: boolean,
   manager = false,
   spokenAloud = '',
+  voiceName?: string,
 ): GeminiSetupMessage {
   const declarations: GeminiFunctionDeclaration[] = [
     // A Manager call has its own tools and no agent behind it; `never` has no agent either.
@@ -522,7 +528,12 @@ function buildSetupMessage(
   return {
     setup: {
       model,
-      generationConfig: { responseModalities: ['AUDIO'] },
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        ...(voiceName !== undefined
+          ? { speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } }
+          : {}),
+      },
       systemInstruction: {
         parts: [
           {
@@ -841,6 +852,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           this.deps.gate !== undefined,
           this.deps.manager !== undefined,
           this.deps.spokenAloud,
+          this.deps.voice,
         ),
       ),
     );

@@ -7,17 +7,32 @@
 // Nothing is known (config not loaded, host not reported, chat not pinned to a
 // host yet) → null, and the host decides.
 
-import { voiceCellFor, voiceKeyMissingMessage, type VoiceSurface } from '@patch/wire/audio';
+import {
+  voiceCellFor,
+  voiceKeyMissingMessage,
+  type DictationEngine,
+  type VoiceBackend,
+  type VoiceSurface,
+} from '@patch/wire/audio';
 import { useChatStore } from '../stores/chatStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { voiceConfigOrNull } from './preferences';
+import { useSettingsStore } from '../stores/settingsStore';
 
 export function voiceKeyRefusal(chatId: string, surface: VoiceSurface): string | null {
   const config = voiceConfigOrNull();
   if (config === null) return null;
   // Dictation from this phone runs on the phone's engine; only Deepgram needs a key.
-  const backend =
-    surface === 'dictation' ? config.dictation.phone : voiceCellFor(config, surface).backend;
+  let backend: VoiceBackend | DictationEngine;
+  if (surface === 'dictation') {
+    const settings = useSettingsStore.getState().data;
+    const own = settings?.devices.find((d) => d.isCurrent)?.surfaceId;
+    backend =
+      (own !== undefined ? settings?.preferences.deviceDictation?.[own] : undefined) ??
+      config.dictation.phone;
+  } else {
+    backend = voiceCellFor(config, surface).backend;
+  }
   if (backend === 'local' || backend === 'device' || backend === 'host' || backend === 'whisper') {
     return null;
   }

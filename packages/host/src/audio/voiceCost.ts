@@ -283,6 +283,12 @@ export interface SpeechUsage {
   usd: number | null;
 }
 
+/** ElevenLabs credits one synthesis used; `null` = the model's rate is unknown. */
+export function speechCredits(model: string, characters: number): number | null {
+  const perChar = ELEVENLABS_CREDITS_PER_CHAR[model];
+  return perChar === undefined ? null : characters * perChar;
+}
+
 export function speechCostUsd(model: string, characters: number): number | null {
   const perChar = ELEVENLABS_CREDITS_PER_CHAR[model];
   if (perChar === undefined) return null;

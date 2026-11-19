@@ -15,6 +15,7 @@ import {
   KOKORO_VOICES,
   ManagerPage,
   DictationPage,
+  MeetingsPage,
   VoicePage,
   voiceCellStatus,
   writePreferences,
@@ -151,107 +152,91 @@ describe('sections before the settings have loaded', () => {
   });
 });
 
-describe('Voice (per-surface config matrix)', () => {
-  it('draws the three conversation surfaces from the account’s saved config', () => {
-    seedSettings();
-    const r = renderRN(<VoicePage />);
-    for (const s of ['device', 'handsFree', 'call']) {
-      expect(
-        findHost(r.root, byTestId(`voice-${s}-backend-local`)).props.accessibilityState.selected,
-      ).toBe(true);
-    }
-    expect(queryHost(r.root, byTestId('voice-call-status'))).toBeNull();
-  });
+const DEVICES = [
+  {
+    surfaceId: 'phone-1',
+    surfaceKind: 'mobile',
+    label: 'Pixel',
+    issuedAt: 1,
+    status: 'online',
+    lastHeartbeat: 1,
+    isCurrent: true,
+  },
+  {
+    surfaceId: 'mac-1',
+    surfaceKind: 'desktop',
+    label: 'MacBook',
+    issuedAt: 2,
+    status: 'online',
+    lastHeartbeat: 1,
+    isCurrent: false,
+  },
+  {
+    surfaceId: 'web-1',
+    surfaceKind: 'web',
+    label: 'Chrome',
+    issuedAt: 3,
+    status: 'online',
+    lastHeartbeat: 1,
+    isCurrent: false,
+  },
+] as never;
 
-  it('a hosted backend is selectable, written through, and says what "direct" runs as', async () => {
+describe('Voice: one config for every conversation', () => {
+  it('draws the saved provider, Local by default, with Local’s reply voice nested under it', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
-    await actAsync(async () => {
-      findHost(r.root, byTestId('voice-call-backend-openai')).props.onPress();
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenCalledWith({
-      voiceConfig: expect.objectContaining({
-        call: { backend: 'openai', layer: 'direct', handoff: 'auto' },
-      }),
-    });
-    expect(textOf(findHost(r.root, byTestId('voice-call-status')))).toMatch(/runs as "light"/);
-  });
-
-  it('a cell that does nothing yet is selectable, written through, and says so', async () => {
-    seedSettings();
-    const r = renderRN(<VoicePage />);
-    await actAsync(async () => {
-      findHost(r.root, byTestId('voice-device-backend-openai')).props.onPress();
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenCalledWith({
-      voiceConfig: expect.objectContaining({
-        device: { backend: 'openai', layer: 'direct', handoff: 'auto' },
-      }),
-    });
-    expect(textOf(findHost(r.root, byTestId('voice-device-status')))).toMatch(
-      /Not implemented yet/,
+    expect(findHost(r.root, byTestId('voice-engine-local')).props.accessibilityState.selected).toBe(
+      true,
     );
+    expect(findHost(r.root, byTestId('voice-local-tts'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('kokoro-voice'))).toBeTruthy();
+    for (const s of ['device', 'handsFree', 'call']) {
+      expect(queryHost(r.root, byTestId(`voice-${s}`))).toBeNull();
+    }
+    expect(queryHost(r.root, byTestId('voice-status'))).toBeNull();
   });
 
-  it('changing a layer keeps the backend', async () => {
+  it('a provider choice is written to calls, hands-free and voice devices alike', async () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('voice-handsFree-layer-light')).props.onPress();
+      findHost(r.root, byTestId('voice-engine-openai')).props.onPress();
       await flush();
     });
+    const cell = { backend: 'openai', layer: 'light', handoff: 'auto' };
     expect(api.setPreferences).toHaveBeenCalledWith({
-      voiceConfig: expect.objectContaining({
-        handsFree: { backend: 'local', layer: 'light', handoff: 'auto' },
-      }),
+      voiceConfig: expect.objectContaining({ call: cell, handsFree: cell, device: cell }),
     });
   });
 
-  it('the hand-off chips appear only on a hosted backend and keep backend and layer', async () => {
-    seedSettings();
-    const r = renderRN(<VoicePage />);
-    expect(queryHost(r.root, byTestId('voice-call-handoff-always'))).toBeNull();
-    await actAsync(async () => {
-      findHost(r.root, byTestId('voice-call-backend-gemini')).props.onPress();
-      await flush();
+  it('a hosted provider shows its model, its own voices, and the hand-off switch', async () => {
+    seedSettings({
+      preferences: {
+        ...settingsFixture().preferences,
+        voiceConfig: {
+          ...settingsFixture().preferences.voiceConfig,
+          call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+        },
+      },
     });
+    const r = renderRN(<VoicePage />);
+    expect(textOf(findHost(r.root, byTestId('voice-model')))).toMatch(/Flash.*Thinking/);
+    expect(textOf(findHost(r.root, byTestId('voice-gemini-voice')))).toBe('Provider default');
+    const toggle = findHost(r.root, byTestId('voice-handoff'));
+    expect(toggle.props.value).toBe(true);
     await actAsync(async () => {
-      findHost(r.root, byTestId('voice-call-handoff-always')).props.onPress();
+      toggle.props.onValueChange(false);
       await flush();
     });
     expect(api.setPreferences).toHaveBeenLastCalledWith({
       voiceConfig: expect.objectContaining({
-        call: { backend: 'gemini', layer: 'direct', handoff: 'always' },
+        call: { backend: 'gemini', layer: 'light', handoff: 'never' },
       }),
     });
-  });
-
-  it('every chip is disabled while a write is in flight, and freed when it settles', async () => {
-    seedSettings();
-    let settle!: () => void;
-    vi.mocked(api.setPreferences).mockImplementationOnce(
-      (patch) =>
-        new Promise((resolve) => {
-          settle = () => resolve({ preferences: { ...settingsFixture().preferences, ...patch } });
-        }),
-    );
-    const r = renderRN(<VoicePage />);
-    const chips = (): ReturnType<typeof findAllHost> =>
-      findAllHost(r.root, (i) => /^voice-\w+-(backend|layer)-\w+$/.test(String(i.props.testID)));
-    expect(chips().every((c) => c.props.disabled === false)).toBe(true);
-    await actAsync(() => findHost(r.root, byTestId('voice-call-layer-heavy')).props.onPress());
-    expect(chips().length).toBeGreaterThan(0);
-    expect(chips().every((c) => c.props.disabled === true)).toBe(true);
-    await actAsync(async () => {
-      settle();
-      await flush();
-    });
-    expect(chips().every((c) => c.props.disabled === false)).toBe(true);
-    expect(
-      findHost(r.root, byTestId('voice-call-layer-heavy')).props.accessibilityState.selected,
-    ).toBe(true);
+    expect(queryHost(r.root, byTestId('voice-handoff-always'))).toBeNull();
+    await pick(r, 'voice-gemini-voice', 'Kore');
+    expect(api.setPreferences).toHaveBeenLastCalledWith({ geminiVoice: 'Kore' });
   });
 
   it('a failed write is reported, and frees the chips', async () => {
@@ -259,18 +244,18 @@ describe('Voice (per-surface config matrix)', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('voice-call-backend-gemini')).props.onPress();
+      findHost(r.root, byTestId('voice-engine-gemini')).props.onPress();
       await flush();
     });
     expect(__getLastAlert()?.title).toBe('Settings failed');
     expect(__getLastAlert()?.message).toBe('nope');
-    expect(findHost(r.root, byTestId('voice-call-backend-local')).props.accessibilityState).toEqual(
-      { selected: true, disabled: false },
-    );
+    expect(findHost(r.root, byTestId('voice-engine-local')).props.accessibilityState).toEqual({
+      selected: true,
+      disabled: false,
+    });
   });
 
-  it('a hosted cell names each host with no key for it as not configured there', () => {
-    // the user's live config, 2026-09-24, on a host holding neither key.
+  it('a hosted provider and a device’s dictation name each host with no key for it', () => {
     reportHost('hetzner', {
       hostName: 'hetzner',
       voiceKeys: { gemini: false, openai: false, deepgram: false },
@@ -282,13 +267,15 @@ describe('Voice (per-surface config matrix)', () => {
     });
     const base = settingsFixture().preferences;
     seedSettings({
+      devices: DEVICES,
       preferences: {
         ...base,
         voiceConfig: {
+          ...base.voiceConfig,
           dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
           device: { backend: 'openai', layer: 'light', handoff: 'auto' },
-          handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-          call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+          handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
+          call: { backend: 'openai', layer: 'light', handoff: 'auto' },
         },
       },
     });
@@ -298,19 +285,15 @@ describe('Voice (per-surface config matrix)', () => {
         <VoicePage />
       </>,
     );
-    expect(textOf(findHost(r.root, byTestId('dictation-phone-keys')))).toBe(
+    expect(textOf(findHost(r.root, byTestId('dictation-phone-1-keys')))).toBe(
       'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
     );
-    expect(queryHost(r.root, byTestId('dictation-computer-keys'))).toBeNull();
-    expect(textOf(findHost(r.root, byTestId('voice-device-keys')))).toBe(
+    expect(queryHost(r.root, byTestId('dictation-mac-1-keys'))).toBeNull();
+    expect(textOf(findHost(r.root, byTestId('voice-keys')))).toBe(
       'Not configured on laptop, hetzner: no OpenAI key is set. Sessions there are refused.',
     );
-    expect(queryHost(r.root, byTestId('voice-call-keys'))).toBeNull();
-    expect(queryHost(r.root, byTestId('voice-handsFree-keys'))).toBeNull();
   });
 
-  // spec/02 § Provider keys: a key set from Settings → Hosts → Keys applies
-  // with no restart, and the host's next report is what clears the line.
   it('clears the line live when the host reports the key has been set', async () => {
     reportHost('hetzner', {
       hostName: 'hetzner',
@@ -318,6 +301,7 @@ describe('Voice (per-surface config matrix)', () => {
     });
     const base = settingsFixture().preferences;
     seedSettings({
+      devices: DEVICES,
       preferences: {
         ...base,
         voiceConfig: {
@@ -327,47 +311,51 @@ describe('Voice (per-surface config matrix)', () => {
       },
     });
     const r = renderRN(<DictationPage />);
-    expect(queryHost(r.root, byTestId('dictation-computer-keys'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('dictation-mac-1-keys'))).not.toBeNull();
     await actAsync(() =>
       reportHost('hetzner', {
         hostName: 'hetzner',
         voiceKeys: { gemini: false, openai: false, deepgram: true },
       }),
     );
-    expect(queryHost(r.root, byTestId('dictation-computer-keys'))).toBeNull();
+    expect(queryHost(r.root, byTestId('dictation-mac-1-keys'))).toBeNull();
   });
 
-  it('a host that has not reported its keys is not called unconfigured', () => {
-    const base = settingsFixture().preferences;
-    seedSettings({
-      preferences: {
-        ...base,
-        voiceConfig: {
-          ...base.voiceConfig,
-          dictation: { phone: 'deepgram', computer: 'deepgram', tidy: false },
-        },
+  it('shows usage in tokens and credits, summed across hosts, with the plan', () => {
+    reportHost('home', {
+      hostName: 'laptop',
+      runsManager: true,
+      voiceUsage: {
+        monthUsd: 1,
+        monthCalls: 2,
+        allUsd: 2,
+        allCalls: 5,
+        monthTokens: 1000,
+        monthCredits: 2000,
+        elevenLabsPlan: { used: 41304, limit: 185575 },
       },
     });
-    const r = renderRN(<DictationPage />);
-    expect(queryHost(r.root, byTestId('dictation-phone-keys'))).toBeNull();
+    reportHost('hetzner', {
+      hostName: 'hetzner',
+      voiceUsage: { monthUsd: 0, monthCalls: 1, allUsd: 0, allCalls: 1, monthTokens: 500 },
+    });
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    expect(textOf(findHost(r.root, byTestId('voice-usage-month')))).toContain(
+      '3 calls · 1,500 tokens · 2,000 ElevenLabs credits',
+    );
+    expect(textOf(findHost(r.root, byTestId('voice-usage-plan')))).toContain(
+      '41,304 of 185,575 credits used',
+    );
   });
 
-  it('states each cell honestly — the same words web uses', () => {
-    expect(voiceCellStatus('device', 'gemini', 'light')).toMatch(/for this surface/);
-    expect(voiceCellStatus('device', 'openai', 'heavy')).toMatch(/for this surface/);
-    expect(voiceCellStatus('call', 'local', 'heavy')).toMatch(/no front model built for local/);
-    expect(voiceCellStatus('call', 'openai', 'direct')).toMatch(/runs as "light"/);
-    expect(voiceCellStatus('handsFree', 'gemini', 'light')).toMatch(/address word is not enforced/);
-    // Every cell that works as configured says nothing.
-    for (const backend of ['local', 'gemini', 'openai'] as const) {
-      expect(voiceCellStatus('dictation', backend)).toBeNull();
-    }
+  it('states each config honestly — the same words web uses', () => {
+    expect(voiceCellStatus('local', 'heavy')).toMatch(/no front model built for local/);
+    expect(voiceCellStatus('local', 'direct')).toBeNull();
     for (const layer of ['light', 'heavy'] as const) {
-      expect(voiceCellStatus('call', 'gemini', layer)).toBeNull();
-      expect(voiceCellStatus('call', 'openai', layer)).toBeNull();
-      expect(voiceCellStatus('handsFree', 'openai', layer)).toBeNull();
+      expect(voiceCellStatus('gemini', layer)).toBeNull();
+      expect(voiceCellStatus('openai', layer)).toBeNull();
     }
-    expect(voiceCellStatus('call', 'local', 'direct')).toBeNull();
   });
 });
 
@@ -588,35 +576,16 @@ describe('Manager page', () => {
   });
 });
 
-describe('Voice page: Speaking (shared, spec/01 § Settings)', () => {
-  it('a Kokoro voice and a chat-name interval write the shared setting', async () => {
+describe('Voice page: Local calls (nested under Local)', () => {
+  it('a Kokoro voice writes the shared setting, and there is no chat title setting', async () => {
     seedSettings({
-      preferences: {
-        ...settingsFixture().preferences,
-        kokoroVoice: 'af_heart',
-        chatNameInterval: 3,
-      },
+      preferences: { ...settingsFixture().preferences, kokoroVoice: 'af_heart' },
     });
     const r = renderRN(<VoicePage />);
-    const speaking = findHost(r.root, byTestId('settings-voice-speaking'));
-    expect(textOf(speaking)).toContain('Say the chat name every');
     expect(textOf(findHost(r.root, byTestId('kokoro-voice')))).toBe(KOKORO_VOICES[0]!.label);
     await pick(r, 'kokoro-voice', 'bm_george');
     expect(api.setPreferences).toHaveBeenLastCalledWith({ kokoroVoice: 'bm_george' });
-    const interval = (): ReturnType<typeof findHost> =>
-      findHost(r.root, byTestId('chat-name-interval'));
-    for (const bad of ['-2', '1.5', 'x', ' ']) {
-      __clearLastAlert();
-      await actAsync(() => interval().props.onChangeText(bad));
-      await actAsync(() => interval().props.onBlur());
-      expect(__getLastAlert()?.title).toBe('Invalid value');
-    }
-    await actAsync(() => interval().props.onChangeText('5'));
-    await actAsync(async () => {
-      interval().props.onSubmitEditing();
-      await flush();
-    });
-    expect(api.setPreferences).toHaveBeenLastCalledWith({ chatNameInterval: 5 });
+    expect(queryHost(r.root, byTestId('chat-name-interval'))).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -633,7 +602,6 @@ describe('Voice page: Speaking (shared, spec/01 § Settings)', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(findHost(r.root, byTestId('kokoro-voice'))).toBeTruthy();
-    expect(findHost(r.root, byTestId('chat-name-interval'))).toBeTruthy();
   });
 });
 
@@ -666,33 +634,32 @@ describe('Dictation page: when to send (shared)', () => {
   });
 });
 
-describe('Dictation page: engines (shared)', () => {
-  it('the phone and the computer each choose their own engine', async () => {
-    seedSettings();
+describe('Dictation page: one engine per device', () => {
+  it('lists every device at once, each with only the engines it can run', () => {
+    seedSettings({ devices: DEVICES });
     const r = renderRN(<DictationPage />);
-    expect(
-      findHost(r.root, byTestId('dictation-phone-device')).props.accessibilityState.selected,
-    ).toBe(true);
-    expect(textOf(findHost(r.root, byTestId('dictation-phone')))).toMatch(
-      /Phone.*Built-in.*Deepgram.*Whisper/,
+    expect(textOf(findHost(r.root, byTestId('dictation-device-phone-1')))).toMatch(
+      /Pixel.*This device.*Built-in/,
     );
-    // A computer has no recogniser of its own.
-    expect(queryHost(r.root, byTestId('dictation-computer-device'))).toBeNull();
+    expect(
+      findHost(r.root, byTestId('dictation-device-phone-1-device')).props.accessibilityState
+        .selected,
+    ).toBe(true);
+    // Parakeet only in the desktop app; the phone recogniser only on a phone.
+    expect(findHost(r.root, byTestId('dictation-device-mac-1-local'))).toBeTruthy();
+    expect(queryHost(r.root, byTestId('dictation-device-web-1-local'))).toBeNull();
+    expect(queryHost(r.root, byTestId('dictation-device-mac-1-device'))).toBeNull();
+  });
+
+  it('a change writes that device’s own engine', async () => {
+    seedSettings({ devices: DEVICES });
+    const r = renderRN(<DictationPage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('dictation-phone-deepgram')).props.onPress();
+      findHost(r.root, byTestId('dictation-device-mac-1-local')).props.onPress();
+      await flush();
     });
     expect(api.setPreferences).toHaveBeenLastCalledWith({
-      voiceConfig: expect.objectContaining({
-        dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
-      }),
-    });
-    await actAsync(async () => {
-      findHost(r.root, byTestId('dictation-computer-deepgram')).props.onPress();
-    });
-    expect(api.setPreferences).toHaveBeenLastCalledWith({
-      voiceConfig: expect.objectContaining({
-        dictation: expect.objectContaining({ computer: 'deepgram' }),
-      }),
+      deviceDictation: { 'mac-1': 'local' },
     });
   });
 
@@ -710,7 +677,7 @@ describe('Dictation page: engines (shared)', () => {
     });
   });
 
-  it('tidy-up is one switch for both', async () => {
+  it('tidy-up is one switch for every device', async () => {
     seedSettings();
     const r = renderRN(<DictationPage />);
     const tidy = findHost(r.root, byTestId('dictation-tidy'));
@@ -727,35 +694,27 @@ describe('Dictation page: engines (shared)', () => {
 });
 
 describe('Voice page: frame', () => {
-  it('draws Conversations, Speaking and Voice devices, with surfaces in the design’s order', () => {
+  it('draws the conversation config, usage and voice devices — no Speaking, no Dictation', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Voice');
-    const order = findAllHost(r.root, (i) =>
-      /^(dictation-phone|dictation-computer|voice-handsFree|voice-call|voice-device)$/.test(
-        String(i.props.testID),
-      ),
-    ).map((i) => i.props.testID);
-    expect(order).toEqual(['voice-handsFree', 'voice-call', 'voice-device']);
-    expect(textOf(findHost(r.root, byTestId('settings-voice-config')))).toMatch(
-      /Hands-free.*Call.*Voice device/,
-    );
-    expect(findHost(r.root, byTestId('settings-voice-speaking'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-voice-config'))).toBeTruthy();
+    expect(queryHost(r.root, byTestId('settings-voice-speaking'))).toBeNull();
     expect(findHost(r.root, byTestId('settings-voice-devices'))).toBeTruthy();
-    expect(findHost(r.root, byTestId('voice-devices-empty'))).toBeTruthy();
     expect(queryHost(r.root, byTestId('settings-voice-dictation'))).toBeNull();
+    expect(queryHost(r.root, byTestId('settings-voice-meeting'))).toBeNull();
   });
 
-  it('Dictation is its own page: engine, when to send, and meetings', () => {
+  it('Dictation is its own page: engines and when to send; Meetings has its own', () => {
     seedSettings();
     const r = renderRN(<DictationPage />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Dictation');
-    expect(findHost(r.root, byTestId('dictation-phone'))).toBeTruthy();
-    expect(findHost(r.root, byTestId('dictation-computer'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-voice-dictation-engines'))).toBeTruthy();
     expect(findHost(r.root, byTestId('settings-voice-dictation'))).toBeTruthy();
-    expect(findHost(r.root, byTestId('settings-voice-meeting'))).toBeTruthy();
-    expect(queryHost(r.root, byTestId('settings-voice-config'))).toBeNull();
-    expect(queryHost(r.root, byTestId('settings-voice-speaking'))).toBeNull();
+    expect(queryHost(r.root, byTestId('settings-voice-meeting'))).toBeNull();
+    const m = renderRN(<MeetingsPage />);
+    expect(textOf(findHost(m.root, byTestId('settings-page-title')))).toBe('Meetings');
+    expect(findHost(m.root, byTestId('meeting-engine'))).toBeTruthy();
   });
 
   it('Voice devices with no reported host says to add one', () => {

@@ -119,11 +119,49 @@ export const DictationSetting = z.preprocess(
     .strict(),
 );
 
-/** The engine a dictation from this kind of surface runs on. */
+/** Any dictation engine, for a device's own choice (`deviceDictation`). */
+export const DictationEngineSchema = z.enum([
+  'device',
+  'deepgram',
+  'elevenlabs',
+  'host',
+  'whisper',
+  'local',
+]);
+
+/**
+ * Engines a device of this kind can run: the phone's recogniser only on a
+ * phone, Parakeet only in the desktop app (a browser cannot carry it).
+ */
+export function dictationEnginesFor(surfaceKind: AudioSurfaceKind): readonly DictationEngine[] {
+  if (surfaceKind === 'mobile') return PhoneDictationEngine.options;
+  if (surfaceKind === 'desktop') return ComputerDictationEngine.options;
+  return ComputerDictationEngine.options.filter((e) => e !== 'local');
+}
+
+/**
+ * The engine a dictation runs on. Each device picks its own (`deviceDictation`,
+ * by surface id); a device that has not picked one yet runs on the engine set
+ * for its kind in `voiceConfig.dictation`, which is also what Settings shows
+ * for it. A choice the device cannot run is refused, never swapped.
+ */
 export function dictationEngineFor(
   dictation: DictationConfig,
   surfaceKind: AudioSurfaceKind,
+  own?: {
+    surfaceId?: string | undefined;
+    deviceDictation?: Record<string, DictationEngine> | undefined;
+  },
 ): DictationEngine {
+  const chosen = own?.surfaceId !== undefined ? own.deviceDictation?.[own.surfaceId] : undefined;
+  if (chosen !== undefined) {
+    if (!dictationEnginesFor(surfaceKind).includes(chosen)) {
+      throw new Error(
+        `This device's dictation engine (${chosen}) does not run on a ${surfaceKind === 'mobile' ? 'phone' : surfaceKind === 'desktop' ? 'computer' : 'browser'}. Pick another in Settings → Dictation.`,
+      );
+    }
+    return chosen;
+  }
   return surfaceKind === 'mobile' ? dictation.phone : dictation.computer;
 }
 
@@ -808,3 +846,54 @@ export function draftDictationHostId(chatId: string): string | null {
     ? chatId.slice(DRAFT_DICTATION_PREFIX.length)
     : null;
 }
+
+/**
+ * The voices a Gemini Live call can speak in (Gemini's prebuilt voices), for
+ * Settings → Voice. Unset (`geminiVoice` absent) is Gemini's own default.
+ */
+export const GEMINI_VOICES: readonly string[] = [
+  'Puck',
+  'Charon',
+  'Kore',
+  'Fenrir',
+  'Aoede',
+  'Leda',
+  'Orus',
+  'Zephyr',
+  'Callirrhoe',
+  'Autonoe',
+  'Enceladus',
+  'Iapetus',
+  'Umbriel',
+  'Algieba',
+  'Despina',
+  'Erinome',
+  'Algenib',
+  'Rasalgethi',
+  'Laomedeia',
+  'Achernar',
+  'Alnilam',
+  'Schedar',
+  'Gacrux',
+  'Pulcherrima',
+  'Achird',
+  'Zubenelgenubi',
+  'Vindemiatrix',
+  'Sadachbia',
+  'Sadaltager',
+  'Sulafat',
+];
+
+/** The voices an OpenAI Realtime call can speak in. Unset (`openaiVoice` absent) is `marin`. */
+export const OPENAI_VOICES: readonly string[] = [
+  'marin',
+  'cedar',
+  'alloy',
+  'ash',
+  'ballad',
+  'coral',
+  'echo',
+  'sage',
+  'shimmer',
+  'verse',
+];

@@ -24,6 +24,7 @@ import {
   deriveVoiceSurface,
   voiceCellFor,
   dictationEngineFor,
+  type DictationEngine,
   modesShareVoiceEngine,
   voiceKeyMissingMessage,
   DEFAULT_VOICE_CONFIG,
@@ -156,6 +157,10 @@ export interface AudioServerOptions {
    * `direct`).
    */
   getVoiceConfig?: () => VoiceConfig;
+  /** The voice each hosted provider speaks in (Settings → Voice), read per call. Absent entries use the provider's default. */
+  getHostedVoices?: () => { gemini?: string; openai?: string; elevenlabs?: string };
+  /** Each device's own dictation engine, by surface id (`deviceDictation`), read per session. */
+  getDeviceDictation?: () => Record<string, DictationEngine> | undefined;
   /**
    * Resolves the account's `speechToText` choice on this host (stt-engines.ts).
    * Used for turn-based conversation sessions and the dictation tidy-up; a
@@ -768,16 +773,25 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // Dictation has no conversation cell: it runs on the engine chosen for
         // this kind of surface (spec/07 § Dictation engines), on the host's own
         // pipeline unless that engine is Deepgram.
-        const dictationEngine =
-          voiceSurface === 'dictation'
-            ? dictationEngineFor(voiceConfig.dictation, start.surfaceKind)
-            : null;
+        let dictationEngine: DictationEngine | null = null;
+        if (voiceSurface === 'dictation') {
+          try {
+            dictationEngine = dictationEngineFor(voiceConfig.dictation, start.surfaceKind, {
+              surfaceId: start.surfaceId,
+              deviceDictation: opts.getDeviceDictation?.(),
+            });
+          } catch (e) {
+            rejectConn(ws, 'whisper_unavailable', (e as Error).message);
+            return;
+          }
+        }
         // The account's speech-to-text engine, resolved on this host. Only
         // asked of paths that read speech with it.
         const resolveStt = (): SpeechToTextResolution =>
           opts.resolveSpeechToText
             ? opts.resolveSpeechToText(voiceConfig.speechToText)
             : { ok: true, whisper: opts.whisper };
+        const hostedVoices = opts.getHostedVoices?.() ?? {};
         const cell: { backend: VoiceBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } =
           voiceSurface === 'dictation'
             ? { backend: 'local' }
@@ -886,6 +900,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
               transcriber: opts.whisper,
             },
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
+            ...(hostedVoices.gemini !== undefined ? { voice: hostedVoices.gemini } : {}),
             model: geminiLiveModelFor(cell.layer ?? 'light', {
               light: opts.geminiLiveModel,
               heavy: opts.geminiLiveModelHeavy,
@@ -913,6 +928,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             submitUserTurn: opts.submitUserTurn,
             apiKey: openaiKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
+            ...(hostedVoices.openai !== undefined ? { voice: hostedVoices.openai } : {}),
             model: openaiRealtimeModelFor(cell.layer ?? 'light', {
               light: opts.openaiRealtimeModelLight,
               heavy: opts.openaiRealtimeModelHeavy,
@@ -940,6 +956,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             submitUserTurn: opts.submitUserTurn,
             apiKey: elevenKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
+            ...(hostedVoices.elevenlabs !== undefined ? { voiceId: hostedVoices.elevenlabs } : {}),
             llm: elevenLabsAgentLlmFor(cell.layer ?? 'light', {
               light: opts.elevenLabsAgentLlmLight,
               heavy: opts.elevenLabsAgentLlmHeavy,

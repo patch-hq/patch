@@ -1,5 +1,5 @@
 // The Settings pages, their groups and their order (design/settings-redesign):
-// Agents — Usage, Chats, Agent, MCP, Memories, Manager, Goals, Dictation, Voice, Hooks, Computer use; Setup — Hosts, Providers,
+// Agents — Usage, Chats, Agent, MCP, Memories, Manager, Goals, Dictation, Meetings, Voice, Hooks, Computer use; Setup — Hosts, Providers,
 // Devices; System — Experimental features, Updates, Account. The Settings tab lists them; each opens
 // as its own screen at /settings/<id> (app/settings/[page].tsx).
 
@@ -16,7 +16,7 @@ import { PromptsPage } from './PromptsSection';
 import { ChatsPage } from './ChatsSection';
 import { ComputerUsePage } from './ComputerUseSection';
 import { HooksPage } from './HooksSection';
-import { DictationPage, ManagerPage, VoicePage } from './PreferenceSections';
+import { DictationPage, ManagerPage, MeetingsPage, VoicePage } from './PreferenceSections';
 import { NotificationsPage } from './NotificationsSection';
 import { UpdatesPage } from './VersionSection';
 import { ExperimentalPage } from './ExperimentalSection';
@@ -41,6 +41,7 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   { id: 'goals', title: 'Goals', group: 'Agents', Page: GoalsPage },
   { id: 'prompts', title: 'Prompts', group: 'Agents', Page: PromptsPage },
   { id: 'dictation', title: 'Dictation', group: 'Agents', Page: DictationPage },
+  { id: 'meetings', title: 'Meetings', group: 'Agents', Page: MeetingsPage },
   { id: 'voice', title: 'Voice', group: 'Agents', Page: VoicePage },
   { id: 'hooks', title: 'Hooks', group: 'Agents', Page: HooksPage },
   { id: 'computer', title: 'Computer use', group: 'Agents', Page: ComputerUsePage },

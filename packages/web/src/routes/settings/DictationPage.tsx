@@ -1,18 +1,17 @@
-// Settings → Dictation: speaking words into the composer — where the words
-// come from, when a dictation sends, this host's dictate shortcut, and how
-// meetings are transcribed.
+// Settings → Dictation: speaking words into the composer — where each
+// device's words come from, when a dictation sends, and this host's dictate
+// shortcut. Meetings have their own page (MeetingsPage).
 
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import {
   SPEECH_TO_TEXT_LABEL,
+  dictationEnginesFor,
   SpeechToTextEngine,
   voiceKeyHostStatus,
-  type ComputerDictationEngine,
+  type AudioSurfaceKind,
   type DictationConfig,
   type DictationEngine,
-  type MeetingEngine,
-  type PhoneDictationEngine,
 } from '@patch/wire/audio';
 import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
@@ -21,10 +20,10 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { chordFromEvent, chordGlyphs } from '../../lib/dictateChord.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
-import { reenableSpeakerNames, setNamesDeclined, useMeetingSetup } from '../../lib/meetingSetup.js';
 import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
-import { Group, Pills, Row, SettingsPage } from './ui.js';
+import { useDevices } from './DevicesPage.js';
+import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
 
 export function DictationPage(): JSX.Element {
@@ -34,26 +33,10 @@ export function DictationPage(): JSX.Element {
       <DictationEnginesGroup />
       <DictationGroup />
       <ShortcutGroup />
-      <MeetingEngineGroup />
     </SettingsPage>
   );
 }
 
-/** spec/07 § Dictation engines — a computer has no recogniser of its own. */
-const PHONE_DICTATION: readonly PhoneDictationEngine[] = [
-  'device',
-  'deepgram',
-  'elevenlabs',
-  'host',
-  'whisper',
-];
-const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
-  'deepgram',
-  'elevenlabs',
-  'host',
-  'local',
-  'whisper',
-];
 const DICTATION_LABELS: Record<DictationEngine, string> = {
   local: 'Parakeet (free, on device)',
   device: 'Built-in',
@@ -61,14 +44,6 @@ const DICTATION_LABELS: Record<DictationEngine, string> = {
   elevenlabs: 'ElevenLabs',
   host: 'Host server',
   whisper: 'Whisper',
-};
-
-const MEETING_ENGINES: readonly MeetingEngine[] = ['local', 'elevenlabs', 'deepgram', 'assemblyai'];
-const MEETING_LABELS: Record<MeetingEngine, string> = {
-  local: 'Free, on device',
-  elevenlabs: 'ElevenLabs',
-  deepgram: 'Deepgram',
-  assemblyai: 'AssemblyAI',
 };
 
 /**
@@ -214,9 +189,10 @@ function LocalSttStatus(): JSX.Element {
 }
 
 /**
- * Where dictation's words come from (spec/07 § Dictation engines): one engine
- * for the phone app, one for web and desktop, and whether Whisper tidies up a
- * live engine's words as dictation goes on.
+ * Where dictation's words come from (spec/07 § Dictation engines): every
+ * signed-in device picks its own engine, all listed at once so nothing needs
+ * opening on the device itself; and whether Whisper tidies up a live engine's
+ * words as dictation goes on.
  */
 /** What reads speech on turn-based calls and tidies dictation (spec/07 § Speech to text). */
 function SpeechToTextGroup(): JSX.Element {
@@ -248,19 +224,17 @@ function SpeechToTextGroup(): JSX.Element {
 function DictationEnginesGroup(): JSX.Element {
   const dictation = usePreferencesStore((s) => s.preferences.voiceConfig.dictation);
   const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
+  const deviceDictation = usePreferencesStore((s) => s.preferences.deviceDictation) ?? {};
   const loaded = usePreferencesStore((s) => s.loaded);
   const update = usePreferencesStore((s) => s.update);
   const pushError = useUiStore((s) => s.pushError);
+  const { devices } = useDevices();
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>
     h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
   );
-  const write = (patch: Partial<DictationConfig>): void => {
-    void update({ voiceConfig: { ...voiceConfig, dictation: { ...dictation, ...patch } } }).catch(
-      (e: Error) => pushError(failed('settings'), undefined, e.message),
-    );
-  };
-  // A Deepgram choice names each host that holds no key for it.
+  const dictating = (devices ?? []).filter((d) => DICTATING_KINDS.has(d.surfaceKind));
+  // A paid choice names each host that holds no key for it.
   const keys = (engine: DictationEngine, testid: string): JSX.Element | undefined => {
     const status = voiceKeyHostStatus(engine, hostReports);
     return status ? (
@@ -271,42 +245,48 @@ function DictationEnginesGroup(): JSX.Element {
   };
   return (
     <Group label="Engine" testid="settings-voice-dictation-engines">
-      <Row
-        title="Phone"
-        sub={keys(dictation.phone, 'dictation-phone-keys')}
-        testid="dictation-phone"
-      >
-        <Pills
-          label="Phone dictation"
-          options={PHONE_DICTATION}
-          labels={DICTATION_LABELS}
-          value={dictation.phone}
-          disabled={!loaded}
-          testid="dictation-phone-engine"
-          onChange={(phone) => write({ phone })}
-        />
-      </Row>
-      <Row
-        title="Computer"
-        sub={
-          dictation.computer === 'local' ? (
-            <LocalSttStatus />
-          ) : (
-            keys(dictation.computer, 'dictation-computer-keys')
-          )
-        }
-        testid="dictation-computer"
-      >
-        <Pills
-          label="Computer dictation"
-          options={COMPUTER_DICTATION}
-          labels={DICTATION_LABELS}
-          value={dictation.computer}
-          disabled={!loaded}
-          testid="dictation-computer-engine"
-          onChange={(computer) => write({ computer })}
-        />
-      </Row>
+      {devices === null ? <Note>Loading…</Note> : null}
+      {dictating.map((d) => {
+        const kind = d.surfaceKind as AudioSurfaceKind;
+        const engine = dictationEngineShown(dictation, kind, d.surfaceId, deviceDictation);
+        const where = d.isCurrent ? 'This device' : (KIND_LABELS[d.surfaceKind] ?? d.surfaceKind);
+        return (
+          <Row
+            key={d.surfaceId}
+            title={d.label}
+            sub={
+              <>
+                <span className="set-sub-line">{where}</span>
+                {engine === 'local' ? (
+                  d.isCurrent ? (
+                    <LocalSttStatus />
+                  ) : (
+                    <span className="set-sub-line">Downloaded from Settings on that computer</span>
+                  )
+                ) : (
+                  keys(engine, `dictation-${d.surfaceId}-keys`)
+                )}
+              </>
+            }
+            testid={`dictation-device-${d.surfaceId}`}
+            className="stack set-row-choices"
+          >
+            <Pills
+              label={`${d.label} dictation`}
+              options={dictationEnginesFor(kind)}
+              labels={DICTATION_LABELS}
+              value={engine}
+              disabled={!loaded}
+              testid={`dictation-device-${d.surfaceId}-engine`}
+              onChange={(next) =>
+                void patchShared('dictation', {
+                  deviceDictation: { ...deviceDictation, [d.surfaceId]: next },
+                })
+              }
+            />
+          </Row>
+        );
+      })}
       <Row
         title={`Tidy up each phrase with ${SPEECH_TO_TEXT_LABEL[voiceConfig.speechToText]}`}
         testid="dictation-tidy-row"
@@ -314,7 +294,11 @@ function DictationEnginesGroup(): JSX.Element {
         <Toggle
           checked={dictation.tidy}
           disabled={!loaded}
-          onChange={(tidy) => write({ tidy })}
+          onChange={(tidy) =>
+            void update({
+              voiceConfig: { ...voiceConfig, dictation: { ...dictation, tidy } },
+            }).catch((e: Error) => pushError(failed('settings'), undefined, e.message))
+          }
           testid="dictation-tidy-toggle"
         />
       </Row>
@@ -322,70 +306,24 @@ function DictationEnginesGroup(): JSX.Element {
   );
 }
 
-/**
- * Who transcribes a meeting. On this computer is free; the others are paid and
- * chosen deliberately — a meeting is hours of audio.
- */
-function MeetingEngineGroup(): JSX.Element {
-  const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
-  const loaded = usePreferencesStore((s) => s.loaded);
-  const update = usePreferencesStore((s) => s.update);
-  const pushError = useUiStore((s) => s.pushError);
-  const hosts = usePresenceStore((s) => s.hosts);
-  const hostReports = Object.values(hosts).flatMap((h) =>
-    h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
-  );
-  const status = voiceKeyHostStatus(voiceConfig.meeting, hostReports);
-  return (
-    <Group label="Meetings" testid="settings-voice-meeting">
-      <Row
-        title="Transcription"
-        sub={
-          status ? (
-            <span className="set-sub-line set-sub-error" data-testid="meeting-engine-keys">
-              {status}
-            </span>
-          ) : undefined
-        }
-        testid="meeting-engine"
-      >
-        <Pills
-          label="Meeting transcription"
-          options={MEETING_ENGINES}
-          labels={MEETING_LABELS}
-          value={voiceConfig.meeting}
-          disabled={!loaded}
-          testid="meeting-engine-pills"
-          onChange={(meeting) =>
-            void update({ voiceConfig: { ...voiceConfig, meeting } }).catch((e: Error) =>
-              pushError(failed('settings'), undefined, e.message),
-            )
-          }
-        />
-      </Row>
-      <MeetingNamesRow />
-    </Group>
-  );
-}
+/** Devices that dictate: phones, desktop apps and browsers. */
+const DICTATING_KINDS = new Set(['mobile', 'desktop', 'web']);
+const KIND_LABELS: Record<string, string> = {
+  web: 'Browser',
+  desktop: 'Desktop app',
+  mobile: 'Phone',
+};
 
-/** Meeting mode: whether Patch asks for Accessibility to name who is speaking. Desktop only. */
-function MeetingNamesRow(): JSX.Element | null {
-  const declined = useMeetingSetup((s) => s.namesDeclined);
-  if (!getDesktopBridge()?.getMeetingPermissions) return null;
-  return (
-    <Row
-      title="Name speakers on calls"
-      sub="Reads Teams, Zoom and Meet through macOS Accessibility. Off, speakers show as Unknown."
-      testid="meeting-names-row"
-    >
-      <Toggle
-        checked={!declined}
-        onChange={(next) => {
-          if (next) void reenableSpeakerNames();
-          else setNamesDeclined(true);
-        }}
-        testid="meeting-names-toggle"
-      />
-    </Row>
-  );
+/**
+ * The engine shown for a device: its own choice, or — until it has made one —
+ * the engine its kind runs on. A stored choice the device cannot run is shown
+ * as it is (the device refuses dictation and says so) rather than masked.
+ */
+function dictationEngineShown(
+  dictation: DictationConfig,
+  kind: AudioSurfaceKind,
+  surfaceId: string,
+  deviceDictation: Record<string, DictationEngine>,
+): DictationEngine {
+  return deviceDictation[surfaceId] ?? (kind === 'mobile' ? dictation.phone : dictation.computer);
 }

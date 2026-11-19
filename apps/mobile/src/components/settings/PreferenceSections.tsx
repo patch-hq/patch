@@ -7,12 +7,12 @@
 // failed write is said out loud and the control keeps showing what the server
 // holds.
 //
-// Dictation — where dictated words come from, when a dictation sends, and how
-// meetings are transcribed.
+// Dictation — where each device's dictated words come from, and when a
+// dictation sends. Meetings — how a meeting is transcribed.
 //
-// Voice — the engine matrix for voice conversations (account-wide), how the
-// host picked in the switcher speaks (its Kokoro voice and how often it says
-// the chat's name, per host over `host.settings`), and voice devices.
+// Voice — one config for every voice conversation (calls, hands-free, voice
+// devices): provider, model, voice and hand-off; Local nests what reads the
+// replies out. Then what voice has used, and voice devices.
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
@@ -23,12 +23,13 @@ import { usePresenceStore } from '../../stores/presenceStore';
 import {
   SPEECH_TO_TEXT_LABEL,
   SpeechToTextEngine,
+  GEMINI_VOICES,
+  OPENAI_VOICES,
+  dictationEnginesFor,
   voiceKeyHostStatus,
-  type ComputerDictationEngine,
+  type AudioSurfaceKind,
   type DictationEngine,
   type MeetingEngine,
-  type DictationConfig,
-  type PhoneDictationEngine,
 } from '@patch/wire/audio';
 import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
 type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
@@ -194,70 +195,52 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
 
 // ── Voice ────────────────────────────────────────────────────────────────────
 
-const VOICE_BACKENDS: readonly VoiceBackend[] = ['local', 'gemini', 'openai'];
-/** spec/07 § Dictation engines — a computer has no recogniser of its own. */
-const PHONE_DICTATION: readonly PhoneDictationEngine[] = [
-  'device',
-  'deepgram',
-  'elevenlabs',
-  'host',
-  'whisper',
-];
-const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
-  'deepgram',
-  'elevenlabs',
-  'host',
-  'local',
-  'whisper',
-];
+const VOICE_BACKENDS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
+const VOICE_BACKEND_LABELS: Record<VoiceBackend, string> = {
+  local: 'Local',
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  elevenlabs: 'ElevenLabs',
+};
+type Variant = Exclude<VoiceLayer, 'direct'>;
+const VARIANTS: readonly Variant[] = ['light', 'heavy'];
+const VARIANT_NAMES: Record<Exclude<VoiceBackend, 'local'>, Record<Variant, string>> = {
+  gemini: { light: 'Flash', heavy: 'Thinking' },
+  openai: { light: 'mini', heavy: 'full' },
+  elevenlabs: { light: 'Haiku', heavy: 'Sonnet' },
+};
+const variantOf = (layer: VoiceLayer): Variant => (layer === 'heavy' ? 'heavy' : 'light');
 const DICTATION_LABELS: Record<DictationEngine, string> = {
-  local: 'Parakeet on this computer',
+  local: 'Parakeet (free, on device)',
   device: 'Built-in',
   deepgram: 'Deepgram',
   elevenlabs: 'ElevenLabs',
-  host: 'On this host',
+  host: 'Host server',
   whisper: 'Whisper',
+};
+const DICTATION_KIND_LABELS: Record<string, string> = {
+  mobile: 'Phone',
+  desktop: 'Desktop app',
+  web: 'Browser',
 };
 const MEETING_ENGINES: readonly MeetingEngine[] = ['local', 'elevenlabs', 'deepgram', 'assemblyai'];
 const MEETING_LABELS: Record<MeetingEngine, string> = {
-  local: 'On this computer',
+  local: 'Parakeet (free, on device)',
   elevenlabs: 'ElevenLabs',
   deepgram: 'Deepgram',
   assemblyai: 'AssemblyAI',
 };
-const VOICE_LAYERS: readonly VoiceLayer[] = ['direct', 'light', 'heavy'];
-const VOICE_HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];
-type VoiceSurfaceKey = 'device' | 'handsFree' | 'call';
-/** The design's order: Hands-free, Call, Voice device. */
-const VOICE_SURFACES: readonly VoiceSurfaceKey[] = ['handsFree', 'call', 'device'];
-const VOICE_SURFACE_LABELS: Record<VoiceSurfaceKey, string> = {
-  device: 'Voice device',
-  handsFree: 'Hands-free',
-  call: 'Call',
-};
+/** The three conversation entries share one config; `call` is the one shown. */
+const VOICE_SURFACES = ['call', 'handsFree', 'device'] as const;
 
 /**
- * What actually happens for a given cell, right now (spec/07 § Voice — a config
- * matrix). Mirrors the host's audio server branching and web's
- * `voiceCellStatus` word for word, so neither surface claims a cell works when
- * the host would refuse it.
+ * What actually happens for a config, right now. Mirrors the host's audio
+ * server branching and web's `voiceCellStatus`, so neither surface claims a
+ * config works when the host would refuse it.
  */
-export function voiceCellStatus(
-  surface: VoiceSurfaceKey,
-  backend: VoiceBackend,
-  layer?: VoiceLayer,
-): string | null {
-  if (backend !== 'local' && surface === 'device') {
-    return 'Not implemented yet for this surface. Refused at connect time.';
-  }
+export function voiceCellStatus(backend: VoiceBackend, layer?: VoiceLayer): string | null {
   if (backend === 'local' && layer !== undefined && layer !== 'direct') {
     return 'Not implemented yet — no front model built for local. Refused at connect time.';
-  }
-  if (backend !== 'local' && layer === 'direct') {
-    return 'A hosted backend always fronts Manager — "direct" runs as "light".';
-  }
-  if (backend === 'gemini' && surface === 'handsFree') {
-    return 'Gemini answers everything it hears — the address word is not enforced.';
   }
   return null;
 }
@@ -304,7 +287,14 @@ export function DictationPage(): React.ReactElement {
           )}
         </WithSettings>
       </SettingsSection>
-      <SettingsSection title="Meetings" testID="settings-voice-meeting">
+    </SettingsPage>
+  );
+}
+
+export function MeetingsPage(): React.ReactElement {
+  return (
+    <SettingsPage title="Meetings" testID="settings-page-meetings">
+      <SettingsSection testID="settings-voice-meeting">
         <MeetingEngineRow />
       </SettingsSection>
     </SettingsPage>
@@ -314,29 +304,22 @@ export function DictationPage(): React.ReactElement {
 export function VoicePage(): React.ReactElement {
   return (
     <SettingsPage title="Voice" testID="settings-page-voice">
-      <SettingsSection title="Conversations" testID="settings-voice-config">
+      <SettingsSection testID="settings-voice-config">
         <VoiceEngine />
       </SettingsSection>
-      <SettingsSection title="Speaking" testID="settings-voice-speaking">
-        <WithSettings testID="voice-speaking">
-          {(data) => <Speaking preferences={data.preferences} />}
-        </WithSettings>
-      </SettingsSection>
+      <VoiceUsage />
       <VoiceDevicesSection />
     </SettingsPage>
   );
 }
 
 /**
- * Per-surface voice engine and layer (spec/07 § Voice — a config matrix).
- * Every combination is selectable; a cell that does not yet do anything, or
- * whose key is missing on a host, says so under its name.
+ * The voice conversation config (spec/07 § Voice). One choice drives calls,
+ * hands-free and voice devices: it is written to all three cells.
  */
 function VoiceEngine(): React.ReactElement {
   const colors = useTheme();
   const [busy, setBusy] = React.useState(false);
-  // Per-host key status (`host.host.voiceKeys`): a hosted cell names each
-  // host that cannot run it.
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>
     h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
@@ -344,77 +327,289 @@ function VoiceEngine(): React.ReactElement {
   return (
     <WithSettings testID="voice-config">
       {(data) => {
-        const voiceConfig = data.preferences.voiceConfig;
-        const save = (next: AccountPreferences['voiceConfig']): void => {
+        const prefs = data.preferences;
+        const voiceConfig = prefs.voiceConfig;
+        const cell = voiceConfig.call;
+        const { backend, layer, handoff } = cell;
+        const write = (next: {
+          backend: VoiceBackend;
+          layer: VoiceLayer;
+          handoff: VoiceHandoff;
+        }): void => {
           setBusy(true);
+          const all = Object.fromEntries(VOICE_SURFACES.map((k) => [k, next]));
           void useSettingsStore
             .getState()
-            .updatePreferences({ voiceConfig: next })
+            .updatePreferences({ voiceConfig: { ...voiceConfig, ...all } })
             .catch((e: Error) => Alert.alert('Settings failed', e.message))
             .finally(() => setBusy(false));
         };
-        const write = (
-          surface: VoiceSurfaceKey,
-          backend: VoiceBackend,
-          layer: VoiceLayer,
-          handoff: VoiceHandoff,
-        ): void => save({ ...voiceConfig, [surface]: { backend, layer, handoff } });
-        return VOICE_SURFACES.map((surface) => {
-          const cell = voiceConfig[surface];
-          const { backend, layer, handoff } = cell;
-          const status = voiceCellStatus(surface, backend, layer);
-          const keyStatus = voiceKeyHostStatus(backend, hostReports);
-          return (
+        const status = voiceCellStatus(backend, layer);
+        const keyStatus = voiceKeyHostStatus(backend, hostReports);
+        return (
+          <>
             <Row
-              key={surface}
-              testID={`voice-${surface}`}
-              title={VOICE_SURFACE_LABELS[surface]}
+              title="Provider"
+              testID="voice-provider"
+              subtitle={
+                status || keyStatus ? (
+                  <View style={{ gap: space.xs }}>
+                    {status ? <Muted testID="voice-status">{status}</Muted> : null}
+                    {keyStatus ? (
+                      <Text testID="voice-keys" style={{ ...typography.meta, color: colors.red }}>
+                        {keyStatus}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : undefined
+              }
               stack
             >
-              <View style={{ gap: space.xs }}>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md }}>
-                  <Chips
-                    options={VOICE_BACKENDS}
-                    selected={backend}
-                    disabled={busy}
-                    testIDPrefix={`voice-${surface}-backend`}
-                    labelPrefix={`${VOICE_SURFACE_LABELS[surface]} backend`}
-                    onSelect={(b) => write(surface, b, layer, handoff)}
-                  />
-                  <Chips
-                    options={VOICE_LAYERS}
-                    selected={layer}
-                    disabled={busy}
-                    testIDPrefix={`voice-${surface}-layer`}
-                    labelPrefix={`${VOICE_SURFACE_LABELS[surface]} layer`}
-                    onSelect={(l) => write(surface, backend, l, handoff)}
-                  />
-                  {backend !== 'local' ? (
-                    <Chips
-                      options={VOICE_HANDOFFS}
-                      selected={handoff}
-                      disabled={busy}
-                      testIDPrefix={`voice-${surface}-handoff`}
-                      labelPrefix={`${VOICE_SURFACE_LABELS[surface]} hand-off`}
-                      onSelect={(h) => write(surface, backend, layer, h)}
-                    />
-                  ) : null}
-                </View>
-                {status ? <Muted testID={`voice-${surface}-status`}>{status}</Muted> : null}
-                {keyStatus ? (
-                  <Text
-                    testID={`voice-${surface}-keys`}
-                    style={{ ...typography.meta, color: colors.red }}
-                  >
-                    {keyStatus}
-                  </Text>
-                ) : null}
-              </View>
+              <Chips
+                options={VOICE_BACKENDS}
+                selected={backend}
+                labelOf={(b) => VOICE_BACKEND_LABELS[b]}
+                disabled={busy}
+                testIDPrefix="voice-engine"
+                labelPrefix="Voice provider"
+                onSelect={(b) =>
+                  write({
+                    backend: b,
+                    layer: b === 'local' ? 'direct' : variantOf(layer),
+                    handoff: handoff === 'never' ? 'never' : 'auto',
+                  })
+                }
+              />
             </Row>
-          );
-        });
+            {backend === 'local' ? (
+              <LocalCallRows preferences={prefs} />
+            ) : (
+              <>
+                <Row title="Model" testID="voice-model" stack>
+                  <Chips
+                    options={VARIANTS}
+                    selected={variantOf(layer)}
+                    labelOf={(v) => VARIANT_NAMES[backend][v]}
+                    disabled={busy}
+                    testIDPrefix="voice-variant"
+                    labelPrefix="Voice model"
+                    onSelect={(v) => write({ ...cell, layer: v })}
+                  />
+                </Row>
+                <HostedVoiceRow backend={backend} preferences={prefs} />
+                <ToggleRow
+                  label="Pass work to the chat’s agent"
+                  subtitle={
+                    handoff === 'never'
+                      ? 'The voice answers everything itself.'
+                      : 'The voice answers what it can and hands the rest to the agent.'
+                  }
+                  testID="voice-handoff"
+                  value={handoff !== 'never'}
+                  disabled={busy}
+                  onChange={(on) => write({ ...cell, handoff: on ? 'auto' : 'never' })}
+                />
+              </>
+            )}
+          </>
+        );
       }}
     </WithSettings>
+  );
+}
+
+/** The voice a hosted provider speaks in. */
+function HostedVoiceRow({
+  backend,
+  preferences,
+}: {
+  backend: Exclude<VoiceBackend, 'local'>;
+  preferences: AccountPreferences;
+}): React.ReactElement {
+  if (backend === 'elevenlabs') return <ElevenLabsVoiceRow preferences={preferences} />;
+  const key = backend === 'gemini' ? 'geminiVoice' : 'openaiVoice';
+  const value = preferences[key];
+  const voices = (backend === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES).map((v) => ({
+    id: v,
+    label: v,
+  }));
+  return (
+    <Row
+      title="Voice"
+      testID={`voice-${backend}-voice-row`}
+      right={
+        <OptionPicker
+          testID={`voice-${backend}-voice`}
+          selectedId={value ?? ''}
+          selectedLabel={value ?? 'Provider default'}
+          options={voices}
+          onSelect={(id) => void patchShared('Voice', { [key]: id })}
+          emptyText="No voices"
+        />
+      }
+    />
+  );
+}
+
+/** The account's ElevenLabs voices, listed by whichever online host holds the key. */
+function ElevenLabsVoiceRow({
+  preferences,
+}: {
+  preferences: AccountPreferences;
+}): React.ReactElement {
+  const hosts = usePresenceStore((s) => s.hosts);
+  const reports = Object.values(hosts).flatMap((h) => (h.host ? [h.host] : []));
+  const voices = reports.find((h) => h.elevenLabsVoices !== undefined)?.elevenLabsVoices;
+  const error = reports.find((h) => h.elevenLabsVoicesError !== undefined)?.elevenLabsVoicesError;
+  const current = preferences.elevenLabsVoice;
+  const options = (voices ?? []).map((v) => ({
+    id: v.id,
+    label:
+      v.category === 'generated'
+        ? `${v.name} (designed)`
+        : v.category && v.category !== 'premade'
+          ? `${v.name} (${v.category})`
+          : v.name,
+  }));
+  return (
+    <Row
+      title="Voice"
+      testID="voice-elevenlabs-voice-row"
+      subtitle={
+        error !== undefined
+          ? `Could not list ElevenLabs voices: ${error}`
+          : voices === undefined
+            ? 'Add an ElevenLabs key under Hosts → Keys to list voices'
+            : undefined
+      }
+      right={
+        <OptionPicker
+          testID="elevenlabs-voice"
+          selectedId={current ?? ''}
+          selectedLabel={
+            current === undefined ? '—' : (options.find((o) => o.id === current)?.label ?? current)
+          }
+          options={options}
+          disabled={voices === undefined}
+          onSelect={(id) => void patchShared('Voice', { elevenLabsVoice: id })}
+          emptyText="No voices"
+        />
+      }
+    />
+  );
+}
+
+/**
+ * Standard Kokoro v1 voices — the same list web offers. Names match the `.pt`
+ * files the sidecar loads by name.
+ */
+export const KOKORO_VOICES: { id: string; label: string }[] = [
+  { id: 'af_heart', label: 'Heart (American F)' },
+  { id: 'af_bella', label: 'Bella (American F)' },
+  { id: 'af_sky', label: 'Sky (American F)' },
+  { id: 'af_sarah', label: 'Sarah (American F)' },
+  { id: 'af_nicole', label: 'Nicole (American F)' },
+  { id: 'am_adam', label: 'Adam (American M)' },
+  { id: 'am_michael', label: 'Michael (American M)' },
+  { id: 'bf_emma', label: 'Emma (British F)' },
+  { id: 'bf_isabella', label: 'Isabella (British F)' },
+  { id: 'bm_george', label: 'George (British M)' },
+  { id: 'bm_lewis', label: 'Lewis (British M)' },
+];
+
+/**
+ * Local calls: words are transcribed on the host, every turn goes to the
+ * chat's agent, and its reply is read out by Kokoro or ElevenLabs.
+ */
+function LocalCallRows({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
+  const tts = preferences.ttsBackend ?? 'kokoro';
+  const currentVoice = preferences.kokoroVoice;
+  return (
+    <>
+      <Row
+        title="Read replies with"
+        subtitle="Every turn goes to the chat’s agent; its reply is read out."
+        testID="voice-local-tts"
+        stack
+      >
+        <Chips
+          options={['kokoro', 'elevenlabs'] as const}
+          selected={tts}
+          labelOf={(t) => (t === 'kokoro' ? 'Kokoro (free)' : 'ElevenLabs')}
+          testIDPrefix="tts-backend"
+          labelPrefix="Speech engine"
+          onSelect={(t) => void patchShared('Speech engine', { ttsBackend: t })}
+        />
+      </Row>
+      {tts === 'elevenlabs' ? (
+        <ElevenLabsVoiceRow preferences={preferences} />
+      ) : (
+        <Row
+          title="Voice"
+          testID="voice-settings"
+          subtitle={currentVoice === undefined ? 'Each host’s Kokoro default' : undefined}
+          right={
+            <OptionPicker
+              testID="kokoro-voice"
+              selectedId={currentVoice ?? ''}
+              selectedLabel={
+                currentVoice === undefined
+                  ? '—'
+                  : (KOKORO_VOICES.find((v) => v.id === currentVoice)?.label ?? currentVoice)
+              }
+              options={KOKORO_VOICES}
+              onSelect={(id) => void patchShared('Voice', { kokoroVoice: id })}
+              emptyText="No voices"
+            />
+          }
+        />
+      )}
+    </>
+  );
+}
+
+const fmtInt = (n: number): string => Math.round(n).toLocaleString('en-GB');
+
+/** What voice has used across every host: tokens, ElevenLabs credits, and the plan. */
+function VoiceUsage(): React.ReactElement | null {
+  const hosts = usePresenceStore((s) => s.hosts);
+  const usages = Object.values(hosts).flatMap((h) =>
+    h.host?.voiceUsage ? [h.host.voiceUsage] : [],
+  );
+  if (usages.length === 0) return null;
+  const sum = (f: (u: (typeof usages)[number]) => number | undefined): number =>
+    usages.reduce((n, u) => n + (f(u) ?? 0), 0);
+  const plan = usages.find((u) => u.elevenLabsPlan !== undefined)?.elevenLabsPlan;
+  const line = (c: number, t: number, cr: number): string =>
+    `${c} ${c === 1 ? 'call' : 'calls'} · ${fmtInt(t)} tokens · ${fmtInt(cr)} ElevenLabs credits`;
+  return (
+    <SettingsSection title="Usage" testID="voice-usage">
+      <Row
+        title="This month"
+        testID="voice-usage-month"
+        subtitle={line(
+          sum((u) => u.monthCalls),
+          sum((u) => u.monthTokens),
+          sum((u) => u.monthCredits),
+        )}
+      />
+      <Row
+        title="In all"
+        testID="voice-usage-all"
+        subtitle={line(
+          sum((u) => u.allCalls),
+          sum((u) => u.allTokens),
+          sum((u) => u.allCredits),
+        )}
+      />
+      {plan ? (
+        <Row
+          title="ElevenLabs plan"
+          testID="voice-usage-plan"
+          subtitle={`${fmtInt(plan.used)} of ${fmtInt(plan.limit)} credits used`}
+        />
+      ) : null}
+    </SettingsSection>
   );
 }
 
@@ -471,9 +666,9 @@ function MeetingEngineRow(): React.ReactElement {
 }
 
 /**
- * Where dictation's words come from (spec/07 § Dictation engines): one engine
- * for this app, one for web and desktop, and whether Whisper tidies up a live
- * engine's words as dictation goes on.
+ * Where dictation's words come from (spec/07 § Dictation engines): every
+ * signed-in device picks its own engine, all listed at once; and whether
+ * Whisper tidies up a live engine's words as dictation goes on.
  */
 function DictationEngines(): React.ReactElement {
   const colors = useTheme();
@@ -487,17 +682,8 @@ function DictationEngines(): React.ReactElement {
       {(data) => {
         const voiceConfig = data.preferences.voiceConfig;
         const dictation = voiceConfig.dictation;
-        const write = (patch: Partial<DictationConfig>): void => {
-          setBusy(true);
-          void useSettingsStore
-            .getState()
-            .updatePreferences({
-              voiceConfig: { ...voiceConfig, dictation: { ...dictation, ...patch } },
-            })
-            .catch((e: Error) => Alert.alert('Settings failed', e.message))
-            .finally(() => setBusy(false));
-        };
-        // A Deepgram choice names each host that holds no key for it.
+        const own = data.preferences.deviceDictation ?? {};
+        const devices = data.devices.filter((d) => d.surfaceKind in DICTATION_KIND_LABELS);
         const keys = (engine: DictationEngine, testID: string): React.ReactNode => {
           const status = voiceKeyHostStatus(engine, hostReports);
           return status ? (
@@ -526,132 +712,61 @@ function DictationEngines(): React.ReactElement {
                 }}
               />
             </Row>
-            <Row
-              title="Phone"
-              testID="dictation-phone"
-              subtitle={keys(dictation.phone, 'dictation-phone-keys')}
-              stack
-            >
-              <Chips
-                options={PHONE_DICTATION}
-                selected={dictation.phone}
-                labelOf={(e) => DICTATION_LABELS[e]}
-                disabled={busy}
-                testIDPrefix="dictation-phone"
-                labelPrefix="Phone dictation"
-                onSelect={(phone) => write({ phone })}
-              />
-            </Row>
-            <Row
-              title="Computer"
-              testID="dictation-computer"
-              subtitle={keys(dictation.computer, 'dictation-computer-keys')}
-              stack
-            >
-              <Chips
-                options={COMPUTER_DICTATION}
-                selected={dictation.computer}
-                labelOf={(e) => DICTATION_LABELS[e]}
-                disabled={busy}
-                testIDPrefix="dictation-computer"
-                labelPrefix="Computer dictation"
-                onSelect={(computer) => write({ computer })}
-              />
-            </Row>
+            {devices.map((d) => {
+              const kind = d.surfaceKind as AudioSurfaceKind;
+              const engine =
+                own[d.surfaceId] ?? (kind === 'mobile' ? dictation.phone : dictation.computer);
+              return (
+                <Row
+                  key={d.surfaceId}
+                  title={d.label}
+                  testID={`dictation-device-${d.surfaceId}`}
+                  subtitle={
+                    <View style={{ gap: space.xs }}>
+                      <Muted>
+                        {d.isCurrent ? 'This device' : DICTATION_KIND_LABELS[d.surfaceKind]}
+                      </Muted>
+                      {keys(engine, `dictation-${d.surfaceId}-keys`)}
+                    </View>
+                  }
+                  stack
+                >
+                  <Chips
+                    options={dictationEnginesFor(kind)}
+                    selected={engine}
+                    labelOf={(e) => DICTATION_LABELS[e]}
+                    disabled={busy}
+                    testIDPrefix={`dictation-device-${d.surfaceId}`}
+                    labelPrefix={`${d.label} dictation`}
+                    onSelect={(next) => {
+                      setBusy(true);
+                      void patchShared('Dictation', {
+                        deviceDictation: { ...own, [d.surfaceId]: next },
+                      }).finally(() => setBusy(false));
+                    }}
+                  />
+                </Row>
+              );
+            })}
             <ToggleRow
               label={`Tidy up each phrase with ${SPEECH_TO_TEXT_LABEL[voiceConfig.speechToText]}`}
               testID="dictation-tidy"
               value={dictation.tidy}
               disabled={busy}
-              onChange={(tidy) => write({ tidy })}
+              onChange={(tidy) => {
+                setBusy(true);
+                void useSettingsStore
+                  .getState()
+                  .updatePreferences({
+                    voiceConfig: { ...voiceConfig, dictation: { ...dictation, tidy } },
+                  })
+                  .catch((e: Error) => Alert.alert('Settings failed', e.message))
+                  .finally(() => setBusy(false));
+              }}
             />
           </>
         );
       }}
     </WithSettings>
-  );
-}
-
-/**
- * Standard Kokoro v1 voices — the same list web offers. Names match the `.pt`
- * files the sidecar loads by name.
- */
-export const KOKORO_VOICES: { id: string; label: string }[] = [
-  { id: 'af_heart', label: 'Heart (American F)' },
-  { id: 'af_bella', label: 'Bella (American F)' },
-  { id: 'af_sky', label: 'Sky (American F)' },
-  { id: 'af_sarah', label: 'Sarah (American F)' },
-  { id: 'af_nicole', label: 'Nicole (American F)' },
-  { id: 'am_adam', label: 'Adam (American M)' },
-  { id: 'am_michael', label: 'Michael (American M)' },
-  { id: 'bf_emma', label: 'Emma (British F)' },
-  { id: 'bf_isabella', label: 'Isabella (British F)' },
-  { id: 'bm_george', label: 'George (British M)' },
-  { id: 'bm_lewis', label: 'Lewis (British M)' },
-];
-
-/**
- * How Patch speaks on every host (spec/01 § Settings): the Kokoro voice, and
- * every how many replies it says the chat's name (0 = never). A voice never
- * chosen is each host's own Kokoro default.
- */
-function Speaking({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
-  const currentInterval = preferences.chatNameInterval;
-  const [interval, setIntervalDraft] = React.useState(String(currentInterval));
-  React.useEffect(() => setIntervalDraft(String(currentInterval)), [currentInterval]);
-  const currentVoice = preferences.kokoroVoice;
-  const commitInterval = (): void => {
-    const n = Number(interval.trim());
-    const was = String(currentInterval);
-    if (!Number.isInteger(n) || n < 0 || interval.trim() === '') {
-      Alert.alert('Invalid value', 'Chat name interval must be a non-negative integer.');
-      setIntervalDraft(was);
-      return;
-    }
-    if (n === currentInterval) return;
-    void patchShared('Chat name interval', { chatNameInterval: n }).then((ok) => {
-      if (!ok) setIntervalDraft(was);
-    });
-  };
-  return (
-    <>
-      <Row
-        title="Voice"
-        testID="voice-settings"
-        subtitle={currentVoice === undefined ? 'Each host’s Kokoro default' : undefined}
-        right={
-          <OptionPicker
-            testID="kokoro-voice"
-            selectedId={currentVoice ?? ''}
-            selectedLabel={
-              currentVoice === undefined
-                ? '—'
-                : (KOKORO_VOICES.find((v) => v.id === currentVoice)?.label ?? currentVoice)
-            }
-            options={KOKORO_VOICES}
-            onSelect={(id) => void patchShared('Voice', { kokoroVoice: id })}
-            emptyText="No voices"
-          />
-        }
-      />
-      <Row
-        title="Say the chat name every"
-        right={
-          <>
-            <Field
-              testID="chat-name-interval"
-              accessibilityLabel="Chat name interval"
-              keyboardType="number-pad"
-              value={interval}
-              onChangeText={setIntervalDraft}
-              onBlur={commitInterval}
-              onSubmitEditing={commitInterval}
-              style={{ width: 52, textAlign: 'center' }}
-            />
-            <Muted>replies</Muted>
-          </>
-        }
-      />
-    </>
   );
 }

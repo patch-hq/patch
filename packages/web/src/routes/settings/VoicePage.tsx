@@ -1,26 +1,28 @@
-// Settings → Voice: talking with Patch — which engine each voice conversation
-// uses (account-wide), how Patch speaks, and the voice devices paired to the
-// account. Dictation has its own page (DictationPage).
+// Settings → Voice: talking with Patch. One set of settings for every voice
+// conversation — calls, hands-free and voice devices alike: the provider, its
+// model and voice, whether it can pass work to the chat's agent, and what calls
+// have used. Plus the voice devices paired to the account. Dictation and
+// Meetings have their own pages.
 
 import type { JSX } from 'react';
-import { Fragment, useState } from 'react';
-import { voiceKeyHostStatus } from '@patch/wire/audio';
-import { type VoiceBackend, type VoiceHandoff, type VoiceLayer } from '../../api/rest.js';
+import { useState } from 'react';
+import {
+  GEMINI_VOICES,
+  OPENAI_VOICES,
+  voiceKeyHostStatus,
+} from '@patch/wire/audio';
+import { type VoiceBackend, type VoiceLayer, type VoiceSurfaceConfig } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { AddVoiceDevice } from '../../components/AddVoiceDevice.js';
+import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
 import { VoiceProfilesGroup } from './VoiceProfilesGroup.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
 
-/**
- * spec/07 § Voice is a config matrix — each cell is presented as a provider
- * and, for a hosted one, the variant of it; the backend and layer they stand
- * for are not shown.
- */
 const PROVIDERS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
 const PROVIDER_LABELS: Record<VoiceBackend, string> = {
   local: 'Local',
@@ -28,82 +30,38 @@ const PROVIDER_LABELS: Record<VoiceBackend, string> = {
   openai: 'OpenAI',
   elevenlabs: 'ElevenLabs',
 };
-const VARIANTS: readonly Exclude<VoiceLayer, 'direct'>[] = ['light', 'heavy'];
-const VARIANT_NAMES: Record<VoiceBackend, Record<Exclude<VoiceLayer, 'direct'>, string>> = {
-  local: { light: '', heavy: '' },
+type Variant = Exclude<VoiceLayer, 'direct'>;
+const VARIANTS: readonly Variant[] = ['light', 'heavy'];
+const VARIANT_NAMES: Record<Exclude<VoiceBackend, 'local'>, Record<Variant, string>> = {
   gemini: { light: 'Flash', heavy: 'Thinking' },
   openai: { light: 'mini', heavy: 'full' },
   elevenlabs: { light: 'Haiku', heavy: 'Sonnet' },
 };
-/**
- * Rough dollars per minute of call, voice only (the chat's own agent turns ride
- * on the subscription). Gemini/OpenAI are estimated from token prices
- * (host/src/audio/voiceCost.ts) and Gemini Flash's measured $0.012 per 52s;
- * ElevenLabs is $0.08/min plus the LLM — Haiku measured at $0.086/min.
- */
-const VARIANT_COST: Record<VoiceBackend, Record<Exclude<VoiceLayer, 'direct'>, string>> = {
-  local: { light: 'free', heavy: 'free' },
-  gemini: { light: '~$0.01/min', heavy: '~$0.02/min' },
-  openai: { light: '~$0.03/min', heavy: '~$0.09/min' },
-  elevenlabs: { light: '~$0.09/min', heavy: '~$0.10+/min' },
-};
-const variantOf = (layer: VoiceLayer): Exclude<VoiceLayer, 'direct'> =>
-  layer === 'heavy' ? 'heavy' : 'light';
-/** A hosted `direct` runs as `light`. */
-const variantLabels = (backend: VoiceBackend): Record<Exclude<VoiceLayer, 'direct'>, string> => ({
-  light: `${VARIANT_NAMES[backend].light} · ${VARIANT_COST[backend].light}`,
-  heavy: `${VARIANT_NAMES[backend].heavy} · ${VARIANT_COST[backend].heavy}`,
-});
-const HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];
-const HANDOFF_LABELS: Record<VoiceHandoff, string> = {
-  auto: 'Voice decides',
-  always: 'Always',
-  never: 'Never',
-};
-const HANDOFF_SUBS: Record<VoiceHandoff, string> = {
-  auto: 'The voice answers simple questions itself and passes the rest to the chat’s agent.',
-  always: 'Everything you say goes to the chat’s agent; the voice only reads out its reply.',
-  never: 'The voice answers everything itself and never uses the chat’s agent.',
-};
-/** Dollars, to the penny that matters: two significant figures under 10 cents. */
-function formatUsd(usd: number): string {
-  if (usd === 0) return '$0';
-  if (usd < 0.1) return `$${Number(usd.toPrecision(2))}`;
-  return `$${usd.toFixed(2)}`;
-}
-const calls = (n: number): string => `${n} ${n === 1 ? 'call' : 'calls'}`;
+const variantOf = (layer: VoiceLayer): Variant => (layer === 'heavy' ? 'heavy' : 'light');
 
-type VoiceSurfaceKey = 'device' | 'handsFree' | 'call';
-const SURFACES: { key: VoiceSurfaceKey; label: string }[] = [
-  { key: 'handsFree', label: 'Hands-free' },
-  { key: 'call', label: 'Call' },
-  { key: 'device', label: 'Voice device' },
-];
+/** The three conversation entries share one config; `call` is the one shown. */
+const SURFACES = ['call', 'handsFree', 'device'] as const;
 
 /**
- * What actually happens for a given cell, right now (spec/07 § Voice — a
- * config matrix — "Implemented today" / "Not implemented"). Mirrors
- * `packages/host/src/audio/server.ts`'s branching exactly, so this can
- * never claim a cell works when the host would refuse it — the UI accepts
- * every combination the schema does (nothing here blocks a selection), it
- * only tells you honestly what picking it will do.
+ * What actually happens for a config, right now. Mirrors
+ * `packages/host/src/audio/server.ts`'s branching, so this never claims a
+ * config works when the host would refuse it.
  */
-export function voiceCellStatus(
-  surface: VoiceSurfaceKey,
-  backend: VoiceBackend,
-  layer?: VoiceLayer,
-): string | null {
+export function voiceCellStatus(backend: VoiceBackend, layer?: VoiceLayer): string | null {
   if (backend === 'local' && layer !== undefined && layer !== 'direct') {
     return 'Not implemented yet — no front model built for local. Refused at connect time.';
   }
   return null;
 }
 
+const fmtInt = (n: number): string => Math.round(n).toLocaleString('en-GB');
+const calls = (n: number): string => `${n} ${n === 1 ? 'call' : 'calls'}`;
+
 export function VoicePage(): JSX.Element {
   return (
     <SettingsPage title="Voice" testid="settings-voice">
-      <EngineGroup />
-      <SpeakingGroup />
+      <ConversationGroup />
+      <UsageGroup />
       <VoiceDevicesGroup />
       <VoiceProfilesGroup />
     </SettingsPage>
@@ -111,135 +69,175 @@ export function VoicePage(): JSX.Element {
 }
 
 /**
- * Per-surface voice config (spec/07 § Voice — a config matrix). Four surfaces,
- * each independently choosing an engine and (for the three conversational ones)
- * a front layer — deliberately a matrix to test against, not a fixed
- * architecture, so every combination is selectable and the row just says
- * honestly which ones already do something.
+ * The voice conversation config (spec/07 § Voice). One choice drives calls,
+ * hands-free and voice devices: it is written to all three cells.
  */
-function EngineGroup(): JSX.Element {
+function ConversationGroup(): JSX.Element {
   const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
   const loaded = usePreferencesStore((s) => s.loaded);
   const update = usePreferencesStore((s) => s.update);
   const pushError = useUiStore((s) => s.pushError);
-  // Per-host key status (`host.host.voiceKeys`): a hosted cell names each
-  // host that cannot run it — the host refuses its sessions there.
   const hosts = usePresenceStore((s) => s.hosts);
   const hostReports = Object.values(hosts).flatMap((h) =>
     h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
   );
-  const write = (patch: Parameters<typeof update>[0]): void => {
-    void update(patch).catch((e: Error) => pushError(failed('settings'), undefined, e.message));
+  const cell = voiceConfig.call;
+  const { backend, layer, handoff } = cell;
+  const write = (next: VoiceSurfaceConfig): void => {
+    const all = Object.fromEntries(SURFACES.map((k) => [k, next]));
+    void update({ voiceConfig: { ...voiceConfig, ...all } }).catch((e: Error) =>
+      pushError(failed('settings'), undefined, e.message),
+    );
   };
-
+  const status = voiceCellStatus(backend, layer);
+  const keyStatus = voiceKeyHostStatus(backend, hostReports);
   return (
-    <Group label="Voice conversations" testid="settings-voice-config">
-      {SURFACES.map(({ key: surface, label }) => {
-        const cell = voiceConfig[surface];
-        const { backend, layer, handoff } = cell;
-        const status = voiceCellStatus(surface, backend, layer);
-        const keyStatus = voiceKeyHostStatus(backend, hostReports);
-        const sub =
+    <Group testid="settings-voice-config">
+      <Row
+        title="Provider"
+        sub={
           status || keyStatus ? (
             <>
               {status ? (
-                <span className="set-sub-line" data-testid={`voice-${surface}-status`}>
+                <span className="set-sub-line" data-testid="voice-status">
                   {status}
                 </span>
               ) : null}
               {keyStatus ? (
-                <span className="set-sub-line set-sub-error" data-testid={`voice-${surface}-keys`}>
+                <span className="set-sub-line set-sub-error" data-testid="voice-keys">
                   {keyStatus}
                 </span>
               ) : null}
             </>
-          ) : undefined;
-        return (
-          <Fragment key={surface}>
-            <Row
-              title={label}
-              sub={sub}
-              testid={`voice-${surface}`}
-              className="stack set-row-choices"
-            >
-              <Pills
-                label={`${label} provider`}
-                options={PROVIDERS}
-                labels={PROVIDER_LABELS}
-                value={backend}
-                disabled={!loaded}
-                testid={`voice-${surface}-engine`}
-                onChange={(next) =>
-                  write({
-                    voiceConfig: {
-                      ...voiceConfig,
-                      [surface]: {
-                        backend: next,
-                        layer: next === 'local' ? 'direct' : variantOf(layer),
-                        handoff,
-                      },
-                    },
-                  })
-                }
-              />
-              {backend !== 'local' ? (
-                <Pills
-                  label={`${label} variant`}
-                  options={VARIANTS}
-                  labels={variantLabels(backend)}
-                  value={variantOf(layer)}
-                  disabled={!loaded}
-                  testid={`voice-${surface}-variant`}
-                  onChange={(next) =>
-                    write({
-                      voiceConfig: { ...voiceConfig, [surface]: { ...cell, layer: next } },
-                    })
-                  }
-                />
-              ) : (
-                <span className="set-sub" data-testid={`voice-${surface}-cost`}>
-                  Free
-                </span>
-              )}
-            </Row>
-            {backend !== 'local' ? (
-              <Row
-                title={`${label}: pass to the chat’s agent`}
-                sub={HANDOFF_SUBS[handoff]}
-                testid={`voice-${surface}-handoff-row`}
-                className="stack set-row-choices"
-              >
-                <Pills
-                  label={`${label} hand-off`}
-                  options={HANDOFFS}
-                  labels={HANDOFF_LABELS}
-                  value={handoff}
-                  disabled={!loaded}
-                  testid={`voice-${surface}-handoff`}
-                  onChange={(next) =>
-                    write({
-                      voiceConfig: { ...voiceConfig, [surface]: { ...cell, handoff: next } },
-                    })
-                  }
-                />
-              </Row>
-            ) : null}
-          </Fragment>
-        );
-      })}
-      {/* spec/07 § Call cost — what each host's voice calls have cost. */}
-      {Object.entries(hosts).flatMap(([hostId, h]) => {
-        const usage = h.host?.voiceUsage;
-        if (!h.host || !usage) return [];
-        return [
-          <Note key={hostId} testid={`voice-usage-${hostId}`}>
-            {`${h.host.hostName}: this month ${formatUsd(usage.monthUsd)} across ${calls(
-              usage.monthCalls,
-            )} · in all ${formatUsd(usage.allUsd)} across ${calls(usage.allCalls)}`}
-          </Note>,
-        ];
-      })}
+          ) : undefined
+        }
+        testid="voice-provider"
+        className="stack set-row-choices"
+      >
+        <Pills
+          label="Voice provider"
+          options={PROVIDERS}
+          labels={PROVIDER_LABELS}
+          value={backend}
+          disabled={!loaded}
+          testid="voice-engine"
+          onChange={(next) =>
+            write({
+              backend: next,
+              layer: next === 'local' ? 'direct' : variantOf(layer),
+              handoff: handoff === 'never' ? 'never' : 'auto',
+            })
+          }
+        />
+      </Row>
+      {backend === 'local' ? (
+        <LocalCallRows />
+      ) : (
+        <>
+          <Row title="Model" testid="voice-model" className="stack set-row-choices">
+            <Pills
+              label="Voice model"
+              options={VARIANTS}
+              labels={VARIANT_NAMES[backend]}
+              value={variantOf(layer)}
+              disabled={!loaded}
+              testid="voice-variant"
+              onChange={(next) => write({ ...cell, layer: next })}
+            />
+          </Row>
+          <HostedVoiceRow backend={backend} />
+          <Row
+            title="Pass work to the chat’s agent"
+            sub={
+              handoff === 'never'
+                ? 'The voice answers everything itself.'
+                : 'The voice answers what it can and hands the rest to the agent.'
+            }
+            testid="voice-handoff-row"
+          >
+            <Toggle
+              checked={handoff !== 'never'}
+              disabled={!loaded}
+              onChange={(on) => write({ ...cell, handoff: on ? 'auto' : 'never' })}
+              testid="voice-handoff-toggle"
+            />
+          </Row>
+        </>
+      )}
     </Group>
+  );
+}
+
+/** The voice a hosted provider speaks in. */
+function HostedVoiceRow({ backend }: { backend: Exclude<VoiceBackend, 'local'> }): JSX.Element {
+  if (backend === 'elevenlabs') return <ElevenLabsVoiceRow />;
+  return <PresetVoiceRow backend={backend} />;
+}
+
+function PresetVoiceRow({ backend }: { backend: 'gemini' | 'openai' }): JSX.Element {
+  const key = backend === 'gemini' ? 'geminiVoice' : 'openaiVoice';
+  const value = usePreferencesStore((s) => s.preferences[key]);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const voices = backend === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES;
+  return (
+    <Row title="Voice" testid={`voice-${backend}-voice-row`}>
+      <select
+        aria-label="Voice"
+        data-testid={`voice-${backend}-voice`}
+        value={value ?? ''}
+        disabled={!loaded}
+        onChange={(e) => void patchShared('voice', { [key]: e.target.value })}
+      >
+        {value === undefined ? <option value="">Provider default</option> : null}
+        {voices.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+    </Row>
+  );
+}
+
+/** The account's ElevenLabs voices, listed by whichever online host holds the key. */
+function ElevenLabsVoiceRow(): JSX.Element {
+  const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const reports = Object.values(hosts).flatMap((h) => (h.host ? [h.host] : []));
+  const voices = reports.find((h) => h.elevenLabsVoices !== undefined)?.elevenLabsVoices;
+  const error = reports.find((h) => h.elevenLabsVoicesError !== undefined)?.elevenLabsVoicesError;
+  return (
+    <Row
+      title="Voice"
+      sub={
+        error !== undefined
+          ? `Could not list ElevenLabs voices: ${error}`
+          : voices === undefined
+            ? 'Add an ElevenLabs key under Hosts → Keys to list voices'
+            : undefined
+      }
+      testid="voice-elevenlabs-voice-row"
+    >
+      <select
+        aria-label="Voice"
+        data-testid="elevenlabs-voice"
+        value={elevenLabsVoice ?? ''}
+        disabled={!loaded || voices === undefined}
+        onChange={(e) => void patchShared('voice', { elevenLabsVoice: e.target.value })}
+      >
+        {elevenLabsVoice === undefined ? <option value="">—</option> : null}
+        {(voices ?? []).map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.category === 'generated'
+              ? `${v.name} (designed)`
+              : v.category && v.category !== 'premade'
+                ? `${v.name} (${v.category})`
+                : v.name}
+          </option>
+        ))}
+      </select>
+    </Row>
   );
 }
 
@@ -270,67 +268,34 @@ const ELEVENLABS_MODELS = [
   { id: 'eleven_v3', label: 'v3 (most expressive)' },
 ] as const;
 
-/** How Patch speaks on every host: the engine and its voice, and how often the chat's title is refreshed. */
-function SpeakingGroup(): JSX.Element {
+/**
+ * Local calls: your words are transcribed on the host, every turn goes to the
+ * chat's agent, and its reply is read out by Kokoro or ElevenLabs. The same
+ * speech reads out announcements on house speakers.
+ */
+function LocalCallRows(): JSX.Element {
   const kokoroVoice = usePreferencesStore((s) => s.preferences.kokoroVoice);
   const ttsBackend = usePreferencesStore((s) => s.preferences.ttsBackend) ?? 'kokoro';
-  const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
   const elevenLabsModel = usePreferencesStore((s) => s.preferences.elevenLabsModel);
-  const chatNameInterval = usePreferencesStore((s) => s.preferences.chatNameInterval);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const hosts = usePresenceStore((s) => s.hosts);
-  // The account's voices come from whichever online host holds the key.
-  const elevenHosts = Object.values(hosts).flatMap((h) => (h.host ? [h.host] : []));
-  const elevenVoices = elevenHosts.find((h) => h.elevenLabsVoices !== undefined)?.elevenLabsVoices;
-  const elevenError = elevenHosts.find(
-    (h) => h.elevenLabsVoicesError !== undefined,
-  )?.elevenLabsVoicesError;
-
-  const titleOptions = [...new Set([0, 5, 10, 20, chatNameInterval])]
-    .sort((x, y) => x - y)
-    .map(String);
-  const titleLabels = Object.fromEntries(
-    titleOptions.map((n) => [n, n === '0' ? 'Set once' : `Every ${n} messages`]),
-  );
-
   return (
-    <Group label="Speaking" testid="voice-speaking">
-      <Row title="Spoken replies">
+    <>
+      <Row
+        title="Read replies with"
+        sub="Every turn goes to the chat’s agent; its reply is read out."
+        testid="voice-local-tts"
+      >
         <Pills
           label="Speech engine"
           value={ttsBackend}
           options={['kokoro', 'elevenlabs'] as const}
-          labels={{ kokoro: 'Kokoro', elevenlabs: 'ElevenLabs' }}
+          labels={{ kokoro: 'Kokoro (free)', elevenlabs: 'ElevenLabs' }}
           testid="tts-backend"
           onChange={(v) => void patchShared('speech engine', { ttsBackend: v })}
         />
       </Row>
       {ttsBackend === 'elevenlabs' ? (
-        <Row
-          title="Voice"
-          sub={
-            elevenError !== undefined
-              ? `Could not list ElevenLabs voices: ${elevenError}`
-              : elevenVoices === undefined
-                ? 'Add an ElevenLabs key under Hosts → Keys to list voices'
-                : undefined
-          }
-        >
-          <select
-            aria-label="Voice"
-            data-testid="elevenlabs-voice"
-            value={elevenLabsVoice ?? ''}
-            disabled={!loaded || elevenVoices === undefined}
-            onChange={(e) => void patchShared('voice', { elevenLabsVoice: e.target.value })}
-          >
-            {elevenLabsVoice === undefined ? <option value="">—</option> : null}
-            {(elevenVoices ?? []).map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.category && v.category !== 'premade' ? `${v.name} (${v.category})` : v.name}
-              </option>
-            ))}
-          </select>
-        </Row>
+        <ElevenLabsVoiceRow />
       ) : null}
       {ttsBackend === 'elevenlabs' ? (
         <Row
@@ -365,6 +330,7 @@ function SpeakingGroup(): JSX.Element {
         <Row
           title="Voice"
           sub={kokoroVoice === undefined ? 'Each host’s Kokoro default' : undefined}
+          testid="voice-kokoro-voice-row"
         >
           <select
             aria-label="Voice"
@@ -382,21 +348,53 @@ function SpeakingGroup(): JSX.Element {
           </select>
         </Row>
       )}
-      <Row
-        title="Chat title"
-        sub="How often Patch rewrites a chat’s title as the conversation moves on."
-        className="stack set-row-choices"
-      >
-        <Pills
-          label="Chat title refresh"
-          value={String(chatNameInterval)}
-          options={titleOptions}
-          labels={titleLabels}
-          disabled={!loaded}
-          testid="chat-name-interval"
-          onChange={(v) => void patchShared('chat title refresh', { chatNameInterval: Number(v) })}
-        />
+    </>
+  );
+}
+
+/**
+ * What voice has used across every host, in the providers' own units: tokens
+ * for Gemini and OpenAI, credits for ElevenLabs, and the ElevenLabs plan's
+ * credits used this period.
+ */
+function UsageGroup(): JSX.Element | null {
+  const hosts = usePresenceStore((s) => s.hosts);
+  const usages = Object.values(hosts).flatMap((h) =>
+    h.host?.voiceUsage ? [h.host.voiceUsage] : [],
+  );
+  if (usages.length === 0) return null;
+  const sum = (f: (u: (typeof usages)[number]) => number | undefined): number =>
+    usages.reduce((n, u) => n + (f(u) ?? 0), 0);
+  const plan = usages.find((u) => u.elevenLabsPlan !== undefined)?.elevenLabsPlan;
+  const line = (callsN: number, tokens: number, credits: number): string =>
+    [calls(callsN), `${fmtInt(tokens)} tokens`, `${fmtInt(credits)} ElevenLabs credits`].join(
+      ' · ',
+    );
+  return (
+    <Group label="Usage" testid="voice-usage">
+      <Row title="This month" testid="voice-usage-month">
+        <span className="set-sub">
+          {line(
+            sum((u) => u.monthCalls),
+            sum((u) => u.monthTokens),
+            sum((u) => u.monthCredits),
+          )}
+        </span>
       </Row>
+      <Row title="In all" testid="voice-usage-all">
+        <span className="set-sub">
+          {line(
+            sum((u) => u.allCalls),
+            sum((u) => u.allTokens),
+            sum((u) => u.allCredits),
+          )}
+        </span>
+      </Row>
+      {plan ? (
+        <Row title="ElevenLabs plan" testid="voice-usage-plan">
+          <span className="set-sub">{`${fmtInt(plan.used)} of ${fmtInt(plan.limit)} credits used`}</span>
+        </Row>
+      ) : null}
     </Group>
   );
 }

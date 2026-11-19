@@ -900,6 +900,12 @@ async function startHost(
   let elevenLabsVoice: string | undefined = persistedHostState.elevenLabsVoice;
   /** The ElevenLabs speech model (`host.settings` → `elevenLabsModel`); absent keeps the per-purpose defaults. */
   let elevenLabsModel: ElevenLabsTtsModel | undefined = persistedHostState.elevenLabsModel;
+  /** The voices hosted calls speak in, and each device's dictation engine (shared settings; not persisted — they arrive with the settings on connect). */
+  let geminiVoice: string | undefined;
+  /** The ElevenLabs plan's credits as last read (after each ElevenLabs call, and when the voice list is read). */
+  let elevenLabsPlan: PlanCredits | undefined;
+  let openaiVoice: string | undefined;
+  let deviceDictation: Record<string, DictationEngine> | undefined;
   /** The account's ElevenLabs voices, or why they could not be listed. */
   let elevenLabsVoices: ElevenLabsVoice[] | undefined;
   let elevenLabsVoicesError: string | undefined;
@@ -1413,7 +1419,12 @@ async function startHost(
       ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
       ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
-      voiceUsage: voiceLedger.totals(Date.now()),
+      voiceUsage: {
+        ...voiceLedger.totals(Date.now()),
+        ...(elevenLabsPlan !== undefined
+          ? { elevenLabsPlan: { used: elevenLabsPlan.used, limit: elevenLabsPlan.limit } }
+          : {}),
+      },
       providerKeys: providerKeys.describe(),
       chatNameInterval,
       titleGenerationEnabled,
@@ -1528,8 +1539,23 @@ async function startHost(
     if (!providerKeys.has('elevenlabs')) {
       elevenLabsVoices = undefined;
       elevenLabsVoicesError = undefined;
+      elevenLabsPlan = undefined;
       publishHost();
       return;
+    }
+    const apiKey = providerKeys.get('elevenlabs');
+    if (apiKey) {
+      void fetchPlanCredits({ apiKey })
+        .then((plan) => {
+          elevenLabsPlan = plan;
+        })
+        .catch((err: Error) =>
+          logger.error(
+            { component: 'elevenlabs', err: err.message },
+            'elevenlabs: could not read the plan credits',
+          ),
+        )
+        .finally(publishHost);
     }
     void elevenlabs
       .listVoices()
@@ -2107,6 +2133,14 @@ async function startHost(
       elevenLabsModel = shared.elevenLabsModel;
       hostStateStore.update({ elevenLabsModel });
       logger.info({ elevenLabsModel }, 'elevenlabs model changed');
+    if (shared.geminiVoice !== geminiVoice || shared.openaiVoice !== openaiVoice) {
+      geminiVoice = shared.geminiVoice;
+      openaiVoice = shared.openaiVoice;
+      logger.info({ geminiVoice, openaiVoice }, 'hosted call voices changed');
+    }
+    if (JSON.stringify(shared.deviceDictation) !== JSON.stringify(deviceDictation)) {
+      deviceDictation = shared.deviceDictation;
+      logger.info({ deviceDictation }, 'per-device dictation engines changed');
     }
     if (shared.voiceDevicePrompt !== voiceDevicePrompt) {
       voiceDevicePrompt = shared.voiceDevicePrompt;
@@ -2206,7 +2240,6 @@ async function startHost(
     }
     if (shared.chatNameInterval !== chatNameInterval) {
       chatNameInterval = shared.chatNameInterval;
-      daemon.setChatNameInterval(chatNameInterval);
       hostStateStore.update({ chatNameInterval });
     }
     if (shared.titleGenerationEnabled !== titleGenerationEnabled) {
@@ -3149,13 +3182,22 @@ async function startHost(
         // host owns Whisper, so it just transcribes the uploaded clip and
         // replies. `whisper` is assigned at step 8 (below); a request arriving
         // before the audio stack is up is reported, not silently dropped.
-        void handleVoiceNoteTranscribe(
-          event,
-          dictationTranscribers,
-          dictationEngineFor(voiceConfig.dictation, event.surfaceKind),
-          sender,
-          logger,
-        );
+        let engine: DictationEngine;
+        try {
+          engine = dictationEngineFor(voiceConfig.dictation, event.surfaceKind, {
+            surfaceId: event.surfaceId,
+            deviceDictation,
+          });
+        } catch (err) {
+          sender({
+            type: 'patch.voice_note.transcribe_response',
+            requestId: event.requestId,
+            ok: false,
+            error: { code: 'internal', message: (err as Error).message },
+          });
+          return;
+        }
+        void handleVoiceNoteTranscribe(event, dictationTranscribers, engine, sender, logger);
         return;
       }
       if (event.type === 'patch.attachment.store_request') {
@@ -4051,6 +4093,7 @@ async function startHost(
       let leftError: string | undefined;
       try {
         plan = await fetchPlanCredits({ apiKey });
+        elevenLabsPlan = plan;
       } catch (err) {
         leftError = (err as Error).message;
         logger.error({ err: leftError }, 'voice: could not read ElevenLabs credits left');
@@ -5092,8 +5135,6 @@ async function startHost(
     // spec/20-hooks.md § On the agent's response — check `agent_response`
     // hooks after every turn settles.
     checkAgentResponseHooks: true,
-    // "chat names should update every N messages": persisted global preference.
-    chatNameInterval,
     // spec/06 § Manager conversation — persisted global preference.
     managerContextWindow,
     // spec/16 § Speaking aloud — a turn heard on a voice device is answered in a room.
@@ -6444,6 +6485,12 @@ async function startHost(
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
     resolveSpeechToText: sttEngineResolver,
+    getHostedVoices: () => ({
+      ...(geminiVoice !== undefined ? { gemini: geminiVoice } : {}),
+      ...(openaiVoice !== undefined ? { openai: openaiVoice } : {}),
+      ...(elevenLabsVoice !== undefined ? { elevenlabs: elevenLabsVoice } : {}),
+    }),
+    getDeviceDictation: () => deviceDictation,
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),

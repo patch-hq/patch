@@ -9,7 +9,7 @@
 
 import { AccountRefusal, AccountState } from './accountState.js';
 import { z } from 'zod';
-import { DictationSetting, MeetingEngine, SpeechToTextEngine } from './audio.js';
+import { DictationEngineSchema, DictationSetting, MeetingEngine, SpeechToTextEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
@@ -2579,6 +2579,16 @@ export const SharedSettings = z
     elevenLabsModel: z
       .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
       .optional(),
+    /** The voice a Gemini Live call speaks in. Absent: Gemini's own default voice. */
+    geminiVoice: z.string().min(1).optional(),
+    /** The voice an OpenAI Realtime call speaks in. Absent: OpenAI's own default voice. */
+    openaiVoice: z.string().min(1).optional(),
+    /**
+     * Per signed-in device, by surface id: the engine its dictation runs on
+     * (spec/07 § Dictation engines). A device absent here runs on its kind's
+     * engine in `voiceConfig.dictation`. Written whole; synced to every device.
+     */
+    deviceDictation: z.record(z.string().min(1), DictationEngineSchema).optional(),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -2608,6 +2618,7 @@ export const SharedSettings = z
      * configuration and writes nothing for a setting that is absent.
      */
     providerSettings: z.record(z.string(), z.record(z.string(), z.number())),
+    /** Retired: a chat's title is set once. Still accepted from older clients; ignored. */
     chatNameInterval: z.number().int().nonnegative(),
     /** Days of inactivity after which a host deletes a chat's log and removes its clean, fully pushed agent worktrees, at startup. Patch's own, separate from Claude Code's setting. 0 means never: nothing is deleted. */
     cleanupPeriodDays: z.number().int().min(0).max(3650),
@@ -3188,6 +3199,17 @@ export const HostInfoEvent = z
         monthCalls: z.number().int().nonnegative(),
         allUsd: z.number().nonnegative(),
         allCalls: z.number().int().nonnegative(),
+        /** Gemini and OpenAI tokens, as the providers reported them. Absent on an older host. */
+        monthTokens: z.number().int().nonnegative().optional(),
+        allTokens: z.number().int().nonnegative().optional(),
+        /** ElevenLabs credits, as ElevenLabs charged them (calls and speech). Absent on an older host. */
+        monthCredits: z.number().nonnegative().optional(),
+        allCredits: z.number().nonnegative().optional(),
+        /** The ElevenLabs plan's credits this period, as last read from ElevenLabs. */
+        elevenLabsPlan: z
+          .object({ used: z.number().nonnegative(), limit: z.number().nonnegative() })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -9160,6 +9182,8 @@ export const PatchVoiceNoteTranscribeRequestEvent = z
     requestId: z.string().min(1),
     /** The uploading surface (for logging/context). */
     surfaceKind: VoiceAppSurfaceKind,
+    /** The uploading device, whose own dictation engine (`deviceDictation`) the clip runs on. */
+    surfaceId: z.string().min(1).optional(),
     /** Container format of the uploaded clip. Mobile records m4a. */
     format: z.enum(['m4a', 'wav']),
     /** The clip bytes, base64-encoded (JSON codec has no binary frame). */

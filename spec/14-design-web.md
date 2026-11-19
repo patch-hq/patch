@@ -1213,8 +1213,6 @@ setting that applies on every host (`01-server.md` § Settings).
   § Limits).
 - Automatic continue — off by default. Continues each interrupted turn as soon
   as its host is back (`12-error-and-offline.md` § Continue).
-- Chat names — how many user messages between regenerating a chat's name,
-  where 0 leaves the name as first set.
 - Provider-level context — `providerContextVerbosity` (`02-host.md` §
   Provider-level context); a three-step control (Off / Summary / Full)
   setting the default expand state of the provider-level context panel.
