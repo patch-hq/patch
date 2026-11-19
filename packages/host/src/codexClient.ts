@@ -57,6 +57,8 @@ export class CodexClient {
       credentialStore?: 'keyring' | 'ephemeral' | 'existing' | 'file';
       timeoutMs?: number;
       externalAuth?: () => { accessToken: string; chatgptAccountId: string };
+      /** Added to app-server's environment: a model endpoint's key (`modelEndpoints.ts`). */
+      env?: Record<string, string>;
       /** Each stderr line, ANSI-stripped and with token-shaped strings redacted. */
       onStderr?: (line: string) => void;
       /**
@@ -95,6 +97,7 @@ export class CodexClient {
       'CODEX_API_KEY',
     ])
       delete env[name];
+    Object.assign(env, this.options.env);
     const executable =
       this.options.executable ??
       process.env['PATCH_CODEX_EXECUTABLE'] ??

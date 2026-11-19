@@ -19,13 +19,16 @@ import {
   CLAUDE_BACKEND_ID,
   ChatErrorCode,
   ACCOUNT_PROVIDERS,
+  ModelEndpoints,
+  RecordedHarnessId,
+  endpointModelId,
+  parseEndpointModel,
+  retiredModelNotice,
 } from '../src/index.js';
 
 describe('provider built-in commands', () => {
   it('every provider declares its own, and routing follows the model', () => {
-    // The local engine has no CLI of its own, so nothing for Patch to avoid colliding with.
     for (const p of ACCOUNT_PROVIDERS) expect(p.builtinCommands.length).toBeGreaterThan(0);
-    expect(providerDescriptor('local').builtinCommands).toEqual([]);
     expect(providerBuiltinCommands('claude-opus-5').has('context')).toBe(true);
     expect(providerBuiltinCommands(null).has('context')).toBe(true);
     expect(providerBuiltinCommands('openai/gpt-5-codex').has('context')).toBe(false);
@@ -114,21 +117,41 @@ describe('provider account and capability facts', () => {
   });
 });
 
-describe('the local model provider', () => {
-  it('claims local/ models and its own sessions, with no accounts', () => {
-    expect(providerForModel('local/qwen3:8b')).toBe('local');
-    expect(providerForSessionId('local-3f2a')).toBe('local');
-    expect(backendIdForModel('local/llama3.2')).toBe('local');
-    expect(providerByName('ollama')).toBe('local');
-    expect(providerDescriptor('local').accountsKey).toBeNull();
-    expect(() => accountsKeyForBackend('local')).toThrow('no accounts');
-    expect([...BACKEND_IDS]).not.toContain('local');
+describe('model endpoints', () => {
+  it("route to the harness the endpoint API names, with that harness's capabilities", () => {
+    const codexModel = endpointModelId({ id: 'ollama', api: 'openai' }, 'qwen3:8b');
+    const claudeModel = endpointModelId({ id: 'router', api: 'anthropic' }, 'anthropic/claude-x');
+    expect(codexModel).toBe('openai/endpoint/ollama/qwen3:8b');
+    expect(providerForModel(codexModel)).toBe('codex');
+    expect(providerForModel(claudeModel)).toBe('claude');
+    expect(permissionModesFor(codexModel)).not.toContain('auto');
+    expect(parseEndpointModel(codexModel)).toEqual({
+      api: 'openai',
+      endpointId: 'ollama',
+      model: 'qwen3:8b',
+    });
+    expect(parseEndpointModel(claudeModel)?.model).toBe('anthropic/claude-x');
+    expect(parseEndpointModel('openai/gpt-5')).toBeUndefined();
+    expect(parseEndpointModel('openai/endpoint/ollama/')).toBeUndefined();
+    expect(parseEndpointModel('openai/endpoint/Bad_Id/x')).toBeUndefined();
   });
 
-  it('cannot run auto and has no effort control', () => {
-    expect(permissionModesFor('local/llama3.2')).not.toContain('auto');
-    expect(modelSupportsEffort('local/llama3.2')).toBe(false);
-    expect(HarnessId.parse('local')).toBe('local');
+  it('there is no local provider; its old records still parse and its chats name a successor', () => {
+    expect(PROVIDERS.map((p) => p.id)).not.toContain('local');
+    expect(() => providerByName('ollama')).toThrow('unknown provider');
+    expect(HarnessId.safeParse('local').success).toBe(false);
+    expect(RecordedHarnessId.parse('local')).toBe('local');
+    expect(retiredModelNotice('openai/gpt-5')).toBeUndefined();
+    expect(retiredModelNotice('local/qwen3:8b')).toMatchObject({
+      replacementModel: 'openai/endpoint/local/qwen3:8b',
+      message: expect.stringContaining('cannot continue'),
+    });
+  });
+
+  it('refuses two endpoints with one id', () => {
+    const e = { id: 'a', label: 'A', api: 'openai', baseUrl: 'http://h:1/v1' };
+    expect(ModelEndpoints.safeParse([e, e]).success).toBe(false);
+    expect(ModelEndpoints.safeParse([e]).success).toBe(true);
   });
 });
 
@@ -156,6 +179,6 @@ describe('provider capabilities', () => {
     expect(modelHasCapability('claude-opus-5', 'editAtMessage')).toBe(true);
     expect(modelHasCapability('openai/gpt-5', 'steer')).toBe(true);
     expect(modelHasCapability('openai/gpt-5', 'rewind')).toBe(false);
-    expect(providerCapabilities('local/x').branchAtTurn).toBe(false);
+    expect(providerCapabilities('openai/endpoint/ollama/x').branchAtTurn).toBe(true);
   });
 });

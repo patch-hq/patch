@@ -31,6 +31,7 @@ import {
   DEFAULT_SHARED_SETTINGS,
   EMPTY_SHARED_SECRETS,
   PROVIDER_KEY_MIN_LENGTH,
+  MIGRATED_LOCAL_ENDPOINT_ID,
   PROVIDER_KEYS,
   type ProviderKeyCheck,
   SharedSecrets,
@@ -377,6 +378,19 @@ export class SharedSettingsService {
       delete raw['sweepPrompt'];
       raw['sweepEnabled'] = false;
     }
+    // Local models were one OpenAI-compatible URL run on Patch's own agent
+    // loop. They are now model endpoints run through Codex (spec/02 § Provider
+    // adapters): the URL becomes the endpoint retired chats are offered to
+    // continue on, and the old key is gone from the file at the next write.
+    if ('localModelBaseUrl' in raw) {
+      const url = raw['localModelBaseUrl'];
+      delete raw['localModelBaseUrl'];
+      if (typeof url === 'string' && url !== '' && raw['modelEndpoints'] === undefined) {
+        raw['modelEndpoints'] = [
+          { id: MIGRATED_LOCAL_ENDPOINT_ID, label: 'Local model', api: 'openai', baseUrl: url },
+        ];
+      }
+    }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);
@@ -446,6 +460,14 @@ export class SharedSettingsService {
         const check = this.keyChecks.get(id);
         return { id, set: true, last4: value.slice(-4), ...(check ? { check } : {}) };
       }),
+      ...(this.secrets.endpointKeys
+        ? {
+            endpointKeys: Object.entries(this.secrets.endpointKeys).map(([id, value]) => ({
+              id,
+              ...(value.length >= PROVIDER_KEY_MIN_LENGTH ? { last4: value.slice(-4) } : {}),
+            })),
+          }
+        : {}),
     };
   }
 
@@ -922,9 +944,53 @@ export class SharedSettingsService {
         }
       }
     }
+    // An endpoint taken out takes its key with it.
+    const keptKeys = parsed.data.modelEndpoints
+      ? this.endpointKeysFor(parsed.data.modelEndpoints.map((e) => e.id))
+      : undefined;
+    if (keptKeys !== undefined) this.requireSecrets();
     this.settings = { ...this.settings, ...limitBehaviourInStep(parsed.data) };
-    this.commit({ secrets: false });
+    if (keptKeys !== undefined) this.replaceEndpointKeys(keptKeys);
+    this.commit({ secrets: keptKeys !== undefined });
     return this.current();
+  }
+
+  /** The saved endpoint keys for these endpoint ids, or undefined when nothing would be dropped. */
+  private endpointKeysFor(ids: string[]): Record<string, string> | undefined {
+    const held = this.secrets.endpointKeys ?? {};
+    const kept = Object.fromEntries(Object.entries(held).filter(([id]) => ids.includes(id)));
+    return Object.keys(kept).length === Object.keys(held).length ? undefined : kept;
+  }
+
+  /** Absent rather than empty, so a snapshot with no endpoint keys is unchanged for older hosts. */
+  private replaceEndpointKeys(keys: Record<string, string>): void {
+    if (Object.keys(keys).length === 0) delete this.secrets.endpointKeys;
+    else this.secrets.endpointKeys = keys;
+  }
+
+  /** Save the key a model endpoint is called with (spec/02 § Provider adapters). */
+  setEndpointKey(endpointId: string, value: string): void {
+    this.requireSecrets();
+    if (!(this.settings.modelEndpoints ?? []).some((e) => e.id === endpointId)) {
+      throw new SettingsError(404, 'unknown_endpoint', `No model endpoint ${endpointId}`);
+    }
+    const trimmed = value.trim();
+    if (trimmed === '' || /\s/.test(trimmed)) {
+      throw new SettingsError(400, 'invalid_value', 'A key has no whitespace');
+    }
+    this.replaceEndpointKeys({ ...this.secrets.endpointKeys, [endpointId]: trimmed });
+    this.commit({ secrets: true });
+  }
+
+  revokeEndpointKey(endpointId: string): void {
+    this.requireSecrets();
+    if (!this.secrets.endpointKeys?.[endpointId]) {
+      throw new SettingsError(404, 'not_set', `No key is saved for ${endpointId}`);
+    }
+    const { [endpointId]: _gone, ...rest } = this.secrets.endpointKeys;
+    void _gone;
+    this.replaceEndpointKeys(rest);
+    this.commit({ secrets: true });
   }
 
   setStrategy(backendId: BackendId, strategy: AccountStrategy): void {

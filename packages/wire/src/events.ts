@@ -49,6 +49,7 @@ import {
 } from './watch-check-in-prompt.js';
 import { HostProviderKey, ProviderKeyCheck, ProviderKeyId } from './provider-keys.js';
 import { AcpAgentConfig } from './acpAgents.js';
+import { MODEL_ENDPOINT_ID, ModelEndpoints } from './modelEndpoints.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -119,13 +120,21 @@ export const HarnessId = z.enum(PROVIDERS.map((p) => p.id) as [ProviderId, ...Pr
 export type HarnessId = z.infer<typeof HarnessId>;
 
 /**
+ * A harness a chat's record may name: every provider, plus `local`, Patch's
+ * own local-model loop. That loop is retired (local models are endpoints
+ * inside a harness, `modelEndpoints.ts`), but records it wrote stay readable.
+ */
+export const RecordedHarnessId = z.enum([...HarnessId.options, 'local']);
+export type RecordedHarnessId = z.infer<typeof RecordedHarnessId>;
+
+/**
  * Where an entry came from in the provider's own store — a Claude uuid, a Codex
  * item id (spec/01 § Chat record). It is how native edit and rewind find their
  * place; Patch never reads the provider's store through it for display.
  */
 export const NativeRef = z
   .object({
-    harness: HarnessId,
+    harness: RecordedHarnessId,
     sessionId: z.string().min(1),
     id: z.string().min(1),
   })
@@ -261,10 +270,8 @@ export const ChatErrorCode = z.enum([
   // The ChatGPT/Codex counterpart: no ChatGPT login on the host is usable (never
   // signed in, or the sign-in expired). Surfaces offer a button to sign in again.
   'chatgpt_login_required',
-  // A local model chat on a host with no local model endpoint configured.
+  // No longer sent (the local-model loop is retired); kept so older hosts' errors still parse.
   'local_endpoint_missing',
-  // An ACP agent refused to start a session for want of a sign-in or key.
-  'acp_agent_signed_out',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.
@@ -964,7 +971,7 @@ export const ChatMessageEvent = z
      */
     sessionChange: z
       .object({
-        harness: HarnessId,
+        harness: RecordedHarnessId,
         model: z.string().min(1),
         seededMessages: z.number().int().nonnegative(),
         /**
@@ -2587,13 +2594,12 @@ export const SharedSettings = z
      */
     providerPermissionDefaults: z.record(z.string(), PermissionMode),
     /**
-     * Base URL of the OpenAI-compatible server local models run on (Ollama,
-     * llama.cpp, LM Studio), up to and including its version segment, e.g.
-     * `http://127.0.0.1:11434/v1`. Absent until set: local models are then
-     * unavailable and a chat on one says so. Reached FROM each host, so
-     * `127.0.0.1` means that host. Empty clears it.
+     * The model endpoints local models and routers are reached at (spec/02 §
+     * Provider adapters): each runs inside Codex or Claude Code by the API it
+     * speaks (`modelEndpoints.ts`). Absent: none. An endpoint's key is a
+     * shared secret (`endpointKeys`), never here.
      */
-    localModelBaseUrl: z.union([z.literal(''), z.string().url()]).optional(),
+    modelEndpoints: ModelEndpoints.optional(),
     /**
      * Agent Client Protocol agents this account adds to the built-in ones, or
      * replaces by id (spec/02 § Provider adapters): each the command that
@@ -2838,6 +2844,11 @@ export const SharedSecrets = z
         assemblyai: z.string().min(1).optional(),
       })
       .strict(),
+    /**
+     * Each model endpoint's key, by endpoint id (`modelEndpoints.ts`). Absent
+     * when no endpoint has one, so a snapshot without keys is unchanged.
+     */
+    endpointKeys: z.record(z.string().regex(MODEL_ENDPOINT_ID), z.string().min(1)).optional(),
   })
   .strict();
 export type SharedSecrets = z.infer<typeof SharedSecrets>;
@@ -2885,6 +2896,18 @@ export const SharedSecretsSummary = z
         })
         .strict(),
     ),
+    /** The model endpoints that have a key saved, never the key. */
+    endpointKeys: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            /** Absent for a key too short for its last four to stay private. */
+            last4: z.string().min(1).max(4).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 export type SharedSecretsSummary = z.infer<typeof SharedSecretsSummary>;

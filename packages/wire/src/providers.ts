@@ -76,7 +76,7 @@ export interface ProviderDescriptor {
   /**
    * The key of the provider's list in the shared settings (`secrets.<key>`,
    * `strategy.<key>`). `null` for a provider with no accounts to sign in to
-   * (a local model server): it has no credential store, strategy or usage.
+   * (an agent that holds its own sign-in): it has no credential store, strategy or usage.
    */
   readonly accountsKey: string | null;
   /**
@@ -253,34 +253,6 @@ export const PROVIDERS = [
     settingsNote:
       'Codex has no setting to delete old sessions. It keeps every session until you delete it with Codex itself.',
     nativeDuplicates: ['patch_agent'],
-  },
-  {
-    id: 'local',
-    label: 'Local model',
-    modelPrefix: 'local/',
-    sessionIdPrefix: 'local-',
-    // No classifier-driven approval, so no `auto` (openaiCompatPermission refuses it).
-    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-    backendId: 'local',
-    accountsKey: null,
-    accountKinds: null,
-    hostSignIn: null,
-    aliases: ['ollama', 'llamacpp', 'lmstudio'],
-    supportsEffort: false,
-    loginRequiredCode: 'local_endpoint_missing',
-    builtinCommands: [],
-    capabilities: {
-      resume: true,
-      editAtMessage: false,
-      rewind: false,
-      branchAtTurn: false,
-      disableNativeTools: false,
-      interrupt: true,
-      // The adapter puts waiting input in front of the model between tool steps.
-      steer: true,
-    },
-    settings: [],
-    nativeDuplicates: [],
   },
   // Any Agent Client Protocol agent (spec/02 § Provider adapters): Gemini CLI
   // and every agent added as a config entry. Models are

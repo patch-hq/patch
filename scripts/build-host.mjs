@@ -658,12 +658,6 @@ async function buildTarget(t, ctx) {
     join(DAEMON, 'src', 'bin', 'turn-runner.ts'),
     join(outDir, 'bin', 'turn-runner.js'),
   );
-  // A local-model turn's agent process, run under the turn runner.
-  await bundle(
-    esb,
-    join(DAEMON, 'src', 'bin', 'local-agent.ts'),
-    join(outDir, 'bin', 'local-agent.js'),
-  );
   await bundle(esb, join(DAEMON, 'src', 'installer', 'entry.ts'), join(outDir, 'install.mjs'));
 
   // 2. the pinned Node runtime

@@ -298,6 +298,13 @@ export interface SdkRunOptions {
    * its own default config dir.
    */
   claudeConfigDir?: string;
+  /**
+   * An Anthropic-compatible model endpoint the turn runs against instead of
+   * Anthropic (spec/02 § Provider adapters): Claude Code is pointed at it with
+   * `ANTHROPIC_BASE_URL`, and `model` is the endpoint's own name for the model.
+   * No Claude account is used.
+   */
+  modelEndpoint?: { baseUrl: string; key?: string };
 }
 
 export interface SdkBackend {
@@ -1037,7 +1044,14 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   // environment holds never reaches the SDK (spec/10 § Backend credentials).
   delete env['ANTHROPIC_API_KEY'];
   delete env['CLAUDE_CODE_OAUTH_TOKEN'];
-  if (isAnthropicApiKey(opts.oauthAccessToken)) env['ANTHROPIC_API_KEY'] = opts.oauthAccessToken;
+  if (opts.modelEndpoint) {
+    // A model endpoint: the endpoint's key, sent as a bearer token, and no
+    // Claude credential at all — nor any token of the host's own.
+    env['ANTHROPIC_BASE_URL'] = opts.modelEndpoint.baseUrl;
+    delete env['ANTHROPIC_AUTH_TOKEN'];
+    if (opts.modelEndpoint.key !== undefined) env['ANTHROPIC_AUTH_TOKEN'] = opts.modelEndpoint.key;
+  } else if (isAnthropicApiKey(opts.oauthAccessToken))
+    env['ANTHROPIC_API_KEY'] = opts.oauthAccessToken;
   else env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
   if (opts.claudeConfigDir !== undefined) env['CLAUDE_CONFIG_DIR'] = opts.claudeConfigDir;
   // An unattended agent must not reach the 1Password desktop app: with the

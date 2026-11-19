@@ -12,7 +12,7 @@ import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { OAuthCheckResult } from './chatRunner.js';
-import { providerForModel, type HarnessId } from '@patch/wire';
+import { isEndpointModel, providerForModel, type HarnessId } from '@patch/wire';
 import type { Logger } from 'pino';
 import { cutAt, stripWrappingQuotes } from './textClean.js';
 
@@ -50,8 +50,8 @@ export interface MakeTitleGeneratorOptions {
     sdkBackend: SdkBackend;
     resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
   };
-  /** The same for a local-model chat: titled by the local model itself. */
-  local?: {
+  /** The same for a chat on a model endpoint, whichever harness it runs in: titled by its own model. */
+  endpoint?: {
     sdkBackend: SdkBackend;
     resolveOAuth: (model?: string) => OAuthCheckResult | Promise<OAuthCheckResult>;
   };
@@ -163,10 +163,12 @@ export function makeTitleGenerator(
     > = {
       claude: undefined,
       codex: { dep: opts.codex, name: 'Codex' },
-      local: { dep: opts.local, name: 'local model' },
       acp: null,
     };
-    const own = ownByProvider[providerForModel(input.chatModel)];
+    // An endpoint model never borrows a Claude small-job model the user did not choose.
+    const own = isEndpointModel(input.chatModel)
+      ? { dep: opts.endpoint, name: 'model endpoint' }
+      : ownByProvider[providerForModel(input.chatModel)];
     if (own === null) return null;
     if (own) {
       const model = input.chatModel!;

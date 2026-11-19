@@ -161,6 +161,23 @@ describe('makeGoalEvaluator', () => {
     expect(opts?.prompt).toContain(baseInput.transcript);
   });
 
+  it('judges a chat on a model endpoint on that model, and any other chat on the judge model', async () => {
+    const sdk = createMockSdkBackend();
+    const verdict = [
+      { type: 'assistant' as const, content: '{"verdict":"met","reason":"ok"}' },
+      { type: 'result' as const, sessionId: 's' },
+    ];
+    sdk.enqueue(verdict);
+    sdk.enqueue(verdict);
+    const resolveOAuth = vi.fn(okOAuth);
+    const evaluate = makeGoalEvaluator({ sdkBackend: sdk, resolveOAuth, logger: silent });
+    await evaluate({ ...baseInput, chatModel: 'openai/endpoint/ollama/qwen3:8b' });
+    expect(sdk.lastOptions()?.model).toBe('openai/endpoint/ollama/qwen3:8b');
+    expect(resolveOAuth).toHaveBeenLastCalledWith('openai/endpoint/ollama/qwen3:8b');
+    await evaluate({ ...baseInput, chatModel: 'openai/gpt-5' });
+    expect(sdk.lastOptions()?.model).toBe(GOAL_EVAL_MODEL);
+  });
+
   it('gives the judge the host-verified background state so a "waiting" claim can be tested', async () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([

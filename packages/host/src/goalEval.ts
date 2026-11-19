@@ -16,7 +16,12 @@
 // reply — resolves to null and the host leaves the goal exactly as it was,
 // logged; the next turn's settle tries again.
 
-import { DEFAULT_GOAL_EVAL_PROMPT, DEFAULT_GOAL_MODEL, tailCodePoints } from '@patch/wire';
+import {
+  DEFAULT_GOAL_EVAL_PROMPT,
+  DEFAULT_GOAL_MODEL,
+  isEndpointModel,
+  tailCodePoints,
+} from '@patch/wire';
 import type { SdkBackend } from './sdkBackend.js';
 import type { OAuthCheckResult } from './chatRunner.js';
 import type { Logger } from 'pino';
@@ -59,6 +64,11 @@ export interface GoalEvalInput {
   agentStatement: string;
   /** This evaluation is also a check-in: the reply must say whether the goal is on track. */
   checkIn?: boolean;
+  /**
+   * The chat's own model. A chat on a model endpoint is judged on that model,
+   * never on a paid one the user did not choose (spec/02 § Provider adapters).
+   */
+  chatModel?: string;
 }
 
 export interface GoalJudgeSettings {
@@ -177,7 +187,7 @@ export function makeGoalEvaluator(
       prompt: DEFAULT_GOAL_EVAL_PROMPT,
       model: GOAL_EVAL_MODEL,
     };
-    const model = judge.model;
+    const model = isEndpointModel(input.chatModel) ? input.chatModel! : judge.model;
     const auth = await opts.resolveOAuth(model);
     if (!auth.ok) {
       opts.logger?.warn(

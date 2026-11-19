@@ -9,6 +9,7 @@
 import {
   CLAUDE_BACKEND_ID,
   HARNESS_PERMISSION_MODES,
+  isEndpointModel,
   providerForModel,
   providerForSessionId,
   type HarnessId,
@@ -16,7 +17,6 @@ import {
 } from '@patch/wire';
 import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
-import { LOCAL_BACKEND_ID } from './localModels.js';
 import { ACP_BACKEND_ID } from './acpRegistry.js';
 
 export interface HarnessTraits {
@@ -80,23 +80,6 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     buildsAccountReport: false,
     signedOutMessage: (_hostId, reason) => reason,
   },
-  // A local endpoint has no account, no quota and no status model of its own.
-  local: {
-    backendId: LOCAL_BACKEND_ID,
-    resolvesPermissionModeByModel: false,
-    generatesStatus: false,
-    rateLimitSweeps: false,
-    turnRetrySafe: () => false,
-    limitMustStateReset: false,
-    ownsSessionFile: false,
-    sessionBoundToAccount: false,
-    // Its loop runs in an agent process under the turn runner (localAgent.ts).
-    detachedTurnRunner: true,
-    hostCreditAggregate: false,
-    sessionMovable: false,
-    buildsAccountReport: false,
-    signedOutMessage: (_hostId, reason) => reason,
-  },
   // An ACP agent (acpBackend.ts): its turn runs under the detached runner, its
   // session is the agent's own and stays where the agent keeps it, and its
   // credential is a provider key or the agent's own sign-in.
@@ -118,8 +101,25 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
   },
 };
 
+/**
+ * A Claude chat on a model endpoint (spec/02 § Provider adapters) runs on no
+ * Claude account, so nothing account-shaped applies to it, and its status line
+ * is not generated on a Claude small-job model the user did not choose.
+ */
+const CLAUDE_ON_ENDPOINT: HarnessTraits = {
+  ...HARNESS_TRAITS.claude,
+  generatesStatus: false,
+  rateLimitSweeps: false,
+  turnRetrySafe: () => false,
+  sessionBoundToAccount: false,
+  hostCreditAggregate: false,
+};
+
 export function harnessTraitsForModel(model: string | null | undefined): HarnessTraits {
-  return HARNESS_TRAITS[providerForModel(model)];
+  const harness = providerForModel(model);
+  return harness === 'claude' && isEndpointModel(model)
+    ? CLAUDE_ON_ENDPOINT
+    : HARNESS_TRAITS[harness];
 }
 
 /**

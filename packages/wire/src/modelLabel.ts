@@ -4,6 +4,7 @@
 // `claude-opus-5-5-20260101`.
 
 import { parseAcpModel } from './acpAgents.js';
+import { parseEndpointModel } from './modelEndpoints.js';
 
 /**
  * The catalogue's own label when there is one, minus the brand prefix every
@@ -18,6 +19,8 @@ export function compactModelLabel(modelId: string, catalogueLabel?: string): str
   // An ACP agent's model (`acp/<agent>/<model>`) reads as the agent's own id.
   const acp = parseAcpModel(modelId);
   if (acp !== undefined) return acp.modelId;
+  const onEndpoint = parseEndpointModel(modelId);
+  if (onEndpoint) return `${onEndpoint.model} · ${onEndpoint.endpointId}`;
   const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(modelId);
   if (m === null) return modelId;
   const family = m[1] ?? '';

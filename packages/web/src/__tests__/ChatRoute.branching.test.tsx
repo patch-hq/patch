@@ -112,7 +112,7 @@ describe('editing a user turn forks a track', () => {
       { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
     ]);
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'local/qwen' } },
+      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'gemini/gemini-3-pro' } },
     }));
     renderChat('c-fork');
     expect(screen.queryAllByTestId('msg-edit')).toHaveLength(0);

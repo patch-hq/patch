@@ -43,6 +43,17 @@ describe('the chat core does not branch on a provider name', () => {
     const src = readFileSync(new URL('../src/chatRunner.ts', import.meta.url), 'utf8');
     expect(src.match(/[!=]==\s*'(claude|codex|local)'/g) ?? []).toEqual([]);
   });
+
+  it('a Claude chat on a model endpoint has no account to retry on or sweep, nor a status line', () => {
+    const t = harnessTraitsForModel('claude/endpoint/router/x');
+    expect(t.backendId).toBe(HARNESS_TRAITS.claude.backendId);
+    expect(t.generatesStatus).toBe(false);
+    expect(t.rateLimitSweeps).toBe(false);
+    expect(t.hostCreditAggregate).toBe(false);
+    expect(t.turnRetrySafe(new Error('x'))).toBe(false);
+    expect(harnessTraitsForModel('claude-opus-5')).toBe(HARNESS_TRAITS.claude);
+    expect(harnessTraitsForModel('openai/endpoint/ollama/q')).toBe(HARNESS_TRAITS.codex);
+  });
 });
 
 describe('host wiring reads provider adapters', () => {
@@ -58,11 +69,18 @@ describe('host wiring reads provider adapters', () => {
   it('adapterForModel picks the adapter by the model’s provider', async () => {
     const { adapterForModel } = await import('../src/providerAdapters.js');
     const mk = (name: string) => ({ name }) as never;
-    const adapters = { claude: mk('c'), codex: mk('x'), local: mk('l') };
+    const adapters = { claude: mk('c'), codex: mk('x'), gemini: mk('g') };
     expect((adapterForModel(adapters, 'openai/gpt-5') as unknown as { name: string }).name).toBe(
       'x',
     );
-    expect((adapterForModel(adapters, 'local/q') as unknown as { name: string }).name).toBe('l');
+    expect((adapterForModel(adapters, 'gemini/g') as unknown as { name: string }).name).toBe('g');
+    // A model endpoint is a model inside a harness, never an adapter of its own.
+    expect(
+      (adapterForModel(adapters, 'openai/endpoint/ollama/q') as unknown as { name: string }).name,
+    ).toBe('x');
+    expect(
+      (adapterForModel(adapters, 'claude/endpoint/router/q') as unknown as { name: string }).name,
+    ).toBe('c');
     expect((adapterForModel(adapters, undefined) as unknown as { name: string }).name).toBe('c');
   });
 });

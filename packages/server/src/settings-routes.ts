@@ -552,4 +552,15 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/providers/keys/:keyId',
     handle(undefined, (req) => shared.revokeProviderKey(keyOf(req))),
   );
+
+  // A model endpoint's key (spec/02 § Provider adapters): write-only, like a provider key.
+  const endpointOf = (req: FastifyRequest) => (req.params as { endpointId: string }).endpointId;
+  app.put(
+    '/api/providers/endpoints/:endpointId/key',
+    handle(KeyBody, (req, body) => shared.setEndpointKey(endpointOf(req), body.value)),
+  );
+  app.delete(
+    '/api/providers/endpoints/:endpointId/key',
+    handle(undefined, (req) => shared.revokeEndpointKey(endpointOf(req))),
+  );
 }

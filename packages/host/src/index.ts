@@ -13,13 +13,7 @@ import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexHistory } from './codexHistory.js';
-import {
-  LOCAL_BACKEND_ID,
-  LocalBackend,
-  LocalModels,
-  localHistoryDir,
-  localSessionDir,
-} from './localModels.js';
+import { ModelEndpointRegistry } from './modelEndpoints.js';
 import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 // Entry point for the patch-daemon process.
 //
@@ -117,10 +111,17 @@ import { QueuePullClient } from './queuePull.js';
 import {
   assessHostHealth,
   HOST_HEALTH_INTERVAL_MS,
+  isEndpointModel,
   providerDescriptor,
   parseAcpModel,
   providerForModel,
 } from '@patch/wire';
+
+/**
+ * Where chats on the retired local-model loop kept their history (Codex's
+ * format). Read for those chats' history and search only; nothing writes it.
+ */
+const retiredLocalHistoryDir = (patchHome: string): string => join(patchHome, 'local-history');
 import type { ChatInputEvent } from '@patch/wire';
 import { DEFAULT_SMALL_JOB_MODELS } from '@patch/wire';
 import { createMetaStore } from './meta.js';
@@ -806,7 +807,7 @@ async function startHost(
     {
       claudeProjectsRoot: config.claudeProjectsRoot,
       codexHistoryRoot: join(config.patchHome, 'openai-history'),
-      localHistoryRoot: localHistoryDir(config.patchHome),
+      localHistoryRoot: retiredLocalHistoryDir(config.patchHome),
       acpHistoryRoot: join(config.patchHome, 'acp-history'),
       seqIndexPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'seqindex.jsonl'),
       now: () => Date.now(),
@@ -821,34 +822,12 @@ async function startHost(
   const chatSearchReady = new Promise<void>((resolve) => {
     chatSearchBuilt = resolve;
   });
-  const codexBackend = new CodexBackend(codexAccounts, codexHistory);
-  const localModels = new LocalModels();
-  const localHistory = new CodexHistory(localHistoryDir(config.patchHome), 'local');
-  // A local-model turn runs in an agent process of its own under the turn
-  // runner (spec/02 § Host restarts), resolved like the runner itself below.
-  // Only the real backend runs turns durably, so only it needs one.
-  const localAgent = ((): { command: string; args: string[] } | undefined => {
-    if (config.sdkBackend !== 'real') return undefined;
-    const here = dirname(fileURLToPath(import.meta.url));
-    const built = resolve(here, 'bin', 'local-agent.js');
-    const source = resolve(here, 'bin', 'local-agent.ts');
-    if (existsSync(built)) return { command: process.execPath, args: [built] };
-    if (existsSync(source)) {
-      const tsxLoader = createRequire(import.meta.url).resolve('tsx');
-      return {
-        command: process.execPath,
-        args: ['--import', pathToFileURL(tsxLoader).href, source],
-      };
-    }
-    throw new Error(`patch-daemon: local agent not found at ${built} or ${source}`);
-  })();
-  const localBackend = new LocalBackend(
-    localModels,
-    localHistory,
-    localSessionDir(config.patchHome),
-    undefined,
-    localAgent,
-  );
+  // spec/02 § Provider adapters — local models and routers are endpoints
+  // inside Codex and Claude Code, set once for the account.
+  const modelEndpoints = new ModelEndpointRegistry();
+  const codexBackend = new CodexBackend(codexAccounts, codexHistory, modelEndpoints);
+  // What chats on the retired local-model loop wrote, read for their history only.
+  const localHistory = new CodexHistory(retiredLocalHistoryDir(config.patchHome), 'local');
   // ACP agents (spec/02 § Provider adapters): which agents exist is the shared
   // `acpAgents` setting over the built-in list; this host offers those whose
   // command it has. Their credential is a shared provider key.
@@ -2049,6 +2028,9 @@ async function startHost(
         logger.warn({ model, err: (err as Error).message }, 'special thread model refused'),
     );
   };
+  /** The endpoints and their keys, as the last settings snapshot gave them. */
+  let endpointSettings: SharedSettings['modelEndpoints'];
+  let endpointKeys: Record<string, string> | undefined;
   const applySharedHostSettings = (shared: SharedSettings): void => {
     if (shared.agentIdentity.enabled !== webBotAuthEnabled) {
       webBotAuthEnabled = shared.agentIdentity.enabled;
@@ -2074,7 +2056,8 @@ async function startHost(
     } catch (err) {
       logger.error({ err }, 'Claude Code settings not written: settings.json cannot be edited');
     }
-    localModels.setBaseUrl(shared.localModelBaseUrl);
+    endpointSettings = shared.modelEndpoints;
+    modelEndpoints.apply(endpointSettings, endpointKeys);
     acpRegistry.setConfigured(shared.acpAgents);
     setDefaultModel(shared.defaultModel);
     if (shared.specialThreadModel !== specialThreadModel) {
@@ -2342,6 +2325,10 @@ async function startHost(
         if (err instanceof ProviderKeyError) throw new Error(err.message);
         throw err;
       }
+    });
+    // Before the settings, which apply the endpoints the keys belong to.
+    await part('model endpoint keys', () => {
+      endpointKeys = snapshot.secrets.endpointKeys;
     });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
     await part('Claude accounts', () => {
@@ -2991,7 +2978,7 @@ async function startHost(
           logger,
           selfHostId,
           codexAccounts,
-          localModels,
+          modelEndpoints,
           acpRegistry,
         );
         return;
@@ -4508,8 +4495,23 @@ async function startHost(
   // belongs to.
   const providerAdapters: ProviderAdapters = {
     claude: {
-      run: (opts) => sdkBackend.run(opts),
-      resolveCredential: (_model, turn) => resolveOAuthWithCredit(turn),
+      // A model on an Anthropic-compatible endpoint runs on Claude Code pointed
+      // at that endpoint, with no Claude account (spec/02 § Provider adapters).
+      run: (opts) => {
+        if (!isEndpointModel(opts.model)) return sdkBackend.run(opts);
+        const launch = modelEndpoints.claudeLaunch(opts.model);
+        return sdkBackend.run({
+          ...opts,
+          model: launch.model,
+          oauthAccessToken: '',
+          modelEndpoint: {
+            baseUrl: launch.baseUrl,
+            ...(launch.key !== undefined ? { key: launch.key } : {}),
+          },
+        });
+      },
+      resolveCredential: async (model, turn) =>
+        isEndpointModel(model) ? { ok: true, accessToken: '' } : resolveOAuthWithCredit(turn),
       heldAccounts: () =>
         (readPatchStore(oauthOpts)?.accounts ?? []).map((a) => ({ id: a.id, label: a.label })),
       accountLabel: (accountId) =>
@@ -4543,6 +4545,9 @@ async function startHost(
     codex: {
       run: (opts) => codexBackend.run(opts),
       resolveCredential: async (model, turn) => {
+        // An endpoint model uses no Codex login; an endpoint that is not set
+        // up is refused by the turn itself, naming it.
+        if (isEndpointModel(model)) return { ok: true, accessToken: '' };
         try {
           const account = await codexAccounts.resolve(
             {
@@ -4571,22 +4576,6 @@ async function startHost(
         };
       },
       nextAccountAfterExhausted: (_chatId, id) => codexAccounts.markExhausted(id),
-      accountRouting: () => undefined,
-    },
-    // A local endpoint has no account, no quota and no status model of its own.
-    local: {
-      run: (opts) => localBackend.run(opts),
-      resolveCredential: async () =>
-        localModels.configured
-          ? { ok: true, accessToken: '' }
-          : {
-              ok: false,
-              reason: 'No local model endpoint is set. Add its URL under Settings → Providers.',
-            },
-      heldAccounts: () => [],
-      accountLabel: () => undefined,
-      accountSpent: () => ({ spent: false }),
-      nextAccountAfterExhausted: () => undefined,
       accountRouting: () => undefined,
     },
     // An ACP agent's credential is its provider key or its own sign-in, which
@@ -4847,7 +4836,7 @@ async function startHost(
       const results = await Promise.allSettled([
         modelCatalog.get().then((r) => r.models),
         codexAccounts.models(),
-        localModels.configured ? localModels.models() : Promise.resolve([]),
+        ...modelEndpoints.list().map((e) => modelEndpoints.models(e)),
         acpRegistry.models().then((r) => r.models),
       ]);
       const models = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
@@ -4979,7 +4968,7 @@ async function startHost(
       smallJobModels: () => smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
-      local: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
+      endpoint: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
     }),
     // patch/todo.md § Features to add — "Current status": after each turn
@@ -6750,7 +6739,7 @@ export async function handleModelsRequest(
   logger: Logger,
   hostId: string,
   codex?: CodexAccounts,
-  local?: LocalModels,
+  endpoints?: ModelEndpointRegistry,
   acp?: AcpRegistry,
 ): Promise<void> {
   // Every entry names the backend serving it, and a backend that failed is
@@ -6759,12 +6748,15 @@ export async function handleModelsRequest(
   // other's models (spec/02 § Model catalogue). NO FALLBACK: a failure is never
   // papered over with a hand-maintained list.
   if (codex) {
-    // The local endpoint is only asked when one is set: an account that never
-    // configured local models has no error to report about them.
+    // Each model endpoint is listed under the harness it runs in, and one that
+    // cannot be reached is reported against that harness, naming it.
     const sources: Array<{ backend: string; load: Promise<{ id: string; label: string }[]> }> = [
       { backend: CLAUDE_BACKEND_ID, load: catalog.get().then((s) => s.models) },
       { backend: CODEX_BACKEND_ID, load: codex.models() },
-      ...(local?.configured ? [{ backend: LOCAL_BACKEND_ID, load: local.models() }] : []),
+      ...(endpoints?.list() ?? []).map((e) => ({
+        backend: e.api === 'openai' ? CODEX_BACKEND_ID : CLAUDE_BACKEND_ID,
+        load: endpoints!.models(e),
+      })),
     ];
     const outcomes = await Promise.allSettled(sources.map((src) => src.load));
     const models: { id: string; label: string; backend: string }[] = [];

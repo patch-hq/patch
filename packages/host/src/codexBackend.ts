@@ -9,6 +9,8 @@ import type { CodexNotification, RpcObject } from './codexClient.js';
 import { discoverSkills, skillCatalogueText } from './projectSkills.js';
 import { DurableCodexProcess } from './codexDurable.js';
 import { keepRunnerLog, retireTurn, turnDirFor } from './durableTurn.js';
+import { isEndpointModel } from '@patch/wire';
+import type { CodexEndpointLaunch, ModelEndpointRegistry } from './modelEndpoints.js';
 
 export function codexPermission(mode: SdkRunOptions['permissionMode']): {
   approvalPolicy: string;
@@ -152,6 +154,8 @@ export class CodexBackend implements SdkBackend {
   constructor(
     private accounts: CodexAccounts,
     readonly history: CodexHistory,
+    /** The account's model endpoints; a chat on one runs with no Codex login. */
+    private readonly endpoints?: ModelEndpointRegistry,
   ) {}
   /**
    * The runner this turn goes under, or undefined when the host has none
@@ -159,13 +163,16 @@ export class CodexBackend implements SdkBackend {
    * never recorded) is dropped loudly and the turn starts fresh, which is
    * what a turn that never began is owed.
    */
-  private durableFor(opts: SdkRunOptions, accountId: string): DurableCodexProcess | undefined {
+  private durableFor(
+    opts: SdkRunOptions,
+    accountId: string | undefined,
+  ): DurableCodexProcess | undefined {
     const req = opts.durableTurn;
     if (!req) return undefined;
     let attach = req.attach;
     if (attach) {
       const probe = DurableCodexProcess.attachable(req)
-        ? new DurableCodexProcess({ ...req, accountId })
+        ? new DurableCodexProcess({ ...req, ...(accountId !== undefined ? { accountId } : {}) })
         : undefined;
       const r = probe?.recovered;
       if (!r?.threadId || !r.turnId) {
@@ -180,7 +187,7 @@ export class CodexBackend implements SdkBackend {
     }
     return new DurableCodexProcess({
       ...req,
-      accountId,
+      ...(accountId !== undefined ? { accountId } : {}),
       attach: attach,
     });
   }
@@ -191,16 +198,34 @@ export class CodexBackend implements SdkBackend {
       throw new Error(
         `Codex cannot switch off these tools for this chat: ${unsupported.join(', ')}`,
       );
-    const { accountId } = await this.accounts
-      .resolveChosen(opts.accountId, opts.model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt')
-      .catch((error: Error) => {
-        throw new CodexTurnError(error.message, true);
-      });
+    // A model endpoint (spec/02 § Provider adapters) runs as a custom model
+    // provider of Codex's own, on no Codex login. Refused here, before a
+    // process starts, when the endpoint is not configured.
+    let endpoint: CodexEndpointLaunch | undefined;
+    if (isEndpointModel(opts.model)) {
+      if (!this.endpoints) throw new Error('This host has no model endpoints to run this chat on');
+      endpoint = this.endpoints.codexLaunch(opts.model);
+    }
+    const accountId = endpoint
+      ? undefined
+      : (
+          await this.accounts
+            .resolveChosen(
+              opts.accountId,
+              opts.model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt',
+            )
+            .catch((error: Error) => {
+              throw new CodexTurnError(error.message, true);
+            })
+        ).accountId;
     const durable = this.durableFor(opts, accountId);
     const attached = durable?.attaching ? durable.recovered : undefined;
     let client: Awaited<ReturnType<CodexAccounts['turnClient']>>;
     try {
-      client = await this.accounts.turnClient(accountId, durable);
+      client =
+        accountId === undefined
+          ? await this.accounts.endpointTurnClient(endpoint!.env, durable)
+          : await this.accounts.turnClient(accountId, durable);
     } catch (error) {
       durable?.release();
       throw error;
@@ -219,11 +244,12 @@ export class CodexBackend implements SdkBackend {
       if (prior && !prior.startsWith('codex-')) {
         throw new Error('A session of another provider cannot be resumed with Codex');
       }
-      const config: RpcObject = {};
+      const config: RpcObject = { ...endpoint?.config };
       const mcpServers = codexMcpServers(opts);
       if (mcpServers) config.mcp_servers = mcpServers;
       const base = {
-        model: opts.model?.replace(/^openai\/(?:api\/)?/, ''),
+        model: endpoint ? endpoint.model : opts.model?.replace(/^openai\/(?:api\/)?/, ''),
+        ...(endpoint ? { modelProvider: endpoint.modelProvider } : {}),
         cwd: opts.cwd,
         ...policy,
         config,
@@ -532,7 +558,8 @@ export class CodexBackend implements SdkBackend {
             );
         }
       } catch (error) {
-        if (isAccountExhausted((error as TurnFailedError).limit)) {
+        // An endpoint turn has no Codex login to mark.
+        if (accountId !== undefined && isAccountExhausted((error as TurnFailedError).limit)) {
           this.accounts.markExhausted(accountId);
           void this.accounts.refresh();
         }

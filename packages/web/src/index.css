@@ -10102,6 +10102,11 @@ button.set-row-open:focus-visible {
   flex: 1;
   min-width: 160px;
 }
+.set-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .set-actions {
   display: flex;
   justify-content: flex-end;
