@@ -238,6 +238,8 @@ test.describe('Settings — phone', () => {
   });
 
   test('tapping a row opens its page; ← goes back to the list', async ({ page }) => {
+    // One tap-open-back round trip per page: the loop outgrows the default 60s on a loaded CI shard.
+    test.slow();
     await page.goto(settingsUrl());
     await seedEverything(page);
     for (const p of PAGES) {
