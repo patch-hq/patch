@@ -1,13 +1,13 @@
-// spec/04 § History — the provider-switch confirmation. A cross-provider
-// model change (Claude <-> Codex) shows a modal with the user's exact copy before
-// `chat.model_request` goes out; a same-provider change never shows it.
-// "Don't show again" persists as an account setting (packages/server's
-// `suppressProviderSwitchWarning`), so it must survive on every surface, not
-// just this session.
+// spec/04 § Provider switches — a chat keeps one provider for its life.
+// Picking another provider's model in the composer's model control drafts a
+// new chat linked to this one and opens it on the new-chat screen; nothing is
+// sent to the host. A same-provider pick is an ordinary model change, and the
+// Manager changes provider in place.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render as rtlRender, screen, fireEvent, cleanup } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { render as rtlRender, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import type { WireEvent } from '@patch/wire';
 import { ChatModelControl } from '../components/ChatModelControl.js';
 import type { ChatRow } from '../stores/types.js';
@@ -17,9 +17,7 @@ import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesS
 import { setActiveWs } from '../api/ws.js';
 import { setModelCatalog, resetModelCatalog } from '../lib/models.js';
 
-const setPreferences = vi.fn(async (patch: Record<string, unknown>) => ({
-  preferences: { ...DEFAULT_PREFERENCES, ...patch },
-}));
+const continueChat = vi.fn();
 
 vi.mock('../api/rest.js', () => ({
   api: {
@@ -28,7 +26,16 @@ vi.mock('../api/rest.js', () => ({
     renameChat: vi.fn(),
     archiveChat: vi.fn(),
     models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
-    setPreferences: (patch: Record<string, unknown>) => setPreferences(patch),
+    continueChat: (...args: unknown[]) => continueChat(...args),
+  },
+  ApiError: class ApiError extends Error {
+    constructor(
+      readonly status: number,
+      message: string,
+      readonly body: unknown,
+    ) {
+      super(message);
+    }
   },
 }));
 vi.mock('../lib/voiceController.js', () => ({ startVoiceCall: vi.fn(async () => {}) }));
@@ -73,6 +80,11 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
   };
 }
 
+function Where(): ReactElement {
+  const loc = useLocation();
+  return <span data-testid="where">{loc.pathname + loc.search}</span>;
+}
+
 /** The control reads its chat from the store, as it does in the composer. */
 function seed(r: ChatRow): void {
   useChatStore.setState((s) => ({ chats: { ...s.chats, [r.chatId]: r } }));
@@ -83,16 +95,24 @@ function render(r: ChatRow): ReturnType<typeof rtlRender> {
   return rtlRender(
     <MemoryRouter initialEntries={['/chats/c1']}>
       <Routes>
-        <Route path="*" element={<ChatModelControl chatId={r.chatId} />} />
+        <Route
+          path="*"
+          element={
+            <>
+              <ChatModelControl chatId={r.chatId} />
+              <Where />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>,
   );
 }
 
-describe('model control — provider-switch confirmation', () => {
+describe('model control — provider switch starts a linked chat', () => {
   beforeEach(() => {
     sent.length = 0;
-    setPreferences.mockClear();
+    continueChat.mockReset();
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();
     usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES }, loaded: true });
@@ -117,70 +137,60 @@ describe('model control — provider-switch confirmation', () => {
     resetModelCatalog();
   });
 
-  it("shows the modal with exactly Tom's copy on a cross-provider pick, and sends nothing yet", () => {
-    render(row({ model: 'claude-sonnet-4-6' }));
-    fireEvent.click(screen.getByTestId('chat-model'));
-    fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
-    expect(screen.getByTestId('provider-switch-modal')).toBeInTheDocument();
-    expect(screen.getByTestId('provider-switch-modal').textContent).toContain(
-      'Switching provider may cost more due to lack of a cache, are you sure?',
-    );
-    expect(sent).toEqual([]);
-  });
-
-  it('never shows the modal for a same-provider model change', () => {
-    render(row({ model: 'claude-sonnet-4-6' }));
-    fireEvent.click(screen.getByTestId('chat-model'));
-    fireEvent.click(screen.getByTestId('model-option-claude-opus-4-1'));
-    expect(screen.queryByTestId('provider-switch-modal')).not.toBeInTheDocument();
-    expect(sent).toEqual([{ type: 'chat.model_request', chatId: 'c1', model: 'claude-opus-4-1' }]);
-  });
-
-  it('Switch sends chat.model_request and closes the modal', () => {
-    render(row({ model: 'claude-sonnet-4-6' }));
-    fireEvent.click(screen.getByTestId('chat-model'));
-    fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
-    fireEvent.click(screen.getByTestId('provider-switch-switch'));
-    expect(sent).toEqual([
-      { type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5-codex' },
-    ]);
-    expect(screen.queryByTestId('provider-switch-modal')).not.toBeInTheDocument();
-    // No checkbox ticked -> no settings write.
-    expect(setPreferences).not.toHaveBeenCalled();
-  });
-
-  it('Cancel sends nothing and closes the modal', () => {
-    render(row({ model: 'claude-sonnet-4-6' }));
-    fireEvent.click(screen.getByTestId('chat-model'));
-    fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
-    fireEvent.click(screen.getByTestId('provider-switch-cancel'));
-    expect(sent).toEqual([]);
-    expect(screen.queryByTestId('provider-switch-modal')).not.toBeInTheDocument();
-  });
-
-  it('"Don\'t show again" persists the account setting and still switches', () => {
-    render(row({ model: 'claude-sonnet-4-6' }));
-    fireEvent.click(screen.getByTestId('chat-model'));
-    fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
-    fireEvent.click(screen.getByTestId('provider-switch-dont-show-again'));
-    fireEvent.click(screen.getByTestId('provider-switch-switch'));
-    expect(setPreferences).toHaveBeenCalledWith({ suppressProviderSwitchWarning: true });
-    expect(sent).toEqual([
-      { type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5-codex' },
-    ]);
-  });
-
-  it('never shows the modal once the account setting is on, even cross-provider', () => {
-    usePreferencesStore.setState({
-      preferences: { ...DEFAULT_PREFERENCES, suppressProviderSwitchWarning: true },
-      loaded: true,
+  it('a cross-provider pick drafts a linked chat and opens it, sending nothing to the host', async () => {
+    continueChat.mockResolvedValue({
+      draft: {
+        id: 'draft-linked-9',
+        hostId: 'd1',
+        folder: '~/projects/foo',
+        model: 'openai/gpt-5-codex',
+        text: 'This continues "fix layout"',
+        continuedFrom: 'c1',
+        updatedAt: 1,
+      },
     });
     render(row({ model: 'claude-sonnet-4-6' }));
     fireEvent.click(screen.getByTestId('chat-model'));
     fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
-    expect(screen.queryByTestId('provider-switch-modal')).not.toBeInTheDocument();
+    expect(continueChat).toHaveBeenCalledWith('c1', { model: 'openai/gpt-5-codex' });
+    await waitFor(() =>
+      expect(screen.getByTestId('where').textContent).toBe('/chats/new?draft=draft-linked-9'),
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('says so when the linked chat cannot be drafted', async () => {
+    continueChat.mockRejectedValue(new Error('server down'));
+    render(row({ model: 'claude-sonnet-4-6' }));
+    fireEvent.click(screen.getByTestId('chat-model'));
+    fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
+    await waitFor(() =>
+      expect(
+        useUiStore
+          .getState()
+          .errors.map((t) => t.message)
+          .join(' '),
+      ).toContain('Could not start a linked chat: server down'),
+    );
+    expect(screen.getByTestId('where').textContent).toBe('/chats/c1');
+    expect(sent).toEqual([]);
+  });
+
+  it('a same-provider pick is an ordinary model change', () => {
+    render(row({ model: 'claude-sonnet-4-6' }));
+    fireEvent.click(screen.getByTestId('chat-model'));
+    fireEvent.click(screen.getByTestId('model-option-claude-opus-4-1'));
+    expect(continueChat).not.toHaveBeenCalled();
+    expect(sent).toEqual([{ type: 'chat.model_request', chatId: 'c1', model: 'claude-opus-4-1' }]);
+  });
+
+  it('the Manager changes provider in place', () => {
+    render(row({ chatId: 'thread_manager', model: 'claude-sonnet-4-6' }));
+    fireEvent.click(screen.getByTestId('chat-model'));
+    fireEvent.click(screen.getByTestId('model-option-openai/gpt-5-codex'));
+    expect(continueChat).not.toHaveBeenCalled();
     expect(sent).toEqual([
-      { type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5-codex' },
+      { type: 'chat.model_request', chatId: 'thread_manager', model: 'openai/gpt-5-codex' },
     ]);
   });
 

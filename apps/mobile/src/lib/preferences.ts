@@ -16,7 +16,6 @@ import { useSettingsStore } from '../stores/settingsStore';
 
 let addressWord: string | null = null;
 let voiceConfig: VoiceConfig | null = null;
-let suppressProviderSwitchWarning = false;
 let verbosity: AccountPreferences['providerContextVerbosity'] = 'summary';
 
 export async function loadPreferences(): Promise<void> {
@@ -24,7 +23,6 @@ export async function loadPreferences(): Promise<void> {
   if (!settings.preferences) throw new Error('server returned no account preferences');
   addressWord = settings.preferences.addressWord;
   voiceConfig = settings.preferences.voiceConfig;
-  suppressProviderSwitchWarning = settings.preferences.suppressProviderSwitchWarning;
   verbosity = settings.preferences.providerContextVerbosity;
 }
 
@@ -42,20 +40,6 @@ export function voiceConfigOrNull(): VoiceConfig | null {
 }
 
 /**
- * Whether the provider-switch confirmation (spec/04 § History) should be
- * SKIPPED. Unlike the two accessors above, this defaults to `false` rather
- * than an unloaded null — a boolean has no "unknown" state to represent, and
- * the safe default is to show the warning until told otherwise, never to
- * silently suppress it because preferences haven't loaded yet.
- */
-export function suppressProviderSwitchWarningOrFalse(): boolean {
-  return (
-    useSettingsStore.getState().data?.preferences.suppressProviderSwitchWarning ??
-    suppressProviderSwitchWarning
-  );
-}
-
-/**
  * The provider-level context bar's default expand state, as read at boot.
  * `summary` until then — the account's own default, and the setting that
  * hides nothing and opens nothing (spec/02 § Provider-level context).
@@ -68,6 +52,5 @@ export function providerContextVerbosity(): AccountPreferences['providerContextV
 export function __resetPreferences(): void {
   addressWord = null;
   voiceConfig = null;
-  suppressProviderSwitchWarning = false;
   verbosity = 'summary';
 }

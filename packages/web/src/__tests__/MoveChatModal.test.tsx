@@ -1,10 +1,21 @@
-// spec/04 § Moving a chat to another host, spec/14 § Chat panel header — the
-// Move dialog: pick the host, get its folder with the same name offered,
-// and a refusal keeps the dialog open with the server's own reason.
+// spec/04 § Moving to another host, spec/14 § Chat panel header — the Move
+// dialog: pick the host, get its folder with the same name offered; moving
+// opens the linked chat's draft on the new-chat screen, and a refusal keeps
+// the dialog open with the server's own reason.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  cleanup,
+  waitFor,
+  act,
+} from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MoveChatModal } from '../components/MoveChatModal.js';
+import { useDraftStore } from '../stores/draftStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow } from '../stores/types.js';
@@ -27,6 +38,40 @@ function host(hostId: string, hostName: string, online: boolean, recent: string[
 }
 
 const row = { chatId: 'c1', hostId: 'mac', folder: '/Users/tom/wpp/Unite' } as ChatRow;
+
+function Where(): ReactElement {
+  const loc = useLocation();
+  return <span data-testid="where">{loc.pathname + loc.search}</span>;
+}
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <MemoryRouter initialEntries={['/chats/c1']}>
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              {ui}
+              <Where />
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+const draft = (hostId: string, folder: string) => ({
+  draft: {
+    id: 'draft-linked-1',
+    hostId,
+    folder,
+    text: 'This continues a chat',
+    continuedFrom: 'c1',
+    updatedAt: 5,
+  },
+});
 
 describe('MoveChatModal', () => {
   beforeEach(() => {
@@ -58,12 +103,7 @@ describe('MoveChatModal', () => {
         box: host('box', 'Hetzner', false, []),
       },
     });
-    vi.mocked(api.moveChat).mockResolvedValue({
-      ok: true,
-      chatId: 'c1',
-      hostId: 'mac',
-      folder: '/Users/tom/wpp/Unite2',
-    });
+    vi.mocked(api.moveChat).mockResolvedValue(draft('mac', '/Users/tom/wpp/Unite2'));
     const onClose = vi.fn();
     render(<MoveChatModal row={row} onClose={onClose} />);
     expect(screen.getByTestId('move-chat-host-mac').textContent).toContain('this machine');
@@ -88,18 +128,19 @@ describe('MoveChatModal', () => {
     expect(input.value).toBe('/my/typed/path');
   });
 
-  it('moves to the chosen host and folder, then closes', async () => {
-    vi.mocked(api.moveChat).mockResolvedValue({
-      ok: true,
-      chatId: 'c1',
-      hostId: 'box',
-      folder: '/home/tom/Unite',
-    });
+  it('moves to the chosen host and folder, then closes and opens the linked chat’s draft', async () => {
+    vi.mocked(api.moveChat).mockResolvedValue(draft('box', '/home/tom/Unite'));
     const onClose = vi.fn();
     render(<MoveChatModal row={row} onClose={onClose} />);
     fireEvent.click(screen.getByTestId('move-chat-confirm'));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.moveChat).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
+    expect(screen.getByTestId('where').textContent).toBe('/chats/new?draft=draft-linked-1');
+    expect(useDraftStore.getState().drafts['draft-linked-1']).toMatchObject({
+      hostId: 'box',
+      folder: '/home/tom/Unite',
+      continuedFrom: 'c1',
+    });
   });
 
   it('a refusal stays open and says why', async () => {
@@ -140,52 +181,21 @@ describe('MoveChatModal', () => {
     expect((screen.getByTestId('move-chat-confirm') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  describe("when the chat's own host is offline", () => {
-    beforeEach(() => {
-      usePresenceStore.setState({
-        hosts: {
-          mac: host('mac', 'Mac', false, ['/Users/tom/wpp/Unite']),
-          box: host('box', 'Hetzner', true, ['/home/tom/projects', '/home/tom/Unite']),
-        },
-      });
+  it('moves a chat whose own host is offline the same way: nothing is taken from that host', async () => {
+    usePresenceStore.setState({
+      hosts: {
+        mac: host('mac', 'Mac', false, ['/Users/tom/wpp/Unite']),
+        box: host('box', 'Hetzner', true, ['/home/tom/projects', '/home/tom/Unite']),
+      },
     });
-
-    it('leaves the folder for the user to choose', () => {
-      render(<MoveChatModal row={row} onClose={() => undefined} />);
-      expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe('');
-      expect((screen.getByTestId('move-chat-confirm') as HTMLButtonElement).disabled).toBe(true);
-    });
-
-    it('offers the same-named folder as a suggestion that is used only once accepted', async () => {
-      vi.mocked(api.moveChat).mockResolvedValue({
-        ok: true,
-        chatId: 'c1',
-        hostId: 'box',
-        folder: '/home/tom/Unite',
-      });
-      const onClose = vi.fn();
-      render(<MoveChatModal row={row} onClose={onClose} />);
-      const suggest = screen.getByTestId('move-chat-suggest');
-      expect(suggest.textContent).toContain('/home/tom/Unite');
-      expect(api.moveChat).not.toHaveBeenCalled();
-      fireEvent.click(suggest);
-      expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe(
-        '/home/tom/Unite',
-      );
-      fireEvent.click(screen.getByTestId('move-chat-confirm'));
-      await waitFor(() => expect(onClose).toHaveBeenCalled());
-      expect(api.moveChat).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
-    });
-
-    it('a host that is online shows no suggestion button', () => {
-      usePresenceStore.setState({
-        hosts: {
-          mac: host('mac', 'Mac', true, ['/Users/tom/wpp/Unite']),
-          box: host('box', 'Hetzner', true, ['/home/tom/Unite']),
-        },
-      });
-      render(<MoveChatModal row={row} onClose={() => undefined} />);
-      expect(screen.queryByTestId('move-chat-suggest')).toBeNull();
-    });
+    vi.mocked(api.moveChat).mockResolvedValue(draft('box', '/home/tom/Unite'));
+    const onClose = vi.fn();
+    render(<MoveChatModal row={row} onClose={onClose} />);
+    expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe(
+      '/home/tom/Unite',
+    );
+    fireEvent.click(screen.getByTestId('move-chat-confirm'));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.moveChat).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
   });
 });

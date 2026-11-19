@@ -2274,6 +2274,9 @@ export class WsHub {
       const chatStatus = row?.chatStatus;
       if (chatStatus) event = { ...event, chatStatus };
       if (row?.feedPos !== undefined) event = { ...event, feedPos: row.feedPos };
+      // Server-owned links (spec/04 § Provider switches): a host never sends them.
+      if (row?.continuedFrom !== undefined) event = { ...event, continuedFrom: row.continuedFrom };
+      if (row?.continuedIn !== undefined) event = { ...event, continuedIn: row.continuedIn };
       // spec/12 § Continue: with automatic continue on, an interrupted turn
       // carries on as soon as the host reports it.
       if (

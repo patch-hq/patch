@@ -32,6 +32,17 @@ import { bytesToBase64 } from '../lib/base64';
 import { apiUrl } from '../config';
 
 /** One row of a host directory listing (spec/03 § Host files). */
+
+/** A server-drafted linked chat (spec/04 § Provider switches): a new-chat draft naming the chat it continues. */
+export interface LinkedChatDraft {
+  id: string;
+  folder: string;
+  hostId?: string;
+  model?: string;
+  text: string;
+  continuedFrom: string;
+  updatedAt: number;
+}
 export interface HostFileEntry {
   name: string;
   /** A symlink is listed as what it points at; a dangling one is `other`. */
@@ -486,6 +497,8 @@ export const api = {
     permissionMode?: PermissionMode;
     /** The shared account the chat's turns start on (spec/10 — preferred account). */
     preferredAccountId?: string;
+    /** The chat this one continues — set when the draft was a linked chat's (spec/04 § Provider switches). */
+    continuedFrom?: string;
   }) =>
     request<{ chatId: string; folder: string; status: 'pending' }>('/api/chats', {
       method: 'POST',
@@ -493,27 +506,22 @@ export const api = {
     }),
   deleteChat: (chatId: string) =>
     request<{ ok: true }>(`/api/chats/${chatId}`, { method: 'DELETE' }),
-  // spec/04 § Moving a chat to another host — resolves once the chat is running
-  // there; every refusal is an ApiError whose body carries the reason.
-  moveChat: async (chatId: string, hostId: string, folder: string) => {
-    const move = (fromServerCopy: boolean) =>
-      request<{ ok: true; chatId: string; hostId: string; folder: string }>(
-        `/api/chats/${chatId}/move`,
-        {
-          method: 'POST',
-          body: fromServerCopy ? { hostId, folder, fromServerCopy } : { hostId, folder },
-        },
-      );
-    try {
-      return await move(false);
-    } catch (e) {
-      // The old host would not let go of the chat (mid-turn, a timer armed,
-      // a Codex session): continue from the server's copy, which has no such limit.
-      const code = e instanceof ApiError ? (e.body as { error?: unknown } | null)?.error : null;
-      if (code === 'busy' || code === 'unsupported') return move(true);
-      throw e;
-    }
-  },
+  // spec/04 § Provider switches — draft a new chat linked to this one: on
+  // another model (a provider switch), or as it is (its session is gone). The
+  // server answers with the new-chat draft, first message drafted, for the user
+  // to read, edit and send.
+  continueChat: (chatId: string, body: { model?: string } = {}) =>
+    request<{ draft: LinkedChatDraft }>(`/api/chats/${chatId}/continue`, {
+      method: 'POST',
+      body,
+    }),
+  // spec/04 § Moving to another host — the same linked-chat draft, on another
+  // host or folder. Nothing is copied; every refusal is an ApiError naming why.
+  moveChat: (chatId: string, hostId: string, folder: string) =>
+    request<{ draft: LinkedChatDraft }>(`/api/chats/${chatId}/move`, {
+      method: 'POST',
+      body: { hostId, folder },
+    }),
   archiveChat: (chatId: string, archived: boolean) =>
     request<unknown>(`/api/chats/${chatId}/archive`, { method: 'POST', body: { archived } }),
   pinChat: (chatId: string, pinned: boolean) =>

@@ -53,6 +53,13 @@ export interface ChatRow {
    * finished turn never moves a row.
    */
   lastUserActivity: number;
+  /**
+   * spec/04 § Provider switches, § Moving to another host — the chat this one
+   * continues, and the chat that continues it. Server-owned; absent on a chat
+   * with no link. The Chats tab lists a thread once, as its newest chat.
+   */
+  continuedFrom?: string;
+  continuedIn?: string;
   awaitingPermission: boolean;
   /**
    * Highest `lastSeq` this phone has seen on a visit (the read watermark). A chat

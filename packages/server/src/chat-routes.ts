@@ -80,6 +80,12 @@ const SpawnBody = z
       .optional(),
     /** The shared account the chat's turns start on (spec/10 § Backend credentials — preferred account). */
     preferredAccountId: z.string().min(1).optional(),
+    /**
+     * The chat this one continues (spec/04 § Provider switches, § Moving to
+     * another host): the draft it was sent from was a linked chat's. Once the
+     * spawn is confirmed the server links the two.
+     */
+    continuedFrom: z.string().min(1).optional(),
   })
   .strict();
 
@@ -202,6 +208,11 @@ export interface ChatRoutesDeps {
   accountReport?: (hostId: string, backendId: string) => ReportedBackend | undefined;
   /** Override the spawn-error wait window for tests. */
   spawnErrorWaitMs?: number;
+  /**
+   * Send a `chat.state` the server produced to every surface — how both
+   * chats of a new link (spec/04 § Provider switches) reach the surfaces.
+   */
+  broadcastChatState?: (event: Extract<WireEvent, { type: 'chat.state' }>) => void;
 }
 
 export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): void {
@@ -304,6 +315,24 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         reportFor,
       });
     };
+    // A linked chat continues one the server knows, and only once: a chat
+    // already continued carries on in its newer chat (spec/04 § Provider switches).
+    const continuedFrom = parsed.data.continuedFrom;
+    if (continuedFrom !== undefined) {
+      const old = deps.chatRegistry.get(continuedFrom);
+      if (!old) {
+        return reply
+          .code(404)
+          .send({ error: 'chat_not_found', message: `no chat ${continuedFrom} to continue` });
+      }
+      if (old.continuedIn !== undefined) {
+        return reply.code(409).send({
+          error: 'already_continued',
+          message: 'That chat already continues in a newer chat; carry on from that one',
+          continuedIn: old.continuedIn,
+        });
+      }
+    }
     const chatId = deps.idGenerator();
     const event: ChatSpawnRequestEvent = {
       type: 'chat.spawn_request',
@@ -377,10 +406,36 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       });
     }
 
+    if (continuedFrom !== undefined) {
+      // The chat exists now whatever happens here, so a link that cannot be
+      // made is reported on the reply rather than as a failed spawn.
+      try {
+        for (const state of deps.chatRegistry.linkContinuation(chatId, continuedFrom)) {
+          deps.broadcastChatState?.(state);
+        }
+        deps.logger.info(
+          { chatId, continuedFrom },
+          'POST /api/chats: linked to the chat it continues',
+        );
+      } catch (err) {
+        deps.logger.error(
+          { chatId, continuedFrom, err: (err as Error).message },
+          'POST /api/chats: spawned, but the link to the chat it continues was not recorded',
+        );
+        return reply.code(202).send({
+          chatId,
+          folder: parsed.data.folder,
+          status: 'pending',
+          linkError: (err as Error).message,
+        });
+      }
+    }
+
     return reply.code(202).send({
       chatId,
       folder: parsed.data.folder,
       status: 'pending',
+      ...(continuedFrom !== undefined ? { continuedFrom } : {}),
     });
   });
 

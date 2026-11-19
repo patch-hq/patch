@@ -159,12 +159,6 @@ export function AgentPage(): React.ReactElement {
             </SettingsSection>
             <QuestionExpiry preferences={data.preferences} />
             <SettingsSection title="Chats" testID="settings-agent-chats">
-              <ToggleRow
-                label="Warn before switching provider"
-                testID="provider-switch-warning"
-                value={!data.preferences.suppressProviderSwitchWarning}
-                onChange={(next) => writePreferences({ suppressProviderSwitchWarning: !next })}
-              />
               {/* spec/12 § Continue — a turn cut off by its machine going down
                   waits for Continue unless this is on. */}
               <ToggleRow

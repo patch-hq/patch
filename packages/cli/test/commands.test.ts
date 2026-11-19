@@ -1292,3 +1292,36 @@ test('chats send-to over the host socket sends the calling chat so the host can 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('chats move drafts a linked chat on the target host and prints its first message', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/hosts' && req.method === 'GET')
+        return { status: 200, body: { hosts: [{ hostId: 'box-1', hostName: 'box' }] } };
+      if (req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/move' && req.method === 'POST') {
+        return {
+          status: 201,
+          body: {
+            draft: {
+              id: 'draft-linked-1',
+              hostId: 'box-1',
+              folder: '/srv/w',
+              text: 'This continues "Plan".',
+              continuedFrom: '01M3N32N9T7V75JCV7XHY9NRHM',
+            },
+          },
+        };
+      }
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(
+        ['chats', 'move', '01M3N32N9T7V75JCV7XHY9NRHM', '--host', 'box', '--folder', '/srv/w'],
+        env,
+      );
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      assert.match(r.stdout, /Drafted a new chat on box in \/srv\/w/);
+      assert.match(r.stdout, /This continues "Plan"\./);
+    },
+  );
+});

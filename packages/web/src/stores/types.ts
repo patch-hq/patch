@@ -50,6 +50,13 @@ export interface ChatRow {
   lastUserActivity: number;
   /** ms epoch the chat was created; absent until the host reports it. The Created sort key. */
   createdAt?: number;
+  /**
+   * spec/04 § Provider switches, § Moving to another host — the chat this one
+   * continues, and the chat that continues it. Server-owned; absent on a chat
+   * with no link. The list shows a thread once, as its newest chat.
+   */
+  continuedFrom?: string;
+  continuedIn?: string;
   /** Set when this chat is awaiting a permission decision. */
   awaitingPermission: boolean;
   /**

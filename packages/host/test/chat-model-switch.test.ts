@@ -16,7 +16,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatStateEvent, WireEvent } from '@patch/wire';
-import { Daemon, UnknownModelError, NoModelCatalogueError } from '../src/chatRunner.js';
+import {
+  Daemon,
+  UnknownModelError,
+  NoModelCatalogueError,
+  ProviderSwitchNeedsNewChatError,
+} from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { chatStateFromMeta } from '../src/chatState.js';
@@ -215,27 +220,34 @@ describe('a chat model change reaches every surface holding the chat', () => {
   });
 });
 
-describe('a chat model change keeps the approval mode in line with the provider', () => {
-  it('moves `auto` to the closest Codex mode when crossing to Codex, and says so', async () => {
-    const { daemon, events, folder } = setup({
+describe('a chat keeps one provider for its life (spec/04 § Provider switches)', () => {
+  it('refuses another provider’s model: the chat stays on its model and mode, and nothing is emitted', async () => {
+    const { daemon, events, folder, metaStore } = setup({
       knownModelIds: async () => new Set([...CATALOGUE, 'claude-opus-5', 'openai/gpt-5']),
     });
     const chatId = await daemon.spawnChat({ folder, model: 'claude-opus-5', prompt: 'go' });
     await new Promise((r) => setTimeout(r, 20));
     daemon.setChatPermissionMode(chatId, 'auto');
-    await daemon.setChatModel(chatId, 'openai/gpt-5');
-    expect(states(events).at(-1)?.permissionMode).toBe('acceptEdits');
+    events.length = 0;
+    await expect(daemon.setChatModel(chatId, 'openai/gpt-5')).rejects.toBeInstanceOf(
+      ProviderSwitchNeedsNewChatError,
+    );
+    await expect(daemon.setChatModel(chatId, 'openai/gpt-5')).rejects.toMatchObject({
+      code: 'provider_switch_needs_new_chat',
+    });
+    expect(states(events)).toHaveLength(0);
+    expect(metaStore.read(chatId)?.model).toBe('claude-opus-5');
+    expect(daemon.chatState.get(chatId)?.permissionMode).toBe('auto');
   });
 
-  it('leaves a mode the new provider can run untouched', async () => {
+  it('still changes model within the provider', async () => {
     const { daemon, events, folder } = setup({
       knownModelIds: async () => new Set([...CATALOGUE, 'claude-opus-5', 'openai/gpt-5']),
     });
     const chatId = await daemon.spawnChat({ folder, model: 'claude-opus-5', prompt: 'go' });
     await new Promise((r) => setTimeout(r, 20));
-    daemon.setChatPermissionMode(chatId, 'plan');
-    await daemon.setChatModel(chatId, 'openai/gpt-5');
-    expect(states(events).at(-1)?.permissionMode).toBe('plan');
+    await daemon.setChatModel(chatId, 'claude-sonnet-4-6');
+    expect(states(events).at(-1)?.model).toBe('claude-sonnet-4-6');
   });
 });
 

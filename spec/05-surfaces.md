@@ -62,7 +62,7 @@ The server decides each chat's status; the statuses and their allowed transition
 
 Actions that depend on the provider follow the chat's provider capabilities (`02-host.md` § Provider adapters). Edit, rewind and branch controls appear only on chats whose provider supports them natively; on any other chat they are absent, not disabled. A chat whose provider session is gone stays readable and shows that it cannot continue with the model's memory.
 
-A provider switch, and a move to another host, starts a new chat linked to the old one (`04-chats-and-folders.md` § Provider switches, § Moving to another host). Surfaces show the linked chats as one continuing thread: the earlier chat's entries, a divider marking the switch or move and naming both providers or hosts, then the new chat from its first message, which is the visible carried-over context. The chat list shows the thread once, as its newest chat.
+A provider switch, and a move to another host, starts a new chat linked to the old one (`04-chats-and-folders.md` § Provider switches, § Moving to another host). Surfaces show the linked chats as one continuing thread: the new chat opens with a divider naming the chat it continues and both models or hosts, the earlier chat ends with a divider naming the chat that continues it, and each divider opens the other chat. The new chat's first message is the visible carried-over context. The chat list shows the thread once, as its newest chat.
 
 ## Handover
 

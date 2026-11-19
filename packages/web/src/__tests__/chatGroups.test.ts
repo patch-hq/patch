@@ -705,3 +705,39 @@ describe('groupByStatus', () => {
     expect(out[0]?.rows.map((r) => r.chatId)).toEqual(['a', 'b']);
   });
 });
+
+describe('linked chats are one thread in the list (spec/04 § Provider switches)', () => {
+  const ids = (g: ReturnType<typeof groupChats>): string[] => [
+    ...g.pinned.map((c) => c.chatId),
+    ...g.folders.flatMap((f) => f.rows.map((c) => c.chatId)),
+    ...g.archived.map((c) => c.chatId),
+  ];
+
+  it('lists the thread once, as its newest chat', () => {
+    const g = groupChats([
+      row({ chatId: 'old', continuedIn: 'new', lastUpdated: 100 }),
+      row({ chatId: 'new', continuedFrom: 'old', lastUpdated: 200 }),
+    ]);
+    expect(ids(g)).toEqual(['new']);
+  });
+
+  it('keeps the earlier chat even when it is archived out of the way, hidden behind its continuation', () => {
+    const g = groupChats([
+      row({ chatId: 'old', continuedIn: 'new', status: 'archived' }),
+      row({ chatId: 'new', continuedFrom: 'old' }),
+    ]);
+    expect(ids(g)).toEqual(['new']);
+  });
+
+  it('shows the earlier chat again when its continuation is deleted or not known here', () => {
+    expect(
+      ids(
+        groupChats([
+          row({ chatId: 'old', continuedIn: 'new' }),
+          row({ chatId: 'new', continuedFrom: 'old', status: 'deleted' }),
+        ]),
+      ),
+    ).toEqual(['old']);
+    expect(ids(groupChats([row({ chatId: 'old', continuedIn: 'gone' })]))).toEqual(['old']);
+  });
+});

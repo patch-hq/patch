@@ -1,9 +1,12 @@
 // When a chat's provider is spent but the other one on the host has credit, the
-// out-of-usage banner offers to move the chat across (spec/04 § Model).
+// out-of-usage banner offers a provider switch: a new chat linked to this one,
+// drafted by the server with the unanswered request in its first message
+// (spec/04 § Provider switches).
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import type { HostAccountSummary, WireEvent } from '@patch/wire';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -12,8 +15,13 @@ import { setActiveWs } from '../api/ws.js';
 import { setModelCatalog, resetModelCatalog } from '../lib/models.js';
 import { clearHosts, reportAccounts } from './presenceHelpers.js';
 
+const continueChat = vi.fn();
 vi.mock('../api/rest.js', () => ({
-  api: { models: vi.fn(async () => ({ models: [], fetchedAt: '' })) },
+  api: {
+    models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
+    continueChat: (...args: unknown[]) => continueChat(...args),
+  },
+  ApiError: class ApiError extends Error {},
 }));
 
 const NOW = Date.UTC(2026, 9, 12, 10, 0, 0);
@@ -49,10 +57,24 @@ const setShared = (claude: string[], codex: string[]): void =>
   });
 
 const sent: WireEvent[] = [];
+function Where(): ReactElement {
+  const loc = useLocation();
+  return <span data-testid="where">{loc.pathname + loc.search}</span>;
+}
 const renderBanner = (model = 'claude-opus-5'): void => {
   render(
-    <MemoryRouter>
-      <OutOfUsageBanner hostId="h" model={model} chatId="c1" />
+    <MemoryRouter initialEntries={['/chats/c1']}>
+      <Routes>
+        <Route
+          path="*"
+          element={
+            <>
+              <OutOfUsageBanner hostId="h" model={model} chatId="c1" />
+              <Where />
+            </>
+          }
+        />
+      </Routes>
     </MemoryRouter>,
   );
 };
@@ -61,6 +83,18 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(NOW);
   sent.length = 0;
+  continueChat.mockReset();
+  continueChat.mockResolvedValue({
+    draft: {
+      id: 'draft-linked-2',
+      hostId: 'h',
+      folder: '/w',
+      model: 'openai/gpt-5',
+      text: 'Still unanswered',
+      continuedFrom: 'c1',
+      updatedAt: 1,
+    },
+  });
   setActiveWs({ send: (e: WireEvent) => void sent.push(e) } as never);
   resetModelCatalog();
   setModelCatalog({
@@ -70,13 +104,7 @@ beforeEach(() => {
       { id: 'openai/gpt-5', label: 'GPT-5' },
     ],
   });
-  usePreferencesStore.setState({
-    preferences: {
-      ...usePreferencesStore.getState().preferences,
-      suppressProviderSwitchWarning: false,
-    },
-    shared: null,
-  });
+  usePreferencesStore.setState({ shared: null });
 });
 afterEach(() => {
   cleanup();
@@ -86,7 +114,7 @@ afterEach(() => {
 });
 
 describe('OutOfUsageBanner — Change provider', () => {
-  it('lists Codex when Claude is spent and Codex has credit, and switches after confirming', () => {
+  it('lists Codex when Claude is spent and Codex has credit, and opens a linked chat on it', async () => {
     setShared(['a'], ['x']);
     reportAccounts('h', [spent('a')]);
     reportCodex([fine('x')]);
@@ -95,27 +123,12 @@ describe('OutOfUsageBanner — Change provider', () => {
     const options = within(screen.getByTestId('rate-limit-provider-menu')).getAllByRole('menuitem');
     expect(options.map((o) => o.textContent)).toEqual(['Codex']);
     fireEvent.click(options[0]!);
-    expect(sent).toEqual([]); // the cross-provider warning comes first
-    fireEvent.click(screen.getByRole('button', { name: /^switch$/i }));
-    expect(sent).toEqual([
-      { type: 'chat.model_request', chatId: 'c1', model: 'openai/gpt-5', retry: true },
-    ]);
-  });
-
-  it('switches at once when the warning is turned off', () => {
-    usePreferencesStore.setState({
-      preferences: {
-        ...usePreferencesStore.getState().preferences,
-        suppressProviderSwitchWarning: true,
-      },
-    });
-    setShared(['a'], ['x']);
-    reportAccounts('h', [spent('a')]);
-    reportCodex([fine('x')]);
-    renderBanner();
-    fireEvent.click(screen.getByTestId('rate-limit-change-provider'));
-    fireEvent.click(screen.getByTestId('rate-limit-provider-option'));
-    expect(sent).toHaveLength(1);
+    expect(continueChat).toHaveBeenCalledWith('c1', { model: 'openai/gpt-5' });
+    await waitFor(() =>
+      expect(screen.getByTestId('where').textContent).toBe('/chats/new?draft=draft-linked-2'),
+    );
+    // Nothing is sent to the host: the spent chat stays as it is.
+    expect(sent).toEqual([]);
   });
 
   it('lists Claude when a Codex chat is spent and Claude has credit', () => {
@@ -126,10 +139,8 @@ describe('OutOfUsageBanner — Change provider', () => {
     fireEvent.click(screen.getByTestId('rate-limit-change-provider'));
     expect(screen.getByTestId('rate-limit-provider-option').textContent).toBe('Claude');
     fireEvent.click(screen.getByTestId('rate-limit-provider-option'));
-    fireEvent.click(screen.getByRole('button', { name: /^switch$/i }));
-    expect(sent).toEqual([
-      { type: 'chat.model_request', chatId: 'c1', model: 'claude-opus-5', retry: true },
-    ]);
+    expect(continueChat).toHaveBeenCalledWith('c1', { model: 'claude-opus-5' });
+    expect(sent).toEqual([]);
   });
 
   it('is disabled with a reason when no other provider has usage left', () => {

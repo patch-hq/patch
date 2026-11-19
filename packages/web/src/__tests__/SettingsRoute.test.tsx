@@ -1460,17 +1460,7 @@ describe('Settings → Agent', () => {
       await waitFor(() =>
         expect(screen.getByTestId('provider-context-verbosity-full')).toBeDisabled(),
       );
-      expect(screen.getByTestId('provider-switch-warning')).toBeDisabled();
-    });
-
-    it('the provider-switch warning toggle writes its inverse', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/agent');
-      const toggle = (await screen.findByTestId('provider-switch-warning')) as HTMLInputElement;
-      expect(toggle.checked).toBe(true);
-      fireEvent.click(toggle);
-      await waitFor(() => expect(server.writes).toEqual([{ suppressProviderSwitchWarning: true }]));
+      expect(screen.queryByTestId('provider-switch-warning')).toBeNull();
     });
 
     // spec/12 § Continue — off by default; turning it on is one preference write.

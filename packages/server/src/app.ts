@@ -69,7 +69,7 @@ import { BatchNotifier } from './notifications/batch.js';
 import { FolderRegistry } from './folder-registry.js';
 import { registerFolderRoutes, requireAuth } from './folder-routes.js';
 import { registerHostFilesRoutes } from './host-files-routes.js';
-import { registerChatMoveRoutes } from './chat-move-routes.js';
+import { registerChatContinueRoutes } from './chat-continue-routes.js';
 import { registerChatSearchRoutes } from './chat-search-routes.js';
 
 /**
@@ -2078,6 +2078,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatLogStore,
     idGenerator,
     accountReport: (hostId, backendId) => wsHub.accountReport(hostId, backendId),
+    broadcastChatState: (event) => wsHub.broadcastChatState(event),
     // The account's default model, applied to any spawn that names none. Read
     // per request so a change in Settings reaches the next spawn.
     ...(accountSettings
@@ -2130,14 +2131,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     idGenerator,
   });
 
-  // ---- moving a chat between hosts (spec/04 § Moving a chat to another host) ----
-  registerChatMoveRoutes(app, {
-    logger: log.child({ component: 'chat-move-routes' }),
+  // ---- linked chats: provider switch, move, a session that is gone (spec/04 § Provider switches) ----
+  registerChatContinueRoutes(app, {
+    logger: log.child({ component: 'chat-continue-routes' }),
     registry,
     hostLink,
     chatRegistry,
     chatLogStore,
-    attachmentsDir,
+    newChatDrafts,
     idGenerator,
   });
 

@@ -1,21 +1,12 @@
-// spec/04 § History — the provider-switch confirmation (mobile). A
-// cross-provider model change (Claude <-> Codex) shows a modal with the user's
-// exact copy before `chat.model_request` goes out; a same-provider change
-// never shows it. "Don't show again" persists as an account setting
-// (packages/server's `suppressProviderSwitchWarning`), so it must survive on
-// every surface, not just this session.
+// spec/04 § Provider switches (mobile) — a chat keeps one provider for its
+// life. Picking another provider's model in the composer drafts a new chat
+// linked to this one and opens it on the new-chat screen; nothing goes to the
+// host. A same-provider pick is an ordinary model change, and the Manager
+// changes provider in place.
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  renderRN,
-  findHost,
-  queryHost,
-  byTestId,
-  actSync,
-  actAsync,
-  flush,
-} from './testUtils/render';
+import { renderRN, findHost, byTestId, actSync, actAsync, flush } from './testUtils/render';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
@@ -23,18 +14,21 @@ import { useSettingsStore } from '../src/stores/settingsStore';
 import { __resetPreferences } from '../src/lib/preferences';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { __clearAllMmkv } from './stubs/mmkv';
+import { __resetRouterMock, routerMock } from './stubs/expo-router';
+import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 
-const { modelsSpy, setPreferencesSpy } = vi.hoisted(() => ({
+const { modelsSpy, continueChatSpy } = vi.hoisted(() => ({
   modelsSpy: vi.fn(),
-  setPreferencesSpy: vi.fn(),
+  continueChatSpy: vi.fn(),
 }));
 vi.mock('../src/api/rest', () => ({
   api: {
     skills: vi.fn().mockResolvedValue({ skills: [] }),
     uploadAttachment: vi.fn(),
     models: modelsSpy,
-    setPreferences: setPreferencesSpy,
+    continueChat: continueChatSpy,
   },
+  ApiError: class ApiError extends Error {},
 }));
 
 const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
@@ -61,13 +55,13 @@ const BASE_PREFERENCES = {
   },
 };
 
-function seedSettings(suppressProviderSwitchWarning: boolean): void {
+function seedSettings(): void {
   useSettingsStore.setState({
     data: {
       devices: [],
       push: { tokenCount: 0 },
       google: { configured: false, connected: false, scope: null },
-      preferences: { ...BASE_PREFERENCES, suppressProviderSwitchWarning },
+      preferences: { ...BASE_PREFERENCES },
     },
     error: null,
   });
@@ -94,7 +88,18 @@ beforeEach(() => {
       { id: 'openai/gpt-5-codex', label: 'GPT-5 Codex' },
     ],
   });
-  setPreferencesSpy.mockResolvedValue({ preferences: { ...BASE_PREFERENCES } });
+  __resetRouterMock();
+  continueChatSpy.mockResolvedValue({
+    draft: {
+      id: 'draft-linked-m',
+      hostId: 'd1',
+      folder: '/home/tom/work',
+      model: 'openai/gpt-5-codex',
+      text: 'This continues "Chat"',
+      continuedFrom: 'c1',
+      updatedAt: 1,
+    },
+  });
   vi.spyOn(deliveryTracker, 'submit').mockImplementation(() => {});
 });
 
@@ -103,10 +108,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function seedChat(model = 'claude-opus-5-5'): void {
+function seedChat(model = 'claude-opus-5-5', chatId = 'c1'): void {
   useChatStore.getState().hydrate([
     {
-      chatId: 'c1',
+      chatId,
       hostId: 'd1',
       name: 'Chat',
       folder: '/home/tom/work',
@@ -133,25 +138,49 @@ async function openPickerAndChoose(
   actSync(() => findHost(root, byTestId(`new-chat-model-option-${modelId}`)).props['onPress']());
 }
 
-describe('Composer — provider-switch confirmation', () => {
-  it("shows the modal with exactly Tom's copy on a cross-provider pick, and sends nothing yet", async () => {
-    seedSettings(false);
-    seedChat('claude-opus-5-5');
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    await openPickerAndChoose(r.root, 'openai/gpt-5-codex');
-
-    const modal = findHost(r.root, byTestId('provider-switch-modal'));
-    expect(modal).not.toBeNull();
-    expect(wsMock.send).not.toHaveBeenCalled();
+describe('Composer — a provider switch starts a linked chat', () => {
+  it('a cross-provider pick drafts a linked chat and opens it, sending nothing to the host', async () => {
+    seedSettings();
+    seedChat();
+    const { root } = renderRN(<Composer chatId="c1" />);
+    await openPickerAndChoose(root, 'openai/gpt-5-codex');
+    await actAsync(async () => {
+      await flush();
+    });
+    expect(continueChatSpy).toHaveBeenCalledWith('c1', { model: 'openai/gpt-5-codex' });
+    expect(routerMock.push).toHaveBeenCalledWith('/new-chat?draftId=draft-linked-m');
+    expect(useNewChatDraftStore.getState().get('draft-linked-m')).toMatchObject({
+      continuedFrom: 'c1',
+    });
+    expect(wsMock.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'chat.model_request' }),
+    );
   });
 
-  it('never shows the modal for a same-provider model change', async () => {
-    seedSettings(false);
-    seedChat('claude-opus-5-5');
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    await openPickerAndChoose(r.root, 'claude-sonnet-5');
+  it('says so when the linked chat cannot be drafted', async () => {
+    continueChatSpy.mockRejectedValue(new Error('server down'));
+    seedSettings();
+    seedChat();
+    const { root } = renderRN(<Composer chatId="c1" />);
+    await openPickerAndChoose(root, 'openai/gpt-5-codex');
+    await actAsync(async () => {
+      await flush();
+    });
+    expect(
+      useUiStore
+        .getState()
+        .errors.map((e) => e.message)
+        .join(' '),
+    ).toContain('Could not start a linked chat: server down');
+    expect(routerMock.push).not.toHaveBeenCalled();
+  });
 
-    expect(queryHost(r.root, byTestId('provider-switch-modal'))).toBeNull();
+  it('a same-provider pick is an ordinary model change', async () => {
+    seedSettings();
+    seedChat();
+    const { root } = renderRN(<Composer chatId="c1" />);
+    await openPickerAndChoose(root, 'claude-sonnet-5');
+    expect(continueChatSpy).not.toHaveBeenCalled();
     expect(wsMock.send).toHaveBeenCalledWith({
       type: 'chat.model_request',
       chatId: 'c1',
@@ -159,64 +188,15 @@ describe('Composer — provider-switch confirmation', () => {
     });
   });
 
-  it('Cancel closes the modal and sends nothing', async () => {
-    seedSettings(false);
-    seedChat('claude-opus-5-5');
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    await openPickerAndChoose(r.root, 'openai/gpt-5-codex');
-    actSync(() => findHost(r.root, byTestId('provider-switch-cancel')).props['onPress']());
-
-    expect(queryHost(r.root, byTestId('provider-switch-modal'))).toBeNull();
-    expect(wsMock.send).not.toHaveBeenCalled();
-  });
-
-  it('Switch sends chat.model_request and closes the modal', async () => {
-    seedSettings(false);
-    seedChat('claude-opus-5-5');
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    await openPickerAndChoose(r.root, 'openai/gpt-5-codex');
-    actSync(() => findHost(r.root, byTestId('provider-switch-switch')).props['onPress']());
-
+  it('the Manager changes provider in place', async () => {
+    seedSettings();
+    seedChat('claude-opus-5-5', 'thread_manager');
+    const { root } = renderRN(<Composer chatId="thread_manager" />);
+    await openPickerAndChoose(root, 'openai/gpt-5-codex');
+    expect(continueChatSpy).not.toHaveBeenCalled();
     expect(wsMock.send).toHaveBeenCalledWith({
       type: 'chat.model_request',
-      chatId: 'c1',
-      model: 'openai/gpt-5-codex',
-    });
-    expect(queryHost(r.root, byTestId('provider-switch-modal'))).toBeNull();
-    expect(setPreferencesSpy).not.toHaveBeenCalled();
-  });
-
-  it('"Don\'t show again" persists the account setting and still switches', async () => {
-    seedSettings(false);
-    seedChat('claude-opus-5-5');
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    await openPickerAndChoose(r.root, 'openai/gpt-5-codex');
-    actSync(() =>
-      findHost(r.root, byTestId('provider-switch-dont-show-again')).props['onValueChange'](true),
-    );
-    await actAsync(async () => {
-      findHost(r.root, byTestId('provider-switch-switch')).props['onPress']();
-      await flush();
-    });
-
-    expect(setPreferencesSpy).toHaveBeenCalledWith({ suppressProviderSwitchWarning: true });
-    expect(wsMock.send).toHaveBeenCalledWith({
-      type: 'chat.model_request',
-      chatId: 'c1',
-      model: 'openai/gpt-5-codex',
-    });
-  });
-
-  it('never shows the modal once the account setting is already on', async () => {
-    seedSettings(true);
-    seedChat('claude-opus-5-5');
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    await openPickerAndChoose(r.root, 'openai/gpt-5-codex');
-
-    expect(queryHost(r.root, byTestId('provider-switch-modal'))).toBeNull();
-    expect(wsMock.send).toHaveBeenCalledWith({
-      type: 'chat.model_request',
-      chatId: 'c1',
+      chatId: 'thread_manager',
       model: 'openai/gpt-5-codex',
     });
   });

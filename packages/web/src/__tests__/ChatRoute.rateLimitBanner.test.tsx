@@ -14,7 +14,8 @@ import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { setActiveWs } from '../api/ws.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { DEFAULT_SHARED_SETTINGS, type WireEvent } from '@patch/wire';
-import { fireEvent } from '@testing-library/react';
+import { fireEvent, waitFor } from '@testing-library/react';
+import { api } from '../api/rest.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
@@ -23,6 +24,16 @@ vi.mock('../api/rest.js', () => ({
     getFileContentAtHead: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     skills: vi.fn(async () => ({ skills: [] })),
     models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
+    continueChat: vi.fn(async () => ({
+      draft: {
+        id: 'draft-linked-l',
+        hostId: 'd1',
+        folder: '/p',
+        text: 'Still unanswered',
+        continuedFrom: 'c1',
+        updatedAt: 1,
+      },
+    })),
     setGoal: vi.fn(async () => undefined),
     setReminder: vi.fn(async () => undefined),
     setPreferences: vi.fn(async (patch: Record<string, unknown>) => ({
@@ -246,7 +257,7 @@ describe('ChatRoute — the limit bubble', () => {
       );
     });
 
-    it('Change provider moves the model and re-sends in ONE request, never a separate resume', () => {
+    it('Change provider drafts a linked chat on the other provider, and sends nothing to the host', async () => {
       const sent = setup({ resetsAt: Date.now() + 60_000, other: 'out', codex: true });
       setModelCatalog({
         status: 'ready',
@@ -258,10 +269,12 @@ describe('ChatRoute — the limit bubble', () => {
       renderChat();
       fireEvent.click(screen.getByTestId('rate-limit-change-provider'));
       fireEvent.click(screen.getByTestId('rate-limit-provider-option'));
-      const confirm = screen.queryByTestId('provider-switch-switch');
-      if (confirm) fireEvent.click(confirm);
-      const move = sent.find((e) => e.type === 'chat.model_request');
-      expect(move).toMatchObject({ chatId: 'c1', retry: true });
+      await waitFor(() =>
+        expect(vi.mocked(api.continueChat)).toHaveBeenCalledWith('c1', {
+          model: 'openai/gpt-5-codex',
+        }),
+      );
+      expect(sent.find((e) => e.type === 'chat.model_request')).toBeUndefined();
       expect(sent).not.toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
     });
 

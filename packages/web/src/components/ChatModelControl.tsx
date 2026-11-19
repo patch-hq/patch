@@ -12,11 +12,12 @@ import { useUiStore } from '../stores/uiStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { ModelPicker } from './ModelPicker.js';
 import { PopupSelect } from './PopupSelect.js';
-import { ProviderSwitchModal } from './ProviderSwitchModal.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { loadModels } from '../lib/models.js';
 import { getActiveWs } from '../api/ws.js';
+import { useNavigate } from 'react-router-dom';
+import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
 
 /**
  * How long the control waits for the host to confirm a model change before it
@@ -204,15 +205,26 @@ export function ModelControl({
     return () => clearTimeout(t);
   }, [pendingModel, hostLabel, row.model, pushError]);
 
-  // spec/04 § History — a cross-provider switch may cost more (no cache to
-  // resume from), so the picker confirms it first unless the account has
-  // turned that off (Settings has a toggle to bring it back). A same-provider
-  // model change never shows it — there's no `row.model` to compare against
-  // for a chat that hasn't spawned yet, so nothing to switch FROM either.
-  const [providerSwitchTarget, setProviderSwitchTarget] = useState<string | null>(null);
-  const suppressProviderSwitchWarning = usePreferencesStore(
-    (s) => s.preferences.suppressProviderSwitchWarning,
-  );
+  // spec/04 § Provider switches — a chat keeps one provider for its life.
+  // Choosing another provider's model starts a new chat linked to this one: the
+  // server drafts it and it opens on the new-chat screen, its first message
+  // ready to read, edit and send. The Manager and Speakers change in place.
+  const navigate = useNavigate();
+  const [drafting, setDrafting] = useState(false);
+  function startLinkedChat(modelId: string): void {
+    if (drafting) return;
+    setDrafting(true);
+    draftLinkedChat(row.chatId, modelId).then(
+      (path) => {
+        setDrafting(false);
+        navigate(path);
+      },
+      (err: unknown) => {
+        setDrafting(false);
+        pushError(`Could not start a linked chat: ${linkedChatError(err)}`);
+      },
+    );
+  }
 
   function sendModelChange(modelId: string): void {
     setPendingModel(modelId);
@@ -226,8 +238,8 @@ export function ModelControl({
     if (modelId === row.model) return;
     const crossProvider =
       row.model != null && harnessForModel(modelId) !== harnessForModel(row.model);
-    if (crossProvider && !suppressProviderSwitchWarning) {
-      setProviderSwitchTarget(modelId);
+    if (crossProvider && !isReservedSpecialThread(row.chatId)) {
+      startLinkedChat(modelId);
       return;
     }
     sendModelChange(modelId);
@@ -258,19 +270,6 @@ export function ModelControl({
             : 'Applies to your next message'
         }
       />
-      {providerSwitchTarget !== null && (
-        <ProviderSwitchModal
-          onCancel={() => setProviderSwitchTarget(null)}
-          onSwitch={(dontShowAgain) => {
-            const target = providerSwitchTarget;
-            setProviderSwitchTarget(null);
-            if (dontShowAgain) {
-              void usePreferencesStore.getState().update({ suppressProviderSwitchWarning: true });
-            }
-            sendModelChange(target);
-          }}
-        />
-      )}
     </>
   );
 }

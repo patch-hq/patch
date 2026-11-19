@@ -605,25 +605,38 @@ describe('checkHooks timeout', () => {
   });
 });
 
-describe('moveChat — continues from the server copy when the old host refuses', () => {
-  const ok = { ok: true, chatId: 'c1', hostId: 'box', folder: '/f' };
-  const bodies = (): unknown[] =>
-    fetchMock.mock.calls.map((c) => JSON.parse((c as [string, RequestInit])[1].body as string));
+describe('moveChat / continueChat — draft a linked chat (spec/04 § Provider switches)', () => {
+  const draft = {
+    id: 'draft-linked-1',
+    hostId: 'box',
+    folder: '/f',
+    text: 't',
+    continuedFrom: 'c1',
+    updatedAt: 1,
+  };
+  const calls = (): [string, unknown][] =>
+    fetchMock.mock.calls.map((c) => {
+      const [url, init] = c as [string, RequestInit];
+      return [url, JSON.parse(init.body as string)];
+    });
 
-  it.each(['busy', 'unsupported'])('retries once with fromServerCopy after %s', async (code) => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ error: code, message: 'no' }, 409))
-      .mockResolvedValueOnce(jsonResponse(ok));
-    await expect(api.moveChat('c1', 'box', '/f')).resolves.toEqual(ok);
-    expect(bodies()).toEqual([
-      { hostId: 'box', folder: '/f' },
-      { hostId: 'box', folder: '/f', fromServerCopy: true },
+  it('move posts the target once and answers with the draft; a refusal is not retried', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ draft }, 201));
+    await expect(api.moveChat('c1', 'box', '/f')).resolves.toEqual({ draft });
+    expect(calls()).toEqual([
+      [expect.stringContaining('/api/chats/c1/move'), { hostId: 'box', folder: '/f' }],
     ]);
-  });
-
-  it('does not retry other refusals', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ error: 'folder_not_found', message: 'x' }, 400));
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'busy', message: 'x' }, 409));
     await expect(api.moveChat('c1', 'box', '/f')).rejects.toBeInstanceOf(ApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('continue posts the other provider’s model', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ draft }, 201));
+    await api.continueChat('c1', { model: 'openai/gpt-5' });
+    expect(calls()).toEqual([
+      [expect.stringContaining('/api/chats/c1/continue'), { model: 'openai/gpt-5' }],
+    ]);
   });
 });

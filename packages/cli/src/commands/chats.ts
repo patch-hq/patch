@@ -13,7 +13,7 @@
 //   hide      → POST /chats/:id/hide (uds) | POST /api/chats/:id/hide (rest)
 //   pin       → POST /api/chats/:id/pin (rest)
 //   rename    → POST /api/chats/:id/rename (rest)
-//   move      → POST /api/chats/:id/move (rest — the server drives both hosts)
+//   move      → POST /api/chats/:id/move (rest — drafts a linked chat on the target host)
 //
 // All commands accept `--json`. Without `--json`, output is a small table.
 
@@ -397,24 +397,37 @@ export function registerChatsCommands(program: Command): void {
   chats
     .command('move <id>')
     .description(
-      'Move a chat to another host, to run in --folder there (spec/04 § Moving a chat to another host)',
+      'Start a new chat on another host, in --folder there, linked to this one; its drafted first message waits in New chat drafts to edit and send (spec/04 § Moving to another host)',
     )
     .requiredOption('--host <host>', 'The host to move it to: a host name or hostId prefix')
     .requiredOption('--folder <folder>', 'Absolute folder on that host')
     .option('--json', 'JSON output')
     .action(async (rawId: string, opts: CommonOpts & { host: string; folder: string }) => {
       await run(opts, async () => {
-        // Only the server can reach both hosts, so this is REST even from
-        // the host the chat is on.
+        // The server drafts the linked chat, so this is REST even from the
+        // host the chat is on. Nothing is copied; the old chat stays as it is.
         const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
         const id = await resolveChatId(t, rawId);
-        const res = await t.post<{ ok: true; chatId: string; hostId: string; folder: string }>(
-          `/api/chats/${id}/move`,
-          { hostId, folder: opts.folder },
-        );
+        const res = await t.post<{
+          draft: {
+            id: string;
+            hostId: string;
+            folder: string;
+            text: string;
+            continuedFrom: string;
+          };
+        }>(`/api/chats/${id}/move`, { hostId, folder: opts.folder });
         if (opts.json) emitJson(res);
-        else emitText(`moved ${res.chatId} to ${opts.host}:${res.folder}`);
+        else
+          emitText(
+            [
+              `Drafted a new chat on ${opts.host} in ${res.draft.folder}, continuing ${id}.`,
+              'Read, edit and send its first message from New chat drafts in Patch:',
+              '',
+              res.draft.text,
+            ].join('\n'),
+          );
       });
     });
 

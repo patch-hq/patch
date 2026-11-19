@@ -114,6 +114,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   harnessForModel,
+  isReservedSpecialThread,
   modelSupportsEffort,
   providerBuiltinCommands,
   providerDescriptor,
@@ -128,8 +129,7 @@ import { AnchoredMenu } from './AnchoredMenu';
 import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
 import { AccountMenu } from './AccountMenu';
-import { ProviderSwitchModal } from './ProviderSwitchModal';
-import { suppressProviderSwitchWarningOrFalse } from '../lib/preferences';
+import { draftLinkedChat, linkedChatError } from '../lib/linkedChat';
 import { useExperimentalFeatures, useSettingsStore } from '../stores/settingsStore';
 import {
   PERMISSION_MODE_ORDER,
@@ -747,10 +747,18 @@ export function Composer({
     }, MODEL_CONFIRM_TIMEOUT_MS);
     return () => clearTimeout(t);
   }, [pendingModel, chatModel]);
-  // spec/04 § History — a cross-provider switch may cost more (no cache to
-  // resume from), so the picker confirms it first unless the account has
-  // turned that off (Settings has a toggle to bring it back).
-  const [providerSwitchTarget, setProviderSwitchTarget] = React.useState<string | null>(null);
+  // spec/04 § Provider switches — a chat keeps one provider for its life.
+  // Picking another provider's model starts a new chat linked to this one: the
+  // server drafts it and it opens on the new-chat screen, its first message
+  // ready to read, edit and send. The Manager and Speakers change in place.
+  const linkedRouter = useRouter();
+  const startLinkedChat = (modelId: string): void => {
+    draftLinkedChat(chatId, modelId).then(
+      (route) => linkedRouter.push(route as Href),
+      (err: unknown) =>
+        useUiStore.getState().pushError(`Could not start a linked chat: ${linkedChatError(err)}`),
+    );
+  };
 
   const sendModelChange = (modelId: string): void => {
     setPendingModel(modelId);
@@ -765,8 +773,8 @@ export function Composer({
     if (modelId === (pendingModel ?? chatModel)) return;
     const crossProvider =
       chatModel !== null && harnessForModel(modelId) !== harnessForModel(chatModel);
-    if (crossProvider && !suppressProviderSwitchWarningOrFalse()) {
-      setProviderSwitchTarget(modelId);
+    if (crossProvider && !isReservedSpecialThread(chatId)) {
+      startLinkedChat(modelId);
       return;
     }
     sendModelChange(modelId);
@@ -2683,23 +2691,6 @@ export function Composer({
         onDismiss={() => setEffortMenuOpen(false)}
         placement="bottom"
         nonModal
-      />
-      <ProviderSwitchModal
-        visible={providerSwitchTarget !== null}
-        onCancel={() => setProviderSwitchTarget(null)}
-        onSwitch={(dontShowAgain) => {
-          const target = providerSwitchTarget;
-          setProviderSwitchTarget(null);
-          if (dontShowAgain) {
-            void useSettingsStore
-              .getState()
-              .updatePreferences({ suppressProviderSwitchWarning: true })
-              .catch((e: Error) =>
-                useUiStore.getState().pushError(`settings failed: ${e.message}`),
-              );
-          }
-          if (target !== null) sendModelChange(target);
-        }}
       />
       <SkillPreviewSheet
         skill={previewSkill}

@@ -175,6 +175,14 @@ export interface ChatSummary {
    */
   jobId: string | null;
   /**
+   * spec/04 § Provider switches, § Moving to another host — the chat this one
+   * continues, and the chat that continues it. Server-owned: recorded by
+   * `linkContinuation` when a linked chat is spawned, never from a host frame,
+   * so every merge carries them forward. Absent on a chat with no link.
+   */
+  continuedFrom?: string;
+  continuedIn?: string;
+  /**
    * The model this chat is running on: what it resolved to at spawn (spec/04 §
    * Spawn), kept in step with any later change by the `model` the host
    * carries on `chat.state` (spec/04 § Model). `null` when the spawning host
@@ -625,6 +633,9 @@ export class ChatRegistry {
         // carries no jobId field, so it always just carries the existing value
         // forward.
         jobId: existing?.jobId ?? null,
+        // Server-owned links (spec/04 § Provider switches): a host never sends them.
+        ...(existing?.continuedFrom !== undefined ? { continuedFrom: existing.continuedFrom } : {}),
+        ...(existing?.continuedIn !== undefined ? { continuedIn: existing.continuedIn } : {}),
         // spec/04 § Model — a chat's model CAN change mid-chat, and `chat.state`
         // is how the change travels, so take the event's value when it carries
         // one. Absence means "unchanged" (an older host never sends the
@@ -915,7 +926,33 @@ export class ChatRegistry {
       disabled: next.disabled,
       lastUserActivity: next.lastUserActivity,
       ...(next.createdAt !== undefined ? { createdAt: next.createdAt } : {}),
+      ...(next.continuedFrom !== undefined ? { continuedFrom: next.continuedFrom } : {}),
+      ...(next.continuedIn !== undefined ? { continuedIn: next.continuedIn } : {}),
     };
+  }
+
+  /**
+   * Record that `newChatId` continues `oldChatId` (spec/04 § Provider
+   * switches, § Moving to another host): the new chat's `continuedFrom` and
+   * the old one's `continuedIn`. Returns the `chat.state` of each row that
+   * changed, for the caller to broadcast. A chat the mirror does not hold is
+   * an error: the link is only made for two chats the server knows.
+   */
+  linkContinuation(newChatId: string, oldChatId: string): ChatStateEvent[] {
+    const fresh = this.chats.get(newChatId);
+    const old = this.chats.get(oldChatId);
+    if (!fresh) throw new Error(`linkContinuation: unknown chat ${newChatId}`);
+    if (!old) throw new Error(`linkContinuation: unknown chat ${oldChatId}`);
+    const nextFresh: ChatSummary = {
+      ...fresh,
+      continuedFrom: oldChatId,
+      feedPos: ++this.feedCounter,
+    };
+    const nextOld: ChatSummary = { ...old, continuedIn: newChatId, feedPos: ++this.feedCounter };
+    this.chats.set(newChatId, nextFresh);
+    this.chats.set(oldChatId, nextOld);
+    this.markDirty();
+    return [this.stateEventOf(nextFresh), this.stateEventOf(nextOld)];
   }
 
   /**

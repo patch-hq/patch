@@ -128,26 +128,41 @@ the picker does.
 ### Provider switches
 
 Switching to a model of another provider starts a new chat linked to the old one,
-on the same host and in the same folder. The new chat opens on the new-chat
-screen with its first message as a draft the user reads, edits and sends: that
-message is the only context that carries over. Patch offers a drafted summary of
-the old chat as the starting text, written by a one-shot model call over the old
-chat's record; the user can keep it, change it or clear it, and nothing reaches
-the new model except what the sent message says.
+on the same host and in the same folder. The surface asks the server to draft it
+(`POST /api/chats/:id/continue {model}`), which stores a new-chat draft (`14-design-web.md`
+§ New chat drafts) naming the chat it continues, and the surface opens it on the
+new-chat screen. Its first message is the draft the user reads, edits and sends:
+that message is the only context that carries over. The starting text is drafted
+from the server's record of the old chat, with no model call, so it works while
+the old chat's host is offline: one line naming the old chat, its model, host and
+folder, then the last request and how the last reply ended, and every request
+still unanswered, each quoted. The user can keep it, change it or clear it, and
+nothing reaches the new model except what the sent message says. A host refuses a
+model of another provider on an ordinary chat (`provider_switch_needs_new_chat`),
+so a surface too old to draft a linked chat cannot switch one in place.
 
-The new chat records `continuedFrom` (the old chat's id) and the old chat
-`continuedIn`. Surfaces show the two as one continuing thread: one row in the
-chat list, the old chat's history above, a divider naming the providers and
-models either side of the switch, then the new chat. The old chat stays as it
-was, readable and able to continue on its own provider from its own row in the
-thread's history.
+Sending the draft spawns the chat with `continuedFrom` (`POST /api/chats`), and
+once the host confirms it the server records `continuedFrom` on the new chat and
+`continuedIn` on the old one, and stamps both on every `chat.state` it sends. A
+chat is continued once: drafting or spawning a second continuation of the same
+chat is refused, naming the newer chat. Surfaces show the two as one continuing
+thread: one row in the chat list (the newest chat; an earlier one keeps its own
+row only when its continuation is deleted), and a divider at the start of the
+new chat naming the chat it continues and the models either side of the switch,
+with a matching divider at the end of the old chat naming the chat that
+continues it. Each divider opens the other chat; the earlier chat's messages are
+read there rather than drawn above the new chat's. The old chat stays as it was,
+readable and able to continue on its own provider.
+
+The Manager and Speakers change provider in place instead (`06-threads-manager-speakers.md`).
 
 When every account of a chat's provider is out of credit, and another provider
-the chat's host can run has a ready account, the out-of-usage banner offers a Switch to ChatGPT / Switch to Claude button. It
-opens the provider switch onto the first model of the other provider in that
-host's catalogue, with the request that met the limit included in the drafted
-first message. With nothing usable on the other provider, or no model for it in
-the catalogue, there is no button.
+the chat's host can run has a ready account, the out-of-usage banner and the
+limit card offer Change provider. It opens the provider switch onto the first
+model of the other provider in that host's catalogue; the request that met the
+limit is still unanswered, so the drafted first message carries it. With nothing
+usable on the other provider, or no model for it in the catalogue, the choice is
+disabled with the reason.
 
 ### Moving to another host
 
@@ -161,12 +176,22 @@ side of the move, and the old chat stays as it was on its own host.
 
 Web (chat header ⋯ → Move to…), mobile (chat ⋯ → Move to…) and the CLI
 (`17-cli.md`) call `POST /api/chats/:id/move {hostId, folder}`, which creates
-the linked new-chat draft and answers with it; sending it spawns the chat as
-any draft does (§ Spawn). The picker lists the other hosts (offline ones
-disabled), then the chosen host's folders, pre-selecting the one named like the
-chat's current folder, else the first that host offers; any absolute path can
-be typed. A special thread is not moved this way; its home changes as
-`06-threads-manager-speakers.md` § Changing home describes.
+the linked new-chat draft and answers with it; web and mobile open it on the
+new-chat screen, the CLI prints its first message, and sending it spawns the
+chat as any draft does (§ Spawn). The draft keeps the chat's model. Nothing is
+asked of either host, so a chat whose host is offline moves the same way. The
+picker lists every host (offline ones disabled), the chat's own host included
+for a move to another folder there, then the chosen host's folders,
+pre-selecting the one named like the chat's current folder, else the first that
+host offers; any absolute path can be typed. A special thread is not moved this
+way; its home changes as `06-threads-manager-speakers.md` § Changing home
+describes.
+
+A move made before linked chats could take a chat over from the server's copy
+while its old host was offline, leaving that host owed a retire of its copy.
+Such a debt is still paid: when the host next finishes its start-up inventory the
+server asks it to set the old copy aside (under `~/.patch/moved/`) before
+reconciling it.
 
 ## Effort
 

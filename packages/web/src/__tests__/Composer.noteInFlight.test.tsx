@@ -17,7 +17,9 @@
 // upload), because the bug lives in the seam between it and the composer.
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { reportAccount } from './presenceHelpers.js';
@@ -26,6 +28,9 @@ import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import { startVoiceNote, __setRecorderFactoryForTests } from '../lib/voiceController.js';
 import type { VoiceRecording } from '../lib/voiceRecorder.js';
+
+/** The composer always sits inside the app's router (its model control can open a new chat). */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 describe('Composer — a voice note already in flight', () => {
   const clip = new Blob(['x'], { type: 'audio/wav' });

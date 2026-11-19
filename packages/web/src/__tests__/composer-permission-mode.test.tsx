@@ -9,7 +9,9 @@
 // § Permission mode), so every pick sends a `chat.settings` carrying a mode.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import type { PermissionMode, WireEvent } from '@patch/wire';
 import { Composer } from '../components/Composer.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -18,6 +20,9 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { reportAccount } from './presenceHelpers.js';
 import { setActiveWs } from '../api/ws.js';
 import type { ChatRow } from '../stores/types.js';
+
+/** The composer always sits inside the app's router (its model control can open a new chat). */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 function fakeWs(sent: WireEvent[]) {
   return { send: (e: WireEvent) => sent.push(e) } as unknown as Parameters<typeof setActiveWs>[0];

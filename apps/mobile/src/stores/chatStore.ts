@@ -722,6 +722,8 @@ function toListRow(row: ChatRow): ChatListRow {
     reminderEvery: row.reminderEvery,
     todos: row.todos,
     disabled: row.disabled,
+    ...(row.continuedFrom !== undefined ? { continuedFrom: row.continuedFrom } : {}),
+    ...(row.continuedIn !== undefined ? { continuedIn: row.continuedIn } : {}),
   };
 }
 
@@ -932,6 +934,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // spec/14 § Sidebar ordering — an older host never sends the
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,
+            // Server-owned links (spec/04 § Provider switches); an absent field keeps what is known.
+            ...((event.continuedFrom ?? row.continuedFrom) !== undefined
+              ? { continuedFrom: event.continuedFrom ?? row.continuedFrom }
+              : {}),
+            ...((event.continuedIn ?? row.continuedIn) !== undefined
+              ? { continuedIn: event.continuedIn ?? row.continuedIn }
+              : {}),
             awaitingPermission: event.activity === 'awaiting-permission',
             // Incoming value wins whenever the host sends one (including an
             // explicit `null` clearing a fired/cancelled wake); an omitted field
