@@ -530,6 +530,14 @@ test.describe('Settings — behaviour', () => {
 
   test('Hosts: removing a host asks, DELETEs it, and drops it from the list', async ({ page }) => {
     const deletes: string[] = [];
+    // The Manager's home is d1, so removing d2 goes straight to the confirm.
+    await page.route('**/api/manager/home', (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ hostId: 'd1' }),
+      }),
+    );
     await page.route('**/api/hosts/d2', (r) => {
       deletes.push(r.request().method());
       return r.fulfill({
