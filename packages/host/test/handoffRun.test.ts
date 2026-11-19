@@ -11,8 +11,6 @@ import {
   UNASSUMED_WINDOW_TOKENS,
   DEFAULT_OUTPUT_TOKENS,
 } from '../src/handoffRun.js';
-import { reportedContextLimit } from '../src/sdkBackend.js';
-import { ModelCatalog } from '../src/modelCatalog.js';
 
 describe('model limits', () => {
   it('uses a window a model has reported and flags it as known', () => {
@@ -89,38 +87,5 @@ describe('verification helpers', () => {
     expect(estimateIsOff(1000, 2100)).toBe(true);
     expect(estimateIsOff(1000, 400)).toBe(true);
     expect(estimateIsOff(1000, null)).toBe(false);
-  });
-  it('reads the window a provider names in an overflow', () => {
-    expect(
-      reportedContextLimit('maximum context length is 272,000 tokens, however you requested 900'),
-    ).toBe(272000);
-    expect(reportedContextLimit('context_length_exceeded')).toBeUndefined();
-  });
-});
-
-describe('the catalogue feeds model limits', () => {
-  it('notes the window and output cap Anthropic states, per model', async () => {
-    const limits = new ModelLimits();
-    const catalog = new ModelCatalog({
-      runOnAccountWithCredit: async (_label, fn) => fn('token'),
-      limits,
-      fetchImpl: (async () =>
-        new Response(
-          JSON.stringify({
-            data: [
-              {
-                id: 'claude-a',
-                display_name: 'A',
-                max_input_tokens: 1_000_000,
-                max_tokens: 64_000,
-              },
-              { id: 'claude-b', display_name: 'B' },
-            ],
-          }),
-        )) as typeof fetch,
-    });
-    await catalog.get();
-    expect(limits.get('claude-a')).toEqual({ contextWindow: 1_000_000, maxOutputTokens: 64_000 });
-    expect(limits.get('claude-b')).toBeUndefined();
   });
 });

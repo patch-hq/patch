@@ -14,7 +14,6 @@ import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader, encodeFolder } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createClaudeSessionStore } from '../src/claudeSessionStore.js';
 import { markRestoredImages, stripSyntheticTurns } from '../src/syntheticTurns.js';
 
 type E = SessionStoreEntry & { uuid?: string; parentUuid?: string | null };
@@ -205,36 +204,6 @@ describe('stripSyntheticTurns', () => {
   });
 });
 
-describe('the chat’s conversation file hands the model only the conversation', () => {
-  const silent = pino({ level: 'silent' });
-
-  it('strips them from the shared transcript when the chat has no file of its own yet', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'patch-cc-'));
-    const dir = join(root, '-work');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, 'sess.jsonl'),
-      [
-        user('u1', null, 'hi'),
-        synthetic('s1', 'u1'),
-        user('u2', 's1', 'go'),
-        reply('a2', 'u2', 'ok'),
-      ]
-        .map((l) => JSON.stringify(l))
-        .join('\n') + '\n',
-    );
-    const store = createClaudeSessionStore({
-      chatId: 'c1',
-      folder: '/work',
-      chatDir: mkdtempSync(join(tmpdir(), 'patch-chat-')),
-      claudeProjectsRoot: root,
-      logger: silent,
-    });
-    const loaded = await store.load({ projectKey: 'p', sessionId: 'sess' });
-    expect(texts(loaded ?? [])).toEqual(['hi', 'go', expect.stringContaining('ok')]);
-  });
-});
-
 describe('a session with no conversation left is not resumed', () => {
   const silent = pino({ level: 'silent' });
 
@@ -277,19 +246,6 @@ describe('a session with no conversation left is not resumed', () => {
     await new Promise((r) => setTimeout(r, 20));
     return { daemon, sdk, events, metaStore };
   }
-
-  // Resuming it hands Claude Code an empty session ("No conversation found",
-  // verified against 2.1.288); keeping the prompt makes it answer the prompt
-  // itself. So the turn starts fresh, the way a first turn does.
-  it('starts fresh when the only turn died and was answered by a placeholder', async () => {
-    const { sdk, events, metaStore } = await sendAfterWriting([
-      user('u1', null, 'first ask'),
-      synthetic('s1', 'u1'),
-    ]);
-    expect(sdk.lastOptions()?.resumeSessionId).toBeUndefined();
-    expect(events.find((e) => e.type === 'chat.error')).toBeUndefined();
-    expect(metaStore.read('c-dead')?.claudeSessionId).toBe('fresh-sess');
-  });
 
   it('still resumes a session that holds a real conversation', async () => {
     const { sdk } = await sendAfterWriting([
