@@ -44,7 +44,6 @@ import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useBatchStore } from './stores/batchStore.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
 import { VoiceBar } from './components/VoiceBar.js';
-import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
@@ -4264,7 +4263,6 @@ function Harness(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }}>
       <VoiceBar />
-      <RemoteCallBanner />
       {withChrome}
     </div>
   );

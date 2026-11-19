@@ -53,6 +53,7 @@ import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
+import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { EmptyChat } from '../components/EmptyChat.js';
@@ -1537,6 +1538,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           </button>
         </div>
       </header>
+      <RemoteCallBanner />
       {/* spec/14 § Terminal — the Chat / Terminal strip. This screen has no
           pane/tab system of its own (it is the pre-chat draft screen), so the
           switch is local state, not a `layoutStore` tab. */}

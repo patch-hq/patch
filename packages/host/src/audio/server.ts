@@ -313,6 +313,19 @@ export interface AudioServerHandle {
    * sessions — those are `voice-device-conv`.
    */
   phoneCallActive(): boolean;
+  /**
+   * Every call this server has announced open and not yet closed — the state
+   * `onCallSession` reports changes to. Sent as the host's `voice.calls`
+   * snapshot on every link (re)connect (spec/07 § A call can move between
+   * devices).
+   */
+  liveCalls(): Array<{
+    sessionId: string;
+    surfaceId: string;
+    surfaceKind: string;
+    chatId: string;
+    startedAt: number;
+  }>;
   /** Inspect a session's state (test/diagnostics). */
   getSessionState(sessionId: string): SessionState | undefined;
   /** The open sessions currently aimed at `chatId` (live context sync). */
@@ -1196,6 +1209,21 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         if (active.role === 'voice-call' && active.surfaceKind !== 'device') return true;
       }
       return false;
+    },
+    liveCalls() {
+      return [...sessions.values()].flatMap((entry) =>
+        entry.callAnnounced === true && entry.call
+          ? [
+              {
+                sessionId: entry.call.init.sessionId,
+                surfaceId: entry.surfaceId,
+                surfaceKind: String(entry.surfaceKind),
+                chatId: entry.call.init.chatId,
+                startedAt: entry.call.startedAt,
+              },
+            ]
+          : [],
+      );
     },
     sessionsOnChat(chatId: string): VoiceSessionLike[] {
       return [...sessions.values()]

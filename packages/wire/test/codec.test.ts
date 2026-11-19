@@ -384,6 +384,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     active: true,
     startedAt: 1,
   },
+  'voice.calls': {
+    type: 'voice.calls',
+    hostId: 'host-a',
+    calls: [
+      {
+        sessionId: 'sess-1',
+        surfaceId: 'surf-1',
+        surfaceKind: 'mobile',
+        chatId: 'c1',
+        startedAt: 1,
+      },
+    ],
+  },
   'folders.list': {
     type: 'folders.list',
     hostId: 'host-a',

@@ -32,6 +32,7 @@ import {
   type HostAccountEvent,
   type HostInfoEvent,
   type FoldersListEvent,
+  type VoiceCallsEvent,
   type FeedFollow,
   type WireEvent,
 } from '@patch/wire';
@@ -345,6 +346,16 @@ export class WsHub {
    */
   private readonly lastFolderList = new Map<string, FoldersListEvent>();
   /**
+   * The voice calls live on each host, `hostId → sessionId → call` (spec/07 §
+   * A call can move between devices). The server is the record of which calls
+   * exist: kept from each host's `voice.call` changes and replaced by its
+   * `voice.calls` snapshot on every link (re)connect, and a host that goes
+   * offline takes its calls with it. Every surface gets the whole set in its
+   * greeting, so a call-in-progress strip never outlives the call because one
+   * `active: false` was missed.
+   */
+  private readonly liveCalls = new Map<string, Map<string, VoiceCallsEvent['calls'][number]>>();
+  /**
    * The last Claude Code settings + memory snapshot each host published
    * (`claude_settings.list` / `claude_settings.updated` carry the COMPLETE
    * state). Replayed to a surface in its greeting, same reasoning as
@@ -518,6 +529,21 @@ export class WsHub {
     }
   }
 
+  /** Every live call on the account, as the `voice.calls` a surface replaces its list with. */
+  private voiceCallsSnapshot(): WireEvent {
+    return {
+      type: 'voice.calls',
+      calls: [...this.liveCalls.values()].flatMap((calls) => [...calls.values()]),
+    };
+  }
+
+  /** Forget a host's calls and tell every surface, if it held any. */
+  private endCallsOnHost(hostId: string): void {
+    const had = (this.liveCalls.get(hostId)?.size ?? 0) > 0;
+    this.liveCalls.delete(hostId);
+    if (had) this.sendToAll(this.voiceCallsSnapshot());
+  }
+
   private hostOfflineEvent(hostId: string): WireEvent {
     const reason = this.deps.hostOfflineReason?.(hostId);
     return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
@@ -578,6 +604,8 @@ export class WsHub {
       this.deps.hostLink.sendTo(otherId, 'presence', ev);
     }
     if (status !== 'offline') return;
+    // A call's audio runs on its host, so a host gone offline has no calls.
+    this.endCallsOnHost(hostId);
     // The host owns every in-flight turn. When the link drops, the
     // turn-completion / activity event will never arrive, so a chat left in
     // `running` / `awaiting-permission` would spin forever — a SILENT failure
@@ -711,7 +739,7 @@ export class WsHub {
       }
     }, RESTORED_HOST_GRACE_MS).unref();
     // Pipe host → surfaces.
-    this.hostEventUnsub = deps.hostLink.onEvent((event) => this.onHostEvent(event));
+    this.hostEventUnsub = deps.hostLink.onEvent((event, from) => this.onHostEvent(event, from));
     // Presence names the host it describes: the link tells us WHICH host
     // changed, so a surface can never mistake one host going offline for
     // another's. NO unaddressed presence frame is ever sent.
@@ -1334,6 +1362,10 @@ export class WsHub {
       const claudeSettings = this.lastClaudeSettings.get(hostId);
       if (claudeSettings) socket.send(encode(claudeSettings));
     }
+    // Every live call on the account (spec/07 § A call can move between
+    // devices): the surface replaces its list with this, so a call that ended
+    // while it was away is gone the moment it reconnects.
+    socket.send(encode(this.voiceCallsSnapshot()));
     // The shared settings, from the greeting alone (spec/03 § Settings).
     const shared = this.deps.sharedSettings?.();
     if (shared) socket.send(encode(shared));
@@ -2104,7 +2136,33 @@ export class WsHub {
 
   // ---- host → surfaces ----
 
-  private onHostEvent(event: WireEvent): void {
+  private onHostEvent(event: WireEvent, fromHostId: string | null): void {
+    if (event.type === 'voice.calls') {
+      if (fromHostId === null) {
+        this.deps.logger.error('ws-hub: voice.calls arrived without a sending host; dropped');
+        return;
+      }
+      this.liveCalls.set(fromHostId, new Map(event.calls.map((c) => [c.sessionId, c])));
+      this.sendToAll(this.voiceCallsSnapshot());
+      return;
+    }
+    if (event.type === 'voice.call') {
+      if (fromHostId === null) {
+        this.deps.logger.error(
+          { sessionId: event.sessionId },
+          'ws-hub: voice.call arrived without a sending host; dropped',
+        );
+        return;
+      }
+      const { type: _type, active, ...call } = event;
+      let calls = this.liveCalls.get(fromHostId);
+      if (active) {
+        if (!calls) this.liveCalls.set(fromHostId, (calls = new Map()));
+        calls.set(call.sessionId, call);
+      } else {
+        calls?.delete(call.sessionId);
+      }
+    }
     if (event.type === 'host.restarting') {
       this.beginHostRestart(event.hostId);
       return;
@@ -2510,6 +2568,7 @@ export class WsHub {
     this.hostLastSeenAt.delete(hostId);
     this.lastFolderList.delete(hostId);
     this.lastClaudeSettings.delete(hostId);
+    this.endCallsOnHost(hostId);
     this.endTerminalSessionsOnHost(hostId);
     for (const [searchId, host] of this.hostSearchHost.entries()) {
       if (host === hostId) this.hostSearchHost.delete(searchId);

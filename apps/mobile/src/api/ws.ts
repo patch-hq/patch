@@ -1185,6 +1185,13 @@ export class PatchWs {
     }
     // spec/07 § A call can move between devices — a call live on another
     // surface is offered for switching here. This surface's own call is not.
+    // The server's whole set of live calls (greeting, a host reconnecting or
+    // going offline): replace the list, so a call whose end was missed goes.
+    if (event.type === 'voice.calls') {
+      const self = usePresenceStore.getState().surfaceId;
+      useVoiceStore.getState().setRemoteCalls(event.calls.filter((c) => c.surfaceId !== self));
+      return;
+    }
     if (event.type === 'voice.call') {
       if (event.surfaceId === usePresenceStore.getState().surfaceId) return;
       const { type: _type, active, ...call } = event;

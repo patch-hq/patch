@@ -2600,6 +2600,11 @@ async function startHost(
       // memory entries on (re)connect, same snapshot-on-connect contract as
       // folders and secrets below.
       sender({ type: 'claude_settings.list', hostId: selfHostId, ...claudeSettingsSnapshot() });
+      // spec/07 § A call can move between devices — the calls this host holds
+      // right now. The server replaces whatever it last knew for this host, so
+      // a call that ended while the link was down does not stay on any
+      // surface. No audio server yet means no call can be open.
+      sender({ type: 'voice.calls', hostId: selfHostId, calls: audioServer?.liveCalls() ?? [] });
       // spec/02 § Agent backends — warm the catalogue on connect so a picker
       // opens on a real list rather than an empty one. It no longer SEEDS
       // anything: the model a model-less spawn takes is the account default the
