@@ -103,19 +103,20 @@ describe('selectNextTodo', () => {
 
   it('fires the second of two items with identical text once the first is completed', () => {
     const todos = [t('a', 'completed'), t('a', 'pending')];
-    expect(selectNextTodo(todos, { text: 'a', occurrence: 0 })).toEqual({
+    // Fired earlier as the first of two pending 'a's (one 'a' follows it).
+    expect(selectNextTodo(todos, { text: 'a', occurrence: 1 })).toEqual({
       action: 'fire',
       text: 'a',
-      occurrence: 1,
+      occurrence: 0,
     });
   });
 
   it('still reports the duplicate as stalled when that very occurrence was fired', () => {
     const todos = [t('a', 'completed'), t('a', 'pending')];
-    expect(selectNextTodo(todos, { text: 'a', occurrence: 1 })).toEqual({
+    expect(selectNextTodo(todos, { text: 'a', occurrence: 0 })).toEqual({
       action: 'stalled',
       text: 'a',
-      occurrence: 1,
+      occurrence: 0,
     });
   });
 
@@ -157,16 +158,16 @@ describe('markTodoStarted', () => {
 
   it('promotes the requested occurrence when a list repeats an item text', () => {
     const todos = [t('b', 'completed'), t('b', 'pending')];
-    expect(markTodoStarted(todos, { text: 'b', occurrence: 1 })).toEqual([
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toEqual([
       t('b', 'completed'),
       t('b', 'in_progress'),
     ]);
-    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toBeNull();
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 1 })).toBeNull();
   });
 
   it('promotes only the first match when a list repeats an item text', () => {
     const todos = [t('b', 'pending'), t('b', 'pending')];
-    expect(markTodoStarted(todos, { text: 'b', occurrence: 0 })).toEqual([
+    expect(markTodoStarted(todos, { text: 'b', occurrence: 1 })).toEqual([
       t('b', 'in_progress'),
       t('b', 'pending'),
     ]);
@@ -294,5 +295,27 @@ describe('keepCompletedHistory reused text', () => {
 describe('keepCompletedHistory clearing', () => {
   it('an empty list clears the history', () => {
     expect(keepCompletedHistory([], [{ text: 'a', status: 'completed' }])).toEqual([]);
+  });
+});
+
+describe('stalled detection survives history merges of the same text', () => {
+  const done: TodoItem = { text: 'Fix tests', status: 'completed' };
+  const open: TodoItem = { text: 'Fix tests', status: 'pending' };
+
+  it('stays stalled when more completed history of the same text is prepended', () => {
+    const first = selectNextTodo(keepCompletedHistory([open], [done]), null);
+    if (first.action !== 'fire') throw new Error('expected fire');
+    const lastFired = { text: first.text, occurrence: first.occurrence };
+    const merged = keepCompletedHistory([open], [done, done, done]);
+    expect(selectNextTodo(merged, lastFired).action).toBe('stalled');
+  });
+
+  it('still fires the second of two pending items after the first completes', () => {
+    const first = selectNextTodo([open, open], null);
+    if (first.action !== 'fire') throw new Error('expected fire');
+    const merged = keepCompletedHistory([done, open], [done]);
+    expect(selectNextTodo(merged, { text: first.text, occurrence: first.occurrence }).action).toBe(
+      'fire',
+    );
   });
 });
