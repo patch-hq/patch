@@ -211,6 +211,9 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
   return (
     entry.tool === 'view_file' ||
     entry.tool === 'mcp__patch__view_file' ||
+    // A `link_file` row is the file card, so it takes its result too.
+    entry.tool === 'link_file' ||
+    entry.tool === 'mcp__patch__link_file' ||
     // A background agent start keeps its own row, result included.
     entry.tool === 'patch_agent' ||
     entry.tool === 'mcp__patch__patch_agent' ||

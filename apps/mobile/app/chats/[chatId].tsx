@@ -1793,6 +1793,13 @@ function ToolCallItem({
       ? viewFilePayload(result.toolResult)
       : null;
   if (viewFile) return <ViewFileCard view={viewFile} />;
+  // `link_file` points at a file on the host's disk: a card with its path.
+  // An invalid ack (an error) falls through to the ordinary row.
+  const linkFile =
+    entry.tool && toolLabel(entry.tool) === 'link_file' && result
+      ? linkFilePayload(result.toolResult)
+      : null;
+  if (linkFile) return <LinkFileCard link={linkFile} />;
   // The agent's plan is a checklist card; args that are not a todo list fall
   // through to the ordinary row. Stable per entry, like the branches above.
   const todoItems = entry.tool === 'TodoWrite' ? todoCardItems(entry.toolArgs) : null;
@@ -2278,6 +2285,80 @@ function ViewFileCard({ view }: { view: ViewFileView }): React.ReactElement {
         />
       ) : null}
     </Pressable>
+  );
+}
+
+interface LinkFileView {
+  name: string;
+  absPath: string;
+  isDirectory: boolean;
+  size?: number | undefined;
+}
+
+function asLinkFile(v: unknown): LinkFileView | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (o['kind'] !== 'link') return null;
+  const name = o['name'];
+  const absPath = o['absPath'];
+  if (typeof name !== 'string' || name === '') return null;
+  if (typeof absPath !== 'string' || absPath === '') return null;
+  return {
+    name,
+    absPath,
+    isDirectory: o['isDirectory'] === true,
+    size: typeof o['size'] === 'number' ? o['size'] : undefined,
+  };
+}
+
+/** Parse a `link_file` result: the host's json ack, bare or in content blocks. */
+function linkFilePayload(result: unknown): LinkFileView | null {
+  const direct = asLinkFile(result);
+  if (direct) return direct;
+  if (typeof result !== 'object' || result === null) return null;
+  const content = Array.isArray(result) ? result : (result as Record<string, unknown>)['content'];
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const text = (block as Record<string, unknown>)['text'];
+    if (typeof text !== 'string') continue;
+    try {
+      const parsed = asLinkFile(JSON.parse(text));
+      if (parsed) return parsed;
+    } catch {
+      // Not this block — a `link_file` ack is always valid JSON.
+    }
+  }
+  return null;
+}
+
+// The file lives on the host's disk, so on a phone the card is the name and
+// path alone — nothing to open here.
+function LinkFileCard({ link }: { link: LinkFileView }): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <View
+      testID="link-file"
+      style={{
+        backgroundColor: colors.paperRaised,
+        borderColor: colors.lineSoft,
+        borderWidth: 1,
+        borderRadius: radii.lg,
+        padding: space.sm,
+        marginBottom: space.sm,
+      }}
+    >
+      <Text testID="link-file-name" style={{ ...typography.meta, color: colors.ink }}>
+        {link.size !== undefined ? `${link.name} · ${formatBytes(link.size)}` : link.name}
+      </Text>
+      <Text
+        testID="link-file-path"
+        selectable
+        style={{ ...typography.meta, color: colors.ink3, marginTop: space.xs }}
+      >
+        {link.absPath}
+      </Text>
+    </View>
   );
 }
 
