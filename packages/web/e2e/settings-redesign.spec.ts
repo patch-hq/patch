@@ -241,6 +241,10 @@ test.describe('Settings — phone', () => {
     await page.goto(settingsUrl());
     await seedEverything(page);
     for (const p of PAGES) {
+      if (p.id === 'mcp' || p.id === 'hooks') {
+        const adv = page.getByTestId('settings-nav-advanced');
+        if ((await adv.getAttribute('aria-expanded')) !== 'true') await adv.tap();
+      }
       await page.getByTestId(`settings-nav-${p.id}`).tap();
       await expect(page.getByTestId('settings-route')).toHaveAttribute('data-page', p.id);
       await expect(page.getByTestId(p.testid)).toBeVisible();
