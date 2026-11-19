@@ -79,12 +79,15 @@ export function GoalEditor({
   goal,
   plan,
   onSave,
+  onSaveAndSnooze,
   onClose,
 }: {
   goal: string | null;
   plan: Required<GoalPlan>;
   /** `goal: null` clears. Called only when something changed. */
   onSave: (draft: GoalDraft) => void;
+  /** When given and no goal is set yet, offers "Set goal and snooze". */
+  onSaveAndSnooze?: (draft: GoalDraft) => void;
   onClose: () => void;
 }): JSX.Element {
   const [text, setText] = useState(goal ?? '');
@@ -112,17 +115,25 @@ export function GoalEditor({
     !sameEvery(remind, plan.remindEvery) ||
     !sameEvery(checkIn, plan.checkInEvery);
 
+  function draft(): GoalDraft {
+    return {
+      goal: next === '' ? null : next,
+      plan:
+        next === '' || (cleaned.length === 0 && remind === null && checkIn === null)
+          ? {}
+          : { then: cleaned, remindEvery: remind, checkInEvery: checkIn },
+    };
+  }
+
   function save(): void {
     if (next === '' && goal === null) return;
-    if (changed) {
-      onSave({
-        goal: next === '' ? null : next,
-        plan:
-          next === '' || (cleaned.length === 0 && remind === null && checkIn === null)
-            ? {}
-            : { then: cleaned, remindEvery: remind, checkInEvery: checkIn },
-      });
-    }
+    if (changed) onSave(draft());
+    onClose();
+  }
+
+  function saveAndSnooze(): void {
+    if (next === '' || !onSaveAndSnooze) return;
+    onSaveAndSnooze(draft());
     onClose();
   }
 
@@ -154,8 +165,8 @@ export function GoalEditor({
         {then.map((g, i) => (
           <div className="goal-then-row" key={i}>
             <span className="goal-then-index">Then {i + 1}</span>
-            <input
-              type="text"
+            <textarea
+              rows={2}
               className="goal-then-input"
               data-testid={`goal-then-${i}`}
               aria-label={`Then goal ${i + 1}`}
@@ -205,6 +216,17 @@ export function GoalEditor({
           >
             {goal === null ? 'Set goal' : 'Save'}
           </button>
+          {goal === null && onSaveAndSnooze ? (
+            <button
+              type="button"
+              className="modal-btn primary-btn"
+              data-testid="goal-edit-save-snooze"
+              disabled={next === ''}
+              onClick={saveAndSnooze}
+            >
+              Set goal and snooze
+            </button>
+          ) : null}
         </div>
       </div>
     </ModalOverlay>
