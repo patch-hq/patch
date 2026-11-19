@@ -6675,7 +6675,7 @@ function PermissionCard({
         <p className="permission-outcome" data-testid="permission-outcome">
           {resolved === 'approve'
             ? entry.permissionCancelled
-              ? 'Approved, cancelled by interrupt'
+              ? 'Not run: the turn was stopped before your approval arrived'
               : 'Approved'
             : 'Denied'}
         </p>

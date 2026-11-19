@@ -14253,6 +14253,23 @@ export class Daemon {
     /** Daemon-internal only: who decided, for the history log. Absent → the user. */
     by?: PermissionDecisionBy;
   }): void {
+    // One line per answer, in arrival order, so a card that shows an approval
+    // the tool never saw can be traced: approve (by user) → sweep (by
+    // cancelled/expiry) → redelivered approve, each with whether the request
+    // was still held when it landed.
+    this.opts.logger.info(
+      {
+        requestId: ev.requestId,
+        chatId: ev.chatId,
+        decision: ev.decision,
+        by: ev.by ?? 'user',
+        held: [...this.pendingPermissionEvents.keys()].some((k) => k.endsWith(`:${ev.requestId}`)),
+        settledAs: this.settledPermissionEchoes.get(ev.requestId)
+          ? (this.settledPermissionEchoes.get(ev.requestId) as { decision?: string }).decision
+          : undefined,
+      },
+      'permission answer received',
+    );
     // A person answering means somebody saw the prompt: the chat stays listed.
     if (ev.by === undefined) {
       for (const k of this.pendingPermissionEvents.keys()) {
@@ -14401,8 +14418,14 @@ export class Daemon {
         return;
       }
       this.opts.logger.warn(
-        { requestId: ev.requestId },
-        'submitPermissionResponse: no pending request',
+        {
+          requestId: ev.requestId,
+          decision: ev.decision,
+          settledAs: (
+            this.settledPermissionEchoes.get(ev.requestId) as { decision?: string } | undefined
+          )?.decision,
+        },
+        'submitPermissionResponse: no pending request (answer arrived after the request was already settled)',
       );
       // The surface resolved its card the moment it was tapped and now waits
       // for an echo, redelivering until one arrives. Say something rather than
