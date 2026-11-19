@@ -228,6 +228,27 @@ describe('ElevenLabs clip backend', () => {
   });
 });
 
+describe('audio batching', () => {
+  test('many small mic frames go up as a few ~200 ms messages, and a commit flushes the rest', async () => {
+    const fake = await fakeScribe();
+    open.push(fake);
+    const b = new ElevenLabsScribeBackend({ logger, apiKey: 'k', wsUrl: fake.url });
+    const stream = b.openLiveStream(
+      () => {},
+      () => {},
+    );
+    await fake.socket();
+    await until(() => stream.isOpen, 'open');
+    // 25 frames of 20 ms = 500 ms of audio.
+    for (let i = 0; i < 25; i++) stream.push(new Int16Array(320));
+    await until(() => fake.chunks.length >= 2, 'batches');
+    expect(fake.chunks.length).toBeLessThanOrEqual(3);
+    const sizes = fake.chunks.map((c) => Buffer.from(c.audio_base_64, 'base64').length / 2);
+    for (const n of sizes) expect(n).toBeGreaterThanOrEqual(3200 - 1);
+    stream.close();
+  });
+});
+
 describe('picking and costing', () => {
   const local = {} as never;
   test('elevenlabs engine without a key is refused, with a key is picked', () => {
