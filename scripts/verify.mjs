@@ -79,7 +79,10 @@ const ALL_STEPS = [
     argv:
       BROWSER_SHARD === undefined
         ? ['pnpm', '--filter', '@patch/web', 'run', 'test:ui']
-        : ['pnpm', '--filter', '@patch/web', 'exec', 'playwright', 'test', `--shard=${BROWSER_SHARD}`],
+        : // --project=chromium: the load-targets project depends on chromium, and
+          // Playwright puts a project's whole dependency on the shard that draws it,
+          // so a bare --shard ran the entire suite on shard 1 and nothing on 2-4.
+          ['pnpm', '--filter', '@patch/web', 'exec', 'playwright', 'test', '--project=chromium', `--shard=${BROWSER_SHARD}`],
     env: BROWSER_ENV,
     // The one step that is skippable, and only on the narrowest of grounds: it
     // exercises the SPA in a real browser, so a commit that cannot reach the SPA
@@ -88,6 +91,18 @@ const ALL_STEPS = [
     // they catch, and cross-package breakage is exactly what they exist for.
     skippableWhenUntouched: BROWSER_GATE_PATHS,
   },
+  // Sharded runs: the load targets run alone, on shard 1 only (--no-deps: the
+  // chromium specs are already split across the shards).
+  ...(BROWSER_SHARD !== undefined && BROWSER_SHARD.startsWith('1/')
+    ? [
+        {
+          label: 'browser load targets',
+          argv: ['pnpm', '--filter', '@patch/web', 'exec', 'playwright', 'test', '--project=load-targets', '--no-deps'],
+          env: BROWSER_ENV,
+          skippableWhenUntouched: BROWSER_GATE_PATHS,
+        },
+      ]
+    : []),
   { label: 'mock leakage', argv: ['node', 'scripts/mock-check.mjs', '--quiet'] },
   // Patch is a public product: no one person's hosts or ids in what a stranger runs.
   { label: 'personal strings', argv: ['node', 'scripts/personal-check.mjs'] },
@@ -137,7 +152,7 @@ if (SKIP_BROWSER_GATE_TEMP) {
 }
 
 const STEPS = ALL_STEPS.filter((step) => {
-  if (SKIP_BROWSER_GATE_TEMP && step.label === 'browser') return false;
+  if (SKIP_BROWSER_GATE_TEMP && step.label.startsWith('browser')) return false;
   if (!changed || !step.skippableWhenUntouched) return true;
   const touched = changed.some((f) => step.skippableWhenUntouched.some((p) => f.startsWith(p)));
   if (!touched) {
