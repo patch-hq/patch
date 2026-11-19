@@ -484,7 +484,11 @@ export class DurableTurn {
     );
     child.on('exit', (code, signal) => {
       // Once connected, the socket closing is what reports a runner that went.
-      if (proc.superseded && !proc.finished) {
+      // A runner whose directory has been removed was retired on purpose
+      // (retireTurn SIGTERMs it, then deletes the directory): a kill, not a
+      // runner that died unexplained. Same for one this turn itself asked to die.
+      const retired = proc.superseded || proc.killed || !existsSync(this.dir);
+      if (retired && !proc.finished) {
         proc.finish(code, signal);
       } else if (!proc.finished && !proc.connected && !detaching) {
         proc.fail(
