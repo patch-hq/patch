@@ -24,7 +24,7 @@
 
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
-import { OpenAICompatBackend, type Message } from './openaiCompatBackend.js';
+import { OpenAICompatBackend } from './openaiCompatBackend.js';
 import { TurnFailedError, type LimitFacts, type SdkRunOptions } from './sdkBackend.js';
 
 /** What the host hands the agent to run one turn. */
