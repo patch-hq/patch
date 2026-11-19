@@ -111,7 +111,7 @@ test.describe('jobs sort and filter', () => {
   test('the list opens on last fired — newest fire first, never-fired last', async ({ page }) => {
     await expect(page.getByTestId('jobs-sort')).toHaveValue('last-fired');
     expect(await rowOrder(page)).toEqual(['zulu', 'alpha', 'mike']);
-    await expect(page.getByTestId('job-last-fired-mike')).toHaveText('never');
+    await expect(page.getByTestId('job-last-fired-mike')).toHaveText('Never run');
   });
 
   test('choosing a sort re-orders the rows', async ({ page }) => {

@@ -96,7 +96,7 @@ test.describe('jobs list — cron zone labelling, read from Europe/London', () =
     );
 
     // A non-cron trigger has no schedule and gains nothing.
-    await expect(page.getByTestId('job-trigger-hook')).toHaveText('github webhook');
+    await expect(page.getByTestId('job-trigger-hook')).toHaveText('GitHub webhook');
   });
 
   test('the zone label is searchable, because search matches what the row shows', async ({
