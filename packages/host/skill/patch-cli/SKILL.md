@@ -65,7 +65,9 @@ patch accounts list [backend] --json             # shared accounts, in order
 patch accounts connect <backend> <accountId> --json     # replace an account's token
 patch accounts disconnect <backend> <accountId> --json  # take it out of every host's sequence
 patch hosts models [--host H] --json             # this host's model catalogue
-patch hosts install <component> [--host H] --json    # e.g. kokoro (~340 MB), whisper (~1.5 GB)
+patch hosts install <component> [--host H] --json    # e.g. kokoro (~340 MB), whisper (~1.5 GB), speaker (~27 MB, voice profiles)
+patch voice recent --json                        # voices the devices heard lately (ids for enrol)
+patch voice enrol <name> <recentId>... [--access owner|household|guest] [--context T] --json
 patch hosts uninstall <component> [--host H] --json
 patch hosts update [--host H] --json             # apply an available host update
 patch hosts add --json                           # a registration code for a NEW host

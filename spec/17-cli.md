@@ -45,7 +45,11 @@ patch manager home                        # the Manager's home host (06-threads-
 patch manager home --set H [--message M | --no-message] [--yes]   # move it: shows the drafted handover message and asks y/N; --yes confirms without asking; without a terminal or --yes (or with --json) it only previews
 
 patch settings                            # every shared setting, and each host's applied version (01-server.md § Settings)
-patch settings set <key> <value>          # change a shared setting, e.g. permission-mode, question-expiry, default-model
+patch settings set <key> <value>          # change a shared setting, e.g. permission-mode, question-expiry, default-model, voice-device-prompt, voice-match-threshold
+patch voice [profiles]                    # the people voice devices recognise (16-voice-device.md § Who is speaking)
+patch voice recent                        # the voices the devices heard lately, newest first, with who each was taken for
+patch voice enrol <name> <recentId>... [--access owner|household|guest] [--context T]   # fold heard voices into a person's voiceprint; creates the person if new
+patch voice remove <name>                 # forget a person
 patch accounts [<backend>]                # the shared backend accounts, in order
 patch accounts add <backend> --token T [--label L]
 patch accounts sign-in <backend>                   # sign in through the server: prints the address and code to open on any device (10-auth.md § Signing in)

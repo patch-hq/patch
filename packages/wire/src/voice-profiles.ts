@@ -47,11 +47,14 @@ export const VoiceProfile = z
 export type VoiceProfile = z.infer<typeof VoiceProfile>;
 
 /**
- * A match needs this cosine similarity or more. Measured on the speaker model:
- * the same voice scores 0.84–0.92 across different sentences, different
- * voices mostly 0.35–0.67.
+ * How sure a match must be: the cosine similarity a voiceprint needs
+ * (`voiceMatchThreshold`). Measured on synthetic voices, which share a vocoder
+ * and so sit closer than real people: the same voice scores 0.92+ across
+ * sentences, different voices up to 0.83. A wrong match hands a stranger
+ * someone else's access, so the default leans strict; Settings offers the three.
  */
-export const VOICE_MATCH_THRESHOLD = 0.6;
+export const VOICE_MATCH_LEVELS = { relaxed: 0.65, normal: 0.75, strict: 0.85 } as const;
+export const VOICE_MATCH_THRESHOLD = VOICE_MATCH_LEVELS.normal;
 /** ...and must beat the next-best profile by this much, so two similar voices don't swap. */
 export const VOICE_MATCH_MARGIN = 0.05;
 
@@ -102,6 +105,7 @@ export interface VoiceMatch {
 export function identifyVoice(
   voiceprint: readonly number[],
   profiles: readonly VoiceProfile[],
+  threshold: number = VOICE_MATCH_THRESHOLD,
 ): VoiceMatch {
   let best: VoiceProfile | null = null;
   let bestScore = -1;
@@ -118,7 +122,7 @@ export function identifyVoice(
     }
   }
   if (best === null) return { profile: null, score: 0 };
-  const clear = bestScore >= VOICE_MATCH_THRESHOLD && bestScore - second >= VOICE_MATCH_MARGIN;
+  const clear = bestScore >= threshold && bestScore - second >= VOICE_MATCH_MARGIN;
   return { profile: clear ? best : null, score: bestScore };
 }
 

@@ -14,10 +14,14 @@ export interface DeviceVoiceDeps {
   prompt: () => string;
   /** The account's voice profiles. */
   profiles: () => readonly VoiceProfile[];
+  /** How sure a match must be (`voiceMatchThreshold`). Absent: the default. */
+  threshold?: () => number;
   /** Voiceprint of 16 kHz speech. Absent when this host cannot compute them. */
   embed?: (pcm: Int16Array) => Promise<number[]>;
   /** Where heard voices are kept for enrolment. */
   recent?: RecentVoices;
+  /** Load the speaker model ahead of the first utterance. */
+  warm?: () => void;
 }
 
 /** Whether a session should recognise speakers: some profile has a voiceprint to match. */

@@ -93,6 +93,7 @@ const SETTING_KEYS: Record<string, string> = {
   'small-job-models': 'smallJobModels',
   'speech-backend': 'speechBackend',
   'voice-device-prompt': 'voiceDevicePrompt',
+  'voice-match-threshold': 'voiceMatchThreshold',
 };
 
 /** A value as typed: JSON where it parses (true, 60, "x"), else the text itself. */

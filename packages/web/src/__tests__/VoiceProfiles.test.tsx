@@ -118,3 +118,17 @@ describe('Settings → Voice → Who is speaking', () => {
     expect(await screen.findByTestId('voice-profiles-engine-note')).toBeTruthy();
   });
 });
+
+describe('Settings → Voice → how sure to be', () => {
+  it('writes the chosen strictness as the match threshold', async () => {
+    seed([{ id: 'p1', name: 'Tom', access: 'owner', context: '', samples: 0 }]);
+    const server = serve();
+    renderSettings('/settings/voice');
+    fireEvent.click(await screen.findByTestId('voice-match-level-strict'));
+    await waitFor(() =>
+      expect(server.writes.find((w) => 'voiceMatchThreshold' in w)).toEqual({
+        voiceMatchThreshold: 0.85,
+      }),
+    );
+  });
+});

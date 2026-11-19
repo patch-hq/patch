@@ -9,6 +9,7 @@ import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import {
   addVoiceSample,
+  VOICE_MATCH_LEVELS,
   VOICE_PROFILES_MAX,
   type RecentVoice,
   type VoiceProfile,
@@ -32,6 +33,28 @@ const ACCESS_TITLES: Record<VoiceProfileAccess, string> = {
   household: 'Can ask the agent for things; not told your chats',
   guest: 'General chat only',
 };
+
+type MatchLevel = keyof typeof VOICE_MATCH_LEVELS;
+const MATCH_LEVELS = Object.keys(VOICE_MATCH_LEVELS) as MatchLevel[];
+const MATCH_LABELS: Record<MatchLevel, string> = {
+  relaxed: 'Relaxed',
+  normal: 'Normal',
+  strict: 'Strict',
+};
+const MATCH_TITLES: Record<MatchLevel, string> = {
+  relaxed: 'Recognises people more readily; more likely to mistake one voice for another',
+  normal: 'The default',
+  strict: 'Mistakes one voice for another least; may not recognise someone in a noisy room',
+};
+
+/** The level a stored threshold reads as: the nearest of the three. */
+function levelOf(threshold: number): MatchLevel {
+  return MATCH_LEVELS.reduce((best, l) =>
+    Math.abs(VOICE_MATCH_LEVELS[l] - threshold) < Math.abs(VOICE_MATCH_LEVELS[best] - threshold)
+      ? l
+      : best,
+  );
+}
 
 function saveProfiles(next: VoiceProfile[]): Promise<boolean> {
   return patchShared('voice profiles', { voiceProfiles: next });
@@ -77,6 +100,24 @@ export function VoiceProfilesGroup(): JSX.Element {
           Voices are recognised when voice devices use OpenAI (Voice conversations above). With the
           current choice, everyone in the room is answered alike.
         </Note>
+      ) : null}
+      {profiles.length > 0 ? (
+        <Row
+          title="How sure to be"
+          sub="How closely a voice must match before Patch treats it as that person."
+        >
+          <Pills
+            label="How sure Patch must be of a voice"
+            options={MATCH_LEVELS}
+            labels={MATCH_LABELS}
+            titles={MATCH_TITLES}
+            value={levelOf(prefs.voiceMatchThreshold)}
+            testid="voice-match-level"
+            onChange={(l) =>
+              void patchShared('voice recognition', { voiceMatchThreshold: VOICE_MATCH_LEVELS[l] })
+            }
+          />
+        </Row>
       ) : null}
       {profiles.map((p) => (
         <ProfileCard key={p.id} profile={p} update={update} all={profiles} />
@@ -277,9 +318,11 @@ function RecentVoices({
         <Row
           key={v.id}
           title={v.text ? `"${v.text}"` : '(no words caught)'}
-          sub={`${ago(v.at)} · ${v.seconds} s${
-            nameOf(v.matchedProfileId) ? ` · taken for ${nameOf(v.matchedProfileId)}` : ''
-          }`}
+          sub={`${ago(v.at)} · ${v.seconds} s · ${
+            nameOf(v.matchedProfileId)
+              ? `taken for ${nameOf(v.matchedProfileId)}`
+              : 'not recognised'
+          } (match ${v.score.toFixed(2)})`}
           testid={`voice-recent-${v.id}`}
         >
           <button
