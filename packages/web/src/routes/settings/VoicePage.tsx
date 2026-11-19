@@ -294,9 +294,7 @@ function LocalCallRows(): JSX.Element {
           onChange={(v) => void patchShared('speech engine', { ttsBackend: v })}
         />
       </Row>
-      {ttsBackend === 'elevenlabs' ? (
-        <ElevenLabsVoiceRow />
-      ) : null}
+      {ttsBackend === 'elevenlabs' ? <ElevenLabsVoiceRow /> : null}
       {ttsBackend === 'elevenlabs' ? (
         <Row
           title="Model"
