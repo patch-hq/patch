@@ -127,7 +127,7 @@ describe('editing a user turn forks a track', () => {
     expect(screen.getAllByTestId('msg-side-thread-trigger').length).toBeGreaterThan(0);
     cleanup();
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'local/qwen' } },
+      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'gemini/gemini-3-pro' } },
     }));
     renderChat('c-fork');
     expect(screen.queryAllByTestId('msg-side-thread-trigger')).toHaveLength(0);
