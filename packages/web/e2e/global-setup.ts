@@ -23,11 +23,16 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   if (!baseURL) throw new Error('global-setup: no baseURL in the Playwright config');
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({ baseURL });
     for (const route of ROUTES) {
+      // A page of its own per route. The harness has no backend, so its /api
+      // calls are refused and retried; Chromium counts those against the page
+      // and, a few navigations in, starts failing every request with
+      // ERR_INSUFFICIENT_RESOURCES — on the fifth load of one shared page.
+      const page = await browser.newPage({ baseURL });
       // `networkidle`: every module the route imports has been requested and
       // served, so the dev server has compiled it.
       await page.goto(route, { waitUntil: 'networkidle', timeout: 180_000 });
+      await page.close();
     }
   } finally {
     await browser.close();
