@@ -1334,6 +1334,11 @@ export const GoalProgress = z
      */
     pausedByStop: z.boolean().optional(),
     /**
+     * True while the judge says the agent is blocked on something only the user
+     * can give: the goal is held, not resubmitted, until the user's next turn starts.
+     */
+    waitingOnUser: z.boolean().optional(),
+    /**
      * The evaluator's latest "is this on track?" read (spec/04 § Goals — check-in),
      * taken on the goal's own cadence. Absent before the first check-in or when the
      * goal has no cadence.

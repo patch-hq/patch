@@ -66,12 +66,11 @@ for (const viewport of [
       await expect(page.locator('.deep h3')).toHaveCount(7);
       await expect(page.locator('.detail-grid details')).toHaveCount(11);
 
-      // A quiet Download every couple of sections, all pointing at the same build.
-      const strips = page.locator('.cta-strip [data-download]');
-      await expect(strips).toHaveCount(4);
-      for (const a of await strips.all()) {
-        await expect(a).toHaveAttribute('href', `${LATEST}Patch-mac-arm64.dmg`);
-      }
+      // Download appears only at the top and in Get started, and says what you need.
+      await expect(page.locator('[data-download]')).toHaveCount(2);
+      await expect(page.locator('.cta-strip')).toHaveCount(0);
+      await expect(page.getByTestId('needs')).toContainText('Apple Silicon');
+      await expect(page.locator('body')).not.toContainText('harness');
 
       const mac = page.locator('.platforms [data-os="mac"]');
       await expect(mac.locator('.p-meta')).toHaveText('Apple Silicon · 389 MB');
@@ -204,9 +203,6 @@ test('a phone visitor gets Get started in place of a download', async ({ page })
   await page.goto(SITE);
   await expect(page.locator('.hero [data-download]')).toBeHidden();
   await expect(page.locator('.hero [data-no-build]')).toBeVisible();
-  // The strips through the page do the same, without a second Get started.
-  await expect(page.locator('.cta-strip [data-no-build]').first()).toBeVisible();
-  await expect(page.locator('.cta-strip [data-build-only]').first()).toBeHidden();
 });
 
 test('with reduced motion the diagram is still, without its pulses', async ({ page }) => {

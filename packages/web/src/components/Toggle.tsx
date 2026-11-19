@@ -12,6 +12,7 @@ export function Toggle({
   testid,
   disabled,
   title,
+  ariaLabel,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
@@ -19,6 +20,8 @@ export function Toggle({
   testid?: string;
   disabled?: boolean;
   title?: string;
+  /** Names the switch for assistive tech when the row beside it already shows the words. */
+  ariaLabel?: string;
 }): JSX.Element {
   return (
     <label className="toggle" title={title}>
@@ -28,6 +31,7 @@ export function Toggle({
         className="toggle-input"
         checked={checked}
         disabled={disabled}
+        aria-label={ariaLabel}
         onChange={(e) => onChange(e.target.checked)}
         data-testid={testid}
       />

@@ -300,8 +300,8 @@ async function firstChat(page: Page): Promise<void> {
   await expect(page.getByTestId('composer-input')).toBeVisible();
   const notice = page.getByTestId('composer-signed-out');
   await expect(notice).toHaveText(/Sign in to Claude to send messages\./);
-  const banner = page.getByTestId('claude-disconnected-banner');
-  await expect(banner).toBeVisible();
+  // Signed out is said once, by the composer's notice: no banner as well.
+  await expect(page.getByTestId('claude-disconnected-banner')).toHaveCount(0);
   // Meeting permissions wait until a meeting is started.
   await page.waitForTimeout(1500);
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
@@ -310,10 +310,6 @@ async function firstChat(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/connect/);
   await expect(page.getByTestId('claude-signin-start')).toBeVisible();
   await shot(page, 'connect');
-  await page.getByTestId('connect-close').click();
-  await expect(page).toHaveURL(/\/chats\/new/);
-  await banner.getByRole('link', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/connect/);
   await page.getByTestId('connect-close').click();
   await expect(page).toHaveURL(/\/chats\/new/);
 }
@@ -383,7 +379,7 @@ test('the question can be declined: closing it quits, and nothing is remembered'
   expect(existsSync(join(computer.userData, 'connection.json'))).toBe(false);
 });
 
-test('this computer: its own server and host, Claude Code and Codex installed, kept running', async () => {
+test('this computer: its own server and host, no CLI installed until a provider is picked, kept running', async () => {
   test.skip(
     process.env['PATCH_E2E_THIS_COMPUTER'] !== '1',
     'Installs a host as a login service, replacing any Patch host on this computer. Set PATCH_E2E_THIS_COMPUTER=1 on a disposable computer.',
@@ -405,19 +401,14 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   const welcome = await windowAt(app, /\/app\/welcome\?machine=local/, 10 * 60_000);
   await expect(welcome.getByTestId('welcome-providers')).toBeVisible();
 
-  // Claude Code arrives on a computer that had none, by its own installer.
-  // Electron's home on macOS is the account's own, whatever HOME says, so the
-  // host and the Claude Code it installs live there (another reason this path
-  // only runs on a disposable computer).
+  // Nothing is picked yet, so no provider's CLI is installed: a host installs
+  // Claude Code or Codex only once the person connects that provider. Electron's
+  // home on macOS is the account's own, whatever HOME says, so that is where it
+  // would land (another reason this path only runs on a disposable computer).
   const claude = join(ACCOUNT_HOME, '.local', 'bin', 'claude');
-  await expect.poll(() => existsSync(claude), { timeout: 10 * 60_000 }).toBe(true);
+  await expect(welcome.getByTestId('welcome-claude-installing')).toHaveCount(0);
   await expect(welcome.getByTestId('welcome-claude-install-failed')).toHaveCount(0);
-  expect(
-    execFileSync(claude, ['--version'], {
-      encoding: 'utf8',
-      env: { PATH: BARE_PATH, HOME: ACCOUNT_HOME },
-    }),
-  ).toMatch(/Claude Code/);
+  expect(existsSync(claude)).toBe(false);
 
   // Claude sign-in starts in the browser with no terminal: a claude.ai address.
   const signin = await welcome.evaluate(async () => {

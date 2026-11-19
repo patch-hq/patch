@@ -52,6 +52,13 @@ export class ScribeError extends Error {
  */
 const NOTHING_TO_COMMIT = new Set(['commit_throttled', 'insufficient_audio_activity']);
 
+/**
+ * Messages by which Scribe ends one session while the user is still talking.
+ * Dictation has no length limit of its own, so these open a new session
+ * rather than ending the dictation.
+ */
+const RESTARTABLE_ENDS = new Set(['queue_overflow', 'session_time_limit_exceeded']);
+
 export interface ScribeStreamDeps {
   apiKey: KeySource;
   logger: Logger;
@@ -100,6 +107,9 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     return this.open;
   }
 
+  /** When this connection was opened (ms since epoch). */
+  readonly startedAt = Date.now();
+
   get hasFailed(): boolean {
     return this.failed;
   }
@@ -118,6 +128,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
       model_id: SCRIBE_REALTIME_MODEL,
       audio_format: 'pcm_16000',
       commit_strategy: 'vad',
+      // Commit a phrase after half a second of quiet (default 1.5 s) so words settle sooner.
+      vad_silence_threshold_secs: '0.5',
       language_code: 'en',
     });
     const Ctor = this.deps.wsCtor ?? WebSocket;
@@ -176,7 +188,8 @@ export class ScribeRealtimeStream implements LiveTranscriptStream {
     } else if (NOTHING_TO_COMMIT.has(type)) {
       this.deps.logger.warn({ type }, 'scribe: nothing to commit');
       this.commitWaiter?.();
-    } else if (type === 'queue_overflow') {
+    } else if (RESTARTABLE_ENDS.has(type)) {
+      // Scribe ended this session itself; the dictation opens a new one.
       this.fail(`ElevenLabs reported ${type}: ${msg.error ?? 'no detail'}`, true);
     } else if (type === 'error' || type.endsWith('_error') || msg.error !== undefined) {
       this.fail(`ElevenLabs reported ${type || 'an error'}: ${msg.error ?? 'no detail'}`);

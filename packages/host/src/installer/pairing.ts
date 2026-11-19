@@ -58,6 +58,30 @@ async function readError(res: Response): Promise<ServerError> {
   }
 }
 
+const TLS_TRUST_CODES = new Set([
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'CERT_UNTRUSTED',
+]);
+
+/** Name the cause behind fetch's bare "fetch failed". */
+export function describeNetworkError(err: unknown): string {
+  const e = err as Error & { cause?: { code?: unknown; message?: unknown } };
+  const code = typeof e.cause?.code === 'string' ? e.cause.code : undefined;
+  if (code !== undefined && TLS_TRUST_CODES.has(code)) {
+    return (
+      `this network re-signs secure connections with a certificate Patch doesn't trust (${code}). ` +
+      'Add that certificate to the system keychain, or set NODE_EXTRA_CA_CERTS to its file and run the installer again'
+    );
+  }
+  if (code !== undefined && code.startsWith('ERR_TLS_')) return `TLS failed (${code})`;
+  const detail = e.cause?.message ?? code;
+  return typeof detail === 'string' && detail !== '' ? `${e.message} (${detail})` : e.message;
+}
+
 /**
  * Submit the code + this host's public key, then collect the minted
  * `daemonKey`. Returns a named failure rather than throwing, so the installer
@@ -83,7 +107,7 @@ export async function redeemPairingCode(opts: RedeemOptions): Promise<PairResult
     return {
       ok: false,
       kind: 'unreachable',
-      message: `could not reach the patch server at ${base}: ${(err as Error).message}`,
+      message: `could not reach the patch server at ${base}: ${describeNetworkError(err)}`,
     };
   }
 

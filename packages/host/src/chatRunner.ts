@@ -5525,6 +5525,57 @@ export class Daemon {
   }
 
   /**
+   * The agent asks to end its OWN goal as `met` or `impossible`. It is never
+   * taken on trust: the goal judge is asked the same question with the claim
+   * in front of it, and the goal only ends when the judge reaches the same
+   * verdict. Otherwise the goal stays set and the judge's reason comes back to
+   * the agent. NO FALLBACK: a judge that cannot answer refuses the claim.
+   */
+  async claimGoalOutcome(
+    chatId: string,
+    claimed: 'met' | 'impossible',
+    claim: string,
+  ): Promise<{ accepted: boolean; verdict?: string; reason: string }> {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    const condition = state.goal;
+    if (condition === null) return { accepted: false, reason: 'This chat has no goal set.' };
+    const evaluator = this.opts.evaluateGoal;
+    if (!evaluator) {
+      return {
+        accepted: false,
+        reason: 'No goal judge is configured, so the goal cannot be ended.',
+      };
+    }
+    const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
+    const result = await evaluator({
+      chatId,
+      condition,
+      transcript: renderGoalTranscript(state.lastMessages),
+      turnsEvaluated,
+      folder: state.folder,
+      background: this.describeBackgroundForGoal(chatId),
+      userScope: renderUserScope(state.lastMessages),
+      agentStatement:
+        `The agent is asking to end the goal as "${claimed}" and says: ${claim}\n` +
+        'The transcript may not yet include its latest tool calls. Judge the claim yourself: ' +
+        `answer "${claimed}" only if it is really true, otherwise answer not_met.\n\n` +
+        renderAgentStatement(state.lastMessages),
+    });
+    if (result === null) {
+      return {
+        accepted: false,
+        reason: 'The goal judge gave no answer, so the goal was not ended. Try again.',
+      };
+    }
+    if (result.verdict !== claimed) {
+      return { accepted: false, verdict: result.verdict, reason: result.reason };
+    }
+    this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
+    return { accepted: true, verdict: result.verdict, reason: result.reason };
+  }
+
+  /**
    * Put `goal` (and the plan around it) in force: fresh counters, the agent
    * told on its next turn, persisted. Shared by `setGoal` and the sequence
    * advancing to its next goal (spec/04 § Goals — sequence).
@@ -10645,8 +10696,8 @@ export class Daemon {
     this.clearInterrupted(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
-    if (state.goalProgress?.pausedByStop)
-      state.goalProgress = { ...state.goalProgress, pausedByStop: false };
+    if (state.goalProgress?.pausedByStop || state.goalProgress?.waitingOnUser)
+      state.goalProgress = { ...state.goalProgress, pausedByStop: false, waitingOnUser: false };
     this.emitState(chatId);
 
     // Record the turn as in-flight BEFORE the SDK is asked to run it. Everything
@@ -12638,7 +12689,22 @@ export class Daemon {
       }
     }
 
-    if (result.verdict === 'refused' || result.verdict === 'blocked') {
+    if (result.verdict === 'blocked') {
+      // spec/04 § Goals — the agent needs something only the user can give. Hold
+      // the goal (no resubmit: nothing the agent can do), put the chat in front of
+      // the user as a question, and carry on when their next turn starts.
+      state.goalRefusalStreak = 0;
+      state.goalProgress = { ...state.goalProgress, waitingOnUser: true };
+      this.emitState(chatId);
+      void this.declareStatus(chatId, 'question', `Goal waiting on you: ${result.reason}`).catch(
+        (err) => {
+          this.opts.logger.warn({ chatId, err }, 'goal waiting on user: declareStatus failed');
+        },
+      );
+      return;
+    }
+
+    if (result.verdict === 'refused') {
       state.goalRefusalStreak += 1;
       if (state.goalRefusalStreak >= this.goalRefusalLimit) {
         // Deadlock: the agent keeps declining. Stop pushing, keep the goal, and
@@ -12648,9 +12714,7 @@ export class Daemon {
         void this.declareStatus(
           chatId,
           'report',
-          result.verdict === 'blocked'
-            ? `Goal deadlocked: the agent said it is blocked on you ${this.goalRefusalLimit} times running. ${result.reason}`
-            : `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
+          `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
         ).catch((err) => {
           this.opts.logger.warn({ chatId, err }, 'goal deadlock guard: declareStatus failed');
         });
@@ -12664,11 +12728,7 @@ export class Daemon {
       state.goalRefusalStreak = 0;
     }
 
-    if (
-      result.verdict === 'not_met' ||
-      result.verdict === 'refused' ||
-      result.verdict === 'blocked'
-    ) {
+    if (result.verdict === 'not_met' || result.verdict === 'refused') {
       this.emitState(chatId);
       // A turn is already running, so the agent is not stopping; the goal is
       // re-evaluated when that turn settles. Nudging now would only queue noise.
@@ -15676,6 +15736,12 @@ export class Daemon {
    * (spec/04 § History): its one conversation file, resumed in place. */
   private claudeConfigDirFor(chatId: string): string {
     return chatClaudeDir(this.chatDirFor(chatId));
+  }
+
+  /** The chat's private config dir — a root `view_file` may read from besides
+   * the chat folder. */
+  chatConfigDir(chatId: string): string {
+    return this.claudeConfigDirFor(chatId);
   }
 
   private claudeSessionStoreFor(chatId: string, folder: string): ClaudeSessionStore {

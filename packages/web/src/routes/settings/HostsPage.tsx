@@ -517,14 +517,25 @@ function ThisMac(): JSX.Element | null {
   });
   const [installing, setInstalling] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The name step: null until Install is pressed, then the editable name.
+  const [name, setName] = useState<string | null>(null);
   if (!bridge || !status.data || status.data.installed) return null;
+
+  async function askName(): Promise<void> {
+    setFailure(null);
+    try {
+      setName(await (bridge as NonNullable<typeof bridge>).defaultName());
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function install(): Promise<void> {
     setInstalling(true);
     setFailure(null);
     try {
       const { nonce } = await api.hostPairStart();
-      const result = await (bridge as NonNullable<typeof bridge>).install(nonce);
+      const result = await (bridge as NonNullable<typeof bridge>).install(nonce, name ?? undefined);
       if (!result.ok) setFailure(result.output.trim() || `the installer exited ${result.exitCode}`);
     } catch (err) {
       setFailure(err instanceof Error ? err.message : String(err));
@@ -542,17 +553,42 @@ function ThisMac(): JSX.Element | null {
             <span className="set-row-title">Host</span>
             <span className="set-sub">Not installed</span>
           </div>
-          <button
-            type="button"
-            className="set-btn primary"
-            data-testid="this-mac-install"
-            disabled={installing}
-            onClick={() => void install()}
-          >
-            {installing ? 'Installing…' : 'Install'}
-          </button>
+          {name === null ? (
+            <button
+              type="button"
+              className="set-btn primary"
+              data-testid="this-mac-install"
+              onClick={() => void askName()}
+            >
+              Install
+            </button>
+          ) : null}
         </div>
       </div>
+      {name !== null ? (
+        <div className="set-row">
+          <div className="set-row-head">
+            <input
+              type="text"
+              className="set-word"
+              aria-label="Machine name"
+              data-testid="this-mac-name"
+              value={name}
+              disabled={installing}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <button
+              type="button"
+              className="set-btn primary"
+              data-testid="this-mac-confirm"
+              disabled={installing || !name.trim()}
+              onClick={() => void install()}
+            >
+              {installing ? 'Installing…' : 'Install'}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {failure ? (
         <pre className="set-pre" data-testid="this-mac-error">
           {failure.split('\n').slice(-12).join('\n')}

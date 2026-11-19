@@ -13,7 +13,8 @@
 import type { JSX, KeyboardEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CONNECT_PATH, providerNameForModel } from '../components/ClaudeDisconnectedBanner.js';
 import { useQuery } from '@tanstack/react-query';
 import {
   folderName,
@@ -51,6 +52,7 @@ import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
+import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { FirstRunIntro } from '../components/FirstRunIntro.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
@@ -227,7 +229,6 @@ export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
 function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }): JSX.Element {
   // Whole-screen drop zone (spec/14 § Composer): reaches the composer by ref.
   const composerRef = useRef<ComposerHandle>(null);
-  const chatDrop = useWholeChatDrop(composerRef);
   const navigate = useNavigate();
   // E6: the sidebar's Recent folders rows start a new chat in a specific folder
   // via `/chats/new?folder=<path>`. When present it preselects that folder
@@ -966,6 +967,29 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     setPickerOpen(false);
   }
 
+  // A folder dropped on the screen (desktop app only — a browser never learns
+  // a path) becomes the chat's folder, on this computer's host.
+  function dropFolder(paths: string[]): void {
+    const dropped = paths[0];
+    const status = getDesktopBridge()?.localHost?.status();
+    if (!dropped || !status) return;
+    void status.then(
+      (st) => {
+        if (!st.installed || !st.hostId) {
+          pushError('No Patch host on this computer, so a dropped folder cannot be opened.');
+          return;
+        }
+        userEditedFolder.current = true;
+        setFolder(dropped);
+        setFolderHostId(st.hostId);
+        setChosenHostId(st.hostId);
+        setPickerOpen(false);
+      },
+      (err: unknown) => pushError(`Could not read this computer's host: ${String(err)}`),
+    );
+  }
+  const chatDrop = useWholeChatDrop(composerRef, dropFolder);
+
   // Choosing the host. Its folders are not the last host's, so the folder
   // becomes the first one in this host's list, and the browser goes back to
   // this host's roots.
@@ -1065,6 +1089,12 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       {/* One labelled row per decision, in the order they are taken: host,
           project, model, account (spec/14 §8). A row with nothing to decide —
           one host, one account — is absent rather than drawn with one chip. */}
+      {signedOut ? (
+        <p className="new-chat-setup-reason" data-testid="new-chat-setup-reason" role="status">
+          Project and model are unavailable until you sign in to{' '}
+          {providerNameForModel(effectiveModel)}. <Link to={CONNECT_PATH}>Sign in</Link>
+        </p>
+      ) : null}
       <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
         {/* Where the chat runs. An offline host is listed so its absence is
             visible, and cannot be chosen. */}
@@ -1131,7 +1161,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
               browsed path, or one past the chips); otherwise the pill is the
               way to the rest of the list and says so. No tooltip. */}
-              <span className={`folder-pill-label ${folderIsQuick ? '' : 'mono'}`}>
+              <span className="folder-pill-label">
                 {folderIsQuick ? 'Other…' : folder ? folderName(folder) : 'Choose a folder…'}
               </span>
               <span className="folder-pill-caret" aria-hidden>
@@ -1542,7 +1572,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               the pickers sit directly under the "New chat" title rather than
               drifting to the foot of the panel. */}
             <div className="new-chat-intro">
-              <EmptyChat title="New chat" />
+              <EmptyChat title="" />
               <FirstRunIntro />
               {/* Not signed in is said by the banner and in the composer,
                   where sending fails — not a third time here. */}

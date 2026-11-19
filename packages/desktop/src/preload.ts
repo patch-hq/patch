@@ -20,7 +20,7 @@
 //
 // NO FALLBACK: bridge methods throw if invoked outside Electron.
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 /**
  * Mirrors packages/wire's `NotifyActions` shape. Not imported from
@@ -60,6 +60,13 @@ interface NotificationSendPayload {
 }
 
 contextBridge.exposeInMainWorld('patch', {
+  // The real path of a File the person dropped onto the window (a dropped
+  // folder arrives as a File too). The renderer cannot read a path off a File
+  // itself; only Electron's webUtils can. Synchronous so a drop handler can
+  // use it before the event's data goes away.
+  pathForFile(file: File): string {
+    return webUtils.getPathForFile(file);
+  },
   // Whether the shell hid the title bar on this platform's document windows,
   // in which case the SPA has to keep its top-left clear of the traffic lights
   // and provide its own drag region. A plain value, not IPC: the renderer
@@ -319,8 +326,14 @@ contextBridge.exposeInMainWorld('patch', {
         hostId: string | null;
       }>;
     },
-    install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }> {
-      return ipcRenderer.invoke('patch:local-host:install', { code }) as Promise<{
+    defaultName(): Promise<string> {
+      return ipcRenderer.invoke('patch:local-host:default-name') as Promise<string>;
+    },
+    install(
+      code: string,
+      name?: string,
+    ): Promise<{ ok: boolean; exitCode: number | null; output: string }> {
+      return ipcRenderer.invoke('patch:local-host:install', { code, name }) as Promise<{
         ok: boolean;
         exitCode: number | null;
         output: string;

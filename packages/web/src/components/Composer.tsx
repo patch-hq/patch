@@ -589,8 +589,9 @@ export const Composer = forwardRef(function Composer(
   // exception: spawning it has to validate the folder on a live link, so it
   // is refused up front instead of queued (spec/12 § Host-offline UX).
   const isNewChat = chatId === 'new';
-  // No credit left on any account that could run this chat: the turn would
-  // only park, so the send is refused up front and says why. Same certainty
+  // No credit left on any account that could run this chat: the turn
+  // parks on the host and runs when the pool refills, so the send is accepted
+  // and queued; only the tooltip says why it waits. Same certainty
   // rule as the out-of-usage banner (an unread account is not "spent"), and
   // the same per-host account set it counts.
   const hostAccounts = usePresenceStore((s) =>
@@ -616,7 +617,7 @@ export const Composer = forwardRef(function Composer(
     );
     return () => window.clearTimeout(id);
   }, [outageResetsAt]);
-  const sendBlocked = (offline && isNewChat) || claudeDisconnected || outOfUsage;
+  const sendBlocked = (offline && isNewChat) || claudeDisconnected;
   // The EFFECTIVE approval mode the next turn will use, as the host resolved
   // it and put it on `chat.state` — never re-derived here, since a surface does
   // not hold the host default this was resolved against. `undefined` means the
@@ -2882,11 +2883,6 @@ export const Composer = forwardRef(function Composer(
               // credential is the one case that disables the field itself:
               // that turn can never run at all.
               disabled={claudeDisconnected}
-              {...(claudeDisconnected
-                ? {
-                    title: `${accountModel?.startsWith('openai/') ? 'Codex' : 'Claude'} isn’t connected. Connect in Settings.`,
-                  }
-                : {})}
               rows={1}
             />
             {/* Dictate sits inside the field, bottom-right, so the action row
@@ -3180,7 +3176,7 @@ export const Composer = forwardRef(function Composer(
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
                 title={
                   outOfUsage
-                    ? 'Out of usage — can’t send until it resets'
+                    ? 'Out of usage — will queue until it resets'
                     : editingTurn
                       ? shortcutTitle('Save edit', '↵')
                       : running

@@ -28,6 +28,12 @@ export interface PatchDesktopBridge {
    * no shell and no window chrome to compensate for.
    */
   overlayTitleBar?: boolean;
+  /**
+   * The real filesystem path of a File dropped onto the window — how a dropped
+   * folder becomes a chat's working folder. Absent in a browser, which never
+   * learns a path, and on shells that predate it.
+   */
+  pathForFile?(file: File): string;
   /** The per-device master notifications switch, owned by main (the tray menu flips it too). */
   notificationsOff?(): Promise<boolean>;
   setNotificationsOff?(off: boolean): Promise<void>;
@@ -160,7 +166,12 @@ export interface PatchDesktopBridge {
   localServer?: { turnOff(): Promise<void> };
   localHost?: {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
-    install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
+    /** The name the person gave this computer, not its network hostname. */
+    defaultName(): Promise<string>;
+    install(
+      code: string,
+      name?: string,
+    ): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   };
   /**
    * spec/07 § Dictation engines (`local`) — Parakeet run by the desktop app on

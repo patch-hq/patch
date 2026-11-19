@@ -321,8 +321,9 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_goal_clear'),
     label: 'patch_goal_clear',
     category: 'patch',
-    description: "Clears this chat's goal without judging it.",
-    params: '(no params)',
+    description:
+      "Asks to clear this chat's goal by claiming it is met or impossible; the goal judge tests the claim and the goal clears only if it agrees.",
+    params: 'outcome: met | impossible, reason: string',
   },
   {
     name: patchToolId('patch_watch'),

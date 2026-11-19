@@ -52,3 +52,25 @@ describe('the chat core does not branch on a provider name', () => {
     expect(HARNESS_TRAITS.claude.ownsSessionFile).toBe(true);
   });
 });
+
+describe('host wiring reads provider adapters', () => {
+  it('index.ts and titleGen.ts ask no isCodexModel/isLocalModel question', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const f of ['../src/index.ts', '../src/titleGen.ts']) {
+      const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(src.match(/\bis(Codex|Local)Model\(/g) ?? []).toEqual([]);
+      expect(src.match(/spawnProvider\.id === '/g) ?? []).toEqual([]);
+    }
+  });
+
+  it('adapterForModel picks the adapter by the model’s provider', async () => {
+    const { adapterForModel } = await import('../src/providerAdapters.js');
+    const mk = (name: string) => ({ name }) as never;
+    const adapters = { claude: mk('c'), codex: mk('x'), local: mk('l') };
+    expect((adapterForModel(adapters, 'openai/gpt-5') as unknown as { name: string }).name).toBe(
+      'x',
+    );
+    expect((adapterForModel(adapters, 'local/q') as unknown as { name: string }).name).toBe('l');
+    expect((adapterForModel(adapters, undefined) as unknown as { name: string }).name).toBe('c');
+  });
+});

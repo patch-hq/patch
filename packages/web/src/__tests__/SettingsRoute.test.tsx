@@ -84,40 +84,48 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
     const buttons = within(nav)
       .getAllByRole('button')
       .filter((b) => b.getAttribute('data-testid')?.startsWith('settings-nav-'));
-    expect(buttons.map((a) => a.textContent)).toEqual([
-      'Usage',
+    const collapsed = [
+      'AI accounts',
+      'Hosts',
+      'Notifications',
+      'Devices',
+      'Voice and other services',
       'Chats',
       'Agent',
-      'MCP',
+      'Agent identity',
       'Memories',
       'Manager',
       'Goals',
       'Prompts',
       'Voice',
-      'Hooks',
-      'Computer use',
-      'Activity',
-      'Hosts',
-      'Agent identity',
-      'Providers',
-      'Notifications',
-      'Devices',
       'Shortcuts',
+      'Advanced ▸',
       'Experimental features',
       'Updates',
       'Bug reports',
       'Account',
-    ]);
+    ];
+    expect(buttons.map((a) => a.textContent)).toEqual(collapsed);
     expect(
       within(nav)
         .getAllByRole('heading', { level: 2 })
         .map((h) => h.textContent),
-    ).toEqual(['Agents', 'Setup', 'System']);
+    ).toEqual(['Setup', 'Agents', 'System']);
+    // Expert pages stay folded away until asked for.
+    fireEvent.click(within(nav).getByTestId('settings-nav-advanced'));
+    const open = within(nav)
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('data-testid')?.startsWith('settings-nav-'))
+      .filter((b) => b.getAttribute('data-testid') !== 'settings-nav-advanced');
+    expect(open.map((a) => a.textContent)).toEqual(
+      expect.arrayContaining(['MCP', 'Hooks', 'Computer use', 'Activity']),
+    );
   });
 
   it.each(SETTINGS_PAGES.map((p) => p.id))('the %s link opens that page', async (id) => {
     vi.stubGlobal('fetch', makeFetch());
     renderSettings('/settings');
+    fireEvent.click(await screen.findByTestId('settings-nav-advanced'));
     fireEvent.click(await screen.findByTestId(`settings-nav-${id}`));
     await waitFor(() => expect(screen.getByTestId(PAGE_TESTID[id]!)).toBeInTheDocument());
     expect(screen.getByTestId('settings-route')).toHaveAttribute('data-page', id);
@@ -282,6 +290,7 @@ describe('Settings host switcher (per-host pages)', () => {
       expect(screen.getByTestId('host-d1-memory-unreported')).toBeInTheDocument(),
     );
     expect(useSettingsHostStore.getState().selected).toBe('d1');
+    fireEvent.click(screen.getByTestId('settings-nav-advanced'));
     fireEvent.click(screen.getByTestId('settings-nav-mcp'));
     await waitFor(() =>
       expect(screen.getByTestId('settings-host-d1')).toHaveAttribute('aria-selected', 'true'),

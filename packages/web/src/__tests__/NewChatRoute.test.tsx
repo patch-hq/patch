@@ -362,9 +362,8 @@ describe('/chats/new', () => {
     );
     const emptyChat = screen.getByTestId('empty-chat');
     expect(emptyChat).toBeInTheDocument();
-    // The graphic + title remain (title scoped to the empty state — "New chat"
-    // also appears as the header h1).
-    expect(emptyChat.querySelector('.empty-chat-title')?.textContent).toBe('New chat');
+    // The graphic stays; the title is the header h1 only, not repeated here.
+    expect(emptyChat.querySelector('.empty-chat-title')).toBeNull();
     // The old hint copy and its element are gone.
     expect(screen.queryByText(/type your first message/i)).toBeNull();
     expect(document.querySelector('.empty-chat-hint')).toBeNull();
@@ -1514,6 +1513,18 @@ describe('/chats/new', () => {
 
     expect(await screen.findByTestId('folder-quick-/home/tom/projects/alpha')).toBeDisabled();
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
+    // The greyed controls say why, with a Sign in action.
+    const reason = screen.getByTestId('new-chat-setup-reason');
+    expect(reason.textContent).toMatch(/sign in to Claude/i);
+    expect(reason.querySelector('a')?.getAttribute('href')).toBe('/connect');
+  });
+
+  it('has no native tooltip on the disabled message box', async () => {
+    setSharedAccounts({ claude: [{ connected: false }] });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+    await screen.findByTestId('composer-signed-out');
+    expect(document.querySelector('textarea')?.hasAttribute('title')).toBe(false);
   });
 
   it('says signed out once on the landing chat: the composer notice, no banner', async () => {

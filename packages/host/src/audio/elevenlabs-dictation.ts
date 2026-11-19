@@ -20,8 +20,13 @@ import type { VoiceSessionLike } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 
 const SAMPLE_RATE = 16000;
-/** New streams opened after Scribe itself ended one (queue_overflow, a dropped socket). */
+/**
+ * Restarts in a row without a stream living for MIN_HEALTHY_MS. A long dictation
+ * crosses Scribe's own session limit any number of times, so only a stream that
+ * keeps dying at once counts against this.
+ */
 const MAX_RESTARTS = 3;
+const MIN_HEALTHY_MS = 10_000;
 
 export interface ElevenLabsDictationDeps {
   logger: Logger;
@@ -87,7 +92,7 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
 
   /** Scribe ended the session itself: keep its words, open a new one, resend what it never got. */
   private restart(old: ScribeRealtimeStream, reason: string): void {
-    this.restarts += 1;
+    this.restarts = Date.now() - old.startedAt >= MIN_HEALTHY_MS ? 1 : this.restarts + 1;
     this.deps.logger.warn(
       { reason, restarts: this.restarts },
       'scribe dictation: restarting stream',

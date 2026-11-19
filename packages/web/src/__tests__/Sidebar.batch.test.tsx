@@ -89,6 +89,7 @@ describe('Sidebar batch mode', () => {
   }
 
   it('renders the sidebar view dropdown at the top', () => {
+    seedChat('c0', 'a chat');
     renderSidebar();
     expect(screen.getByTestId('sidebar-view-menu')).toBeTruthy();
     expect(screen.getByTestId('sidebar-view-trigger')).toBeTruthy();

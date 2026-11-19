@@ -51,21 +51,25 @@ export function AccountPage(): JSX.Element {
   return (
     <SettingsPage title="Account" testid="settings-account">
       <Group testid="settings-build">
-        <Row
-          title="Account"
-          sub={<code data-testid="account-id">{me?.account.accountId ?? '—'}</code>}
-        />
-        <Row
-          title="Server"
-          testid="build-line"
-          sub={
-            <>
-              <code data-testid="build-origin">{window.location.origin}</code>
-              {' · '}
-              <code data-testid="build-sha">{health?.gitSha ?? '—'}</code>
-            </>
-          }
-        />
+        <Row title="This device" sub={me?.surface?.label ?? '—'} testid="device-name" />
+        <details className="set-details" data-testid="account-details">
+          <summary className="set-row-title">Details</summary>
+          <Row
+            title="Account"
+            sub={<code data-testid="account-id">{me?.account.accountId ?? '—'}</code>}
+          />
+          <Row
+            title="Server"
+            testid="build-line"
+            sub={
+              <>
+                <code data-testid="build-origin">{window.location.origin}</code>
+                {' · '}
+                <code data-testid="build-sha">{health?.gitSha ?? '—'}</code>
+              </>
+            }
+          />
+        </details>
         {relay?.enabled ? (
           <Row
             title="Remote access"
@@ -91,7 +95,7 @@ export function AccountPage(): JSX.Element {
         </Row>
       </Group>
       <Group label="This device" testid="settings-session">
-        <Row title="Sign this device out">
+        <Row title="Deactivate this device">
           <button
             type="button"
             className="set-btn danger"

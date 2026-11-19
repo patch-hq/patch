@@ -56,7 +56,21 @@ interface FiledEntry {
   number: number;
   url: string;
   count: number;
+  /** The issue's title and when it was filed; absent on entries from older builds. */
+  title?: string;
+  at?: number;
 }
+
+/** One filed issue, as Settings lists it. */
+export interface FiledIssue {
+  number: number;
+  url: string;
+  title: string | null;
+  count: number;
+  at: number | null;
+}
+
+const LISTED_ISSUES = 20;
 
 interface State {
   filed: Record<string, FiledEntry>;
@@ -72,6 +86,8 @@ export interface IssueFilerStatus {
   tokenConfigured: boolean;
   pending: number;
   filed: number;
+  /** The most recently filed issues, newest first. */
+  issues: FiledIssue[];
   lastError: string | null;
 }
 
@@ -134,6 +150,16 @@ export class IssueFiler {
       tokenConfigured: Boolean(this.opts.token),
       pending: this.state.outbox.length,
       filed: Object.keys(this.state.filed).length,
+      issues: Object.values(this.state.filed)
+        .map((e) => ({
+          number: e.number,
+          url: e.url,
+          title: e.title ?? null,
+          count: e.count,
+          at: e.at ?? null,
+        }))
+        .sort((a, b) => (b.at ?? 0) - (a.at ?? 0) || b.number - a.number)
+        .slice(0, LISTED_ISSUES),
       lastError: this.state.lastError,
     };
   }
@@ -249,7 +275,12 @@ export class IssueFiler {
   private async fileOne(report: StoredReport): Promise<void> {
     const existing = await this.search(report.fingerprint);
     if (existing) {
-      this.state.filed[report.fingerprint] = { ...existing, count: 1 };
+      this.state.filed[report.fingerprint] = {
+        ...existing,
+        count: 1,
+        title: titleFor(report),
+        at: this.now(),
+      };
       return;
     }
     await this.create(report, AUTO_LABELS);
@@ -297,7 +328,13 @@ export class IssueFiler {
       body: JSON.stringify({ title: titleFor(report), body: bodyFor(report), labels }),
     })) as { number: number; html_url: string };
     this.state.created.push(this.now());
-    this.state.filed[report.fingerprint] = { number: issue.number, url: issue.html_url, count: 1 };
+    this.state.filed[report.fingerprint] = {
+      number: issue.number,
+      url: issue.html_url,
+      count: 1,
+      title: titleFor(report),
+      at: this.now(),
+    };
     this.save();
     return issue.html_url;
   }

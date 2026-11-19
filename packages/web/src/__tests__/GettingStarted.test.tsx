@@ -59,6 +59,10 @@ describe('getting started guide', () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId('guide-jobs')).toBeInTheDocument();
+    // Connecting an AI comes first.
+    expect(document.querySelector('.guide-item')?.getAttribute('data-testid')).toBe(
+      'guide-connect',
+    );
     expect(screen.getByTestId('guide-go-pads')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useUiStore.getState().guideOpen).toBe(false);

@@ -1,10 +1,10 @@
-// Composer — Send is refused while every account that could run the chat is
-// out of usage: the turn would only park, so the phone says so up front.
-// Unknown is not spent: an account with no reading never blocks.
+// Composer — Send is never blocked by usage. While every account that could
+// run the chat is out of usage the message is queued (the host parks the turn
+// until the pool refills) and the Send label says so.
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { findHost, byLabel, byType, renderRN, update } from './testUtils/render';
+import { findHost, byLabel, byType, renderRN, update, flushMicrotasks } from './testUtils/render';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
@@ -84,16 +84,18 @@ function typeAndFind() {
   return r;
 }
 
-describe('Composer — out of usage', () => {
-  it('disables Send, says why, and blocks Send when every account is spent', () => {
+describe('Composer — out of usage queues', () => {
+  it('keeps Send enabled and submits (queued) when every account is spent', async () => {
     report([
       { id: 'a', usage: spent },
       { id: 'b', usage: spent },
     ]);
     const r = typeAndFind();
-    const send = findHost(r.root, byLabel('Send unavailable — out of usage until it resets'));
-    expect(send.props['disabled']).toBe(true);
-    expect(submitSpy).not.toHaveBeenCalled();
+    const send = findHost(r.root, byLabel('Send message (queued until usage resets)'));
+    expect(send.props['disabled']).toBe(false);
+    send.props['onPress']();
+    await flushMicrotasks();
+    expect(submitSpy).toHaveBeenCalledTimes(1);
   });
 
   it('still sends while one account has usage left', () => {

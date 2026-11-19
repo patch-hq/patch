@@ -234,7 +234,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
         <StatusRow
           nested={nested}
           icon={ended || nested ? null : <Spinner />}
-          label={nested ? undefined : 'Task'}
+          label={nested ? undefined : 'Background'}
           className={`${ended ? 'status-row-ended' : ''} ${nested ? '' : 'status-row-solo'}`}
           testId="background-task-bar-task"
           data-ended={ended ? 'true' : 'false'}
@@ -355,7 +355,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
     <div data-testid="background-task-bar" data-collapsed={open ? 'false' : 'true'} role="status">
       <StatusRow
         icon={<Spinner />}
-        label="Tasks"
+        label="Background"
         meta={oldestStart === null ? null : formatElapsed(oldestStart, now)}
       >
         <StatusPill

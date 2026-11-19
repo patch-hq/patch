@@ -589,10 +589,13 @@ export const api = {
   setTodos: (chatId: string, todos: TodoItem[]) =>
     request<unknown>(`/api/chats/${chatId}/todos`, { method: 'POST', body: { todos } }),
   // `/loop` — arm (or, with null, cancel) the chat's recurring self-wake.
-  // `every` is a duration string or seconds.
+  // `every` is a duration string or seconds; `at` is an ISO time for a one-shot wake.
   setLoop: (
     chatId: string,
-    loop: { message: string; every: string | number; notAfter?: string } | null,
+    loop:
+      | { message: string; every: string | number; notAfter?: string }
+      | { message: string; at: string }
+      | null,
   ) => request<unknown>(`/api/chats/${chatId}/loop`, { method: 'POST', body: { loop } }),
   // `/remind` — set (or clear, with null) the chat's reminder.
   setReminder: (chatId: string, reminder: string | null, every: ReminderEvery | null = null) =>

@@ -25,25 +25,28 @@ export type SettingsPageId =
   | 'bugs'
   | 'account';
 
+/** Expert pages, folded away in the nav until asked for. */
+export const ADVANCED_GROUP = 'Advanced';
+
 export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string }[] = [
-  { id: 'usage', title: 'Usage', group: 'Agents' },
+  { id: 'usage', title: 'AI accounts', group: 'Setup' },
+  { id: 'hosts', title: 'Hosts', group: 'Setup' },
+  { id: 'notifications', title: 'Notifications', group: 'Setup' },
+  { id: 'devices', title: 'Devices', group: 'Setup' },
+  { id: 'providers', title: 'Voice and other services', group: 'Setup' },
   { id: 'chats', title: 'Chats', group: 'Agents' },
   { id: 'agent', title: 'Agent', group: 'Agents' },
-  { id: 'mcp', title: 'MCP', group: 'Agents' },
+  { id: 'identity', title: 'Agent identity', group: 'Agents' },
   { id: 'memories', title: 'Memories', group: 'Agents' },
   { id: 'manager', title: 'Manager', group: 'Agents' },
   { id: 'goals', title: 'Goals', group: 'Agents' },
   { id: 'prompts', title: 'Prompts', group: 'Agents' },
   { id: 'voice', title: 'Voice', group: 'Agents' },
-  { id: 'hooks', title: 'Hooks', group: 'Agents' },
-  { id: 'computer', title: 'Computer use', group: 'Agents' },
-  { id: 'activity', title: 'Activity', group: 'Agents' },
-  { id: 'hosts', title: 'Hosts', group: 'Setup' },
-  { id: 'identity', title: 'Agent identity', group: 'Setup' },
-  { id: 'providers', title: 'Providers', group: 'Setup' },
-  { id: 'notifications', title: 'Notifications', group: 'Setup' },
-  { id: 'devices', title: 'Devices', group: 'Setup' },
-  { id: 'shortcuts', title: 'Shortcuts', group: 'Setup' },
+  { id: 'shortcuts', title: 'Shortcuts', group: 'Agents' },
+  { id: 'mcp', title: 'MCP', group: ADVANCED_GROUP },
+  { id: 'hooks', title: 'Hooks', group: ADVANCED_GROUP },
+  { id: 'computer', title: 'Computer use', group: ADVANCED_GROUP },
+  { id: 'activity', title: 'Activity', group: ADVANCED_GROUP },
   { id: 'experimental', title: 'Experimental features', group: 'System' },
   { id: 'updates', title: 'Updates', group: 'System' },
   { id: 'bugs', title: 'Bug reports', group: 'System' },

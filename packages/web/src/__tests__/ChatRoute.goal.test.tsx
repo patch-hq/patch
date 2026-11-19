@@ -41,6 +41,7 @@ function seed(
     lastVerdict: 'not_met' | null;
     lastReason: string | null;
     pausedByStop?: boolean;
+    waitingOnUser?: boolean;
   } | null = null,
 ): void {
   useChatStore.getState().hydrate([
@@ -122,6 +123,23 @@ describe('ChatRoute — /goal command + goal banner', () => {
       'You stopped the chat. Send a message to resume.',
     );
     expect(screen.getByTestId('goal-pill')).toHaveTextContent('Paused');
+  });
+
+  it('says the goal needs the user when the agent is blocked on them', () => {
+    seed('Deploy it', {
+      startedAt: Date.now(),
+      turnsEvaluated: 1,
+      tokensSpent: 0,
+      lastVerdict: 'not_met',
+      lastReason: 'Needs the prod password',
+      waitingOnUser: true,
+    });
+    renderChat();
+    expect(screen.getByTestId('goal-banner')).toHaveAttribute('data-paused', 'true');
+    expect(screen.getByTestId('goal-banner-paused-note')).toHaveTextContent(
+      'Needs you: Needs the prod password. Reply to continue.',
+    );
+    expect(screen.getByTestId('goal-pill')).toHaveTextContent('Needs you');
   });
 
   it('never shows the goal as working when the chat is archived', () => {

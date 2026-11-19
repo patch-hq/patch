@@ -14,7 +14,7 @@ export interface SharedBackendRow {
  * missing or broken — and its raw message goes behind Details.
  */
 export function backendStatus(
-  b: { state: string; error?: string | undefined },
+  b: { state: string; label?: string | undefined; error?: string | undefined },
   rows: readonly SharedBackendRow[] | null,
 ): { text: string; needsSignIn: boolean; details?: string } {
   const signedIn = (rows ?? []).filter((r) => r.connected);
@@ -29,7 +29,14 @@ export function backendStatus(
   }
   const details = b.error;
   if (b.state === 'absent') {
-    return { text: 'Not installed on this machine', needsSignIn, ...(details ? { details } : {}) };
+    // Patch installs a backend on demand once an account is connected for it
+    // (useInstallPickedProviders), so absent is only a fault once one is.
+    const text = needsSignIn
+      ? `Installs when you connect ${b.label ?? 'it'}`
+      : rows === null
+        ? 'Checking…'
+        : 'Installing…';
+    return { text, needsSignIn, ...(details ? { details } : {}) };
   }
   if (b.state === 'failed') {
     return { text: 'Not working on this machine', needsSignIn, ...(details ? { details } : {}) };

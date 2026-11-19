@@ -10,6 +10,16 @@ const STATUS = {
   tokenConfigured: true,
   pending: 0,
   filed: 2,
+  issues: [
+    {
+      number: 12,
+      url: 'https://github.com/o/r/issues/12',
+      title: 'TypeError in chat list',
+      count: 3,
+      at: 1,
+    },
+    { number: 9, url: 'https://github.com/o/r/issues/9', title: null, count: 1, at: null },
+  ],
   lastError: null,
 };
 
@@ -31,6 +41,17 @@ afterEach(() => {
 });
 
 describe('Settings → Bug reports', () => {
+  it('shows reports GitHub has not taken yet', async () => {
+    vi.stubGlobal(
+      'fetch',
+      fetchWith(() => respond({ ...STATUS, enabled: true, pending: 2 })),
+    );
+    renderSettings('/settings/bugs');
+    await waitFor(() =>
+      expect(screen.getByTestId('issue-reporting-pending-value')).toHaveTextContent('2'),
+    );
+  });
+
   it('shows automatic filing off by default and turns it on', async () => {
     let enabled = false;
     const f = fetchWith((u, init) => {
@@ -43,8 +64,13 @@ describe('Settings → Bug reports', () => {
     renderSettings('/settings/bugs');
     const toggle = (await screen.findByTestId('issue-reporting-toggle')) as HTMLInputElement;
     await waitFor(() =>
-      expect(screen.getByTestId('issue-reporting-counts-value')).toHaveTextContent('2 / 0'),
+      expect(screen.getByTestId('issue-reporting-issue-12')).toHaveTextContent(
+        'TypeError in chat list',
+      ),
     );
+    expect(screen.getByTestId('issue-reporting-issue-12')).toHaveTextContent('seen 3 times');
+    expect(screen.getByTestId('issue-reporting-issue-9')).toHaveTextContent('#9');
+    expect(screen.queryByTestId('issue-reporting-pending')).toBeNull();
     expect(toggle.checked).toBe(false);
     fireEvent.click(toggle);
     await waitFor(() =>

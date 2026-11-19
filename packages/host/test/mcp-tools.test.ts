@@ -272,12 +272,14 @@ describe('patch-tools MCP server — full client round-trip', () => {
       expect(getRes.goal).toBe('Ship the release by Friday');
       expect(getRes.goalProgress?.turnsEvaluated).toBe(0);
 
-      const clear = (await cG.callTool({ name: 'patch_goal_clear', arguments: {} })) as {
-        content: { text: string }[];
-      };
-      const clearRes = JSON.parse(clear.content[0]!.text) as { ok: boolean; goal: string | null };
-      expect(clearRes).toEqual({ ok: true, goal: null });
-      expect(daemon.chatState.get(goalCallerId)?.goal).toBeNull();
+      // An agent cannot drop its own goal: with no judge it is refused and the goal stays.
+      const clear = (await cG.callTool({
+        name: 'patch_goal_clear',
+        arguments: { outcome: 'met', reason: 'shipped' },
+      })) as { content: { text: string }[] };
+      const clearRes = JSON.parse(clear.content[0]!.text) as { ok: boolean; accepted: boolean };
+      expect(clearRes.accepted).toBe(false);
+      expect(daemon.chatState.get(goalCallerId)?.goal).toBe('Ship the release by Friday');
     } finally {
       await cG.close();
     }

@@ -573,16 +573,23 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_goal_clear',
     {
       description:
-        "Clear THIS chat's goal without judging it — no met/impossible verdict is recorded, the " +
-        'evaluator simply stops. No-op if none is set. Use when the goal is no longer relevant (the ' +
-        'user changed direction) rather than letting the evaluator eventually call it impossible.',
-      inputSchema: {},
+        "Ask to clear THIS chat's goal by claiming it is `met` or `impossible`. You cannot just drop " +
+        'a goal: the goal judge tests your claim against the conversation now, and the goal clears ' +
+        "only if the judge agrees (the outcome it records is the judge's, not yours). If it " +
+        'disagrees the goal stays set and you get its reason back. No-op if no goal is set. To ' +
+        'change direction, ask the user (they can clear it with /goal).',
+      inputSchema: {
+        outcome: z
+          .enum(['met', 'impossible'])
+          .describe('Your claim: the goal is achieved, or cannot be.'),
+        reason: z.string().min(1).describe('The evidence for the claim, for the judge to test.'),
+      },
     },
-    async () => {
+    async ({ outcome, reason }) => {
       const res = await uds<unknown>({
         method: 'POST',
-        path: '/internal/goal',
-        body: { chatId: callerChatId, goal: null },
+        path: '/internal/goal/finish',
+        body: { chatId: callerChatId, verdict: outcome, reason },
       });
       return toolResult(res);
     },
@@ -1584,7 +1591,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'view_file',
     {
       description:
-        "Show a file to the USER, inline in the chat. The opposite of Read: Read pulls a file into YOUR context to work on; view_file puts it on the user's screen and returns only a short ack, so the contents never enter your context. Use it whenever you want them to LOOK at something — a screenshot or diagram you made or found, a chart, a rendered HTML page, a PDF, or a document you made for them. Images (.png .jpg .jpeg .gif .webp .svg) render as a picture; .mp4 and .webm videos play inline with controls; .pdf renders in a viewer; audio (.mp3 .wav .m4a .ogg .opus .flac .aac) plays in an inline player; .html renders as a live page; Word/Excel/PowerPoint/OpenDocument, .rtf .epub .csv .tsv .txt .md .json and .zip show as a download card (name, size, download link) — use that to hand over a file you produced instead of telling them a path. Images, PDFs and audio 7 MB max, videos and files 50 MB max, pages 2 MB max. file_path may be absolute or relative to the chat folder, but must resolve inside it. Returns { kind, url, name } — having shown it, do not also Read it back to describe it unless asked; they can see it.",
+        "Show a file to the USER, inline in the chat. The opposite of Read: Read pulls a file into YOUR context to work on; view_file puts it on the user's screen and returns only a short ack, so the contents never enter your context. Use it whenever you want them to LOOK at something — a screenshot or diagram you made or found, a chart, a rendered HTML page, a PDF, or a document you made for them. Images (.png .jpg .jpeg .gif .webp .svg) render as a picture; .mp4 and .webm videos play inline with controls; .pdf renders in a viewer; audio (.mp3 .wav .m4a .ogg .opus .flac .aac) plays in an inline player; .html renders as a live page; Word/Excel/PowerPoint/OpenDocument, .rtf .epub .csv .tsv .txt .md .json and .zip show as a download card (name, size, download link) — use that to hand over a file you produced instead of telling them a path. Images, PDFs and audio 7 MB max, videos and files 50 MB max, pages 2 MB max. file_path may be absolute or relative to the chat folder, but must resolve inside it (or inside the chat's own config dir). Returns { kind, url, name } — having shown it, do not also Read it back to describe it unless asked; they can see it.",
       inputSchema: {
         file_path: z.string().min(1),
       },

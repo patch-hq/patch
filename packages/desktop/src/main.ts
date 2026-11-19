@@ -46,7 +46,6 @@ import {
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { isAbsolute, join } from 'node:path';
-import { hostname } from 'node:os';
 import {
   realpathSync,
   existsSync,
@@ -2010,10 +2009,13 @@ function setupAutoUpdater(): void {
     await loadFirstRun().turnOffLocalServer(app.getPath('home'));
   });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
-  ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
+  ipcMain.handle('patch:local-host:default-name', () => friendlyComputerName());
+  ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown; name?: unknown }) =>
     installLocalHost({
       serverUrl: serverOrigin(SERVER_URL),
       code: typeof payload?.code === 'string' ? payload.code : '',
+      name:
+        typeof payload?.name === 'string' && payload.name.trim() ? payload.name.trim() : undefined,
       home: app.getPath('home'),
     }),
   );
@@ -2267,7 +2269,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
       resources: process.resourcesPath,
       execPath: process.execPath,
       relayUrl: process.env['PATCH_RELAY_URL'] ?? DEFAULT_RELAY_URL,
-      label: `${app.getName()} on ${hostname()}`,
+      label: friendlyComputerName(),
       ui,
       installHost: (origin, code, name) =>
         installLocalHost({ serverUrl: origin, code, name, home: app.getPath('home') }),

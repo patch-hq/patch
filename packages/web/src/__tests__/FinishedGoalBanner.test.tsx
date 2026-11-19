@@ -65,18 +65,20 @@ describe('FinishedGoalBanner', () => {
     expect(screen.getByTestId('finished-goal-pill')).toHaveTextContent('Impossible');
   });
 
-  it('Not met hands the condition back, only for a met goal', () => {
-    const onNotMet = vi.fn();
-    const r = render(<FinishedGoalBanner row={row()} onNotMet={onNotMet} />);
-    fireEvent.click(screen.getByTestId('finished-goal-not-met'));
-    expect(onNotMet).toHaveBeenCalledWith(long);
+  it('Reset hands the condition back, for a met or an impossible goal', () => {
+    const onReset = vi.fn();
+    const r = render(<FinishedGoalBanner row={row()} onReset={onReset} />);
+    fireEvent.click(screen.getByTestId('finished-goal-reset'));
+    expect(onReset).toHaveBeenCalledWith(long);
     r.unmount();
+    onReset.mockClear();
     render(
       <FinishedGoalBanner
         row={row({ lastGoal: { ...lastGoal, outcome: 'impossible' } })}
-        onNotMet={onNotMet}
+        onReset={onReset}
       />,
     );
-    expect(screen.queryByTestId('finished-goal-not-met')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('finished-goal-reset'));
+    expect(onReset).toHaveBeenCalledWith(long);
   });
 });

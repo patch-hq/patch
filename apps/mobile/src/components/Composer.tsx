@@ -1536,7 +1536,6 @@ export function Composer({
       edit.onSave(draftRef.current.trim());
       return;
     }
-    if (outOfUsage) return;
     // No `linkDown` guard: sending into an existing chat while the link is
     // down queues + flushes on reconnect (Todoist 6hWrcpCQFqXGJpF6; spec/12 §
     // Surface → server disconnect — deliveryTracker already retries
@@ -1672,8 +1671,9 @@ export function Composer({
   const submitRef = React.useRef(sendDraft);
   submitRef.current = sendDraft;
 
-  // No credit left on any account that could run this chat: the turn would
-  // only park, so Send is refused up front (same certainty rule as web).
+  // No credit left on any account that could run this chat: Send still works
+  // — the host parks the turn and runs it when the pool refills — so this only
+  // changes the label.
   const usageHostId = setup ? setup.hostId : (row?.hostId ?? null);
   const hostAccounts = usePresenceStore((s) =>
     usageHostId ? (s.hosts[usageHostId]?.accounts[accountBackend]?.accounts ?? null) : null,
@@ -1698,7 +1698,6 @@ export function Composer({
   const sendDisabled =
     !edit &&
     (resolving ||
-      outOfUsage ||
       hookChecking ||
       (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle'));
 
@@ -2593,7 +2592,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel={
               outOfUsage
-                ? 'Send unavailable — out of usage until it resets'
+                ? 'Send message (queued until usage resets)'
                 : hookChecking
                   ? 'Checking…'
                   : resolving

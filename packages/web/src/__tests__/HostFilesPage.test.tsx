@@ -116,6 +116,24 @@ describe('open without a chat (spec/14 § File browser)', () => {
     expect(screen.getByTestId('browse-breadcrumb-current')).toHaveTextContent('tom');
   });
 
+  it('hides dotfiles until toggled, and the path has no doubled slash', async () => {
+    seedHost('d1', { hostName: 'mac' });
+    vi.spyOn(api, 'hostFilesList').mockResolvedValue({
+      path: '/Users',
+      parent: '/',
+      entries: [
+        { name: '.ssh', type: 'dir' },
+        { name: 'tom', type: 'dir' },
+      ],
+    });
+    render(withQuery(<HostFilesPage ws={null} />));
+    expect(await screen.findByTestId('host-browse-entry-tom')).toBeInTheDocument();
+    expect(screen.queryByTestId('host-browse-entry-.ssh')).toBeNull();
+    expect(screen.getByTestId('browse-breadcrumb').textContent).toBe('/Users');
+    fireEvent.click(screen.getByTestId('host-browse-hidden-toggle'));
+    expect(screen.getByTestId('host-browse-entry-.ssh')).toBeInTheDocument();
+  });
+
   it('with more than one host, shows a picker naming each, offline ones disabled', async () => {
     seedHost('d1', { hostName: 'mac' });
     seedHost('d2', { hostName: 'hetzner', online: false });

@@ -40,7 +40,7 @@ patch hosts update [--host H]             # apply an available host update
 patch hosts claude-settings [--host H]                    # that host's Claude Code settings.json text and memory entries
 patch hosts claude-settings set <file> [--host H]         # replace that host's settings.json from a file
 patch hosts memory remove <project> <file> [--host H]     # delete one Claude Code memory entry
-patch hosts remove --host H               # revoke a host (confirmed; names its chat count)
+patch hosts remove --host H               # revoke a host (confirmed; names its chat count). Not available from a host (revocation is not relayable): it fails with a pointer to Settings → Hosts → Remove
 
 patch settings                            # every shared setting, and each host's applied version (01-server.md § Settings)
 patch settings set <key> <value>          # change a shared setting, e.g. permission-mode, question-expiry, default-model

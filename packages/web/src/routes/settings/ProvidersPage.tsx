@@ -26,7 +26,7 @@ import { Group, Note, Row, SettingsPage } from './ui.js';
 
 export function ProvidersPage(): JSX.Element {
   return (
-    <SettingsPage title="Providers" testid="settings-providers">
+    <SettingsPage title="Voice and other services" testid="settings-providers">
       <section className="set-group">
         <div className="set-group-head">
           <h2 className="set-label">Provider keys</h2>

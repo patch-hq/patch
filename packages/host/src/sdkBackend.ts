@@ -1313,6 +1313,16 @@ let claudeExecutable: string | undefined | null = null;
 export function forgetClaudeExecutable(): void {
   claudeExecutable = null;
 }
+/**
+ * Set while this host is installing Claude Code. A turn that starts meanwhile
+ * waits for it rather than running the SDK with no binary and failing into the
+ * retry ladder ("Native CLI binary ... not found"). A failed install resolves
+ * the gate too: the turn then runs and reports the SDK's own error.
+ */
+let claudeInstallGate: Promise<void> | undefined;
+export function setClaudeInstallGate(gate: Promise<void> | undefined): void {
+  claudeInstallGate = gate;
+}
 function claudeExecutablePath(): string | undefined {
   if (claudeExecutable === null) {
     claudeExecutable = resolveClaudeExecutable({
@@ -2429,6 +2439,10 @@ async function* realRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   // when interrupted chats resumed together. Context continuity already lives
   // in the provider session id, so every completed iterator now tears its own
   // process tree down through the SDK's normal one-shot lifecycle.
+  if (claudeInstallGate) {
+    await claudeInstallGate;
+    forgetClaudeExecutable();
+  }
   yield* oneShotRun(opts);
 }
 

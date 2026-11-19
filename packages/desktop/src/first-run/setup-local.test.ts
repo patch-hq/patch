@@ -132,3 +132,18 @@ test('choosing "on this Mac" again after a switch picks the account up instead o
   assert.equal(up.saved.credential, 'cred.jwt.value');
   assert.ok(!calls.includes('/api/auth/account'));
 });
+
+test("the account's device is named with the name the person chose, not the app/host label", async () => {
+  const labels: unknown[] = [];
+  const { d } = deps({
+    call: async (_origin, path, body) => {
+      if (path === '/api/auth/account') {
+        labels.push((body as { label: string }).label);
+        return { status: 200, json: { credential: 'c' } };
+      }
+      return { status: 200, json: { nonce: 'n' } };
+    },
+  });
+  await bringUpLocal(null, d, 'MacBook');
+  assert.deepEqual(labels, ['MacBook']);
+});

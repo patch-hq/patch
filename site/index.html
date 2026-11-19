@@ -6,7 +6,7 @@
     <title>Patch — agents, done properly</title>
     <meta
       name="description"
-      content="A harness for Claude Code, Codex and more, built with care for people who spend their day in agents. Self-hosted, free and open source."
+      content="Run Claude Code and Codex from one app, on your computer, your server and your phone. Self-hosted, free and open source."
     />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f2f0ea" media="(prefers-color-scheme: light)" />
@@ -14,7 +14,7 @@
     <meta property="og:title" content="Patch" />
     <meta
       property="og:description"
-      content="A harness for Claude Code, Codex and more, built with care for people who spend their day in agents. Self-hosted, free and open source."
+      content="Run Claude Code and Codex from one app, on your computer, your server and your phone. Self-hosted, free and open source."
     />
     <meta property="og:url" content="https://patchhq.dev/" />
     <meta property="og:image" content="https://patchhq.dev/img/og.jpg" />
@@ -42,10 +42,11 @@
       <section class="hero wrap">
         <h1 class="display">Agents, done properly.</h1>
         <p class="lede">
-          A harness for Claude Code, Codex
-          <button class="more" type="button" aria-expanded="false" aria-controls="providers-hero" data-more>and more</button>,
-          built with care for people who spend their day in agents. Use the subscriptions you already have.
+          One app to run Claude Code and Codex, on your computer, your server and your phone. More
+          <button class="more" type="button" aria-expanded="false" aria-controls="providers-hero" data-more>AI tools are coming</button>.
+          Use the subscriptions you already have.
         </p>
+        <p class="needs" data-testid="needs">You need a Mac with Apple Silicon or a Linux computer, and a Claude or ChatGPT subscription or an API key.</p>
         <div class="providers" id="providers-hero" data-testid="providers" hidden>
           <div class="providers-group">
             <h3>Runs today</h3>
@@ -282,19 +283,13 @@
           </figure>
         </article>
 
-        <div class="cta-strip" data-testid="cta-strip">
-          <a class="btn btn-primary" data-download href="#start">Download</a>
-          <a class="btn btn-primary" data-no-build href="#start" hidden>Get started</a>
-          <a class="btn btn-quiet" data-build-only href="#start">Get started</a>
-          <p class="next" data-next hidden></p>
-        </div>
 
         <article class="feature feature-wide">
           <div class="feature-text">
             <h2 class="display">Jobs you can shape</h2>
             <p>
               Start work on a schedule, from a webhook or a Todoist task, or after another job. A
-              script can decide whether it's worth running. Failures raise an alert.
+              small script can decide whether a run is worth doing. Failures raise an alert.
             </p>
           </div>
           <figure class="shot shot-video">
@@ -315,12 +310,6 @@
           </figure>
         </article>
 
-        <div class="cta-strip" data-testid="cta-strip">
-          <a class="btn btn-primary" data-download href="#start">Download</a>
-          <a class="btn btn-primary" data-no-build href="#start" hidden>Get started</a>
-          <a class="btn btn-quiet" data-build-only href="#start">Get started</a>
-          <p class="next" data-next hidden></p>
-        </div>
 
         <article class="feature feature-flip">
           <div class="feature-text">
@@ -356,12 +345,6 @@
       </section>
 
       <div class="wrap">
-        <div class="cta-strip" data-testid="cta-strip">
-          <a class="btn btn-primary" data-download href="#start">Download</a>
-          <a class="btn btn-primary" data-no-build href="#start" hidden>Get started</a>
-          <a class="btn btn-quiet" data-build-only href="#start">Get started</a>
-          <p class="next" data-next hidden></p>
-        </div>
       </div>
 
       <section id="practice" class="practice wrap" aria-labelledby="practice-title">
@@ -435,22 +418,16 @@
           </figure>
         </article>
 
-        <div class="cta-strip" data-testid="cta-strip">
-          <a class="btn btn-primary" data-download href="#start">Download</a>
-          <a class="btn btn-primary" data-no-build href="#start" hidden>Get started</a>
-          <a class="btn btn-quiet" data-build-only href="#start">Get started</a>
-          <p class="next" data-next hidden></p>
-        </div>
 
         <article class="deep deep-flip">
           <div class="deep-text">
             <h3>How a job decides</h3>
             <p>
-              A trigger fires, a filter checks what came in, and a gate script looks at the world.
+              Something sets the job off, a filter checks what came in, and a short script you write decides whether to go ahead.
               Only then does the job start a chat, message one, or carry on the chat it already has
               for that subject.
             </p>
-            <p>A gate that holds costs one quick command and leaves one quiet line. Its output becomes part of the prompt when it passes.</p>
+            <p>If the gate says not now, the job simply skips that run and notes why in one short line. If it says go, whatever the script printed is added to the prompt.</p>
           </div>
           <div class="viz viz-job" aria-hidden="true">
             <ol class="flow">
@@ -562,7 +539,7 @@
           <details>
             <summary><h3>Self-hosted</h3><p>Your server, your machines.</p></summary>
             <div class="detail-more">
-              <p>Patch runs on your own computer or server. Credentials stay on the machine that uses them. The relay that reaches your phone is optional, only passes end-to-end encrypted bytes, and you can run your own.</p>
+              <p>Patch runs on your own computer or server. Credentials stay on the machine that uses them. The relay (a go-between server that reaches your phone) is optional, only passes end-to-end encrypted bytes, and you can run your own.</p>
             </div>
           </details>
           <details>
@@ -657,7 +634,7 @@
               <li>Signed webhooks and Todoist</li>
               <li>After another job finishes</li>
               <li>Filters on what came in</li>
-              <li>Gate scripts that decide each run</li>
+              <li>Gate scripts (quick checks) that decide each run</li>
               <li>Run windows and concurrency limits</li>
               <li>One chat per subject, carried on</li>
               <li>Wake a sleeping Mac before it runs</li>
@@ -755,7 +732,7 @@
           <li>
             <span class="num">2</span>
             <h3>Connect your AI accounts</h3>
-            <p>Every AI works the same way: sign in, or add an API key. Patch installs Claude Code and Codex itself.</p>
+            <p>Every AI works the same way: sign in, or add an API key. Patch installs Claude Code and Codex itself. You need a <a href="https://claude.com/pricing">Claude</a> or <a href="https://chatgpt.com/pricing">ChatGPT</a> subscription, or an API key from <a href="https://console.anthropic.com/">Anthropic</a> or <a href="https://platform.openai.com/api-keys">OpenAI</a>.</p>
           </li>
           <li>
             <span class="num">3</span>

@@ -379,6 +379,10 @@ export const PASSTHROUGH_ENV = [
   'KOKORO_SIDECAR_URL',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'TZ',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'NO_PROXY',
+  'NODE_EXTRA_CA_CERTS',
 ] as const;
 
 /** Passed-through variables that are credentials, kept out of the unit file. */
@@ -738,6 +742,10 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       PATCH_HOST_NAME: host,
       // The one agent backend patch drives. The backend's own install is
       // provisioned on the host, not carried in the artifact (spec/11).
+      // Trust the OS certificate store and honour the proxy environment, so a
+      // network that re-signs TLS does not leave the host unable to connect.
+      NODE_USE_SYSTEM_CA: '1',
+      NODE_USE_ENV_PROXY: '1',
       SDK_BACKEND: 'real',
       // Every artifact carries silero_vad.onnx, so end-of-utterance detection
       // and barge-in work on this host with nothing downloaded (spec/02).

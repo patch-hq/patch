@@ -75,6 +75,8 @@ export interface GoalProgress {
   lastReason: string | null;
   /** The user stopped the chat's turn: the goal is on hold until the next turn starts. */
   pausedByStop?: boolean;
+  /** The judge said the agent is blocked on the user: held until the user's next turn starts. */
+  waitingOnUser?: boolean;
   /** The evaluator's latest on-track read (spec/04 § Goals — check-in). */
   lastCheckIn?: { at: number; status: 'on_track' | 'off_track'; reason: string } | null;
 }

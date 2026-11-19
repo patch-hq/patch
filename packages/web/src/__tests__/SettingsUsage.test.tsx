@@ -172,7 +172,8 @@ describe('Settings → Usage → strategy', () => {
         'true',
       ),
     );
-    expect(screen.getByTestId('strategy-codex-priority')).toHaveAttribute('aria-pressed', 'true');
+    // No Codex accounts yet, so nothing to choose between.
+    expect(screen.queryByTestId('strategy-codex-priority')).toBeNull();
   });
 
   it('says what each strategy does on hover', () => {
