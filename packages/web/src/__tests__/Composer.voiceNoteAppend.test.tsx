@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render as rtlRender, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { ReactElement } from 'react';
+import type { ComponentProps } from 'react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { reportAccount } from './presenceHelpers.js';
@@ -41,7 +41,8 @@ import type { VoiceRecording } from '../lib/voiceRecorder.js';
 import type { startDictationPreview, DictationPreviewCallbacks } from '../lib/dictationPreview.js';
 
 /** The composer always sits inside the app's router (its model control can open a new chat). */
-const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
+const render = (ui: ComponentProps<typeof MemoryRouter>['children']) =>
+  rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 describe('voice note — the typed message is appended to, never erased', () => {
   const clip = new Blob(['x'], { type: 'audio/wav' });
