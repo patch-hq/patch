@@ -3036,6 +3036,52 @@ describe('ChatRoute regression', () => {
     expect(screen.queryByTestId('link-file-reveal')).not.toBeInTheDocument();
   });
 
+  it('shows the link_file card when it follows other tool calls, not folded into their run', () => {
+    seedChat('c-link-batch', [
+      { seq: 1, kind: 'tool_call', tool: 'Bash', callId: 'b1', toolArgs: { command: 'ls' }, at: 0 },
+      { seq: 2, kind: 'tool_result', tool: 'Bash', callId: 'b1', toolResult: 'a', at: 1 },
+      {
+        seq: 3,
+        kind: 'tool_call',
+        tool: 'Bash',
+        callId: 'b2',
+        toolArgs: { command: 'pwd' },
+        at: 2,
+      },
+      { seq: 4, kind: 'tool_result', tool: 'Bash', callId: 'b2', toolResult: 'b', at: 3 },
+      {
+        seq: 5,
+        kind: 'tool_call',
+        tool: 'mcp__patch__link_file',
+        callId: 'l1',
+        toolArgs: { file_path: '/home/u/plan.xlsx' },
+        at: 4,
+      },
+      {
+        seq: 6,
+        kind: 'tool_result',
+        tool: 'mcp__patch__link_file',
+        callId: 'l1',
+        toolResult: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              linked: true,
+              kind: 'link',
+              name: 'plan.xlsx',
+              absPath: '/home/u/plan.xlsx',
+              isDirectory: false,
+            }),
+          },
+        ],
+        at: 5,
+      },
+    ]);
+    renderChat('c-link-batch');
+    expect(screen.getByTestId('link-file-name').textContent).toBe('plan.xlsx');
+  });
+
   it('shows an inline preview frame on a link_file card when the ack has previewUrl', () => {
     seedLinkCard('c-link-preview', { previewUrl: '/api/chats/c/artifact/a' });
     renderChat('c-link-preview');

@@ -9,13 +9,16 @@ import { parseAskHuman } from './action-text.js';
 
 /**
  * Can this tool call fold into a run? A file edit keeps its own row for its
- * inline diff, a `Monitor` for the watcher it armed, and a `view_file` because
- * its row IS the file — folded away, the picture only mounts on expand.
+ * inline diff, a `Monitor` for the watcher it armed, and a `view_file` or `link_file`
+ * because its row IS the file — folded away, the picture only mounts on expand.
  */
 export function isGroupableToolCall(tool: string | undefined, args: unknown): boolean {
   if (tool === undefined) return true;
   if (tool === 'Monitor') return false;
   if (tool === 'view_file' || tool === 'mcp__patch__view_file') return false;
+  // A `link_file` is the same: its row is the file card, so it must not fold
+  // into a run beside neighbouring calls.
+  if (tool === 'link_file' || tool === 'mcp__patch__link_file') return false;
   // A notification is a message to the user: it stays in the transcript.
   if (tool === 'patch_notify' || tool === 'mcp__patch__patch_notify') return false;
   // An action request is drawn as a card the user acts on; folded into a run
