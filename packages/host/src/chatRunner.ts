@@ -2,7 +2,6 @@ import {
   harnessOfModel,
   harnessOfSessionId,
   HARNESS_TRAITS,
-  type HarnessTraits,
   harnessTraitsForModel,
   harnessModesInclude,
 } from './harnesses.js';
@@ -180,17 +179,7 @@ import {
   TODO_PREFIX,
   keepCompletedHistory,
 } from './todos.js';
-import { execFileSync } from 'node:child_process';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
-import { handoffKey, planHandoff, replanAfterOverflow, type HandoffPlan } from './handoffPlan.js';
-import {
-  budgetFor,
-  dividerCopy,
-  estimateIsOff,
-  instructionHash,
-  trackForPlan,
-  type ModelLimits,
-} from './handoffRun.js';
 import { renderAgentStatement, renderGoalTranscript, renderUserScope } from './goalEval.js';
 import {
   isReservedSpecialThread,
@@ -209,18 +198,10 @@ import {
 } from '@patch/wire';
 import { modelHasCapability, patchToolsOmittedFor, type ProviderCapability } from '@patch/wire';
 import type { SweepDecisionResult } from './managerSweepGen.js';
-import { countMessages, windowTrack } from './managerContext.js';
 import { permissionModeChangeLine } from './permissionMode.js';
 import { isAccountExhausted, parseLimitResetsAt } from './accountFailover.js';
-import {
-  assistantErrorText,
-  HandoffOverflowError,
-  isModelOutput,
-  setLiveRunPermissionMode,
-  TurnFailedError,
-} from './sdkBackend.js';
+import { isModelOutput, setLiveRunPermissionMode, TurnFailedError } from './sdkBackend.js';
 import type { LimitFacts } from './sdkBackend.js';
-import type { SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
 import { isOverloadedError, limitFailureMessage, statedLimitOf } from './limitFailure.js';
 import { classifyFailure, isSessionAbort, backoffMs as overloadBackoffMs } from './errorClass.js';
 import { describeTurnFailure } from './failureCopy.js';
@@ -668,12 +649,6 @@ export interface HostOptions {
     claudeConfigDir?: string;
   }) => Promise<string | null>;
   /**
-   * What the catalogue and the harnesses have reported about each model's
-   * context window and output cap (spec/04 § Handoff budget). Absent, every
-   * target is planned against the assumed window and says so on the divider.
-   */
-  modelLimits?: ModelLimits;
-  /**
    * The Manager sweep's one decision call (spec/06 § Sweep;
    * `managerSweepGen.ts`). OPTIONAL — `runManagerSweep` refuses rather than
    * guessing when it's unset (NO FALLBACK), same contract as `generateDigest`.
@@ -830,24 +805,6 @@ export interface HostOptions {
  */
 export const COMPUTER_USE_TOOL = 'Computer use';
 
-/** `Daemon.estimateProviderSwitch`'s result (spec/04 § History — the switch
- * confirmation's cost line). */
-export interface ProviderSwitchEstimate {
-  fromHarness: HarnessId;
-  toHarness: HarnessId;
-  /** Rides the target's OWN prior session (only the delta is new), rather
-   * than rebuilding the whole track from scratch. */
-  resumesExistingSession: boolean;
-  /** chars/4 ballpark of what the target must re-read uncached — the whole
-   * track if rebuilding from scratch, just the delta if resuming. Always
-   * shown with a "~", never presented as an exact count. */
-  approxTokens: number;
-  /** This chat has been idle long enough that the relevant prompt cache
-   * entry has almost certainly expired — the "resumes its session" framing
-   * would be misleading without this caveat. */
-  cacheProbablyCold: boolean;
-}
-
 /**
  * Tools a `patch_delegate` subagent never gets, on top of whatever the user
  * has switched off for the chat (spec/02 § Native subagent dispatch —
@@ -967,25 +924,6 @@ const SESSION_ABORT_RESTARTS = 2;
  */
 const STALE_RETRY_CUTOFF_MS = 6 * 60 * 60 * 1000;
 
-/**
- * How long a provider's prompt cache entry is assumed to survive with no
- * traffic (spec/04 § History — flag when a switch confirmation's "resumes
- * its session" framing is misleading because the cache is probably gone
- * anyway). Anthropic's default `ephemeral` cache is a 5-minute TTL; a 1-hour
- * TTL exists but is opt-in per `cache_control` block (`ttl: "1h"`) — checked
- * against the installed `@anthropic-ai/claude-agent-sdk` bundle (no literal
- * `"1h"` anywhere in it, only the two `cache_creation` USAGE field names it
- * always reports), so Claude Code itself does not request the longer TTL and
- * this uses the 5-minute default for both harnesses.
- */
-const PROMPT_CACHE_TTL_MS = 5 * 60 * 1000;
-
-/** "Switch and compact" (spec/04 § History): how many of the track's own most
- * recent entries ride along with the handoff note verbatim, on top of the
- * digest. A handful of exchanges, not a real window — the point of this path
- * is that everything OLDER is summarised, not reconstructed. */
-const COMPACT_SWITCH_RECENT_ENTRIES = 6;
-
 export class FolderNotFoundError extends Error {
   constructor(folder: string) {
     super(`folder does not exist or is not a directory: ${folder}`);
@@ -1098,8 +1036,8 @@ export const CONTINUE_MESSAGE = 'Carry on from where you were cut off.';
 
 /**
  * Folded into a turn the reader moved to another model with Retry. The turn did
- * not finish on the model that started it; the new one is handed the work so
- * far (the session, or the reconstructed track) and told to continue it.
+ * not finish on the model that started it; the new one resumes the same session
+ * and is told to continue it.
  */
 export const MODEL_SWITCH_TURN_REMINDER = noteBlock(
   'Turn moved to another model',
@@ -1110,17 +1048,20 @@ export const MODEL_SWITCH_TURN_REMINDER = noteBlock(
 
 /**
  * Folded into a turn re-sent on a fresh session after the SDK aborted its
- * session twice. The new session is rebuilt from the chat log, so the work
- * done so far is in front of the model; it must continue that, not answer
- * only the latest message.
+ * session twice. Patch does not rebuild the old session (spec/04 § Resume), so
+ * the new one knows nothing of the chat: the note says so, visibly, and the
+ * model works from the message and what it can see in the folder.
  */
 export const SESSION_RESTART_TURN_REMINDER = noteBlock(
   'Turn restarted on a new session',
   'This turn was cut off partway through when its session failed, and has been restarted ' +
-    'on a new session. The conversation and any task in progress are in the history above. ' +
-    'Check what had already been done and carry on any unfinished task from there, ' +
-    'as well as answering the latest message.',
+    'on a new session that has no memory of this chat. Check the folder for what had ' +
+    'already been done before acting, and ask if the request depends on earlier context ' +
+    'you cannot see.',
 );
+
+/** Longest stretch of one message a Manager handover note carries. */
+const MANAGER_HANDOVER_MESSAGE_CHARS = 4_000;
 
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
@@ -1212,19 +1153,6 @@ function rawUuid(raw: unknown): string | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const uuid = (raw as Record<string, unknown>)['uuid'];
   return typeof uuid === 'string' ? uuid : undefined;
-}
-
-/** The text blocks of a transcript assistant entry, joined. */
-function assistantText(entry: SessionStoreEntry): string {
-  const message = (entry['message'] ?? {}) as Record<string, unknown>;
-  const content = message['content'];
-  if (typeof content === 'string') return content.trim();
-  if (!Array.isArray(content)) return '';
-  return (content as Record<string, unknown>[])
-    .filter((b) => b && b['type'] === 'text' && typeof b['text'] === 'string')
-    .map((b) => String(b['text']))
-    .join('\n')
-    .trim();
 }
 
 /** A wire event the history log stores whole (spec/04 § History). */
@@ -1364,22 +1292,13 @@ import { identityHash, readSeqIndexFile } from './seqIndex.js';
 import { ChatLog, HistoryWriteError } from './chatLog.js';
 import { readTrack, readTrackRecords } from './readTrack.js';
 import { recordEntries, turnBoundaryOf } from './recordEntries.js';
-import { toClaudeSessionEntries, estimateTokens, type TrackEntry } from './nativeReconstruct.js';
 import {
   ChatMoveError,
   setAsideMovedChat,
   type ChatMovePaths,
   attachmentsDirFor,
 } from './chatMove.js';
-import {
-  chatClaudeDir,
-  chatTranscriptPath,
-  createClaudeSessionStore,
-  entriesSince,
-  transcriptSize,
-  type ClaudeSessionStore,
-} from './claudeSessionStore.js';
-import { hasConversation, stripSyntheticTurns } from './syntheticTurns.js';
+import { chatClaudeDir, createClaudeSessionStore } from './claudeSessionStore.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
@@ -2160,67 +2079,6 @@ interface ToolRunState {
   closed?: boolean;
 }
 
-/** The numbers a handoff divider shows (the wire `sessionChange.handoff`, plus the model it names). */
-interface HandoffDivider {
-  model: string;
-  carriedEntries: number;
-  totalEntries: number;
-  omittedFromSeq?: number;
-  omittedToSeq?: number;
-  estimatedTokens: number;
-  availableTokens: number;
-  windowKnown: boolean;
-  summary: boolean;
-  summaryNote?: string;
-  replanned: boolean;
-}
-
-interface ActiveHandoff {
-  key: string;
-  prompt: string;
-  instructionHash: string;
-  track: readonly TrackEntry[];
-  targetModel: string | null;
-  planState: { permissionMode?: string; branch?: string; narrative: string | null };
-  summaryNote: string | undefined;
-  windowKnown: boolean;
-  estimatedTokens: number;
-  availableTokens: number;
-  replanned: boolean;
-  /** First input-token count the target reported for this handoff's turn. */
-  reportedInputTokens: number | null;
-}
-
-/** How long the source model gets to write an optional narrative before the handoff goes without. */
-const HANDOFF_NARRATIVE_TIMEOUT_MS = 30_000;
-
-/** The folder's git branch, when it is a git checkout; absent otherwise (not every chat folder is one). */
-function gitBranchOf(folder: string): { branch?: string } {
-  try {
-    const out = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd: folder,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 2000,
-    }).trim();
-    return out ? { branch: out } : {};
-  } catch {
-    return {};
-  }
-}
-
-/** A handoff track as plain text, for the first message of a linked fresh chat. */
-function renderSeedTrack(track: readonly TrackEntry[]): string {
-  const lines: string[] = [];
-  for (const { event } of track) {
-    if (event.type === 'chat.message' && event.role !== 'system')
-      lines.push(`${event.role === 'user' ? 'User' : 'Assistant'}: ${event.content}`);
-    else if (event.type === 'chat.tool_call')
-      lines.push(`[tool ${event.tool}] ${JSON.stringify(event.args).slice(0, 300)}`);
-  }
-  return lines.join('\n\n');
-}
-
 /** A reset instant in the host's own zone, zone named. */
 const LOCAL_INSTANT: Intl.DateTimeFormatOptions = {
   day: 'numeric',
@@ -2469,44 +2327,6 @@ export class Daemon {
   private readonly turnUsage = new Map<string, Record<string, unknown>>();
   /** The fork each running turn opened, so its new session is recorded as one. */
   private readonly runningForks = new Map<string, ForkRun>();
-  /** The running turn is a provider switch (spec/04 § History — seamless
-   * reconstruction), so its `session` record is `reason:'switch'`, not
-   * `'rotate'`, and its arrival gets a quiet `sessionChange` divider. */
-  private readonly runningProviderSwitch = new Map<
-    string,
-    {
-      toHarness: HarnessId;
-      toModel: string | null;
-      seededMessages: number;
-      /** Set once the target harness reports it had to drop the oldest
-       * records to fit its context window (spec/04 § History — Codex has no
-       * auto-compaction for an injected thread, unlike Claude Code). */
-      trimmedRecords?: number;
-      /** The budgeted handoff behind this switch (spec/04 § Handoff budget), for its divider. */
-      handoff?: HandoffDivider;
-    }
-  >();
-  /**
-   * The budgeted handoff in flight for each chat (spec/04 § Handoff budget):
-   * what was planned, so an overflow can re-plan once and the first reply can
-   * be verified against it. Cleared when the turn settles.
-   */
-  private readonly activeHandoffs = new Map<string, ActiveHandoff>();
-  /** A retry that must reuse the user message already logged at this seq (see `recoverHandoff`). */
-  private readonly reuseLoggedUserMessage = new Map<string, number>();
-  /**
-   * Set by `setChatModel(chatId, model, { compact: true })` (spec/04 § History
-   * — "switch and compact", the cheap path for huge chats): the NEXT turn's
-   * switch, if it's still a cross-provider switch by the time it runs, hands
-   * the target a handoff note (the outgoing session's own self-summary, via
-   * `generateDigest`) plus the last few turns, instead of the full native
-   * reconstruction. Consumed (and cleared) the moment that turn's switch
-   * block runs, so it never lingers onto some LATER, unrelated switch.
-   */
-  private readonly pendingCompactSwitch = new Map<
-    string,
-    { outgoingModel: string | null; outgoingSessionId: string }
-  >();
   /**
    * Per-chat ring of the most-recent emitted wire events. Backs `patch_peek`
    * (spec/06): peek returns the recent wire-event slice so the agent can see
@@ -2896,7 +2716,6 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     // A retry on another model continues the turn rather than repeating its
     // prompt, as a restart does: the work done so far is in what the model gets.
-    if (opts?.carryOn) this.interruptedResend.add(chatId);
     void this.sendInput({
       chatId,
       message: opts?.carryOn
@@ -2942,14 +2761,6 @@ export class Daemon {
    * say it was ever owed. Persisted with the rest of `pendingTurns` meanwhile.
    */
   private readonly resumeOwed = new Map<string, PendingTurn>();
-  /** Chats whose pump is re-sending a turn a host restart cut off (as "carry on"). */
-  private readonly interruptedResend = new Set<string>();
-  /**
-   * Chats whose provider session was found dead (e.g. it belongs to another
-   * account after a switch). Their next turn rebuilds a fresh session from
-   * Patch's log instead of starting contextless.
-   */
-  private readonly rebuildFromLog = new Set<string>();
 
   /** Put a chat's owed turn at the back of the resume line, once. */
   private enqueueResume(chatId: string, start: () => Promise<void> | undefined): void {
@@ -4117,7 +3928,6 @@ export class Daemon {
         // await, so the second and later turns here see a live pump and queue
         // behind the first in their original order — exactly where they were.
         this.owedResend.add(m.chatId);
-        this.interruptedResend.add(m.chatId);
         if (i === 0) {
           this.resumeOwed.set(m.chatId, turn);
           this.persistPendingTurns(m.chatId);
@@ -6101,6 +5911,92 @@ export class Daemon {
    * over is not a degraded rotation, it is a different, worse operation this
    * method does not perform silently.
    */
+  /**
+   * spec/04 § Resume — the chat's provider session is gone and Patch does not
+   * rebuild it. The session id is cleared so the next turn starts a fresh
+   * session, and a divider in the record says plainly that the model's memory
+   * of the chat ends here (surfaces offer "Start a linked chat" beside it).
+   * The record itself is untouched and stays readable.
+   */
+  private endSessionMemory(chatId: string, why: string): void {
+    const state = this.chatState.get(chatId);
+    if (state) {
+      state.claudeSessionId = undefined;
+      state.claudeSessionAccountId = undefined;
+    }
+    this.opts.metaStore.update(chatId, (m) => {
+      const { claudeSessionId: _session, claudeSessionAccountId: _account, ...rest } = m;
+      void _session;
+      void _account;
+      return { ...rest, updatedAt: this.opts.now() };
+    });
+    // A chat restored from disk is otherwise held to resuming; with nothing to
+    // resume its next turn is a first turn.
+    this.hydratedFromDisk.delete(chatId);
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `The model's memory of this chat ends here: ${why}. The next message starts a new session.`,
+      sessionGone: true,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
+  }
+
+  /**
+   * The Manager's bounded context (spec/06 § Manager conversation), through
+   * what the provider supports: a fresh session, never a rebuilt one. Once
+   * the current session has carried more than `managerContextWindow`
+   * messages, the session is retired, a divider marks it, and the last
+   * `window` messages from Patch's record are returned as a `Handoff` note for
+   * the front of this turn's message — recorded and shown like every note, so
+   * nothing reaches the model unseen. Empty when no handover is due.
+   */
+  private managerHandover(chatId: string): string {
+    const window = this.opts.managerContextWindow;
+    const state = this.chatState.get(chatId);
+    const meta = this.opts.metaStore.read(chatId);
+    if (window === undefined || window <= 0 || !state?.claudeSessionId || !meta) return '';
+    const from = meta.sessionFromSeq ?? 0;
+    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
+    const messages = readTrack(this.chatLog, chatId, meta, branchId, -1).flatMap(({ event }) =>
+      event.type === 'chat.message' && event.role !== 'system' && event.content.trim() !== ''
+        ? [{ seq: event.seq, role: event.role, content: event.content }]
+        : [],
+    );
+    if (messages.filter((m) => m.seq >= from).length <= window) return '';
+    const recent = messages.slice(-window);
+    const lines = recent.map(
+      (m) =>
+        `${m.role === 'user' ? 'User' : 'Manager'}: ${m.content.length > MANAGER_HANDOVER_MESSAGE_CHARS ? `${m.content.slice(0, MANAGER_HANDOVER_MESSAGE_CHARS)}…` : m.content}`,
+    );
+    state.claudeSessionId = undefined;
+    state.claudeSessionAccountId = undefined;
+    this.opts.metaStore.update(chatId, (m) => {
+      const { claudeSessionId: _session, claudeSessionAccountId: _account, ...rest } = m;
+      void _session;
+      void _account;
+      return { ...rest, updatedAt: this.opts.now() };
+    });
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `New session · the last ${recent.length} messages carried over`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
+    this.opts.logger.info(
+      { chatId, window, carried: recent.length },
+      'manager: fresh session, recent conversation carried in a visible note',
+    );
+    return noteBlock(
+      'Handoff',
+      `This is a fresh session of the Manager thread. The last ${recent.length} messages of its conversation follow, as Patch recorded them; older ones are in its history.\n\n${lines.join('\n\n')}`,
+    );
+  }
+
   async rotateThread(chatId: string): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
@@ -6163,39 +6059,6 @@ export class Daemon {
       message: `[rotation] Picking up from a rotated session. Handoff from the outgoing one:\n\n${digest}`,
       localId: `rotation-${chatId}-${at}`,
     });
-  }
-
-  /**
-   * Keep the Manager's native session bounded to its last N messages
-   * (spec/06 § Manager conversation). A no-op while the full track is still
-   * within the window — only a track that's grown PAST it gets a fresh
-   * session seeded from the trailing slice `windowTrack` computes. History
-   * is untouched either way: this only ever changes which native session
-   * `state.claudeSessionId` points at, never the chat's own log.
-   */
-  private async ensureBoundedManagerContext(chatId: string): Promise<void> {
-    const windowSize = this.opts.managerContextWindow;
-    if (windowSize === undefined || windowSize <= 0) return;
-    const state = this.chatState.get(chatId);
-    if (!state?.claudeSessionId) return; // nothing to bound yet
-    const meta = this.opts.metaStore.read(chatId);
-    if (!meta) return;
-    const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    const full = readTrack(this.chatLog, chatId, meta, activeBranchId, -1);
-    if (countMessages(full) <= windowSize) return; // already within budget
-    const windowed = windowTrack(full, windowSize);
-    const freshSessionId = randomUUID();
-    const store = this.claudeSessionStoreFor(chatId, state.folder);
-    await store.append(
-      { projectKey: chatId, sessionId: freshSessionId },
-      toClaudeSessionEntries(windowed, {
-        sessionId: freshSessionId,
-        folder: state.folder,
-        model: state.model ?? null,
-      }),
-    );
-    state.claudeSessionId = freshSessionId;
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, claudeSessionId: freshSessionId }));
   }
 
   /**
@@ -7895,7 +7758,6 @@ export class Daemon {
       releaseSleep?.();
       this.pumping.delete(chatId);
       this.owedResend.delete(chatId);
-      this.interruptedResend.delete(chatId);
       this.resumeOwed.delete(chatId);
       // Normally empty. When a turn threw, whatever queued behind it is dropped
       // here — each was announced with `chat.queued`, so say it is gone or the
@@ -9570,7 +9432,13 @@ export class Daemon {
     const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
     const sideOwnsSessionFile = HARNESS_TRAITS[this.harnessOf(chatId)].ownsSessionFile;
     if (sideOwnsSessionFile && sideResumeId)
-      await this.claudeSessionStoreFor(chatId, state.folder).prepare(sideResumeId);
+      await createClaudeSessionStore({
+        chatId,
+        folder: state.folder,
+        chatDir: this.chatDirFor(chatId),
+        claudeProjectsRoot: this.claudeProjectsRoot,
+        logger: this.opts.logger,
+      }).prepare(sideResumeId);
     const sdkOpts: SdkRunOptions = {
       prompt: composedPrompt,
       cwd: state.folder,
@@ -10318,6 +10186,13 @@ export class Daemon {
     // first turn never delays the title landing. Fire-and-forget.
     this.maybeGenerateTitle(chatId, prompt);
 
+    // spec/06 § Manager conversation — the Manager's session carries at most
+    // its window of messages. Past that it starts a fresh session, and the
+    // recent conversation goes in as a visible note on this turn.
+    if (chatId === SPECIAL_THREAD_IDS.manager && !fork) {
+      prompt = this.managerHandover(chatId) + prompt;
+    }
+
     // A RESUME is any query on a chat restored from disk (pre-existing across
     // a host restart). A chat created live this process (spawn / special
     // thread bootstrap) is on its legitimate first turn — resume undefined is
@@ -10428,14 +10303,9 @@ export class Daemon {
       this.opts.logger.warn(
         { chatId, orphanedSessionId: state.claudeSessionId, folder: state.folder },
         'resume session id has no transcript on disk (mock-origin or pruned); ' +
-          'clearing it and starting fresh to avoid the real-SDK resume hang',
+          'the session is gone, so this turn starts a fresh one',
       );
-      state.claudeSessionId = undefined;
-      this.opts.metaStore.update(chatId, (m) => {
-        const { claudeSessionId: _drop, ...rest } = m;
-        void _drop;
-        return { ...rest, updatedAt: this.opts.now() };
-      });
+      this.endSessionMemory(chatId, 'its session is no longer on this host');
     }
 
     // Register the abort controller BEFORE the first await (the session load
@@ -10445,46 +10315,6 @@ export class Daemon {
     // would find no aborter and silently no-op, and the turn would run on.
     const abortController = new AbortController();
     this.aborters.set(chatId, abortController);
-
-    // spec/02 § Per-turn process / warm sessions — a session with no
-    // conversation left once harness-written turns are stripped (a chat whose
-    // only turn died: one prompt, answered by nothing or by a placeholder).
-    // Resuming it hands Claude Code an empty session, which it refuses ("No
-    // conversation found"), and keeping the prompt makes it answer that prompt
-    // itself. There is nothing to resume, so this turn starts a fresh session,
-    // exactly as a chat's first turn does; the chat's own history is untouched.
-    // Every resume, not only a chat hydrated from disk: a placeholder lands in
-    // a live chat's session as easily as in a restored one's.
-    if (
-      this.opts.sdkBackendKind === 'real' &&
-      HARNESS_TRAITS[this.harnessOf(chatId)].ownsSessionFile &&
-      typeof state.claudeSessionId === 'string' &&
-      state.claudeSessionId.length > 0
-    ) {
-      let loaded: Awaited<ReturnType<ClaudeSessionStore['load']>>;
-      try {
-        loaded = await this.claudeSessionStoreFor(chatId, state.folder).load({
-          projectKey: chatId,
-          sessionId: state.claudeSessionId,
-        });
-      } catch (err) {
-        this.aborters.delete(chatId);
-        throw err;
-      }
-      if (loaded !== null && !hasConversation(loaded)) {
-        this.opts.logger.info(
-          { chatId, emptySessionId: state.claudeSessionId },
-          'resume session has no conversation once harness-written turns are stripped; ' +
-            'starting a fresh session',
-        );
-        state.claudeSessionId = undefined;
-        this.opts.metaStore.update(chatId, (m) => {
-          const { claudeSessionId: _drop, ...rest } = m;
-          void _drop;
-          return { ...rest, updatedAt: this.opts.now() };
-        });
-      }
-    }
 
     // A turn never starts while the host is in a dark wake: it would die when
     // the host drops back to sleep. Before the credential is read, so a long
@@ -10515,11 +10345,8 @@ export class Daemon {
     // preference and never persisted — it is re-decided next turn — but a
     // failure has to name the key that spent, or a host whose first key is out
     // marks the wrong one and never learns.
-    let movedAccount = false;
     if (oauth.ok) {
       const previous = this.runningOnAccount.get(chatId);
-      movedAccount =
-        previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
       // A reattached turn is still running on the account it was started on,
       // whatever the host resolves to now: a refusal has to be blamed there.
       const carriedOn =
@@ -10589,32 +10416,19 @@ export class Daemon {
       return false;
     }
 
-    // Claude's provider session cache belongs to the account that created it.
-    // A credit failover is a complete account switch: retain Patch's transcript
-    // but never hand account B account A's session id. The native rebuild below
-    // reseeds a fresh session from Patch's history.
-    // A chat whose last turn never recorded a session id still switched: with
-    // nothing to resume, only the rebuild carries the transcript across.
-    const switchedClaudeAccount =
-      HARNESS_TRAITS[this.harnessOf(chatId)].sessionBoundToAccount &&
-      ((state.claudeSessionId !== undefined &&
-        state.claudeSessionAccountId !== undefined &&
-        oauth.accountId !== undefined &&
-        state.claudeSessionAccountId !== oauth.accountId) ||
-        movedAccount);
-    if (switchedClaudeAccount && state.claudeSessionId !== undefined) {
-      const previousSessionId = state.claudeSessionId;
-      state.claudeSessionId = undefined;
-      state.claudeSessionAccountId = undefined;
-      this.opts.metaStore.update(chatId, (m) => {
-        const { claudeSessionId: _session, claudeSessionAccountId: _account, ...rest } = m;
-        void _session;
-        void _account;
-        return { ...rest, updatedAt: this.opts.now() };
-      });
+    // A turn on another account than the one its session was made on resumes
+    // the same session: the provider's own resume carries it across accounts
+    // (spec/10 § Limits — continue on another account). Patch does not rebuild
+    // or replace it; only the prompt cache is the old account's.
+    if (
+      state.claudeSessionId !== undefined &&
+      state.claudeSessionAccountId !== undefined &&
+      oauth.accountId !== undefined &&
+      state.claudeSessionAccountId !== oauth.accountId
+    ) {
       this.opts.logger.info(
-        { chatId, previousSessionId, runningOn: oauth.accountId },
-        'account changed — rebuilding a fresh provider session from Patch history',
+        { chatId, sessionId: state.claudeSessionId, runningOn: oauth.accountId },
+        'account changed — resuming the same provider session on the new account',
       );
     }
 
@@ -10787,11 +10601,7 @@ export class Daemon {
       retryOfSeq !== undefined &&
       this.durableAttach.has(chatId) &&
       this.durableAttach.get(chatId)?.localId === localId;
-    const reusesLoggedMessage =
-      retryOfSeq !== undefined &&
-      (reattachesDrawnTurn || this.reuseLoggedUserMessage.get(chatId) === retryOfSeq);
-    if (reusesLoggedMessage) {
-      this.reuseLoggedUserMessage.delete(chatId);
+    if (reattachesDrawnTurn) {
       userMessageSeq = retryOfSeq;
     } else if (userContent !== null) {
       // spec/04 § Notes to the agent — each note this turn carries is its own
@@ -10896,237 +10706,25 @@ export class Daemon {
         state.model,
       );
     }
-    // spec/06 § Manager conversation — bounded context: the Manager's model
-    // only ever sees the last N messages of its own conversation. Checked
-    // BEFORE the provider-switch logic below so a bounded reseed and a
-    // switch never fight over `state.claudeSessionId` in the same turn — a
-    // bounded reseed that fires rewrites it in place, and the switch logic
-    // then sees the fresh session like any other.
-    if (chatId === SPECIAL_THREAD_IDS.manager) {
-      await this.ensureBoundedManagerContext(chatId);
-    }
-    // spec/04 § History — a seamless provider switch: the chat's own session
-    // and its MODEL's harness have fallen out of step (setChatModel crossed
-    // providers), so this turn resumes onto the NEW harness by reconstructing
-    // the chat's own track as a native session there, rather than resuming
-    // `state.claudeSessionId` (which belongs to the OLD harness) or starting
-    // fresh with nothing.
-    const sessionHarness: HarnessId | undefined = harnessOfSessionId(state.claudeSessionId);
     const targetHarness = this.harnessOf(chatId);
-    const isProviderSwitch = sessionHarness !== undefined && sessionHarness !== targetHarness;
-    // Patch's own log is the record, the provider session only a cache of it.
-    // A chat restored from disk that has no native session left to resume (the
-    // host died before the provider ever returned an id, or the id/transcript
-    // was cleared above as orphaned or empty) is rebuilt from the log exactly
-    // as a provider switch is — the prior messages, tool calls and results,
-    // and the interrupted turn's own original prompt all reach the model —
-    // instead of starting a contextless session that only sees this prompt.
-    const isNativeRebuild =
-      !isProviderSwitch &&
-      (isResume || switchedClaudeAccount || this.rebuildFromLog.has(chatId)) &&
-      !fork &&
-      !state.claudeSessionId &&
-      this.hasPriorTrack(chatId, userMessageSeq) &&
-      // A chat that never answered anything has no session to rebuild: the send
-      // carries its prompt itself and starts fresh. Only a restart's "carry on"
-      // re-send leans on the log for the prompt it never repeats.
-      (this.hasAnsweredTrack(chatId, userMessageSeq) || this.interruptedResend.has(chatId));
-    this.rebuildFromLog.delete(chatId);
-    // spec/04 § History — preserve the cached prefix: a return to a harness
-    // this track used before resumes ITS OWN prior session and hands over
-    // only the delta (everything that happened elsewhere since), so the
-    // provider's prompt cache still covers everything up to the switch.
-    // Building from scratch is reserved for a harness this track has never
-    // run on (or whose prior session is genuinely gone).
-    let reconstructTrack: readonly TrackEntry[] | undefined;
-    let resumeExistingNativeSessionId: string | undefined;
-    let handoffDivider: HandoffDivider | undefined;
-    let emptyRebuild = false;
-    if (isProviderSwitch || isNativeRebuild) {
-      const compactRequest = this.pendingCompactSwitch.get(chatId);
-      this.pendingCompactSwitch.delete(chatId);
-      // spec/04 § History — "switch and compact": only honoured when it's
-      // still the SAME switch it was requested for (the model hasn't moved
-      // again since — a stale request from a switch that never ran does not
-      // silently fire on a different one).
-      const useCompact =
-        isProviderSwitch &&
-        compactRequest !== undefined &&
-        compactRequest.outgoingSessionId === state.claudeSessionId;
-      let chosen: {
-        track: TrackEntry[];
-        activeBranchId: string;
-        fullTrackLastSeq: number;
-      };
-      if (useCompact) {
-        const compact = await this.buildCompactSwitchTrack(
-          chatId,
-          state.folder,
-          compactRequest!.outgoingSessionId,
-          compactRequest!.outgoingModel,
-          userMessageSeq,
-        );
-        // NO FALLBACK: the user asked for the cheap path specifically: a
-        // digest failure fails the SWITCH loudly rather than silently
-        // reconstructing in full instead (spec/04 § History).
-        if (!compact.ok) {
-          this.aborters.delete(chatId);
-          const error = { code: 'switch_compact_failed' as const, message: compact.error };
-          this.emit({
-            type: 'chat.error',
-            chatId,
-            error,
-            seq: this.bumpSeq(chatId),
-            ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}),
-          });
-          this.closeTurnInHistory(chatId, 'failed', error);
-          this.chatState.setActivity(chatId, 'idle');
-          this.emitState(chatId);
-          return false;
-        }
-        chosen = compact;
-      } else {
-        const plan = await this.planHarnessReconstruction(
-          chatId,
-          targetHarness,
-          state.folder,
-          userMessageSeq,
-        );
-        chosen = plan;
-        resumeExistingNativeSessionId = switchedClaudeAccount
-          ? undefined
-          : plan.resumeExistingSessionId;
-        // spec/04 § Handoff budget — a track built from scratch on another
-        // provider is sized to the target's window first; a resume of the
-        // target's own earlier session only carries the delta.
-        if (isProviderSwitch && plan.resumeExistingSessionId === undefined) {
-          const handoff = await this.planProviderHandoff({
-            chatId,
-            state,
-            fullTrack: plan.track,
-            branchId: plan.activeBranchId,
-            prompt,
-            ...(userMessageSeq !== undefined ? { userMessageSeq } : {}),
-          });
-          if (!handoff.ok) {
-            this.aborters.delete(chatId);
-            const error = this.failHandoff(chatId, 'handoff_too_large', handoff.message, {
-              ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}),
-              revertModel: true,
-            });
-            this.closeTurnInHistory(chatId, 'failed', error);
-            return false;
-          }
-          chosen = { ...plan, track: handoff.track };
-          handoffDivider = handoff.divider;
-        }
-      }
-      reconstructTrack = chosen.track;
-      // A rebuild with nothing left once harness-written turns and trailing
-      // unanswered prompts are stripped (a chat whose only events are its prompt
-      // and a limit notice) leaves the reseeded transcript EMPTY on disk, which
-      // Claude Code refuses to resume ("No conversation found"). There is nothing to carry, so this turn is a genuinely fresh
-      // session: no resume id, no reseed.
-      if (
-        isNativeRebuild &&
-        HARNESS_TRAITS[targetHarness].ownsSessionFile &&
-        !hasConversation(
-          stripSyntheticTurns(
-            toClaudeSessionEntries(reconstructTrack, {
-              sessionId: 'probe',
-              folder: state.folder,
-              model: state.model ?? null,
-            }) as unknown as Parameters<typeof stripSyntheticTurns>[0],
-          ).entries,
-        )
-      ) {
-        emptyRebuild = true;
-        this.opts.logger.info(
-          { chatId },
-          'native rebuild has no answered turn to carry; starting a fresh session',
-        );
-      }
-      // A rebuild after a restart is not a switch: no divider to announce.
-      if (isProviderSwitch) {
-        this.runningProviderSwitch.set(chatId, {
-          toHarness: targetHarness,
-          toModel: state.model ?? null,
-          // `role: 'system'` messages (a compaction note, an earlier
-          // `sessionChange` divider) never make it into the reconstruction
-          // itself (`toClaudeSessionEntries`/`toResponsesItems` both drop
-          // them) — excluded here too so this count matches what the target
-          // harness actually receives.
-          seededMessages: reconstructTrack.filter(
-            (t) => t.event.type === 'chat.message' && t.event.role !== 'system',
-          ).length,
-          ...(handoffDivider ? { handoff: handoffDivider } : {}),
-        });
-      }
-      // Stash the OUTGOING harness's own session + how much of the track it
-      // already has — a LATER return to it reads this back as `prior` above.
-      // Written unconditionally (a chat leaving a harness for the first
-      // time), never mind whether THIS switch resumes an old session itself,
-      // or compacted rather than reconstructing in full — a plain return trip
-      // LATER should still ride the outgoing session's own full cache.
-      if (sessionHarness !== undefined && state.claudeSessionId) {
-        const outgoingSessionId = state.claudeSessionId;
-        const lastSeq = chosen.fullTrackLastSeq;
-        this.opts.metaStore.update(chatId, (m) => ({
-          ...m,
-          branches: (m.branches ?? []).map((b) =>
-            b.branchId === chosen.activeBranchId
-              ? {
-                  ...b,
-                  harnessSessions: {
-                    ...b.harnessSessions,
-                    [sessionHarness]: { sessionId: outgoingSessionId, lastSeq },
-                  },
-                }
-              : b,
-          ),
-        }));
-      }
-      // Claude resumes in place from the chat's own config dir, so the delta
-      // is appended to that file BEFORE the resume call, threaded onto the
-      // existing session's own last entry rather than a disconnected second
-      // root (spec/04 § History).
-      if (resumeExistingNativeSessionId && HARNESS_TRAITS[targetHarness].ownsSessionFile) {
-        const store = this.claudeSessionStoreFor(chatId, state.folder);
-        const key = { projectKey: chatId, sessionId: resumeExistingNativeSessionId };
-        const existing = await store.load(key);
-        // `load()` can source `existing` from the old mirror or the shared
-        // store when this session has not been migrated yet. `append()` only
-        // ever writes the chat's own file, so re-affirm `existing` there first
-        // (a no-op, dedup by uuid, once it is already there).
-        if (existing && existing.length > 0) await store.append(key, existing);
-        const startParentUuid = existing?.at(-1)?.['uuid'];
-        await store.append(
-          key,
-          toClaudeSessionEntries(reconstructTrack, {
-            sessionId: resumeExistingNativeSessionId,
-            folder: state.folder,
-            model: state.model ?? null,
-            startParentUuid: typeof startParentUuid === 'string' ? startParentUuid : null,
-          }),
-        );
-      }
+    // A session made by another provider cannot be resumed here: a chat whose
+    // model was switched in place before linked chats (or a special thread
+    // that has just changed provider) starts a fresh session. Patch never
+    // carries one provider's session into another's (spec/04 § Provider switches).
+    const sessionHarness: HarnessId | undefined = harnessOfSessionId(state.claudeSessionId);
+    if (sessionHarness !== undefined && sessionHarness !== targetHarness && !fork) {
+      this.endSessionMemory(chatId, 'it was made by another provider');
     }
     const claudeResumeId: string | undefined =
-      resumeExistingNativeSessionId ??
-      ((isProviderSwitch || isNativeRebuild) && HARNESS_TRAITS[targetHarness].ownsSessionFile
-        ? emptyRebuild
-          ? undefined
-          : randomUUID()
-        : fork?.resumeAtUuid === null
-          ? // Editing the FIRST message: the shared prefix is empty, so there is
-            // nothing to resume. Resuming the parent would carry the original
-            // message and everything after it into the new track.
-            undefined
-          : state.claudeSessionId);
+      fork?.resumeAtUuid === null
+        ? // Editing the FIRST message: the shared prefix is empty, so there is
+          // nothing to resume. Resuming the parent would carry the original
+          // message and everything after it into the new track.
+          undefined
+        : state.claudeSessionId;
     // Claude runs under the chat's own config dir: make its one conversation
-    // file ready (migrate / reseed / strip) and remember where it ends, so
-    // what Claude itself writes on resume can be surfaced after the turn.
-    let claudeTranscript: { path: string; size: number } | undefined;
+    // file ready (a session from before per-chat config dirs is migrated in).
+    // Patch never edits or reads the file for display.
     if (HARNESS_TRAITS[targetHarness].ownsSessionFile && claudeResumeId !== undefined) {
       await createClaudeSessionStore({
         chatId,
@@ -11134,41 +10732,9 @@ export class Daemon {
         chatDir: this.chatDirFor(chatId),
         claudeProjectsRoot: this.claudeProjectsRoot,
         logger: this.opts.logger,
-        // Only a from-scratch rebuild reseeds — a resume of an existing
-        // session already had its delta appended above.
-        ...((isProviderSwitch || isNativeRebuild) &&
-        !resumeExistingNativeSessionId &&
-        reconstructTrack
-          ? {
-              reseed: {
-                sessionId: claudeResumeId,
-                events: reconstructTrack,
-                model: state.model ?? null,
-              },
-            }
-          : {}),
       }).prepare(claudeResumeId);
-      const path = chatTranscriptPath(this.chatDirFor(chatId), state.folder, claudeResumeId);
-      claudeTranscript = { path, size: transcriptSize(path) };
     }
-    // A turn the user stopped before the model answered leaves a track of bare
-    // prompts, which the session store drops — so the next send (a "Continue")
-    // starts a fresh session and the model sees only that word. Carry the
-    // unanswered prompts in with it.
-    // Only the bare "Continue" nudge (the stop-card button / Threads carry-on):
-    // any other message after a stop is the user moving on, not asking to resume.
-    const sdkPrompt =
-      !fork &&
-      prompt.trim().toLowerCase() === 'continue' &&
-      retryOfSeq === undefined &&
-      userMessageSeq !== undefined &&
-      !isProviderSwitch &&
-      !isNativeRebuild &&
-      !state.claudeSessionId &&
-      this.hasPriorTrack(chatId, userMessageSeq) &&
-      !this.hasAnsweredTrack(chatId, userMessageSeq)
-        ? this.withUnansweredPrompts(chatId, userMessageSeq, prompt)
-        : prompt;
+    const sdkPrompt = prompt;
     // Continuing the provider's own saved session is the resume capability
     // (spec/02 § Provider adapters): refused, never replaced with a fresh one.
     if (claudeResumeId !== undefined && !modelHasCapability(state.model, 'resume')) {
@@ -11184,19 +10750,10 @@ export class Daemon {
       ...(HARNESS_TRAITS[targetHarness].ownsSessionFile
         ? { claudeConfigDir: this.claudeConfigDirFor(chatId) }
         : {}),
-      // A switch carries the track across: appended to the provider's own
-      // session where it can take items, otherwise the opening messages of a
-      // fresh one (each adapter's traits name its option).
-      ...handoffRunOptions(
-        HARNESS_TRAITS[targetHarness],
-        (isProviderSwitch || isNativeRebuild) && reconstructTrack ? reconstructTrack : undefined,
-        resumeExistingNativeSessionId !== undefined,
-      ),
       // spec/04 § Branching — this turn opens a new TRACK: resume the parent
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
       ...(fork ? { fork } : {}),
-      ...(handoffDivider ? { handoffStrict: true } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
@@ -11308,77 +10865,41 @@ export class Daemon {
     );
 
     let sawResult = false;
-    let transcriptScanned = false;
     const run = (async (): Promise<boolean> => {
       try {
-        for (;;) {
-          try {
-            for await (const env of untilAborted(
-              withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
-              abortController.signal,
-              (env) => env.type === 'tool_result',
-            )) {
-              if (env.type === 'result' || env.type === 'error') sawResult = true;
-              // What Claude itself wrote to the file on resume (a `No response
-              // requested.`) never crosses the SDK stream: read it back once,
-              // as soon as the process is talking (spec/02 § Per-turn process).
-              if (!transcriptScanned && claudeTranscript) {
-                transcriptScanned = true;
-                this.noteMirroredEntries(
-                  chatId,
-                  entriesSince(claudeTranscript.path, claudeTranscript.size),
-                );
-              }
-              this.handleEnvelope(chatId, env, userMessageSeq);
-              // A subagent's result is the end of its turn. Waiting on the stream
-              // to close as well would hang the settle (and so the parent's reply)
-              // for as long as a command the agent detached keeps the process's
-              // pipes open. Leaving the loop closes the stream.
-              if (env.type === 'result' && state.subagent !== undefined) break;
-            }
-            // A stream that closes without the provider's final `result` (or an error
-            // it has already reported) did not
-            // finish the turn: the connection dropped or the process went away
-            // mid-work. Counting that as completed ended the turn in silence with
-            // the work half done, so it fails here, loudly, and takes the retry
-            // ladder like any other dropped stream. A stop closes the stream
-            // early on purpose.
-            if (!sawResult && !abortController.signal.aborted) {
-              throw new Error('Model stream ended before the turn finished (no final result)');
-            }
-            break;
-          } catch (err) {
-            // spec/04 § Handoff budget — the target refused the handoff as over
-            // its window before producing anything (so no tool ran): re-plan
-            // ONCE, tighter. Never the same request again; a second overflow
-            // is the error below.
-            const tighter =
-              err instanceof HandoffOverflowError
-                ? this.replanHandoff(chatId, state, err, userMessageSeq)
-                : undefined;
-            if (!tighter) throw err;
-            const reseedRunOptions = HARNESS_TRAITS[targetHarness].reseedRunOptions;
-            if (reseedRunOptions !== null) Object.assign(sdkOpts, reseedRunOptions(tighter));
-            else if (claudeResumeId !== undefined) {
-              // The rejected handoff produced no output, so the file holds only
-              // the seed that was too big: replace it outright.
-              await createClaudeSessionStore({
-                chatId,
-                folder: state.folder,
-                chatDir: this.chatDirFor(chatId),
-                claudeProjectsRoot: this.claudeProjectsRoot,
-                logger: this.opts.logger,
-                reseed: {
-                  sessionId: claudeResumeId,
-                  events: tighter,
-                  model: state.model ?? null,
-                  replace: true,
-                },
-              }).prepare(claudeResumeId);
-            }
+        for await (const env of untilAborted(
+          withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
+          abortController.signal,
+          (env) => env.type === 'tool_result',
+        )) {
+          if (env.type === 'result' || env.type === 'error') sawResult = true;
+          // What Claude itself wrote to the file on resume (a `No response
+          // requested.`) never crosses the SDK stream: read it back once,
+          // as soon as the process is talking (spec/02 § Per-turn process).
+          if (!transcriptScanned && claudeTranscript) {
+            transcriptScanned = true;
+            this.noteMirroredEntries(
+              chatId,
+              entriesSince(claudeTranscript.path, claudeTranscript.size),
+            );
           }
+          this.handleEnvelope(chatId, env, userMessageSeq);
+          // A subagent's result is the end of its turn. Waiting on the stream
+          // to close as well would hang the settle (and so the parent's reply)
+          // for as long as a command the agent detached keeps the process's
+          // pipes open. Leaving the loop closes the stream.
+          if (env.type === 'result' && state.subagent !== undefined) break;
         }
-        this.verifyHandoff(chatId, sdkOpts.prompt);
+        // A stream that closes without the provider's final `result` (or an error
+        // it has already reported) did not
+        // finish the turn: the connection dropped or the process went away
+        // mid-work. Counting that as completed ended the turn in silence with
+        // the work half done, so it fails here, loudly, and takes the retry
+        // ladder like any other dropped stream. A stop closes the stream
+        // early on purpose.
+        if (!sawResult && !abortController.signal.aborted) {
+          throw new Error('Model stream ended before the turn finished (no final result)');
+        }
         turnOutcome = 'completed';
         // A turn that completes cleanly RECOVERS an errored chat: drop the
         // errored status and the persisted error detail so it no longer counts
@@ -11531,16 +11052,6 @@ export class Daemon {
             state.goalProgress = { ...state.goalProgress, pausedByStop: true };
           this.chatState.setActivity(chatId, 'idle');
           this.emitState(chatId);
-          return false;
-        }
-        if (err instanceof HandoffOverflowError) {
-          turnError = this.failHandoff(
-            chatId,
-            'handoff_overflow',
-            'The target model rejected the handoff as too large, even after re-planning it smaller. The history is untouched; retry, switch back, or continue in a linked fresh chat.',
-            { ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}) },
-          );
-          this.opts.logger.warn({ chatId, err: err.message }, 'handoff overflowed twice');
           return false;
         }
         const errMsg = (err as Error).message ?? String(err);
@@ -11929,18 +11440,10 @@ export class Daemon {
             const cur = this.chatState.get(chatId);
             const restartFresh = aborts === SESSION_ABORT_RESTARTS;
             if (restartFresh && cur) {
-              cur.claudeSessionId = undefined;
-              this.opts.metaStore.update(chatId, (m) => {
-                const { claudeSessionId: _drop, ...rest } = m;
-                void _drop;
-                return { ...rest, updatedAt: this.opts.now() };
-              });
-              this.hydratedFromDisk.delete(chatId);
-              // The fresh session has no memory of the task in progress: rebuild
-              // it from Patch's log and tell the model to carry on, rather than
-              // handing it the latest message alone.
-              this.rebuildFromLog.add(chatId);
-              this.interruptedResend.add(chatId);
+              // The fresh session has no memory of the task in progress, and
+              // Patch does not rebuild it: say so in the record and in the
+              // re-sent turn's own note.
+              this.endSessionMemory(chatId, 'its session failed twice and was restarted');
             }
             this.opts.logger.warn(
               { chatId, aborts, restartFresh, error: errMsg },
@@ -11977,14 +11480,7 @@ export class Daemon {
         if (isSessionInvalid && this.owedResend.delete(chatId)) {
           const cur = this.chatState.get(chatId);
           const deadSessionId = cur?.claudeSessionId;
-          if (cur) cur.claudeSessionId = undefined;
-          this.opts.metaStore.update(chatId, (m) => {
-            const { claudeSessionId: _drop, ...rest } = m;
-            void _drop;
-            return { ...rest, updatedAt: this.opts.now() };
-          });
-          this.hydratedFromDisk.delete(chatId);
-          this.rebuildFromLog.add(chatId);
+          this.endSessionMemory(chatId, 'the provider could not resume its session');
           this.opts.logger.warn(
             { chatId, deadSessionId: deadSessionId ?? null, error: errMsg },
             'resumed onto a session with no transcript — re-sending the owed turn as a fresh session',
@@ -12024,7 +11520,7 @@ export class Daemon {
           // from the hydrated set so the recovery turn is treated as a
           // legitimate first turn (spec/04 line 46: "starts fresh").
           this.hydratedFromDisk.delete(chatId);
-          this.rebuildFromLog.add(chatId);
+          this.endSessionMemory(chatId, 'the provider could not resume its session');
         }
         // A LIMIT THE PROVIDER STATED, THAT NOBODY PARKED — auto-resume off, or
         // its retry budget spent. Patch renders its own structured account of
@@ -13108,48 +12604,14 @@ export class Daemon {
     });
   }
 
-  /**
-   * Entries Claude Code just wrote to this chat's session mirror. The one that
-   * matters is the `No response requested.` it inserts on resuming a session
-   * whose last turn got no reply: it goes into the model's context as the
-   * agent's own words but never crosses the SDK stream, so without this the
-   * user cannot see it at all. Failure notices are left out — they already
-   * fail the turn loudly.
-   */
-  private noteMirroredEntries(chatId: string, entries: readonly SessionStoreEntry[]): void {
-    for (const entry of entries) {
-      if (entry.type !== 'assistant' || isModelOutput(entry)) continue;
-      if (assistantErrorText(entry) !== undefined) continue;
-      const text = assistantText(entry);
-      if (text.length === 0) continue;
-      this.emitSyntheticNotice(chatId, text, entry.uuid);
-    }
-  }
-
   private handleEnvelopeInner(chatId: string, env: SdkEnvelope, userMessageSeq?: number): void {
-    // spec/04 § Handoff budget — what the target reports about itself: its real
-    // window (learned for the next switch) and the input tokens of the first
-    // request after a handoff (checked against the estimate by `verifyHandoff`).
-    const limitsModel = this.chatState.get(chatId)?.model;
-    if (env.tokenUsage?.contextWindow !== undefined && limitsModel)
-      this.opts.modelLimits?.note(limitsModel, { contextWindow: env.tokenUsage.contextWindow });
-    const active = this.activeHandoffs.get(chatId);
-    if (active && active.reportedInputTokens === null) {
-      const reported = env.tokenUsage?.inputTokens ?? assistantContextTokens(env.raw)?.tokens;
-      if (reported !== undefined) active.reportedInputTokens = reported;
-    }
     if (env.sessionId) {
       const cur = this.chatState.get(chatId);
       if (cur && cur.claudeSessionId !== env.sessionId) {
         // spec/04 § History — the chat moved onto a new harness session. Its
-        // first, a fork's own, a provider switch's, or one the harness
-        // rotated to on its own (/clear, /compact).
+        // first, a fork's own, or one the harness rotated to on its own
+        // (/clear, /compact).
         const fork = this.runningForks.get(chatId);
-        const providerSwitch = this.runningProviderSwitch.get(chatId);
-        if (providerSwitch && env.seedTrim) {
-          providerSwitch.seededMessages -= env.seedTrim;
-          providerSwitch.trimmedRecords = env.seedTrim;
-        }
         const previous = cur.claudeSessionId;
         this.logRecord(
           chatId,
@@ -13158,13 +12620,7 @@ export class Daemon {
             harness: this.harnessOf(chatId),
             model: cur.model ?? null,
             sessionId: env.sessionId,
-            reason: fork
-              ? 'fork'
-              : providerSwitch
-                ? 'switch'
-                : previous === undefined
-                  ? 'start'
-                  : 'rotate',
+            reason: fork ? 'fork' : previous === undefined ? 'start' : 'rotate',
             ...(fork
               ? {
                   seed: {
@@ -13172,25 +12628,18 @@ export class Daemon {
                     ...(previous !== undefined ? { parentSessionId: previous } : {}),
                   },
                 }
-              : providerSwitch
-                ? {
-                    seed: {
-                      seededMessages: providerSwitch.seededMessages,
-                      ...(previous !== undefined ? { parentSessionId: previous } : {}),
-                      ...(providerSwitch.trimmedRecords
-                        ? { trimmedRecords: providerSwitch.trimmedRecords }
-                        : {}),
-                    },
-                  }
-                : {}),
+              : {}),
           },
           { sync: true },
         );
         cur.claudeSessionId = env.sessionId;
         cur.claudeSessionAccountId = this.runningOnAccount.get(chatId);
+        const sessionFromSeq =
+          userMessageSeq ?? Math.max(0, this.chatLog.recordedHighWater(chatId));
         this.opts.metaStore.update(chatId, (m) => ({
           ...m,
           claudeSessionId: env.sessionId,
+          sessionFromSeq,
           ...(cur.claudeSessionAccountId !== undefined
             ? { claudeSessionAccountId: cur.claudeSessionAccountId }
             : {}),
@@ -13208,69 +12657,6 @@ export class Daemon {
             : {}),
           updatedAt: this.opts.now(),
         }));
-        if (providerSwitch?.handoff) {
-          // The target accepted the handoff (its session exists, the track is in it).
-          this.opts.metaStore.update(chatId, (m) => ({
-            ...m,
-            ...(m.handoff ? { handoff: { ...m.handoff, state: 'sent' as const } } : {}),
-          }));
-        }
-        if (providerSwitch) {
-          // A quiet divider, not a notice — the fact rides on the field, not
-          // on eye-catching text (spec/04 § History, unlike a permission-mode
-          // change, which IS meant to draw the eye).
-          this.emit({
-            type: 'chat.message',
-            chatId,
-            role: 'system',
-            content: providerSwitch.handoff
-              ? dividerCopy({
-                  model: providerSwitch.handoff.model,
-                  carried: providerSwitch.handoff.carriedEntries,
-                  total: providerSwitch.handoff.totalEntries,
-                  estimatedTokens: providerSwitch.handoff.estimatedTokens,
-                  availableTokens: providerSwitch.handoff.availableTokens,
-                  windowKnown: providerSwitch.handoff.windowKnown,
-                  summary: providerSwitch.handoff.summary,
-                  ...(providerSwitch.handoff.summaryNote !== undefined
-                    ? { summaryNote: providerSwitch.handoff.summaryNote }
-                    : {}),
-                  replanned: providerSwitch.handoff.replanned,
-                })
-              : '',
-            seq: this.bumpSeq(chatId),
-            createdAt: this.opts.now(),
-            sessionChange: {
-              harness: providerSwitch.toHarness,
-              model: providerSwitch.toModel ?? 'default',
-              seededMessages: providerSwitch.seededMessages,
-              ...(providerSwitch.trimmedRecords
-                ? { trimmedRecords: providerSwitch.trimmedRecords }
-                : {}),
-              ...(providerSwitch.handoff
-                ? {
-                    handoff: {
-                      carriedEntries: providerSwitch.handoff.carriedEntries,
-                      totalEntries: providerSwitch.handoff.totalEntries,
-                      ...(providerSwitch.handoff.omittedFromSeq !== undefined
-                        ? {
-                            omittedFromSeq: providerSwitch.handoff.omittedFromSeq,
-                            omittedToSeq: providerSwitch.handoff.omittedToSeq!,
-                          }
-                        : {}),
-                      estimatedTokens: providerSwitch.handoff.estimatedTokens,
-                      availableTokens: providerSwitch.handoff.availableTokens,
-                      summary: providerSwitch.handoff.summary,
-                      ...(providerSwitch.handoff.summaryNote !== undefined
-                        ? { summaryNote: providerSwitch.handoff.summaryNote }
-                        : {}),
-                      ...(providerSwitch.handoff.replanned ? { replanned: true as const } : {}),
-                    },
-                  }
-                : {}),
-            },
-          });
-        }
       }
     }
 
@@ -15749,593 +15135,6 @@ export class Daemon {
     return this.claudeConfigDirFor(chatId);
   }
 
-  private claudeSessionStoreFor(chatId: string, folder: string): ClaudeSessionStore {
-    return createClaudeSessionStore({
-      chatId,
-      folder,
-      chatDir: this.chatDirFor(chatId),
-      claudeProjectsRoot: this.claudeProjectsRoot,
-      logger: this.opts.logger,
-    });
-  }
-
-  /**
-   * Whether `harness` still has `sessionId` natively available for THIS
-   * track (spec/04 § History — "build from scratch only when no original
-   * native session exists"). Claude checks the mirror OR the harness's own
-   * on-disk transcript (`claudeSessionStore`'s own load() priority — a
-   * session can be genuinely resumable even if only one of the two survived);
-   * Codex's own history store is the single source of truth for its ids, no
-   * separate mirror to fall back to.
-   */
-  private async hasNativeSessionFor(
-    chatId: string,
-    folder: string,
-    harness: HarnessId,
-    sessionId: string,
-  ): Promise<boolean> {
-    if (!HARNESS_TRAITS[harness].ownsSessionFile)
-      return this.historyReader.hasSession({ folder, sessionId });
-    const loaded = await this.claudeSessionStoreFor(chatId, folder).load({
-      projectKey: chatId,
-      sessionId,
-    });
-    return loaded !== null && loaded.length > 0;
-  }
-
-  /**
-   * What a switch onto `targetHarness` would reconstruct, WITHOUT doing it
-   * (spec/04 § History — preserve the cached prefix, and the confirmation
-   * estimate that previews it before the user commits). Shared by the actual
-   * switch (`runQuery`) and `estimateProviderSwitch` — both need the exact
-   * same "resume this track's own prior session, or rebuild from scratch"
-   * decision; only `runQuery` acts on it (stashing, mirror-appending).
-   *
-   * `excludeFromSeq` drops the in-flight turn's own trigger message (already
-   * logged by the time `runQuery` reaches this, but not yet run) — omitted
-   * for a preview, since there IS no in-flight message yet.
-   */
-  /** Whether the active track holds anything logged before `beforeSeq`. */
-  private hasPriorTrack(chatId: string, beforeSeq: number | undefined): boolean {
-    const meta = this.opts.metaStore.read(chatId);
-    if (!meta) return false;
-    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    return readTrack(this.chatLog, chatId, meta, branchId, -1).some(
-      (t) => beforeSeq === undefined || t.record.seq < beforeSeq,
-    );
-  }
-
-  /**
-   * Does the track hold anything the model took part in — a reply or a tool
-   * call — and not only user prompts nobody answered? The session store drops
-   * unanswered prompts, so a session rebuilt from a track of nothing else is
-   * empty and Claude Code cannot resume it ("No conversation found").
-   */
-  private withUnansweredPrompts(
-    chatId: string,
-    beforeSeq: number | undefined,
-    prompt: string,
-  ): string {
-    const meta = this.opts.metaStore.read(chatId);
-    if (!meta) return prompt;
-    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    const earlier = readTrack(this.chatLog, chatId, meta, branchId, -1)
-      .filter((t) => beforeSeq === undefined || t.record.seq < beforeSeq)
-      .flatMap((t) =>
-        t.event.type === 'chat.message' && t.event.role === 'user' && t.event.content
-          ? [t.event.content]
-          : [],
-      );
-    if (earlier.length === 0) return prompt;
-    return `Earlier in this chat, not yet answered (the turn was stopped):\n\n${earlier.join('\n\n')}\n\nNow: ${prompt}`;
-  }
-
-  private hasAnsweredTrack(chatId: string, beforeSeq: number | undefined): boolean {
-    const meta = this.opts.metaStore.read(chatId);
-    if (!meta) return false;
-    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    return readTrack(this.chatLog, chatId, meta, branchId, -1).some(
-      (t) =>
-        (beforeSeq === undefined || t.record.seq < beforeSeq) &&
-        (t.event.type !== 'chat.message' || t.event.role !== 'user'),
-    );
-  }
-
-  /**
-   * spec/04 § Handoff budget — size a cross-provider handoff to the TARGET's
-   * window before anything is sent. Whole track if it fits; otherwise the
-   * ledger plus the widest recent window that does, plus a model-written
-   * narrative only if the source can produce one right now. `ok: false` is a
-   * refusal: nothing has been sent and the caller must say so.
-   */
-  private async planProviderHandoff(o: {
-    chatId: string;
-    state: ChatState;
-    fullTrack: readonly TrackEntry[];
-    branchId: string;
-    prompt: string;
-    userMessageSeq?: number;
-  }): Promise<
-    { ok: true; track: TrackEntry[]; divider: HandoffDivider } | { ok: false; message: string }
-  > {
-    const { chatId, state, fullTrack, prompt } = o;
-    const targetModel = state.model ?? null;
-    const { budget, windowKnown } = budgetFor(
-      this.opts.modelLimits?.get(targetModel),
-      this.harnessConfig,
-    );
-    const planState = {
-      permissionMode: this.chatPermissionMode(chatId),
-      ...gitBranchOf(state.folder),
-      narrative: null as string | null,
-    };
-    let plan = planHandoff(chatId, fullTrack, budget, {
-      latestInstruction: prompt,
-      ...planState,
-    });
-    let summaryNote: string | undefined = 'only the recent turns were needed';
-    if (plan.ok && plan.omittedEntries > 0) {
-      const narrative = await this.handoffNarrative(chatId, state);
-      summaryNote = narrative.note;
-      if (narrative.text !== null) {
-        planState.narrative = narrative.text;
-        plan = planHandoff(chatId, fullTrack, budget, { latestInstruction: prompt, ...planState });
-      }
-    }
-    if (!plan.ok) return { ok: false, message: plan.message };
-    const key = handoffKey(
-      chatId,
-      o.branchId,
-      fullTrack[0]?.record.seq ?? -1,
-      targetModel ?? 'default',
-    );
-    this.activeHandoffs.set(chatId, {
-      key,
-      prompt,
-      instructionHash: instructionHash(prompt),
-      track: fullTrack,
-      targetModel,
-      planState,
-      summaryNote: planState.narrative === null ? summaryNote : undefined,
-      windowKnown,
-      estimatedTokens: plan.estimatedTokens,
-      availableTokens: plan.availableTokens,
-      replanned: false,
-      reportedInputTokens: null,
-    });
-    this.opts.metaStore.update(chatId, (m) => ({
-      ...m,
-      handoff: {
-        key,
-        state: 'planned',
-        targetModel,
-        prompt,
-        estimatedTokens: plan.ok ? plan.estimatedTokens : 0,
-        availableTokens: plan.availableTokens,
-        instructionHash: instructionHash(prompt),
-        ...(o.userMessageSeq !== undefined ? { userMessageSeq: o.userMessageSeq } : {}),
-      },
-    }));
-    return {
-      ok: true,
-      track: trackForPlan(chatId, plan, planState, this.opts.now()),
-      divider: this.dividerFor(chatId, plan, fullTrack.length),
-    };
-  }
-
-  private dividerFor(
-    chatId: string,
-    plan: Extract<HandoffPlan, { ok: true }>,
-    totalEntries: number,
-  ): HandoffDivider {
-    const active = this.activeHandoffs.get(chatId)!;
-    return {
-      model: active.targetModel ?? 'default',
-      carriedEntries: plan.carried.length,
-      totalEntries,
-      ...(plan.omittedEntries > 0
-        ? { omittedFromSeq: plan.ledger.fromSeq, omittedToSeq: plan.carriedFromSeq - 1 }
-        : {}),
-      estimatedTokens: plan.estimatedTokens,
-      availableTokens: plan.availableTokens,
-      windowKnown: active.windowKnown,
-      summary: active.planState.narrative !== null,
-      ...(active.summaryNote !== undefined ? { summaryNote: active.summaryNote } : {}),
-      replanned: active.replanned,
-    };
-  }
-
-  /** The optional model-written summary: only when the source answers within the timeout. */
-  private async handoffNarrative(
-    chatId: string,
-    state: ChatState,
-  ): Promise<{ text: string | null; note: string | undefined }> {
-    if (!this.opts.generateDigest || !state.claudeSessionId)
-      return { text: null, note: 'no summariser is configured' };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const text = await Promise.race([
-        this.opts.generateDigest({
-          chatId,
-          resumeSessionId: state.claudeSessionId,
-          folder: state.folder,
-          claudeConfigDir: this.claudeConfigDirFor(chatId),
-          model: state.model ?? null,
-        }),
-        new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), HANDOFF_NARRATIVE_TIMEOUT_MS);
-        }),
-      ]);
-      return text === null
-        ? { text: null, note: 'the previous model could not write one in time' }
-        : { text, note: undefined };
-    } catch (err) {
-      this.opts.logger.warn(
-        { chatId, err: (err as Error).message },
-        'handoff narrative unavailable — continuing from the deterministic ledger',
-      );
-      return { text: null, note: `the previous model was unavailable: ${(err as Error).message}` };
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  /**
-   * One tighter plan after the target said the handoff was over its window.
-   * `undefined` means there is nothing smaller to try (already re-planned
-   * once, or the plan would fall below a useful size): the caller ends in an
-   * error rather than resending.
-   */
-  private replanHandoff(
-    chatId: string,
-    state: ChatState,
-    err: HandoffOverflowError,
-    userMessageSeq: number | undefined,
-  ): TrackEntry[] | undefined {
-    const active = this.activeHandoffs.get(chatId);
-    if (!active || active.replanned) return undefined;
-    if (err.reportedLimit !== undefined && active.targetModel)
-      this.opts.modelLimits?.note(active.targetModel, { contextWindow: err.reportedLimit });
-    const tighter = replanAfterOverflow(
-      { estimatedTokens: active.estimatedTokens, availableTokens: active.availableTokens },
-      err.reportedLimit,
-    );
-    if (!tighter) return undefined;
-    const { budget } = budgetFor(
-      this.opts.modelLimits?.get(active.targetModel),
-      this.harnessConfig,
-    );
-    const plan = planHandoff(chatId, active.track, budget, {
-      latestInstruction: active.prompt,
-      ...active.planState,
-      maxTokensOverride: tighter.maxTokensOverride,
-    });
-    if (!plan.ok) return undefined;
-    active.replanned = true;
-    active.estimatedTokens = plan.estimatedTokens;
-    active.availableTokens = plan.availableTokens;
-    const track = trackForPlan(chatId, plan, active.planState, this.opts.now());
-    const running = this.runningProviderSwitch.get(chatId);
-    if (running) {
-      running.handoff = this.dividerFor(chatId, plan, active.track.length);
-      running.seededMessages = track.filter(
-        (t) => t.event.type === 'chat.message' && t.event.role !== 'system',
-      ).length;
-      delete running.trimmedRecords;
-    }
-    this.opts.metaStore.update(chatId, (m) => ({
-      ...m,
-      ...(m.handoff
-        ? {
-            handoff: {
-              ...m.handoff,
-              state: 'planned' as const,
-              replanned: true,
-              estimatedTokens: plan.estimatedTokens,
-              availableTokens: plan.availableTokens,
-            },
-          }
-        : {}),
-    }));
-    // The re-run starts on a fresh thread: the chat is not on the half-made one.
-    void state;
-    this.opts.logger.warn(
-      { chatId, userMessageSeq: userMessageSeq ?? null, estimatedTokens: plan.estimatedTokens },
-      'handoff overflowed — re-planned tighter, once',
-    );
-    return track;
-  }
-
-  /**
-   * A handoff that cannot go ahead, said plainly with the recoveries a surface
-   * offers (retry, switch back, linked fresh chat). `revertModel` returns a
-   * refused (never-sent) switch to the model it left.
-   */
-  private failHandoff(
-    chatId: string,
-    code: 'handoff_too_large' | 'handoff_overflow',
-    message: string,
-    o: { causeSeq?: number; revertModel?: boolean },
-  ): { code: ChatErrorCode; message: string } {
-    const error = { code, message };
-    this.emit({
-      type: 'chat.error',
-      chatId,
-      error,
-      seq: this.bumpSeq(chatId),
-      ...(o.causeSeq !== undefined ? { causeSeq: o.causeSeq } : {}),
-    });
-    const s = this.chatState.get(chatId);
-    if (o.revertModel && s) {
-      const from = this.opts.metaStore.read(chatId)?.switchedFrom;
-      if (from?.model) {
-        s.model = from.model;
-        this.opts.metaStore.update(chatId, (m) => {
-          const { switchedFrom: _drop, ...rest } = m;
-          void _drop;
-          return { ...rest, model: from.model! };
-        });
-      }
-    }
-    this.activeHandoffs.delete(chatId);
-    this.runningProviderSwitch.delete(chatId);
-    this.chatState.setLastError(chatId, { ...error, at: this.opts.now() });
-    this.chatState.setActivity(chatId, 'idle');
-    this.emitState(chatId);
-    return error;
-  }
-
-  /** The target answered: write `handoff.verified` and close the handoff's state. */
-  private verifyHandoff(chatId: string, deliveredPrompt: string): void {
-    const active = this.activeHandoffs.get(chatId);
-    if (!active) return;
-    this.activeHandoffs.delete(chatId);
-    const delivered = instructionHash(deliveredPrompt);
-    this.logRecord(chatId, {
-      k: 'handoff.verified',
-      key: active.key,
-      replyReceived: true,
-      estimatedTokens: active.estimatedTokens,
-      reportedInputTokens: active.reportedInputTokens,
-      flagged: estimateIsOff(active.estimatedTokens, active.reportedInputTokens),
-      instructionHash: delivered,
-    });
-    if (delivered !== active.instructionHash)
-      this.opts.logger.error(
-        { chatId, planned: active.instructionHash, delivered },
-        'handoff instruction was altered before delivery',
-      );
-    this.opts.metaStore.update(chatId, (m) => {
-      const { switchedFrom: _drop, ...rest } = m;
-      void _drop;
-      return {
-        ...rest,
-        ...(m.handoff ? { handoff: { ...m.handoff, state: 'confirmed' as const } } : {}),
-      };
-    });
-  }
-
-  /**
-   * The recoveries a failed provider switch offers (spec/04 § Handoff budget).
-   * Refused loudly when there is nothing to recover.
-   */
-  async recoverHandoff(
-    chatId: string,
-    action: 'retry' | 'switch_back' | 'linked_chat',
-  ): Promise<void> {
-    const state = this.chatState.get(chatId);
-    if (!state) throw new ChatNotFoundError(chatId);
-    const meta = this.opts.metaStore.read(chatId);
-    const handoff = meta?.handoff;
-    if (!handoff || handoff.state === 'confirmed')
-      throw new Error('This chat has no failed provider switch to recover from');
-    if (action === 'switch_back') {
-      const from = meta?.switchedFrom;
-      const current = this.chatState.get(chatId)?.model ?? null;
-      if (!from?.model) throw new Error('The model this chat was switched from is not recorded');
-      if (current !== from.model) await this.setChatModel(chatId, from.model);
-      this.opts.metaStore.update(chatId, (m) => {
-        const { handoff: _h, switchedFrom: _s, ...rest } = m;
-        void _h;
-        void _s;
-        return rest;
-      });
-      return;
-    }
-    if (action === 'retry') {
-      if (handoff.targetModel && state.model !== handoff.targetModel)
-        await this.setChatModel(chatId, handoff.targetModel);
-      if (handoff.userMessageSeq !== undefined)
-        this.reuseLoggedUserMessage.set(chatId, handoff.userMessageSeq);
-      await this.sendInput({
-        chatId,
-        message: handoff.prompt,
-        localId: `handoff-retry-${chatId}-${this.opts.now()}`,
-        ...(handoff.userMessageSeq !== undefined ? { retryOfSeq: handoff.userMessageSeq } : {}),
-      });
-      return;
-    }
-    const model = handoff.targetModel ?? state.model ?? null;
-    const fullTrack = meta
-      ? readTrack(
-          this.chatLog,
-          chatId,
-          meta,
-          meta.activeBranchId ?? this.branchIdFor(chatId),
-          -1,
-        ).filter(
-          (t) => handoff.userMessageSeq === undefined || t.record.seq < handoff.userMessageSeq,
-        )
-      : [];
-    const { budget } = budgetFor(this.opts.modelLimits?.get(model), this.harnessConfig);
-    const overflowed = state.lastError?.code === 'handoff_overflow';
-    const retighten = overflowed
-      ? replanAfterOverflow({
-          estimatedTokens: handoff.estimatedTokens,
-          availableTokens: handoff.availableTokens,
-        })
-      : null;
-    const plan = planHandoff(chatId, fullTrack, budget, {
-      latestInstruction: handoff.prompt,
-      permissionMode: this.chatPermissionMode(chatId),
-      ...gitBranchOf(state.folder),
-      narrative: null,
-      ...(retighten ? { maxTokensOverride: retighten.maxTokensOverride } : {}),
-    });
-    if (!plan.ok) throw new Error(plan.message);
-    const seed = trackForPlan(
-      chatId,
-      plan,
-      { permissionMode: this.chatPermissionMode(chatId), narrative: null },
-      this.opts.now(),
-    );
-    const newChatId = await this.spawnChat({
-      folder: state.folder,
-      ...(model ? { model } : {}),
-      prompt: [renderSeedTrack(seed), '[The task]', handoff.prompt].join('\n\n'),
-    });
-    this.opts.metaStore.update(newChatId, (m) => ({ ...m, continuedFrom: { chatId } }));
-    this.emit({
-      type: 'chat.message',
-      chatId,
-      role: 'system',
-      content: 'Continued in a linked fresh chat',
-      seq: this.bumpSeq(chatId),
-      createdAt: this.opts.now(),
-      handoffLink: { chatId: newChatId },
-    });
-  }
-
-  private async planHarnessReconstruction(
-    chatId: string,
-    targetHarness: HarnessId,
-    folder: string,
-    excludeFromSeq?: number,
-  ): Promise<{
-    track: TrackEntry[];
-    resumeExistingSessionId?: string;
-    activeBranchId: string;
-    fullTrackLastSeq: number;
-    /** When the track's own last entry was logged (via `this.opts.now()`,
-     * unlike `ChatState.lastUpdated`, which `setActivity` stamps with a raw
-     * `Date.now()`) — the cache-cold check's basis. `undefined` for an empty
-     * track (nothing has happened yet). */
-    lastActivityAt: number | undefined;
-  }> {
-    // Guarantees `meta.branches` is populated (persisting the synthesised
-    // root if this chat predates branching, e.g. every chat that has never
-    // been forked) — otherwise `harnessSessions` has nowhere well-formed to
-    // live and a cache-preserving return trip could never find what an
-    // earlier switch stashed on the way out.
-    this.ensureBranches(chatId);
-    const meta = this.opts.metaStore.read(chatId);
-    const activeBranchId = meta?.activeBranchId ?? this.branchIdFor(chatId);
-    const beforeBoundary = (t: { record: { seq: number } }): boolean =>
-      excludeFromSeq === undefined || t.record.seq < excludeFromSeq;
-    const fullTrack = meta
-      ? readTrack(this.chatLog, chatId, meta, activeBranchId, -1).filter(beforeBoundary)
-      : [];
-    const fullTrackLastSeq = fullTrack.at(-1)?.record.seq ?? -1;
-    const lastActivityAt = fullTrack.at(-1)?.record.at;
-    const branch = meta?.branches?.find((b) => b.branchId === activeBranchId);
-    const prior = branch?.harnessSessions?.[targetHarness];
-    if (prior && (await this.hasNativeSessionFor(chatId, folder, targetHarness, prior.sessionId))) {
-      const delta = meta
-        ? readTrack(this.chatLog, chatId, meta, activeBranchId, prior.lastSeq).filter(
-            beforeBoundary,
-          )
-        : [];
-      return {
-        track: delta,
-        resumeExistingSessionId: prior.sessionId,
-        activeBranchId,
-        fullTrackLastSeq,
-        lastActivityAt,
-      };
-    }
-    return { track: fullTrack, activeBranchId, fullTrackLastSeq, lastActivityAt };
-  }
-
-  /**
-   * "Switch and compact" (spec/04 § History — the cheap path for a huge
-   * chat): the OUTGOING session writes its own handoff (resumed, riding its
-   * cache — `generateDigest`, `rotationDigest.ts`, on WHICHEVER harness it
-   * actually is, via `model`), and the target starts from that plus the last
-   * few turns, instead of the full native reconstruction
-   * `planHarnessReconstruction` would build.
-   *
-   * NO FALLBACK: no generator configured, or the generator itself failing
-   * (OAuth miss, SDK error, empty reply — `generateDigest`'s own contract),
-   * resolves to `{ok: false}`. The caller fails the whole switch loudly
-   * rather than silently reconstructing in full instead — the user asked for
-   * the cheap path specifically.
-   */
-  private async buildCompactSwitchTrack(
-    chatId: string,
-    folder: string,
-    outgoingSessionId: string,
-    outgoingModel: string | null,
-    excludeFromSeq: number | undefined,
-  ): Promise<
-    | {
-        ok: true;
-        track: TrackEntry[];
-        activeBranchId: string;
-        fullTrackLastSeq: number;
-      }
-    | { ok: false; error: string }
-  > {
-    if (!this.opts.generateDigest) {
-      return { ok: false, error: 'switch and compact: no digest generator is configured' };
-    }
-    this.ensureBranches(chatId);
-    const meta = this.opts.metaStore.read(chatId);
-    const activeBranchId = meta?.activeBranchId ?? this.branchIdFor(chatId);
-    const beforeBoundary = (t: { record: { seq: number } }): boolean =>
-      excludeFromSeq === undefined || t.record.seq < excludeFromSeq;
-    const fullTrack = meta
-      ? readTrack(this.chatLog, chatId, meta, activeBranchId, -1).filter(beforeBoundary)
-      : [];
-    const fullTrackLastSeq = fullTrack.at(-1)?.record.seq ?? -1;
-    const digest = await this.opts.generateDigest({
-      chatId,
-      resumeSessionId: outgoingSessionId,
-      folder,
-      claudeConfigDir: this.claudeConfigDirFor(chatId),
-      model: outgoingModel,
-    });
-    if (digest === null) {
-      return {
-        ok: false,
-        error:
-          'switch and compact: the outgoing session could not write a handoff (OAuth, an SDK error, or an empty reply) — try again, or switch without compacting',
-      };
-    }
-    const recent = fullTrack.slice(-COMPACT_SWITCH_RECENT_ENTRIES);
-    const handoffSeq = (recent[0]?.record.seq ?? fullTrackLastSeq) - 1;
-    const handoffAt = recent[0]?.record.at ?? this.opts.now();
-    const handoff: TrackEntry = {
-      record: { seq: handoffSeq, at: handoffAt },
-      event: {
-        type: 'chat.message',
-        chatId,
-        role: 'user',
-        // Framed as user-provided context, the same way patch's own notes are
-        // — the Messages/Responses APIs require the first turn to be `user`,
-        // and an `assistant`-voiced handoff would misattribute an unspoken
-        // reply to the model.
-        content: `[Handoff from the previous session]\n\n${digest}`,
-        seq: handoffSeq,
-      },
-    };
-    return {
-      ok: true,
-      track: [handoff, ...recent],
-      activeBranchId,
-      fullTrackLastSeq,
-    };
-  }
-
   /**
    * Append one history record for a chat, stamped with its branch and open
    * turn. Throws `HistoryWriteError`; a running turn records the failure so it
@@ -16367,7 +15166,6 @@ export class Daemon {
     this.closeToolRun(chatId);
     this.historyFailures.delete(chatId);
     this.runningForks.delete(chatId);
-    this.runningProviderSwitch.delete(chatId);
     const usage = this.turnUsage.get(chatId);
     this.turnUsage.delete(chatId);
     try {
@@ -17231,35 +16029,11 @@ export class Daemon {
     ) {
       throw new ProviderSwitchNeedsNewChatError(chatId, s.model, model);
     }
-    if (opts?.compact) {
-      const targetHarness: HarnessId = harnessOfModel(model);
-      const fromHarness: HarnessId | undefined = harnessOfSessionId(s.claudeSessionId);
-      if (fromHarness !== undefined && fromHarness !== targetHarness && s.claudeSessionId) {
-        this.pendingCompactSwitch.set(chatId, {
-          outgoingModel: s.model ?? null,
-          outgoingSessionId: s.claudeSessionId,
-        });
-      }
-    } else {
-      // An explicit plain switch after a compact one was requested but never
-      // ran (model changed again before a turn consumed it) — the stale
-      // intent must not silently fire on a later, differently-requested turn.
-      this.pendingCompactSwitch.delete(chatId);
-    }
-    // spec/04 § Handoff budget — remember the model a provider switch leaves,
-    // so a failed switch can go back. Kept from the FIRST crossing (A→B→C is
-    // still "from A"); dropped when the chat is back on its session's provider.
-    const sessionHarness = harnessOfSessionId(s.claudeSessionId);
-    const crossing = sessionHarness !== undefined && sessionHarness !== harnessOfModel(model);
-    const leaving = s.model ?? null;
     s.model = model;
     this.opts.metaStore.update(chatId, (m) => {
-      const { switchedFrom: kept, ...rest } = m;
-      return {
-        ...rest,
-        model,
-        ...(crossing ? { switchedFrom: kept ?? { model: leaving } } : {}),
-      };
+      const { switchedFrom: _dropped, ...rest } = m;
+      void _dropped;
+      return { ...rest, model };
     });
     // Approval mode follows the provider: a mode the new model cannot run moves
     // to its static closest (wire `closestPermissionModeForModel`), recorded as
@@ -17323,40 +16097,6 @@ export class Daemon {
     s.effort = effort ?? undefined;
     this.opts.metaStore.update(chatId, (m) => ({ ...m, effort: effort ?? undefined }));
     this.emitState(chatId);
-  }
-
-  /**
-   * Preview what switching this chat to `targetModel` would cost, WITHOUT
-   * doing it (spec/04 § History — show the cost in the switch confirmation:
-   * the approximate tokens the target must re-read uncached — the full track
-   * from scratch, or just the delta on a cache-preserving resume — plus
-   * whether the relevant cache is probably cold anyway from idle time).
-   * `null` when this isn't actually a cross-provider switch (same harness as
-   * now, or no session yet to leave) — nothing to confirm.
-   */
-  async estimateProviderSwitch(
-    chatId: string,
-    targetModel: string,
-  ): Promise<ProviderSwitchEstimate | null> {
-    const state = this.chatState.get(chatId);
-    if (!state) throw new ChatNotFoundError(chatId);
-    const targetHarness: HarnessId = harnessOfModel(targetModel);
-    const fromHarness: HarnessId | undefined = harnessOfSessionId(state.claudeSessionId);
-    if (fromHarness === undefined || fromHarness === targetHarness) return null;
-    const plan = await this.planHarnessReconstruction(chatId, targetHarness, state.folder);
-    return {
-      fromHarness,
-      toHarness: targetHarness,
-      resumesExistingSession: plan.resumeExistingSessionId !== undefined,
-      approxTokens: estimateTokens(plan.track),
-      // "The last turn" — this chat's own, whichever harness it ran on: a
-      // chat idle long enough that ITS OWN traffic has gone quiet has almost
-      // certainly gone cold on the provider side too, resumed session or not.
-      cacheProbablyCold:
-        plan.lastActivityAt === undefined
-          ? false
-          : this.opts.now() - plan.lastActivityAt > PROMPT_CACHE_TTL_MS,
-    };
   }
 
   /**
@@ -17849,20 +16589,4 @@ function nativeDedupeKey(ref: NativeRef, event: WireEvent): string {
 function mcpArgsOmitting(args: string[], model: string | undefined): string[] {
   const omitted = patchToolsOmittedFor(model);
   return omitted.length > 0 ? [...args, `--omit-tools=${omitted.join(',')}`] : args;
-}
-
-/**
- * The run options that carry a provider switch's track into the target
- * provider's session, named by its traits. Nothing when there is no track or the
- * provider takes none (Claude reseeds through its session file instead).
- */
-function handoffRunOptions(
-  traits: HarnessTraits,
-  track: readonly TrackEntry[] | undefined,
-  hasNativeSession: boolean,
-): Partial<SdkRunOptions> {
-  if (!track) return {};
-  if (hasNativeSession && traits.appendRunOptions !== null) return traits.appendRunOptions(track);
-  if (!hasNativeSession && traits.reseedRunOptions !== null) return traits.reseedRunOptions(track);
-  return {};
 }

@@ -66,6 +66,7 @@ export interface ChatEventEntry {
     | 'permission_mode'
     | 'handoff'
     | 'handoff_link'
+    | 'session_gone'
     | 'note';
   /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
   linkedChatId?: string;
@@ -1060,6 +1061,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // the conversation. Transcript furniture, not a message: none of the
           // reconcile/preview bookkeeping below applies, and (seq, kind) is its
           // identity so a repeated replay draws it once.
+          // spec/04 § Resume — the provider session is gone: a divider saying the
+          // model's memory of the chat ends here, with Start a linked chat.
+          if (event.role === 'system' && event.sessionGone === true) {
+            chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+            const held = timelines[event.chatId];
+            if (held?.some((e) => e.kind === 'session_gone' && e.seq === event.seq)) break;
+            pushTimeline(event.chatId, {
+              seq: event.seq,
+              kind: 'session_gone',
+              content: event.content,
+              at: Date.now(),
+            });
+            break;
+          }
           // spec/04 § Handoff budget — the provider-switch divider and the row
           // saying the chat was continued in a linked fresh chat. Furniture:
           // (seq, kind) is the identity, the host's one-line record the text.

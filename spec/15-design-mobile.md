@@ -369,7 +369,7 @@ Several sections read the one `GET /api/settings` payload web's page reads (Link
    - Secrets — mobile only: a key-value store for tokens/credentials the host injects into chats (not the host's own provider keys, which are under Settings → Providers). Editable from any surface: add a key, set/replace its value (a write-only field; existing values are masked behind a Reveal toggle), and delete. A failed read is shown with a Retry rather than as an empty list.
 6. Special threads
    - Sweep (`06-threads-manager-speakers.md` § The sweep) — Enabled (off by default), delivery slider, messages per chat, the standing instructions (opens the same full-text editor pattern as web, with Reset to default) and the model it runs on.
-   - Manager — quiet hours (24-hour `HH:MM` fields; anything else is refused and the field returns to the saved value), the context window (§ Manager conversation — bounded context) and the address word.
+   - Manager — quiet hours (24-hour `HH:MM` fields; anything else is refused and the field returns to the saved value), the context window (`06-threads-manager-speakers.md` § Bounded context) and the address word.
    - Goals (`14-design-web.md` § Goals) — the judge model (one for every chat, default Sonnet 5.5), how many refusals in a row end a goal's pushing (a positive whole number; anything else returns the field to the saved value) and the judge prompt, opened in the same full-screen editor as the other prompts with Reset to default.
    - Manager & Speakers — the model those threads run on (from the account's default host's catalogue, separate from the default model) and scheduled session rotation: a switch and the time of day.
 

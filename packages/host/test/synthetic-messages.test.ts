@@ -134,40 +134,6 @@ describe('synthetic assistant messages', () => {
   // The resume placeholder never crosses the SDK stream: Claude Code writes it
   // straight into the session, so the host sees it only as a mirrored entry.
   // It must still show — once, however many ways it arrives.
-  it('shows a placeholder written only to the session mirror, once', async () => {
-    const { daemon, sdk, events, folder } = setup();
-    sdk.enqueue([{ type: 'result', sessionId: 'sess' }]);
-    const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
-    await new Promise((r) => setTimeout(r, 20));
-    const note = (
-      daemon as unknown as {
-        noteMirroredEntries(chatId: string, entries: readonly Record<string, unknown>[]): void;
-      }
-    ).noteMirroredEntries.bind(daemon);
-    const placeholder = { ...SYNTHETIC_RAW, uuid: 'p1' };
-    const limit = {
-      type: 'assistant',
-      uuid: 'e1',
-      isApiErrorMessage: true,
-      message: {
-        model: '<synthetic>',
-        content: [{ type: 'text', text: "You've hit your monthly spend limit" }],
-        usage: { input_tokens: 0, output_tokens: 0 },
-      },
-    };
-    note(chatId, [{ type: 'user', uuid: 'u1' }, placeholder, limit, { ...REAL_RAW, uuid: 'r1' }]);
-    note(chatId, [placeholder]);
-
-    const notices = events.filter(
-      (e): e is ChatMessageEvent => e.type === 'chat.message' && e.synthetic === true,
-    );
-    expect(notices.map((n) => n.content)).toEqual(['No response requested.']);
-  });
-
-  // The guard keys on a marker that is PRESENT. A backend that carries no raw
-  // SDK message — the mock one, and every test built on it — must not have its
-  // replies silently deleted, which is a far worse failure than the one being
-  // fixed.
   it('an envelope with no raw SDK message is not treated as synthetic', async () => {
     const { daemon, sdk, events, folder } = setup();
     sdk.enqueue([

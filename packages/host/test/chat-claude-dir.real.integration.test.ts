@@ -212,37 +212,42 @@ describe(`one conversation file per chat, real Claude${realClaudeEnabled() ? '' 
       const sessionId = randomUUID();
       const log = pino({ level: 'silent' });
       try {
-        // An old chat: its conversation exists only in Claude Code's shared projects dir.
-        const { toClaudeSessionEntries } = await import('../src/nativeReconstruct.js');
-        const seeded = toClaudeSessionEntries(
-          [
-            {
-              record: { seq: 0, at: 1 },
-              event: {
-                type: 'chat.message',
-                chatId: 'x',
-                role: 'user',
-                content: `The codeword is ${word}.`,
-                seq: 0,
-              },
+        // An old chat: its conversation exists only in native/claude, as the old store wrote it.
+        // Two lines in Claude Code's own transcript shape.
+        const u1 = randomUUID();
+        const seeded = [
+          {
+            type: 'user',
+            uuid: u1,
+            parentUuid: null,
+            sessionId,
+            cwd,
+            timestamp: new Date(1).toISOString(),
+            message: { role: 'user', content: `The codeword is ${word}.` },
+          },
+          {
+            type: 'assistant',
+            uuid: randomUUID(),
+            parentUuid: u1,
+            sessionId,
+            cwd,
+            timestamp: new Date(2).toISOString(),
+            message: {
+              id: `msg_${randomUUID().slice(0, 8)}`,
+              type: 'message',
+              role: 'assistant',
+              model: MODEL,
+              content: [{ type: 'text', text: 'Noted.' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 1, output_tokens: 1 },
             },
-            {
-              record: { seq: 1, at: 2 },
-              event: {
-                type: 'chat.message',
-                chatId: 'x',
-                role: 'assistant',
-                content: 'Noted.',
-                seq: 1,
-              },
-            },
-          ],
-          { sessionId, folder: cwd, model: MODEL },
+          },
+        ];
+        mkdirSync(legacyMirrorDir(chatDir), { recursive: true });
+        writeFileSync(
+          join(legacyMirrorDir(chatDir), `${sessionId}.jsonl`),
+          seeded.map((e) => JSON.stringify(e)).join('\n') + '\n',
         );
-        const shared = mkdtempSync(join(tmpdir(), 'patch-real-shared-'));
-        const sharedFile = join(shared, encodeFolder(cwd), `${sessionId}.jsonl`);
-        mkdirSync(dirname(sharedFile), { recursive: true });
-        writeFileSync(sharedFile, seeded.map((e) => JSON.stringify(e)).join('\n') + '\n');
 
         const store = createClaudeSessionStore({
           chatId: 'real-dir',

@@ -1,8 +1,8 @@
-// spec/06 § Manager conversation — bounded context, the host-side half:
-// `ChatRunner.ensureBoundedManagerContext` decides WHEN the pure windowing
-// (`managerContext.test.ts`) applies, and rewrites `claudeSessionId` to a
-// fresh session seeded from the window when it does. Full history in the
-// log is never touched either way.
+// spec/06 § Manager conversation — bounded context through what the provider
+// supports: once the Manager's session has carried more than its window of
+// messages, the next turn starts a fresh session and the recent conversation
+// goes in as a visible `Handoff` note on that turn. Nothing is rebuilt and the
+// full record is untouched.
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
@@ -38,91 +38,101 @@ function setup(managerContextWindow: number | undefined) {
 }
 
 let n = 0;
+/** A turn that resumes ONE provider session, as Claude Code does. */
 async function turn(
   daemon: ReturnType<typeof setup>['daemon'],
   sdk: ReturnType<typeof setup>['sdk'],
   chatId: string,
+  sessionId = 'native',
 ): Promise<void> {
   n += 1;
-  sdk.enqueue([{ type: 'assistant', content: `reply ${n}`, sessionId: `native-${n}` }]);
+  sdk.enqueue([{ type: 'assistant', content: `reply ${n}`, sessionId }]);
   await daemon.sendInput({ chatId, message: `msg ${n}`, localId: `L${n}` });
   await new Promise((r) => setTimeout(r, 30));
 }
 
-describe('ensureBoundedManagerContext (via ordinary Manager turns)', () => {
-  it('leaves claudeSessionId alone while the track is within the window', async () => {
+describe('the Manager’s bounded context', () => {
+  it('resumes the same session while it is within the window', async () => {
     n = 0;
-    const { daemon, sdk, folder } = setup(40);
+    const { daemon, sdk, folder, events } = setup(40);
     const chatId = await daemon.spawnChat({ folder });
     await turn(daemon, sdk, chatId);
-    const after1 = daemon.chatState.get(chatId)?.claudeSessionId;
     await turn(daemon, sdk, chatId);
-    const after2 = daemon.chatState.get(chatId)?.claudeSessionId;
-    // Ordinary resume: the SDK's own reported session id each time, untouched.
-    expect(after1).toBe('native-1');
-    expect(after2).toBe('native-2');
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('native');
+    expect(events.some((e) => e.type === 'chat.note' && e.label === 'Handoff')).toBe(false);
   });
 
-  it('rewrites claudeSessionId to a fresh one once the track grows past the window, and the full history survives', async () => {
+  it('past the window: a fresh session, a divider, and the recent messages in a visible Handoff note', async () => {
     n = 0;
-    const { daemon, sdk, folder } = setup(2); // 2 messages — one user+assistant exchange
+    const { daemon, sdk, folder, events } = setup(2);
     const chatId = await daemon.spawnChat({ folder });
-    // Turn 1: track is empty beforehand (the incoming user message is logged
-    // before the bounded-context check runs, so turn 1 sees 1, not 0 — still
-    // nothing to bound, since there is no existing session yet to reseed).
     await turn(daemon, sdk, chatId);
-    expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('native-1');
-    // Turn 2: by the time the check runs, the track already carries this
-    // turn's own incoming message (3: msg1, reply1, msg2) — past the window
-    // of 2. `ensureBoundedManagerContext` checks BEFORE the turn's reply
-    // lands, so this is visible in what got RESUMED, not in what the mock
-    // reports back afterward (which overwrites it regardless — see
-    // `setManagerContextWindow` below for why that assertion is the wrong one).
-    await turn(daemon, sdk, chatId);
-    const resumed = sdk.lastOptions()?.resumeSessionId;
-    expect(resumed).toBeDefined();
-    expect(resumed).not.toBe('native-1'); // a fresh uuid was minted and seeded instead
-
-    // History in the LOG is untouched — every message is still there.
+    await turn(daemon, sdk, chatId); // msg1 + reply1 = 2, within the window
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('native');
+    await turn(daemon, sdk, chatId, 'native-2'); // 4 messages on this session: past it
+    const opts = sdk.lastOptions()!;
+    expect(opts.resumeSessionId).toBeUndefined();
+    expect(opts.prompt).toMatch(/^\[Note: Handoff\]/);
+    expect(opts.prompt).toContain('User: msg 2');
+    expect(opts.prompt).toContain('Manager: reply 2');
+    expect(opts.prompt).not.toContain('msg 1');
+    expect(opts.prompt.endsWith('msg 3')).toBe(true);
+    // What the model received is in the record: the note is its own entry.
+    const note = events.find((e) => e.type === 'chat.note' && e.label === 'Handoff');
+    expect(note).toBeDefined();
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'chat.message' &&
+          e.role === 'system' &&
+          e.content === 'New session · the last 2 messages carried over',
+      ),
+    ).toBe(true);
+    // The user's own message is recorded as they sent it.
+    expect(
+      events.some((e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'msg 3'),
+    ).toBe(true);
+    // The next turn resumes the new session; no handover until it fills again.
+    await turn(daemon, sdk, chatId, 'native-2');
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('native-2');
+    // The record keeps every message.
     const history = daemon.readHistory({ chatId, limit: 200 });
-    const messages = history.events.filter((e) => e.type === 'chat.message' && e.role !== 'system');
-    expect(messages).toHaveLength(4); // 2 exchanges — all still in the log
+    expect(
+      history.events.filter((e) => e.type === 'chat.message' && e.role !== 'system'),
+    ).toHaveLength(8);
   });
 
-  it('a host with no managerContextWindow configured never reseeds', async () => {
+  it('a host with no window configured never hands over', async () => {
     n = 0;
     const { daemon, sdk, folder } = setup(undefined);
     const chatId = await daemon.spawnChat({ folder });
     await turn(daemon, sdk, chatId);
     await turn(daemon, sdk, chatId);
     await turn(daemon, sdk, chatId);
-    // Every turn just resumes the SDK's own reported session, unbounded.
-    expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('native-3');
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('native');
   });
 
-  it('setManagerContextWindow changes the live window for the NEXT turn', async () => {
+  it('setManagerContextWindow changes the window for the next turn', async () => {
     n = 0;
-    const { daemon, sdk, folder } = setup(40); // starts generous
+    const { daemon, sdk, folder } = setup(40);
     const chatId = await daemon.spawnChat({ folder });
     await turn(daemon, sdk, chatId);
-    await turn(daemon, sdk, chatId); // track now has 4 messages, well within 40
-    expect(sdk.lastOptions()?.resumeSessionId).toBe('native-1'); // ordinary resume, no reseed
-
-    daemon.setManagerContextWindow(2); // tighten it live
-    await turn(daemon, sdk, chatId); // track beforehand is 4 messages — now past the new window of 2
-    expect(sdk.lastOptions()?.resumeSessionId).not.toBe('native-2');
+    await turn(daemon, sdk, chatId);
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('native');
+    daemon.setManagerContextWindow(2);
+    await turn(daemon, sdk, chatId);
+    expect(sdk.lastOptions()?.resumeSessionId).toBeUndefined();
   });
 
-  it('a non-Manager chat is never bounded, even with a tiny window configured', async () => {
+  it('an ordinary chat is never bounded, even with a tiny window configured', async () => {
     n = 0;
     const home = mkdtempSync(join(tmpdir(), 'patch-mgrctx-ord-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-mgrctx-ord-folder-')));
     mkdirSync(folder, { recursive: true });
-    const metaStore = createMetaStore(home);
     const sdk = createMockSdkBackend();
     const daemon = new Daemon({
       hostId: 'd1',
-      metaStore,
+      metaStore: createMetaStore(home),
       sdkBackend: sdk,
       oauthAccessToken: 'tok',
       emit: () => {},
@@ -134,8 +144,6 @@ describe('ensureBoundedManagerContext (via ordinary Manager turns)', () => {
     await turn(daemon, sdk, chatId);
     await turn(daemon, sdk, chatId);
     await turn(daemon, sdk, chatId);
-    // An ordinary chat always just resumes the SDK's own session — bounding
-    // is Manager-only (spec/06 § Manager conversation).
-    expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('native-3');
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('native');
   });
 });

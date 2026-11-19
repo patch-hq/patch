@@ -15,7 +15,6 @@
 
 import { ANTHROPIC_API_VERSION, anthropicAuthHeaders } from '@patch/auth';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
-import type { ModelLimits } from './handoffRun.js';
 
 /** How long a successfully read catalogue is served before re-reading. */
 export const MODELS_TTL_MS = 6 * 60 * 60 * 1000; // 6h
@@ -62,8 +61,6 @@ export interface ModelCatalogOptions {
   now?: () => number;
   /** Injected in tests; defaults to MODELS_TTL_MS. */
   ttlMs?: number;
-  /** Receives each model's stated window and output cap (spec/04 § Handoff budget). */
-  limits?: ModelLimits;
   /**
    * Called after each successful read from Anthropic. A choice refused while
    * there was no catalogue (the Manager's model, before any sign-in) is
@@ -77,7 +74,6 @@ export class ModelCatalog {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly ttlMs: number;
-  private readonly limits: ModelLimits | undefined;
   private readonly onRefreshed: (() => void) | undefined;
 
   private cached: { models: ModelOption[]; fetchedAt: string; at: number } | null = null;
@@ -88,7 +84,6 @@ export class ModelCatalog {
     this.fetchImpl = opts.fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
     this.now = opts.now ?? (() => Date.now());
     this.ttlMs = opts.ttlMs ?? MODELS_TTL_MS;
-    this.limits = opts.limits;
     this.onRefreshed = opts.onRefreshed;
   }
 
@@ -145,13 +140,6 @@ export class ModelCatalog {
     }
     const body = (await res.json()) as { data?: unknown };
     const raw = Array.isArray(body.data) ? (body.data as AnthropicModel[]) : [];
-    for (const m of raw) {
-      if (typeof m.id !== 'string' || m.id === '') continue;
-      this.limits?.note(m.id, {
-        ...(typeof m.max_input_tokens === 'number' ? { contextWindow: m.max_input_tokens } : {}),
-        ...(typeof m.max_tokens === 'number' ? { maxOutputTokens: m.max_tokens } : {}),
-      });
-    }
     const models = raw
       .filter((m): m is AnthropicModel & { id: string } => typeof m.id === 'string' && m.id !== '')
       .map((m) => ({

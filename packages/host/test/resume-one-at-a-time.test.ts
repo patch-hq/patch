@@ -197,13 +197,13 @@ describe('a turn resumed onto a session with no transcript', () => {
     await settle();
 
     // The resume tried `sess-dead`, was told there is no such conversation, and
-    // ran again on a rebuilt session — the same prompt.
+    // ran again on a fresh session — the same prompt.
     expect(seen.map((s) => s.prompt)).toEqual(['owed turn', 'owed turn']);
     expect(seen[0]?.resume).toBe('sess-dead');
-    // The dead id is dropped and the session rebuilt from Patch's history
-    // (a new id, seeded), not started empty and not resumed onto the dead one.
-    expect(seen[1]?.resume).not.toBe('sess-dead');
-    expect(seen[1]?.reseed).toBe(true);
+    // The dead id is dropped and nothing is rebuilt (spec/04 § Resume): a fresh
+    // session, with the record saying the model's memory ended there.
+    expect(seen[1]?.resume).toBeUndefined();
+    expect(seen[1]?.reseed).toBe(false);
     expect(daemon.chatState.get(chatId)?.activity).not.toBe('errored');
     daemon.shutdown();
   });

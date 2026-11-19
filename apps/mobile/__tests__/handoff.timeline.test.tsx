@@ -1,5 +1,6 @@
-// spec/04 § Handoff budget on the phone — the provider-switch divider, the
-// error's three recoveries, and the linked-chat row.
+// How older records still read on the phone: a chat switched in place before
+// linked chats keeps its provider-switch divider and the linked-chat row. A
+// failed switch no longer offers recoveries (spec/04 § Provider switches).
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -70,11 +71,7 @@ describe('handoff on mobile', () => {
     expect(hasText(r.root, DIVIDER)).toBe(true);
   });
 
-  it.each([
-    ['handoff-retry', 'retry'],
-    ['handoff-switch-back', 'switch_back'],
-    ['handoff-linked-chat', 'linked_chat'],
-  ])('a handoff error offers %s, which sends the recovery frame', (testId, action) => {
+  it('a failed switch in an older record offers no in-chat recoveries', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.error',
       chatId: 'c1',
@@ -82,12 +79,8 @@ describe('handoff on mobile', () => {
       error: { code: 'handoff_overflow', message: 'Too large even after re-planning.' },
     });
     const r = renderRN(<ChatDetailScreen />);
-    findHost(r.root, byTestId(testId))!.props.onPress();
-    expect(sendMock).toHaveBeenCalledWith({
-      type: 'chat.handoff_recover_request',
-      chatId: 'c1',
-      action,
-    });
+    expect(findAllHost(r.root, byTestId('handoff-retry'))).toHaveLength(0);
+    expect(findAllHost(r.root, byTestId('handoff-switch-back'))).toHaveLength(0);
   });
 
   it('an ordinary error offers none of them', () => {

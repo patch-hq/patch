@@ -235,7 +235,6 @@ import { rotateLog } from './logRotate.js';
 import { handleHookCheck } from './hookCheck.js';
 import { FolderRegistry } from './folders.js';
 import { ModelCatalog } from './modelCatalog.js';
-import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
 import { StrayProcessTracker, handleStrayProcessesRequest } from './strayProcesses.js';
 import {
@@ -3909,25 +3908,19 @@ async function startHost(
         return;
       }
       if (event.type === 'chat.handoff_recover_request') {
-        // spec/04 § Handoff budget — Retry / Switch back / Continue in a linked
-        // fresh chat, offered by a failed provider switch. A refusal is said,
-        // never swallowed.
-        const { chatId, action } = event;
-        void daemon.recoverHandoff(chatId, action).then(
-          () => logger.info({ chatId, action }, 'handoff recovery run'),
-          (err: unknown) => {
-            logger.warn(
-              { chatId, action, err: (err as Error).message },
-              'handoff recovery refused',
-            );
-            sender({
-              type: 'chat.error',
-              chatId,
-              error: { code: 'sdk_error', message: (err as Error).message },
-              seq: OUT_OF_BAND_SEQ,
-            });
+        // A failed in-chat provider switch offered these recoveries. A switch
+        // is a new linked chat now (spec/04 § Provider switches), so there is
+        // nothing to recover: said, never swallowed.
+        sender({
+          type: 'chat.error',
+          chatId: event.chatId,
+          error: {
+            code: 'sdk_error',
+            message:
+              'Provider switches start a new linked chat now; choose the other model again to start one.',
           },
-        );
+          seq: OUT_OF_BAND_SEQ,
+        });
         return;
       }
       if (event.type === 'chat.account_request') {
@@ -4792,12 +4785,10 @@ async function startHost(
   // nothing, and would make every test that boots a host hit the network.
   if (config.sdkBackend === 'real') accountUsage.start();
 
-  const modelLimits = new ModelLimits();
   const modelCatalog = new ModelCatalog({
     // Not the credit gate: listing models costs nothing, so a usage-limited
     // account must not empty the picker.
     runOnAccountWithCredit: runOnAnyAccount,
-    limits: modelLimits,
     // The Manager's model is refused while there is no catalogue (no AI
     // connected yet); the first real read after a sign-in puts it on it.
     onRefreshed: () => applySpecialThreadModel(),
@@ -5009,7 +5000,6 @@ async function startHost(
     // asks the outgoing special-thread session to write for itself before
     // it's retired.
     generateDigest: makeDigestGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
-    modelLimits,
     // spec/06 § Sweep — the sweep's one decision call, plus the cross-host
     // relays it uses to read a non-local candidate's recent messages and to
     // nudge/wake one (same relays `patch_history`/`patch_send_to` use).

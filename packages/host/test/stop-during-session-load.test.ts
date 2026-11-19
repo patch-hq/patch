@@ -1,6 +1,7 @@
-// A Stop pressed while a resumed turn is still loading its session must end
-// that turn. The abort handle used to be registered only after the load, so a
-// stop in that window found nothing to abort, did nothing, and the turn ran on.
+// A Stop pressed while a resumed turn is still getting ready (its credential
+// being resolved) must end that turn. The abort handle used to be registered
+// only after that wait, so a stop in that window found nothing to abort, did
+// nothing, and the turn ran on.
 
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type SdkBackend } from '../src/sdkBackend.js';
 
-describe('stop while a resumed turn loads its session', () => {
+describe('stop while a resumed turn is getting ready', () => {
   it('aborts the turn instead of letting it run', async () => {
     const home = mkdtempSync(join(tmpdir(), 'patch-stop-load-'));
     const folder = mkdtempSync(join(tmpdir(), 'patch-stop-load-folder-'));
@@ -28,7 +29,15 @@ describe('stop while a resumed turn loads its session', () => {
     };
     const events: WireEvent[] = [];
     let id = 0;
+    // The second turn's credential is slow, so Stop lands inside that wait.
+    let holdNext = false;
+    let releaseLoad!: () => void;
+    const loadHeld = new Promise<void>((r) => (releaseLoad = r));
     const daemon = new Daemon({
+      resolveOAuth: async () => {
+        if (holdNext) await loadHeld;
+        return { ok: true as const, accessToken: 'tok' };
+      },
       hostId: 'd1',
       metaStore: createMetaStore(home),
       sdkBackend: sdk,
@@ -44,15 +53,7 @@ describe('stop while a resumed turn loads its session', () => {
     await daemon.sendInput({ chatId, message: 'first', localId: 'l1' });
     const runsBefore = runs;
 
-    // Make the next turn's session load slow, so Stop lands inside it.
-    let releaseLoad!: () => void;
-    const loadHeld = new Promise<void>((r) => (releaseLoad = r));
-    (daemon as unknown as Record<string, unknown>)['claudeSessionStoreFor'] = () => ({
-      load: async () => {
-        await loadHeld;
-        return null;
-      },
-    });
+    holdNext = true;
     const state = (
       daemon as unknown as { chatState: Map<string, { claudeSessionId?: string }> }
     ).chatState.get(chatId)!;

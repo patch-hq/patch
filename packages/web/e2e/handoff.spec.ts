@@ -1,11 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-// Real-browser e2e for spec/04 § Handoff budget: the provider-switch divider is
-// one quiet line, a failed handoff offers its three recoveries (each one frame
-// to the host), and a linked fresh chat leaves a row that opens it.
+// Real-browser e2e for how older records still read: a chat switched in place
+// before linked chats kept its provider-switch divider (one quiet line) and the
+// row that opens a linked fresh chat. A failed switch no longer offers
+// recoveries: a provider switch is a new linked chat (spec/04 § Provider switches).
 const URL = '/app/dev-harness.html?chat=chat_handoff';
-
-type Sent = { type: string; chatId?: string; action?: string };
 
 test.describe('model handoff', () => {
   test('the divider is one quiet line carrying carried-vs-total counts', async ({ page }) => {
@@ -24,22 +23,12 @@ test.describe('model handoff', () => {
     expect(bg).toBe('rgba(0, 0, 0, 0)');
   });
 
-  for (const [testId, action] of [
-    ['handoff-retry', 'retry'],
-    ['handoff-switch-back', 'switch_back'],
-    ['handoff-linked-chat', 'linked_chat'],
-  ] as const) {
-    test(`${testId} sends the ${action} recovery frame`, async ({ page }) => {
-      await page.goto(URL);
-      await page.getByTestId(testId).click();
-      const sent = await page.evaluate(() => (window as unknown as { __wsSent: Sent[] }).__wsSent);
-      expect(sent).toContainEqual({
-        type: 'chat.handoff_recover_request',
-        chatId: 'chat_handoff',
-        action,
-      });
-    });
-  }
+  test('a failed switch in an older record offers no in-chat recoveries', async ({ page }) => {
+    await page.goto(URL);
+    await expect(page.getByTestId('handoff-divider')).toBeVisible();
+    await expect(page.getByTestId('handoff-retry')).toHaveCount(0);
+    await expect(page.getByTestId('handoff-switch-back')).toHaveCount(0);
+  });
 
   test('the linked-chat row opens the new chat', async ({ page }) => {
     await page.goto(URL);
