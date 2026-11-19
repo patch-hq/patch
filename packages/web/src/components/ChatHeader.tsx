@@ -328,8 +328,10 @@ export function ChatHeader({
 
   // Hide (spec/04 § Hidden) — move a running chat out of the list. The chat
   // keeps running and the host tells the agent it is now in hidden mode.
-  // Optimistic flip, reverting + toasting on failure (NO FALLBACK).
+  // Optimistic flip, reverting + toasting on failure (NO FALLBACK). Like
+  // archive, hiding moves you on to the next chat, resolved before the flip.
   async function hide(): Promise<void> {
+    navigateAfterArchive(navigate, [row.chatId]);
     setHidden(row.chatId, true);
     try {
       await api.hideChat(row.chatId, true);
