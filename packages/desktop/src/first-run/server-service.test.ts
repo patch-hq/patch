@@ -135,6 +135,36 @@ test('installing registers the agent once, restarts it only when it changed, and
   assert.deepEqual(lc.calls, [`disable ${t}`, `print ${t}`, `bootout ${t}`]);
 });
 
+test('a reinstall does not bootstrap until launchd has finished removing the old agent', async () => {
+  const calls: string[] = [];
+  let loaded = false;
+  let stillRemoving = 0;
+  const lc: Launchctl = async (args) => {
+    calls.push(args[0]);
+    if (args[0] === 'print') {
+      if (stillRemoving > 0) {
+        stillRemoving--;
+        return { ok: true, output: '' };
+      }
+      return { ok: loaded, output: '' };
+    }
+    if (args[0] === 'bootout') {
+      loaded = false;
+      stillRemoving = 3;
+    }
+    if (args[0] === 'bootstrap') {
+      if (stillRemoving > 0)
+        return { ok: false, output: 'Bootstrap failed: 5: Input/output error' };
+      loaded = true;
+    }
+    return { ok: true, output: '' };
+  };
+  const svc = serviceControl({ userHome: scratch(), uid: 501, launchctl: lc });
+  await svc.install('<plist a/>', false);
+  await svc.install('<plist b/>', false);
+  assert.equal(loaded, true);
+});
+
 test('a launchctl failure is an error, not a silent skip', async () => {
   const svc = serviceControl({
     userHome: scratch(),
