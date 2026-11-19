@@ -5082,7 +5082,7 @@ async function startHost(
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
   // Meeting mode (meeting.ts). Local Whisper unless the account's meeting engine
-  // setting (Settings → Voice) picks a paid one: a meeting is hours of audio, so a
+  // setting (Settings → Dictation) picks a paid one: a meeting is hours of audio, so a
   // paid STT backend is never picked just because a key exists.
   // Starts (or re-tries, at most once a minute after a failure) the Whisper
   // component download and returns the notice a meeting clip shows meanwhile.
@@ -7086,7 +7086,7 @@ export async function handleVoiceNoteTranscribe(
       error: {
         code: 'transcription_failed',
         message:
-          'Dictation is set to Parakeet on this computer, which only runs in the desktop app. Switch Dictation to another engine in Settings → Voice.',
+          'Dictation is set to Parakeet on this computer, which only runs in the desktop app. Switch Dictation to another engine in Settings → Dictation.',
       },
     });
     return;

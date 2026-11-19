@@ -936,7 +936,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           rejectConn(
             ws,
             'whisper_unavailable',
-            'Dictation is set to Parakeet on this computer, which only runs in the desktop app. Switch Dictation to another engine in Settings → Voice.',
+            'Dictation is set to Parakeet on this computer, which only runs in the desktop app. Switch Dictation to another engine in Settings → Dictation.',
           );
           return;
         } else if (dictationEngine === 'host') {
@@ -947,7 +947,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             rejectConn(
               ws,
               'whisper_unavailable',
-              'Dictation is set to On this host, but this host has no streaming speech model (PARAKEET_STREAMING_MODEL_DIR is not set). Switch Dictation to another engine in Settings → Voice.',
+              'Dictation is set to On this host, but this host has no streaming speech model (PARAKEET_STREAMING_MODEL_DIR is not set). Switch Dictation to another engine in Settings → Dictation.',
             );
             return;
           }

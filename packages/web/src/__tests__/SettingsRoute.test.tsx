@@ -45,6 +45,7 @@ const PAGE_TESTID: Record<string, string> = {
   experimental: 'settings-experimental-page',
   goals: 'settings-goals-page',
   prompts: 'settings-prompts-page',
+  dictation: 'settings-dictation',
   voice: 'settings-voice',
   hooks: 'settings-hooks-page',
   computer: 'settings-computer-use',
@@ -97,6 +98,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Manager',
       'Goals',
       'Prompts',
+      'Dictation',
       'Voice',
       'Shortcuts',
       'Advanced ▸',
@@ -685,7 +687,7 @@ describe('Settings → Devices', () => {
   });
 });
 
-describe('Settings → Voice', () => {
+describe('Settings → Dictation and Voice', () => {
   describe('Dictate shortcut', () => {
     beforeEach(() => {
       localStorage.clear();
@@ -694,13 +696,13 @@ describe('Settings → Voice', () => {
 
     it('shows ⌘⇧D until changed (Ctrl+Shift+D off a Mac, as jsdom is)', async () => {
       vi.stubGlobal('fetch', makeFetch());
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       expect(await screen.findByTestId('dictate-chord')).toHaveTextContent('Ctrl+Shift+D');
     });
 
     it('Change records the next chord with ⌘ in it, and keeps it for this host', async () => {
       vi.stubGlobal('fetch', makeFetch());
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       fireEvent.click(await screen.findByTestId('dictate-chord-change'));
       expect(screen.getByTestId('dictate-chord')).toHaveTextContent('Press keys…');
       // A key with no ⌘ is not a chord: still listening.
@@ -721,7 +723,7 @@ describe('Settings → Voice', () => {
 
     it('Esc leaves the old chord', async () => {
       vi.stubGlobal('fetch', makeFetch());
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       fireEvent.click(await screen.findByTestId('dictate-chord-change'));
       fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
       expect(screen.getByTestId('dictate-chord')).toHaveTextContent('Ctrl+Shift+D');
@@ -758,13 +760,15 @@ describe('Settings → Voice', () => {
         voiceKeys: { gemini: true, openai: false, deepgram: true },
       });
       reportHost('d3', { hostName: 'old-daemon', runsManager: false });
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       await waitFor(() => expect(screen.getByTestId('dictation-phone-keys')).toBeInTheDocument());
       expect(screen.getByTestId('dictation-phone-keys')).toHaveTextContent(
         'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
       );
       // Whisper on the computer needs no key.
       expect(screen.queryByTestId('dictation-computer-keys')).toBeNull();
+      fireEvent.click(screen.getByTestId('settings-nav-voice'));
+      await waitFor(() => expect(screen.getByTestId('voice-device-keys')).toBeInTheDocument());
       expect(screen.getByTestId('voice-device-keys')).toHaveTextContent(
         'Not configured on hetzner, mac: no OpenAI key is set. Sessions there are refused.',
       );
@@ -794,7 +798,7 @@ describe('Settings → Voice', () => {
         hostName: 'hetzner',
         voiceKeys: { gemini: false, openai: false, deepgram: false },
       });
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       await waitFor(() =>
         expect(screen.getByTestId('dictation-computer-keys')).toBeInTheDocument(),
       );
@@ -844,7 +848,7 @@ describe('Settings → Voice', () => {
     it('dictation: the phone and the computer each choose their own engine', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       expect(await screen.findByTestId('dictation-phone-engine-device')).toHaveTextContent(
         'Built-in',
       );
@@ -866,7 +870,7 @@ describe('Settings → Voice', () => {
         hostName: 'hetzner',
         voiceKeys: { gemini: false, openai: false, assemblyai: false },
       });
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       expect(await screen.findByTestId('meeting-engine-pills-local')).toHaveTextContent(
         'Free, on device',
       );
@@ -884,7 +888,7 @@ describe('Settings → Voice', () => {
     it('speech to text: choosing an engine writes it and the tidy-up row names it', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       expect(await screen.findByTestId('stt-engine-groq')).toHaveTextContent('Groq Whisper');
       expect(screen.getByTestId('dictation-tidy-row')).toHaveTextContent(
         'Tidy up each phrase with Groq Whisper',
@@ -904,7 +908,7 @@ describe('Settings → Voice', () => {
     it('tidy-up is one switch for both', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
+      renderSettings('/settings/dictation');
       fireEvent.click(await screen.findByTestId('dictation-tidy-toggle'));
       await waitFor(() => expect(server.writes).toHaveLength(1));
       expect((server.writes[0]!.voiceConfig as Record<string, unknown>).dictation).toEqual({
@@ -1019,7 +1023,7 @@ describe('Settings → Voice', () => {
     const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     loadShared();
-    renderSettings('/settings/voice');
+    renderSettings('/settings/dictation');
     const pills = await screen.findByTestId('dictation-pause');
     expect(pills.querySelector('[aria-pressed="true"]')).toHaveTextContent('10s');
     fireEvent.click(within(pills).getByText('5s'));
@@ -1030,7 +1034,7 @@ describe('Settings → Voice', () => {
     const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     loadShared();
-    renderSettings('/settings/voice');
+    renderSettings('/settings/dictation');
     const toggle = await screen.findByTestId('dictation-turn-detection-toggle');
     expect(screen.getByTestId('settings-voice-dictation')).toHaveTextContent(
       'Send anyway after a pause of',

@@ -60,11 +60,11 @@ function countTranscribes(page: Page, transcript = 'hello from dictation mode'):
 }
 
 test.describe('composer dictation mode', () => {
-  test('right-click → Voice settings opens the Voice settings page', async ({ page }) => {
+  test('right-click → Dictation settings opens the Dictation settings page', async ({ page }) => {
     await open(page, { dictationPauseSeconds: 3, dictationTurnDetection: false });
     await page.getByTestId('voice-note-btn').click({ button: 'right' });
-    await page.getByText('Voice settings').click();
-    await expect(page.getByTestId('settings-voice')).toBeVisible();
+    await page.getByText('Dictation settings').click();
+    await expect(page.getByTestId('settings-dictation')).toBeVisible();
   });
 
   test('right-click → Keep dictating keeps the mic open; a quiet gap transcribes the utterance and it keeps listening', async ({

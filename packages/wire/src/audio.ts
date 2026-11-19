@@ -307,9 +307,11 @@ export function voiceKeyMissingMessage(
   backend: HostedVoiceBackend,
 ): string {
   const label = surface === 'meeting' ? 'Meetings' : VOICE_SURFACE_LABEL[surface];
+  // Dictation and meetings live on Settings → Dictation; conversations on Settings → Voice.
+  const page = surface === 'meeting' || surface === 'dictation' ? 'Dictation' : 'Voice';
   return (
     `${label} is set to ${backend}, but no ${VOICE_BACKEND_KEY_LABEL[backend]} is set on this host. ` +
-    `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice.`
+    `Add it in Settings → Providers, or switch ${label} to another backend in Settings → ${page}.`
   );
 }
 

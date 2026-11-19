@@ -14,6 +14,7 @@ import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import {
   KOKORO_VOICES,
   ManagerPage,
+  DictationPage,
   VoicePage,
   voiceCellStatus,
   writePreferences,
@@ -291,7 +292,12 @@ describe('Voice (per-surface config matrix)', () => {
         },
       },
     });
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(
+      <>
+        <DictationPage />
+        <VoicePage />
+      </>,
+    );
     expect(textOf(findHost(r.root, byTestId('dictation-phone-keys')))).toBe(
       'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
     );
@@ -320,7 +326,7 @@ describe('Voice (per-surface config matrix)', () => {
         },
       },
     });
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     expect(queryHost(r.root, byTestId('dictation-computer-keys'))).not.toBeNull();
     await actAsync(() =>
       reportHost('hetzner', {
@@ -342,7 +348,7 @@ describe('Voice (per-surface config matrix)', () => {
         },
       },
     });
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     expect(queryHost(r.root, byTestId('dictation-phone-keys'))).toBeNull();
   });
 
@@ -631,10 +637,10 @@ describe('Voice page: Speaking (shared, spec/01 § Settings)', () => {
   });
 });
 
-describe('Voice page: Dictation mode pause (shared)', () => {
+describe('Dictation page: when to send (shared)', () => {
   it('shows the current pause and writes the chosen one', async () => {
     seedSettings();
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     expect(findHost(r.root, byTestId('dictation-pause-10')).props.accessibilityState).toMatchObject(
       {
         selected: true,
@@ -648,7 +654,7 @@ describe('Voice page: Dictation mode pause (shared)', () => {
 
   it('turn detection is on by default and can be turned off', async () => {
     seedSettings();
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     const section = findHost(r.root, byTestId('settings-voice-dictation'));
     expect(textOf(section)).toContain('Send anyway after a pause of');
     const toggle = findHost(r.root, byTestId('dictation-turn-detection'));
@@ -660,10 +666,10 @@ describe('Voice page: Dictation mode pause (shared)', () => {
   });
 });
 
-describe('Voice page: dictation engines (shared)', () => {
+describe('Dictation page: engines (shared)', () => {
   it('the phone and the computer each choose their own engine', async () => {
     seedSettings();
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     expect(
       findHost(r.root, byTestId('dictation-phone-device')).props.accessibilityState.selected,
     ).toBe(true);
@@ -706,7 +712,7 @@ describe('Voice page: dictation engines (shared)', () => {
 
   it('tidy-up is one switch for both', async () => {
     seedSettings();
-    const r = renderRN(<VoicePage />);
+    const r = renderRN(<DictationPage />);
     const tidy = findHost(r.root, byTestId('dictation-tidy'));
     expect(tidy.props.value).toBe(false);
     await actAsync(async () => {
@@ -721,7 +727,7 @@ describe('Voice page: dictation engines (shared)', () => {
 });
 
 describe('Voice page: frame', () => {
-  it('draws Dictation, Engine, Speaking and Voice devices, with surfaces in the design’s order', () => {
+  it('draws Conversations, Speaking and Voice devices, with surfaces in the design’s order', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Voice');
@@ -730,19 +736,26 @@ describe('Voice page: frame', () => {
         String(i.props.testID),
       ),
     ).map((i) => i.props.testID);
-    expect(order).toEqual([
-      'dictation-phone',
-      'dictation-computer',
-      'voice-handsFree',
-      'voice-call',
-      'voice-device',
-    ]);
+    expect(order).toEqual(['voice-handsFree', 'voice-call', 'voice-device']);
     expect(textOf(findHost(r.root, byTestId('settings-voice-config')))).toMatch(
       /Hands-free.*Call.*Voice device/,
     );
     expect(findHost(r.root, byTestId('settings-voice-speaking'))).toBeTruthy();
     expect(findHost(r.root, byTestId('settings-voice-devices'))).toBeTruthy();
     expect(findHost(r.root, byTestId('voice-devices-empty'))).toBeTruthy();
+    expect(queryHost(r.root, byTestId('settings-voice-dictation'))).toBeNull();
+  });
+
+  it('Dictation is its own page: engine, when to send, and meetings', () => {
+    seedSettings();
+    const r = renderRN(<DictationPage />);
+    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Dictation');
+    expect(findHost(r.root, byTestId('dictation-phone'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('dictation-computer'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-voice-dictation'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-voice-meeting'))).toBeTruthy();
+    expect(queryHost(r.root, byTestId('settings-voice-config'))).toBeNull();
+    expect(queryHost(r.root, byTestId('settings-voice-speaking'))).toBeNull();
   });
 
   it('Voice devices with no reported host says to add one', () => {

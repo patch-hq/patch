@@ -382,8 +382,10 @@ export interface ComposerProps {
    * the chat and open it before a meeting can bind to it.
    */
   onStartMeeting?(): void;
-  /** When provided, the mic's right-click menu offers Voice settings and calls this. */
+  /** When provided, the call button's right-click menu offers Voice settings and calls this. */
   onOpenVoiceSettings?(): void;
+  /** When provided, the mic's right-click menu offers Dictation settings and calls this. */
+  onOpenDictationSettings?(): void;
   /** Test seam (transcribe mode): inject the mic recorder factory. */
   recorderFactory?(deps?: VoiceRecorderDeps): Promise<VoiceRecording>;
   /** Test seam (transcribe mode): inject the clip→transcript upload call. */
@@ -523,6 +525,7 @@ export const Composer = forwardRef(function Composer(
     onStartCall,
     onStartMeeting,
     onOpenVoiceSettings,
+    onOpenDictationSettings,
     recorderFactory,
     transcribeClip,
     previewFactory,
@@ -1735,7 +1738,7 @@ export const Composer = forwardRef(function Composer(
       // Keep dictating reads each spoken stretch as its own clip on the host,
       // which does not run this engine. Said, not quietly read by another one.
       pushError(
-        'voice: Keep dictating is not available with Parakeet on this computer. Switch Dictation to another engine in Settings → Voice.',
+        'voice: Keep dictating is not available with Parakeet on this computer. Switch Dictation to another engine in Settings → Dictation.',
       );
       return;
     }
@@ -1926,13 +1929,13 @@ export const Composer = forwardRef(function Composer(
       icon: <Mic size={14} aria-hidden />,
       run: () => startDictMode(),
     },
-    ...(onOpenVoiceSettings
+    ...(onOpenDictationSettings
       ? [
           {
-            id: 'voice-settings',
-            label: 'Voice settings',
+            id: 'dictation-settings',
+            label: 'Dictation settings',
             icon: <Settings size={14} aria-hidden />,
-            run: onOpenVoiceSettings,
+            run: onOpenDictationSettings,
           },
         ]
       : []),

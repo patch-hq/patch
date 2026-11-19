@@ -76,7 +76,7 @@ describe('picking the dictation transcriber', () => {
       backend: 'deepgram',
       message:
         'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
+        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
     });
     const withKey = createDictationTranscribers({ logger, local, deepgramApiKey: 'd' });
     const picked = pickDictationTranscriber('deepgram', withKey);

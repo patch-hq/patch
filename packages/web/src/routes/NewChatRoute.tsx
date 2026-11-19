@@ -1663,6 +1663,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           newChatDraftId={draftId}
           onStartMeeting={() => void createThenRun((id) => void startMeeting(id))}
           onOpenVoiceSettings={() => navigate('/settings/voice')}
+          onOpenDictationSettings={() => navigate('/settings/dictation')}
           autoFocus
           // Restore + persist the draft's unsent text (spec/14 § New chat drafts).
           // Keyed by draftId above, so switching drafts remounts + re-seeds.

@@ -89,20 +89,20 @@ describe('composer dictation mode', () => {
     expect(screen.getByTestId('mic-menu')).toBeInTheDocument();
   });
 
-  it('right-click offers Voice settings, which opens them and closes the menu', () => {
-    const onOpenVoiceSettings = vi.fn();
+  it('right-click offers Dictation settings, which opens them and closes the menu', () => {
+    const onOpenDictationSettings = vi.fn();
     render(
       <Composer
         chatId="c1"
         hostId="d1"
         onSend={vi.fn()}
-        onOpenVoiceSettings={onOpenVoiceSettings}
+        onOpenDictationSettings={onOpenDictationSettings}
         dictationModeFactory={factory as unknown as typeof startDictationMode}
       />,
     );
     fireEvent.contextMenu(mic(), { clientX: 10, clientY: 10 });
-    fireEvent.click(screen.getByText('Voice settings'));
-    expect(onOpenVoiceSettings).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByText('Dictation settings'));
+    expect(onOpenDictationSettings).toHaveBeenCalledOnce();
     expect(factory).not.toHaveBeenCalled();
     expect(screen.queryByTestId('mic-menu')).toBeNull();
   });

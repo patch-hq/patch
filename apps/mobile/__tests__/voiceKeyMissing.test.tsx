@@ -42,7 +42,7 @@ const TOMS_CONFIG: VoiceConfig = {
 };
 const REFUSAL =
   'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-  'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.';
+  'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.';
 
 function seedConfig(voiceConfig: VoiceConfig): void {
   useSettingsStore.setState({

@@ -71,7 +71,7 @@ export function localSttStatus(modelsDir: string): LocalSttStatus {
 
 /** The message every surface shows for a dictation that cannot start. */
 export function localSttMissingMessage(status: LocalSttStatus): string {
-  return `Parakeet on this computer is not downloaded (missing ${status.missing.join(', ')}). Download it in Settings → Voice.`;
+  return `Parakeet on this computer is not downloaded (missing ${status.missing.join(', ')}). Download it in Settings → Dictation.`;
 }
 
 export interface DownloadProgress {
