@@ -863,6 +863,9 @@ const SUBAGENT_DISALLOWED_PATCH_TOOLS = [
   'mcp__patch__patch_pad_reply',
   'mcp__patch__patch_pad_list',
   'mcp__patch__patch_pad_collect',
+  // Only a chat the user is in starts agents: nesting is invisible to them.
+  'mcp__patch__patch_agent',
+  'mcp__patch__patch_spawn',
 ];
 
 /** `patch_delegate`'s live/settled state (spec/06 § Cross-chat tools). */

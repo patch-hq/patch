@@ -719,6 +719,8 @@ describe('patch_delegate', () => {
         'mcp__patch__patch_speak',
         'mcp__patch__patch_ask_human',
         'mcp__patch__patch_artifact',
+        'mcp__patch__patch_agent',
+        'mcp__patch__patch_spawn',
       ]),
     );
   });

@@ -3041,6 +3041,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
     const { chatId, prompt, title, model, folder, account, disallowedTools, wait } = parsed.data;
+    if (opts.daemon!.isSubagent(chatId)) {
+      return reply.code(403).send({
+        error: 'forbidden',
+        message: 'An agent cannot start agents or chats; only a chat the user is in can.',
+      });
+    }
     if (!limiter.check(`delegate:${chatId}`)) {
       toolLog({
         tool: 'patch_delegate',
@@ -3177,6 +3183,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       goal,
       hidden,
     } = parsed.data;
+    if (callerChatId !== undefined && opts.daemon!.isSubagent(callerChatId)) {
+      return reply.code(403).send({
+        error: 'forbidden',
+        message: 'An agent cannot start agents or chats; only a chat the user is in can.',
+      });
+    }
     const limiterKey = callerChatId ?? 'anonymous';
     if (!limiter.check(`spawn:${limiterKey}`)) {
       toolLog({

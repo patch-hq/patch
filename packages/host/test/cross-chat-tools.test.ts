@@ -277,6 +277,40 @@ describe('UDS internal endpoints — patch_spawn', () => {
   });
 });
 
+describe('agents cannot start agents', () => {
+  it('refuses patch_spawn and patch_delegate from a subagent, allows them from an ordinary chat', async () => {
+    const { daemon, jobs, folder } = setup();
+    const parent = await daemon.spawnChat({ folder, prompt: 'hi' });
+    const { id: sub } = await daemon.createDelegate({ parentChatId: parent, prompt: 'work' });
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const spawn = await app.inject({
+        method: 'POST',
+        url: '/internal/spawn',
+        headers: AUTH,
+        payload: { folder, callerChatId: sub },
+      });
+      expect(spawn.statusCode).toBe(403);
+      const deleg = await app.inject({
+        method: 'POST',
+        url: '/internal/delegate',
+        headers: AUTH,
+        payload: { chatId: sub, prompt: 'nested' },
+      });
+      expect(deleg.statusCode).toBe(403);
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/internal/delegate',
+        headers: AUTH,
+        payload: { chatId: parent, prompt: 'fine' },
+      });
+      expect(ok.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('patch_spawn records the chat that launched the new one', () => {
   it('announces parentChatId on chat.spawned, replays it, and keeps it in meta', async () => {
     const { daemon, jobs, folder, events } = setup();
