@@ -24,6 +24,7 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { hostLabel, sortHosts } from './hostScope.js';
 import { patchShared, problemText, writeShared } from './sharedWrite.js';
 import { Group, Note, Row, SettingsPage } from './ui.js';
+import { ModelEndpoints } from './ModelEndpoints.js';
 
 export function ProvidersPage(): JSX.Element {
   return (
@@ -35,7 +36,7 @@ export function ProvidersPage(): JSX.Element {
         <ProviderKeys />
       </section>
       <ProviderOwnSettings />
-      <LocalModelEndpoint />
+      <ModelEndpoints />
       <Secrets />
     </SettingsPage>
   );
@@ -139,73 +140,6 @@ function ProviderSettingRow({
       />
       <span className="set-unit">days</span>
     </Row>
-  );
-}
-
-/**
- * The server local models run on (Ollama, llama.cpp, LM Studio): one OpenAI-
- * compatible base URL, shared by every host and reached from each host, so
- * `127.0.0.1` means the host running the chat. Its models then appear in the
- * model picker as `local/<name>`.
- */
-function LocalModelEndpoint(): JSX.Element {
-  const saved = usePreferencesStore((s) => s.preferences.localModelBaseUrl) ?? '';
-  const loaded = usePreferencesStore((s) => s.loaded);
-  const [draft, setDraft] = useState<string | null>(null);
-  const value = draft ?? saved;
-  const dirty = draft !== null && draft.trim() !== saved;
-
-  async function save(next: string): Promise<void> {
-    if (await patchShared('local model endpoint', { localModelBaseUrl: next.trim() }))
-      setDraft(null);
-  }
-
-  return (
-    <Group label="Local model" testid="settings-local-model">
-      <Row
-        title="Endpoint"
-        sub={saved === '' ? 'Not set' : 'Set'}
-        testid="local-model-endpoint-row"
-        className="stack"
-      >
-        <form
-          className="set-inline"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (dirty) void save(value);
-          }}
-        >
-          <input
-            className="set-grow"
-            type="url"
-            aria-label="Local model endpoint"
-            data-testid="local-model-endpoint"
-            placeholder="http://127.0.0.1:11434/v1"
-            value={value}
-            disabled={!loaded}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          <button
-            type="submit"
-            className="set-btn primary"
-            data-testid="local-model-endpoint-save"
-            disabled={!loaded || !dirty}
-          >
-            Save
-          </button>
-          {saved !== '' ? (
-            <button
-              type="button"
-              className="set-btn ghost"
-              data-testid="local-model-endpoint-clear"
-              onClick={() => void save('')}
-            >
-              Clear
-            </button>
-          ) : null}
-        </form>
-      </Row>
-    </Group>
   );
 }
 

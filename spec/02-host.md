@@ -111,13 +111,8 @@ replayed, and the new host's request ids continue past the highest the old one
 used. A replayed item the chat's log already holds, found by its item id, is not
 logged again.
 
-A local-model turn is no different either. Its tool-calling loop (stream the
-model's reply, run the tools it asked for, send the results back) runs in an agent
-process of its own under the same runner, which speaks the same JSON-RPC line shape,
-so it is reattached exactly as a Codex turn is: what the agent said after the point
-the previous host had handled is replayed, and a tool approval no host had answered
-is asked again. The tools it runs are the agent's children, so they carry on too. A
-turn that had not yet named its session had not begun, and starts again as a new turn.
+A chat on a model endpoint is no different either: it is a Codex turn (or a
+Claude Code one) like any other, and is reattached the same way.
 
 A script job's command runs detached in its own process group, with its output
 written to files and its exit code to a sidecar file, and its record is on disk
@@ -315,12 +310,23 @@ version is off for that provider's chats and the native one is used
 
 Local models and routers (Ollama, LM Studio, llama.cpp, vLLM, OpenRouter,
 LiteLLM) are not providers. Each is a model endpoint inside a harness Patch
-already drives, set in that provider's settings (Settings → Providers): its base
-URL and, for a router, its key. The models the endpoint lists appear under that
-provider in the catalogue, and an unreachable endpoint is reported against it.
-Titles and goal checks for a chat on an endpoint run on the chat's own model, so
-nothing calls a paid API the user did not choose. Patch runs no agent loop of its
-own.
+already drives, listed under Settings → Providers → Model endpoints: a name, its
+API, its base URL, optionally the models to offer, and optionally a key. An
+OpenAI-compatible endpoint runs in Codex, as a custom model provider with no
+ChatGPT sign-in; an Anthropic-compatible one runs in Claude Code, pointed at it
+with `ANTHROPIC_BASE_URL`, with no Claude account. The list is a shared setting;
+a key is a shared secret, written once, sent to hosts in the snapshot and never
+shown again. The models an endpoint names, or else lists at `/models`, appear
+under its harness in the catalogue, and an unreachable endpoint is reported
+against that harness, naming it. Titles and goal checks for a chat on an
+endpoint run on the chat's own model, so nothing calls a paid API the user did
+not choose. A chat on an endpoint that is no longer set up is refused, naming
+it. Patch runs no agent loop of its own.
+
+Chats made on Patch's former local-model loop (`local/<model>`) keep their
+history and stay searchable, but cannot continue: the chat says so and offers a
+new chat in the same folder on the same model through Codex. The old
+`localModelBaseUrl` setting becomes the endpoint those new chats use.
 
 The host provisions a provider the host lacks rather than reporting it as
 missing. For Claude Code it resolves the `claude` executable and passes it to the

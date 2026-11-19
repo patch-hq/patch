@@ -159,6 +159,7 @@ export async function stubSettingsApi(
   };
   await page.route('**/api/accounts/**', write);
   await page.route('**/api/providers/keys/**', write);
+  await page.route('**/api/providers/endpoints/**', write);
   await page.route('**/api/healthz', (r) =>
     r.fulfill(json({ ok: true, version: '0.0.0', gitSha: 'abc1234' })),
   );

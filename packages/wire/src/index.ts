@@ -171,6 +171,7 @@ export * from './chatLog.js';
 export * from './provider-keys.js';
 export * from './providers.js';
 export * from './acpAgents.js';
+export * from './modelEndpoints.js';
 export * from './permissionModeCopy.js';
 // Which permission modes each model can actually run in (spec/02 § Permission
 // mode). Static, mirroring Claude Code's own denylist — see the module header.

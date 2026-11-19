@@ -1057,6 +1057,16 @@ export const api = {
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
     }),
+  // spec/02 § Provider adapters — a model endpoint's key, write-only.
+  setEndpointKey: (endpointId: string, value: string) =>
+    request<SharedState>(`/api/providers/endpoints/${encodeURIComponent(endpointId)}/key`, {
+      method: 'PUT',
+      body: { value },
+    }),
+  revokeEndpointKey: (endpointId: string) =>
+    request<SharedState>(`/api/providers/endpoints/${encodeURIComponent(endpointId)}/key`, {
+      method: 'DELETE',
+    }),
   addAccount: (
     backendId: SharedBackendId,
     body: { token?: string; apiKey?: string; label?: string },

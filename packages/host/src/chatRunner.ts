@@ -62,6 +62,7 @@ import {
   deriveSnoozeOutcome,
   openSnoozeRecord,
   providerDescriptor,
+  retiredModelNotice,
   providerForSessionId,
   modelSupportsEffort,
   ChatErrorCode,
@@ -609,6 +610,8 @@ export interface HostOptions {
     agentStatement: string;
     /** Also report whether the goal is on track (spec/04 § Goals — check-in). */
     checkIn?: boolean;
+    /** The chat's own model: a chat on a model endpoint is judged on it. */
+    chatModel?: string;
   }) => Promise<{
     verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
@@ -5448,6 +5451,7 @@ export class Daemon {
       transcript: renderGoalTranscript(state.lastMessages),
       turnsEvaluated,
       folder: state.folder,
+      ...(state.model ? { chatModel: state.model } : {}),
       background: this.describeBackgroundForGoal(chatId),
       userScope: renderUserScope(state.lastMessages),
       agentStatement:
@@ -10163,6 +10167,21 @@ export class Daemon {
     // held or restart-resumed turn), a settled child that runs again is running
     // again — else this turn's final report is dropped as already delivered.
     this.rearmDelegate(chatId);
+
+    // A chat on Patch's retired local-model loop keeps its history but cannot
+    // continue (spec/02 § Provider adapters): say so, never run it elsewhere.
+    const retired = retiredModelNotice(state.model);
+    if (retired) {
+      this.emit({
+        type: 'chat.error',
+        chatId,
+        error: { code: 'model_retired', message: retired.message },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.chatState.setActivity(chatId, 'idle');
+      this.emitState(chatId);
+      return false;
+    }
     if (state.subagent?.userPaused) {
       // A turn is running again, whoever started it: no longer paused.
       this.setDelegatePaused(chatId, false);
@@ -12062,6 +12081,7 @@ export class Daemon {
     const agentStatement = renderAgentStatement(state.lastMessages);
     const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
     const folder = state.folder;
+    const chatModel = state.model;
     const background = this.describeBackgroundForGoal(chatId);
     // spec/04 § Goals — check-in: on its cadence the same call also says whether
     // the work is on track.
@@ -12083,6 +12103,7 @@ export class Daemon {
           userScope,
           agentStatement,
           ...(checkIn ? { checkIn: true } : {}),
+          ...(chatModel ? { chatModel } : {}),
         });
         this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
       } catch (err) {

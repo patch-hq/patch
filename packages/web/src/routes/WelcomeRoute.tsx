@@ -23,7 +23,7 @@ import {
   permissionModeHint,
   permissionModesForProviders,
   PROVIDERS,
-  providerForModel,
+  isEndpointModel,
   type PermissionMode,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
@@ -380,7 +380,8 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
   // Only the connected providers' models: a ChatGPT user is never offered, or
   // left on, a Claude model they cannot run.
   const runnable = (id: string): boolean =>
-    providerForModel(id) === 'local'
+    // A model endpoint needs no sign-in: it is reachable or it is not listed.
+    isEndpointModel(id)
       ? true
       : (secrets?.[accountsKeyForBackend(backendIdForModel(id))] ?? []).some((a) => a.connected);
   const options = all.filter((m) => runnable(m.id));

@@ -106,6 +106,7 @@ export const MANAGER_EMPTY_LINE = 'Ask about any of your chats, or have it messa
 import { CONNECT_PATH, ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { ChatSignInBanner } from '../components/ChatSignInBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
+import { RetiredModelBanner } from '../components/RetiredModelBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
@@ -2486,6 +2487,7 @@ export function ChatRoute({
       <ProviderContextPanel row={row} />
       <WakeBar row={row} />
       <BrowserHandoffPanel chatId={chatId} />
+      <RetiredModelBanner row={row} />
       <ArchivedBanner row={row} />
       <HiddenBanner row={row} />
       <SnoozedBanner row={row} />

@@ -215,12 +215,15 @@ export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   // The project header's + names the host as well as the path: the same path on
   // two hosts is two directories (spec/04 § Spawn).
   const hostParam = searchParams.get('host');
+  // A chat that cannot continue offers a new one on its model's successor.
+  const modelParam = searchParams.get('model');
 
   const [draftId, setDraftId] = useState<string>(() => {
     const st = useDraftStore.getState();
     if (draftIdParam && st.drafts[draftIdParam]) return draftIdParam;
     const id = st.create(folderParam ?? undefined);
     if (hostParam) st.update(id, { hostId: hostParam });
+    if (modelParam) st.update(id, { model: modelParam });
     return id;
   });
   // The URL naming a DIFFERENT existing draft is the sidebar switching drafts —

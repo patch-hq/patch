@@ -290,16 +290,65 @@ describe('SharedSettingsService', () => {
     expect(service.current().providerSettings).toEqual({ claude: { cleanupPeriodDays: 90 } });
   });
 
-  it('stores the local model endpoint, clears it with an empty value, and refuses a non-URL', () => {
-    expect(service.current().localModelBaseUrl).toBeUndefined();
-    service.update({ localModelBaseUrl: 'http://127.0.0.1:11434/v1' });
-    expect(service.current().localModelBaseUrl).toBe('http://127.0.0.1:11434/v1');
-    service.update({ localModelBaseUrl: '' });
-    expect(service.current().localModelBaseUrl).toBe('');
-    expect(() => service.update({ localModelBaseUrl: 'not a url' })).toThrow(/invalid/i);
-    // It is not a secret: it rides in the settings snapshot hosts receive.
-    service.update({ localModelBaseUrl: 'http://h:8080/v1' });
-    expect(JSON.stringify(service.current())).toContain('http://h:8080/v1');
+  it('stores model endpoints in the settings and their keys only as secrets', async () => {
+    expect(service.current().modelEndpoints).toBeUndefined();
+    const ollama = {
+      id: 'ollama',
+      label: 'Ollama',
+      api: 'openai' as const,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+    };
+    const router = {
+      id: 'router',
+      label: 'LiteLLM',
+      api: 'anthropic' as const,
+      baseUrl: 'http://h:4000',
+    };
+    service.update({ modelEndpoints: [ollama, router] });
+    expect(() => service.update({ modelEndpoints: [ollama, ollama] })).toThrow(/share an id/);
+    expect(() => service.update({ modelEndpoints: [{ ...ollama, baseUrl: 'not a url' }] })).toThrow(
+      /invalid/i,
+    );
+    expect(() => service.setEndpointKey('nope', 'sk-1234')).toThrow(/No model endpoint nope/);
+
+    // LiteLLM's own example key is seven characters: short keys are accepted, but never shown.
+    service.setEndpointKey('router', 'sk-1234');
+    service.setEndpointKey('ollama', 'sk-a-much-longer-endpoint-key-9876');
+    expect(service.secretsSummary().endpointKeys).toEqual([
+      { id: 'router' },
+      { id: 'ollama', last4: '9876' },
+    ]);
+    expect(JSON.stringify(service.current())).not.toContain('sk-1234');
+    expect(everythingOnDisk(dir)).not.toContain('9876');
+
+    online = ['d1'];
+    service.hostOnline('d1');
+    await new Promise((r) => setTimeout(r, 10));
+    const snap = snapshots('d1').at(-1)!.event;
+    expect(snap.settings.modelEndpoints).toHaveLength(2);
+    expect(snap.secrets.endpointKeys).toEqual({
+      router: 'sk-1234',
+      ollama: 'sk-a-much-longer-endpoint-key-9876',
+    });
+
+    // An endpoint taken out takes its key with it; with none left the field is gone.
+    service.update({ modelEndpoints: [ollama] });
+    expect(service.secretsSummary().endpointKeys).toEqual([{ id: 'ollama', last4: '9876' }]);
+    service.revokeEndpointKey('ollama');
+    expect(service.secretsSummary().endpointKeys).toBeUndefined();
+    expect(() => service.revokeEndpointKey('ollama')).toThrow(/No key is saved/);
+  });
+
+  it('turns the retired local model URL into the endpoint its chats continue on', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ localModelBaseUrl: 'http://127.0.0.1:11434/v1' }),
+    );
+    expect(make().current().modelEndpoints).toEqual([
+      { id: 'local', label: 'Local model', api: 'openai', baseUrl: 'http://127.0.0.1:11434/v1' },
+    ]);
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ localModelBaseUrl: '' }));
+    expect(make().current().modelEndpoints).toBeUndefined();
   });
 
   it('merges two hosts’ accounts, dropping a second copy of the same Claude account', () => {

@@ -24,16 +24,14 @@ Cost note: any paid API needs Tom's sign-off and a spend cap before first use.
 | -------------------------------------- | ------------- | ----------------------------------------------- | ----------------------------------------------------------------------------- |
 | Gemini                                 | `acp/gemini/` | Gemini CLI over ACP (built in)                  | Key already stored (`gemini`); free tier is limited; paid use needs approval. |
 | DeepSeek                               | `deepseek/`   | OpenAI-compatible API through a generic harness | Very cheap per token; key needed.                                             |
-| Local (Ollama / llama.cpp / LM Studio) | `local/`      | OpenAI-compatible endpoint on the host          | Free, private; capability depends on model; endpoint URL is host config.      |
+| Local (Ollama / llama.cpp / LM Studio) | endpoint      | Model endpoint inside Codex                     | Free, private; capability depends on model; set under Model endpoints.        |
 | OpenRouter                             | `openrouter/` | OpenAI-compatible API                           | One key reaches many models; good catch-all.                                  |
 | Groq                                   | `groq/`       | OpenAI-compatible API                           | Key already stored; fast open models.                                         |
 | Mistral                                | `mistral/`    | OpenAI-compatible API or Vibe CLI               | Optional.                                                                     |
 | xAI Grok                               | `xai/`        | OpenAI-compatible API                           | Optional.                                                                     |
 
-Status: the generic engine (`openaiCompatBackend.ts`) is wired to chats for `local/` only (`localModels.ts`; endpoint is the shared setting `localModelBaseUrl`). The paid providers each still need a registry entry, a key and a config block.
-
-Recommended order: (1) a generic **OpenAI-compatible harness** (base URL + key + model list, tool-calling loop) — one backend that makes DeepSeek, Local, OpenRouter, Groq, Mistral and xAI each a registry entry plus a config block; (2) Gemini via its CLI as a separate harness, mirroring Codex; (3) local first for zero-cost testing.
+Status: local models and OpenAI- or Anthropic-compatible routers run as model endpoints inside Codex or Claude Code (spec/02 § Provider adapters, `modelEndpoints.ts`). Patch's own agent loop and `local/` provider are gone.
 
 ## Status
 
-Built: the generic OpenAI-compatible engine (`packages/host/src/openaiCompatBackend.ts`) — streaming, tool loop (Bash/Read/Write), permission modes, saved sessions. Not yet reachable from a chat: it has no registry entries, no host routing, no key/endpoint config, no history reader, no MCP tools, and Gemini's CLI harness is not started.
+Built: model endpoints in Codex and Claude Code, and Gemini CLI as the first ACP provider. A paid API reached through an endpoint (DeepSeek, Groq, Mistral, xAI) needs only an endpoint entry and its key.

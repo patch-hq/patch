@@ -21,9 +21,12 @@ import {
   acpBackendStatus,
   backendStatus,
   isAcpBackendRow,
+  endpointIdFor,
   providerDescriptor,
   providerForBackendId,
   providerKeyInfo,
+  type ModelEndpoint,
+  type ModelEndpointApi,
   type ProviderKeyId,
 } from '@patch/wire';
 import { api, ApiError, type SharedState } from '../../api/rest';
@@ -724,7 +727,7 @@ export function ProvidersPage(): React.ReactElement {
     <SettingsPage title="Providers" testID="settings-page-providers">
       <ProviderKeys />
       <ProviderOwnSettings />
-      <LocalModelEndpoint />
+      <ModelEndpoints />
       <SecretsSection />
     </SettingsPage>
   );
@@ -882,60 +885,165 @@ export function ProviderKeys(): React.ReactElement {
   );
 }
 
+const ENDPOINT_API_LABEL: Record<ModelEndpointApi, string> = {
+  openai: 'OpenAI-compatible · runs in Codex',
+  anthropic: 'Anthropic-compatible · runs in Claude Code',
+};
+
 /**
- * The server local models run on (Ollama, llama.cpp, LM Studio): one
- * OpenAI-compatible base URL, shared by every host and reached from each host,
- * so `127.0.0.1` means the host running the chat. Its models then appear in
- * the model picker as `local/<name>`.
+ * Model endpoints (spec/02 § Provider adapters): local model servers and
+ * routers, each run inside Codex (OpenAI-compatible) or Claude Code
+ * (Anthropic-compatible). The list is a shared setting; a key is a write-only
+ * shared secret.
  */
-export function LocalModelEndpoint(): React.ReactElement {
-  const conn = usePresenceStore((s) => s.connection);
-  const saved = useSettingsStore((s) => s.data?.preferences.localModelBaseUrl) ?? '';
+export function ModelEndpoints(): React.ReactElement {
+  const reachable = usePresenceStore((s) => s.connection) === 'connected';
+  const endpoints = useSettingsStore((s) => s.data?.preferences.modelEndpoints) ?? [];
+  const keys = useSettingsStore((s) => s.data?.shared?.secrets.endpointKeys) ?? [];
   const loaded = useSettingsStore((s) => s.data !== null);
-  const [draft, setDraft] = React.useState(saved);
-  React.useEffect(() => setDraft(saved), [saved]);
-  const reachable = conn === 'connected';
-  const dirty = draft.trim() !== saved;
+  const [adding, setAdding] = React.useState(false);
+  const [label, setLabel] = React.useState('');
+  const [endpointApi, setEndpointApi] = React.useState<ModelEndpointApi>('openai');
+  const [baseUrl, setBaseUrl] = React.useState('');
+  const [key, setKey] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+
+  const save = async (): Promise<void> => {
+    const endpoint: ModelEndpoint = {
+      id: endpointIdFor(
+        label,
+        endpoints.map((e) => e.id),
+      ),
+      label: label.trim(),
+      api: endpointApi,
+      baseUrl: baseUrl.trim(),
+    };
+    setBusy(true);
+    try {
+      if (!(await patchShared('Model endpoint', { modelEndpoints: [...endpoints, endpoint] })))
+        return;
+      if (
+        key.trim() &&
+        !(await writeShared('Endpoint key', () => api.setEndpointKey(endpoint.id, key.trim())))
+      )
+        return;
+      setAdding(false);
+      setLabel('');
+      setBaseUrl('');
+      setKey('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <SettingsSection title="Local model" testID="local-model">
-      <Row
-        testID="local-model-endpoint-row"
-        title="Endpoint"
-        subtitle={saved === '' ? 'Not set' : 'Set'}
-      >
-        <View style={{ marginTop: space.sm }}>
-          <Field
-            testID="local-model-endpoint"
-            accessibilityLabel="Local model endpoint"
-            placeholder="http://127.0.0.1:11434/v1"
-            value={draft}
-            onChangeText={setDraft}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            editable={loaded}
-          />
-          <ButtonRow>
-            <SettingsButton
-              testID="local-model-endpoint-save"
-              label="Save"
-              disabled={!reachable || !loaded || !dirty}
-              onPress={() =>
-                void patchShared('Local model endpoint', { localModelBaseUrl: draft.trim() })
-              }
-            />
-            {saved !== '' ? (
+    <SettingsSection title="Model endpoints" testID="model-endpoints">
+      {endpoints.map((e) => {
+        const k = keys.find((x) => x.id === e.id);
+        return (
+          <Row
+            key={e.id}
+            testID={`model-endpoint-${e.id}`}
+            title={e.label}
+            subtitle={`${ENDPOINT_API_LABEL[e.api]} · ${e.baseUrl} · ${
+              k ? `Key set${k.last4 ? ` · ends ${k.last4}` : ''}` : 'No key'
+            }`}
+            right={
               <SettingsButton
-                testID="local-model-endpoint-clear"
-                label="Clear"
-                variant="quiet"
-                disabled={!reachable}
-                onPress={() => void patchShared('Local model endpoint', { localModelBaseUrl: '' })}
+                testID={`model-endpoint-${e.id}-remove`}
+                label="Remove"
+                variant="danger"
+                disabled={!reachable || busy}
+                onPress={() =>
+                  Alert.alert(
+                    `Remove ${e.label}?`,
+                    'Chats on its models stay readable but cannot continue until it is added again with the same name.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Remove',
+                        style: 'destructive',
+                        onPress: () =>
+                          void patchShared('Model endpoint', {
+                            modelEndpoints: endpoints.filter((x) => x.id !== e.id),
+                          }),
+                      },
+                    ],
+                  )
+                }
               />
-            ) : null}
-          </ButtonRow>
-        </View>
-      </Row>
+            }
+          />
+        );
+      })}
+      {adding ? (
+        <Row testID="model-endpoint-new" title="New endpoint">
+          <View style={{ marginTop: space.sm, gap: space.sm }}>
+            <Field
+              testID="model-endpoint-new-label"
+              accessibilityLabel="Name"
+              placeholder="Name, e.g. Ollama"
+              value={label}
+              onChangeText={setLabel}
+            />
+            <ButtonRow>
+              {(['openai', 'anthropic'] as const).map((a) => (
+                <SettingsButton
+                  key={a}
+                  testID={`model-endpoint-new-api-${a}`}
+                  label={a === 'openai' ? 'Codex' : 'Claude Code'}
+                  variant={endpointApi === a ? 'primary' : 'quiet'}
+                  onPress={() => setEndpointApi(a)}
+                />
+              ))}
+            </ButtonRow>
+            <Field
+              testID="model-endpoint-new-url"
+              accessibilityLabel="Base URL"
+              placeholder={
+                endpointApi === 'openai' ? 'http://127.0.0.1:11434/v1' : 'http://127.0.0.1:4000'
+              }
+              value={baseUrl}
+              onChangeText={setBaseUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <Field
+              testID="model-endpoint-new-key"
+              accessibilityLabel="Key"
+              placeholder="Key (optional)"
+              value={key}
+              onChangeText={setKey}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <ButtonRow>
+              <SettingsButton label="Cancel" variant="quiet" onPress={() => setAdding(false)} />
+              <SettingsButton
+                testID="model-endpoint-new-save"
+                label="Save"
+                disabled={!reachable || busy || label.trim() === '' || baseUrl.trim() === ''}
+                onPress={() => void save()}
+              />
+            </ButtonRow>
+          </View>
+        </Row>
+      ) : (
+        <Row
+          testID="model-endpoint-add-row"
+          title="Add an endpoint"
+          right={
+            <SettingsButton
+              testID="model-endpoint-add"
+              label="Add"
+              disabled={!reachable || !loaded}
+              onPress={() => setAdding(true)}
+            />
+          }
+        />
+      )}
     </SettingsSection>
   );
 }

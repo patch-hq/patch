@@ -43,8 +43,11 @@ it('Claude can switch its native tools off, so every Patch tool is offered', asy
   for (const n of ['patch_agent', 'patch_wake_me', 'patch_goal_set']) expect(names).toContain(n);
 });
 
-it('a local model has no native twins, so nothing is withheld', () => {
-  expect(patchToolsOmittedFor('local/qwen')).toEqual([]);
+it('an endpoint model follows its harness: Codex withholds what Codex duplicates', () => {
+  expect(patchToolsOmittedFor('openai/endpoint/ollama/qwen3:8b')).toEqual(
+    patchToolsOmittedFor('openai/gpt-5'),
+  );
+  expect(patchToolsOmittedFor('claude/endpoint/router/x')).toEqual([]);
 });
 
 it('reads the omitted tools from the command line, not the environment', () => {

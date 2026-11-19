@@ -17,8 +17,8 @@ import {
   ChatNoteEvent,
   ChatToolCallEvent,
   ChatToolResultEvent,
-  HarnessId,
   NativeRef,
+  RecordedHarnessId,
   PermissionDecision,
   PermissionMode,
   TurnOrigin,
@@ -96,7 +96,7 @@ export const LogRecordBody = z.discriminatedUnion('k', [
   z
     .object({
       k: z.literal('turn.start'),
-      harness: HarnessId,
+      harness: RecordedHarnessId,
       /** Null when the chat names no model (the harness's own default ran). */
       model: z.string().min(1).nullable(),
       sessionId: z.string().min(1).optional(),
@@ -116,7 +116,7 @@ export const LogRecordBody = z.discriminatedUnion('k', [
   z
     .object({
       k: z.literal('session'),
-      harness: HarnessId,
+      harness: RecordedHarnessId,
       model: z.string().min(1).nullable(),
       sessionId: z.string().min(1),
       reason: SessionReason,
@@ -173,7 +173,7 @@ export const LogRecordBody = z.discriminatedUnion('k', [
   z
     .object({
       k: z.literal('import'),
-      harness: HarnessId,
+      harness: RecordedHarnessId,
       sessionId: z.string().min(1),
       records: z.number().int().nonnegative(),
     })

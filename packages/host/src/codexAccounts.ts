@@ -795,6 +795,37 @@ export class CodexAccounts {
       throw error;
     }
   }
+  /**
+   * A turn on a model endpoint (`modelEndpoints.ts`): no Codex login at all,
+   * just app-server under a home of its own with the endpoint's key in `env`.
+   * The endpoint is handed to the thread as a custom model provider.
+   */
+  async endpointTurnClient(
+    env: Record<string, string>,
+    durable?: DurableCodexProcess,
+  ): Promise<CodexClient> {
+    const client = new CodexClient({
+      executable: this.opts.executable ?? (await this.runtime.ensure()),
+      home: this.endpointHome,
+      // Nothing to sign in: never touch the OS keyring for it.
+      credentialStore: 'ephemeral',
+      env,
+      onStderr: this.stderrLogger('model-endpoint'),
+      ...(durable ? { durable } : {}),
+    });
+    try {
+      await client.start();
+      this.turnClients.add(client);
+      return client;
+    } catch (error) {
+      await client.close();
+      throw error;
+    }
+  }
+  /** Where Codex keeps endpoint chats' threads: beside the logins, shared by every endpoint. */
+  get endpointHome(): string {
+    return join(this.opts.root, 'endpoints');
+  }
   async releaseTurnClient(client: CodexClient): Promise<void> {
     this.turnClients.delete(client);
     await client.close();
