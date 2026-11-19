@@ -68,7 +68,9 @@ test.describe('jobs page at 412px', () => {
   test('cards are compact: three or more fit in a screen', async ({ page }) => {
     await open(page, '/jobs');
     const card = (await page.getByTestId('job-a').boundingBox())!;
-    expect(card.height).toBeLessThan(135);
+    // The design pass gave the card a title row, a trigger line and a status line.
+    // Three must still fit under the page head on a 900px phone viewport.
+    expect(card.height).toBeLessThan(200);
   });
 
   test('action line is dropped from the card', async ({ page }) => {
