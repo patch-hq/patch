@@ -59,6 +59,8 @@ test('new chat: no meetings popover, the composer says why and links to signing 
 });
 
 test('Meeting still asks for what it needs, when it is pressed', async ({ page }) => {
+  // Meeting mode is experimental: the button is there only with the setting on.
+  await stubSettingsApi(page, { preferences: { experimentalFeatures: true } });
   await page.goto('/app/dev-harness.html?chat=chat_tools');
   await expect(page.getByTestId('composer-input')).toBeVisible();
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
