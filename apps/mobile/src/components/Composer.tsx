@@ -1037,7 +1037,17 @@ export function Composer({
         });
       return;
     }
-    const { engine, tidy } = dictationEngineFor(settings.preferences.voiceConfig.dictation);
+    let picked: ReturnType<typeof dictationEngineFor>;
+    try {
+      picked = dictationEngineFor(settings.preferences.voiceConfig.dictation, {
+        surfaceId: settings.devices.find((d) => d.isCurrent)?.surfaceId,
+        deviceDictation: settings.preferences.deviceDictation,
+      });
+    } catch (e) {
+      useUiStore.getState().pushError(`voice: ${(e as Error).message}`);
+      return;
+    }
+    const { engine, tidy } = picked;
     // Dictation on a backend this chat's host has no key for is refused at the
     // press, not after the user has spoken (the host refuses it too). The
     // phone's recogniser needs no key.

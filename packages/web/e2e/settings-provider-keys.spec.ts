@@ -45,7 +45,7 @@ test.describe('Settings — Providers', () => {
       },
     });
     await page.goto(settingsUrl('dictation'));
-    await expect(page.getByTestId('dictation-phone-keys')).toContainText('no Deepgram key is set');
+    await expect(page.getByTestId('dictation-web-1-keys')).toContainText('no Deepgram key is set');
     await page.getByTestId('settings-nav-providers').click();
 
     await page.getByTestId('provider-key-deepgram-edit').click();
@@ -72,7 +72,7 @@ test.describe('Settings — Providers', () => {
     });
     await page.getByTestId('settings-nav-dictation').click();
     await expect(page.getByTestId('settings-voice-dictation-engines')).toBeVisible();
-    await expect(page.getByTestId('dictation-phone-keys')).toHaveCount(0);
+    await expect(page.getByTestId('dictation-web-1-keys')).toHaveCount(0);
     expect(await page.content()).not.toContain(FAKE_KEY);
   });
 

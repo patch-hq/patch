@@ -684,7 +684,7 @@ export interface HostOptions {
    * how many of its own messages the model sees, reconstructed fresh from
    * that window once the full track grows past it. Mutable at runtime via
    * `setManagerContextWindow` (`host.settings` → `managerContextWindow`),
-   * same pattern as `chatNameInterval`. Defaults to a generous 200 so a host
+   * same pattern as the other live settings. Defaults to a generous 200 so a host
    * that hasn't heard from the server yet doesn't truncate aggressively.
    */
   managerContextWindow?: number;
@@ -735,15 +735,6 @@ export interface HostOptions {
    * unaffected. Production wires this on.
    */
   checkAgentResponseHooks?: boolean;
-  /**
-   * How many user messages between auto-regen of the chat name (task: "chat
-   * names should update every 10 messages"). `0` (default) disables periodic
-   * regen — the title is only generated from the first message, as before.
-   * When set, the title is regenerated every `chatNameInterval` user messages
-   * after the first title has already been generated. Optional — absent or 0
-   * leaves existing behaviour entirely unchanged.
-   */
-  chatNameInterval?: number;
   /**
    * Delay before `maybeGenerateTitle`'s retry attempt, in ms. Defaults to
    * `TITLE_GEN_RETRY_DELAY_MS`. Tests override this to keep the retry-path
@@ -2305,12 +2296,6 @@ export class Daemon {
    * attempt returned null / is still in flight.
    */
   private readonly titleGenerated = new Set<string>();
-  /**
-   * Per-chat count of user messages seen since the last title generation.
-   * Reset each time a title is (re-)generated; used to implement
-   * `chatNameInterval` periodic re-titling.
-   */
-  private readonly userMessagesSinceTitle = new Map<string, number>();
   private readonly historyReader: HistoryReader;
   private readonly claudeProjectsRoot: string;
   /** The chats' own history log and seq authority (spec/04 § History). */
@@ -11695,9 +11680,8 @@ export class Daemon {
    * spec/04 § Name — as soon as a chat's FIRST user message is accepted,
    * summarise it into a short human-readable title. Fired asynchronously so it
    * never blocks the turn that is about to start (or delays on a long-running
-   * one). Triggered at most ONCE per chat (`titleGenerated` guard) for the
-   * first title; after that, when `chatNameInterval > 0`, re-generates the
-   * title every N user messages. Special threads keep their fixed names.
+   * one). Triggered at most ONCE per chat (`titleGenerated` guard): a title is
+   * set once and never regenerated. Special threads keep their fixed names.
    *
    * A job-spawned chat (`dispatcher.ts` `spawn` action) gets exactly one user
    * message ever, so this single trigger gets `TITLE_GEN_ATTEMPTS` real
@@ -11716,23 +11700,11 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state) return;
 
-    // Track user messages per chat for periodic regen.
-    const prev = this.userMessagesSinceTitle.get(chatId) ?? 0;
-    const count = prev + 1;
-    this.userMessagesSinceTitle.set(chatId, count);
-
-    const interval = this.opts.chatNameInterval ?? 0;
-    const isFirstTitle = !this.titleGenerated.has(chatId) && state.name === null;
-    const isPeriodicRegen =
-      interval > 0 && this.titleGenerated.has(chatId) && count % interval === 0;
-
-    if (!isFirstTitle && !isPeriodicRegen) return;
+    if (this.titleGenerated.has(chatId) || state.name !== null) return;
 
     // Mark BEFORE the async work so a second message arriving while this one
     // is in flight can never kick off a duplicate generation.
     this.titleGenerated.add(chatId);
-    // Reset counter so the next interval starts from 0.
-    this.userMessagesSinceTitle.set(chatId, 0);
 
     // Strip the folded [Attachments] block so a pasted image never leaks a raw
     // path into the title prompt; an attachment-only turn passes a short note.
@@ -11775,22 +11747,21 @@ export class Daemon {
             'title generation produced no title; leaving name unchanged',
           );
           // Re-arm a failed FIRST title so the turn settling retries it.
-          if (isFirstTitle) this.titleGenerated.delete(chatId);
+          this.titleGenerated.delete(chatId);
           return;
         }
         const cur = this.chatState.get(chatId);
         if (!cur) return;
-        // For first title: only set when still unnamed (no user override).
-        // For periodic regen: always overwrite — the user asked for refresh.
-        if (isFirstTitle && cur.name !== null) return;
+        // Only set when still unnamed (no user override meanwhile).
+        if (cur.name !== null) return;
         const now = this.opts.now();
         cur.name = title;
         this.opts.metaStore.update(chatId, (m) => ({ ...m, name: title, updatedAt: now }));
         this.emitState(chatId);
-        this.opts.logger.info({ chatId, title, isPeriodicRegen }, 'chat title generated');
+        this.opts.logger.info({ chatId, title }, 'chat title generated');
       } catch (err) {
         this.opts.logger.warn({ chatId, err }, 'title generation failed; leaving name unchanged');
-        if (isFirstTitle) this.titleGenerated.delete(chatId);
+        this.titleGenerated.delete(chatId);
       }
     })();
   }
@@ -15788,15 +15759,6 @@ export class Daemon {
   /** The host-wide default currently in force. */
   permissionModeDefault(): SdkPermissionMode {
     return this.opts.permissionModeDefault ?? 'auto';
-  }
-
-  /**
-   * Update the live chat-name-regeneration interval (from `host.settings`
-   * → `chatNameInterval`). Takes effect on the next user message without
-   * restarting any in-flight turn.
-   */
-  setChatNameInterval(interval: number): void {
-    this.opts.chatNameInterval = interval;
   }
 
   /** Settings → Goals: how many refusals in a row end a goal's pushing. */

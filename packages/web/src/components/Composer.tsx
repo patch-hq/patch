@@ -95,6 +95,7 @@ import {
   useExperimentalFeatures,
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
+import { ownDictationEngine } from '../lib/ownDictation.js';
 import { CONNECT_PATH, providerNameForModel } from './ClaudeDisconnectedBanner.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -565,9 +566,7 @@ export const Composer = forwardRef(function Composer(
   // Dictation that is certain to fail is not offered: web/desktop dictation on
   // an engine whose key this chat's host lacks is refused at the host, so
   // the mic greys out and says why. Unknown (host not reported) is not blocked.
-  const computerDictationEngine = usePreferencesStore(
-    (s) => s.preferences.voiceConfig.dictation.computer,
-  );
+  const computerDictationEngine = usePreferencesStore((s) => ownDictationEngine(s.preferences));
   const chatHostPresence = usePresenceStore((s) => (hostId ? s.hosts[hostId] : undefined));
   const dictationBlockedReason =
     computerDictationEngine === 'local'
@@ -1540,7 +1539,7 @@ export const Composer = forwardRef(function Composer(
    */
   function startLivePreview(rec: VoiceRecording, gen: number, previewChatId: string): void {
     try {
-      const engine = usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
+      const engine = ownDictationEngine(usePreferencesStore.getState().preferences);
       const openPreview =
         previewFactory ?? (engine === 'local' ? startLocalDictationPreview : startDictationPreview);
       previewRef.current = openPreview(previewChatId, {
@@ -1612,8 +1611,7 @@ export const Composer = forwardRef(function Composer(
     // last interim words stay drawn until it lands (cleared in `finally`).
     // On a streaming engine the live session IS the transcript, so it stays
     // open until the host has answered the finish below.
-    const computerEngine =
-      usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
+    const computerEngine = ownDictationEngine(usePreferencesStore.getState().preferences);
     const streaming =
       computerEngine === 'deepgram' ||
       computerEngine === 'elevenlabs' ||

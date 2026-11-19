@@ -15,6 +15,7 @@ import {
   DictationSetting,
   dictationEngineFor,
   SpeechToTextEngine,
+  dictationEnginesFor,
   type AudioEvent,
   type AudioEventType,
   type AudioSessionStartEvent,
@@ -437,5 +438,39 @@ describe('meeting engine', () => {
         { ...keys, assemblyai: true },
       ),
     ).toEqual([]);
+  });
+});
+
+describe('dictationEngineFor — each device picks its own engine', () => {
+  const dictation = { phone: 'device', computer: 'whisper', tidy: false } as const;
+  test('a device with its own choice runs on it; one without runs on its kind’s engine', () => {
+    const deviceDictation = { mac: 'local', pixel: 'deepgram' } as const;
+    expect(dictationEngineFor(dictation, 'desktop', { surfaceId: 'mac', deviceDictation })).toBe(
+      'local',
+    );
+    expect(dictationEngineFor(dictation, 'mobile', { surfaceId: 'pixel', deviceDictation })).toBe(
+      'deepgram',
+    );
+    expect(dictationEngineFor(dictation, 'mobile', { surfaceId: 'other', deviceDictation })).toBe(
+      'device',
+    );
+    expect(dictationEngineFor(dictation, 'web')).toBe('whisper');
+  });
+  test('a choice the device cannot run is refused, never swapped', () => {
+    expect(() =>
+      dictationEngineFor(dictation, 'web', { surfaceId: 'b', deviceDictation: { b: 'local' } }),
+    ).toThrow(/does not run on a browser/);
+    expect(() =>
+      dictationEngineFor(dictation, 'desktop', {
+        surfaceId: 'm',
+        deviceDictation: { m: 'device' },
+      }),
+    ).toThrow(/does not run on a computer/);
+  });
+  test('each kind is offered only what it can run', () => {
+    expect(dictationEnginesFor('mobile')).toContain('device');
+    expect(dictationEnginesFor('mobile')).not.toContain('local');
+    expect(dictationEnginesFor('desktop')).toContain('local');
+    expect(dictationEnginesFor('web')).not.toContain('local');
   });
 });

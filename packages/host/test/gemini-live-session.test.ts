@@ -176,6 +176,19 @@ describe('GeminiLiveSession — connect + setup', () => {
     expect(first.setup.model).toBe('models/gemini-custom');
   });
 
+  test('speaks in the chosen voice, and in Gemini’s default when none is chosen', async () => {
+    const chosen = makeDeps({ voice: 'Kore' });
+    const ws = await openSession(new GeminiLiveSession(makeInit(), chosen.deps), chosen.lastWs);
+    const [first] = ws.sentJson() as [{ setup: { generationConfig: Record<string, unknown> } }];
+    expect(first.setup.generationConfig.speechConfig).toEqual({
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+    });
+    const plain = makeDeps();
+    const ws2 = await openSession(new GeminiLiveSession(makeInit(), plain.deps), plain.lastWs);
+    const [setup2] = ws2.sentJson() as [{ setup: { generationConfig: Record<string, unknown> } }];
+    expect(setup2.setup.generationConfig.speechConfig).toBeUndefined();
+  });
+
   test('puts a briefing on the chat in the instructions, so the voice knows what the chat is from its first word', async () => {
     const getChatContext = vi.fn(async () => [
       { role: 'user' as const, text: '(This chat is titled "Train times".)' },

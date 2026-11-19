@@ -4234,14 +4234,13 @@ describe('Host ChatRunner', () => {
     });
   });
 
-  describe('chatNameInterval: periodic title regeneration', () => {
+  describe('a chat title is set once', () => {
     function setupInterval(
       generateTitle: (input: {
         chatId: string;
         firstUserMessage: string;
         folder: string;
       }) => Promise<string | null>,
-      chatNameInterval: number,
     ) {
       const home = mkdtempSync(join(tmpdir(), 'patch-interval-'));
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-interval-folder-')));
@@ -4260,7 +4259,6 @@ describe('Host ChatRunner', () => {
         now: () => 1_700_000_000_000,
         generateChatId: () => `chat-iv-${++id}`,
         generateTitle,
-        chatNameInterval,
       });
       return { daemon, sdk, events, folder, metaStore };
     }
@@ -4290,91 +4288,18 @@ describe('Host ChatRunner', () => {
       }
     }
 
-    it('with interval=0 title is only generated once (first message), never regenerated', async () => {
+    it('is generated from the first message and never regenerated', async () => {
       resetMsgCounter();
       const calls: string[] = [];
       const { daemon, sdk, folder } = setupInterval(async (input) => {
         calls.push(input.firstUserMessage);
         return `Title for: ${input.firstUserMessage}`;
-      }, 0);
+      });
       const chatId = await daemon.spawnChat({ folder });
       // Send 5 messages — only the first should trigger title generation.
       await sendMessages(daemon, sdk, chatId, 5);
       expect(calls).toHaveLength(1);
       expect(calls[0]).toBe('msg 0');
-    });
-
-    it('with interval=3 title regenerates every 3 messages after the first title', async () => {
-      resetMsgCounter();
-      const calls: string[] = [];
-      let titleNum = 0;
-      const { daemon, sdk, folder } = setupInterval(async (input) => {
-        calls.push(input.firstUserMessage);
-        return `Title ${++titleNum}`;
-      }, 3);
-      const chatId = await daemon.spawnChat({ folder });
-      // Send 7 messages:
-      //  msg 0 → first title (call 1)
-      //  msg 1, msg 2 → no regen
-      //  msg 3 → periodic regen (count=3, 3%3=0) (call 2)
-      //  msg 4, msg 5 → no regen
-      //  msg 6 → periodic regen (count=3 again after reset) (call 3)
-      await sendMessages(daemon, sdk, chatId, 7);
-      expect(calls).toHaveLength(3);
-      expect(calls[0]).toBe('msg 0');
-      // The periodic regen uses the triggering message as the prompt.
-      expect(calls[1]).toBe('msg 3');
-      expect(calls[2]).toBe('msg 6');
-      // Final name is from the last regen.
-      expect(daemon.chatState.get(chatId)?.name).toBe('Title 3');
-    });
-
-    it('periodic regen always overwrites the name even when a user had set one', async () => {
-      resetMsgCounter();
-      let titleNum = 0;
-      const { daemon, sdk, folder } = setupInterval(async () => {
-        return `Regen ${++titleNum}`;
-      }, 2);
-      const chatId = await daemon.spawnChat({ folder });
-      await sendMessages(daemon, sdk, chatId, 1); // msg 0 → first title "Regen 1"
-      // User overrides the name.
-      const state = daemon.chatState.get(chatId)!;
-      state.name = 'User Name';
-      await sendMessages(daemon, sdk, chatId, 2); // msg 1 (no regen), msg 2 (count=2, 2%2=0 → regen)
-      // Periodic regen overwrites user name.
-      expect(daemon.chatState.get(chatId)?.name).toBe('Regen 2');
-    });
-
-    it('setChatNameInterval updates the interval live — subsequent messages use the new value', async () => {
-      resetMsgCounter();
-      const calls: string[] = [];
-      const { daemon, sdk, folder } = setupInterval(async (input) => {
-        calls.push(input.firstUserMessage);
-        return `Title for ${input.firstUserMessage}`;
-      }, 0);
-      const chatId = await daemon.spawnChat({ folder });
-      await sendMessages(daemon, sdk, chatId, 3); // msg 0 (first title), msg 1, msg 2 — no regen with interval=0
-      expect(calls).toHaveLength(1);
-      // Now switch to interval=2. Counter reset after first title, so next
-      // regen fires 2 messages later.
-      daemon.setChatNameInterval(2);
-      await sendMessages(daemon, sdk, chatId, 2); // msg 3, msg 4 → count=2, 2%2=0 → regen
-      expect(calls).toHaveLength(2);
-      expect(calls[1]).toBe('msg 4');
-    });
-
-    it('interval=1 regenerates on every message after the first title', async () => {
-      resetMsgCounter();
-      const calls: string[] = [];
-      let n = 0;
-      const { daemon, sdk, folder } = setupInterval(async (input) => {
-        calls.push(input.firstUserMessage);
-        return `T${++n}`;
-      }, 1);
-      const chatId = await daemon.spawnChat({ folder });
-      await sendMessages(daemon, sdk, chatId, 4);
-      // msg 0 → first title; msg 1, 2, 3 → each triggers regen.
-      expect(calls).toHaveLength(4);
     });
   });
 

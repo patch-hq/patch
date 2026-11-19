@@ -125,6 +125,43 @@ describe('voice ledger', () => {
     expect(t.allUsd).toBeCloseTo(0.2, 9);
     expect(t.monthUsd).toBeCloseTo(0.1, 9);
   });
+
+  it('totals tokens and ElevenLabs credits in the providers’ own units', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'patch-ledger-')), 'voice-usage.jsonl');
+    const ledger = createVoiceLedger(path);
+    ledger.record(
+      costCall({
+        ...base,
+        engine: {
+          backend: 'gemini',
+          model: 'x',
+          tokens: { textIn: 100, audioIn: 400, cachedIn: 50, textOut: 20, audioOut: 300 },
+          stt: null,
+        },
+      }),
+    );
+    ledger.record({
+      ...costCall({
+        ...base,
+        engine: { backend: 'elevenlabs', model: 'x', tokens: null, stt: null },
+      }),
+      real: { credits: 2923, usd: null, creditsLeft: 144271 },
+    });
+    ledger.recordSpeech({
+      kind: 'tts',
+      provider: 'elevenlabs',
+      model: 'eleven_flash_v2_5',
+      characters: 200,
+      at: base.endedAt,
+      usd: null,
+    });
+    const t = createVoiceLedger(path).totals(base.endedAt);
+    expect(t.monthTokens).toBe(870);
+    expect(t.allTokens).toBe(870);
+    // 2923 for the call, plus 200 characters of Flash at half a credit each.
+    expect(t.monthCredits).toBe(3023);
+    expect(t.allCalls).toBe(2);
+  });
 });
 
 describe('formatUsd — amounts too small for plain digits', () => {

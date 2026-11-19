@@ -198,6 +198,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
       type: 'patch.voice_note.transcribe_request',
       requestId,
       surfaceKind,
+      surfaceId,
       format,
       audioBase64,
       ...(engine !== undefined ? { engine } : {}),

@@ -12,93 +12,65 @@ async function expectChosen(page: Page, testid: string, label: string): Promise<
   await expect.poll(() => chosen(page, testid)).toBe(label);
 }
 
-// Real-browser e2e for the per-surface voice config (spec/07 § Voice is a
-// config matrix). Three conversation surfaces (device / hands-free / call), each
-// ONE choice of engine — the backend and layer it maps to are not shown — with
-// an honest status for a cell the host would refuse at connect time. Dictation
-// has its own group: an engine for the phone, one for the computer, and tidy-up
-// (spec/07 § Dictation engines).
-test.describe('Settings — Voice engines', () => {
+// Real-browser e2e for Settings → Voice (spec/07 § Voice): ONE config for
+// every voice conversation — calls, hands-free and voice devices — a provider,
+// its model and voice, and the hand-off switch; Local nests what reads the
+// replies out. Dictation lists every device with its own engine.
+test.describe('Settings — Voice', () => {
   test.beforeEach(async ({ page }) => {
     await stubSettingsApi(page);
     await page.goto(settingsUrl('voice'));
     await expect(page.getByTestId('settings-voice-config')).toBeVisible();
   });
 
-  test('each surface is one engine choice, named for people, with no layer axis', async ({
-    page,
-  }) => {
-    for (const surface of ['device', 'handsFree', 'call']) {
-      await expect(page.getByTestId(`voice-${surface}-engine`)).toBeVisible();
-      await expect(page.getByTestId(`voice-${surface}-layer`)).toHaveCount(0);
-    }
-    await expect(page.getByTestId('voice-call-engine').locator('button')).toHaveText([
+  test('one provider choice, named for people, with Local the default', async ({ page }) => {
+    await expect(page.getByTestId('voice-engine').locator('button')).toHaveText([
       'Local',
       'Gemini',
       'OpenAI',
       'ElevenLabs',
     ]);
-    // Dictation: the phone has its own recogniser; a computer does not.
-    await page.getByTestId('settings-nav-dictation').click();
-    await expect(page.getByTestId('dictation-phone-engine').locator('button')).toHaveText([
-      'Built-in',
-      'Deepgram',
-      'ElevenLabs',
-      'Host server',
-      'Whisper',
-    ]);
-    await expect(page.getByTestId('dictation-computer-engine').locator('button')).toHaveText([
-      'Deepgram',
-      'ElevenLabs',
-      'Host server',
-      'Parakeet (free, on device)',
-      'Whisper',
-    ]);
+    await expectChosen(page, 'voice-engine', 'Local');
+    // Local nests what reads the replies out.
+    await expect(page.getByTestId('voice-local-tts')).toBeVisible();
+    await expect(page.getByTestId('kokoro-voice')).toBeVisible();
     await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);
-  });
-
-  test('defaults to Local everywhere, no status hint shown', async ({ page }) => {
+    // No per-surface rows, no chat title, no "Speaking" section.
     for (const surface of ['device', 'handsFree', 'call']) {
-      await expectChosen(page, `voice-${surface}-engine`, 'Local');
+      await expect(page.getByTestId(`voice-${surface}-engine`)).toHaveCount(0);
     }
-    await expect(
-      page.locator('[data-testid="settings-voice-config"] [data-testid$="-status"]'),
-    ).toHaveCount(0);
-    await page.getByTestId('settings-nav-dictation').click();
-    await expectChosen(page, 'dictation-phone-engine', 'Built-in');
-    await expectChosen(page, 'dictation-computer-engine', 'Whisper');
-    await expect(page.getByTestId('dictation-tidy-toggle')).not.toBeChecked();
+    await expect(page.getByText('Speaking')).toHaveCount(0);
+    await expect(page.getByTestId('chat-name-interval')).toHaveCount(0);
   });
 
-  test('picking an engine writes the backend and layer it stands for', async ({ page }) => {
-    await page.getByTestId('voice-call-engine-gemini').click();
-    await page.getByTestId('voice-call-variant-heavy').click();
-    await expectChosen(page, 'voice-call-variant', 'Thinking · ~$0.02/min');
-    await page.getByTestId('voice-call-engine-openai').click();
-    await expectChosen(page, 'voice-call-engine', 'OpenAI');
-    await expectChosen(page, 'voice-call-variant', 'full · ~$0.09/min');
-    await expect(page.getByTestId('voice-call-status')).toHaveCount(0);
+  test('a hosted provider: model, its own voice, and the hand-off switch', async ({ page }) => {
+    await page.getByTestId('voice-engine-gemini').click();
+    await expectChosen(page, 'voice-engine', 'Gemini');
+    await page.getByTestId('voice-variant-heavy').click();
+    await expectChosen(page, 'voice-variant', 'Thinking');
+    await expect(page.getByTestId('voice-gemini-voice')).toBeVisible();
+    await expect(page.getByTestId('voice-handoff-toggle')).toBeChecked();
+    await page.getByTestId('voice-engine-openai').click();
+    await expectChosen(page, 'voice-variant', 'full');
+    await expect(page.getByTestId('voice-openai-voice')).toBeVisible();
+    await expect(page.getByTestId('voice-gemini-voice')).toHaveCount(0);
   });
 
   test('row labels stay readable at phone width — chips sit under the label', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 });
-    await page.getByTestId('voice-call-engine-elevenlabs').click();
-    const title = page.getByTestId('voice-call').locator('.set-row-title');
+    await page.getByTestId('voice-engine-elevenlabs').click();
+    const title = page.getByTestId('voice-provider').locator('.set-row-title');
     const box = await title.boundingBox();
     expect(box!.width).toBeGreaterThan(40);
     expect(box!.height).toBeLessThan(30);
-    const handoff = page.getByTestId('voice-call-handoff-row');
-    await expect(handoff).toContainText('pass to the chat’s agent');
-    await expect(handoff.locator('.set-row-title')).toBeVisible();
+    const handoff = page.getByTestId('voice-handoff-row');
+    await expect(handoff).toContainText('Pass work to the chat’s agent');
     expect((await handoff.locator('.set-row-title').boundingBox())!.height).toBeLessThan(60);
   });
 
-  test('Gemini on hands-free shows no warning: the address word is enforced', async ({ page }) => {
-    await page.getByTestId('voice-handsFree-engine-gemini').click();
-    await expect(page.getByTestId('voice-handsFree-status')).toHaveCount(0);
-  });
-
-  test('shows what voice calls have cost on each host, this month and in all', async ({ page }) => {
+  test('usage is one account-wide summary in tokens and credits, not dollars per host', async ({
+    page,
+  }) => {
     await page.evaluate(() => {
       const store = (
         window as unknown as {
@@ -114,18 +86,29 @@ test.describe('Settings — Voice engines', () => {
       store.getState().setHostReport({
         ...host,
         type: 'host.host',
-        voiceUsage: { monthUsd: 0.0412, monthCalls: 3, allUsd: 1.5, allCalls: 40 },
+        voiceUsage: {
+          monthUsd: 0.0412,
+          monthCalls: 3,
+          allUsd: 1.5,
+          allCalls: 40,
+          monthTokens: 12000,
+          allTokens: 90000,
+          monthCredits: 7400,
+          allCredits: 41304,
+          elevenLabsPlan: { used: 41304, limit: 185575 },
+        },
       });
     });
-    await expect(page.getByTestId('voice-usage-d1')).toHaveText(
-      'dev-host: this month $0.041 across 3 calls · in all $1.50 across 40 calls',
+    await expect(page.getByTestId('voice-usage-month')).toContainText(
+      '3 calls · 12,000 tokens · 7,400 ElevenLabs credits',
     );
+    await expect(page.getByTestId('voice-usage-plan')).toContainText(
+      '41,304 of 185,575 credits used',
+    );
+    await expect(page.getByTestId('voice-usage')).not.toContainText('$');
   });
 
-  test('a hosted cell whose key the host lacks says so, naming the host and the key', async ({
-    page,
-  }) => {
-    // The host reports which provider keys it holds (`host.host.voiceKeys`).
+  test('a hosted provider whose key the host lacks says so, as an error', async ({ page }) => {
     await page.evaluate(() => {
       const store = (
         window as unknown as {
@@ -144,23 +127,43 @@ test.describe('Settings — Voice engines', () => {
         voiceKeys: { gemini: false, openai: true, deepgram: false },
       });
     });
-    // The key the host holds says nothing. (Checked first: the Voice page is an
-    // experimental page, so the nav has no entry to come back to it from Dictation.)
-    await page.getByTestId('voice-call-engine-openai').click();
-    await expect(page.getByTestId('voice-call-keys')).toHaveCount(0);
-    await page.getByTestId('settings-nav-dictation').click();
-    await expect(page.getByTestId('dictation-computer-keys')).toHaveCount(0);
-    await page.getByTestId('dictation-computer-engine-deepgram').click();
-    const line = page.getByTestId('dictation-computer-keys');
+    await page.getByTestId('voice-engine-gemini').click();
+    const line = page.getByTestId('voice-keys');
     await expect(line).toHaveText(
-      'Not configured on dev-host: no Deepgram key is set. Sessions there are refused.',
+      'Not configured on dev-host: no Gemini key is set. Sessions there are refused.',
     );
-    await expect(line).toBeVisible();
-    // It reads as an error, not as a muted hint.
     const color = await line.evaluate((el) => getComputedStyle(el).color);
     const hint = await line.evaluate(
       (el) => getComputedStyle(el.closest('.set-sub') as HTMLElement).color,
     );
     expect(color).not.toBe(hint);
+    await page.getByTestId('voice-engine-openai').click();
+    await expect(page.getByTestId('voice-keys')).toHaveCount(0);
+  });
+});
+
+test.describe('Settings — Dictation, one engine per device', () => {
+  test('every device is listed with only the engines it can run', async ({ page }) => {
+    await stubSettingsApi(page);
+    await page.goto(settingsUrl('dictation'));
+    const row = page.getByTestId('dictation-device-web-1');
+    await expect(row).toContainText('This device');
+    await expect(page.getByTestId('dictation-device-web-1-engine').locator('button')).toHaveText([
+      'Deepgram',
+      'ElevenLabs',
+      'Host server',
+      'Whisper',
+    ]);
+    await expectChosen(page, 'dictation-device-web-1-engine', 'Whisper');
+    await page.getByTestId('dictation-device-web-1-engine-deepgram').click();
+    await expectChosen(page, 'dictation-device-web-1-engine', 'Deepgram');
+  });
+
+  test('Meetings has its own page', async ({ page }) => {
+    await stubSettingsApi(page);
+    await page.goto(settingsUrl('meetings'));
+    await expect(page.getByTestId('meeting-engine-pills')).toBeVisible();
+    await page.getByTestId('settings-nav-dictation').click();
+    await expect(page.getByTestId('meeting-engine-pills')).toHaveCount(0);
   });
 });

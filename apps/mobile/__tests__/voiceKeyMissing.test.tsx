@@ -47,6 +47,7 @@ const REFUSAL =
 function seedConfig(voiceConfig: VoiceConfig): void {
   useSettingsStore.setState({
     data: {
+      devices: [],
       preferences: { addressWord: 'patch', voiceConfig, experimentalFeatures: true },
     } as unknown as SettingsResponse,
     error: null,
@@ -130,5 +131,38 @@ describe('composer dictation on a backend with no key', () => {
     });
     expect(factory).toHaveBeenCalledTimes(1);
     expect(useUiStore.getState().errors).toEqual([]);
+  });
+});
+
+describe('this phone’s own dictation engine', () => {
+  it('a phone that picked its own engine is judged on that engine, not the phones’ one', () => {
+    useSettingsStore.setState({
+      data: {
+        devices: [{ surfaceId: 'me', surfaceKind: 'mobile', isCurrent: true }],
+        preferences: {
+          addressWord: 'patch',
+          voiceConfig: {
+            dictation: { phone: 'device', computer: 'whisper', tidy: false },
+            meeting: 'local',
+            device: { backend: 'local', layer: 'direct', handoff: 'auto' },
+            handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
+            call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+          },
+          deviceDictation: { me: 'deepgram' },
+        },
+      } as unknown as SettingsResponse,
+      error: null,
+    });
+    pinChat('c-own', 'h-own');
+    usePresenceStore.setState((s) => ({
+      hosts: {
+        ...s.hosts,
+        'h-own': {
+          online: true,
+          host: { voiceKeys: { gemini: false, openai: false, deepgram: false } },
+        } as never,
+      },
+    }));
+    expect(voiceKeyRefusal('c-own', 'dictation')).toMatch(/no Deepgram key/);
   });
 });

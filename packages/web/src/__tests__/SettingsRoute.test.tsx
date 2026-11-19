@@ -46,6 +46,7 @@ const PAGE_TESTID: Record<string, string> = {
   goals: 'settings-goals-page',
   prompts: 'settings-prompts-page',
   dictation: 'settings-dictation',
+  meetings: 'settings-meetings',
   voice: 'settings-voice',
   hooks: 'settings-hooks-page',
   computer: 'settings-computer-use',
@@ -99,6 +100,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Goals',
       'Prompts',
       'Dictation',
+      'Meetings',
       'Voice',
       'Shortcuts',
       'Advanced ▸',
@@ -734,7 +736,7 @@ describe('Settings → Dictation and Voice', () => {
   // spec/07 § Voice — a config matrix: a hosted cell whose key a host lacks is
   // shown as not configured on that host, from `host.host.voiceKeys`.
   describe('a backend with no key on a host', () => {
-    it('names the missing key per host on each hosted cell, and nothing on a local one', async () => {
+    it('names the missing key per host on a device and on the voice provider', async () => {
       usePreferencesStore.setState({
         preferences: {
           ...usePreferencesStore.getState().preferences,
@@ -743,8 +745,8 @@ describe('Settings → Dictation and Voice', () => {
             dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             meeting: 'local',
             device: { backend: 'openai', layer: 'light', handoff: 'auto' },
-            handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-            call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+            handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
+            call: { backend: 'openai', layer: 'light', handoff: 'auto' },
           },
         },
         loaded: true,
@@ -761,19 +763,17 @@ describe('Settings → Dictation and Voice', () => {
       });
       reportHost('d3', { hostName: 'old-daemon', runsManager: false });
       renderSettings('/settings/dictation');
-      await waitFor(() => expect(screen.getByTestId('dictation-phone-keys')).toBeInTheDocument());
-      expect(screen.getByTestId('dictation-phone-keys')).toHaveTextContent(
+      await waitFor(() => expect(screen.getByTestId('dictation-mob-7-keys')).toBeInTheDocument());
+      expect(screen.getByTestId('dictation-mob-7-keys')).toHaveTextContent(
         'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
       );
-      // Whisper on the computer needs no key.
-      expect(screen.queryByTestId('dictation-computer-keys')).toBeNull();
+      // Whisper on this browser needs no key.
+      expect(screen.queryByTestId('dictation-web-dev-1-keys')).toBeNull();
       fireEvent.click(screen.getByTestId('settings-nav-voice'));
-      await waitFor(() => expect(screen.getByTestId('voice-device-keys')).toBeInTheDocument());
-      expect(screen.getByTestId('voice-device-keys')).toHaveTextContent(
+      await waitFor(() => expect(screen.getByTestId('voice-keys')).toBeInTheDocument());
+      expect(screen.getByTestId('voice-keys')).toHaveTextContent(
         'Not configured on hetzner, mac: no OpenAI key is set. Sessions there are refused.',
       );
-      expect(screen.queryByTestId('voice-handsFree-keys')).toBeNull();
-      expect(screen.queryByTestId('voice-call-keys')).toBeNull();
     });
 
     // spec/02 § Provider keys: a key set from Settings → Providers takes effect with
@@ -800,7 +800,7 @@ describe('Settings → Dictation and Voice', () => {
       });
       renderSettings('/settings/dictation');
       await waitFor(() =>
-        expect(screen.getByTestId('dictation-computer-keys')).toBeInTheDocument(),
+        expect(screen.getByTestId('dictation-web-dev-1-keys')).toBeInTheDocument(),
       );
       act(() =>
         reportHost('d1', {
@@ -808,104 +808,54 @@ describe('Settings → Dictation and Voice', () => {
           voiceKeys: { gemini: false, openai: false, deepgram: true },
         }),
       );
-      await waitFor(() => expect(screen.queryByTestId('dictation-computer-keys')).toBeNull());
+      await waitFor(() => expect(screen.queryByTestId('dictation-web-dev-1-keys')).toBeNull());
     });
   });
 
-  describe('Engine', () => {
-    it('shows each conversation surface as one engine choice, with no layer axis', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      await waitFor(() => expect(screen.getByTestId('voice-call')).toBeInTheDocument());
-      expect(screen.getByTestId('voice-call-engine-local')).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.queryByTestId('voice-call-layer')).toBeNull();
-      expect(screen.queryByTestId('voice-call-variant')).toBeNull();
-      expect(screen.getByTestId('voice-call-engine-gemini')).toHaveTextContent('Gemini');
-      fireEvent.click(screen.getByTestId('voice-call-engine-gemini'));
-      expect(await screen.findByTestId('voice-call-variant-heavy')).toHaveTextContent(
-        'Thinking · ~$0.02/min',
-      );
-    });
-
-    it('picking an engine writes the backend and layer it stands for', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-call-engine-openai'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      const cfg = server.writes[0]!.voiceConfig as Record<string, unknown>;
-      expect(cfg.call).toEqual({ backend: 'openai', layer: 'light', handoff: 'auto' });
-      expect(cfg.dictation).toEqual({ phone: 'device', computer: 'whisper', tidy: false });
-      await waitFor(() =>
-        expect(screen.getByTestId('voice-call-variant-light')).toHaveAttribute(
-          'aria-pressed',
-          'true',
-        ),
-      );
-    });
-
-    it('dictation: the phone and the computer each choose their own engine', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+  describe('Dictation engines, one per device', () => {
+    it('lists every device at once, each with only the engines it can run', async () => {
+      vi.stubGlobal('fetch', makeFetch());
       renderSettings('/settings/dictation');
-      expect(await screen.findByTestId('dictation-phone-engine-device')).toHaveTextContent(
+      expect(await screen.findByTestId('dictation-device-mob-7-engine-device')).toHaveTextContent(
         'Built-in',
       );
-      // A computer has no recogniser of its own.
-      expect(screen.queryByTestId('dictation-computer-engine-device')).toBeNull();
-      fireEvent.click(screen.getByTestId('dictation-computer-engine-deepgram'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).dictation).toEqual({
-        phone: 'device',
-        computer: 'deepgram',
-        tidy: false,
-      });
+      expect(screen.getByTestId('dictation-device-web-dev-1')).toHaveTextContent('This device');
+      // A browser has no recogniser of its own and cannot carry Parakeet.
+      expect(screen.queryByTestId('dictation-device-web-dev-1-engine-device')).toBeNull();
+      expect(screen.queryByTestId('dictation-device-web-dev-1-engine-local')).toBeNull();
+      expect(screen.getByTestId('dictation-device-mob-7-engine-device')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      expect(screen.getByTestId('dictation-device-web-dev-1-engine-whisper')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
     });
 
-    it('meetings: the transcription engine is chosen, and a missing key is named', async () => {
+    it('a change writes that device’s own engine and nothing else', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      reportHost('d1', {
-        hostName: 'hetzner',
-        voiceKeys: { gemini: false, openai: false, assemblyai: false },
-      });
       renderSettings('/settings/dictation');
-      expect(await screen.findByTestId('meeting-engine-pills-local')).toHaveTextContent(
-        'Free, on device',
-      );
-      expect(screen.queryByTestId('meeting-engine-keys')).toBeNull();
-      fireEvent.click(screen.getByTestId('meeting-engine-pills-assemblyai'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).meeting).toBe('assemblyai');
+      fireEvent.click(await screen.findByTestId('dictation-device-mob-7-engine-deepgram'));
       await waitFor(() =>
-        expect(screen.getByTestId('meeting-engine-keys')).toHaveTextContent(
-          'Not configured on hetzner: no AssemblyAI key is set.',
-        ),
+        expect(server.writes).toContainEqual({ deviceDictation: { 'mob-7': 'deepgram' } }),
       );
     });
 
-    it('speech to text: choosing an engine writes it and the tidy-up row names it', async () => {
+    it('speech to text: choosing an engine writes it', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/dictation');
       expect(await screen.findByTestId('stt-engine-groq')).toHaveTextContent('Groq Whisper');
-      expect(screen.getByTestId('dictation-tidy-row')).toHaveTextContent(
-        'Tidy up each phrase with Groq Whisper',
-      );
       fireEvent.click(screen.getByTestId('stt-engine-parakeet'));
       await waitFor(() => expect(server.writes).toHaveLength(1));
       expect((server.writes[0]!.voiceConfig as Record<string, unknown>).speechToText).toBe(
         'parakeet',
       );
-      await waitFor(() =>
-        expect(screen.getByTestId('dictation-tidy-row')).toHaveTextContent(
-          'Tidy up each phrase with Parakeet on host',
-        ),
-      );
     });
 
-    it('tidy-up is one switch for both', async () => {
+    it('tidy-up is one switch for every device', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/dictation');
@@ -917,57 +867,76 @@ describe('Settings → Dictation and Voice', () => {
         tidy: true,
       });
     });
+  });
 
-    it('pressing the engine already chosen writes nothing', async () => {
+  it('Meetings: the transcription engine is chosen on its own page, and a missing key is named', async () => {
+    const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    reportHost('d1', {
+      hostName: 'hetzner',
+      voiceKeys: { gemini: false, openai: false, assemblyai: false },
+    });
+    renderSettings('/settings/meetings');
+    expect(await screen.findByTestId('meeting-engine-pills-local')).toHaveTextContent(
+      'Parakeet (free, on device)',
+    );
+    expect(screen.queryByTestId('meeting-engine-keys')).toBeNull();
+    fireEvent.click(screen.getByTestId('meeting-engine-pills-assemblyai'));
+    await waitFor(() => expect(server.writes).toHaveLength(1));
+    expect((server.writes[0]!.voiceConfig as Record<string, unknown>).meeting).toBe('assemblyai');
+    await waitFor(() =>
+      expect(screen.getByTestId('meeting-engine-keys')).toHaveTextContent(
+        'Not configured on hetzner: no AssemblyAI key is set.',
+      ),
+    );
+  });
+
+  describe('Voice: one config for every conversation', () => {
+    it('a provider choice is written to calls, hands-free and voice devices alike', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-handsFree-engine-local'));
-      fireEvent.click(screen.getByTestId('voice-handsFree-engine-gemini'));
-      fireEvent.click(await screen.findByTestId('voice-handsFree-variant-heavy'));
-      await waitFor(() => expect(server.writes).toHaveLength(2));
-      expect((server.writes[1]!.voiceConfig as Record<string, unknown>).handsFree).toEqual({
-        backend: 'gemini',
-        layer: 'heavy',
-        handoff: 'auto',
-      });
+      expect(await screen.findByTestId('voice-engine-local')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      fireEvent.click(screen.getByTestId('voice-engine-openai'));
+      await waitFor(() => expect(server.writes).toHaveLength(1));
+      const cfg = server.writes[0]!.voiceConfig as Record<string, unknown>;
+      const cell = { backend: 'openai', layer: 'light', handoff: 'auto' };
+      expect(cfg.call).toEqual(cell);
+      expect(cfg.handsFree).toEqual(cell);
+      expect(cfg.device).toEqual(cell);
+      expect(cfg.dictation).toEqual({ phone: 'device', computer: 'whisper', tidy: false });
     });
 
-    it('the hand-off row appears only on a hosted engine, and writes just that choice', async () => {
+    it('a hosted provider shows its models, its own voices and the hand-off switch', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
-      await screen.findByTestId('voice-call-engine-local');
-      expect(screen.queryByTestId('voice-call-handoff')).toBeNull();
-      fireEvent.click(screen.getByTestId('voice-call-engine-gemini'));
-      fireEvent.click(await screen.findByTestId('voice-call-handoff-always'));
+      await screen.findByTestId('voice-engine-local');
+      expect(screen.queryByTestId('voice-handoff-toggle')).toBeNull();
+      fireEvent.click(screen.getByTestId('voice-engine-gemini'));
+      expect(await screen.findByTestId('voice-variant-heavy')).toHaveTextContent('Thinking');
+      const select = (await screen.findByTestId('voice-gemini-voice')) as HTMLSelectElement;
+      expect(select.value).toBe('');
+      fireEvent.change(select, { target: { value: 'Kore' } });
+      await waitFor(() => expect(server.writes).toContainEqual({ geminiVoice: 'Kore' }));
+    });
+
+    it('the hand-off switch turns the agent off and on, with no “always”', async () => {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      renderSettings('/settings/voice');
+      fireEvent.click(await screen.findByTestId('voice-engine-gemini'));
+      fireEvent.click(await screen.findByTestId('voice-handoff-toggle'));
       await waitFor(() => expect(server.writes).toHaveLength(2));
       expect((server.writes[1]!.voiceConfig as Record<string, unknown>).call).toEqual({
         backend: 'gemini',
         layer: 'light',
-        handoff: 'always',
-      });
-    });
-
-    it('changing the engine keeps the hand-off choice', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini'));
-      fireEvent.click(await screen.findByTestId('voice-call-handoff-never'));
-      await waitFor(() =>
-        expect(screen.getByTestId('voice-call-handoff-never')).toHaveAttribute(
-          'aria-pressed',
-          'true',
-        ),
-      );
-      fireEvent.click(screen.getByTestId('voice-call-variant-heavy'));
-      await waitFor(() => expect(server.writes).toHaveLength(3));
-      expect((server.writes[2]!.voiceConfig as Record<string, unknown>).call).toEqual({
-        backend: 'gemini',
-        layer: 'heavy',
         handoff: 'never',
       });
+      expect(screen.queryByTestId('voice-handoff-always')).toBeNull();
     });
 
     it('says honestly what an unbuilt combination does', async () => {
@@ -980,19 +949,18 @@ describe('Settings → Dictation and Voice', () => {
             dictation: { phone: 'device', computer: 'whisper', tidy: false },
             meeting: 'local',
             device: { backend: 'local', layer: 'light', handoff: 'auto' },
-            handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-            call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+            handsFree: { backend: 'local', layer: 'light', handoff: 'auto' },
+            call: { backend: 'local', layer: 'light', handoff: 'auto' },
           },
         },
         loaded: true,
       });
       renderSettings('/settings/voice');
       await waitFor(() =>
-        expect(screen.getByTestId('voice-device-status')).toHaveTextContent(
-          voiceCellStatus('device', 'local', 'light')!,
+        expect(screen.getByTestId('voice-status')).toHaveTextContent(
+          voiceCellStatus('local', 'light')!,
         ),
       );
-      expect(screen.queryByTestId('voice-call-status')).toBeNull();
     });
 
     it('a failed write is said', async () => {
@@ -1005,18 +973,47 @@ describe('Settings → Dictation and Voice', () => {
         ),
       );
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini'));
+      fireEvent.click(await screen.findByTestId('voice-engine-gemini'));
       await waitFor(() => expect(errors()).toContain('Settings failed. Try again.'));
+    });
+
+    it('shows usage in tokens and credits, summed across hosts, with the plan', async () => {
+      vi.stubGlobal('fetch', makeFetch());
+      reportHost('d1', {
+        hostName: 'hetzner',
+        voiceUsage: {
+          monthUsd: 1,
+          monthCalls: 2,
+          allUsd: 2,
+          allCalls: 5,
+          monthTokens: 1000,
+          allTokens: 3000,
+          monthCredits: 2000,
+          allCredits: 4000,
+          elevenLabsPlan: { used: 41304, limit: 185575 },
+        },
+      });
+      reportHost('d2', {
+        hostName: 'mac',
+        runsManager: false,
+        voiceUsage: { monthUsd: 0, monthCalls: 1, allUsd: 0, allCalls: 1, monthTokens: 500 },
+      });
+      renderSettings('/settings/voice');
+      expect(await screen.findByTestId('voice-usage-month')).toHaveTextContent(
+        '3 calls · 1,500 tokens · 2,000 ElevenLabs credits',
+      );
+      expect(screen.getByTestId('voice-usage-plan')).toHaveTextContent(
+        '41,304 of 185,575 credits used',
+      );
+      expect(screen.getByTestId('settings-voice')).not.toHaveTextContent('$');
     });
   });
 
   it('voiceCellStatus mirrors the host’s branching', () => {
-    // Voice devices run every hosted engine too.
-    expect(voiceCellStatus('device', 'openai', 'light')).toBeNull();
-    expect(voiceCellStatus('call', 'local', 'light')).toMatch(/no front model built for local/);
-    // Gemini hands-free enforces the address word on the host, so there is nothing to warn about.
-    expect(voiceCellStatus('handsFree', 'gemini', 'light')).toBeNull();
-    expect(voiceCellStatus('call', 'local', 'direct')).toBeNull();
+    expect(voiceCellStatus('openai', 'light')).toBeNull();
+    expect(voiceCellStatus('local', 'light')).toMatch(/no front model built for local/);
+    expect(voiceCellStatus('gemini', 'light')).toBeNull();
+    expect(voiceCellStatus('local', 'direct')).toBeNull();
   });
 
   it('Dictation mode: shows the pause and writes the chosen one', async () => {
@@ -1043,7 +1040,7 @@ describe('Settings → Dictation and Voice', () => {
     await waitFor(() => expect(server.writes).toContainEqual({ dictationTurnDetection: false }));
   });
 
-  describe('Speaking (shared by every host)', () => {
+  describe('Local calls (nested under the Local provider)', () => {
     it('writes the chosen Kokoro voice to the account', async () => {
       const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
@@ -1055,7 +1052,7 @@ describe('Settings → Dictation and Voice', () => {
       await waitFor(() => expect(server.writes).toContainEqual({ kokoroVoice: 'bm_george' }));
     });
 
-    it('chooses ElevenLabs as the speech engine and writes it to the account', async () => {
+    it('chooses ElevenLabs to read replies and writes it to the account', async () => {
       const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       loadShared();
@@ -1071,7 +1068,9 @@ describe('Settings → Dictation and Voice', () => {
       renderSettings('/settings/voice');
       const select = (await screen.findByTestId('elevenlabs-voice')) as HTMLSelectElement;
       expect(select.disabled).toBe(true);
-      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Add an ElevenLabs key');
+      expect(screen.getByTestId('settings-voice-config')).toHaveTextContent(
+        'Add an ElevenLabs key',
+      );
     });
 
     it('chooses an ElevenLabs model and writes it to the account', async () => {
@@ -1090,17 +1089,17 @@ describe('Settings → Dictation and Voice', () => {
       renderSettings('/settings/voice');
       const select = (await screen.findByTestId('kokoro-voice')) as HTMLSelectElement;
       expect(select.value).toBe('');
-      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Each host’s Kokoro default');
+      expect(screen.getByTestId('settings-voice-config')).toHaveTextContent(
+        'Each host’s Kokoro default',
+      );
     });
 
-    it('offers chat title refresh as a choice and writes it', async () => {
-      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      loadShared({ settings: { chatNameInterval: 0 } });
+    it('has no chat title setting: a title is set once', async () => {
+      vi.stubGlobal('fetch', makeFetch());
+      loadShared();
       renderSettings('/settings/voice');
-      expect(await screen.findByTestId('chat-name-interval-0')).toHaveTextContent('Set once');
-      fireEvent.click(screen.getByTestId('chat-name-interval-5'));
-      await waitFor(() => expect(server.writes).toContainEqual({ chatNameInterval: 5 }));
+      await screen.findByTestId('settings-voice-config');
+      expect(screen.queryByTestId('chat-name-interval')).toBeNull();
     });
   });
 
