@@ -32,7 +32,7 @@ test.describe('Settings — Providers', () => {
     page,
   }) => {
     const server = await stubSettingsApi(page, {
-      preferences: DEEPGRAM_ON_DICTATION,
+      preferences: { ...DEEPGRAM_ON_DICTATION, experimentalFeatures: true },
       answer: (w, srv) => {
         if (w.method === 'PUT' && w.path === '/api/providers/keys/deepgram') {
           srv.secrets = {
