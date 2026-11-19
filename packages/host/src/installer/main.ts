@@ -747,10 +747,10 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       NODE_USE_SYSTEM_CA: '1',
       NODE_USE_ENV_PROXY: '1',
       SDK_BACKEND: 'real',
-      // Every artifact carries silero_vad.onnx, so end-of-utterance detection
-      // and barge-in work on this host with nothing downloaded (spec/02).
+      // End-of-utterance detection and barge-in use the voice component
+      // (onnxruntime + the VAD model), fetched on first use and found under
+      // the patch home. No model path: the artifact no longer carries one.
       VAD_BACKEND: 'silero',
-      VAD_MODEL_PATH: join(installDir, 'silero_vad.onnx'),
       // spec/11 § Env: GROQ_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
       // "are read by the host, so they are set in the environment of each
       // host's service rather than in the server's compose env". They travel

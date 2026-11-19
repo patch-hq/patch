@@ -74,7 +74,6 @@ function makeArtifact(target = BUILD.target): string {
     writeFileSync(join(app, 'MacOS', 'patch-host'), '#!/bin/sh\n');
     writeFileSync(join(app, 'Info.plist'), '<string>io.github.patch-hq.host</string>\n');
   }
-  writeFileSync(join(dir, 'silero_vad.onnx'), 'onnx');
   writeFileSync(join(dir, 'install'), '#!/bin/sh\n');
   mkdirSync(join(dir, 'skill', 'patch-cli'), { recursive: true });
   writeFileSync(join(dir, 'skill', 'patch-cli', 'SKILL.md'), '# patch-cli\n');
@@ -577,7 +576,6 @@ describe('what the install puts on the host', () => {
     await runInstaller(ctx);
     const installDir = join(home, '.patch', 'versions', '9.9.9');
     expect(readFileSync(join(installDir, 'host.mjs'), 'utf8')).toContain('bundled host');
-    expect(readFileSync(join(installDir, 'silero_vad.onnx'), 'utf8')).toBe('onnx');
     expect(
       readFileSync(join(home, '.claude', 'skills', 'patch-cli', 'SKILL.md'), 'utf8'),
     ).toContain('patch-cli');
@@ -737,9 +735,8 @@ describe('what the install puts on the host', () => {
     await runInstaller(first);
     expect(captured['GROQ_API_KEY']).toBe('gk');
     expect(captured['VAD_BACKEND']).toBe('silero');
-    expect(captured['VAD_MODEL_PATH']).toBe(
-      join(home, '.patch', 'versions', '9.9.9', 'silero_vad.onnx'),
-    );
+    // The model comes from the voice component, never from the install dir.
+    expect(captured).not.toHaveProperty('VAD_MODEL_PATH');
     expect(captured['SDK_BACKEND']).toBe('real');
     // The speech engine is a setting in the app now, never carried in the unit.
     expect(captured).not.toHaveProperty('WHISPER_BACKEND');
@@ -834,8 +831,8 @@ describe('the shipping targets (spec/11 § Host installation)', () => {
       'linux-arm64',
       'linux-x64',
     ]);
-    // onnxruntime-node ships no darwin-x64 binary and every artifact carries
-    // VAD, so the target cannot be built.
+    // onnxruntime-node ships no darwin-x64 binary and the voice component
+    // carries it, so that target's voice component cannot be built.
     expect(TARGETS.some((t) => t.target === 'darwin-x64')).toBe(false);
   });
 });

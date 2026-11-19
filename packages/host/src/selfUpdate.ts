@@ -71,6 +71,8 @@ export interface ManifestArtifact {
   bytes: number;
   sha256: string;
   sig: string;
+  /** The voice component for this target (components.ts): its own tarball, same project signature. */
+  voice?: { file: string; bytes: number; sha256: string; sig: string };
 }
 
 export interface HostManifest {

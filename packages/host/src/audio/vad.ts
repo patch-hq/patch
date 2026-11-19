@@ -19,9 +19,7 @@
 // at import time (matches the lazy-fail policy for Whisper/Kokoro creds).
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { bundledNativeDir } from '../installPaths.js';
+import { ortModuleSpecifier } from '../voiceComponent.js';
 
 export interface VadFrameResult {
   /** Per-frame speech probability ∈ [0, 1]. */
@@ -189,19 +187,16 @@ interface SileroOrt {
  */
 export async function createSileroVadFactory(opts: {
   modelPath: string;
+  /** Directory holding `onnxruntime-node/` (the voice component's `native/`); absent ⇒ the workspace dependency. */
+  nativeDir?: string | undefined;
   cfg?: Partial<VadConfig>;
 }): Promise<() => Vad> {
   // Dynamic import so onnxruntime-node isn't required for `pnpm test`.
   //
-  // An INSTALLED host has no node_modules: the platform's prebuilt addon ships
-  // in the artifact's own `native/` directory (spec/18 § Two shipping shapes),
-  // so it is imported from there by path. A source checkout has no `native/` and
-  // resolves the workspace dependency by name. Neither is a fallback for the
-  // other — each is how that program finds the one copy it has.
-  const native = bundledNativeDir();
-  const ortModuleName: string = native
-    ? pathToFileURL(join(native, 'onnxruntime-node', 'dist', 'index.js')).href
-    : 'onnxruntime-node';
+  // An INSTALLED host has no node_modules: onnxruntime ships in the voice
+  // component (voiceComponent.ts), so it is imported from there by path. A
+  // source checkout names no component and resolves the workspace dependency.
+  const ortModuleName: string = ortModuleSpecifier(opts.nativeDir);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ort: any;
   try {

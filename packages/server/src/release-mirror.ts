@@ -117,7 +117,7 @@ export function parseChecksum(text: string): string {
 
 /** Files copied into the downloads folder as they are, when the release has them. */
 const PASS_THROUGH = [
-  /^patch-host-.+\.tar\.gz(\.sig)?$/,
+  /^patch-(host|voice)-.+\.tar\.gz(\.sig)?$/,
   /^patch-.+\.apk$/,
   /^android-latest\.json$/,
   // The phone's signed update manifest. Only the manifest: the files it names

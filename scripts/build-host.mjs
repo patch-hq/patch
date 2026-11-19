@@ -7,13 +7,16 @@
 //   node               the pinned Node runtime for that OS/arch
 //   host.mjs         the host and its pure-JS dependencies, one esbuild bundle
 //   bin/               the stdio MCP server every SDK query launches
-//   native/            the platform's prebuilt native addons (onnxruntime-node)
-//   silero_vad.onnx    the VAD model (~2 MB)
-//   smart_turn.onnx    dictation mode's end-of-turn model (~8.7 MB)
 //   skill/patch-cli/   the CLI skill the install writes into the user's skills dir
 //   install            the installer (sh entry + its bundled program)
 //   install.mjs
 //   build-info.json    version, source commit, build instant, target
+//
+// Voice is NOT in it. onnxruntime-node, sherpa-onnx, silero_vad.onnx and
+// smart_turn.onnx (~120 MB) are built into a second, separately signed tarball,
+// patch-voice-<version>-<target>.tar.gz, that the host fetches on first use as
+// its optional `voice` component (components.ts). The manifest's artifact entry
+// names it under `voice`, with its own sha256 and signature.
 //
 // Targets: darwin-arm64, linux-x64, linux-arm64. macOS x64 is NOT a target —
 // onnxruntime-node ships no darwin-x64 binary and every artifact carries VAD,
@@ -130,7 +133,9 @@ export function timestampFlag(identity) {
   return /^Developer ID Application: /.test(identity) ? '--timestamp' : '--timestamp=none';
 }
 
-const MACHO_MAGIC = new Set([0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
+const MACHO_MAGIC = new Set([
+  0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca,
+]);
 
 /** True for a Mach-O executable, library or bundle (thin or universal). */
 export function isMachO(file) {
@@ -535,8 +540,7 @@ function codesignMacArtifact(outDir, machos) {
     );
   }
   const entitlements =
-    process.env.PATCH_CODESIGN_ENTITLEMENTS ??
-    join(DAEMON, 'installer', 'host-entitlements.plist');
+    process.env.PATCH_CODESIGN_ENTITLEMENTS ?? join(DAEMON, 'installer', 'host-entitlements.plist');
   if (!entitlements || !existsSync(entitlements)) {
     die(
       'PATCH_CODESIGN_ENTITLEMENTS must point at the daemon entitlements plist ' +
@@ -570,6 +574,71 @@ function codesignMacArtifact(outDir, machos) {
   return identity;
 }
 
+/**
+ * Tar `<outRoot>/<name>` into `<name>.tar.gz` and sign its sha256 with the
+ * project key (detached `.sig` beside it). Used for the host and for voice.
+ */
+async function packSigned(outRoot, name, key) {
+  const tar = join(outRoot, `${name}.tar.gz`);
+  rmSync(tar, { force: true });
+  // COPYFILE_DISABLE stops macOS bsdtar writing an AppleDouble `._<file>` next
+  // to every entry. Those resource forks travel inside the tarball and get
+  // materialised on extraction, so a Linux install ends up with `._SKILL.md`
+  // in the user's skills directory and `._patch-tools-server.js` in bin — junk
+  // in shipped directories, and hundreds of lines of `LIBARCHIVE.xattr` noise
+  // scrolling past during a `curl … | sh`.
+  // COPYFILE_DISABLE stops the AppleDouble `._<file>` sidecars; --no-xattrs
+  // stops bsdtar storing the xattrs THEMSELVES, which is the other half — an
+  // install on Linux otherwise prints a `LIBARCHIVE.xattr.com.apple.provenance`
+  // warning per entry, ~200 lines of noise scrolling past a `curl … | sh`.
+  sh('tar', ['--no-xattrs', '-czf', tar, '-C', outRoot, name], {
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
+  });
+  const digest = sha256(tar);
+  const signature = Buffer.from(
+    await ed.signAsync(new Uint8Array(Buffer.from(digest, 'hex')), key.seed),
+  ).toString('base64url');
+  writeFileSync(`${tar}.sig`, `${signature}\n`);
+  return { bytes: statSync(tar).size, sha256: digest, sig: signature };
+}
+
+/**
+ * The voice component for one target: onnxruntime-node (native/), sherpa-onnx
+ * (node_modules/), silero_vad.onnx and smart_turn.onnx, laid out as the host
+ * reads them from `<patchHome>/components/voice/` (voiceComponent.ts). On macOS
+ * every Mach-O in it is signed with the project identity like the host's own,
+ * since the host loads them under the hardened runtime.
+ */
+async function buildVoice(t, ctx) {
+  const { vendor, info, outRoot, key } = ctx;
+  const name = `patch-voice-${info.version}-${t.target}`;
+  const outDir = join(outRoot, name);
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+
+  copyNativeAddons(vendor, t, outDir);
+  copySherpaOnnx(outDir, t);
+  for (const model of ['silero_vad.onnx', 'smart_turn.onnx']) {
+    const src = join(vendor, 'models', model);
+    if (!existsSync(src)) die(`${model} not found at ${src}`);
+    copyFileSync(src, join(outDir, model));
+  }
+
+  if (t.platform === 'darwin') {
+    if (process.platform !== 'darwin') {
+      die('the darwin-arm64 voice component must be built on macOS — codesign lives there');
+    }
+    const machos = machOFiles(outDir);
+    for (const want of ['onnxruntime_binding.node', 'sherpa-onnx.node']) {
+      if (!machos.some((f) => basename(f) === want)) die(`no ${want} to sign in ${outDir}`);
+    }
+    codesignMacArtifact(outDir, machos);
+  }
+
+  const packed = await packSigned(outRoot, name, key);
+  return { file: `${name}.tar.gz`, ...packed };
+}
+
 async function buildTarget(t, ctx) {
   const { vendor, esb, info, outRoot, key } = ctx;
   const name = `patch-host-${info.version}-${t.target}`;
@@ -596,23 +665,10 @@ async function buildTarget(t, ctx) {
   copyFileSync(nodeBin, join(outDir, 'node'));
   chmodSync(join(outDir, 'node'), 0o755);
 
-  // 3. the platform's prebuilt native addons
-  copyNativeAddons(vendor, t, outDir);
-
   // 3b. the agent SDK, beside the bundle, so the host's bare import resolves
   // on a host that has nothing installed but this artifact.
   copyAgentSdk(outDir);
   copyPlaywrightCore(outDir);
-  copySherpaOnnx(outDir, t);
-
-  // 4. the VAD model
-  const model = join(vendor, 'models', 'silero_vad.onnx');
-  if (!existsSync(model)) die(`silero_vad.onnx not found at ${model}`);
-  copyFileSync(model, join(outDir, 'silero_vad.onnx'));
-  // 4b. dictation mode's end-of-turn model (~8.7 MB)
-  const turnModel = join(vendor, 'models', 'smart_turn.onnx');
-  if (!existsSync(turnModel)) die(`smart_turn.onnx not found at ${turnModel}`);
-  copyFileSync(turnModel, join(outDir, 'smart_turn.onnx'));
 
   // 5. the patch CLI itself. The artifact shipped the patch-cli SKILL — which
   // tells every chat on the host to run `patch chats list` and friends — but
@@ -674,42 +730,24 @@ async function buildTarget(t, ctx) {
     // Every Mach-O, `node` last: it becomes the host app's executable, and the
     // libraries it loads are signed first.
     const machos = machOFiles(outDir).filter((f) => f !== join(outDir, 'node'));
-    for (const want of ['onnxruntime_binding.node', 'sherpa-onnx.node']) {
-      if (!machos.some((f) => basename(f) === want)) die(`no ${want} to sign in ${outDir}`);
-    }
     codesignIdentity = codesignMacArtifact(outDir, [...machos, join(outDir, 'node')]);
     signHostApp(outDir, codesignIdentity);
   }
 
   // 9. the tarball + its detached project signature
-  const tar = join(outRoot, `${name}.tar.gz`);
-  rmSync(tar, { force: true });
-  // COPYFILE_DISABLE stops macOS bsdtar writing an AppleDouble `._<file>` next
-  // to every entry. Those resource forks travel inside the tarball and get
-  // materialised on extraction, so a Linux install ends up with `._SKILL.md`
-  // in the user's skills directory and `._patch-tools-server.js` in bin — junk
-  // in shipped directories, and hundreds of lines of `LIBARCHIVE.xattr` noise
-  // scrolling past during a `curl … | sh`.
-  // COPYFILE_DISABLE stops the AppleDouble `._<file>` sidecars; --no-xattrs
-  // stops bsdtar storing the xattrs THEMSELVES, which is the other half — an
-  // install on Linux otherwise prints a `LIBARCHIVE.xattr.com.apple.provenance`
-  // warning per entry, ~200 lines of noise scrolling past a `curl … | sh`.
-  sh('tar', ['--no-xattrs', '-czf', tar, '-C', outRoot, name], {
-    env: { ...process.env, COPYFILE_DISABLE: '1' },
-  });
-  const digest = sha256(tar);
-  const signature = Buffer.from(
-    await ed.signAsync(new Uint8Array(Buffer.from(digest, 'hex')), key.seed),
-  ).toString('base64url');
-  writeFileSync(`${tar}.sig`, `${signature}\n`);
+  const tarball = await packSigned(outRoot, name, key);
+
+  // 10. the voice component, its own tarball (see buildVoice)
+  const voice = await buildVoice(t, ctx);
 
   return {
     target: t.target,
     file: `${name}.tar.gz`,
     dir: outDir,
-    bytes: statSync(tar).size,
-    sha256: digest,
-    sig: signature,
+    bytes: tarball.bytes,
+    sha256: tarball.sha256,
+    sig: tarball.sig,
+    voice,
     ...(codesignIdentity ? { codesignIdentity } : {}),
   };
 }

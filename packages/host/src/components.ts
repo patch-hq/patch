@@ -21,6 +21,8 @@
 // host restart cannot silently promote unverified bytes to `installed`.
 
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   createWriteStream,
   existsSync,
@@ -37,6 +39,10 @@ import { Readable } from 'node:stream';
 import type { Logger } from 'pino';
 import type { HostComponent, HostComponentProgressEvent, WireEvent } from '@patch/wire';
 import { sidecarRuntimeReady } from './audio/sidecarRuntime.js';
+import { verifyArtifactSignature, type HostManifest } from './selfUpdate.js';
+import { VOICE_COMPONENT_ID, VOICE_SENTINEL } from './voiceComponent.js';
+
+const execFileAsync = promisify(execFile);
 
 /** One file that makes up a component. */
 interface ComponentFile {
@@ -53,6 +59,12 @@ export interface ComponentSpec {
   /** Advertised total size in bytes (what a surface shows before starting). */
   bytes: number;
   files: ComponentFile[];
+  /**
+   * `host-release`: not from huggingface but from the host's own release — a
+   * per-platform tarball the build publishes beside the host artifact, signed
+   * with the same project key (`voice` in the manifest's artifact entry).
+   */
+  source?: 'host-release';
   /** The file whose presence marks the component installed. */
   sentinel: string;
   /**
@@ -77,6 +89,17 @@ const HF = 'https://huggingface.co';
  * ctranslate2 `medium.en` directory.
  */
 export const COMPONENT_SPECS: readonly ComponentSpec[] = [
+  {
+    // onnxruntime, sherpa-onnx and the VAD / Smart Turn models (~120 MB). Local
+    // voice calls and dictation need them; chat does not, so the host artifact
+    // does not carry them and they arrive here on first use.
+    id: VOICE_COMPONENT_ID,
+    label: 'Voice detection and on-device speech',
+    bytes: 120_000_000,
+    source: 'host-release',
+    sentinel: VOICE_SENTINEL,
+    files: [],
+  },
   {
     id: 'kokoro',
     label: 'Kokoro TTS',
@@ -208,6 +231,10 @@ export interface ComponentManagerOptions {
   /** Where components live: `<patchHome>/components/<id>/…`. */
   root: string;
   hostId: string;
+  /** The server that publishes this host's release, for `host-release` components. */
+  serverUrl?: string;
+  /** This host's build target (`linux-x64`…); absent when not running from an artifact. */
+  target?: string;
   emit: (event: WireEvent) => void;
   logger: Logger;
   /** Called when a component settles, so the host self-description is re-sent. */
@@ -533,12 +560,99 @@ export class ComponentManager {
     throw new Error(`HEAD ${url}: too many redirects`);
   }
 
+  /**
+   * Fetch a component the host's own release publishes: the manifest names a
+   * per-target tarball with its sha256 and an Ed25519 signature from the project
+   * key. Both are checked before a byte is unpacked; either failing fails the
+   * install. The tarball holds one top-level directory, stripped on extract.
+   */
+  private async runHostRelease(
+    spec: ComponentSpec,
+    control: LiveDownload,
+  ): Promise<Record<string, { bytes: number; algo: DigestAlgo; digest: string }>> {
+    const { serverUrl, target } = this.opts;
+    if (target === undefined) {
+      throw new Error(
+        `${spec.label} comes with the host's release, and this host is not running from one ` +
+          '(a source checkout uses its workspace dependencies).',
+      );
+    }
+    if (serverUrl === undefined || serverUrl === '') {
+      throw new Error(`${spec.label}: this host has no server URL to download it from`);
+    }
+    const base = serverUrl.replace(/\/+$/, '');
+    const signal = control.abort.signal;
+    const manifestRes = await this.fetchImpl(`${base}/api/host/host-latest.json`, { signal });
+    if (!manifestRes.ok) {
+      throw new Error(`could not read the release manifest: HTTP ${manifestRes.status}`);
+    }
+    const manifest = (await manifestRes.json()) as HostManifest;
+    const entry = manifest.artifacts.find((a) => a.target === target)?.voice;
+    if (entry === undefined) {
+      throw new Error(`the published release has no ${spec.id} component for ${target}`);
+    }
+    control.totalBytes = entry.bytes;
+    control.receivedBytes = 0;
+    this.progress(spec.id, 'downloading', 0, entry.bytes);
+
+    const res = await this.fetchImpl(`${base}/api/host/${entry.file}`, {
+      signal,
+      headers: { 'accept-encoding': 'identity' },
+    });
+    if (!res.ok || res.body === null) {
+      throw new Error(`GET ${entry.file} → HTTP ${res.status}`);
+    }
+    const dir = this.dir(spec.id);
+    const tarPath = join(dir, entry.file);
+    const hash = createHash('sha256');
+    const out = createWriteStream(tarPath);
+    const source = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
+    let lastEmit = 0;
+    source.on('data', (chunk: Buffer) => {
+      hash.update(chunk);
+      control.receivedBytes += chunk.length;
+      if (!control.cancelled && control.receivedBytes - lastEmit >= 2_000_000) {
+        lastEmit = control.receivedBytes;
+        this.progress(spec.id, 'downloading', control.receivedBytes, entry.bytes);
+      }
+    });
+    await pipeline(source, out);
+
+    const digest = hash.digest('hex');
+    if (digest !== entry.sha256) {
+      rmSync(tarPath, { force: true });
+      throw new Error(
+        `${entry.file}: digest mismatch (expected sha256 ${entry.sha256}, got ${digest})`,
+      );
+    }
+    if (
+      !verifyArtifactSignature({
+        sha256Hex: digest,
+        signatureB64Url: entry.sig,
+        publicKeyB64Url: manifest.signingPublicKey,
+      })
+    ) {
+      rmSync(tarPath, { force: true });
+      throw new Error(
+        `${entry.file}: its signature does not verify against the project signing key`,
+      );
+    }
+    if (control.cancelled) throw new Error('install cancelled');
+    await execFileAsync('tar', ['-xzf', tarPath, '-C', dir, '--strip-components=1']);
+    rmSync(tarPath, { force: true });
+    if (!existsSync(join(dir, spec.sentinel))) {
+      throw new Error(`${entry.file} unpacked without ${spec.sentinel}`);
+    }
+    return { [entry.file]: { bytes: entry.bytes, algo: 'sha256', digest } };
+  }
+
   private async run(
     spec: ComponentSpec,
     control: LiveDownload,
   ): Promise<Record<string, { bytes: number; algo: DigestAlgo; digest: string }>> {
     const dir = this.dir(spec.id);
     mkdirSync(dir, { recursive: true });
+    if (spec.source === 'host-release') return this.runHostRelease(spec, control);
 
     // Progress for a run `remove()` has cancelled is noise about bytes that no
     // longer exist — never fan it out to surfaces.

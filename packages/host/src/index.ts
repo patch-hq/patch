@@ -251,7 +251,13 @@ import { getPatchToolsPrompt, toolsPromptOverride } from './toolsPrompt.js';
 import { patchToolDescriptions } from './mcp.js';
 import { ComponentManager, ComponentNotOfferedError, componentRuntimeDir } from './components.js';
 import { provisionSidecarRuntime, resolveUv } from './audio/sidecarRuntime.js';
-import { bundledSidecarDir } from './installPaths.js';
+import { bundledBuildInfo, bundledSidecarDir } from './installPaths.js';
+import {
+  VoiceComponentMissingError,
+  voiceComponentDir,
+  voiceComponentInstalled,
+  voiceLocations,
+} from './voiceComponent.js';
 import { TerminalSessions } from './terminal.js';
 import { handleHostFilesRequest } from './hostFiles.js';
 import { HostSearchManager } from './hostSearch.js';
@@ -524,7 +530,12 @@ async function startHost(
   // spec/18 § Host + spec/07 Barge-in: when VAD_BACKEND=silero, the Silero
   // ONNX model must exist at startup — a missing model aborts boot rather than
   // silently disabling barge-in/end-of-utterance detection (NO SILENT FALLBACK).
-  validateVadModel(config.audio);
+  // An installed host's VAD model comes from the voice component, which may not
+  // be installed yet: that is reported when a voice session asks for it, not by
+  // refusing to boot a host whose chats do not need voice at all.
+  if (bundledBuildInfo() === undefined || config.audio.vadModelPath !== undefined) {
+    validateVadModel(config.audio);
+  }
 
   const loggerOptions: import('pino').LoggerOptions = {
     level: process.env['LOG_LEVEL'] ?? 'info',
@@ -1459,6 +1470,12 @@ async function startHost(
    * Optional components (spec/02 § Optional components) — real downloads onto
    * this host's disk, with live progress.
    */
+  // Where voice's native pieces are: the voice component on an installed host
+  // (throws VoiceComponentMissingError when it is not installed), the workspace
+  // dependencies from a source checkout.
+  const voiceDir = voiceComponentDir(config.patchHome);
+  const isArtifact = bundledBuildInfo() !== undefined;
+  const voiceLoc = (): ReturnType<typeof voiceLocations> => voiceLocations(voiceDir, isArtifact);
   /** Set once the audio stack exists (step 8): re-picks the STT engine when a component settles. */
   let onComponentsSettled = (): void => {};
   // Re-picks the speech engine when a speech key is added or removed.
@@ -1468,6 +1485,8 @@ async function startHost(
   const components = new ComponentManager({
     root: join(config.patchHome, 'components'),
     hostId: selfHostId,
+    serverUrl: config.serverUrl,
+    ...(BUILD_TARGET !== undefined ? { target: BUILD_TARGET } : {}),
     emit: (event) => link.send(event),
     logger: logger.child({ component: 'components' }),
     onSettled: () => {
@@ -1821,7 +1840,13 @@ async function startHost(
   // tries again and reports its own error.
   let turnDetector: Promise<TurnDetector> | null = null;
   const loadTurnDetector = (): Promise<TurnDetector> => {
-    const path = config.audio.turnModelPath;
+    let loc: ReturnType<typeof voiceLocations>;
+    try {
+      loc = voiceLoc();
+    } catch (err) {
+      return Promise.reject(new TurnModelUnavailableError((err as Error).message));
+    }
+    const path = config.audio.turnModelPath ?? loc.turnModel;
     if (path === undefined) {
       return Promise.reject(
         new TurnModelUnavailableError(
@@ -1829,7 +1854,7 @@ async function startHost(
         ),
       );
     }
-    turnDetector ??= createSmartTurnDetector(path).catch((err: Error) => {
+    turnDetector ??= createSmartTurnDetector(path, loc.nativeDir).catch((err: Error) => {
       turnDetector = null;
       throw new TurnModelUnavailableError(err.message);
     });
@@ -5640,6 +5665,7 @@ async function startHost(
       ...(config.audio.parakeetModelDir !== undefined
         ? { parakeetModelDir: config.audio.parakeetModelDir }
         : {}),
+      sherpaEntry: () => voiceLoc().sherpaEntry,
       ...(config.audio.whisperLocalSidecarUrl !== undefined
         ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
         : {}),
@@ -5671,14 +5697,22 @@ async function startHost(
   installWhisper(buildWhisper());
   // The on-host model loads now: a broken install aborts the boot rather
   // than failing the first word someone says.
-  if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
+  // An installed host without the voice component boots anyway; Parakeet then
+  // names the missing component on first use rather than at boot.
+  if (
+    config.audio.whisperBackend === 'parakeet' &&
+    (!isArtifact || voiceComponentInstalled(voiceDir))
+  ) {
+    await (whisper as ParakeetWhisperBackend).warm();
+  }
   // The streaming model for dictation on the `host` engine loads now too.
   if (config.audio.parakeetStreamingModelDir !== undefined) {
     liveRecognizer = new ParakeetLiveRecognizer({
       logger: logger.child({ component: 'parakeet-live' }),
       modelDir: config.audio.parakeetStreamingModelDir,
+      sherpaEntry: () => voiceLoc().sherpaEntry,
     });
-    await liveRecognizer.warm();
+    if (!isArtifact || voiceComponentInstalled(voiceDir)) await liveRecognizer.warm();
   }
   // Installing or removing the Whisper component takes effect at once, not at
   // the next restart: the engine follows the component.
@@ -5842,10 +5876,47 @@ async function startHost(
   // (validated at boot above) and build a fresh per-session Vad reusing it; the
   // mock backend stays the docker-compose/test default. NO silent fallback —
   // a silero load failure throws and aborts boot.
-  const makeVad =
-    config.audio.vadBackend === 'silero' && config.audio.vadModelPath !== undefined
-      ? await createSileroVadFactory({ modelPath: config.audio.vadModelPath })
-      : (): Vad => new MockVad();
+  // Installed host, no VAD_MODEL_PATH: the model and onnxruntime come from the
+  // voice component. Loaded at boot when it is installed, and again when an
+  // install settles; until then a session that needs VAD is refused by name
+  // (VoiceComponentMissingError → `voice_component_missing`), never run without.
+  let componentVad: (() => Vad) | undefined;
+  const loadComponentVad = async (): Promise<void> => {
+    const loc = voiceLoc();
+    componentVad = await createSileroVadFactory({
+      modelPath: loc.vadModel as string,
+      nativeDir: loc.nativeDir,
+    });
+  };
+  const useComponentVad =
+    config.audio.vadBackend === 'silero' && isArtifact && config.audio.vadModelPath === undefined;
+  if (useComponentVad && voiceComponentInstalled(voiceDir)) await loadComponentVad();
+  const settleRepickWhisper = onComponentsSettled;
+  onComponentsSettled = (): void => {
+    settleRepickWhisper();
+    if (!useComponentVad) return;
+    if (!voiceComponentInstalled(voiceDir)) {
+      componentVad = undefined;
+    } else if (componentVad === undefined) {
+      void loadComponentVad().catch((err: unknown) => {
+        logger.error({ err: String(err) }, 'voice component installed but VAD failed to load');
+      });
+    }
+  };
+  const makeVad: () => Vad =
+    config.audio.vadBackend !== 'silero'
+      ? (): Vad => new MockVad()
+      : useComponentVad
+        ? (): Vad => {
+            if (componentVad === undefined) throw new VoiceComponentMissingError();
+            return componentVad();
+          }
+        : config.audio.vadModelPath !== undefined
+          ? await createSileroVadFactory({
+              modelPath: config.audio.vadModelPath,
+              nativeDir: voiceLoc().nativeDir,
+            })
+          : (): Vad => new MockVad();
 
   audioServer = await startAudioServer({
     host: config.audio.host,

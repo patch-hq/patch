@@ -1354,7 +1354,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         .replace(/^patch-daemon-/, 'patch-host-');
       const isScript = name === 'install.sh';
       const isManifest = name === 'host-latest.json';
-      const isArtifact = /^patch-host-[A-Za-z0-9._-]+\.tar\.gz(\.sig)?$/.test(name);
+      const isArtifact = /^patch-(host|voice)-[A-Za-z0-9._-]+\.tar\.gz(\.sig)?$/.test(name);
       if (!isScript && !isManifest && !isArtifact) {
         return reply.code(404).send({ error: 'not found' });
       }
