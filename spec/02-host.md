@@ -314,7 +314,9 @@ already drives, listed under Settings → Providers → Model endpoints: a name,
 API, its base URL, optionally the models to offer, and optionally a key. An
 OpenAI-compatible endpoint runs in Codex, as a custom model provider with no
 ChatGPT sign-in; an Anthropic-compatible one runs in Claude Code, pointed at it
-with `ANTHROPIC_BASE_URL`, with no Claude account. The list is a shared setting;
+with `ANTHROPIC_BASE_URL`, with no Claude account: the turn carries the endpoint's
+key (or a placeholder for a keyless endpoint) and never a Claude credential, so a
+Claude login stored on the host is never sent to the endpoint. The list is a shared setting;
 a key is a shared secret, written once, sent to hosts in the snapshot and never
 shown again. The models an endpoint names, or else lists at `/models`, appear
 under its harness in the catalogue, and an unreachable endpoint is reported
