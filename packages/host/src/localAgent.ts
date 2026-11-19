@@ -37,7 +37,6 @@ export interface LocalAgentStart {
   sessionPrefix: string;
   resumeSessionId?: string;
   systemPrompt?: string;
-  seed?: Message[];
   permissionMode?: SdkRunOptions['permissionMode'];
   disabledTools?: string[];
 }
@@ -97,7 +96,6 @@ export async function runLocalAgent(
     sessionPrefix: start.sessionPrefix,
     // A local endpoint takes no key.
     resolveEndpoint: () => ({ baseUrl: start.baseUrl, model: start.model }),
-    seedMessages: () => start.seed,
   });
   const opts = {
     prompt: start.prompt,

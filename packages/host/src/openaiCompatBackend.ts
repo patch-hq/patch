@@ -34,11 +34,6 @@ export interface OpenAICompatOptions {
   sessionDir: string;
   /** Session ids are `<prefix><uuid>`; each provider using the engine owns its own prefix. */
   sessionPrefix?: string;
-  /**
-   * Messages a chat arriving from another provider starts with, built from its
-   * track. Only used when the turn has no session of its own yet.
-   */
-  seedMessages?: (opts: SdkRunOptions) => Message[] | undefined;
   /** Hard stop on model round-trips within one turn. */
   maxSteps?: number;
   fetchImpl?: typeof fetch;
@@ -152,10 +147,7 @@ export class OpenAICompatBackend implements SdkBackend {
     const sessionId = prior ?? `${prefix}${randomUUID()}`;
     const messages: Message[] = prior
       ? this.load(prior)
-      : [
-          ...(opts.systemPrompt ? [{ role: 'system' as const, content: opts.systemPrompt }] : []),
-          ...(this.o.seedMessages?.(opts) ?? []),
-        ];
+      : [...(opts.systemPrompt ? [{ role: 'system' as const, content: opts.systemPrompt }] : [])];
     messages.push({ role: 'user', content: opts.prompt });
     yield { type: 'system', sessionId };
 
