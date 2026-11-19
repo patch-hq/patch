@@ -8,7 +8,7 @@
 // delegate-specific code paths worth re-testing here (see the "restart"
 // describe block below for what that leaves to verify directly).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -275,6 +275,28 @@ describe('patch_delegate', () => {
       origin: 'machine',
     });
 
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes('FINAL REPORT')),
+    );
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'done' });
+  });
+
+  it('a child that ends a turn with a wake armed is not done: only its final report reaches the parent', async () => {
+    const { daemon, sdk, events, folder } = setup();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const wake = (daemon as unknown as { wake: { peek(id: string): unknown } }).wake;
+    const spy = vi.spyOn(wake, 'peek').mockReturnValue({} as never);
+    sdk.enqueue([{ type: 'assistant', content: 'still waiting' }, { type: 'result' }]);
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'long job' });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'running' });
+    expect(messagesOn(events, parentChatId).some((m) => m.content.includes('still waiting'))).toBe(
+      false,
+    );
+
+    spy.mockReturnValue(null);
+    sdk.enqueue([{ type: 'assistant', content: 'FINAL REPORT' }, { type: 'result' }]);
+    await daemon.sendInput({ chatId: id, message: 'wake', localId: 'w1', origin: 'machine' });
     await flushUntil(() =>
       messagesOn(events, parentChatId).some((m) => m.content.includes('FINAL REPORT')),
     );
