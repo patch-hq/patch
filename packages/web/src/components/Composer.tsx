@@ -86,7 +86,6 @@ import {
   providerForModel,
   SPECIAL_THREAD_IDS,
   accountServesModel,
-  providerLabelForModel,
 } from '@patch/wire';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
 import { hostOutage } from '../lib/usage.js';
