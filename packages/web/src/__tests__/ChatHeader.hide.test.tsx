@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { JSX } from 'react';
 import { render as rtlRender, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { ChatHeader } from '../components/ChatHeader.js';
 import type { ChatRow } from '../stores/types.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -20,11 +20,23 @@ vi.mock('../lib/voiceController.js', () => ({
   startVoiceCall: vi.fn(async () => {}),
 }));
 
+function Where(): JSX.Element {
+  return <div data-testid="where">{useLocation().pathname}</div>;
+}
+
 function render(ui: JSX.Element): ReturnType<typeof rtlRender> {
   return rtlRender(
     <MemoryRouter initialEntries={['/chats/c1']}>
       <Routes>
-        <Route path="*" element={ui} />
+        <Route
+          path="*"
+          element={
+            <>
+              {ui}
+              <Where />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -94,6 +106,16 @@ describe('ChatHeader — hide', () => {
     await waitFor(() => expect(api.hideChat).toHaveBeenCalledWith('c1', true));
     expect(useChatStore.getState().chats['c1']?.hidden).toBe(true);
     expect(screen.queryByTestId('action-hide')).toBeNull();
+  });
+
+  it('moves on to the next chat when hiding the open one', async () => {
+    const r = row({ lastUserActivity: 2 });
+    const other = row({ chatId: 'c2', name: 'other', lastUserActivity: 1 });
+    useChatStore.setState({ chats: { c1: r, c2: other }, activeChatId: 'c1' });
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-hide'));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/chats/c2'));
   });
 
   it('reverts and toasts when the host refuses', async () => {
