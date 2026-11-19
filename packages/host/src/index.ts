@@ -2118,6 +2118,7 @@ async function startHost(
       elevenLabsModel = shared.elevenLabsModel;
       hostStateStore.update({ elevenLabsModel });
       logger.info({ elevenLabsModel }, 'elevenlabs model changed');
+    }
     if (shared.geminiVoice !== geminiVoice || shared.openaiVoice !== openaiVoice) {
       geminiVoice = shared.geminiVoice;
       openaiVoice = shared.openaiVoice;
