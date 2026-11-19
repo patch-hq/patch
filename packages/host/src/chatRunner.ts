@@ -5372,6 +5372,19 @@ export class Daemon {
     if (state.turnStopped) {
       this.finishDelegate(chatId, 'stopped');
     } else if (state.activity === 'idle') {
+      // A turn that ends while the child's own background work is still pending
+      // (a watch running, a wake armed) is a progress note, not the result: the
+      // child carries on when that fires. Settling here would hand the parent
+      // the note as the final report and drop the real one.
+      if (this.delegateHasPendingWork(chatId)) {
+        this.emitDelegateUpdate(
+          state.subagent.parentChatId,
+          chatId,
+          state.subagent.label,
+          'running',
+        );
+        return;
+      }
       this.finishDelegate(chatId, 'done');
     } else if (state.activity === 'errored' && !state.turnRetrying) {
       // Out of credit is a state, not an error: parked or not, the chat is
@@ -5380,6 +5393,11 @@ export class Daemon {
         this.announceDelegatePaused(chatId, state.subagent);
       else this.finishDelegate(chatId, 'failed');
     }
+  }
+
+  /** True while a child has a watch running or a wake armed: it will run another turn by itself. */
+  private delegateHasPendingWork(chatId: string): boolean {
+    return this.watch.count(chatId) > 0 || this.wake.peek(chatId) !== null;
   }
 
   /** Tell a delegate's parent the subagent is waiting on credit, not dead. */
@@ -6814,6 +6832,7 @@ export class Daemon {
         if (!state.subagent || state.subagent.outcome !== undefined) continue;
         if (this.runs.has(chatId) || this.hasQueuedTurns(chatId)) continue;
         if (state.activity === 'awaiting-permission') continue;
+        if (this.delegateHasPendingWork(chatId)) continue;
         if (this.limitBlocks.has(chatId) || this.rateLimitPendingTurns.has(chatId)) continue;
         if (this.sdkRetryTimers.has(chatId) || state.turnRetrying) continue;
         if (this.delegateOrphanSeen.has(chatId)) {
@@ -10373,6 +10392,10 @@ export class Daemon {
     }
     const state = this.chatState.get(chatId);
     if (!state) throw new Error(`runQuery: unknown chatId ${chatId}`);
+    // Whatever started this turn (not only `sendInput`: a retry, a resend, a
+    // held or restart-resumed turn), a settled child that runs again is running
+    // again — else this turn's final report is dropped as already delivered.
+    this.rearmDelegate(chatId);
     if (state.subagent?.userPaused) {
       // A turn is running again, whoever started it: no longer paused.
       this.setDelegatePaused(chatId, false);
