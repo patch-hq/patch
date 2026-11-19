@@ -140,7 +140,7 @@ test('a reinstall does not bootstrap until launchd has finished removing the old
   let loaded = false;
   let stillRemoving = 0;
   const lc: Launchctl = async (args) => {
-    calls.push(args[0]);
+    calls.push(args[0] ?? '');
     if (args[0] === 'print') {
       if (stillRemoving > 0) {
         stillRemoving--;
