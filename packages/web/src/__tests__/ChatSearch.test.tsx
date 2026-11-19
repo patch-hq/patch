@@ -396,21 +396,20 @@ describe('sidebar chat search', () => {
     );
     fireEvent.click(row);
     expect(screen.getByTestId('loc')).toHaveTextContent('/chats/c9?seq=7');
-    // Pressing a result clears the search — the field and the results band
-    // are both gone, so the sidebar shows the ordinary chat list again.
-    expect(screen.getByTestId('chat-search')).toHaveValue('');
-    expect(screen.queryByTestId('chat-search-results')).toBeNull();
+    // Pressing a result leaves the search as it was.
+    expect(screen.getByTestId('chat-search')).toHaveValue('bus');
+    expect(screen.getByTestId('chat-search-results')).toBeInTheDocument();
   });
 
-  it('a hit without a message seq opens the chat plainly, and also clears search', async () => {
+  it('a hit without a message seq opens the chat plainly, and keeps the search', async () => {
     search.mockResolvedValue(response({ hits: [hit({ chatId: 'c3' })], total: 1 }));
     renderSidebar();
     type('bus');
     await settle();
     fireEvent.click(screen.getByTestId('chat-search-hit'));
     expect(screen.getByTestId('loc')).toHaveTextContent(/^\/chats\/c3$/);
-    expect(screen.getByTestId('chat-search')).toHaveValue('');
-    expect(screen.queryByTestId('chat-search-results')).toBeNull();
+    expect(screen.getByTestId('chat-search')).toHaveValue('bus');
+    expect(screen.getByTestId('chat-search-results')).toBeInTheDocument();
   });
 
   it('More results fetches the next page and appends it', async () => {

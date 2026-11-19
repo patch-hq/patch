@@ -3,8 +3,7 @@
 // a meta line saying where the chat lives — host · section · Automation · age.
 // Drawn on the same card as ChatRowItem so results sit in the list's language.
 // Tap opens the chat, scrolled to the matched message when its seq is known,
-// and clears the search (via the caller's `onPress`) so coming back shows the
-// normal list rather than a stale query and results band.
+// and leaves the search as it was so coming back shows the same results.
 
 import React from 'react';
 import { Pressable, Text } from 'react-native';

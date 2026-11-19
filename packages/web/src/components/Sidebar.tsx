@@ -818,7 +818,6 @@ function RegularSidebar({
                 archived={row.status === 'archived'}
                 to={searchHitPath(hit)}
                 matchLine={<SearchMatchLine hit={hit} />}
-                onOpened={() => useUiStore.getState().setSearchQuery('')}
               />
             )}
           />
