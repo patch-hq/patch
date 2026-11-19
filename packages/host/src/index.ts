@@ -4871,10 +4871,10 @@ async function startHost(
       const readers: Record<ProviderId, typeof claudeHistory> = {
         claude: claudeHistory,
         codex: codexHistory,
-        local: localHistory,
         acp: acpHistory,
       };
-      const readerFor = (sessionId: string) => readers[providerForSessionId(sessionId)!];
+      const readerFor = (sessionId: string) =>
+        sessionId.startsWith('local-') ? localHistory : readers[providerForSessionId(sessionId)!];
       return {
         hasSession: (o) => readerFor(o.sessionId).hasSession(o),
         read: (o) => readerFor(o.sessionId).read(o),

@@ -197,6 +197,10 @@ export class ChatSearchIndex {
   private transcriptOf(chat: SearchableChat): { path: string; kind: 'claude' | 'codex' } | null {
     const sessionId = chat.claudeSessionId;
     if (!sessionId) return null;
+    // Chats on the retired local-model loop keep their history in Codex's format.
+    if (sessionId.startsWith('local-')) {
+      return { path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' };
+    }
     // Where each provider's adapter keeps its transcripts, and in which format.
     const transcripts: Record<ProviderId, () => { path: string; kind: 'claude' | 'codex' } | null> =
       {
@@ -206,10 +210,6 @@ export class ChatSearchIndex {
         }),
         codex: () => ({
           path: join(this.opts.codexHistoryRoot, `${sessionId}.jsonl`),
-          kind: 'codex',
-        }),
-        local: () => ({
-          path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`),
           kind: 'codex',
         }),
         acp: () =>
