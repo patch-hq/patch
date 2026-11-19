@@ -68,6 +68,23 @@ import {
   LOOK_BACK_RULE,
   LOOK_BACK_TOOL_NAME,
 } from './chatBriefing.js';
+import {
+  CHAT_STATUS_DESCRIPTION,
+  CHAT_STATUS_TOOL_NAME,
+  FIND_CHATS_DESCRIPTION,
+  FIND_CHATS_TOOL_NAME,
+  MANAGER_ASYNC_REPLY_RULE,
+  MANAGER_BLOCKING_REPLY_RULE,
+  MANAGER_TOOL_PARAMS,
+  MANAGER_TOOLS_RULE,
+  MANAGER_VOICE_PREAMBLE,
+  ManagerChatLookupError,
+  managerReplyMessage,
+  SEND_TO_CHAT_DESCRIPTION,
+  SEND_TO_CHAT_TOOL_NAME,
+  type ManagerSendAccepted,
+  type ManagerVoiceTools,
+} from './managerVoice.js';
 
 /** The documented Gemini Live native-audio model as of 2026-09-16. */
 export const DEFAULT_GEMINI_LIVE_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
@@ -123,6 +140,13 @@ export interface GeminiLiveDeps {
   handoff?: VoiceHandoff;
   /** The `look_back` tool's search over this chat. Absent means the voice is not given the tool. */
   lookBack?: (chatId: string, query: string) => string;
+  /**
+   * Set only on a call to the Manager (spec/07 § A call to the Manager): the
+   * voice is the manager, with tools to find chats, read their status and send
+   * them messages, in place of `dispatch_to_patch` — the Manager's own agent is
+   * not in the loop. `handoff` does not apply to such a call.
+   */
+  manager?: ManagerVoiceTools;
   /**
    * One-time context snapshot (spec/07 § Keeping voice and text as one
    * conversation): the target chat's recent history, fetched once at session
@@ -215,13 +239,13 @@ export function geminiUsageTokens(u: GeminiUsageMetadata): EngineTokens {
  */
 const END_OF_SPEECH_SILENCE_MS = 1800;
 
-const FRAGMENT_RULE =
+export const FRAGMENT_RULE =
   'The user often pauses mid-sentence ("uh", "um", "so basically"). If what you heard is an ' +
   'unfinished sentence, a fragment, or ends on a filler word or a dangling clause, it is not a ' +
   'full request yet: say nothing and wait for the rest. Only respond once the request is ' +
   'complete, and never ask "what do you mean?" about half a sentence.\n\n';
 
-const VOICE_PREAMBLE =
+export const VOICE_PREAMBLE =
   'You are the voice of this conversation: the user is talking, out loud, to the same chat they ' +
   'have been typing in. Everything said in it so far is above as prior turns, and anything that ' +
   'lands in it while you talk is added as it arrives. Speak the way a person would on a phone ' +
@@ -229,18 +253,30 @@ const VOICE_PREAMBLE =
   'about what has been discussed.\n\n' +
   FRAGMENT_RULE;
 
-const WAIT_RULE =
-  `Say at most one brief acknowledgement out loud ("one sec") before or as you call ` +
-  `${DISPATCH_TOOL_NAME}, then stay completely silent until the result returns: never repeat ` +
-  'filler such as "still working on it" or "waiting", and do not speak again until you have the ' +
-  'result. Then speak the result naturally.\n\n';
+/**
+ * The brief acknowledgement before a hand-off. Useful when the answer is a
+ * while coming, grating when it is the same two words every time or comes in
+ * front of an answer that was going to be instant.
+ */
+export const ACKNOWLEDGEMENT_RULE =
+  'A brief acknowledgement before a hand-off is optional. Skip it when the answer will be quick — ' +
+  'a short look-up, or a tool that answers at once — and just give the answer. When you do say ' +
+  'one, keep it to a few words and vary it: never the same words twice in a row, and not always ' +
+  '"one sec" (for instance "let me check", "on it", "I\'ll find out", "give me a moment", or just ' +
+  '"okay"). ';
+
+export const WAIT_RULE =
+  ACKNOWLEDGEMENT_RULE +
+  `After calling ${DISPATCH_TOOL_NAME}, stay completely silent until the result returns: never ` +
+  'repeat filler such as "still working on it" or "waiting", and do not speak again until you have ' +
+  'the result. Then speak the result naturally.\n\n';
 
 /** The async variant: the call is answered at once and the result arrives later as a message. */
-const ASYNC_WAIT_RULE =
+export const ASYNC_WAIT_RULE =
   `${DISPATCH_TOOL_NAME} answers at once with "started": the agent is working in the background. ` +
-  'Say once, in a few words, that you have passed it on (for example "Right, I\'ve asked that — now ' +
-  'on to the rest of your question"), then carry straight on with the rest of what the user said ' +
-  'in the same breath: answer every other part yourself, and never stop to wait for the agent. ' +
+  ACKNOWLEDGEMENT_RULE +
+  'If you say that you have passed it on, say it once, in your own words each time, then carry ' +
+  'straight on with the rest of what the user said in the same breath: answer every other part yourself, and never stop to wait for the agent. ' +
   "Only hold back a part that genuinely depends on the agent's result, and say that part will " +
   'follow. Then carry on the conversation normally — answer anything else the user says. Never say "still working on it", "waiting" or anything ' +
   'like it unless the user asks how it is going. When the agent finishes, its result arrives as a ' +
@@ -296,7 +332,21 @@ export function claimsHandoff(text: string): boolean {
 /** How long a spoken claim waits for its dispatch call before it counts as false. */
 const FALSE_CLAIM_GRACE_MS = 400;
 
-const FALSE_CLAIM_CORRECTION =
+/** What the "started" answer to a dispatch tells the voice. */
+export const DISPATCH_STARTED_NOTE =
+  'The agent has the request and is working on it in the background. If you mention it, say in a ' +
+  'few words of your own that you have passed it on, then carry straight on with the rest of what ' +
+  'they asked, answering the other parts yourself. Its result will arrive as a message; do not ' +
+  'wait for it or keep mentioning it.';
+
+/** The same correction on a Manager call, where sending is `send_to_chat`. */
+export const MANAGER_FALSE_CLAIM_CORRECTION =
+  `[System] You just said you had sent, asked or told a chat something, but you did not call ` +
+  `${SEND_TO_CHAT_TOOL_NAME}, so nothing was sent. Tell the user in a few words that it had not ` +
+  `actually been sent, then call ${SEND_TO_CHAT_TOOL_NAME} now with the chat and the message the ` +
+  'user asked for.';
+
+export const FALSE_CLAIM_CORRECTION =
   `[System] You just said you had passed something on or done it, but you did not call ` +
   `${DISPATCH_TOOL_NAME}, so nothing was sent and nothing has happened. Tell the user in a few ` +
   `words that it had not actually been sent, then call ${DISPATCH_TOOL_NAME} now with the ` +
@@ -346,12 +396,28 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
 
 export const HOSTED_VOICE_INSTRUCTION = hostedVoiceInstruction('auto');
 
+/**
+ * The voice's instructions on a call to the Manager (spec/07 § A call to the
+ * Manager). `asyncResult`: a chat's reply arrives later as a message (Gemini)
+ * rather than as the send tool's own return (OpenAI Realtime, ElevenLabs).
+ */
+export function managerHostedInstruction(asyncResult: boolean): string {
+  return (
+    MANAGER_VOICE_PREAMBLE +
+    FRAGMENT_RULE +
+    MANAGER_TOOLS_RULE +
+    ACKNOWLEDGEMENT_RULE +
+    '\n\n' +
+    (asyncResult ? MANAGER_ASYNC_REPLY_RULE : MANAGER_BLOCKING_REPLY_RULE)
+  ).trimEnd();
+}
+
 /** The dispatch tool's description for a hand-off mode (`never` has no tool). */
 export const DISPATCH_TOOL_DESCRIPTION =
   "Call this for ANYTHING needing the user's actual data, tasks (including logging a task, Patch tasks too), calendar, smart " +
-  'home, or any action — you have no access to any of that yourself. Say at most one ' +
-  'brief acknowledgement, then stay silent until the result returns; never ' +
-  'answer from a guess.';
+  'home, or any action — you have no access to any of that yourself. At most one brief ' +
+  'acknowledgement, worded differently each time and skipped when the answer is quick; then stay ' +
+  'silent until the result returns. Never answer from a guess.';
 
 /** The same, for a session where the call is answered at once and the result comes later. */
 export const ASYNC_DISPATCH_TOOL_DESCRIPTION =
@@ -361,34 +427,75 @@ export const ASYNC_DISPATCH_TOOL_DESCRIPTION =
   "user's question rather than waiting. " +
   'Never answer from a guess.';
 
+/** A NON_BLOCKING declaration taking string parameters, all required. */
+function stringTool(
+  name: string,
+  description: string,
+  params: Record<string, string>,
+  required: string[] = Object.keys(params),
+): GeminiFunctionDeclaration {
+  return {
+    name,
+    description,
+    parameters: {
+      type: 'OBJECT',
+      properties: Object.fromEntries(
+        Object.entries(params).map(([k, d]) => [k, { type: 'STRING', description: d }]),
+      ),
+      required,
+    },
+    behavior: 'NON_BLOCKING',
+  };
+}
+
+/** The Manager call's tools (spec/07 § A call to the Manager). */
+function managerDeclarations(): GeminiFunctionDeclaration[] {
+  return [
+    stringTool(
+      FIND_CHATS_TOOL_NAME,
+      FIND_CHATS_DESCRIPTION,
+      { query: MANAGER_TOOL_PARAMS.query },
+      [],
+    ),
+    stringTool(CHAT_STATUS_TOOL_NAME, CHAT_STATUS_DESCRIPTION, { chat: MANAGER_TOOL_PARAMS.chat }),
+    stringTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_DESCRIPTION, {
+      chat: MANAGER_TOOL_PARAMS.chat,
+      message: MANAGER_TOOL_PARAMS.message,
+    }),
+  ];
+}
+
 function buildSetupMessage(
   model: string,
   handoff: VoiceHandoff,
   briefing: string,
   lookBack: boolean,
   manualActivity: boolean,
+  manager = false,
 ): GeminiSetupMessage {
   const declarations: GeminiFunctionDeclaration[] = [
-    // `never` has no agent, so no dispatch tool to call.
-    ...(handoff === 'never'
-      ? []
-      : [
-          {
-            name: DISPATCH_TOOL_NAME,
-            description: ASYNC_DISPATCH_TOOL_DESCRIPTION,
-            parameters: {
-              type: 'OBJECT' as const,
-              properties: {
-                request: {
-                  type: 'STRING' as const,
-                  description: 'What Patch should do or look up, in plain language.',
+    // A Manager call has its own tools and no agent behind it; `never` has no agent either.
+    ...(manager
+      ? managerDeclarations()
+      : handoff === 'never'
+        ? []
+        : [
+            {
+              name: DISPATCH_TOOL_NAME,
+              description: ASYNC_DISPATCH_TOOL_DESCRIPTION,
+              parameters: {
+                type: 'OBJECT' as const,
+                properties: {
+                  request: {
+                    type: 'STRING' as const,
+                    description: 'What Patch should do or look up, in plain language.',
+                  },
                 },
+                required: ['request'],
               },
-              required: ['request'],
+              behavior: 'NON_BLOCKING' as const,
             },
-            behavior: 'NON_BLOCKING' as const,
-          },
-        ]),
+          ]),
     ...(lookBack
       ? [
           {
@@ -417,7 +524,8 @@ function buildSetupMessage(
         parts: [
           {
             text: withBriefing(
-              hostedVoiceInstruction(handoff, true) + (lookBack ? `\n\n${LOOK_BACK_RULE}` : ''),
+              (manager ? managerHostedInstruction(true) : hostedVoiceInstruction(handoff, true)) +
+                (lookBack ? `\n\n${LOOK_BACK_RULE}` : ''),
               briefing,
             ),
           },
@@ -480,7 +588,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
   /** Dispatch calls received so far: a claim is checked against whether one arrived since. */
   private dispatchCount = 0;
   /** Agent results waiting for a gap in the conversation, in the order they finished. */
-  private resultQueue: Array<{ callId: string; request: string; reply: string; readyAt: number }> =
+  private resultQueue: Array<{ callId: string; request: string; text: string; readyAt: number }> =
     [];
   /** The turn that carried a dispatch call is still open: its speech is the acknowledgement. */
   private dispatchTurnOpen = false;
@@ -727,6 +835,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           briefing,
           this.deps.lookBack !== undefined,
           this.deps.gate !== undefined,
+          this.deps.manager !== undefined,
         ),
       ),
     );
@@ -842,8 +951,9 @@ export class GeminiLiveSession implements VoiceSessionLike {
         calls: msg.toolCall.functionCalls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
       });
       for (const call of msg.toolCall.functionCalls) {
-        if (call.name === DISPATCH_TOOL_NAME) void this.handleDispatch(call.id, call.args);
         if (call.name === LOOK_BACK_TOOL_NAME) this.handleLookBack(call.id, call.args);
+        else if (this.deps.manager) this.handleManagerTool(this.deps.manager, call);
+        else if (call.name === DISPATCH_TOOL_NAME) void this.handleDispatch(call.id, call.args);
       }
     }
     if (msg.toolCallCancellation) {
@@ -1116,7 +1226,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
 
   private checkFalseClaim(spoken: string): void {
     if (
-      (this.deps.handoff ?? 'auto') === 'never' ||
+      ((this.deps.handoff ?? 'auto') === 'never' && !this.deps.manager) ||
       this.dispatchCovers ||
       this.handoffsInFlight > 0 ||
       this.resultQueue.length > 0 ||
@@ -1144,7 +1254,16 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.sendFrame(
       {
         clientContent: {
-          turns: [{ role: 'user', parts: [{ text: FALSE_CLAIM_CORRECTION }] }],
+          turns: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: this.deps.manager ? MANAGER_FALSE_CLAIM_CORRECTION : FALSE_CLAIM_CORRECTION,
+                },
+              ],
+            },
+          ],
           turnComplete: true,
         },
       },
@@ -1237,7 +1356,152 @@ export class GeminiLiveSession implements VoiceSessionLike {
     args: Record<string, unknown> | undefined,
   ): Promise<void> {
     const request = typeof args?.['request'] === 'string' ? (args['request'] as string) : '';
-    this.log('dispatching to the chat agent', { callId, request });
+    const source: VoiceTurnSource = {
+      kind: 'voice-app',
+      surfaceKind: this.init.surfaceKind as 'web' | 'desktop' | 'mobile',
+      sessionId: this.init.sessionId,
+    };
+    await this.runHandoff(callId, DISPATCH_TOOL_NAME, {
+      what: 'dispatching to the chat agent',
+      fields: { request },
+      submit: (onAccepted) =>
+        this.deps.submitUserTurn({
+          chatId: this.currentChatId,
+          message: request,
+          source,
+          handoff: true,
+          onAccepted: () => onAccepted(),
+        }),
+      startedNote: () => DISPATCH_STARTED_NOTE,
+      notSent: (reason) => ({
+        error: `The request was not passed to the agent: ${reason}`,
+        note:
+          `The request did NOT reach the agent (${reason}). Tell the user in a few ` +
+          'words that it was not passed on. Do not say it was.',
+      }),
+      resultText: (reply) =>
+        `The agent has finished what you handed off ("${request}"). ` +
+        `Its result, to tell the user now, in your own words: ${reply}`,
+      queuedAs: request,
+    });
+  }
+
+  /**
+   * A Manager call's tools (spec/07 § A call to the Manager). `find_chats` and
+   * `chat_status` answer at once, like `look_back`; `send_to_chat` runs as a
+   * hand-off — answered once the chat has the message, its reply delivered
+   * later as a message, exactly as an agent's result is.
+   */
+  private handleManagerTool(
+    manager: ManagerVoiceTools,
+    call: { id: string; name: string; args?: Record<string, unknown> },
+  ): void {
+    const arg = (k: string): string =>
+      typeof call.args?.[k] === 'string' ? (call.args[k] as string) : '';
+    if (call.name === SEND_TO_CHAT_TOOL_NAME) {
+      void this.handleSendToChat(manager, call.id, arg('chat'), arg('message'));
+      return;
+    }
+    const answer = (result: string): void => {
+      this.log(call.name, { callId: call.id, args: call.args, chars: result.length, result });
+      this.sendFrame(
+        {
+          toolResponse: {
+            functionResponses: [
+              { id: call.id, name: call.name, response: { result, scheduling: 'INTERRUPT' } },
+            ],
+          },
+        },
+        `tool response (${call.name})`,
+        { callId: call.id },
+      );
+    };
+    const fail = (err: Error): void => {
+      if (!(err instanceof ManagerChatLookupError)) {
+        this.deps.logger.error(
+          { sessionId: this.init.sessionId, err: err.message, tool: call.name },
+          'gemini-live: a manager tool failed',
+        );
+      }
+      answer(`That failed: ${err.message}`);
+    };
+    if (call.name === FIND_CHATS_TOOL_NAME) {
+      manager.findChats(arg('query')).then(answer, fail);
+      return;
+    }
+    if (call.name === CHAT_STATUS_TOOL_NAME) {
+      manager.chatStatus(arg('chat')).then(answer, fail);
+      return;
+    }
+    const message = `the voice called a tool a Manager call does not have: ${call.name}`;
+    this.deps.logger.error({ sessionId: this.init.sessionId }, `gemini-live: ${message}`);
+    answer(`There is no tool called ${call.name} on this call.`);
+  }
+
+  private async handleSendToChat(
+    manager: ManagerVoiceTools,
+    callId: string,
+    chat: string,
+    message: string,
+  ): Promise<void> {
+    let name = chat;
+    await this.runHandoff(callId, SEND_TO_CHAT_TOOL_NAME, {
+      what: 'sending to a chat',
+      fields: { chat, message },
+      submit: async (onAccepted) => {
+        const res = await manager.sendToChat({
+          chat,
+          message,
+          onAccepted: (info) => {
+            name = info.name;
+            onAccepted(info);
+          },
+        });
+        return res.reply;
+      },
+      startedNote: (info) =>
+        info?.replyComing === false
+          ? `"${info.name}" has the message. It is on another computer, so its reply will not ` +
+            'come back into this call: tell the user it has been sent and that the answer will be ' +
+            'in that chat.'
+          : `"${info?.name ?? name}" has the message and is working on it. If you mention it, say ` +
+            'so in a few words of your own, then carry on. Its reply will arrive as a message; do ' +
+            'not wait for it or keep mentioning it.',
+      notSent: (reason, err) =>
+        err instanceof ManagerChatLookupError
+          ? { note: `Nothing was sent. ${reason}` }
+          : {
+              error: `The message was not sent to the chat: ${reason}`,
+              note:
+                `The message did NOT reach the chat (${reason}). Tell the user in a few words ` +
+                'that it was not sent. Do not say it was.',
+            },
+      resultText: (reply) => managerReplyMessage(name, message, reply),
+      queuedAs: `${chat}: ${message}`,
+    });
+  }
+
+  /**
+   * One hand-off: the agent of this chat (`dispatch_to_patch`) or, on a Manager
+   * call, another chat (`send_to_chat`). The tool call is answered once the
+   * work has been accepted; the result is queued and said in the next gap
+   * (flushResults). `submit` resolves with the result text, or null when no
+   * result will come back into the call.
+   */
+  private async runHandoff(
+    callId: string,
+    toolName: string,
+    route: {
+      what: string;
+      fields: Record<string, unknown>;
+      submit: (onAccepted: (info?: ManagerSendAccepted) => void) => Promise<string | null>;
+      startedNote: (info?: ManagerSendAccepted) => string;
+      notSent: (reason: string, err: Error) => { error?: string; note: string };
+      resultText: (reply: string) => string;
+      queuedAs: string;
+    },
+  ): Promise<void> {
+    this.log(route.what, { callId, ...route.fields });
     // The chat reads in order: what the user said, the bridge, then the hand-off.
     this.commitUserWords();
     this.finishReply();
@@ -1247,12 +1511,12 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.dispatchTurnOpen = true;
     this.unpromptedBudget += 1;
     this.setState('thinking');
-    // The call is answered only once the chat has the message (onAccepted below): the voice
+    // The call is answered only once the work has been taken (onAccepted below): the voice
     // must not tell the user it has passed something on before that is true. Answering then
     // leaves nothing open for Gemini to cancel, so the conversation carries on while the
-    // agent works. The result comes later, as a message (flushResults).
+    // work runs. The result comes later, as a message (flushResults).
     let accepted = false;
-    const answerStarted = (): void => {
+    const answerStarted = (info?: ManagerSendAccepted): void => {
       if (accepted) return;
       accepted = true;
       this.sendFrame(
@@ -1261,14 +1525,10 @@ export class GeminiLiveSession implements VoiceSessionLike {
             functionResponses: [
               {
                 id: callId,
-                name: DISPATCH_TOOL_NAME,
+                name: toolName,
                 response: {
                   result: 'started',
-                  note:
-                    'The agent has the request and is working on it in the background. Tell the user once, in a few ' +
-                    'words, that you have passed it on, then carry straight on with the rest of ' +
-                    'what they asked, answering the other parts yourself. Its result ' +
-                    'will arrive as a message; do not wait for it or keep mentioning it.',
+                  note: route.startedNote(info),
                   scheduling: 'WHEN_IDLE',
                 },
               },
@@ -1279,40 +1539,37 @@ export class GeminiLiveSession implements VoiceSessionLike {
         { callId, scheduling: 'WHEN_IDLE' },
       );
     };
-    const source: VoiceTurnSource = {
-      kind: 'voice-app',
-      surfaceKind: this.init.surfaceKind as 'web' | 'desktop' | 'mobile',
-      sessionId: this.init.sessionId,
-    };
     const askedAt = Date.now();
-    let replyText: string;
+    const settle = (): void => {
+      this.handoffsInFlight -= 1;
+      if (this.handoffsInFlight === 0) {
+        this.unpromptedBudget = 0;
+        this.dispatchTurnOpen = false;
+      }
+    };
+    let replyText: string | null;
     try {
-      replyText = await this.deps.submitUserTurn({
-        chatId: this.currentChatId,
-        message: request,
-        source,
-        handoff: true,
-        onAccepted: answerStarted,
-      });
+      replyText = await route.submit(answerStarted);
     } catch (err) {
       const reason = (err as Error).message;
-      this.deps.logger.error(
-        { sessionId: this.init.sessionId, err: reason },
-        'gemini-live: dispatch failed',
-      );
+      if (!(err instanceof ManagerChatLookupError)) {
+        this.deps.logger.error(
+          { sessionId: this.init.sessionId, err: reason, tool: toolName },
+          'gemini-live: hand-off failed',
+        );
+      }
       if (!accepted) {
-        // The chat never got the request: say so to the user and the voice, loudly.
-        this.handoffsInFlight -= 1;
-        if (this.handoffsInFlight === 0) {
-          this.unpromptedBudget = 0;
-          this.dispatchTurnOpen = false;
+        // The work was never taken: say so to the user and the voice, loudly.
+        settle();
+        const notSent = route.notSent(reason, err as Error);
+        if (notSent.error !== undefined) {
+          this.deps.sendAudio({
+            type: 'audio.error',
+            code: 'gemini_unavailable',
+            message: notSent.error,
+            sessionId: this.init.sessionId,
+          });
         }
-        this.deps.sendAudio({
-          type: 'audio.error',
-          code: 'gemini_unavailable',
-          message: `The request was not passed to the agent: ${reason}`,
-          sessionId: this.init.sessionId,
-        });
         if (this.closed || !this.ws) return;
         this.sendFrame(
           {
@@ -1320,14 +1577,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
               functionResponses: [
                 {
                   id: callId,
-                  name: DISPATCH_TOOL_NAME,
-                  response: {
-                    result: 'failed',
-                    note:
-                      `The request did NOT reach the agent (${reason}). Tell the user in a few ` +
-                      'words that it was not passed on. Do not say it was.',
-                    scheduling: 'WHEN_IDLE',
-                  },
+                  name: toolName,
+                  response: { result: 'failed', note: notSent.note, scheduling: 'WHEN_IDLE' },
                 },
               ],
             },
@@ -1339,19 +1590,27 @@ export class GeminiLiveSession implements VoiceSessionLike {
       }
       replyText = `That failed: ${reason}`;
     }
-    this.log('chat agent answered', {
+    if (!accepted) answerStarted();
+    if (replyText === null) {
+      // Taken, and nothing will come back into the call (a chat on another host).
+      this.log('hand-off sent with no reply to come', { callId });
+      settle();
+      return;
+    }
+    this.log('hand-off answered', {
       callId,
       ms: Date.now() - askedAt,
       chars: replyText.length,
     });
     // Keep it counted as a hand-off until it is queued, so the chat's own copy of the
     // answer is not also pushed into the voice as context.
-    this.resultQueue.push({ callId, request, reply: replyText, readyAt: Date.now() });
-    this.handoffsInFlight -= 1;
-    if (this.handoffsInFlight === 0) {
-      this.unpromptedBudget = 0;
-      this.dispatchTurnOpen = false;
-    }
+    this.resultQueue.push({
+      callId,
+      request: route.queuedAs,
+      text: route.resultText(replyText),
+      readyAt: Date.now(),
+    });
+    settle();
     if (this.closed || !this.ws) {
       this.deps.logger.warn(
         { sessionId: this.init.sessionId, callId },
@@ -1359,7 +1618,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
       );
       return;
     }
-    this.flushResults('agent answered');
+    this.flushResults('hand-off answered');
   }
 
   /** Nobody is talking and no result is being spoken: a result can be said without cutting anyone off. */
@@ -1405,13 +1664,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           turns: [
             {
               role: 'user',
-              parts: [
-                {
-                  text:
-                    `The agent has finished what you handed off ("${next.request}"). ` +
-                    `Its result, to tell the user now, in your own words: ${next.reply}`,
-                },
-              ],
+              parts: [{ text: next.text }],
             },
           ],
           turnComplete: true,

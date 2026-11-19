@@ -71,8 +71,21 @@ import {
   DISPATCH_TOOL_DESCRIPTION,
   DISPATCH_TOOL_NAME,
   hostedVoiceInstruction,
+  managerHostedInstruction,
   type GeminiContextTurn,
 } from './gemini-live.js';
+import {
+  CHAT_STATUS_DESCRIPTION,
+  CHAT_STATUS_TOOL_NAME,
+  FIND_CHATS_DESCRIPTION,
+  FIND_CHATS_TOOL_NAME,
+  ManagerChatLookupError,
+  MANAGER_TOOL_NAMES,
+  MANAGER_TOOL_PARAMS,
+  SEND_TO_CHAT_BLOCKING_DESCRIPTION,
+  SEND_TO_CHAT_TOOL_NAME,
+  type ManagerVoiceTools,
+} from './managerVoice.js';
 
 /**
  * Front LLMs per layer. Ids are ElevenLabs' (elevenlabs.io/docs/eleven-agents,
@@ -127,6 +140,8 @@ export interface ElevenLabsAgentDeps {
   handoff?: VoiceHandoff;
   /** The `look_back` tool's search over this chat. Absent means the voice is not given the tool. */
   lookBack?: (chatId: string, query: string) => string;
+  /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
+  manager?: ManagerVoiceTools;
   /** An ElevenLabs voice id; absent uses the platform default voice. */
   voiceId?: string;
   getChatContext?: (chatId: string) => Promise<GeminiContextTurn[]> | GeminiContextTurn[];
@@ -298,7 +313,12 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     return text === '' ? {} : JSON.parse(text);
   }
 
-  private clientTool(name: string, description: string, param: string, paramDescription: string) {
+  private clientTool(
+    name: string,
+    description: string,
+    params: Record<string, string>,
+    required: string[] = Object.keys(params),
+  ) {
     return {
       tool_config: {
         type: 'client',
@@ -306,8 +326,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
         description,
         parameters: {
           type: 'object',
-          properties: { [param]: { type: 'string', description: paramDescription } },
-          required: [param],
+          properties: Object.fromEntries(
+            Object.entries(params).map(([k, d]) => [k, { type: 'string', description: d }]),
+          ),
+          required,
         },
         // The agent waits for the host's answer — a dispatch can take minutes.
         expects_response: true,
@@ -319,24 +341,35 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private async provision(): Promise<string> {
     const handoff = this.deps.handoff ?? 'auto';
     const tools: Array<ReturnType<ElevenLabsAgentSession['clientTool']>> = [];
-    if (handoff !== 'never') {
+    if (this.deps.manager) {
+      // A Manager call (spec/07 § A call to the Manager): its own tools, no agent behind it.
       tools.push(
         this.clientTool(
-          DISPATCH_TOOL_NAME,
-          DISPATCH_TOOL_DESCRIPTION,
-          'request',
-          'What Patch should do or look up, in plain language.',
+          FIND_CHATS_TOOL_NAME,
+          FIND_CHATS_DESCRIPTION,
+          { query: MANAGER_TOOL_PARAMS.query },
+          [],
         ),
+        this.clientTool(CHAT_STATUS_TOOL_NAME, CHAT_STATUS_DESCRIPTION, {
+          chat: MANAGER_TOOL_PARAMS.chat,
+        }),
+        this.clientTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_BLOCKING_DESCRIPTION, {
+          chat: MANAGER_TOOL_PARAMS.chat,
+          message: MANAGER_TOOL_PARAMS.message,
+        }),
+      );
+    } else if (handoff !== 'never') {
+      tools.push(
+        this.clientTool(DISPATCH_TOOL_NAME, DISPATCH_TOOL_DESCRIPTION, {
+          request: 'What Patch should do or look up, in plain language.',
+        }),
       );
     }
     if (this.deps.lookBack !== undefined) {
       tools.push(
-        this.clientTool(
-          LOOK_BACK_TOOL_NAME,
-          LOOK_BACK_DESCRIPTION,
-          'query',
-          'A few key words to search the chat for.',
-        ),
+        this.clientTool(LOOK_BACK_TOOL_NAME, LOOK_BACK_DESCRIPTION, {
+          query: 'A few key words to search the chat for.',
+        }),
       );
     }
     for (const t of tools) {
@@ -353,7 +386,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
           language: 'en',
           prompt: {
             prompt: withBriefing(
-              hostedVoiceInstruction(handoff) +
+              (this.deps.manager
+                ? managerHostedInstruction(false)
+                : hostedVoiceInstruction(handoff)) +
                 (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : ''),
               this.briefing,
             ),
@@ -545,7 +580,14 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       case 'client_tool_call': {
         const call = ev.client_tool_call ?? {};
         if (!call.tool_call_id) return;
-        if (call.tool_name === DISPATCH_TOOL_NAME) {
+        if (this.deps.manager && call.tool_name && MANAGER_TOOL_NAMES.has(call.tool_name)) {
+          void this.handleManagerTool(
+            this.deps.manager,
+            call.tool_call_id,
+            call.tool_name,
+            call.parameters,
+          );
+        } else if (call.tool_name === DISPATCH_TOOL_NAME && !this.deps.manager) {
           void this.handleDispatch(call.tool_call_id, call.parameters);
         } else if (call.tool_name === LOOK_BACK_TOOL_NAME && this.deps.lookBack) {
           this.handleLookBack(call.tool_call_id, call.parameters);
@@ -755,6 +797,54 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     if (this.closed || this.fatal) return;
     // The agent speaks the answer once it has this.
     this.toolResult(callId, isError ? result : `${RESULT_GIST_NOTE}${result}`, isError);
+  }
+
+  /**
+   * A Manager call's tools (spec/07 § A call to the Manager). The agent waits
+   * for each answer — for `send_to_chat`, until the chat has replied — the same
+   * way it waits on `dispatch_to_patch`.
+   */
+  private async handleManagerTool(
+    manager: ManagerVoiceTools,
+    callId: string,
+    name: string,
+    params: unknown,
+  ): Promise<void> {
+    const isSend = name === SEND_TO_CHAT_TOOL_NAME;
+    if (isSend) this.dispatchesInFlight += 1;
+    this.deps.logger.info(
+      { sessionId: this.init.sessionId, tool: name, params },
+      'elevenlabs-agent: manager tool',
+    );
+    const arg = (k: string): string =>
+      typeof params === 'object' &&
+      params !== null &&
+      typeof (params as Record<string, unknown>)[k] === 'string'
+        ? ((params as Record<string, unknown>)[k] as string)
+        : '';
+    let result: string;
+    let isError = false;
+    try {
+      if (name === FIND_CHATS_TOOL_NAME) result = await manager.findChats(arg('query'));
+      else if (name === CHAT_STATUS_TOOL_NAME) result = await manager.chatStatus(arg('chat'));
+      else {
+        const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
+        result =
+          sent.reply === null
+            ? `Sent to "${sent.name}". It is on another computer, so its reply will be in that chat, not here.`
+            : `${RESULT_GIST_NOTE}"${sent.name}" replied: ${sent.reply}`;
+      }
+    } catch (err) {
+      result = (err as Error).message;
+      if (!(err instanceof ManagerChatLookupError)) {
+        isError = true;
+        this.reportError(`${name} failed: ${result}`);
+      }
+    } finally {
+      if (isSend) this.dispatchesInFlight -= 1;
+    }
+    if (this.closed || this.fatal) return;
+    this.toolResult(callId, result, isError);
   }
 
   // --- other VoiceSessionLike surface ------------------------------------------
