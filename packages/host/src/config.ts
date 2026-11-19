@@ -2,10 +2,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 /**
  * What a new host is called until someone renames it (spec/02 § Host
