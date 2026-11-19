@@ -7445,7 +7445,7 @@ export const ChatTurnStartedEvent = z
     seq: z.number().int().min(-1),
     at: z.number().int().nonnegative(),
     branchId: z.string().min(1).optional(),
-    harness: HarnessId.optional(),
+    harness: RecordedHarnessId.optional(),
     /** Null when the chat names no model (the provider's own default ran). */
     model: z.string().min(1).nullable().optional(),
     origin: TurnOrigin.optional(),
