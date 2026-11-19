@@ -125,6 +125,7 @@ describe('Settings tab — the list', () => {
       'Memories',
       'Goals',
       'Prompts',
+      'Dictation',
       'Hooks',
       'Computer use',
       'Hosts',
@@ -148,6 +149,7 @@ describe('Settings tab — the list', () => {
       'Memories',
       'Goals',
       'Prompts',
+      'Dictation',
       'Hooks',
       'Computer use',
     ]);
