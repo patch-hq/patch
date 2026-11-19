@@ -413,10 +413,6 @@ describe('server search — results', () => {
       pathname: '/chats/[chatId]',
       params: { chatId: 'c1', seq: '42' },
     });
-    // Pressing a hit closes search (its own test below) — reopen for the second tap.
-    openSearch(r);
-    type(r, 'with');
-    await settle();
     // An archived chat opens like any other; with no seq it opens normally.
     const [, nameOnly] = findAllHost(r.root, byTestId('chat-search-hit'));
     actSync(() => nameOnly!.props.onPress());
@@ -456,10 +452,10 @@ describe('server search — results', () => {
       pathname: '/chats/[chatId]',
       params: { chatId: 'held1', seq: '7' },
     });
-    expect(queryHost(r.root, byTestId('chat-search-results'))).toBeNull();
+    expect(queryHost(r.root, byTestId('chat-search-results'))).not.toBeNull();
   });
 
-  it('tapping a hit also closes search, so coming back shows the normal list', async () => {
+  it('tapping a hit leaves the search and its results in place', async () => {
     hydrateEverySection();
     searchSpy.mockResolvedValue(answer([hit({ chatId: 'c1', name: 'With seq' })]));
     const r = renderRN(<ChatsScreen />);
@@ -467,9 +463,9 @@ describe('server search — results', () => {
     type(r, 'with');
     await settle();
     actSync(() => findHost(r.root, byTestId('chat-search-hit')).props.onPress());
-    expect(queryHost(r.root, byLabel('chats-search'))).toBeNull();
-    expect(queryHost(r.root, byTestId('chat-search-results'))).toBeNull();
-    expect(hasText(r.root, 'Folder other')).toBe(true);
+    expect(queryHost(r.root, byLabel('chats-search'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('chat-search-results'))).not.toBeNull();
+    expect(hasText(r.root, 'Folder other')).toBe(false);
   });
 
   it('"More results" fetches the next page and appends it', async () => {

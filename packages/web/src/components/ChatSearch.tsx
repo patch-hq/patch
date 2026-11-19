@@ -33,10 +33,9 @@ export const SEARCH_DEBOUNCE_MS = 250;
 const PAGE = 20;
 
 /**
- * The sidebar's search field. The query lives in `uiStore.searchQuery` —
- * pressing a result clears it (`SearchHitRow`'s `onClick`), so opening a chat
- * from search always lands back on the ordinary list rather than leaving the
- * sidebar stuck on a stale query. Carries `data-search-input`, so ⌘K lands
+ * The sidebar's search field. The query lives in `uiStore.searchQuery` and
+ * stays put when a result is opened, so the results remain to pick the next
+ * one from; the clear button or Escape ends the search. Carries `data-search-input`, so ⌘K lands
  * here (lib/searchTarget.ts); and `data-search-global`, so ⌘F does not — over
  * a transcript that chord is the browser's find bar (spec/14 § Reserved OS
  * chords).
@@ -439,10 +438,6 @@ function SearchHitRow({
       data-testid={testId}
       data-chat-id={hit.chatId}
       title={title}
-      // Pressing a result opens the chat AND clears the search — leaving the
-      // sidebar stuck on a stale query and results band after you've already
-      // gone where you were looking for is the bug this fixes.
-      onClick={() => useUiStore.getState().setSearchQuery('')}
     >
       <span className="name">
         {hit.name !== null ? <Marked text={hit.name} ranges={hit.nameHighlights} /> : title}
