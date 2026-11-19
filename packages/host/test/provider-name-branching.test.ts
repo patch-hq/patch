@@ -35,12 +35,11 @@ const ADAPTERS = new Set([
  */
 const BASELINE: Record<string, number> = {
   'packages/web/src/lib/useInstallPickedProviders.ts': 2,
-  'packages/web/src/routes/WelcomeRoute.tsx': 5,
-  'packages/web/src/routes/settings/ProvidersPage.tsx': 2,
+  'packages/web/src/routes/WelcomeRoute.tsx': 4,
+  'packages/web/src/routes/settings/ProvidersPage.tsx': 1,
   'packages/web/src/routes/settings/SharedAccounts.tsx': 2,
   'packages/web/src/routes/settings/providers.tsx': 2,
   'apps/mobile/src/components/settings/CreditSourcesSection.tsx': 2,
-  'apps/mobile/src/components/settings/HostsSection.tsx': 1,
   'apps/mobile/src/components/settings/ProviderOwnSettings.tsx': 1,
   'apps/mobile/src/components/settings/providers.tsx': 2,
   'packages/host/src/index.ts': 6,

@@ -44,6 +44,7 @@ import {
   type WireEvent,
   providerForSessionId,
   type ProviderId,
+  isRetiredLocalSessionId,
 } from '@patch/wire';
 export { highlightRanges, makeSnippet };
 import { encodeFolder, eventIdentity, jsonlLineToWire } from './history.js';
@@ -198,7 +199,7 @@ export class ChatSearchIndex {
     const sessionId = chat.claudeSessionId;
     if (!sessionId) return null;
     // Chats on the retired local-model loop keep their history in Codex's format.
-    if (sessionId.startsWith('local-')) {
+    if (isRetiredLocalSessionId(sessionId)) {
       return { path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' };
     }
     // Where each provider's adapter keeps its transcripts, and in which format.

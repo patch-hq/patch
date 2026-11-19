@@ -112,6 +112,7 @@ import {
   assessHostHealth,
   HOST_HEALTH_INTERVAL_MS,
   isEndpointModel,
+  isRetiredLocalSessionId,
   providerDescriptor,
   parseAcpModel,
   providerForModel,
@@ -4874,7 +4875,9 @@ async function startHost(
         acp: acpHistory,
       };
       const readerFor = (sessionId: string) =>
-        sessionId.startsWith('local-') ? localHistory : readers[providerForSessionId(sessionId)!];
+        isRetiredLocalSessionId(sessionId)
+          ? localHistory
+          : readers[providerForSessionId(sessionId)!];
       return {
         hasSession: (o) => readerFor(o.sessionId).hasSession(o),
         read: (o) => readerFor(o.sessionId).read(o),
