@@ -23,7 +23,6 @@ import {
 import {
   renderRN as renderBase,
   findHost,
-  findAllHost,
   queryHost,
   byTestId,
   byLabel,
