@@ -196,20 +196,24 @@ export class ChatSearchIndex {
     const sessionId = chat.claudeSessionId;
     if (!sessionId) return null;
     // Where each provider's adapter keeps its transcripts, and in which format.
-    const transcripts: Record<ProviderId, () => { path: string; kind: 'claude' | 'codex' }> = {
-      claude: () => ({
-        path: join(this.opts.claudeProjectsRoot, encodeFolder(chat.folder), `${sessionId}.jsonl`),
-        kind: 'claude',
-      }),
-      codex: () => ({
-        path: join(this.opts.codexHistoryRoot, `${sessionId}.jsonl`),
-        kind: 'codex',
-      }),
-      local: () => ({
-        path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`),
-        kind: 'codex',
-      }),
-    };
+    // An ACP agent's session is its own and is not read: only the chat's name
+    // and preview are searchable here (the server searches its record).
+    const transcripts: Record<ProviderId, () => { path: string; kind: 'claude' | 'codex' } | null> =
+      {
+        claude: () => ({
+          path: join(this.opts.claudeProjectsRoot, encodeFolder(chat.folder), `${sessionId}.jsonl`),
+          kind: 'claude',
+        }),
+        codex: () => ({
+          path: join(this.opts.codexHistoryRoot, `${sessionId}.jsonl`),
+          kind: 'codex',
+        }),
+        local: () => ({
+          path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`),
+          kind: 'codex',
+        }),
+        gemini: () => null,
+      };
     return transcripts[providerForSessionId(sessionId)!]();
   }
 

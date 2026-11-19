@@ -139,6 +139,23 @@ export interface HistoryReader {
   hasSession(opts: { folder: string; sessionId: string; chatDir?: string }): boolean;
 }
 
+/**
+ * The reader for a provider whose agent keeps its session where Patch does not
+ * read it (an ACP agent such as Gemini CLI). Patch shows such a chat from its own
+ * record and never reads the agent's files (spec/02 § Provider adapters), so
+ * there is nothing to page, fork or side from here. A session the chat names is
+ * the agent's to resume: if it is gone, the agent's own refusal says so on the
+ * next turn. Answering "no transcript" here instead would make every turn after
+ * the first drop the session and start over, and host cleanup treat the chat as
+ * lost.
+ */
+export const agentHeldHistory: HistoryReader = {
+  read: () => [],
+  forkPoint: () => null,
+  sidePoint: () => null,
+  hasSession: ({ sessionId }) => sessionId.length > 0,
+};
+
 export function defaultClaudeProjectsRoot(): string {
   return join(homedir(), '.claude', 'projects');
 }

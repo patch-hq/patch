@@ -281,6 +281,9 @@ export const PROVIDERS = [
     backendId: 'gemini',
     // The Gemini CLI holds its own sign-in; Patch keeps no accounts for it.
     accountsKey: null,
+    accountKinds: null,
+    // Its key is a shared provider key (Settings → Providers), not a per-host sign-in.
+    hostSignIn: null,
     aliases: ['google'],
     supportsEffort: false,
     loginRequiredCode: 'gemini_login_required',

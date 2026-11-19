@@ -67,7 +67,7 @@ import { ChatMoveError } from './chatMove.js';
 import { expandHome } from './expandHome.js';
 import { gitDirtyPaths } from './git-dirty.js';
 import { listFilesRecursive } from './files-recursive.js';
-import { createHistoryReader } from './history.js';
+import { agentHeldHistory, createHistoryReader } from './history.js';
 import type {
   ChatErrorCode,
   McpServerConfig,
@@ -4699,6 +4699,7 @@ async function startHost(
         claude: claudeHistory,
         codex: codexHistory,
         local: localHistory,
+        gemini: agentHeldHistory,
       };
       const readerFor = (sessionId: string) => readers[providerForSessionId(sessionId)!];
       return {
