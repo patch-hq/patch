@@ -56,3 +56,11 @@ describe('isGroupableToolCall for patch_agent', () => {
     }
   });
 });
+
+describe('isGroupableToolCall for file cards', () => {
+  it('keeps view_file and link_file out of runs, bare or mcp-prefixed', () => {
+    for (const t of ['view_file', 'mcp__patch__view_file', 'link_file', 'mcp__patch__link_file']) {
+      expect(isGroupableToolCall(t, { file_path: '/x' })).toBe(false);
+    }
+  });
+});
