@@ -43,7 +43,7 @@ import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
 import type { ViewPositionStore } from './view-position.js';
-import { QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
+import { forSurfaces, QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
 import type { CommitAcks } from './commit-acks.js';
 import type { QueueTracker } from './queue-tracker.js';
 import type { ServerQueue } from './server-queue.js';
@@ -1422,7 +1422,9 @@ export class WsHub {
         accountId: account.accountId,
         surfaceId: claims.daemon_id,
         hosts: this.hostRoster(),
-        ...(this.deps.chatLogStore ? { recordImport: true as const } : {}),
+        ...(this.deps.chatLogStore
+          ? { recordImport: true as const, recordComplete: true as const }
+          : {}),
         hostOutbox: true,
       }),
     );
@@ -2133,6 +2135,11 @@ export class WsHub {
         typeof (event as { forSurfaceId?: unknown }).forSurfaceId === 'string';
       if (replay) {
         this.deps.chatLogStore.observe(event);
+      } else if (event.type === 'chat.turn_started' || event.type === 'chat.turn_ended') {
+        // A turn boundary is a fact for the record and the chat's status
+        // (spec/01 § Chat record), not something a surface draws.
+        this.deps.chatLogStore.commit(event);
+        return;
       } else {
         this.deps.chatLogStore.notePermission(event);
         const outcome = this.deps.chatLogStore.commit(event);
@@ -2151,6 +2158,8 @@ export class WsHub {
         }
       }
     }
+    // The provider's own id stays in the record; surfaces are never sent it.
+    event = forSurfaces(event);
     // Host↔server-only frames are consumed by a server-side bridge and never
     // relayed onward. `patch.artifact.publish_request` carries a whole HTML
     // page and a chatId, so without this it would fan out to every watching
@@ -2187,6 +2196,9 @@ export class WsHub {
       event.type === 'patch.log_sync.batch' ||
       // History the record lacked, sent once: kept, never shown as new.
       event.type === 'host.record_import' ||
+      // Turn boundaries are the record's and the status's, never drawn.
+      event.type === 'chat.turn_started' ||
+      event.type === 'chat.turn_ended' ||
       // Shared settings (spec/03 § Settings): consumed by the settings service.
       // `settings.secret_update`, `settings.adopt.response` and
       // `settings.account_signed_in` carry credential values; surfaces learn the

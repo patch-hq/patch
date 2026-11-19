@@ -16,7 +16,9 @@ export function settingsFixture(patch: Partial<SettingsResponse> = {}): Settings
     devices: [],
     push: { tokenCount: 1 },
     // The shared settings (spec/01 § Settings) as the server starts them.
-    preferences: { ...DEFAULT_SHARED_SETTINGS },
+    // Dictation and calls sit behind the experimental switch, which the
+    // product ships off; tests exercising them start with it on.
+    preferences: { ...DEFAULT_SHARED_SETTINGS, experimentalFeatures: true },
     shared: {
       version: 1,
       secrets: {

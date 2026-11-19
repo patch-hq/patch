@@ -25,6 +25,7 @@ import {
   actAsync,
 } from './testUtils/render';
 import { api } from '../src/api/rest';
+import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { SETTINGS_PAGES, settingsPage } from '../src/components/settings/pages';
 import { reportHost, resetHosts, settingsFixture } from './testUtils/settingsFixtures';
@@ -106,6 +107,9 @@ function rowTitles(r: ReactTestRenderer): string[] {
 
 describe('Settings tab — the list', () => {
   it('shows the title and the design’s groups, rows and order (experimental features off)', async () => {
+    vi.mocked(api.settings).mockResolvedValue(
+      settingsFixture({ preferences: { ...DEFAULT_SHARED_SETTINGS } }),
+    );
     const r = render(<SettingsScreen />);
     await flush();
     const headers = findAllHost(
@@ -121,7 +125,6 @@ describe('Settings tab — the list', () => {
       'Memories',
       'Goals',
       'Prompts',
-      'Voice',
       'Hooks',
       'Computer use',
       'Hosts',
@@ -145,7 +148,6 @@ describe('Settings tab — the list', () => {
       'Memories',
       'Goals',
       'Prompts',
-      'Voice',
       'Hooks',
       'Computer use',
     ]);

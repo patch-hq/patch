@@ -10,6 +10,7 @@
 import React, { type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { modelAccountConnected, providerLabelForModel } from '@patch/wire';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { fonts, space, textMin, useTheme } from '../../lib/theme';
 import { BarShell } from './BarShell';
@@ -17,20 +18,15 @@ import { BarShell } from './BarShell';
 export function ClaudeDisconnectedBar({ model }: { model: string | null }): ReactElement | null {
   const colors = useTheme();
   const router = useRouter();
-  const openai = model?.startsWith('openai/') ?? false;
   const secrets = useSettingsStore((s) => s.data?.shared?.secrets);
   if (!secrets) return null;
-  const kind = model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt';
-  const connected = openai
-    ? secrets.codex.some((a) => a.connected && a.kind === kind)
-    : secrets.claude.some((a) => a.connected);
-  if (connected) return null;
+  if (modelAccountConnected(secrets, model)) return null;
 
   return (
     <BarShell testID="claude-disconnected-bar" tone="alert" role="alert">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Text style={{ flex: 1, color: colors.ink, fontSize: textMin }}>
-          Not signed in to {openai ? 'Codex' : 'Claude'}. Chats can’t run.
+          Not signed in to {providerLabelForModel(model)}. Chats can’t run.
         </Text>
         <Pressable
           testID="claude-disconnected-signin"

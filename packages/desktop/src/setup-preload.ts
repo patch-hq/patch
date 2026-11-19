@@ -5,7 +5,9 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
-type Choice = { kind: 'local'; name: string } | { kind: 'remote'; input: string };
+type Choice =
+  | { kind: 'local'; name: string }
+  | { kind: 'remote'; input: string; host?: { name: string } };
 
 contextBridge.exposeInMainWorld('patchSetup', {
   move(yes: boolean): void {

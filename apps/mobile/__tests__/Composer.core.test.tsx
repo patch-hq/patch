@@ -10,6 +10,7 @@
 // (that's deliveryTracker.test.ts's job).
 
 import React from 'react';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { Pressable as RNPressable } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
@@ -56,6 +57,7 @@ function setPresence(connection: ConnectionState, daemon: DaemonPresence): void 
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  seedSettings();
   // The composer now restores the open chat's unsent text (spec/15 §
   // Composer), and the MMKV stub's registry is shared by every test in the
   // file — without this each test starts holding the previous one's draft.

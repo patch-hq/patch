@@ -96,6 +96,12 @@ import { RemoteRelayError } from './remote-relay.js';
 import { buildPeekResult, stripBinaryPayloads } from './peek.js';
 import { probeFolderAccess } from './folderAccess.js';
 
+/** A stop refused because the chat's provider does not declare interrupt (spec/02 § Provider adapters). */
+const INTERRUPT_UNSUPPORTED = {
+  error: 'capability_unsupported',
+  message: "interrupting a turn is not supported by this chat's provider",
+} as const;
+
 /**
  * A cross-host `patch_spawn` the NAMED host refused (or never answered).
  * Carries that host's own error code so the tool call fails with the real
@@ -1319,6 +1325,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       }
       return reply.code(404).send({ error: 'not found' });
     }
+    if (opts.daemon.refuseUnlessCapable(state.chatId, 'interrupt')) {
+      return reply.code(409).send(INTERRUPT_UNSUPPORTED);
+    }
     await opts.daemon.stopChat(state.chatId);
     return { ok: true };
   });
@@ -1573,6 +1582,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(400).send({ error: 'bad_request', detail: parsed.error.flatten() });
     }
     try {
+      if (opts.daemon.refuseUnlessCapable(parsed.data.chatId, 'interrupt')) {
+        return reply.code(409).send(INTERRUPT_UNSUPPORTED);
+      }
       await opts.daemon.stopChat(parsed.data.chatId);
       return { ok: true };
     } catch (err) {
@@ -3652,6 +3664,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           ok: true,
         });
         return { ok: true };
+      }
+      if (opts.daemon!.refuseUnlessCapable(params.data.id, 'interrupt')) {
+        return reply.code(409).send(INTERRUPT_UNSUPPORTED);
       }
       await opts.daemon!.stopChat(params.data.id);
       if (opts.emitWire && callerChatId) {

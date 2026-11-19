@@ -167,10 +167,21 @@ export class ChatLog {
   private readonly chats = new Map<string, ChatLogState>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly batchMs: number;
+  private recordListener: ((chatId: string, record: LogRecord) => void) | undefined;
 
   constructor(private readonly opts: ChatLogOptions) {
     this.fs = { ...nodeFs, ...(opts.fs ?? {}) } as ChatLogFs;
     this.batchMs = opts.fsyncBatchMs ?? FSYNC_BATCH_MS;
+  }
+
+  /**
+   * Be told of every record once it is written, so what the log learns first
+   * (a turn's start and end, among them one a restart closes) reaches the
+   * server's record too. One listener; a throw from it is logged, never the
+   * writer's problem.
+   */
+  onRecord(listener: (chatId: string, record: LogRecord) => void): void {
+    this.recordListener = listener;
   }
 
   pathFor(chatId: string): string {
@@ -609,6 +620,16 @@ export class ChatLog {
     if (o.sync) this.fsyncState(chatId, state);
     else this.markDirty(state);
     if (state.localIds) collectLocalIds(record, state.localIds);
+    if (this.recordListener) {
+      try {
+        this.recordListener(chatId, record);
+      } catch (err) {
+        this.opts.logger.error(
+          { chatId, k: record.rec.k, err: (err as Error).message },
+          'history log: a record listener failed',
+        );
+      }
+    }
     return true;
   }
 

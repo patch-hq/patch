@@ -31,7 +31,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import { providerForSessionId, type ChatMoveBundle, type ChatMoveFile } from '@patch/wire';
+import {
+  providerForSessionId,
+  type ChatMoveBundle,
+  type ChatMoveFile,
+  type HarnessId,
+} from '@patch/wire';
+import { HARNESS_TRAITS } from './harnesses.js';
 import { encodeFolder } from './history.js';
 import { expandHome } from './expandHome.js';
 import { ChatMeta } from './meta.js';
@@ -107,16 +113,22 @@ function filesUnder(root: string): string[] {
   return out;
 }
 
-/** Every Claude session this chat has ever had, on any of its tracks. */
-function claudeSessionIds(meta: ChatMeta): string[] {
+/**
+ * Every session this chat has ever had, on any of its tracks, whose provider's
+ * session moves with the chat (the `sessionMovable` trait).
+ */
+function movableSessionIds(meta: ChatMeta): string[] {
   const ids = new Set<string>();
-  if (meta.claudeSessionId && providerForSessionId(meta.claudeSessionId) === 'claude') {
-    ids.add(meta.claudeSessionId);
-  }
+  const movable = (id: string | null | undefined): id is string => {
+    const provider = providerForSessionId(id);
+    return provider !== undefined && HARNESS_TRAITS[provider].sessionMovable;
+  };
+  if (movable(meta.claudeSessionId)) ids.add(meta.claudeSessionId);
   for (const b of meta.branches ?? []) {
-    if (b.sessionId && providerForSessionId(b.sessionId) === 'claude') ids.add(b.sessionId);
-    const prior = b.harnessSessions?.claude?.sessionId;
-    if (prior) ids.add(prior);
+    if (movable(b.sessionId)) ids.add(b.sessionId);
+    for (const [provider, prior] of Object.entries(b.harnessSessions ?? {})) {
+      if (prior && HARNESS_TRAITS[provider as HarnessId].sessionMovable) ids.add(prior.sessionId);
+    }
   }
   return [...ids];
 }
@@ -187,7 +199,7 @@ export function buildMoveBundle(chatId: string, paths: ChatMovePaths): ChatMoveB
     add(`blob/${sha}`, readFileSync(p));
   }
 
-  for (const sessionId of claudeSessionIds(meta)) {
+  for (const sessionId of movableSessionIds(meta)) {
     const p = join(paths.claudeProjectsRoot, encodeFolder(meta.folder), `${sessionId}.jsonl`);
     if (existsSync(p)) add(`transcript/${sessionId}.jsonl`, readFileSync(p));
   }

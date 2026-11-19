@@ -4,7 +4,7 @@
 // with the message about to be sent rather than in the header.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { harnessForModel, isReservedSpecialThread } from '@patch/wire';
+import { harnessForModel, isReservedSpecialThread, accountsKeyForModel } from '@patch/wire';
 import { Cpu, UserRound } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -64,7 +64,8 @@ export function AccountControl({
     (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim(),
   );
   const shared = usePreferencesStore((s) => s.shared?.secrets);
-  const accounts = (row.model?.startsWith('openai/') ? shared?.codex : shared?.claude) ?? [];
+  const accountsKey = accountsKeyForModel(row.model);
+  const accounts = (accountsKey !== null ? shared?.[accountsKey] : undefined) ?? [];
   const choices = accounts.filter((a) => a.connected);
   // `undefined` is "no change pending"; null is a pending "by strategy".
   const [pending, setPending] = useState<string | null | undefined>(undefined);

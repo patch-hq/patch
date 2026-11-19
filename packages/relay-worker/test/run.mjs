@@ -123,7 +123,9 @@ if (!target) {
   console.log(`relay-worker: wrangler dev is up at ${target}`);
 }
 
-const code = await run('pnpm', ['exec', 'vitest', 'run', ...SUITE], {
+// One file at a time: the files share one workerd, and keepalive and hello-timeout
+// tests count wall-clock time, so a file hogging a small runner starves them.
+const code = await run('pnpm', ['exec', 'vitest', 'run', '--no-file-parallelism', ...SUITE], {
   cwd: RELAY,
   env: {
     ...process.env,

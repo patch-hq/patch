@@ -376,7 +376,11 @@ describe('Composer — dictation mode (long-press the mic)', () => {
   beforeEach(() => {
     useSettingsStore.setState({
       data: {
-        preferences: { dictationPauseSeconds: 5, dictationTurnDetection: true },
+        preferences: {
+          dictationPauseSeconds: 5,
+          dictationTurnDetection: true,
+          experimentalFeatures: true,
+        },
       } as unknown as SettingsResponse,
       error: null,
     });
@@ -391,9 +395,17 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     const load = vi.fn(async () => {
       useSettingsStore.setState({ error: 'offline' });
     });
-    useSettingsStore.setState({ data: null, error: null, load });
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
-    await keepDictating(r);
+    // The mic only shows once settings say experimental features are on, so
+    // grab its handler, then lose the settings before pressing.
+    const longPress = mic(r)['onLongPress']!;
+    useSettingsStore.setState({ data: null, error: null, load });
+    await actAsync(() => {
+      longPress();
+    });
+    await actAsync(() => {
+      findHost(r.root, byTestId('mic-menu-keep-dictating')).props['onPress']();
+    });
     await flush();
     expect(load).toHaveBeenCalledOnce();
     expect(factory).not.toHaveBeenCalled();

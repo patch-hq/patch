@@ -85,11 +85,16 @@ import {
   providerDescriptor,
   providerForModel,
   SPECIAL_THREAD_IDS,
+  accountServesModel,
 } from '@patch/wire';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
 import { hostOutage } from '../lib/usage.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
+import {
+  providerConnectedForModel,
+  useExperimentalFeatures,
+  usePreferencesStore,
+} from '../stores/preferencesStore.js';
 import { CONNECT_PATH, providerNameForModel } from './ClaudeDisconnectedBanner.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -599,11 +604,7 @@ export const Composer = forwardRef(function Composer(
   );
   const [usageNow, setUsageNow] = useState(() => Date.now());
   const outage = hostOutage(
-    (hostAccounts?.accounts ?? []).filter(
-      (a) =>
-        !accountModel?.startsWith('openai/') ||
-        (a.kind ?? 'chatgpt') === (accountModel.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
-    ),
+    (hostAccounts?.accounts ?? []).filter((a) => accountServesModel(a, accountModel)),
     usageNow,
   );
   const outOfUsage = !claudeDisconnected && outage !== null;
@@ -1246,7 +1247,7 @@ export const Composer = forwardRef(function Composer(
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
   // The Manager coordinates other chats; it takes no meeting notes. Meeting
   // permissions are asked for only when Meeting is pressed (lib/meetingSetup).
-  const experimental = usePreferencesStore((s) => s.preferences.experimentalFeatures);
+  const experimental = useExperimentalFeatures();
   const hasMeetingButton =
     (experimental || inMeeting) &&
     !edit &&
@@ -2888,56 +2889,58 @@ export const Composer = forwardRef(function Composer(
             />
             {/* Dictate sits inside the field, bottom-right, so the action row
                 below keeps its room for the settings (spec/14 § Composer). */}
-            <button
-              type="button"
-              className={`voice-note-btn ${noteActive || micState !== 'idle' || dictModeOn ? 'active' : ''}${micState === 'transcribing' ? ' busy' : ''}`}
-              data-testid="voice-note-btn"
-              aria-label={noteMode ? 'voice note' : 'dictate into message'}
-              aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
-              title={
-                !offline && !hostOnline
-                  ? 'Voice unavailable while the host is offline (audio can’t be queued)'
-                  : dictationBlockedReason !== null
-                    ? dictationBlockedReason
-                    : noteMode
-                      ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
-                      : micState === 'transcribing'
-                        ? 'Transcribing…'
-                        : shortcutTitle('Dictate', chordGlyphs(dictateChord))
-              }
-              // Only the primary button dictates: a right-click opens the mic
-              // menu (onContextMenu), and its own mousedown must not also start
-              // a hold-to-talk recording.
-              onMouseDown={(e) => {
-                if (e.button === 0) onMicDown(e.timeStamp);
-              }}
-              onMouseUp={(e) => {
-                if (e.button === 0) onMicUp(e.timeStamp);
-              }}
-              onContextMenu={(e) => {
-                if (
-                  voiceDisabled ||
-                  dictationBlockedReason !== null ||
-                  noteMode ||
-                  noteActive ||
-                  micState !== 'idle' ||
-                  dictModeOn
-                ) {
-                  e.preventDefault();
-                  return;
+            {experimental ? (
+              <button
+                type="button"
+                className={`voice-note-btn ${noteActive || micState !== 'idle' || dictModeOn ? 'active' : ''}${micState === 'transcribing' ? ' busy' : ''}`}
+                data-testid="voice-note-btn"
+                aria-label={noteMode ? 'voice note' : 'dictate into message'}
+                aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
+                title={
+                  !offline && !hostOnline
+                    ? 'Voice unavailable while the host is offline (audio can’t be queued)'
+                    : dictationBlockedReason !== null
+                      ? dictationBlockedReason
+                      : noteMode
+                        ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
+                        : micState === 'transcribing'
+                          ? 'Transcribing…'
+                          : shortcutTitle('Dictate', chordGlyphs(dictateChord))
                 }
-                micMenu.openAt(e);
-              }}
-              onMouseLeave={(e) => {
-                // Pointer left while holding: commit (release-sends / release-dictates).
-                if (pressAt.current !== null) onMicUp(e.timeStamp);
-              }}
-              disabled={
-                voiceDisabled || dictationBlockedReason !== null || micState === 'transcribing'
-              }
-            >
-              <Mic size={ICON_SIZE} aria-hidden />
-            </button>
+                // Only the primary button dictates: a right-click opens the mic
+                // menu (onContextMenu), and its own mousedown must not also start
+                // a hold-to-talk recording.
+                onMouseDown={(e) => {
+                  if (e.button === 0) onMicDown(e.timeStamp);
+                }}
+                onMouseUp={(e) => {
+                  if (e.button === 0) onMicUp(e.timeStamp);
+                }}
+                onContextMenu={(e) => {
+                  if (
+                    voiceDisabled ||
+                    dictationBlockedReason !== null ||
+                    noteMode ||
+                    noteActive ||
+                    micState !== 'idle' ||
+                    dictModeOn
+                  ) {
+                    e.preventDefault();
+                    return;
+                  }
+                  micMenu.openAt(e);
+                }}
+                onMouseLeave={(e) => {
+                  // Pointer left while holding: commit (release-sends / release-dictates).
+                  if (pressAt.current !== null) onMicUp(e.timeStamp);
+                }}
+                disabled={
+                  voiceDisabled || dictationBlockedReason !== null || micState === 'transcribing'
+                }
+              >
+                <Mic size={ICON_SIZE} aria-hidden />
+              </button>
+            ) : null}
             {/* + (spec/14 § Composer): the things that go INTO the message —
                 a file or image, or a sketch — sit in the field with it, at
                 its bottom-left. Call and meeting stay on the row below: they
@@ -2994,34 +2997,36 @@ export const Composer = forwardRef(function Composer(
               header): attach, dictate and call read as one family of
               composer-adjacent actions rather than splitting call off into
               the header's own icon rail. */}
-              <button
-                type="button"
-                className={`call-btn${onCall ? ' live' : ''}`}
-                data-testid="call-btn"
-                data-live={onCall ? 'true' : undefined}
-                aria-pressed={onCall}
-                aria-label={onCall ? 'end call' : 'call'}
-                title={
-                  onCall
-                    ? 'End call'
-                    : voiceDisabled
-                      ? 'Voice unavailable while the host is offline'
-                      : 'Call'
-                }
-                onClick={() => void handleCall()}
-                onContextMenu={(e) => {
-                  // Mid-call the button only ends the call: no menu to offer.
-                  if (onCall || voiceDisabled) {
-                    e.preventDefault();
-                    return;
+              {experimental ? (
+                <button
+                  type="button"
+                  className={`call-btn${onCall ? ' live' : ''}`}
+                  data-testid="call-btn"
+                  data-live={onCall ? 'true' : undefined}
+                  aria-pressed={onCall}
+                  aria-label={onCall ? 'end call' : 'call'}
+                  title={
+                    onCall
+                      ? 'End call'
+                      : voiceDisabled
+                        ? 'Voice unavailable while the host is offline'
+                        : 'Call'
                   }
-                  callMenu.openAt(e);
-                }}
-                aria-haspopup="menu"
-                disabled={voiceDisabled && !onCall}
-              >
-                <Phone size={ICON_SIZE} aria-hidden />
-              </button>
+                  onClick={() => void handleCall()}
+                  onContextMenu={(e) => {
+                    // Mid-call the button only ends the call: no menu to offer.
+                    if (onCall || voiceDisabled) {
+                      e.preventDefault();
+                      return;
+                    }
+                    callMenu.openAt(e);
+                  }}
+                  aria-haspopup="menu"
+                  disabled={voiceDisabled && !onCall}
+                >
+                  <Phone size={ICON_SIZE} aria-hidden />
+                </button>
+              ) : null}
               {/* Meeting (meeting mode) — this chat listens to a meeting and keeps
               live notes beside the conversation. Pressing it again ends it. */}
               {!hasMeetingButton ? null : (

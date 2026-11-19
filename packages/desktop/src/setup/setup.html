@@ -140,6 +140,17 @@
         border-color: var(--accent);
         box-shadow: 0 0 0 2px var(--accent-tint);
       }
+      #host-option {
+        margin-top: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
       textarea {
         width: 100%;
         min-height: 96px;
@@ -296,11 +307,16 @@
         <div class="choices" style="margin-top: 20px">
           <button type="button" class="choice" id="local" data-testid="choose-local">
             <span class="choice-title">This computer</span>
-            <span class="choice-hint">Patch runs here. Reach it from your phone anywhere. Best if you don’t have a server.</span>
+            <span class="choice-hint"
+              >Patch runs here. Reach it from your phone anywhere. Best if you don’t have a
+              server.</span
+            >
           </button>
           <button type="button" class="choice" id="remote" data-testid="choose-remote">
             <span class="choice-title">My own server</span>
-            <span class="choice-hint">A server you’ve already set up. Paste the pairing code it printed.</span>
+            <span class="choice-hint"
+              >A server you’ve already set up. Paste the pairing code it printed.</span
+            >
           </button>
           <button type="button" class="choice" id="existing" data-testid="choose-existing">
             <span class="choice-title">Connect to an existing Patch</span>
@@ -335,6 +351,20 @@
           autocomplete="off"
           placeholder="patch-pair://…"
         ></textarea>
+        <div id="host-option" hidden>
+          <label class="check">
+            <input type="checkbox" id="run-here" data-testid="run-here" checked />
+            Run agents on this Mac too
+          </label>
+          <input
+            id="host-name"
+            data-testid="host-name"
+            aria-label="Name for this computer"
+            maxlength="64"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </div>
         <div class="row">
           <button type="submit" class="primary" id="connect" data-testid="connect">Connect</button>
           <button type="button" class="ghost" id="back" data-testid="back">Back</button>
@@ -375,10 +405,16 @@
           ['pair', 'Pairing with your server'],
           ['connect', 'Connecting'],
         ],
+        remoteHost: [
+          ['pair', 'Pairing with your server'],
+          ['host', 'Setting up this computer'],
+          ['connect', 'Connecting'],
+        ],
       };
       const stepsEl = $('steps');
       const retryRow = $('retry-row');
       let flow = null;
+      let joinWithHost = false;
       let current = null;
 
       function mark(li, state) {
@@ -411,12 +447,16 @@
         nameForm.hidden = true;
       }
       function step(id) {
-        const name =
-          FLOWS.local.some(([k]) => k === id) && id !== 'connect'
+        const joining = id === 'pair' || flow === 'remote' || flow === 'remoteHost';
+        const name = joining
+          ? id === 'pair'
+            ? joinWithHost
+              ? 'remoteHost'
+              : 'remote'
+            : flow
+          : FLOWS.local.some(([k]) => k === id) && id !== 'connect'
             ? 'local'
-            : id === 'pair'
-              ? 'remote'
-              : (flow ?? 'local');
+            : (flow ?? 'local');
         if (flow !== name) showSteps(name);
         const at = lis().findIndex((li) => li.dataset.step === id);
         lis().forEach((li, i) => mark(li, i < at ? 'done' : i === at ? 'active' : 'pending'));
@@ -497,15 +537,21 @@
         if (name === '') return fail('Give this computer a name.');
         pick({ kind: 'local', name });
       });
-      function showJoin(title) {
+      async function showJoin(title, offerHost) {
         $('join-title').textContent = title;
+        $('host-option').hidden = !offerHost;
+        if (offerHost && $('host-name').value === '')
+          $('host-name').value = await window.patchSetup.defaultName();
         error.hidden = true;
         choose.hidden = true;
         join.hidden = false;
         $('code').focus();
       }
-      $('remote').addEventListener('click', () => showJoin('Connect to your server'));
-      $('existing').addEventListener('click', () => showJoin('Connect to an existing Patch'));
+      $('remote').addEventListener('click', () => showJoin('Connect to your server', false));
+      $('existing').addEventListener('click', () => showJoin('Connect to an existing Patch', true));
+      $('run-here').addEventListener('change', () => {
+        $('host-name').hidden = !$('run-here').checked;
+      });
       $('back').addEventListener('click', () => {
         error.hidden = true;
         join.hidden = true;
@@ -515,7 +561,14 @@
         e.preventDefault();
         const input = $('code').value.trim();
         if (input === '') return fail('Paste the pairing code.');
-        pick({ kind: 'remote', input });
+        const choice = { kind: 'remote', input };
+        if (!$('host-option').hidden && $('run-here').checked) {
+          const name = $('host-name').value.trim();
+          if (name === '') return fail('Give this computer a name.');
+          choice.host = { name };
+        }
+        joinWithHost = choice.host !== undefined;
+        pick(choice);
       });
 
       window.patchSetup.onProgress(progress);

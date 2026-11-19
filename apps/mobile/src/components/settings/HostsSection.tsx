@@ -17,7 +17,13 @@
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { backendStatus, providerKeyInfo, type ProviderKeyId } from '@patch/wire';
+import {
+  backendStatus,
+  providerDescriptor,
+  providerForBackendId,
+  providerKeyInfo,
+  type ProviderKeyId,
+} from '@patch/wire';
 import { api, ApiError, type SharedState } from '../../api/rest';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { patchShared, writeShared } from './sharedWrite';
@@ -309,8 +315,10 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                       );
                       return;
                     }
-                    if (b.id === 'codex') {
-                      // OpenAI sign-in lives on Usage → ChatGPT, where its form is.
+                    if (
+                      providerDescriptor(providerForBackendId(b.id)).hostSignIn === 'accountFlow'
+                    ) {
+                      // The provider's own sign-in lives on Usage, where its form is.
                       useUiStore.getState().setCodexSignInHost(hostId);
                       router.push({ pathname: '/settings/[page]', params: { page: 'usage' } });
                       return;

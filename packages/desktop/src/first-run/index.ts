@@ -79,6 +79,20 @@ export function launch(env: FirstRunEnv): Promise<Launch> {
     file: connectionFile(env.userData),
     ui: env.ui,
     label: env.label,
+    installHost: async (origin, credential, name) => {
+      const started = await post(origin, '/api/auth/daemon/pair/start', {}, credential);
+      if (started.status !== 200 || !started.json.nonce) {
+        throw new Error(
+          `The server gave no pairing code for this computer: ${started.json.error ?? `HTTP ${started.status}`}`,
+        );
+      }
+      const installed = await env.installHost(origin, started.json.nonce, name);
+      if (!installed.ok) {
+        throw new Error(
+          `Installing the host failed (${installed.exitCode ?? 'did not run'}):\n${installed.output.trim()}`,
+        );
+      }
+    },
     startLocal: (existing, progress, name) =>
       bringUpLocal(
         existing,

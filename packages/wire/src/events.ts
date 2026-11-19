@@ -110,6 +110,32 @@ export const HarnessId = z.enum(PROVIDERS.map((p) => p.id) as [ProviderId, ...Pr
 export type HarnessId = z.infer<typeof HarnessId>;
 
 /**
+ * Where an entry came from in the provider's own store — a Claude uuid, a Codex
+ * item id (spec/01 § Chat record). It is how native edit and rewind find their
+ * place; Patch never reads the provider's store through it for display.
+ */
+export const NativeRef = z
+  .object({
+    harness: HarnessId,
+    sessionId: z.string().min(1),
+    id: z.string().min(1),
+  })
+  .strict();
+export type NativeRef = z.infer<typeof NativeRef>;
+
+/**
+ * On a logged entry a host sends the server: the provider's own id for it. The
+ * server keeps it in the record and never relays it to surfaces, so a surface
+ * that predates it is unaffected. A host sends it only to a server whose
+ * `auth.ok` carried `recordComplete: true`.
+ */
+const nativeRefField = { nativeRef: NativeRef.optional() };
+
+/** How a turn ended, as the host's log records it. */
+export const TurnOutcome = z.enum(['completed', 'stopped', 'failed', 'interrupted']);
+export type TurnOutcome = z.infer<typeof TurnOutcome>;
+
+/**
  * Which harness a model id belongs to — the one client-safe copy of the
  * `openai/` prefix check (`packages/host/src/codexAccounts.ts`'s
  * `isCodexModel`, which callers on the host side keep using; this is the
@@ -975,6 +1001,7 @@ export const ChatMessageEvent = z
      * point the agent saw it. Additive/optional like `compaction`.
      */
     midTurn: z.literal(true).optional(),
+    ...nativeRefField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1046,6 +1073,7 @@ export const ChatToolCallEvent = z
     // running call from this, never from when it happened to receive the
     // event. Absent only when a replayed line carries no usable timestamp.
     startedAt: z.number().int().nonnegative().optional(),
+    ...nativeRefField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1075,6 +1103,7 @@ export const ChatToolResultEvent = z
     result: z.unknown(),
     isError: z.boolean().optional(),
     seq: z.number().int().nonnegative(),
+    ...nativeRefField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1127,6 +1156,7 @@ export const ChatNoteEvent = z
     text: z.string().min(1),
     seq: z.number().int().nonnegative(),
     createdAt: z.number().optional(),
+    ...nativeRefField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1190,6 +1220,7 @@ export const ChatArtifactEvent = z
     path: z.string().min(1),
     updatedAt: z.number().int().nonnegative(),
     seq: z.number().int().nonnegative(),
+    ...nativeRefField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -2500,6 +2531,10 @@ export const SharedSettings = z
     ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
     /** The ElevenLabs voice id to speak with, from the account's own list. */
     elevenLabsVoice: z.string().min(1).optional(),
+    /** The ElevenLabs speech model. Absent: fast model for conversation, richer one for announcements. */
+    elevenLabsModel: z
+      .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
+      .optional(),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -3057,6 +3092,9 @@ export const HostInfoEvent = z
     /** The speech engine and ElevenLabs voice this host is using (`host.settings`). */
     ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
     elevenLabsVoice: z.string().min(1).optional(),
+    elevenLabsModel: z
+      .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
+      .optional(),
     /**
      * The voices on this host's ElevenLabs account, cloned and designed ones
      * included. Present only while the host holds a key; `elevenLabsVoicesError`
@@ -7247,6 +7285,54 @@ export const ChatCommittedEvent = z
 export type ChatCommittedEvent = z.infer<typeof ChatCommittedEvent>;
 
 /**
+ * Host -> server: a turn began in a chat (spec/01 § Chat record, spec/03 § Host
+ * outbox). A fact for the record and for the chat's status, not a transcript
+ * row: the server keeps it beside the chat's entries and does not relay it to
+ * surfaces. `seq` is the chat's highest seq when the turn began (-1 before its
+ * first entry), which places the boundary between entries without taking a seq
+ * of its own; the turn is identified by `turnId`. Sent through the outbox, and
+ * only to a server whose `auth.ok` carried `recordComplete: true`.
+ */
+export const ChatTurnStartedEvent = z
+  .object({
+    type: z.literal('chat.turn_started'),
+    chatId: z.string().min(1),
+    turnId: z.string().min(1),
+    seq: z.number().int().min(-1),
+    at: z.number().int().nonnegative(),
+    branchId: z.string().min(1).optional(),
+    harness: HarnessId.optional(),
+    /** Null when the chat names no model (the provider's own default ran). */
+    model: z.string().min(1).nullable().optional(),
+    origin: TurnOrigin.optional(),
+    /** The provider's own session the turn ran in. */
+    sessionId: z.string().min(1).optional(),
+    ...nativeRefField,
+  })
+  .strict();
+export type ChatTurnStartedEvent = z.infer<typeof ChatTurnStartedEvent>;
+
+/**
+ * Host -> server: a turn ended, with its outcome (spec/01 § Chat record). Placed
+ * and identified as `chat.turn_started` is; `seq` is the chat's highest seq
+ * when the turn ended. `error` is the code and the provider's own wording when
+ * it failed.
+ */
+export const ChatTurnEndedEvent = z
+  .object({
+    type: z.literal('chat.turn_ended'),
+    chatId: z.string().min(1),
+    turnId: z.string().min(1),
+    seq: z.number().int().min(-1),
+    at: z.number().int().nonnegative(),
+    outcome: TurnOutcome,
+    error: z.object({ code: ChatErrorCode, message: z.string() }).strict().optional(),
+    branchId: z.string().min(1).optional(),
+  })
+  .strict();
+export type ChatTurnEndedEvent = z.infer<typeof ChatTurnEndedEvent>;
+
+/**
  * Host -> server: the history of one chat that a server's record did not keep
  * before it kept everything (artifacts, tool-run summaries, answered
  * questions), sent once per chat (spec/01 § Chat record). Taken into the record
@@ -9952,6 +10038,13 @@ export const AuthOkEvent = z
      */
     hostOutbox: z.literal(true).optional(),
     /**
+     * Sent to a host by a server whose record keeps everything the host logs:
+     * turn boundaries (`chat.turn_started`, `chat.turn_ended`), each entry's
+     * `nativeRef`, and the full record import (spec/01 § Chat record). Absent:
+     * the host sends none of them, and the import only what that server lacked.
+     */
+    recordComplete: z.literal(true).optional(),
+    /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Absent: use
      * `chat.replay`.
@@ -10223,6 +10316,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchLogSyncBatchEvent,
   PatchLogRestoreEvent,
   ChatCommittedEvent,
+  ChatTurnStartedEvent,
+  ChatTurnEndedEvent,
   HostRecordImportEvent,
   HostRecordImportAckEvent,
   HostOutboxEvent,
@@ -10556,6 +10651,8 @@ export const EVENT_SCHEMAS = {
   'patch.log_sync.batch': PatchLogSyncBatchEvent,
   'patch.log_restore': PatchLogRestoreEvent,
   'chat.committed': ChatCommittedEvent,
+  'chat.turn_started': ChatTurnStartedEvent,
+  'chat.turn_ended': ChatTurnEndedEvent,
   'host.record_import': HostRecordImportEvent,
   'host.record_import_ack': HostRecordImportAckEvent,
   'host.outbox': HostOutboxEvent,

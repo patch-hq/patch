@@ -89,6 +89,7 @@ const SETTING_KEYS: Record<string, string> = {
   'kokoro-voice': 'kokoroVoice',
   'tts-backend': 'ttsBackend',
   'elevenlabs-voice': 'elevenLabsVoice',
+  'elevenlabs-model': 'elevenLabsModel',
   'dictation-pause': 'dictationPauseSeconds',
   'turn-detection': 'dictationTurnDetection',
   memory: 'harnessMemoryEnabled',

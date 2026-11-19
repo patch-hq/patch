@@ -2,6 +2,7 @@
 // so it has the composer's rich editing and none of a new turn's controls.
 
 import React from 'react';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import {
@@ -49,6 +50,7 @@ function renderRN(element: React.ReactElement): ReactTestRenderer {
 }
 
 beforeEach(() => {
+  seedSettings();
   usePresenceStore.setState({
     connection: 'connected',
     daemon: 'online',

@@ -89,8 +89,10 @@ export function buildTodoFireNote(text: string): string {
 }
 
 /**
- * Identifies one list item when texts may repeat: its text plus which
- * occurrence of that text it is (0 = first), counting items of every status.
+ * Identifies one list item when texts may repeat: its text plus how many items
+ * of the same text FOLLOW it (0 = last). Counted from the tail because
+ * `keepCompletedHistory` prepends completed history ahead of the agent's list,
+ * so a head-based count would shift whenever history grows.
  */
 export interface TodoRef {
   text: string;
@@ -102,10 +104,10 @@ export type AdvanceDecision =
   | { action: 'clear' }
   | { action: 'stalled'; text: string; occurrence: number };
 
-/** How many items before `index` share its text. */
+/** How many items after `index` share its text (stable when history is prepended). */
 function occurrenceAt(todos: TodoItem[], index: number): number {
   let n = 0;
-  for (let i = 0; i < index; i++) if (todos[i]!.text === todos[index]!.text) n++;
+  for (let i = index + 1; i < todos.length; i++) if (todos[i]!.text === todos[index]!.text) n++;
   return n;
 }
 

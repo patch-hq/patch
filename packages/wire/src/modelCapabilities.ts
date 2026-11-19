@@ -24,7 +24,7 @@
 // ever wrong, the turn fails loudly rather than running in a mode nobody chose.
 
 import { harnessForModel, PermissionMode, type HarnessId } from './events.js';
-import { PROVIDERS } from './providers.js';
+import { PROVIDERS, accountKindForModel, accountServesModel } from './providers.js';
 
 /**
  * Models that cannot run `auto`, mirroring Claude Code's own list.
@@ -159,7 +159,6 @@ export function accountConnectedForModel(
   model?: string | null,
 ): boolean {
   if (!account) return true;
-  if (!model?.startsWith('openai/') || !account.accounts) return account.connected;
-  const kind = model.startsWith('openai/api/') ? 'apiKey' : 'chatgpt';
-  return account.accounts.some((a) => a.connected && (a.kind ?? 'chatgpt') === kind);
+  if (accountKindForModel(model) === null || !account.accounts) return account.connected;
+  return account.accounts.some((a) => a.connected && accountServesModel(a, model));
 }

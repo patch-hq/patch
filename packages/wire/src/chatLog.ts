@@ -18,22 +18,14 @@ import {
   ChatToolCallEvent,
   ChatToolResultEvent,
   HarnessId,
+  NativeRef,
   PermissionDecision,
   PermissionMode,
   TurnOrigin,
+  TurnOutcome,
 } from './events.js';
 
 export const CHAT_LOG_VERSION = 1;
-
-/** Where a record came from in the harness's own store — a Claude uuid, a Codex item id. */
-export const NativeRef = z
-  .object({
-    harness: HarnessId,
-    sessionId: z.string().min(1),
-    id: z.string().min(1),
-  })
-  .strict();
-export type NativeRef = z.infer<typeof NativeRef>;
 
 /**
  * A tool result (or one block of one) too large to keep inline, stored
@@ -84,9 +76,6 @@ export const LOGGED_EVENT_TYPES: ReadonlySet<LoggedEvent['type']> = new Set([
   'chat.artifact',
   'chat.tool_run_summary',
 ]);
-
-export const TurnOutcome = z.enum(['completed', 'stopped', 'failed', 'interrupted']);
-export type TurnOutcome = z.infer<typeof TurnOutcome>;
 
 export const SessionReason = z.enum([
   'start',
@@ -218,7 +207,8 @@ export type LogRecord = z.infer<typeof LogRecord>;
 /**
  * The events a host sends through its outbox (spec/01 § Host outbox): what the
  * chat's record keeps, numbered in the chat (`seq` 0 or above) and not addressed
- * to one surface. Everything else is live-only and is not resent.
+ * to one surface, and the chat's turn boundaries (placed at the chat's highest
+ * seq, -1 before its first entry). Everything else is live-only and is not resent.
  */
 export function isOutboxEvent(event: { type: string }): boolean {
   if (!OUTBOX_EVENT_TYPES.has(event.type)) return false;
@@ -227,13 +217,24 @@ export function isOutboxEvent(event: { type: string }): boolean {
     seq?: unknown;
     forSurfaceId?: unknown;
   };
+  const lowest = TURN_BOUNDARY_TYPES.has(event.type) ? -1 : 0;
   return (
-    typeof chatId === 'string' && typeof seq === 'number' && seq >= 0 && forSurfaceId === undefined
+    typeof chatId === 'string' &&
+    typeof seq === 'number' &&
+    seq >= lowest &&
+    forSurfaceId === undefined
   );
 }
 
+/** The turn boundaries a host reports (spec/01 § Chat record). */
+export const TURN_BOUNDARY_TYPES: ReadonlySet<string> = new Set([
+  'chat.turn_started',
+  'chat.turn_ended',
+]);
+
 const OUTBOX_EVENT_TYPES: ReadonlySet<string> = new Set([
   ...LOGGED_EVENT_TYPES,
+  ...TURN_BOUNDARY_TYPES,
   'chat.provider_context',
   'chat.error',
 ]);

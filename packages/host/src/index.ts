@@ -1,5 +1,6 @@
 import { cutoffMs } from './cleanup.js';
 import { removeRetiredNativeCopies } from './retiredNativeCopies.js';
+import type { ElevenLabsTtsModel } from './audio/elevenlabs.js';
 import { applyClaudeProviderSettings } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
@@ -67,7 +68,7 @@ import { ChatMoveError } from './chatMove.js';
 import { expandHome } from './expandHome.js';
 import { gitDirtyPaths } from './git-dirty.js';
 import { listFilesRecursive } from './files-recursive.js';
-import { createHistoryReader } from './history.js';
+import { agentHeldHistory, createHistoryReader } from './history.js';
 import type {
   ChatErrorCode,
   McpServerConfig,
@@ -76,8 +77,9 @@ import type {
   PatchActivityResponseEvent,
   PatchSearchChatsResponseEvent,
   LimitBehaviour,
+  ProviderId,
 } from '@patch/wire';
-import { limitBehaviourFromAutoResume } from '@patch/wire';
+import { limitBehaviourFromAutoResume, providerForSessionId } from '@patch/wire';
 import {
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
@@ -878,6 +880,8 @@ async function startHost(
   let ttsBackend: 'kokoro' | 'elevenlabs' = persistedHostState.ttsBackend ?? 'kokoro';
   /** The ElevenLabs voice id in use (`host.settings` → `elevenLabsVoice`). */
   let elevenLabsVoice: string | undefined = persistedHostState.elevenLabsVoice;
+  /** The ElevenLabs speech model (`host.settings` → `elevenLabsModel`); absent keeps the per-purpose defaults. */
+  let elevenLabsModel: ElevenLabsTtsModel | undefined = persistedHostState.elevenLabsModel;
   /** The account's ElevenLabs voices, or why they could not be listed. */
   let elevenLabsVoices: ElevenLabsVoice[] | undefined;
   let elevenLabsVoicesError: string | undefined;
@@ -1372,6 +1376,7 @@ async function startHost(
       ...(kokoroVoice !== undefined ? { kokoroVoice } : {}),
       ttsBackend,
       ...(elevenLabsVoice !== undefined ? { elevenLabsVoice } : {}),
+      ...(elevenLabsModel !== undefined ? { elevenLabsModel } : {}),
       ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
       ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
@@ -1474,6 +1479,7 @@ async function startHost(
   // so loudly when it cannot.
   const elevenlabs = createElevenLabs({
     apiKey: () => providerKeys.get('elevenlabs'),
+    getModel: () => elevenLabsModel,
     logger: logger.child({ component: 'elevenlabs' }),
     onUsage: (usage) => {
       voiceLedger.recordSpeech(usage);
@@ -2050,6 +2056,11 @@ async function startHost(
       hostStateStore.update({ elevenLabsVoice });
       logger.info({ elevenLabsVoice }, 'elevenlabs voice changed');
     }
+    if (shared.elevenLabsModel !== undefined && shared.elevenLabsModel !== elevenLabsModel) {
+      elevenLabsModel = shared.elevenLabsModel;
+      hostStateStore.update({ elevenLabsModel });
+      logger.info({ elevenLabsModel }, 'elevenlabs model changed');
+    }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
       daemon.setManagerContextWindow(managerContextWindow);
@@ -2329,6 +2340,7 @@ async function startHost(
             ...(state.kokoroVoice ? { kokoroVoice: state.kokoroVoice } : {}),
             ...(state.ttsBackend ? { ttsBackend: state.ttsBackend } : {}),
             ...(state.elevenLabsVoice ? { elevenLabsVoice: state.elevenLabsVoice } : {}),
+            ...(state.elevenLabsModel ? { elevenLabsModel: state.elevenLabsModel } : {}),
             chatNameInterval,
             titleGenerationEnabled,
             statusGenerationEnabled,
@@ -2614,7 +2626,10 @@ async function startHost(
       // spec/15 § Secrets: publish the host-owned secret set so every
       // surface's editor is populated from the same source on (re)connect.
       sender({ type: 'secrets.list', secrets: secretsStore.list() });
-      if (greeting.recordImport === true) recordImport?.start();
+      // Only a server that keeps the whole record takes the full import.
+      if (greeting.recordImport === true && greeting.recordComplete === true) {
+        recordImport?.start();
+      }
     },
     onFrame: async (event, sender) => {
       // Host addressing, checked once for the whole inbound stream: ANY frame
@@ -4707,12 +4722,14 @@ async function startHost(
             'history: skipping unreadable JSONL line',
           ),
       });
-      const readerFor = (sessionId: string) =>
-        sessionId.startsWith('codex-')
-          ? codexHistory
-          : sessionId.startsWith('local-')
-            ? localHistory
-            : claudeHistory;
+      // Each provider's transcripts are read by its own adapter's reader.
+      const readers: Record<ProviderId, typeof claudeHistory> = {
+        claude: claudeHistory,
+        codex: codexHistory,
+        local: localHistory,
+        gemini: agentHeldHistory,
+      };
+      const readerFor = (sessionId: string) => readers[providerForSessionId(sessionId)!];
       return {
         hasSession: (o) => readerFor(o.sessionId).hasSession(o),
         read: (o) => readerFor(o.sessionId).read(o),
@@ -4950,8 +4967,20 @@ async function startHost(
   recordImport = new RecordImport({
     path: join(config.patchHome, 'record-import.json'),
     logger,
-    listChats: () => daemon.list().map((c) => c.chatId),
-    replayChat: (chatId, emit) => daemon.replayChat(chatId, -1, emit),
+    // A subagent's chats are never on the wire, so not in the server's record.
+    listChats: () =>
+      daemon
+        .list()
+        .map((c) => c.chatId)
+        .filter((id) => !daemon.isSubagent(id)),
+    recordOf: (chatId) => {
+      try {
+        return daemon.recordForImport(chatId);
+      } catch (err) {
+        if (err instanceof ChatNotFoundError) return null;
+        throw err;
+      }
+    },
     send: (event) => link.send(event),
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
@@ -7720,7 +7749,9 @@ export async function handleServerEvent(
       case 'chat.stop_request': {
         // spec/04 § Branching — a branch-addressed stop ends just that
         // branch's turn; the plain (no branchId) form is "stop THE CHAT",
-        // which ends every branch's turn.
+        // which ends every branch's turn. Only where the provider declares
+        // interrupt (spec/02 § Provider adapters).
+        if (daemon.refuseUnlessCapable(event.chatId, 'interrupt')) return;
         if (event.branchId !== undefined) daemon.stopBranch(event.chatId, event.branchId);
         else await daemon.stopAllBranches(event.chatId);
         return;

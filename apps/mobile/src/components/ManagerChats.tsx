@@ -11,7 +11,13 @@ import React from 'react';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ListChecks, Square } from 'lucide-react-native';
-import { SPECIAL_THREAD_IDS, threadRowState, threadRows, type ThreadRowState } from '@patch/wire';
+import {
+  modelHasCapability,
+  SPECIAL_THREAD_IDS,
+  threadRowState,
+  threadRows,
+  type ThreadRowState,
+} from '@patch/wire';
 import { useChatStore } from '../stores/chatStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
@@ -253,7 +259,7 @@ function ThreadRow({ row }: { row: ChatRow }): React.ReactElement {
           </Text>
         </Pressable>
       ) : null}
-      {state === 'working' ? (
+      {state === 'working' && modelHasCapability(row.model, 'interrupt') ? (
         <Pressable
           onPress={() => stopThread(row.chatId)}
           accessibilityRole="button"

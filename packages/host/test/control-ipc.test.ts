@@ -29,7 +29,12 @@ import { ChatStateMap } from '../src/chatState.js';
  * subclass — it only ever backs ONE narrow control.ts branch per test.
  */
 function fakeHost(overrides: Record<string, unknown>): Daemon {
-  return { chatState: new ChatStateMap(), ...overrides } as unknown as Daemon;
+  return {
+    chatState: new ChatStateMap(),
+    // Every provider these fakes stand in for declares every capability.
+    refuseUnlessCapable: () => false,
+    ...overrides,
+  } as unknown as Daemon;
 }
 
 function makeJob(overrides: Partial<Job> = {}): Job {
@@ -1412,6 +1417,31 @@ describe('C1 Control IPC: POST /stop-chat — guards + error mapping', () => {
       expect(res.statusCode).toBe(503);
     } finally {
       await noHost.close();
+    }
+  });
+
+  it('refuses a stop with 409 capability_unsupported where the provider lacks interrupt', async () => {
+    let stopped = false;
+    const daemon = fakeHost({
+      refuseUnlessCapable: (_chatId: string, capability: string) => capability === 'interrupt',
+      stopChat: async () => {
+        stopped = true;
+      },
+    });
+    const jobs = new MemoryJobsStore();
+    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/stop-chat',
+        headers: AUTH,
+        payload: { chatId: 'c1' },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe('capability_unsupported');
+      expect(stopped).toBe(false);
+    } finally {
+      await app.close();
     }
   });
 
@@ -3748,6 +3778,7 @@ describe('non-Error throw handling (err instanceof Error ? err.message : String(
     });
     const daemon = {
       chatState,
+      refuseUnlessCapable: () => false,
       stopChat: async () => {
         throw 'plain stop failure';
       },

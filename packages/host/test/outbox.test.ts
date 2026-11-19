@@ -203,4 +203,76 @@ describe('server link with an outbox', () => {
     expect(s.sent[0]!['type']).toBe('chat.message');
     expect(link.diagnostics().outboxOwed).toBe(0);
   });
+
+  describe('the whole record: turn boundaries and provider ids', () => {
+    const ref = { harness: 'claude', sessionId: 's1', id: 'u1' };
+    const withRef = (seq: number): WireEvent => ({ ...say(seq), nativeRef: ref }) as WireEvent;
+    const started = (seq: number): WireEvent =>
+      ({
+        type: 'chat.turn_started',
+        chatId: 'c1',
+        turnId: 't1',
+        seq,
+        at: 1,
+      }) as WireEvent;
+    const ended = (seq: number): WireEvent =>
+      ({
+        type: 'chat.turn_ended',
+        chatId: 'c1',
+        turnId: 't1',
+        seq,
+        at: 2,
+        outcome: 'completed',
+      }) as WireEvent;
+
+    it('keeps a turn boundary in the outbox, even one before the first entry (seq -1)', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
+      s.sent.length = 0;
+      link.send(started(-1));
+      link.send(withRef(0));
+      link.send(ended(0));
+      expect(s.sent).toEqual([
+        { type: 'host.outbox', position: 0, event: started(-1) },
+        { type: 'host.outbox', position: 1, event: withRef(0) },
+        { type: 'host.outbox', position: 2, event: ended(0) },
+      ]);
+      expect(link.diagnostics().outboxOwed).toBe(3);
+    });
+
+    it('an older server is sent neither, and the entries still go, without the provider id', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true }));
+      s.sent.length = 0;
+      link.send(started(-1));
+      link.send(withRef(0));
+      link.send(ended(0));
+      expect(s.sent).toEqual([{ type: 'host.outbox', position: 1, event: say(0) }]);
+      // The server's acknowledgement of the entry covers the boundaries before it.
+      s.receive({ type: 'host.outbox_ack', through: 1 });
+      expect(outbox.pending().map((e) => e.position)).toEqual([2]);
+    });
+
+    it('a server without the outbox is sent bare entries without the provider id, and nothing is owed', () => {
+      link.start();
+      const s = connect(authOk());
+      s.sent.length = 0;
+      link.send(started(-1));
+      link.send(withRef(0));
+      expect(s.sent).toEqual([say(0)]);
+      expect(link.diagnostics().outboxOwed).toBe(0);
+    });
+
+    it('what was kept while offline goes whole to a server that keeps the record', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true }));
+      s.close(1006);
+      link.send(started(-1));
+      link.send(withRef(0));
+      link.start();
+      const again = connect(authOk({ hostOutbox: true, recordComplete: true }));
+      const resent = again.sent.filter((f) => f['type'] === 'host.outbox');
+      expect(resent.map((f) => f['event'])).toEqual([started(-1), withRef(0)]);
+    });
+  });
 });

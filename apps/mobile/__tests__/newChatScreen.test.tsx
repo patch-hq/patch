@@ -15,6 +15,7 @@
 //   - leaving without sending creates nothing and deletes nothing
 
 import React from 'react';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   renderRN,
@@ -116,6 +117,7 @@ function chat(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  seedSettings();
   vi.mocked(startVoiceCall).mockClear();
   __clearAllMmkv();
   __resetRouterMock();

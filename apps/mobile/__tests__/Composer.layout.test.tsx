@@ -8,9 +8,19 @@
 // in the suite; this can.
 
 import React from 'react';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { findHost, findAllHost, byLabel, byTestId, byType, renderRN } from './testUtils/render';
+import {
+  findHost,
+  findAllHost,
+  queryHost,
+  byLabel,
+  byTestId,
+  byType,
+  renderRN,
+} from './testUtils/render';
+import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import {
   usePresenceStore,
   type ConnectionState,
@@ -40,6 +50,7 @@ function setPresence(connection: ConnectionState, daemon: DaemonPresence): void 
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  seedSettings();
   __clearAllMmkv();
   useComposerDraftStore.getState()._reset();
   setPresence('connected', 'online');
@@ -115,6 +126,12 @@ describe('Composer — two-row layout', () => {
     expect(input.props['style'].paddingRight).toBeGreaterThanOrEqual(
       (mic.props['style'] as { width: number }).width,
     );
+  });
+
+  it('leaves the mic out while experimental features are off', () => {
+    seedSettings({ preferences: { ...DEFAULT_SHARED_SETTINGS } });
+    const r = renderRN(<Composer chatId="c1" folder="work" />);
+    expect(queryHost(r.root, byTestId('composer-mic'))).toBeNull();
   });
 
   it('holds the + and the mic inside the input row, and send on the actions row', () => {

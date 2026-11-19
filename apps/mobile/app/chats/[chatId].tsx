@@ -84,6 +84,7 @@ import { DelegateTranscript } from '../../src/components/DelegateTranscript';
 import { DelegateStrip } from '../../src/components/DelegateStrip';
 import { DELEGATE_STATUS_LABEL, delegateStatusColor } from '../../src/lib/delegateStatus';
 import { usePresenceStore } from '../../src/stores/presenceStore';
+import { useExperimentalFeatures } from '../../src/stores/settingsStore';
 import { deliveryTracker } from '../../src/lib/deliveryTracker';
 import { permissionDeliveryTracker } from '../../src/lib/permissionDeliveryTracker';
 import { openExistingSideThread } from '../../src/lib/sideThreadActions';
@@ -272,6 +273,7 @@ export default function ChatDetailScreen(): React.ReactElement {
 }
 
 function ChatDetailBody(): React.ReactElement {
+  const experimental = useExperimentalFeatures();
   const colors = useTheme();
   const router = useRouter();
   // `seq` — opened from a search hit (spec/03 § Chat search): land on that
@@ -1218,7 +1220,7 @@ function ChatDetailBody(): React.ReactElement {
             voice call, so it is hidden there. A long press starts hands-free
             instead — the same sustained session with the line left open
             (spec/07 § Session modes). */}
-        {!readOnlyMirror ? (
+        {experimental && !readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId)}
             onLongPress={() => setCallMenuOpen(true)}
@@ -1398,7 +1400,11 @@ function ChatDetailBody(): React.ReactElement {
                     entry={entry}
                     chatId={chatId}
                     queuePos={i + 1}
-                    release={queueRelease(queuedEntries, i)}
+                    release={queueRelease(
+                      queuedEntries,
+                      i,
+                      modelHasCapability(row?.model, 'steer'),
+                    )}
                     {...(queuedEdit !== null && entry.localId === queuedEdit.localId
                       ? { queuedDraft: queuedEdit.text }
                       : {})}
@@ -1793,6 +1799,13 @@ function ToolCallItem({
       ? viewFilePayload(result.toolResult)
       : null;
   if (viewFile) return <ViewFileCard view={viewFile} />;
+  // `link_file` points at a file on the host's disk: a card with its path.
+  // An invalid ack (an error) falls through to the ordinary row.
+  const linkFile =
+    entry.tool && toolLabel(entry.tool) === 'link_file' && result
+      ? linkFilePayload(result.toolResult)
+      : null;
+  if (linkFile) return <LinkFileCard link={linkFile} />;
   // The agent's plan is a checklist card; args that are not a todo list fall
   // through to the ordinary row. Stable per entry, like the branches above.
   const todoItems = entry.tool === 'TodoWrite' ? todoCardItems(entry.toolArgs) : null;
@@ -2278,6 +2291,80 @@ function ViewFileCard({ view }: { view: ViewFileView }): React.ReactElement {
         />
       ) : null}
     </Pressable>
+  );
+}
+
+interface LinkFileView {
+  name: string;
+  absPath: string;
+  isDirectory: boolean;
+  size?: number | undefined;
+}
+
+function asLinkFile(v: unknown): LinkFileView | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (o['kind'] !== 'link') return null;
+  const name = o['name'];
+  const absPath = o['absPath'];
+  if (typeof name !== 'string' || name === '') return null;
+  if (typeof absPath !== 'string' || absPath === '') return null;
+  return {
+    name,
+    absPath,
+    isDirectory: o['isDirectory'] === true,
+    size: typeof o['size'] === 'number' ? o['size'] : undefined,
+  };
+}
+
+/** Parse a `link_file` result: the host's json ack, bare or in content blocks. */
+function linkFilePayload(result: unknown): LinkFileView | null {
+  const direct = asLinkFile(result);
+  if (direct) return direct;
+  if (typeof result !== 'object' || result === null) return null;
+  const content = Array.isArray(result) ? result : (result as Record<string, unknown>)['content'];
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const text = (block as Record<string, unknown>)['text'];
+    if (typeof text !== 'string') continue;
+    try {
+      const parsed = asLinkFile(JSON.parse(text));
+      if (parsed) return parsed;
+    } catch {
+      // Not this block — a `link_file` ack is always valid JSON.
+    }
+  }
+  return null;
+}
+
+// The file lives on the host's disk, so on a phone the card is the name and
+// path alone — nothing to open here.
+function LinkFileCard({ link }: { link: LinkFileView }): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <View
+      testID="link-file"
+      style={{
+        backgroundColor: colors.paperRaised,
+        borderColor: colors.lineSoft,
+        borderWidth: 1,
+        borderRadius: radii.lg,
+        padding: space.sm,
+        marginBottom: space.sm,
+      }}
+    >
+      <Text testID="link-file-name" style={{ ...typography.meta, color: colors.ink }}>
+        {link.size !== undefined ? `${link.name} · ${formatBytes(link.size)}` : link.name}
+      </Text>
+      <Text
+        testID="link-file-path"
+        selectable
+        style={{ ...typography.meta, color: colors.ink3, marginTop: space.xs }}
+      >
+        {link.absPath}
+      </Text>
+    </View>
   );
 }
 
@@ -3067,7 +3154,10 @@ const TimelineItem = React.memo(function TimelineItem({
             // the host has no persisted record of yet, so there is no fork
             // point to hang a side thread off (NO FALLBACK) — mirrors web's
             // `canSideThread`.
-            {...(entry.localId === undefined ? { sideThread: { chatId, seq: entry.seq } } : {})}
+            // Offered only where the chat's provider declares branchAtTurn.
+            {...(entry.localId === undefined && modelHasCapability(chatModel, 'branchAtTurn')
+              ? { sideThread: { chatId, seq: entry.seq } }
+              : {})}
             // Retry: a settled turn re-runs its user message (an assistant
             // reply re-runs the one it answered). Offered only when that
             // message is text-only — attachments would be dropped.
@@ -3176,7 +3266,7 @@ const TimelineItem = React.memo(function TimelineItem({
             >
               {queueChipLabel(queuePos, hostOnline, release, pause)}
             </Text>
-            {entry.localId ? (
+            {entry.localId && modelHasCapability(chatModel, 'interrupt') ? (
               <Pressable
                 testID="queued-promote"
                 accessibilityRole="button"

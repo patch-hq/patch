@@ -342,6 +342,24 @@ describe('groupToolRuns — view_file takes its own result', () => {
   });
 });
 
+describe('groupToolRuns — link_file keeps its own row among other calls', () => {
+  it('does not fold a link_file between Bash calls into the run', () => {
+    const rows = groupToolRuns([
+      call(0, 'Bash', { command: 'ls' }, 'b1'),
+      call(1, 'mcp__patch__link_file', { file_path: '/a' }, 'l1'),
+      call(2, 'Bash', { command: 'pwd' }, 'b2'),
+      result(3, 'Bash', 'b1'),
+      result(4, 'mcp__patch__link_file', 'l1'),
+      result(5, 'Bash', 'b2'),
+    ]);
+    const link = rows.find(
+      (r) => r.kind === 'entry' && r.entry.tool === 'mcp__patch__link_file',
+    ) as { result?: unknown } | undefined;
+    expect(link).toBeDefined();
+    expect(link?.result).toBeDefined();
+  });
+});
+
 describe('toolCallSummary — description that does not start on its first line', () => {
   it('summarises the first non-empty line when the description opens with a newline', () => {
     expect(toolCallSummary('Bash', { description: '\nRun the tests' })).toBe('Run the tests');

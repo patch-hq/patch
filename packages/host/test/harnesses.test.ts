@@ -44,10 +44,22 @@ describe('the chat core does not branch on a provider name', () => {
     expect(src.match(/[!=]==\s*'(claude|codex|local)'/g) ?? []).toEqual([]);
   });
 
-  it('each provider names the run option it reseeds through, or none', () => {
-    expect(HARNESS_TRAITS.codex.reseedOption).toBe('codexReseed');
-    expect(HARNESS_TRAITS.local.reseedOption).toBe('localReseed');
-    expect(HARNESS_TRAITS.claude.reseedOption).toBeNull();
+  it('each adapter builds the run options it reseeds and appends through, or has none', () => {
+    const track = [] as unknown as Parameters<
+      NonNullable<(typeof HARNESS_TRAITS)['codex']['reseedRunOptions']>
+    >[0];
+    expect(HARNESS_TRAITS.codex.reseedRunOptions?.(track)).toEqual({
+      codexReseed: { events: track },
+    });
+    expect(HARNESS_TRAITS.codex.appendRunOptions?.(track)).toEqual({
+      codexAppendItems: { events: track },
+    });
+    expect(HARNESS_TRAITS.local.reseedRunOptions?.(track)).toEqual({
+      localReseed: { events: track },
+    });
+    expect(HARNESS_TRAITS.local.appendRunOptions).toBeNull();
+    expect(HARNESS_TRAITS.claude.reseedRunOptions).toBeNull();
+    expect(HARNESS_TRAITS.claude.appendRunOptions).toBeNull();
     expect(HARNESS_TRAITS.codex.sessionMovable).toBe(false);
     expect(HARNESS_TRAITS.claude.ownsSessionFile).toBe(true);
   });

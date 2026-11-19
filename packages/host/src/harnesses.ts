@@ -18,6 +18,10 @@ import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
 import { LOCAL_BACKEND_ID } from './localModels.js';
 import { GEMINI_BACKEND_ID } from './geminiAgent.js';
+import type { SdkRunOptions } from './sdkBackend.js';
+
+/** The track of Patch's record handed to an adapter that takes one. */
+type Track = NonNullable<SdkRunOptions['localReseed']>['events'];
 
 export interface HarnessTraits {
   /** The `backendId` this provider's credentials report under (`host.unauthenticated`). */
@@ -44,10 +48,16 @@ export interface HarnessTraits {
   readonly sessionMovable: boolean;
   /** Does the host build this provider's account report itself, rather than a bare connected flag? */
   readonly buildsAccountReport: boolean;
-  /** The run option that carries a reseed of Patch's history into a fresh session; null = none. */
-  readonly reseedOption: 'codexReseed' | 'localReseed' | null;
-  /** The run option that appends items to an existing session on a provider switch; null = none. */
-  readonly appendOption: 'codexAppendItems' | null;
+  /**
+   * The adapter's run options that carry a reseed of Patch's history into a
+   * fresh session; null when the provider takes none this way.
+   */
+  readonly reseedRunOptions: ((track: Track) => Partial<SdkRunOptions>) | null;
+  /**
+   * The adapter's run options that append items to an existing session on a
+   * provider switch; null when the provider takes none.
+   */
+  readonly appendRunOptions: ((track: Track) => Partial<SdkRunOptions>) | null;
   /** What a turn refused for want of a sign-in says. `reason` is the credential check's own. */
   readonly signedOutMessage: (hostId: string, reason: string) => string;
 }
@@ -66,8 +76,8 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: true,
     sessionMovable: true,
     buildsAccountReport: true,
-    reseedOption: null,
-    appendOption: null,
+    reseedRunOptions: null,
+    appendRunOptions: null,
     signedOutMessage: (hostId) =>
       `${hostId} isn't signed in to Claude, so this turn can't run. Sign in from Settings → Hosts.`,
   },
@@ -84,8 +94,8 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
-    reseedOption: 'codexReseed',
-    appendOption: 'codexAppendItems',
+    reseedRunOptions: (events) => ({ codexReseed: { events } }),
+    appendRunOptions: (events) => ({ codexAppendItems: { events } }),
     signedOutMessage: (_hostId, reason) => reason,
   },
   // A local endpoint has no account, no quota and no status model of its own.
@@ -103,8 +113,8 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
-    reseedOption: 'localReseed',
-    appendOption: null,
+    reseedRunOptions: (events) => ({ localReseed: { events } }),
+    appendRunOptions: null,
     signedOutMessage: (_hostId, reason) => reason,
   },
   // An ACP agent keeps its own session, account and quota; Patch sees none of them.
@@ -121,8 +131,8 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     hostCreditAggregate: false,
     sessionMovable: false,
     buildsAccountReport: false,
-    reseedOption: null,
-    appendOption: null,
+    reseedRunOptions: null,
+    appendRunOptions: null,
     signedOutMessage: (_hostId, reason) => reason,
   },
 };

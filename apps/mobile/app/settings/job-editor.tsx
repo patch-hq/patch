@@ -63,6 +63,7 @@ import {
   parseRecurrenceFields,
   type PermissionMode,
   type RecurrenceFields,
+  accountsKeyForModel,
 } from '@patch/wire';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 import { useGoBack } from '../../src/lib/goBack';
@@ -482,8 +483,8 @@ export default function JobEditor(): React.ReactElement {
   // The shared accounts the job's chat could start on, for its model's backend.
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
   const accountOptions = React.useMemo(() => {
-    const list =
-      (form.spawnModel.startsWith('openai/') ? sharedSecrets?.codex : sharedSecrets?.claude) ?? [];
+    const accountsKey = accountsKeyForModel(form.spawnModel);
+    const list = (accountsKey !== null ? sharedSecrets?.[accountsKey] : undefined) ?? [];
     const held = list.map((a) => ({ id: a.id, label: a.label }));
     const extra =
       form.spawnAccount && !held.some((a) => a.id === form.spawnAccount)

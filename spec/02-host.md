@@ -205,7 +205,14 @@ of the accounts it runs on (`10-auth.md`), and supplies the models it can run an
 the permission modes it accepts. It also declares its capabilities: resume, edit
 or rewind at a message, branch at a turn, switch off native tools, interrupt, and
 steer. Features follow those declarations (`principles.md`): a feature whose
-capability an adapter does not declare is absent for its chats. Adding or
+capability an adapter does not declare is absent for its chats. Surfaces do not
+offer it, and the host refuses a request for it with `capability_unsupported`
+(a `chat.error`, or a 409 from the CLI and agent tools) rather than doing a
+lesser version: an edit without `editAtMessage`, a side thread without
+`branchAtTurn`, Stop or send now without `interrupt`, a turn on the provider's
+saved session without `resume`. Without `steer` nothing is handed into a running
+turn at a tool boundary; a queued message waits for the turn to end and its chip
+says `end of turn`. No feature uses `rewind` yet. Adding or
 removing a provider is adding or removing its adapter; nothing outside the
 adapters branches on a provider by name. A chat's model selects its provider, a
 chat never changes provider (`04-chats-and-folders.md` § Provider switches), and
@@ -928,6 +935,14 @@ event up to it (`01-server.md` § Host outbox), and the host then drops those
 events. After a reconnect the host resends everything after the last
 acknowledgement, oldest first; the server drops a resend it already holds. There
 is no per-chat comparison and the server never asks a host for history.
+
+A turn's start and end go into the outbox the moment the chat's own log writes
+them, with each entry's `nativeRef`, so the end a restarted host writes for a
+turn its process left open (`interrupted`) reaches the server too. A server that
+does not keep them (no `recordComplete` in `auth.ok`) is sent neither; the
+entries still go to it. Chats the host held before the server's record kept
+everything are sent once, whole, by the record import (`01-server.md` § Record
+import); its progress is `<state dir>/record-import.json`.
 
 A turn runs with the link down: its events wait in the outbox, which survives a
 host restart. Live streaming (text deltas, tool progress) is not durable and does

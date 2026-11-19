@@ -843,13 +843,7 @@ function searchItemKey(item: SearchItem): string {
   return item.kind;
 }
 
-function SearchResults({
-  query,
-  onHitPress,
-}: {
-  query: string;
-  onHitPress: () => void;
-}): React.ReactElement {
+function SearchResults({ query }: { query: string }): React.ReactElement {
   const colors = useTheme();
   const search = useChatSearch(query);
   const chats = useChatStore((s) => s.chats);
@@ -892,7 +886,6 @@ function SearchResults({
                     row={row}
                     to={searchHitRoute(item.hit)}
                     matchLine={<SearchMatchLine hit={item.hit} />}
-                    onOpened={onHitPress}
                   />
                 </View>
               );
@@ -902,7 +895,6 @@ function SearchResults({
                 hit={item.hit}
                 hostName={hostName(item.hit.hostId, serverNames.get(item.hit.hostId) ?? null)}
                 testID={item.local ? 'chat-search-local-hit' : 'chat-search-hit'}
-                onPress={onHitPress}
               />
             );
           }
@@ -1100,7 +1092,7 @@ export default function ChatsScreen(): React.ReactElement {
       {batchMode ? (
         <BatchView />
       ) : serverQuery !== null ? (
-        <SearchResults query={serverQuery} onHitPress={closeSearch} />
+        <SearchResults query={serverQuery} />
       ) : (
         <FlatList
           ref={listRef}

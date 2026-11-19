@@ -13,7 +13,11 @@ import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Square, ArrowRight, ExternalLink } from 'lucide-react';
-import { threadRowState as rowState, threadRows as sharedThreadRows } from '@patch/wire';
+import {
+  modelHasCapability,
+  threadRowState as rowState,
+  threadRows as sharedThreadRows,
+} from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -223,7 +227,7 @@ export function ThreadsStrip(): JSX.Element | null {
                     <ArrowRight size={14} aria-hidden /> Carry on
                   </button>
                 ) : null}
-                {state === 'working' ? (
+                {state === 'working' && modelHasCapability(row.model, 'interrupt') ? (
                   <button
                     type="button"
                     className="thread-btn"

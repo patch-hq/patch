@@ -46,7 +46,9 @@ const REFUSAL =
 
 function seedConfig(voiceConfig: VoiceConfig): void {
   useSettingsStore.setState({
-    data: { preferences: { addressWord: 'patch', voiceConfig } } as unknown as SettingsResponse,
+    data: {
+      preferences: { addressWord: 'patch', voiceConfig, experimentalFeatures: true },
+    } as unknown as SettingsResponse,
     error: null,
   });
 }

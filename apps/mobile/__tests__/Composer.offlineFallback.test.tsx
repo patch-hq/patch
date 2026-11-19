@@ -17,6 +17,7 @@
 // null — which is the only way to reach the fallback text.
 
 import React from 'react';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { findAllHost, byType, hasText, renderRN } from './testUtils/render';
 import { usePresenceStore } from '../src/stores/presenceStore';
@@ -36,6 +37,7 @@ vi.mock('../src/lib/connection', () => ({
 import { Composer } from '../src/components/Composer';
 
 beforeEach(() => {
+  seedSettings();
   usePresenceStore.setState({
     connection: 'offline',
     daemon: 'unknown',

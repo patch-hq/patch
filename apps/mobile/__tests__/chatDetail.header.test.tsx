@@ -66,6 +66,7 @@ let ChatDetailScreen: React.ComponentType;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  (await import('./testUtils/settingsFixtures')).seedSettings();
   __resetRouterMock();
   useChatStore.getState()._reset();
   usePresenceStore.getState().setConnection('connected');

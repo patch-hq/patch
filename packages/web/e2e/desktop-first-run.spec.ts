@@ -143,11 +143,42 @@ test.describe('first run', () => {
     await open(page);
     await page.getByTestId('choose-existing').click();
     await expect(page.getByRole('heading', { name: 'Connect to an existing Patch' })).toBeVisible();
+    await expect(page.getByTestId('run-here')).toBeChecked();
+    await page.getByTestId('run-here').uncheck();
     await page.getByTestId('pairing-code').fill('patch-pair://?nonce=abc&relay=wss%3A%2F%2Fr');
     await page.getByTestId('connect').click();
     expect(await chosen(page)).toEqual([
       { kind: 'remote', input: 'patch-pair://?nonce=abc&relay=wss%3A%2F%2Fr' },
     ]);
+  });
+
+  test('"Connect to an existing Patch" offers to run agents on this Mac, on by default', async ({
+    page,
+  }) => {
+    await open(page);
+    await page.getByTestId('choose-existing').click();
+    await expect(page.getByTestId('run-here')).toBeChecked();
+    await expect(page.getByTestId('host-name')).toHaveValue('Test Mac');
+    await page.getByTestId('host-name').fill('Work Mac');
+    await page.getByTestId('pairing-code').fill('patch-pair://?nonce=abc&relay=wss%3A%2F%2Fr');
+    await page.getByTestId('connect').click();
+    expect(await chosen(page)).toEqual([
+      {
+        kind: 'remote',
+        input: 'patch-pair://?nonce=abc&relay=wss%3A%2F%2Fr',
+        host: { name: 'Work Mac' },
+      },
+    ]);
+    await page.evaluate(() =>
+      (window as never as { __progress(m: string): void }).__progress('pair'),
+    );
+    await expect(page.getByTestId('steps')).toContainText('Setting up this computer');
+  });
+
+  test('"My own server" does not offer to run agents here', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('choose-remote').click();
+    await expect(page.getByTestId('run-here')).toBeHidden();
   });
 
   test('an empty code is turned back on the page without bothering the shell', async ({ page }) => {

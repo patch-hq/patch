@@ -170,10 +170,9 @@ test.describe('sidebar chat search', () => {
 
     const target = page.locator('.chat-stream [data-testid="msg"][data-seq="5"]');
     await expect(target).toHaveClass(/msg-jump-target/);
-    // Pressing a result clears the search — the field and the results band
-    // are both gone, so the sidebar is back to its ordinary chat list.
-    await expect(page.getByTestId('chat-search')).toHaveValue('');
-    await expect(page.getByTestId('chat-search-results')).toHaveCount(0);
+    // Pressing a result leaves the search as it was.
+    await expect(page.getByTestId('chat-search')).toHaveValue('lorem');
+    await expect(page.getByTestId('chat-search-results')).toHaveCount(1);
 
     // Positioned in the middle of the stream, not left at the latest message.
     // Polled: the jump lands over a few frames after the ring appears, and a
