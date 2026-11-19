@@ -146,7 +146,18 @@ export function serviceControl(opts: {
       await must(['enable', target]);
       const isLoaded = await loaded();
       if (isLoaded && !changed && !restart) return;
-      if (isLoaded) await lc(['bootout', target]);
+      if (isLoaded) {
+        await lc(['bootout', target]);
+        // bootout returns before launchd has finished removing the agent, and a
+        // bootstrap in that window fails with "Input/output error". Wait for it
+        // to be gone; if it never goes, say so.
+        const deadline = Date.now() + 15_000;
+        while (await loaded()) {
+          if (Date.now() > deadline)
+            throw new Error(`launchctl bootout ${target}: the agent was still loaded after 15s`);
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
       await must(['bootstrap', domain, path]);
     },
     async turnOff() {
