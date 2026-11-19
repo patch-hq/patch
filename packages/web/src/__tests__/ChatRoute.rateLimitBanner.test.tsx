@@ -17,7 +17,8 @@ import { DEFAULT_SHARED_SETTINGS, type WireEvent } from '@patch/wire';
 import { fireEvent, waitFor } from '@testing-library/react';
 import { api } from '../api/rest.js';
 
-vi.mock('../api/rest.js', () => ({
+vi.mock('../api/rest.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/rest.js')>()),
   api: {
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),
