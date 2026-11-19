@@ -186,7 +186,6 @@ export class AcpBackend implements SdkBackend {
 
     const durableReq = opts.durableTurn;
     let recovered: RecoveredAcpTurn | undefined;
-    const agentTag = { harness: 'acp', label: agent.label };
     let start: () => void;
     if (durableReq?.attach && DurableCodexProcess.attachable(durableReq)) {
       const dir = turnDirFor(durableReq.config, durableReq.chatId);
