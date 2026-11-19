@@ -127,7 +127,6 @@ describe('Settings tab — the list', () => {
       'Prompts',
       'Dictation',
       'Meetings',
-      'Voice',
       'Hooks',
       'Computer use',
       'Hosts',
@@ -153,7 +152,6 @@ describe('Settings tab — the list', () => {
       'Prompts',
       'Dictation',
       'Meetings',
-      'Voice',
       'Hooks',
       'Computer use',
     ]);
