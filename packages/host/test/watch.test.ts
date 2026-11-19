@@ -194,6 +194,44 @@ describe('WatchScheduler resident poll — completion delivered from OUTSIDE the
   });
 });
 
+describe('WatchScheduler — stop during a poll tick', () => {
+  it('a watch stopped while the poller is mid-tick stays stopped and raises no restart notice', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-stop-race',
+      command: 'echo ALERT; sleep 30',
+      description: 'stopped mid-tick',
+      wakeOnMatch: 'ALERT',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose(); // host "restarts": no live handle for B
+    let schedulerB: ReturnType<typeof mkScheduler> | undefined;
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-stop-race'],
+      // The wakeOnMatch delivery yields mid-tick; stop the watch inside it.
+      deliver: async (chatId: string, message: string) => {
+        depsB.delivered.push({ chatId, message });
+        if (message.includes('ALERT')) schedulerB!.stop('c-stop-race', rec.taskId);
+        await Promise.resolve();
+      },
+    });
+    schedulerB = mkScheduler(depsB);
+    try {
+      await flushUntil(() => depsB.delivered.length > 0);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(schedulerB.list('c-stop-race')[0]?.status).toBe('stopped');
+      expect(schedulerB.list('c-stop-race')[0]?.killed).toBeUndefined();
+      expect(depsB.delivered.some((d) => /killed|host restarted/.test(d.message))).toBe(false);
+    } finally {
+      schedulerB.dispose();
+    }
+  });
+});
+
 describe('WatchScheduler — survives a host restart', () => {
   it('a fresh scheduler re-attaches to a still-alive pid from disk with no live handle at all', async () => {
     const depsA = makeDeps();
