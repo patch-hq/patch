@@ -121,6 +121,8 @@ export interface ParakeetLiveOptions {
   logger: Logger;
   /** PARAKEET_STREAMING_MODEL_DIR: the extracted streaming FastConformer transducer. */
   modelDir: string | undefined;
+  /** Where sherpa-onnx-node's entry file is (the voice component's copy on an installed host; throws if missing). */
+  sherpaEntry?: () => string | undefined;
 }
 
 export class ParakeetLiveRecognizer implements LiveRecognizer {
@@ -143,7 +145,8 @@ export class ParakeetLiveRecognizer implements LiveRecognizer {
     if (missing.length > 0) {
       throw new Error(`streaming model dir ${dir} is missing: ${missing.join(', ')}`);
     }
-    const sherpa = createRequire(import.meta.url).resolve('sherpa-onnx-node');
+    const sherpa =
+      this.opts.sherpaEntry?.() ?? createRequire(import.meta.url).resolve('sherpa-onnx-node');
     const worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: { sherpa, dir, silence: ENDPOINT_SILENCE_S, maxPhrase: MAX_PHRASE_S },

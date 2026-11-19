@@ -14,9 +14,7 @@
 //
 // NO FALLBACK: a model that will not load is an error the surface shows.
 
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { bundledNativeDir } from '../installPaths.js';
+import { ortModuleSpecifier } from '../voiceComponent.js';
 
 export const SMART_TURN_SAMPLE_RATE = 16000;
 const N_SAMPLES = 8 * SMART_TURN_SAMPLE_RATE;
@@ -170,14 +168,14 @@ interface Ort {
 
 /**
  * Load the Smart Turn session once. Same onnxruntime the Silero VAD uses: the
- * artifact's own `native/` copy when installed, the workspace dependency from a
+ * voice component's `native/` copy when installed, the workspace dependency from a
  * source checkout.
  */
-export async function createSmartTurnDetector(modelPath: string): Promise<TurnDetector> {
-  const native = bundledNativeDir();
-  const ortModuleName: string = native
-    ? pathToFileURL(join(native, 'onnxruntime-node', 'dist', 'index.js')).href
-    : 'onnxruntime-node';
+export async function createSmartTurnDetector(
+  modelPath: string,
+  nativeDir?: string,
+): Promise<TurnDetector> {
+  const ortModuleName: string = ortModuleSpecifier(nativeDir);
   let ort: Ort;
   try {
     ort = (await import(/* @vite-ignore */ ortModuleName)) as Ort;

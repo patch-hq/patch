@@ -692,6 +692,13 @@ export const AudioErrorCode = z.enum([
    */
   'voice_key_missing',
   /**
+   * The host has not installed its voice component (onnxruntime, sherpa-onnx
+   * and the VAD / turn models), which the local voice pipeline cannot run
+   * without. `message` names the component and where to install it. Never
+   * answered by running without voice activity detection.
+   */
+  'voice_component_missing',
+  /**
    * Dictation on the `deepgram` engine: the streaming connection could not
    * open, or Deepgram failed mid-dictation. The live words ARE the transcript
    * on this engine, so the dictation has failed and the surface says so. Never

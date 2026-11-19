@@ -240,6 +240,8 @@ export interface CreateWhisperOptions {
   uvPath?: string;
   /** PARAKEET_MODEL_DIR (backend === 'parakeet'). */
   parakeetModelDir?: string;
+  /** Where sherpa-onnx-node lives (the voice component's copy on an installed host). */
+  sherpaEntry?: () => string | undefined;
   /** Test hook: substitute fetch (used by groq-backend tests). */
   fetchImpl?: typeof fetch;
   /** Test hook: injectable clock for the request-quota window. */
@@ -262,7 +264,11 @@ export function createWhisper(opts: CreateWhisperOptions): WhisperBackend {
     case 'local':
       return new LocalWhisperBackend(opts);
     case 'parakeet':
-      return new ParakeetWhisperBackend({ logger: opts.logger, modelDir: opts.parakeetModelDir });
+      return new ParakeetWhisperBackend({
+        logger: opts.logger,
+        modelDir: opts.parakeetModelDir,
+        ...(opts.sherpaEntry ? { sherpaEntry: opts.sherpaEntry } : {}),
+      });
     case 'mock':
       return new MockWhisperBackend();
   }

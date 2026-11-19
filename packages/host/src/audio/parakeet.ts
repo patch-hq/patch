@@ -18,6 +18,7 @@ import type { Logger } from 'pino';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ClipOptions, TranscribeOptions, WhisperBackend } from './whisper.js';
 import { pcmFromWav } from './smartTurn.js';
 
@@ -84,6 +85,11 @@ export interface ParakeetOptions {
   /** PARAKEET_MODEL_DIR: the extracted `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`. */
   modelDir: string | undefined;
   threads?: number;
+  /**
+   * Where sherpa-onnx-node's entry file is: the voice component's copy on an
+   * installed host (throws if it is not installed). Absent ⇒ the workspace dependency.
+   */
+  sherpaEntry?: () => string | undefined;
   /** Test hook: substitute the sherpa module. */
   loadSherpa?: () => Promise<SherpaModule>;
   /** Test hook: substitute ffmpeg decoding of a compressed clip to 16 kHz PCM. */
@@ -126,9 +132,12 @@ export class ParakeetWhisperBackend implements WhisperBackend {
     if (missing.length > 0) {
       throw new Error(`Parakeet model dir ${dir} is missing: ${missing.join(', ')}`);
     }
+    const entry = this.opts.sherpaEntry?.();
     const sherpa = await (this.opts.loadSherpa
       ? this.opts.loadSherpa()
-      : (import('sherpa-onnx-node') as unknown as Promise<SherpaModule>));
+      : (import(
+          /* @vite-ignore */ entry ? pathToFileURL(entry).href : 'sherpa-onnx-node'
+        ) as unknown as Promise<SherpaModule>));
     const started = Date.now();
     const recognizer = new sherpa.OfflineRecognizer({
       featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },

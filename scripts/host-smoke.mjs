@@ -204,7 +204,6 @@ export async function main(argv) {
         PATCH_INTERNAL_TOKEN: 'smoke',
         SDK_BACKEND: 'real',
         VAD_BACKEND: 'silero',
-        VAD_MODEL_PATH: join(installDir, 'silero_vad.onnx'),
         PATCH_DAEMON_HEALTHZ_PORT: String(healthPort),
         PATCH_DAEMON_AUDIO_PORT: String(audioPort),
       },

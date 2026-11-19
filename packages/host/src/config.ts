@@ -8,33 +8,6 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
- * `silero_vad.onnx` as SHIPPED IN THE ARTIFACT, beside the bundled host
- * (spec/11 § What ships). Unlike the Kokoro weights, VAD is small enough to
- * ride along, so a freshly installed host already has the model on disk —
- * it just had no way to say where. Resolving it here is not a fallback: it is
- * the known location of a file the build put there. Returns undefined from a
- * source checkout, where the rig names VAD_MODEL_PATH explicitly.
- */
-/** Dictation mode's Smart Turn model, beside the bundled host like the VAD's. */
-function bundledTurnModelPath(): string | undefined {
-  try {
-    const candidate = join(dirname(fileURLToPath(import.meta.url)), 'smart_turn.onnx');
-    return existsSync(candidate) ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function bundledVadModelPath(): string | undefined {
-  try {
-    const candidate = join(dirname(fileURLToPath(import.meta.url)), 'silero_vad.onnx');
-    return existsSync(candidate) ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * What a new host is called until someone renames it (spec/02 § Host
  * identity). A Mac's network hostname is a mangled, numbered copy of its name
  * (`Toms-MacBook-Pro-7.local`), so a Mac reports the name its owner gave it in
@@ -389,14 +362,16 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       kokoroModelPathFromEnv:
         env['KOKORO_MODEL_PATH'] !== undefined && env['KOKORO_MODEL_PATH'] !== '',
       vadBackend: vadBackendRaw,
+      // Env only. An installed host's models come from the voice component
+      // (voiceComponent.ts), resolved when voice is used, not at boot.
       vadModelPath:
         env['VAD_MODEL_PATH'] !== undefined && env['VAD_MODEL_PATH'] !== ''
           ? env['VAD_MODEL_PATH']
-          : bundledVadModelPath(),
+          : undefined,
       turnModelPath:
         env['TURN_MODEL_PATH'] !== undefined && env['TURN_MODEL_PATH'] !== ''
           ? env['TURN_MODEL_PATH']
-          : bundledTurnModelPath(),
+          : undefined,
       maxConcurrentSessions,
       geminiApiKey: env['GEMINI_API_KEY'],
       geminiLiveModel: env['GEMINI_LIVE_MODEL'],

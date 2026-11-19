@@ -41,6 +41,7 @@ import {
   type SessionInit,
   type SessionState,
 } from './session.js';
+import { VoiceComponentMissingError } from '../voiceComponent.js';
 import { MockVad, type Vad } from './vad.js';
 import { watchPeerLiveness } from './peer-liveness.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
@@ -774,6 +775,21 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           return;
         }
 
+        // The VAD comes from the voice component, which an installed host may
+        // not have: built up front so a missing one refuses THIS session by
+        // name instead of throwing from inside a session constructor.
+        const buildVad = (): Vad | null => {
+          try {
+            return (opts.makeVad ?? ((): Vad => new MockVad()))();
+          } catch (err) {
+            if (err instanceof VoiceComponentMissingError) {
+              rejectConn(ws, 'voice_component_missing', err.message);
+              return null;
+            }
+            throw err;
+          }
+        };
+
         if (voiceSurface !== 'dictation' && cell.backend === 'gemini') {
           const geminiKey = readKey(opts.geminiApiKey);
           if (geminiKey === undefined) {
@@ -784,6 +800,8 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             return;
           }
           if (!opts.makeTimeline) throw new Error('audio server: hosted voice needs makeTimeline');
+          const geminiVad = buildVad();
+          if (geminiVad === null) return;
           session = new GeminiLiveSession(sessionInit, {
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
@@ -792,7 +810,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             submitUserTurn: opts.submitUserTurn,
             apiKey: geminiKey,
             gate: {
-              makeVad: opts.makeVad ?? ((): Vad => new MockVad()),
+              makeVad: (): Vad => geminiVad,
               transcriber: opts.whisper,
             },
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
@@ -916,7 +934,8 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           // The self-hosted pipeline — and a dictation on Whisper, or a phone
           // on its own recogniser whose dictation-mode preview still needs one.
           const whisper: WhisperBackend = opts.whisper;
-          const vad = (opts.makeVad ?? ((): Vad => new MockVad()))();
+          const vad = buildVad();
+          if (vad === null) return;
           const aec = (
             opts.makeAec ??
             ((hasAec: boolean): AecProcessor => (hasAec ? new PassThroughAec() : new NlmsAec()))

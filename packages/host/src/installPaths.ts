@@ -6,16 +6,15 @@
 //     node               pinned Node runtime
 //     host.mjs         the bundled host        <- import.meta.url, once bundled
 //     bin/               the MCP stdio server
-//     native/            platform-native addons (onnxruntime for VAD)
-//     silero_vad.onnx    the VAD model
 //     skill/patch-cli/   the CLI skill written into the user's skills dir
 //     install            the installer
 //     build-info.json    version, source commit, build instant
 //
 // esbuild inlines this module into `host.mjs`, so `import.meta.url` here is
 // the artifact's own program file and `programDir` is the install directory —
-// which is how spec/18 has the host read `silero_vad.onnx` "out of the
-// host's own install directory".
+// which is how the host finds its own build-info and sidecar source.
+// (onnxruntime, sherpa-onnx and the VAD / turn models are NOT here: they are
+// the optional voice component, voiceComponent.ts.)
 //
 // Running from source (tsx, dev) this module sits in `packages/host/src`,
 // where none of those siblings exist. That is not a fallback: an artifact and a
@@ -48,23 +47,6 @@ export function bundledBuildInfo(dir: string = programDir): HostBuildInfo | unde
     }
   }
   return parsed as HostBuildInfo;
-}
-
-/**
- * The artifact's `native/` directory, which holds the platform's prebuilt
- * addons. Bare `import 'onnxruntime-node'` cannot find it (there is no
- * node_modules in an artifact), so the VAD loader imports the package's entry
- * file from here by path.
- */
-export function bundledNativeDir(dir: string = programDir): string | undefined {
-  const native = join(dir, 'native');
-  return existsSync(join(native, 'onnxruntime-node', 'package.json')) ? native : undefined;
-}
-
-/** The artifact's `silero_vad.onnx` (~2 MB), present in every install. */
-export function bundledVadModelPath(dir: string = programDir): string | undefined {
-  const model = join(dir, 'silero_vad.onnx');
-  return existsSync(model) ? model : undefined;
 }
 
 /**
