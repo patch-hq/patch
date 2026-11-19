@@ -549,6 +549,31 @@ export function pruneStaged(patchHome: string, running: string): void {
   }
 }
 
+/** How old an update work folder must be before the startup sweep removes it. */
+export const UPDATE_WORK_MAX_AGE_MS = 15 * 60_000;
+
+/**
+ * Remove `patch-update-*` work folders left in the temp dir. The installer
+ * restarts the service and so kills the host before `applyUpdate`'s own cleanup
+ * runs; every update otherwise leaves ~200 MB behind. Recent folders are kept —
+ * an installer may still be running from one. Returns the names removed.
+ */
+export function sweepUpdateWorkDirs(
+  root: string = tmpdir(),
+  now: number = Date.now(),
+  maxAgeMs: number = UPDATE_WORK_MAX_AGE_MS,
+): string[] {
+  const removed: string[] = [];
+  for (const name of readdirSync(root)) {
+    if (!name.startsWith('patch-update-')) continue;
+    const dir = join(root, name);
+    if (now - statSync(dir).mtimeMs < maxAgeMs) continue;
+    rmSync(dir, { recursive: true, force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
 /**
  * Download and verify `version` and keep it for the server's restart into it
  * (spec/11 § Updates in lockstep). Installs nothing. Refuses when the server's
