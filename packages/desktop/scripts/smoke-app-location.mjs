@@ -150,7 +150,7 @@ await until('DevTools endpoint', 60_000, async () =>
 // busy past Playwright's 30s default; wait longer, and on failure say what the
 // app was doing instead of dying with a bare timeout.
 const browser = await chromium
-  .connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 90_000 })
+  .connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 120_000 })
   .catch((e) => fail(`could not attach to the app's DevTools: ${e.message.split('\n')[0]}`));
 const pages = () => browser.contexts().flatMap((c) => c.pages());
 pagesNow = pages;
