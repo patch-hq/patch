@@ -100,6 +100,61 @@ let _connectTimer: ReturnType<typeof setTimeout> | null = null;
  */
 export const CALL_CONNECT_TIMEOUT_MS = 15_000;
 
+/**
+ * A call that drops after it was live (server restart, network change) is
+ * redialled by itself on this backoff. After the last attempt fails the
+ * red "Call problem" banner and Retry appear, naming the last failure.
+ */
+export const CALL_RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+
+let _reconnect: { attempt: number; chatId: string; mode: AudioSessionMode } | null = null;
+let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearReconnect(): void {
+  if (_reconnectTimer !== null) clearTimeout(_reconnectTimer);
+  _reconnectTimer = null;
+  _reconnect = null;
+}
+
+/** The line dropped (or a redial failed): redial after a delay, or give up loudly. */
+function reconnectOrGiveUp(chatId: string, mode: AudioSessionMode, reason: string): void {
+  const attempt = _reconnect?.attempt ?? 0;
+  const delay = CALL_RECONNECT_DELAYS_MS[attempt];
+  const st = useVoiceStore.getState();
+  if (delay === undefined) {
+    console.log(`[patch-voice] call reconnect gave up after ${attempt} attempts: ${reason}`);
+    clearReconnect();
+    st.setError(reason);
+    useUiStore.getState().pushError(`voice call: ${reason}`);
+    return;
+  }
+  console.log(`[patch-voice] call dropped (${reason}) → redial ${attempt + 1} in ${delay}ms`);
+  _reconnect = { attempt: attempt + 1, chatId, mode };
+  // Phase first: clearing the error while the phase still reads live would
+  // look to the subscription above like a redial that had come up.
+  st.setCallPhase('connecting');
+  st.setError(null);
+  const gen = _callGen;
+  if (_reconnectTimer !== null) clearTimeout(_reconnectTimer);
+  _reconnectTimer = setTimeout(() => {
+    _reconnectTimer = null;
+    if (gen !== _callGen) return; // the user ended the call while we waited
+    startVoiceCall(chatId, mode, { reconnect: true });
+  }, delay);
+}
+
+// A redial that fails (token mint, connect timeout, immediate close) sets
+// callError; while redialling that means try again. One that gets the host's
+// first state is live, so the attempt count resets.
+useVoiceStore.subscribe((s) => {
+  if (_reconnect === null || s.activeSession === null) return;
+  if (s.callError !== null) {
+    reconnectOrGiveUp(_reconnect.chatId, _reconnect.mode, s.callError);
+  } else if (s.callPhase !== 'connecting') {
+    clearReconnect();
+  }
+});
+
 function clearConnectTimer(): void {
   if (_connectTimer !== null) clearTimeout(_connectTimer);
   _connectTimer = null;
@@ -127,8 +182,9 @@ async function releaseAudio(): Promise<void> {
 export function startVoiceCall(
   chatId: string,
   mode: AudioSessionMode = 'call',
-  opts: { takeOver?: boolean } = {},
+  opts: { takeOver?: boolean; reconnect?: boolean } = {},
 ): void {
+  if (opts.reconnect !== true) clearReconnect();
   // 1) Mount the call bar synchronously — CONNECTING state, empty session.
   const gen = ++_callGen;
   useVoiceStore.getState().setActive({
@@ -487,7 +543,13 @@ export function startVoiceCall(
         }
         const st = useVoiceStore.getState();
         if (st.activeSession && st.callError === null) {
-          st.setError('Call dropped — the audio connection closed');
+          const reason = 'Call dropped — the audio connection closed';
+          // Redial if the call had been live, or if this was itself a redial.
+          if (_reconnect !== null || st.callPhase !== 'connecting') {
+            reconnectOrGiveUp(chatId, st.callMode, reason);
+          } else {
+            st.setError(reason);
+          }
         }
       };
     } catch (e) {
@@ -552,6 +614,7 @@ export async function endVoiceCall(): Promise<void> {
   // Invalidate any in-flight setup so it tears itself down.
   _callGen++;
   clearConnectTimer();
+  clearReconnect();
   const sessionId = useVoiceStore.getState().activeSession?.sessionId;
   try {
     _ws?.send(JSON.stringify({ type: 'audio.session_end', ...(sessionId ? { sessionId } : {}) }));
