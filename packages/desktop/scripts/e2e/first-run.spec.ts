@@ -454,7 +454,9 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
 
   // The Manager says what it is, shows no empty Threads panel, and names the
   // model it starts on rather than "Choose a model…".
-  await welcome.getByTestId('chat-row-thread_manager').click();
+  // Its sidebar row only shows with Settings → Experimental features on, so
+  // open it by address.
+  await welcome.goto(`${new URL(welcome.url()).origin}/app/chats/thread_manager`);
   await expect(welcome.getByTestId('empty-chat-line')).toHaveText(
     'Ask about any of your chats, or have it message them for you.',
   );
