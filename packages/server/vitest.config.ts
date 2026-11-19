@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    globalSetup: ['../../scripts/vitest/tmp-global-setup.ts'],
     include: ['test/**/*.test.ts'],
     testTimeout: 10_000,
     // I/O-integration suite: some tests wait on real OS filesystem-watch
