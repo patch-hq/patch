@@ -18,10 +18,6 @@ import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
 import { LOCAL_BACKEND_ID } from './localModels.js';
 import { ACP_BACKEND_ID } from './acpRegistry.js';
-import type { SdkRunOptions } from './sdkBackend.js';
-
-/** The track of Patch's record handed to an adapter that takes one. */
-type Track = NonNullable<SdkRunOptions['localReseed']>['events'];
 
 export interface HarnessTraits {
   /** The `backendId` this provider's credentials report under (`host.unauthenticated`). */

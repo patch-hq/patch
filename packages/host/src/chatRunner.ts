@@ -10860,16 +10860,6 @@ export class Daemon {
           (env) => env.type === 'tool_result',
         )) {
           if (env.type === 'result' || env.type === 'error') sawResult = true;
-          // What Claude itself wrote to the file on resume (a `No response
-          // requested.`) never crosses the SDK stream: read it back once,
-          // as soon as the process is talking (spec/02 § Per-turn process).
-          if (!transcriptScanned && claudeTranscript) {
-            transcriptScanned = true;
-            this.noteMirroredEntries(
-              chatId,
-              entriesSince(claudeTranscript.path, claudeTranscript.size),
-            );
-          }
           this.handleEnvelope(chatId, env, userMessageSeq);
           // A subagent's result is the end of its turn. Waiting on the stream
           // to close as well would hang the settle (and so the parent's reply)
