@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -81,6 +82,17 @@ test('laying out a release swaps `current` and keeps only the newest three', () 
   assert.equal(layOutRelease(home, join(root, 'rel-d4'), 'r-d4'), false);
   assert.equal(existsSync(join(home, 'versions/r-a1')), false);
   assert.equal(existsSync(join(home, 'versions/r-b2')), true);
+});
+
+test('layOutRelease keeps relative symlinks relative so the copy survives the app moving', () => {
+  const root = scratch();
+  const rel = join(root, 'rel');
+  mkdirSync(join(rel, 'store'), { recursive: true });
+  writeFileSync(join(rel, 'store', 'dep.txt'), 'x');
+  symlinkSync('store', join(rel, 'node_modules'));
+  const home = join(root, 'home');
+  layOutRelease(home, rel, 'r1');
+  assert.equal(readlinkSync(join(home, 'versions/r1/node_modules')), 'store');
 });
 
 /** A launchctl that records calls and answers as launchd would about one job. */

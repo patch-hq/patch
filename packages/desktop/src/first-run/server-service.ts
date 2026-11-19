@@ -97,7 +97,7 @@ export function layOutRelease(home: string, releaseDir: string, release: string)
   for (const d of ['data', 'downloads', 'logs', 'versions'])
     mkdirSync(join(home, d), { recursive: true });
   const target = join(home, 'versions', release);
-  if (!existsSync(target)) cpSync(releaseDir, target, { recursive: true });
+  if (!existsSync(target)) cpSync(releaseDir, target, { recursive: true, verbatimSymlinks: true });
   const current = join(home, 'current');
   const link = `versions/${release}`;
   if (existsSync(current) && realpathSync(current) === realpathSync(target)) return false;
