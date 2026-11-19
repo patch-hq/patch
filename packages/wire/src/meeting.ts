@@ -323,7 +323,7 @@ export type MeetingAction = z.infer<typeof MeetingAction>;
  * before sending it to be transcribed; `analyseSeconds` is how often the model
  * folds new transcript into the notes. Shorter is fresher and costs more.
  * `engine` is who transcribes this meeting; absent means the account's default
- * (Settings → Voice).
+ * (Settings → Dictation).
  */
 export const MeetingSettings = z
   .object({

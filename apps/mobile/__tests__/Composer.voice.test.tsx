@@ -460,16 +460,16 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     expect(findHost(r.root, byTestId('mic-menu-keep-dictating'))).toBeTruthy();
   });
 
-  it('long-press also offers Voice settings, which opens the Voice page', async () => {
+  it('long-press also offers Dictation settings, which opens the Dictation page', async () => {
     const { factory } = makeModeFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
     await actAsync(() => {
       mic(r)['onLongPress']!();
     });
     await actAsync(() => {
-      findHost(r.root, byTestId('mic-menu-voice-settings')).props['onPress']();
+      findHost(r.root, byTestId('mic-menu-dictation-settings')).props['onPress']();
     });
-    expect(routerMock.push).toHaveBeenCalledWith('/settings/voice');
+    expect(routerMock.push).toHaveBeenCalledWith('/settings/dictation');
     expect(factory).not.toHaveBeenCalled();
   });
 

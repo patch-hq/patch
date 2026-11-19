@@ -19,7 +19,7 @@
 //   ⌘↵   send, same as ↵, in the composer (never interrupts a running turn)
 //   ⌘↵   commit the field being typed in, everywhere else (lib/submitChord.ts)
 //   ⌘⇧D  dictate (hold to talk; a tap opens a sustained session) — the
-//        chord is set per host in Settings → Voice (lib/dictateChord.ts)
+//        chord is set per host in Settings → Dictation (lib/dictateChord.ts)
 //   ⌃Space  global voice to Manager (window-level handler)
 //
 // Component-local handlers (not registered here) live next to their

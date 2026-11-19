@@ -1,4 +1,4 @@
-// Settings → Manager and Settings → Voice (design/settings-redesign).
+// Settings → Manager, Settings → Dictation and Settings → Voice (design/settings-redesign).
 //
 // Manager — the Manager's own switches (Enabled, Quiet hours, Address word),
 // then the model the Manager and Speakers threads run on and their daily
@@ -7,9 +7,12 @@
 // failed write is said out loud and the control keeps showing what the server
 // holds.
 //
-// Voice — the engine matrix (account-wide), how the host picked in the switcher
-// speaks (its Kokoro voice and how often it says the chat's name, per host
-// over `host.settings`), and voice devices.
+// Dictation — where dictated words come from, when a dictation sends, and how
+// meetings are transcribed.
+//
+// Voice — the engine matrix for voice conversations (account-wide), how the
+// host picked in the switcher speaks (its Kokoro voice and how often it says
+// the chat's name, per host over `host.settings`), and voice devices.
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
@@ -259,19 +262,13 @@ export function voiceCellStatus(
   return null;
 }
 
-export function VoicePage(): React.ReactElement {
+export function DictationPage(): React.ReactElement {
   return (
-    <SettingsPage title="Voice" testID="settings-page-voice">
-      <SettingsSection title="Dictation" testID="settings-voice-dictation-engines">
+    <SettingsPage title="Dictation" testID="settings-page-dictation">
+      <SettingsSection title="Engine" testID="settings-voice-dictation-engines">
         <DictationEngines />
       </SettingsSection>
-      <SettingsSection title="Meetings" testID="settings-voice-meeting">
-        <MeetingEngineRow />
-      </SettingsSection>
-      <SettingsSection title="Engine" testID="settings-voice-config">
-        <VoiceEngine />
-      </SettingsSection>
-      <SettingsSection title="Dictation mode" testID="settings-voice-dictation">
+      <SettingsSection title="When to send" testID="settings-voice-dictation">
         <WithSettings testID="voice-dictation">
           {(data) => (
             <>
@@ -306,6 +303,19 @@ export function VoicePage(): React.ReactElement {
             </>
           )}
         </WithSettings>
+      </SettingsSection>
+      <SettingsSection title="Meetings" testID="settings-voice-meeting">
+        <MeetingEngineRow />
+      </SettingsSection>
+    </SettingsPage>
+  );
+}
+
+export function VoicePage(): React.ReactElement {
+  return (
+    <SettingsPage title="Voice" testID="settings-page-voice">
+      <SettingsSection title="Conversations" testID="settings-voice-config">
+        <VoiceEngine />
       </SettingsSection>
       <SettingsSection title="Speaking" testID="settings-voice-speaking">
         <WithSettings testID="voice-speaking">

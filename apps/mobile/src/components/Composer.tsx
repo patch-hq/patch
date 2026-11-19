@@ -2655,12 +2655,16 @@ export function Composer({
         visible={micMenuOpen}
         items={[
           { id: 'keep-dictating', label: 'Keep dictating', testID: 'mic-menu-keep-dictating' },
-          { id: 'voice-settings', label: 'Voice settings', testID: 'mic-menu-voice-settings' },
+          {
+            id: 'dictation-settings',
+            label: 'Dictation settings',
+            testID: 'mic-menu-dictation-settings',
+          },
         ]}
         onSelect={(id) => {
           setMicMenuOpen(false);
           if (id === 'keep-dictating') startDictMode();
-          else if (id === 'voice-settings') router.push('/settings/voice' as Href);
+          else if (id === 'dictation-settings') router.push('/settings/dictation' as Href);
         }}
         onDismiss={() => setMicMenuOpen(false)}
         placement="bottom"

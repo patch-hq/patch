@@ -44,7 +44,7 @@ test.describe('Settings — Providers', () => {
         }
       },
     });
-    await page.goto(settingsUrl('voice'));
+    await page.goto(settingsUrl('dictation'));
     await expect(page.getByTestId('dictation-phone-keys')).toContainText('no Deepgram key is set');
     await page.getByTestId('settings-nav-providers').click();
 
@@ -59,7 +59,7 @@ test.describe('Settings — Providers', () => {
     ]);
     await expect(page.getByTestId('provider-key-deepgram-status')).toHaveText('Set · ends LAST');
 
-    // The host applies the snapshot and republishes; Voice follows its report.
+    // The host applies the snapshot and republishes; Dictation follows its report.
     await reportHost(page, {
       voiceKeys: { gemini: false, openai: false, deepgram: true },
       providerKeys: [
@@ -70,8 +70,8 @@ test.describe('Settings — Providers', () => {
         { id: 'elevenlabs', source: 'none', envSet: false },
       ],
     });
-    await page.getByTestId('settings-nav-voice').click();
-    await expect(page.getByTestId('settings-voice-config')).toBeVisible();
+    await page.getByTestId('settings-nav-dictation').click();
+    await expect(page.getByTestId('settings-voice-dictation-engines')).toBeVisible();
     await expect(page.getByTestId('dictation-phone-keys')).toHaveCount(0);
     expect(await page.content()).not.toContain(FAKE_KEY);
   });

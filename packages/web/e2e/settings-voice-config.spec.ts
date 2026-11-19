@@ -39,6 +39,7 @@ test.describe('Settings — Voice engines', () => {
       'ElevenLabs',
     ]);
     // Dictation: the phone has its own recogniser; a computer does not.
+    await page.getByTestId('settings-nav-dictation').click();
     await expect(page.getByTestId('dictation-phone-engine').locator('button')).toHaveText([
       'Built-in',
       'Deepgram',
@@ -57,15 +58,16 @@ test.describe('Settings — Voice engines', () => {
   });
 
   test('defaults to Local everywhere, no status hint shown', async ({ page }) => {
-    await expectChosen(page, 'dictation-phone-engine', 'Built-in');
-    await expectChosen(page, 'dictation-computer-engine', 'Whisper');
-    await expect(page.getByTestId('dictation-tidy-toggle')).not.toBeChecked();
     for (const surface of ['device', 'handsFree', 'call']) {
       await expectChosen(page, `voice-${surface}-engine`, 'Local');
     }
     await expect(
       page.locator('[data-testid="settings-voice-config"] [data-testid$="-status"]'),
     ).toHaveCount(0);
+    await page.getByTestId('settings-nav-dictation').click();
+    await expectChosen(page, 'dictation-phone-engine', 'Built-in');
+    await expectChosen(page, 'dictation-computer-engine', 'Whisper');
+    await expect(page.getByTestId('dictation-tidy-toggle')).not.toBeChecked();
   });
 
   test('picking an engine writes the backend and layer it stands for', async ({ page }) => {
@@ -142,6 +144,7 @@ test.describe('Settings — Voice engines', () => {
         voiceKeys: { gemini: false, openai: true, deepgram: false },
       });
     });
+    await page.getByTestId('settings-nav-dictation').click();
     await expect(page.getByTestId('dictation-computer-keys')).toHaveCount(0);
     await page.getByTestId('dictation-computer-engine-deepgram').click();
     const line = page.getByTestId('dictation-computer-keys');
@@ -156,6 +159,7 @@ test.describe('Settings — Voice engines', () => {
     );
     expect(color).not.toBe(hint);
     // The key the host holds says nothing.
+    await page.getByTestId('settings-nav-voice').click();
     await page.getByTestId('voice-call-engine-openai').click();
     await expect(page.getByTestId('voice-call-keys')).toHaveCount(0);
   });

@@ -318,7 +318,7 @@ describe('a voice surface whose backend has no key on the host', () => {
   test('the refusal names the surface, the key and the Settings → Voice fix', () => {
     expect(voiceKeyMissingMessage('dictation', 'gemini')).toBe(
       'Dictation is set to gemini, but no Gemini key is set on this host. ' +
-        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
+        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
     );
     expect(voiceKeyMissingMessage('hands-free', 'openai')).toBe(
       'Hands-free is set to openai, but no OpenAI key is set on this host. ' +

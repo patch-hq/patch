@@ -157,7 +157,7 @@ test('Settings → Voice toggle: off remembers a decline, on asks for Accessibil
   await fakeShell(page, { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' });
   await page.addInitScript(() => localStorage.setItem('patch.meetingNamesDeclined', '1'));
   await stubSettingsApi(page);
-  await page.goto(settingsUrl('voice'));
+  await page.goto(settingsUrl('dictation'));
   const toggle = page.getByTestId('meeting-names-toggle');
   await expect(toggle).not.toBeChecked();
   await page.getByTestId('meeting-names-row').locator('.toggle-track').click();

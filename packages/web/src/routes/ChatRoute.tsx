@@ -2629,6 +2629,7 @@ export function ChatRoute({
               hostId={row.hostId}
               folder={row.folder}
               onOpenVoiceSettings={() => navigate('/settings/voice')}
+              onOpenDictationSettings={() => navigate('/settings/dictation')}
               // spec/14 § Composer — unsent text belongs to the chat it was
               // typed in. Read non-reactively: `initialValue` is seeded once
               // per mount and the `key={chatId}` remount above is what re-seeds

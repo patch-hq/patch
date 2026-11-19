@@ -1,5 +1,5 @@
 // The dictate shortcut (spec/14 ## Keyboard shortcuts): one chord, ⌘⇧D unless
-// changed in Settings → Voice. It drives the open chat's composer mic
+// changed in Settings → Dictation. It drives the open chat's composer mic
 // (lib/composerMic.ts), or a voice note where there is no composer.
 //
 // Kept per host in localStorage: a chord belongs to the keyboard it is

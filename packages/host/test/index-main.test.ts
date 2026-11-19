@@ -4008,7 +4008,7 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
           'dictation',
           'DEEPGRAM_API_KEY',
           'voice: Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice. Its sessions will be refused.',
+            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation. Its sessions will be refused.',
         ],
         [
           50,
@@ -4069,7 +4069,7 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
           code: 'voice_key_missing',
           message:
             'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
+            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
         },
       ]);
     } finally {
@@ -4441,7 +4441,7 @@ describe('handleVoiceNoteTranscribe', () => {
         code: 'voice_key_missing',
         message:
           'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
-          'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
+          'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation.',
       },
     });
     expect(local).not.toHaveBeenCalled();

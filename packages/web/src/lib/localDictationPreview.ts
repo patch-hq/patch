@@ -11,7 +11,7 @@ import { getDesktopBridge } from './desktopBridge.js';
 import type { DictationPreview, DictationPreviewCallbacks } from './dictationPreview.js';
 
 export const LOCAL_ENGINE_DESKTOP_ONLY =
-  'Parakeet on this computer only runs in the desktop app. Switch Dictation to another engine in Settings → Voice.';
+  'Parakeet on this computer only runs in the desktop app. Switch Dictation to another engine in Settings → Dictation.';
 
 export function startLocalDictationPreview(
   _chatId: string,
