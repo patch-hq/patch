@@ -279,7 +279,7 @@ test('a restart waits for launchd to finish unloading before it bootstraps', asy
   let loaded = true;
   let stillLoadedPrints = 2;
   const fn: Launchctl = async (args) => {
-    calls.push(args[0]);
+    calls.push(String(args[0]));
     if (args[0] === 'print') {
       if (!loaded) return { ok: false, output: '' };
       if (calls.includes('bootout') && stillLoadedPrints-- <= 0) loaded = false;
