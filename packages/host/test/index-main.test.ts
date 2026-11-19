@@ -3497,7 +3497,7 @@ describe('src/index.ts main() — cross-host patch_send_to', () => {
       )) as { requestId?: string; sourceChatId: string; message: string };
       expect(req.requestId).toBeDefined();
       expect(req.sourceChatId).toBe('mgr');
-      expect(req.message).toBe('hi from here');
+      expect(req.message).toBe('[from chat mgr] hi from here');
       boot.fakeServer.send({
         type: 'patch.send_to.response',
         requestId: req.requestId!,

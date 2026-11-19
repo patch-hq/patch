@@ -262,7 +262,7 @@ describe('patch_send_to — falls back to the owning host when not local', () =>
       expect(called).toEqual({
         sourceChatId: 'mgr',
         targetChatId: 'chat-on-host-b',
-        message: 'hi',
+        message: '[from chat mgr] hi',
         revealTarget: true,
       });
     } finally {
