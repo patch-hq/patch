@@ -97,7 +97,7 @@ test.describe('a call is the chat, spoken', () => {
       seq: 9001,
       createdAt: Date.now(),
     });
-    await expect(page.getByTestId('voice-handoff-pending')).toContainText('Asking the agent…');
+    await expect(page.getByTestId('voice-handoff-pending')).toContainText('Waiting');
     await emit(page, {
       type: 'chat.message',
       chatId: CHAT,
@@ -116,8 +116,10 @@ test.describe('a call is the chat, spoken', () => {
     });
     const handoff = page.getByTestId('voice-handoff');
     await expect(handoff).toBeVisible();
-    await expect(handoff).toContainText('Asked the agent');
+    await expect(handoff).toContainText('Sent to');
     await expect(handoff).toContainText('Add milk to the shopping list');
+    await expect(handoff).not.toContainText('[voice');
+    await expect(page.getByTestId('voice-handoff-answer')).toContainText('Added milk.');
     await expect(handoff).not.toHaveClass(/msg-user/);
     const summary = page.getByTestId('call-summary');
     await expect(summary).toHaveText('Call 0:52 · Gemini Flash · $0.017');

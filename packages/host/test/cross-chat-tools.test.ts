@@ -132,6 +132,58 @@ describe('UDS internal endpoints — patch_send_to', () => {
     }
   });
 
+  it('tags the delivered turn with the sending chat, so the recipient knows who to answer', async () => {
+    const { daemon, jobs, folder, events } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const callerChatId = await daemon.spawnChat({ folder });
+    await daemon.setName(callerChatId, 'Release notes');
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/send-to',
+        headers: AUTH,
+        payload: { chatId, message: 'go', callerChatId },
+      });
+      expect(res.statusCode).toBe(200);
+      await new Promise((r) => setTimeout(r, 30));
+      const turn = events.find(
+        (e) => e.type === 'chat.message' && e.chatId === chatId && e.role === 'user',
+      );
+      expect(turn).toMatchObject({
+        content: `[from Release notes; chat ${callerChatId}] go`,
+        origin: 'machine',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('relays the tagged text to a chat on another host', async () => {
+    const { daemon, jobs } = setup();
+    const sent: { message: string }[] = [];
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      sendToRemoteChat: async (req) => {
+        sent.push(req);
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/send-to',
+        headers: AUTH,
+        payload: { chatId: 'elsewhere', message: 'go', callerChatId: 'unknown-caller' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(sent[0]?.message).toBe('[from chat unknown-caller] go');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('un-archives an archived target and tells the sender it was archived', async () => {
     const { daemon, jobs, folder, upstream } = setup();
     const chatId = await daemon.spawnChat({ folder });

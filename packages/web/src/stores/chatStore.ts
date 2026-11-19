@@ -776,6 +776,8 @@ export interface ChatEventEntry {
   voiceHandoff?: boolean;
   /** The agent's own answer to a hand-off (as opposed to the fast voice's spoken words). */
   handoffAnswer?: boolean;
+  /** spec/04 § Send back — the row a side thread posted into this track (`ChatMessageEvent.branchSendBack`). */
+  branchSendBack?: { fromBranchId: string; fromBranchName: string | null };
   /**
    * Words said in a call, transcribed: the user's own, or the fast voice's reply.
    * Drawn in italics with a call icon on the message's own side.
@@ -2437,6 +2439,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...(event.goalTrigger ? { goalTrigger: event.goalTrigger } : {}),
             ...(event.synthetic ? { synthetic: true } : {}),
             ...(event.accountSwitch ? { accountSwitch: true } : {}),
+            ...(event.branchSendBack ? { branchSendBack: event.branchSendBack } : {}),
             ...(event.role === 'user' && isVoiceHandoff(event.content)
               ? { voiceHandoff: true }
               : {}),

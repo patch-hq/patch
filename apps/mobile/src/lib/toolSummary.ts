@@ -10,7 +10,13 @@
 // a pure function here because the mobile transcript is a FlatList and needs
 // its rows as data.
 
-import { folderName, isGroupableToolCall, todoCardItems, type SnoozeRecord } from '@patch/wire';
+import {
+  folderName,
+  isGroupableToolCall,
+  sendToCall,
+  todoCardItems,
+  type SnoozeRecord,
+} from '@patch/wire';
 
 import type { ChatEventEntry } from '../stores/chatStore';
 
@@ -220,7 +226,9 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     entry.tool === 'patch_delegate' ||
     entry.tool === 'mcp__patch__patch_delegate' ||
     // A plan card takes its own result too, so the result is not a second row.
-    (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null)
+    (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null) ||
+    // So does a "Sent to" card: a refused send says so on the card.
+    sendToCall(entry.tool, entry.toolArgs) !== null
   );
 }
 
@@ -233,6 +241,8 @@ export type TimelineRow =
       result?: ChatEventEntry;
       /** A voice hand-off the agent has not answered yet. */
       handoffPending?: boolean;
+      /** The agent's answer to a voice hand-off (the matching "From" card). */
+      handoffAnswer?: boolean;
     }
   | { kind: 'group'; key: string; entries: ChatEventEntry[] }
   /** Where a snooze began (spec/04 § Snooze → Back): a permanent divider, not a message. */
@@ -374,10 +384,29 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
       ...(entry.kind === 'message' && entry.voiceHandoff
         ? { handoffPending: voiceHandoffPending(timeline, i) }
         : {}),
+      ...(answersVoiceHandoff(timeline, i) ? { handoffAnswer: true } : {}),
     });
     i++;
   }
   return rows;
+}
+
+/**
+ * spec/07 § The fast voice and the chat's agent — is this entry the agent's
+ * answer to a hand-off? The first reply of the agent's own (not the voice's
+ * spoken words) after the hand-off turn is.
+ */
+export function answersVoiceHandoff(timeline: ChatEventEntry[], at: number): boolean {
+  const e = timeline[at];
+  if (!e || e.kind !== 'message' || e.role !== 'assistant' || e.voice) return false;
+  for (let j = at - 1; j >= 0; j--) {
+    const prev = timeline[j]!;
+    if (prev.kind !== 'message') continue;
+    // The agent's first reply after the hand-off answers it; a later one does not.
+    if (prev.role === 'assistant' && !prev.voice) return false;
+    if (prev.role === 'user') return prev.voiceHandoff === true;
+  }
+  return false;
 }
 
 /**
