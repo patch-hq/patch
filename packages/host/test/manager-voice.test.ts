@@ -105,11 +105,61 @@ function makeHost(overrides: Partial<ManagerVoiceHostDeps> = {}) {
     deleteTask: vi.fn(async () => undefined),
     calendar: vi.fn(async () => '[{"title":"Dentist"}]'),
     askAgent: vi.fn(async () => undefined),
+    timers: vi.fn(async () => 'ok'),
     recordNote: (line) => notes.push(line),
     ...overrides,
   };
   return { deps, notes, order, replies, tools: createManagerVoiceTools(deps) };
 }
+
+describe('timer tools', () => {
+  test('set_timer asks the server for a timer on the device the call is on', async () => {
+    const { deps, tools } = makeHost();
+    await tools.quick('set_timer', { seconds: '600', label: 'pasta' }, { deviceId: 'dev-1' });
+    expect(deps.timers).toHaveBeenCalledWith({
+      action: 'set',
+      deviceId: 'dev-1',
+      label: 'pasta',
+      seconds: 600,
+    });
+  });
+
+  test('list_timers only reads: it never sets a timer', async () => {
+    const { deps, tools } = makeHost();
+    await tools.quick('list_timers', {}, { deviceId: 'dev-1' });
+    expect(deps.timers).toHaveBeenCalledWith({ action: 'list' });
+  });
+
+  test('an alarm time is read as London time, in winter and in summer', async () => {
+    const { deps, tools } = makeHost();
+    await tools.quick('set_timer', { at: '2026-12-01T07:00:00' }, {});
+    await tools.quick('set_timer', { at: '2026-07-01T07:00:00' }, {});
+    const calls = (deps.timers as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => (c[0] as { at: number }).at,
+    );
+    expect(new Date(calls[0]!).toISOString()).toBe('2026-12-01T07:00:00.000Z');
+    expect(new Date(calls[1]!).toISOString()).toBe('2026-07-01T06:00:00.000Z');
+  });
+
+  test('change_timer needs an amount, and cancel_timer passes the name through', async () => {
+    const { deps, tools } = makeHost();
+    await expect(tools.quick('change_timer', { timer: 'pasta' })).rejects.toThrow(
+      /how much to add/,
+    );
+    await tools.quick('change_timer', { timer: 'pasta', add_seconds: '120' });
+    await tools.quick('cancel_timer', { timer: 'pasta' });
+    expect(deps.timers).toHaveBeenCalledWith({ action: 'change', timer: 'pasta', addSeconds: 120 });
+    expect(deps.timers).toHaveBeenCalledWith({ action: 'cancel', timer: 'pasta' });
+  });
+
+  test('set_timer with no time is refused before the server is asked', async () => {
+    const { deps, tools } = makeHost();
+    await expect(tools.quick('set_timer', { label: 'x' })).rejects.toBeInstanceOf(
+      ManagerChatLookupError,
+    );
+    expect(deps.timers).not.toHaveBeenCalled();
+  });
+});
 
 describe('isManagerCall', () => {
   test('only the Manager chat', () => {

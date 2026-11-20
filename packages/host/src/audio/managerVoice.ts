@@ -51,6 +51,10 @@ export const READ_PROJECT_TOOL_NAME = 'read_project';
 export const CALENDAR_AGENDA_TOOL_NAME = 'calendar_agenda';
 export const ADD_EVENT_TOOL_NAME = 'add_event';
 export const ASK_AGENT_TOOL_NAME = 'ask_agent';
+export const SET_TIMER_TOOL_NAME = 'set_timer';
+export const CANCEL_TIMER_TOOL_NAME = 'cancel_timer';
+export const CHANGE_TIMER_TOOL_NAME = 'change_timer';
+export const LIST_TIMERS_TOOL_NAME = 'list_timers';
 
 export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
   {
@@ -121,6 +125,47 @@ export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
     required: ['title', 'start'],
   },
   {
+    name: SET_TIMER_TOOL_NAME,
+    description:
+      'Start a timer ("ten minutes") or set an alarm ("for 7am"). Patch keeps it and rings it ' +
+      'when it is done, even after this conversation ends. Give seconds for a timer, or at for ' +
+      'an alarm. Never use it to ask how a timer is going: that is list_timers.',
+    params: {
+      seconds: 'How long, in whole seconds (ten minutes is 600); empty for an alarm.',
+      at: 'For an alarm: the time, London local, ISO (2026-12-01T07:00:00); empty for a timer.',
+      label: 'What it is for ("pasta"); empty if the user did not say.',
+    },
+    required: [],
+  },
+  {
+    name: LIST_TIMERS_TOOL_NAME,
+    description:
+      'Read the timers and alarms that are set and how long each has left. Answers at once. ' +
+      'Use it for "how are my timers", "how long is left", "what timers do I have". It sets nothing.',
+    params: {},
+    required: [],
+  },
+  {
+    name: CANCEL_TIMER_TOOL_NAME,
+    description:
+      'Cancel a timer or alarm, or stop one that is ringing. Say which by its label or id; ' +
+      'empty when there is only one.',
+    params: { timer: "The timer's label or id; empty when there is only one." },
+    required: [],
+  },
+  {
+    name: CHANGE_TIMER_TOOL_NAME,
+    description:
+      'Change a running timer: add or take off time, or set a new time left. Give add_seconds ' +
+      'or set_seconds.',
+    params: {
+      timer: "The timer's label or id; empty when there is only one.",
+      add_seconds: 'Seconds to add; negative to take off ("two more minutes" is 120).',
+      set_seconds: 'Make it this many seconds from now, replacing the time left.',
+    },
+    required: [],
+  },
+  {
     name: ASK_AGENT_TOOL_NAME,
     description:
       "Hand real work to the Manager's own agent: research, changes to code or files, anything that " +
@@ -184,7 +229,9 @@ export const MANAGER_TOOLS_RULE =
   `To add a to-do call ${ADD_TASK_TOOL_NAME} (with the list when the user names one); to tick one ` +
   `off call ${COMPLETE_TASK_TOOL_NAME}; to delete one call ${REMOVE_TASK_TOOL_NAME}; to hear a ` +
   `list call ${READ_PROJECT_TOOL_NAME}; to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}; ` +
-  `to book something call ${ADD_EVENT_TOOL_NAME}. A request to log, add or remind is one of these ` +
+  `to book something call ${ADD_EVENT_TOOL_NAME}; for a timer or alarm call ${SET_TIMER_TOOL_NAME}, ` +
+  `and to hear how the timers are going call ${LIST_TIMERS_TOOL_NAME} — asking about a timer never ` +
+  `sets a new one. A request to log, add or remind is one of these ` +
   `— never go looking for a chat for it. To find a chat call ${FIND_CHATS_TOOL_NAME}; to say how ` +
   `one is getting on call ${CHAT_STATUS_TOOL_NAME}; to tell or ask an existing chat something call ` +
   `${SEND_TO_CHAT_TOOL_NAME} with the chat and the message, phrased for that chat. Only when the ` +
@@ -230,11 +277,29 @@ export interface ManagerSendAccepted {
   replyComing: boolean;
 }
 
+/** Where a quick tool was called from. */
+export interface ManagerQuickContext {
+  /** The voice device the conversation is on; absent for an app call. */
+  deviceId?: string;
+}
+
+/** A timer action as the host asks the server to carry it out (the server keeps the state). */
+export interface ManagerTimerRequest {
+  action: 'set' | 'cancel' | 'change' | 'list';
+  deviceId?: string;
+  label?: string;
+  seconds?: number;
+  at?: number;
+  timer?: string;
+  setSeconds?: number;
+  addSeconds?: number;
+}
+
 export interface ManagerVoiceTools {
   /** Who the voice is told it is (`host.settings` → `managerVoicePrompt`). Absent: the built-in text. */
   voicePrompt?: () => string;
   /** Run one of {@link MANAGER_QUICK_TOOLS}; rejects when the action failed or is not set up. */
-  quick(name: string, args: Record<string, string>): Promise<string>;
+  quick(name: string, args: Record<string, string>, ctx?: ManagerQuickContext): Promise<string>;
   findChats(query: string): Promise<string>;
   chatStatus(chat: string): Promise<string>;
   /**
@@ -296,6 +361,8 @@ export interface ManagerVoiceHostDeps {
   deleteTask(id: string): Promise<void>;
   /** Run the calendar tool with these arguments; resolves with its output. */
   calendar(args: string[]): Promise<string>;
+  /** Timers and alarms live on the server; resolves with what to tell the user, rejects on a refusal. */
+  timers(req: ManagerTimerRequest): Promise<string>;
   /** Hand a request to the Manager chat's own agent; resolves once it has it. */
   askAgent(request: string): Promise<void>;
   /** A quiet `[call]` line in the Manager chat. */
@@ -364,6 +431,82 @@ function words(s: string): string[] {
     .filter((w) => w.length > 0);
 }
 
+/** A number the voice passed as text; a lookup error when it is not one. */
+function seconds(args: Record<string, string>, key: string): number | undefined {
+  const raw = (args[key] ?? '').trim();
+  if (raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new ManagerChatLookupError(`"${raw}" is not a number of seconds.`);
+  return n;
+}
+
+function timerRequest(
+  name: string,
+  args: Record<string, string>,
+  deviceId: string | undefined,
+): ManagerTimerRequest {
+  const timer = (args['timer'] ?? '').trim();
+  if (name === LIST_TIMERS_TOOL_NAME) return { action: 'list' };
+  if (name === CANCEL_TIMER_TOOL_NAME) return { action: 'cancel', timer };
+  if (name === CHANGE_TIMER_TOOL_NAME) {
+    const add = seconds(args, 'add_seconds');
+    const set = seconds(args, 'set_seconds');
+    if (add === undefined && set === undefined) {
+      throw new ManagerChatLookupError('Say how much to add, or the new time left.');
+    }
+    return {
+      action: 'change',
+      timer,
+      ...(add !== undefined ? { addSeconds: add } : {}),
+      ...(set !== undefined ? { setSeconds: set } : {}),
+    };
+  }
+  const secs = seconds(args, 'seconds');
+  const atRaw = (args['at'] ?? '').trim();
+  let at: number | undefined;
+  if (atRaw !== '') {
+    // London local time; Date.parse of a zone-less ISO string would use the host's zone.
+    at = londonToEpoch(atRaw);
+  }
+  if (secs === undefined && at === undefined) {
+    throw new ManagerChatLookupError('Say how long the timer is, or what time the alarm is for.');
+  }
+  const label = (args['label'] ?? '').trim();
+  return {
+    action: 'set',
+    ...(deviceId !== undefined ? { deviceId } : {}),
+    ...(label !== '' ? { label } : {}),
+    ...(at !== undefined ? { at } : { seconds: secs! }),
+  };
+}
+
+/** An ISO date-time with no zone, read as Europe/London. */
+export function londonToEpoch(iso: string): number {
+  if (/[zZ]|[+-]\d\d:?\d\d$/.test(iso)) {
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) throw new ManagerChatLookupError(`"${iso}" is not a time.`);
+    return t;
+  }
+  const asUtc = Date.parse(`${iso}Z`);
+  if (Number.isNaN(asUtc)) throw new ManagerChatLookupError(`"${iso}" is not a time.`);
+  // London's offset at that wall-clock moment (0 or 1 hour): format the UTC guess in London and diff.
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(asUtc));
+  const get = (t: string): string => parts.find((p) => p.type === t)!.value;
+  const shown = Date.parse(
+    `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}Z`,
+  );
+  return asUtc - (shown - asUtc);
+}
+
 export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoiceTools {
   const now = deps.now ?? Date.now;
   /** Targets with a message out and no reply yet: a second send would cut the first off. */
@@ -412,7 +555,7 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
 
   return {
     ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
-    async quick(name, args) {
+    async quick(name, args, ctx) {
       const need = (k: string): string => {
         const v = (args[k] ?? '').trim();
         if (v === '') throw new ManagerChatLookupError(`Say the ${k.replace('_', ' ')}.`);
@@ -503,6 +646,14 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
         ]);
         deps.recordNote(`event added: ${title} (${start})`);
         return `Added. ${out}`;
+      }
+      if (
+        name === SET_TIMER_TOOL_NAME ||
+        name === LIST_TIMERS_TOOL_NAME ||
+        name === CANCEL_TIMER_TOOL_NAME ||
+        name === CHANGE_TIMER_TOOL_NAME
+      ) {
+        return deps.timers(timerRequest(name, args, ctx?.deviceId));
       }
       if (name === ASK_AGENT_TOOL_NAME) {
         const request = need('request');

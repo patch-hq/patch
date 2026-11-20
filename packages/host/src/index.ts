@@ -66,6 +66,7 @@ import type {
   RateLimitWindow,
   PatchActivityResponseEvent,
   PatchSearchChatsResponseEvent,
+  VoiceTimersResponseEvent,
   ProviderId,
   LimitBehaviour,
 } from '@patch/wire';
@@ -297,7 +298,9 @@ import { createVoiceReplyBridge } from './audio/replyBridge.js';
 import {
   createManagerVoiceTools,
   MANAGER_CHAT_ID,
+  ManagerChatLookupError,
   type ManagerChatEntry,
+  type ManagerTimerRequest,
 } from './audio/managerVoice.js';
 import { createSmartTurnDetector, pcmFromWav, type TurnDetector } from './audio/smartTurn.js';
 import { createChatVoice } from './audio/chatVoice.js';
@@ -1683,6 +1686,30 @@ async function startHost(
         ...(archived !== undefined ? { archived } : {}),
       });
     });
+  };
+  /** Voice timers: the server keeps the state; each ask is matched to its answer by requestId. */
+  const timerWaiters = new Map<string, (event: VoiceTimersResponseEvent) => void>();
+  const TIMER_TIMEOUT_MS = 15_000;
+  const requestTimers = async (req: ManagerTimerRequest): Promise<string> => {
+    if (!linkOnline) {
+      throw new Error('Timers are kept by the server, and the link to it is offline.');
+    }
+    const requestId = `timers-${randomUUID()}`;
+    const answer = await new Promise<VoiceTimersResponseEvent>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        timerWaiters.delete(requestId);
+        reject(new Error('The server did not answer the timer request within 15 seconds.'));
+      }, TIMER_TIMEOUT_MS);
+      timer.unref();
+      timerWaiters.set(requestId, (event) => {
+        clearTimeout(timer);
+        resolve(event);
+      });
+      link.send({ type: 'voice.timers.request', requestId, ...req });
+    });
+    // A refusal ("no timer matches pasta") is an answer for the voice to say, not a host failure.
+    if (!answer.ok) throw new ManagerChatLookupError(answer.message);
+    return answer.message;
   };
   /** `patch_search_chats`: one account-wide ask of the server, same waiter shape as the listing. */
   const searchWaiters = new Map<string, Array<(event: PatchSearchChatsResponseEvent) => void>>();
@@ -3597,6 +3624,12 @@ async function startHost(
         resolveListChats(event);
         return;
       }
+      if (event.type === 'voice.timers.response') {
+        const waiter = timerWaiters.get(event.requestId);
+        timerWaiters.delete(event.requestId);
+        waiter?.(event);
+        return;
+      }
       if (event.type === 'patch.search_chats.response') {
         const waiters = searchWaiters.get(event.sourceChatId);
         const next = waiters?.shift();
@@ -4128,6 +4161,7 @@ async function startHost(
         message,
         revealTarget: true,
       }),
+    timers: requestTimers,
     addTask: async ({ content, due, project }) =>
       (
         await runTool(

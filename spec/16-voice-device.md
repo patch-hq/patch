@@ -102,6 +102,16 @@ Every utterance on a device (with or without profiles) leaves its voiceprint and
 
 `patch_speak` and `patch_notify(channel: 'speakers')` are spoken on a connected device (`09-notifications.md` § speakers). The server opens a session on the chosen device for the calling chat, with `conversational: false`, and asks that chat's host to speak the message as soon as the device joins. The device then behaves as after any reply: it stays open for the follow-up window. With no device reachable, the notify is pushed instead. `patch_call` rings the app surfaces only, never a voice device.
 
+## Timers and alarms
+
+The voice has `set_timer`, `list_timers`, `change_timer` and `cancel_timer`. The state is Patch's, held on the server (`timers.json` in its data directory), not in the voice session: a conversation ends seconds after "set a timer", and the timer outlives it and a server restart. A host's voice tool asks the server over the host link (`voice.timers.request` / `voice.timers.response`); the answer is the sentence the voice says back.
+
+- A timer is `seconds` from now; an alarm is a wall-clock time (London local). Each has an optional label and remembers the device that set it.
+- "How are my timers" is `list_timers`, which only reads. Naming a timer by label or id picks it; an ambiguous name is reported back, never guessed.
+- Every connected device gets a `timers` control frame on connect and after each change: the running timers with `endsAt` (and `serverNow`, so the device can convert to its own clock) and whether it set each (`own`). The device draws the ring from it: the countdown and its colours for its own timers, and the alarm sound when one is `ringing`.
+- A ringing timer sounds on the device that set it, or on every connected device when the setter is offline. The device sends `timer_stopped` when the user stops it (button or voice); nobody stopping it silences it after ten minutes.
+- Apps and displays receive `timers.changed` on the surface socket with every live timer, `running` or `ringing`, and draw their own countdown.
+
 ## Cross-refs
 
 - App-surface voice and the voice config matrix: `07-voice-app.md`

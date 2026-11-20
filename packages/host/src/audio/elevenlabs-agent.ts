@@ -808,6 +808,11 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.toolResult(callId, isError ? result : `${RESULT_GIST_NOTE}${result}`, isError);
   }
 
+  /** Where a quick tool is being called from: the device this conversation is on, if it is one. */
+  private quickContext(): { deviceId?: string } {
+    return this.init.deviceId !== undefined ? { deviceId: this.init.deviceId } : {};
+  }
+
   /**
    * A Manager call's tools (spec/07 § A call to the Manager). The agent waits
    * for each answer — for `send_to_chat`, until the chat has replied — the same
@@ -837,7 +842,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       if (name === FIND_CHATS_TOOL_NAME) result = await manager.findChats(arg('query'));
       else if (name === CHAT_STATUS_TOOL_NAME) result = await manager.chatStatus(arg('chat'));
       else if (MANAGER_QUICK_TOOL_NAMES.has(name))
-        result = await manager.quick(name, stringArgs(params));
+        result = await manager.quick(name, stringArgs(params), this.quickContext());
       else {
         const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
         result =

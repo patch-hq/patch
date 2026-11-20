@@ -351,6 +351,34 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     hosts: [{ hostId: 'host-a', appliedVersion: 3 }],
   },
   'notifications.changed': { type: 'notifications.changed', unread: 2 },
+  'timers.changed': {
+    type: 'timers.changed',
+    timers: [
+      {
+        id: 'a1b2',
+        label: 'pasta',
+        kind: 'timer',
+        endsAt: 1_700_000_600_000,
+        totalMs: 600_000,
+        state: 'running',
+        deviceId: 'dev-kitchen',
+      },
+    ],
+  },
+  'voice.timers.request': {
+    type: 'voice.timers.request',
+    requestId: 'timers-1',
+    action: 'set',
+    seconds: 600,
+    label: 'pasta',
+    deviceId: 'dev-kitchen',
+  },
+  'voice.timers.response': {
+    type: 'voice.timers.response',
+    requestId: 'timers-1',
+    ok: true,
+    message: 'Timer set: the pasta timer, 10 minutes.',
+  },
   'settings.secret_update': {
     type: 'settings.secret_update',
     hostId: 'host-a',

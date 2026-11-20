@@ -41,6 +41,7 @@ import type { Registry } from './registry.js';
 import type { ActivityReader } from './activity.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import { searchChats } from './chat-search.js';
+import type { TimerService } from './timers.js';
 
 /** Surface id used for server-originated frames on the host link. */
 const BRIDGE_SURFACE_ID = 'cross-host-bridge';
@@ -52,6 +53,8 @@ export interface CrossHostBridgeDeps {
   registry: Registry;
   activity: ActivityReader;
   chatLogStore: ChatLogStore;
+  /** Voice timers and alarms; a host's voice tools act on these. */
+  timers?: TimerService;
 }
 
 /**
@@ -62,7 +65,7 @@ export interface CrossHostBridgeDeps {
 const RELAY_ROUTE_TTL_MS = 60_000;
 
 export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
-  const { logger, hostLink, chatRegistry, registry, activity, chatLogStore } = deps;
+  const { logger, hostLink, chatRegistry, registry, activity, chatLogStore, timers } = deps;
 
   /**
    * requestId → the host that raised a relayed `patch.spawn`, so its
@@ -247,6 +250,19 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
         sourceChatId: event.sourceChatId,
         chatCount: chats.length,
         chats,
+      });
+      return;
+    }
+
+    if (event.type === 'voice.timers.request') {
+      if (fromHostId === null) return;
+      const outcome = timers
+        ? timers.handle(event)
+        : { ok: false, message: 'Timers are not available on this server.' };
+      hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
+        type: 'voice.timers.response',
+        requestId: event.requestId,
+        ...outcome,
       });
       return;
     }

@@ -296,6 +296,45 @@ describe('voice device control on the server', () => {
     k.ws.close();
     b.ws.close();
   }, 30_000);
+
+  it('timers: set from the host, counted down on the setter, rung there, stopped by the device', async () => {
+    await start({ managerChat: true });
+    const { ws, log } = connect(await deviceJwt('dev-kitchen'));
+    await new Promise<void>((r) => ws.once('open', () => r()));
+    hello(ws, 'dev-kitchen');
+    await log.waitFor(() => log.frames.some((f) => f.type === 'timers'));
+    hostLink.emit({
+      type: 'voice.timers.request',
+      requestId: 'req-1',
+      action: 'set',
+      seconds: 1,
+      label: 'eggs',
+      deviceId: 'dev-kitchen',
+    } as unknown as WireEvent);
+    const answer = hostLink.sent.find((x) => x.event.type === 'voice.timers.response')!
+      .event as unknown as { requestId: string; ok: boolean; message: string };
+    expect(answer).toMatchObject({ requestId: 'req-1', ok: true });
+    expect(answer.message).toContain('eggs');
+    const running = (): Record<string, unknown> | undefined =>
+      log.frames
+        .filter((f) => f.type === 'timers')
+        .map((f) => (f.timers as Array<Record<string, unknown>>)[0])
+        .find((t) => t?.state === 'running');
+    await log.waitFor(() => running() !== undefined);
+    expect(running()).toMatchObject({ label: 'eggs', own: true });
+    const ringing = (): Record<string, unknown> | undefined =>
+      log.frames
+        .filter((f) => f.type === 'timers')
+        .map((f) => (f.timers as Array<Record<string, unknown>>)[0])
+        .find((t) => t?.state === 'ringing');
+    await log.waitFor(() => ringing() !== undefined, 5000);
+    ws.send(JSON.stringify({ type: 'timer_stopped', timerId: ringing()!['id'] }));
+    await log.waitFor(() => {
+      const last = log.frames.filter((f) => f.type === 'timers').at(-1);
+      return (last?.timers as unknown[]).length === 0;
+    });
+    ws.close();
+  });
 });
 
 describe('voice device control keepalive', () => {

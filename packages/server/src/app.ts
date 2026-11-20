@@ -62,6 +62,7 @@ import { registerAuthRoutes } from './auth-routes.js';
 import type { RelayService } from './relay-service.js';
 import { ChatRegistry } from './chat-registry.js';
 import { registerCrossHostBridge } from './cross-host.js';
+import { TimerService } from './timers.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { BatchStore } from './batch/store.js';
 import { registerBatchRoutes } from './batch/routes.js';
@@ -1087,8 +1088,23 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // it names, answer `patch.list_chats.request` from the account-wide chat
   // mirror and `patch.activity.request` by reading every host's chat logs
   // (only the server sees every host's chats).
+  // Voice timers and alarms (spec/16 § Timers and alarms): the server holds the
+  // state so a timer outlives the voice session that set it. Devices are told
+  // over their control socket, apps and displays over the surface socket.
+  const timersDataDir = opts.dataDir ?? registry.dataDir;
+  const timers = new TimerService({
+    logger: log.child({ component: 'timers' }),
+    ...(timersDataDir ? { file: join(timersDataDir, 'timers.json') } : {}),
+    ...(opts.nowMs ? { now: opts.nowMs } : {}),
+    onChanged: (all) => {
+      deviceControl?.syncTimers(all);
+      void wsHub.sendToAll({ type: 'timers.changed', timers: all });
+    },
+  });
+  app.addHook('onClose', async () => timers.close());
   registerCrossHostBridge({
     logger: log.child({ component: 'cross-host' }),
+    timers,
     hostLink,
     chatRegistry,
     registry,
@@ -2317,6 +2333,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // Voice devices connect here, not to a host (spec/16 § Connection model).
     deviceControl = registerDeviceControlRoute(app, {
       logger: log.child({ component: 'device-control' }),
+      timers,
       queueSpeech: (sessionId, text) => {
         pendingDeviceSpeech.set(sessionId, text);
         // A device that never joins must not leave its text behind.
