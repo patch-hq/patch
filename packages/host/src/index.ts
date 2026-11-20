@@ -1719,7 +1719,11 @@ async function startHost(
       const timer = setTimeout(() => {
         const idx = waiters.indexOf(onResolve);
         if (idx >= 0) waiters.splice(idx, 1);
-        reject(new Error('patch_list_chats: the server did not answer within 45s'));
+        reject(
+          new Error(
+            `listing chats: the server did not answer within ${LIST_CHATS_TIMEOUT_MS / 1000}s`,
+          ),
+        );
       }, LIST_CHATS_TIMEOUT_MS);
       timer.unref();
       function onResolve(chats: AccountChat[]): void {

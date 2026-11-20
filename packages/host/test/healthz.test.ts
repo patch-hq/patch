@@ -21,10 +21,10 @@ describe('control HTTP', () => {
     }
   });
 
-  it('rejects unauthenticated /chats request', async () => {
+  it('rejects an unauthenticated /chats/unreadable request', async () => {
     const app = await buildControl({ localKey: 'secret' });
     try {
-      const res = await app.inject({ method: 'GET', url: '/chats' });
+      const res = await app.inject({ method: 'GET', url: '/chats/unreadable' });
       expect(res.statusCode).toBe(401);
     } finally {
       await app.close();

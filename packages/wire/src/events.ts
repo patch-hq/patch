@@ -6374,6 +6374,12 @@ export const PatchListChatsResponseEvent = z
           folder: z.string().optional(),
           status: z.enum(['active', 'archived', 'errored', 'deleted']).optional(),
           activity: z.enum(['idle', 'running', 'awaiting-permission', 'errored']).optional(),
+          /**
+           * The chat's status as the server decides it (spec/12 § Chat status) —
+           * what a listing shows. `activity` is the same said the old way, for
+           * readers that predate this.
+           */
+          chatStatus: ChatStatusInfo.optional(),
           pinned: z.boolean().optional(),
           pinnedAt: z.number().nullable().optional(),
           lastUpdated: z.number().optional(),

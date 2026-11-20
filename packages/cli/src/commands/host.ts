@@ -7,7 +7,7 @@
 import { Command } from 'commander';
 import { spawnSync } from 'node:child_process';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, getTransport, pickPath, run } from './_common.js';
+import { accountChatsPath, emitJson, emitText, getTransport, run } from './_common.js';
 
 export function registerHostCommands(program: Command): void {
   const host = program.command('host').description('Host management');
@@ -110,7 +110,7 @@ export function registerHostCommands(program: Command): void {
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
         const t = getTransport(opts);
-        const res = await t.get<{ chats: unknown[] }>(pickPath(t, '/chats', '/api/chats'));
+        const res = await t.get<{ chats: unknown[] }>(accountChatsPath(t, 'include'));
         if (opts.json) emitJson(res);
         else emitText(JSON.stringify(res, null, 2));
       });

@@ -12,7 +12,15 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, getTransport, parseLimit, pickPath, run } from './_common.js';
+import {
+  accountChatsPath,
+  emitJson,
+  emitText,
+  getTransport,
+  parseLimit,
+  pickPath,
+  run,
+} from './_common.js';
 import { resolveChatId } from './chatId.js';
 
 interface ChatSummary {
@@ -38,7 +46,7 @@ export function registerManageCommands(program: Command): void {
     .action(async (opts: CommonOpts & { active?: boolean }) => {
       await run(opts, async () => {
         const t = getTransport(opts);
-        const res = await t.get<{ chats: ChatSummary[] }>(pickPath(t, '/chats', '/api/chats'));
+        const res = await t.get<{ chats: ChatSummary[] }>(accountChatsPath(t, 'include'));
         const chats = opts.active
           ? res.chats.filter(
               (c) => c.chatStatus !== undefined && ACTIVE_STATES.has(c.chatStatus.state),

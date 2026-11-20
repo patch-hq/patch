@@ -906,7 +906,7 @@ const AccountsStrategyBody = z
 const ListChatsQuery = z
   .object({
     archived: z.enum(['only', 'include']).optional(),
-    /** The calling chat — correlates the account-wide listing RPC to the server. */
+    /** The calling chat, when there is one (the CLI in a terminal has none). */
     callerChatId: z.string().min(1).optional(),
   })
   .strict();
@@ -1202,17 +1202,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
 
   // --- Local CLI endpoints ---------------------------------------------------
 
-  app.get('/chats', async (req, reply) => {
+  // GET /chats/unreadable — chats this host could not load at all (their
+  // meta.json failed to read or parse), for `patch doctor`. Only this host can
+  // know, so it is answered here. It is NOT a chat listing: every list of chats
+  // and their status comes from the server (`/internal/chats`, spec/12 § Chat
+  // status), never from this host's own view.
+  app.get('/chats/unreadable', async (req, reply) => {
     const auth = checkAuth(req);
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
-    // A patch_delegate subagent (spec/02 § Native subagent dispatch) is never
-    // listed here — the CLI's `patch chats` is a user-facing surface, same as
-    // the sidebar.
-    return {
-      chats: opts.daemon.listAll().filter((c) => !c.subagent),
-      unreadable: opts.daemon.unreadableChats(),
-    };
+    return { unreadable: opts.daemon.unreadableChats() };
   });
 
   // GET /chats/folders?path=<partial> — host-mediated folder discovery for
@@ -3444,41 +3443,43 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!q.success) {
       return reply.code(400).send({ error: 'invalid_input', message: q.error.message });
     }
-    const selfHostId = opts.daemon!.hostId;
-    const local = new Map(
-      opts
-        .daemon!.listWithFilter(q.data.archived !== undefined ? { archived: q.data.archived } : {})
-        .map((c) => [
-          c.chatId,
-          {
-            chatId: c.chatId,
-            hostId: selfHostId,
-            name: c.name,
-            folder: c.folder,
-            status: c.status,
-            pinned: c.pinned,
-            pinnedAt: c.pinnedAt,
-            lastUpdated: c.lastUpdated,
-          },
-        ]),
-    );
-    // spec/03 § Cross-chat tools — every listed chat names the host it lives
-    // on, and the list spans the account: only the server sees every host's
-    // chats, so it is asked. NO FALLBACK to this host's own chats — a list
-    // that silently omits another host's chats reads as "there are none".
-    if (opts.listAccountChats && q.data.callerChatId !== undefined) {
-      const account = await opts.listAccountChats(
-        q.data.callerChatId,
+    // spec/03 § Cross-chat tools, spec/12 § Chat status — the list spans the
+    // account and every entry carries the server's status, so only the server
+    // can answer. NO FALLBACK to this host's own chats: a list that silently
+    // omits another host's chats, or shows this host's view of a status, reads
+    // as the truth when it is not. A caller outside a chat (the CLI in a
+    // terminal) names none.
+    if (!opts.listAccountChats) {
+      return reply
+        .code(503)
+        .send({ error: 'unavailable', message: 'listing chats: no Patch server to ask' });
+    }
+    const caller = q.data.callerChatId;
+    try {
+      const chats = await opts.listAccountChats(
+        caller ?? 'cli',
         q.data.archived !== undefined ? q.data.archived : undefined,
       );
-      // The server's entry for every chat: its status is the server's to decide
-      // (spec/12 § Chat status), so this host's own view never replaces it.
-      const merged = account;
-      toolLog({ tool: 'patch_list_chats', durationMs: Date.now() - start, ok: true });
-      return { chats: merged };
+      toolLog({
+        tool: 'patch_list_chats',
+        ...(caller !== undefined ? { callerChatId: caller } : {}),
+        durationMs: Date.now() - start,
+        ok: true,
+      });
+      return { chats };
+    } catch (err) {
+      toolLog({
+        tool: 'patch_list_chats',
+        ...(caller !== undefined ? { callerChatId: caller } : {}),
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'sdk_error',
+      });
+      return reply.code(502).send({
+        error: 'server_unreachable',
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
-    toolLog({ tool: 'patch_list_chats', durationMs: Date.now() - start, ok: true });
-    return { chats: [...local.values()] };
   });
 
   // patch_search_chats — answered by the server for the whole account; no

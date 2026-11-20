@@ -191,6 +191,16 @@ socket, which carries one endpoint per host-scoped control for that reason
 name this host, because the server owns what they change rather than the
 host: `hosts add`, `hosts rename`, `hosts remove` and `hosts replace`.
 
+Every list of chats the CLI prints — `patch list`, `chats list`, `host list`,
+`threads list` and the terminal chat browser — is the server's account-wide
+list, with the server's status for each chat (`12-error-and-offline.md` §
+Chat status). Over the local socket the host fetches it from the server
+(`/internal/chats`) and answers nothing from its own view; with no server
+link the command fails rather than showing this host's chats alone. A command
+run inside a chat names that chat; one run in a terminal needs none. The
+socket's `/chats/unreadable` lists only the chats this host could not load,
+for `patch doctor`.
+
 `--host` accepts a host name or a `hostId` prefix. An ambiguous or unknown
 value is an error listing the candidates.
 

@@ -58,6 +58,12 @@ describe('patch-tools MCP server — full client round-trip', () => {
         truncated: false,
       }),
       historyFromServer: async () => ({ events: [] }),
+      // patch_list_chats lists the server's account-wide list; stand in for it.
+      listAccountChats: async () =>
+        daemon
+          .listAll()
+          .filter((c) => !c.subagent)
+          .map((c) => ({ chatId: c.chatId, hostId: 'd1', name: c.name, folder: c.folder })),
     });
     await app.listen({ path: socketPath });
 

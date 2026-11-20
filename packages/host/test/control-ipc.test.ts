@@ -1020,32 +1020,31 @@ describe('control.ts error handler', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /chats — richer convenience shape.
+// GET /chats/unreadable — for `patch doctor` only; not a chat listing.
 
-describe('C1 Control IPC: GET /chats', () => {
-  it('401s unauthenticated, 503s with no host, 200s on success', async () => {
+describe('C1 Control IPC: GET /chats/unreadable', () => {
+  it('401s unauthenticated, 503s with no host, and reports only the unreadable chats', async () => {
     const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
+    await daemon.spawnChat({ folder });
     const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
     try {
-      const unauth = await app.inject({ method: 'GET', url: '/chats' });
+      const unauth = await app.inject({ method: 'GET', url: '/chats/unreadable' });
       expect(unauth.statusCode).toBe(401);
-
-      const ok = await app.inject({ method: 'GET', url: '/chats', headers: AUTH });
+      const ok = await app.inject({ method: 'GET', url: '/chats/unreadable', headers: AUTH });
       expect(ok.statusCode).toBe(200);
-      expect(ok.json().chats.map((c: { chatId: string }) => c.chatId)).toContain(chatId);
+      expect(ok.json()).toEqual({ unreadable: [] });
+      // The host's own chat listing is gone: lists come from the server.
+      const gone = await app.inject({ method: 'GET', url: '/chats', headers: AUTH });
+      expect(gone.statusCode).toBe(404);
     } finally {
       await app.close();
     }
-  });
-
-  it('503s when no host is wired', async () => {
-    const app = await buildControl({ localKey: LOCAL_KEY });
+    const noHost = await buildControl({ localKey: LOCAL_KEY });
     try {
-      const res = await app.inject({ method: 'GET', url: '/chats', headers: AUTH });
+      const res = await noHost.inject({ method: 'GET', url: '/chats/unreadable', headers: AUTH });
       expect(res.statusCode).toBe(503);
     } finally {
-      await app.close();
+      await noHost.close();
     }
   });
 });
@@ -2250,8 +2249,8 @@ describe('C1 Control IPC: POST /internal/spawn — remaining branches', () => {
   });
 });
 
-describe('C1 Control IPC: GET /internal/chats — 503 with no host', () => {
-  it('503s', async () => {
+describe('C1 Control IPC: GET /internal/chats — the server’s list', () => {
+  it('503s with no host, and with no server to ask', async () => {
     const app = await buildControl({ localKey: LOCAL_KEY });
     try {
       expect(
@@ -2260,39 +2259,72 @@ describe('C1 Control IPC: GET /internal/chats — 503 with no host', () => {
     } finally {
       await app.close();
     }
+    const { daemon, jobs, folder } = setup();
+    await daemon.spawnChat({ folder });
+    const noServer = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      // NO FALLBACK to this host's own chats.
+      const res = await noServer.inject({ method: 'GET', url: '/internal/chats', headers: AUTH });
+      expect(res.statusCode).toBe(503);
+    } finally {
+      await noServer.close();
+    }
   });
 
-  it('lists active by default; archived=only / include filter correctly; rejects a bad value', async () => {
+  it('returns the server’s entries with its status, passing the filter and the caller (or none)', async () => {
     const { daemon, jobs, folder } = setup();
-    const active = await daemon.spawnChat({ folder });
-    const archived = await daemon.spawnChat({ folder });
-    await daemon.setArchived(archived, true);
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    await daemon.spawnChat({ folder });
+    const asked: Array<[string, string | undefined]> = [];
+    const serverChats = [
+      { chatId: 'remote', hostId: 'other', chatStatus: { state: 'host_offline', since: 1 } },
+    ];
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      listAccountChats: async (source, archived) => {
+        asked.push([source, archived]);
+        return serverChats;
+      },
+    });
     try {
       const def = await app.inject({ method: 'GET', url: '/internal/chats', headers: AUTH });
       expect(def.statusCode).toBe(200);
-      expect(def.json().chats.map((c: { chatId: string }) => c.chatId)).toEqual([active]);
-
-      const only = await app.inject({
+      expect(def.json()).toEqual({ chats: serverChats });
+      await app.inject({
         method: 'GET',
-        url: '/internal/chats?archived=only',
+        url: '/internal/chats?archived=include&callerChatId=c1',
         headers: AUTH,
       });
-      expect(only.json().chats.map((c: { chatId: string }) => c.chatId)).toEqual([archived]);
-
-      const include = await app.inject({
-        method: 'GET',
-        url: '/internal/chats?archived=include',
-        headers: AUTH,
-      });
-      expect(include.json().chats).toHaveLength(2);
-
+      expect(asked).toEqual([
+        ['cli', undefined],
+        ['c1', 'include'],
+      ]);
       const bad = await app.inject({
         method: 'GET',
         url: '/internal/chats?archived=bogus',
         headers: AUTH,
       });
       expect(bad.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('502s, naming why, when the server cannot be asked', async () => {
+    const { daemon, jobs } = setup();
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      listAccountChats: async () => {
+        throw new Error('the server link is offline');
+      },
+    });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/internal/chats', headers: AUTH });
+      expect(res.statusCode).toBe(502);
+      expect(res.json().message).toMatch(/offline/);
     } finally {
       await app.close();
     }

@@ -244,6 +244,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
           folder: c.folder,
           status: c.status,
           activity: c.activity,
+          ...(c.chatStatus !== undefined ? { chatStatus: c.chatStatus } : {}),
           pinned: c.pinned,
           pinnedAt: c.pinnedAt,
           lastUpdated: c.lastUpdated,

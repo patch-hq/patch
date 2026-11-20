@@ -6,11 +6,13 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { emitJson, emitText, getTransport, parseLimit, run } from './_common.js';
+import { accountChatsPath, emitJson, emitText, getTransport, parseLimit, run } from './_common.js';
 
 interface ChatSummary {
   chatId: string;
   name?: string;
+  /** The server's status for the chat (spec/12 § Chat status). */
+  chatStatus?: { state: string };
 }
 
 const NAME_TO_ID: Record<string, string> = {
@@ -28,11 +30,12 @@ export function registerThreadsCommands(program: Command): void {
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
         const t = getTransport(opts);
-        const path = t.kind === 'uds' ? '/chats' : '/api/chats';
-        const res = await t.get<{ chats: ChatSummary[] }>(path);
+        const res = await t.get<{ chats: ChatSummary[] }>(accountChatsPath(t));
         const threads = res.chats.filter((c) => c.chatId.startsWith('thread_'));
         if (opts.json) emitJson({ threads });
-        else for (const c of threads) emitText(`${c.chatId}  ${c.name ?? ''}`);
+        else
+          for (const c of threads)
+            emitText(`${c.chatId}  ${c.chatStatus?.state ?? '-'}  ${c.name ?? ''}`);
       });
     });
 

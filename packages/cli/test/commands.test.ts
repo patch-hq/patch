@@ -524,10 +524,10 @@ test('auth login: the pairing payload for an http server carries s=http', async 
 
 // --- flat top-level management verbs (spec/17 § Management subcommands) ---
 
-test('list --json (flat): REST round-trips /api/chats', async () => {
+test('list --json (flat): REST round-trips /api/chats, archived chats included', async () => {
   await withSetup(
     (req) => {
-      if (req.url === '/api/chats' && req.method === 'GET')
+      if (req.url === '/api/chats?archived=include' && req.method === 'GET')
         return {
           status: 200,
           body: {
@@ -957,7 +957,7 @@ test('doctor --json: undeliveredCount is 0 when undelivered.jsonl is absent', as
 test('patch list (text): prints the full chatId', async () => {
   await withSetup(
     (req) => {
-      if (req.url === '/api/chats')
+      if (req.url === '/api/chats?archived=include')
         return {
           status: 200,
           body: { chats: [{ chatId: 'thread_speakers', status: 'active', name: 'speakers' }] },
@@ -1324,4 +1324,71 @@ test('chats move drafts a linked chat on the target host and prints its first me
       assert.match(r.stdout, /This continues "Plan"\./);
     },
   );
+});
+
+// spec/12 § Chat status: every list the CLI prints comes from the server's
+// account-wide list, with the server's status, never from the host's own view.
+test('host list, threads list, list and doctor over the host socket read the server list, not the host’s own', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'patch-cli-lists-'));
+  writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
+  const sock = join(dir, 'host.sock');
+  const seen: string[] = [];
+  const server: Server = createServer((req, res) => {
+    const url = req.url ?? '';
+    seen.push(url);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    if (url.startsWith('/internal/chats')) {
+      res.end(
+        JSON.stringify({
+          chats: [
+            { chatId: 'thread_manager', name: 'Manager', chatStatus: { state: 'running' } },
+            { chatId: 'c1', hostId: 'other-host', chatStatus: { state: 'host_offline' } },
+          ],
+        }),
+      );
+    } else if (url === '/chats/unreadable') {
+      res.end(JSON.stringify({ unreadable: [{ chatId: 'bad', path: '/x', error: 'boom' }] }));
+    } else {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'not found' }));
+    }
+  });
+  await new Promise<void>((ok) => server.listen(sock, ok));
+  try {
+    // A terminal, not a chat: no PATCH_CHAT_ID, and none is needed.
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATCH_HOME: dir,
+      PATCH_DAEMON_SOCKET: sock,
+      PATCH_DAEMON_LOCAL_KEY: 'k',
+    };
+    delete env['PATCH_CHAT_ID'];
+
+    const threads = await runCli(['threads', 'list'], env);
+    assert.equal(threads.code, 0, `stderr=${threads.stderr}`);
+    assert.match(threads.stdout, /thread_manager {2}running {2}Manager/);
+    assert.equal(seen.at(-1), '/internal/chats');
+
+    const host = await runCli(['host', 'list', '--json'], env);
+    assert.equal(host.code, 0, `stderr=${host.stderr}`);
+    assert.equal(seen.at(-1), '/internal/chats?archived=include');
+    assert.equal(JSON.parse(host.stdout).chats[1].chatStatus.state, 'host_offline');
+
+    const active = await runCli(['list', '--active', '--json'], env);
+    assert.equal(active.code, 0, `stderr=${active.stderr}`);
+    assert.deepEqual(
+      JSON.parse(active.stdout).chats.map((c: { chatId: string }) => c.chatId),
+      ['thread_manager'],
+    );
+
+    // Inside a chat, the calling chat is named.
+    const inChat = await runCli(['threads', 'list'], { ...env, PATCH_CHAT_ID: 'chat-9' });
+    assert.equal(inChat.code, 0, `stderr=${inChat.stderr}`);
+    assert.equal(seen.at(-1), '/internal/chats?callerChatId=chat-9');
+
+    assert.equal(seen.includes('/chats'), false);
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
