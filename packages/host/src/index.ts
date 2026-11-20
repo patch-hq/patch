@@ -1395,6 +1395,8 @@ async function startHost(
       serverQueue: true,
       // Script and gate fires get their trigger event (spec/08).
       scriptPayload: true,
+      // A turn that met a limit is said on its end; the server reads the account (spec/12).
+      limitFacts: true,
       audioRelayHost: config.audio.relayHost,
       backends: [
         {
@@ -3363,15 +3365,22 @@ async function startHost(
         }
         createSpecialThreads();
         announceSpecialThreads();
+        // Every special thread carries on from the server's high-water mark,
+        // or the server refuses its new entries as clashing with ones it holds.
+        const MANAGER_THREAD: SpecialThreadId = 'thread_manager';
+        const nextSeqs = event.nextSeqs ?? { [MANAGER_THREAD]: event.nextSeq };
+        for (const [chatId, nextSeq] of Object.entries(nextSeqs)) {
+          if (chatId !== MANAGER_THREAD) daemon.continueFrom(chatId, nextSeq);
+        }
         daemon
-          .handOverThread('thread_manager', {
-            nextSeq: event.nextSeq,
+          .handOverThread(MANAGER_THREAD, {
+            nextSeq: nextSeqs[MANAGER_THREAD] ?? event.nextSeq,
             fromHostName: event.fromHostName,
             toHostName: event.toHostName,
             message: event.message,
           })
           .catch((err) => logger.error({ err }, 'manager: handover failed'));
-        logger.info({ epoch: event.epoch, nextSeq: event.nextSeq }, 'manager: home moved here');
+        logger.info({ epoch: event.epoch, nextSeqs }, 'manager: home moved here');
         return;
       }
       if (event.type === 'host.set_manager') {
@@ -5210,21 +5219,21 @@ async function startHost(
     path: join(config.patchHome, 'delegate-record-import.json'),
     logger,
     // Every subagent on the host, loaded or not: one that finished long ago
-    // still needs its transcript readable from the server.
-    listChats: () =>
-      daemon
-        .listAll()
-        .filter((c) => c.subagent !== undefined)
-        .map((c) => c.chatId),
+    // still needs its transcript readable from the server. Read from metas,
+    // so listing them loads none.
+    listChats: () => daemon.subagentIds(),
+    // Read from disk without loading the subagent (spec/02 § Chat loading).
     recordOf: (chatId) => {
       try {
-        return daemon.recordForImport(chatId);
+        return daemon.delegateRecordForImport(chatId);
       } catch (err) {
         if (err instanceof ChatNotFoundError) return null;
         throw err;
       }
     },
     parentOf: (chatId) => daemon.delegateParentOf(chatId),
+    // Paced, so a few hundred old subagents do not land in one burst at startup.
+    pauseMs: 250,
     send: (event) => link.send(event),
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });

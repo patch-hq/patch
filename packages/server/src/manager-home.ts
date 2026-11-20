@@ -1,8 +1,8 @@
 // Changing the Manager's home host (spec/06 § Changing home).
 //
 // The user chooses the home; it never moves by itself. A change is a visible
-// handover: the new home continues the thread's record from the server's
-// highest stored `seq`, and the thread's recent conversation reaches its fresh
+// handover: the new home continues every special thread's record from the
+// server's high-water mark for it (Speakers as well as the Manager), and the thread's recent conversation reaches its fresh
 // provider session only as an ordinary message the user has seen and approved.
 
 import { headCodePoints, tailCodePoints, SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
@@ -21,7 +21,7 @@ export interface ManagerHomeDeps {
     Registry,
     'managerHostId' | 'isRegisteredHost' | 'hostName' | 'changeManagerHome' | 'managerHandover'
   >;
-  log: Pick<ChatLogStore, 'read'>;
+  log: Pick<ChatLogStore, 'read' | 'highWater'>;
   /** How many messages of the conversation the draft carries. */
   contextWindow: () => number;
   sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
@@ -57,10 +57,12 @@ export class ManagerHome {
   /** Make `toHostId` the home, with the user's approved `message` (empty to send none). */
   change(toHostId: string, message: string): void {
     const from = this.check(toHostId);
-    const events = this.deps.log.read(SPECIAL_THREAD_IDS.manager, -1);
-    const last = events.at(-1) as { seq: number } | undefined;
+    const nextSeqs: Record<string, number> = {};
+    for (const chatId of Object.values(SPECIAL_THREAD_IDS)) {
+      nextSeqs[chatId] = this.deps.log.highWater(chatId) + 1;
+    }
     this.deps.registry.changeManagerHome(toHostId, {
-      nextSeq: last ? last.seq + 1 : 0,
+      nextSeqs,
       fromHostName: this.deps.registry.hostName(from) ?? from,
       toHostName: this.deps.registry.hostName(toHostId) ?? toHostId,
       message,
@@ -85,7 +87,8 @@ export class ManagerHome {
       type: 'host.manager_handover',
       hostId: h.hostId,
       epoch: h.epoch,
-      nextSeq: h.nextSeq,
+      nextSeq: h.nextSeqs[SPECIAL_THREAD_IDS.manager] ?? 0,
+      nextSeqs: h.nextSeqs,
       fromHostName: h.fromHostName,
       toHostName: h.toHostName,
       message: h.message,

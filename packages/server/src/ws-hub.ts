@@ -2038,6 +2038,11 @@ export class WsHub {
     }
   }
 
+  /** Does this host report a turn that met a limit as a fact on its end (`chat.turn_ended.limit`)? */
+  hostLimitFacts(hostId: string): boolean {
+    return this.lastHostReport.get(hostId)?.limitFacts === true;
+  }
+
   /** Does this host say it takes queued messages from the server? */
   hostServerQueue(hostId: string): boolean {
     return this.lastHostReport.get(hostId)?.serverQueue === true;

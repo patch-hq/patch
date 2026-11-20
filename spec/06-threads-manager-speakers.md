@@ -86,7 +86,8 @@ What sits in these folders is the thread's own working state: its `CLAUDE.md`, a
 ### Changing home
 
 Changing the home host is a visible handover. The new home continues each
-thread's record from the server's highest stored `seq` under the same chat id.
+thread's record, Speakers as well as the Manager, from the server's high-water
+mark for that thread under the same chat id.
 The provider session stays on the old host, so the new home starts a fresh one,
 and context carries over only as the thread's next message, shown to the user
 before it is sent: Patch drafts a summary of the thread's recent conversation,
@@ -237,9 +238,11 @@ edits or clears before confirming (`PUT /api/manager/home` `{hostId, message}`).
 
 The server records the change, sends `host.set_manager` naming the new home to
 every host, and sends the new home `host.manager_handover`. The new home creates
-the threads, carries the record on from the server's highest stored `seq` under
-the same chat id, writes a divider ("Home moved · A to B") into the transcript,
-and sends `message` as an ordinary message in the thread. The provider session
+the threads and carries each one's record on under the same chat id from the
+server's high-water mark for it (`nextSeqs`, by thread id; without it the server
+would refuse the new home's entries as clashing with ones it holds). In the
+Manager it writes a divider ("Home moved · A to B") into the transcript and sends
+`message` as an ordinary message. The provider session
 stays on the old host, so the new one starts fresh and nothing reaches the model
 unseen. A host that was away when told is told again when it attaches and acts on
 each change once (`epoch`). The old home stops writing the threads, or does when

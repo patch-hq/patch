@@ -856,7 +856,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   updateControl.setAutoUpdate(
     () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
   );
+  // A chat stopped on a limit or a sign-in takes its status from the state of
+  // the account it ran on (spec/12 § Limits and sign-in).
+  chatRegistry.setAccounts({
+    state: (accountId) => accountSettings?.accountState(accountId),
+    hostLimitFacts: (hostId) => wsHub.hostLimitFacts(hostId),
+  });
   if (accountSettings) {
+    accountSettings.onAccountStates(() => chatRegistry.accountStatesChanged());
     accountSettings.startCredentialRefresh();
     app.addHook('onClose', async () => accountSettings.close());
     hostLink.onEvent((event: WireEvent) => accountSettings.handleHostEvent(event));

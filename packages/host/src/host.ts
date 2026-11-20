@@ -59,6 +59,8 @@ export interface HostDescriptionInput {
   serverQueue?: boolean | undefined;
   /** This host hands a script fire its trigger event (`PATCH_PAYLOAD_FILE`). */
   scriptPayload?: boolean | undefined;
+  /** Reports a turn that met a limit as a fact on its end (`chat.turn_ended.limit`). */
+  limitFacts?: boolean | undefined;
   /**
    * Where the server can reach this host's own audio WSS DIRECTLY
    * (`host.host.audioRelayHost`) — an optional latency optimisation, not a
@@ -152,6 +154,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     runsManager: input.runsManager,
     ...(input.serverQueue !== undefined ? { serverQueue: input.serverQueue } : {}),
     ...(input.scriptPayload !== undefined ? { scriptPayload: input.scriptPayload } : {}),
+    ...(input.limitFacts !== undefined ? { limitFacts: input.limitFacts } : {}),
     ...(input.audioRelayHost !== undefined ? { audioRelayHost: input.audioRelayHost } : {}),
     backends: input.backends,
     components: input.components,

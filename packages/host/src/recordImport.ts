@@ -52,6 +52,11 @@ export interface RecordImportOptions {
   ackTimeoutMs?: number;
   /** Yields between chats; a test passes a synchronous one. */
   defer?: (fn: () => void) => void;
+  /**
+   * How long to wait between chats, so a pass over many chats at startup does
+   * not spike memory or the link. Ignored when `defer` is given.
+   */
+  pauseMs?: number;
 }
 
 /** Split a chat's entries into frames no bigger than `RECORD_FRAME_BYTES`. */
@@ -123,7 +128,16 @@ export class RecordImport {
   }
 
   private schedule(): void {
-    const defer = this.opts.defer ?? ((fn: () => void) => setImmediate(fn));
+    const pause = this.opts.pauseMs ?? 0;
+    const defer =
+      this.opts.defer ??
+      ((fn: () => void) => {
+        if (pause <= 0) {
+          setImmediate(fn);
+          return;
+        }
+        setTimeout(fn, pause).unref();
+      });
     defer(() => this.next());
   }
 

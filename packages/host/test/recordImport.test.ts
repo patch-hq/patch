@@ -1,6 +1,6 @@
 // The one-time import of every chat into the server's record (spec/01 § Chat record).
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -108,6 +108,30 @@ describe('RecordImport', () => {
         done: true,
       },
     ]);
+  });
+
+  it('waits pauseMs between chats', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setImmediate'] });
+    try {
+      const imp = new RecordImport({
+        path,
+        logger: silent,
+        listChats: () => ['a', 'b'],
+        recordOf: (chatId) => [say(chatId, 0)],
+        send: (e) => sent.push(e),
+        pauseMs: 250,
+      });
+      imp.start();
+      imp.onAck('a');
+      expect(chatsOf(sent)).toEqual(['a']);
+      await vi.advanceTimersByTimeAsync(249);
+      expect(chatsOf(sent)).toEqual(['a']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(chatsOf(sent)).toEqual(['a', 'b']);
+      imp.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sends a long chat as several frames, and only the last says it is done', () => {
