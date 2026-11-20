@@ -1,9 +1,9 @@
 // PatchWsClient integration tests against a minimal local WS server.
 //
 // Focus: the attach path (G1-15 regression). attachChat must (a) track the
-// chat for reconnect replay and (b) immediately emit a `chat.replay` frame
-// when already connected, so a surface joining a pre-existing chat renders the
-// existing wire stream rather than an empty pane.
+// chat for reconnect catch-up and (b) immediately ask the server for its
+// history (`chat.history_request`) when already connected, so a surface joining
+// a pre-existing chat renders the existing stream rather than an empty pane.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,7 +64,7 @@ async function waitFor(pred: () => boolean, timeoutMs = 1000): Promise<void> {
   }
 }
 
-test('attachChat emits a chat.replay frame when connected (attach path renders existing stream)', async () => {
+test('attachChat asks the server for history when connected (attach path renders existing stream)', async () => {
   const h = await startServer();
   const client = new PatchWsClient({ url: h.url, bearer: null, noAutoReconnect: true });
   try {
@@ -74,36 +74,37 @@ test('attachChat emits a chat.replay frame when connected (attach path renders e
 
     client.attachChat('c_pre_existing');
 
-    // Attaching a pre-existing chat must produce a chat.replay request so the
-    // server re-streams the chat's history to this surface.
+    // Attaching a pre-existing chat asks the server for its history.
     await waitFor(() =>
-      h.received.some((e) => e.type === 'chat.replay' && e.chatId === 'c_pre_existing'),
+      h.received.some((e) => e.type === 'chat.history_request' && e.chatId === 'c_pre_existing'),
     );
-    const replay = h.received.find(
-      (e) => e.type === 'chat.replay' && e.chatId === 'c_pre_existing',
+    const ask = h.received.find(
+      (e) => e.type === 'chat.history_request' && e.chatId === 'c_pre_existing',
     );
-    assert.ok(replay && replay.type === 'chat.replay');
-    // Never seen any seq for this chat → replay from -1 (all events incl. seq 0).
-    assert.equal(replay.fromSeq, -1);
+    assert.ok(ask && ask.type === 'chat.history_request');
+    // Never seen any seq for this chat → everything after -1 (seq 0 included).
+    assert.equal(ask.after, -1);
   } finally {
     await client.close();
     await h.close();
   }
 });
 
-test('attachChat before connect defers the replay until the socket opens', async () => {
+test('attachChat before connect defers the history read until the socket opens', async () => {
   const h = await startServer();
   const client = new PatchWsClient({ url: h.url, bearer: null, noAutoReconnect: true });
   try {
     // Track the chat while still offline — no frame can be sent yet.
     client.attachChat('c_early');
     assert.equal(
-      h.received.some((e) => e.type === 'chat.replay'),
+      h.received.some((e) => e.type === 'chat.history_request'),
       false,
     );
-    // On connect, openOnce replays every tracked chat.
+    // On connect, openOnce catches up every tracked chat.
     await client.connect();
-    await waitFor(() => h.received.some((e) => e.type === 'chat.replay' && e.chatId === 'c_early'));
+    await waitFor(() =>
+      h.received.some((e) => e.type === 'chat.history_request' && e.chatId === 'c_early'),
+    );
   } finally {
     await client.close();
     await h.close();
@@ -174,7 +175,7 @@ test('a post-connect socket drop does not crash; client reconnects', async () =>
   }
 });
 
-test('a reconnect replays each tracked chat from the last seq seen, not from the start', async () => {
+test('a reconnect catches each tracked chat up from the last seq seen, not from the start', async () => {
   const h = await startServer();
   const client = new PatchWsClient({
     url: h.url,
@@ -185,7 +186,7 @@ test('a reconnect replays each tracked chat from the last seq seen, not from the
   try {
     client.trackChat('c1');
     await client.connect();
-    await waitFor(() => h.received.some((e) => e.type === 'chat.replay'));
+    await waitFor(() => h.received.some((e) => e.type === 'chat.history_request'));
     h.push({
       type: 'chat.message',
       chatId: 'c1',
@@ -196,9 +197,51 @@ test('a reconnect replays each tracked chat from the last seq seen, not from the
     // Let the client take the event in before the socket drops.
     await new Promise((r) => setTimeout(r, 100));
     h.dropClient();
-    await waitFor(() => h.received.filter((e) => e.type === 'chat.replay').length >= 2, 2000);
-    const replays = h.received.filter((e) => e.type === 'chat.replay');
-    assert.equal((replays[1] as { fromSeq: number }).fromSeq, 7);
+    await waitFor(
+      () => h.received.filter((e) => e.type === 'chat.history_request').length >= 2,
+      2000,
+    );
+    const asks = h.received.filter((e) => e.type === 'chat.history_request');
+    assert.equal((asks[1] as { after: number }).after, 7);
+  } finally {
+    await client.close();
+    await h.close();
+  }
+});
+
+test('history pages reach listeners as frames, and the next page is asked for while more remain', async () => {
+  const h = await startServer();
+  const client = new PatchWsClient({ url: h.url, bearer: null, noAutoReconnect: true });
+  const got: number[] = [];
+  try {
+    client.on('chat.message', (e) => got.push(e.seq));
+    client.attachChat('c_paged');
+    await client.connect();
+    await waitFor(() => h.received.some((e) => e.type === 'chat.history_request'));
+    const page = (seqs: number[], more: boolean): WireEvent =>
+      ({
+        type: 'chat.history',
+        requestId: 'r',
+        chatId: 'c_paged',
+        entries: seqs.map((seq) => ({
+          type: 'chat.message',
+          chatId: 'c_paged',
+          role: 'assistant',
+          content: `m${seq}`,
+          seq,
+        })),
+        more,
+        through: 3,
+        pending: [],
+        queued: [],
+      }) as WireEvent;
+    h.push(page([0, 1], true));
+    await waitFor(() => h.received.filter((e) => e.type === 'chat.history_request').length >= 2);
+    const next = h.received.filter((e) => e.type === 'chat.history_request')[1];
+    assert.equal((next as { after: number }).after, 1);
+    h.push(page([2, 3], false));
+    await waitFor(() => got.length === 4);
+    assert.deepEqual(got, [0, 1, 2, 3]);
   } finally {
     await client.close();
     await h.close();

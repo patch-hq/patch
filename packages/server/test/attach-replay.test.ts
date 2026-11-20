@@ -3,10 +3,10 @@
 //
 // Reproduces the reviewer's defect: attaching to a PRE-EXISTING chat (the
 // `patch attach <id>` path) must render the existing wire stream. Previously
-// the attach path never tracked the chat or issued a `chat.replay`, so the
+// the attach path never tracked the chat or asked for its history, so the
 // event pane stayed empty. `PatchWsClient.attachChat()` — called by ChatView
-// on mount — now tracks the chat and requests a replay; this test proves the
-// replayed assistant message actually arrives at the attaching surface.
+// on mount — tracks the chat and asks the server for its history; this test
+// proves the assistant message actually arrives at the attaching surface.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -60,16 +60,6 @@ class WiredHostLink implements HostLink {
           localId: event.localId,
         });
         return;
-      case 'chat.replay': {
-        const surfaceId = event.forSurfaceId;
-        this.daemon.replayChat(event.chatId, event.fromSeq, (ev) => {
-          const tagged = surfaceId
-            ? ({ ...(ev as object), forSurfaceId: surfaceId } as WireEvent)
-            : ev;
-          this.emit(tagged);
-        });
-        return;
-      }
       default:
       // ignored
     }
@@ -377,9 +367,11 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
     const addedSeqs = added.flatMap((r) => (r.rec.k === 'event' ? [r.seq] : []));
     expect(Math.min(...addedSeqs)).toBeGreaterThan(Math.max(...firstEvents.map((e) => e.seq)));
 
-    // The replay the surface gets comes straight from the log.
-    client.send({ type: 'chat.replay', chatId, fromSeq: -1 });
-    await client.waitFor('chat.branches', (e) => e.chatId === chatId);
+    // The surface reads both turns back from the server's record.
+    client.history(chatId);
+    const page = await client.waitFor('chat.history', (e) => e.chatId === chatId);
+    const read = page.entries.map((e) => (e as { seq: number }).seq);
+    expect(read).toEqual(seqs);
 
     await client.close();
     await built.app.close();

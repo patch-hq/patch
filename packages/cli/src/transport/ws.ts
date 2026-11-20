@@ -1,12 +1,16 @@
 // WebSocket client used by the TUI. Wraps @patch/wire/test-client with
-// reconnect-with-backoff and per-chat replay on reconnect.
+// reconnect-with-backoff and per-chat history catch-up on reconnect.
 //
-// On reconnect: re-sends `hello`, then for every chatId we have seen we
-// emit `chat.replay` from `lastSeq` so we don't miss events. NO FALLBACKS:
-// a fatal handshake error surfaces.
+// On reconnect: re-sends `hello`, then for every chatId we have seen asks the
+// server for its history after `lastSeq` (`chat.history_request`, spec/03 §
+// Chat history), so we don't miss events. Each page's entries reach listeners
+// as if they had arrived live. NO FALLBACKS: a fatal handshake error surfaces.
 
 import { WireTestClient } from '@patch/wire/test-client';
 import type { ClientType, WireEvent, WireEventType } from '@patch/wire';
+
+/** Entries per history page while catching a chat up (the server's maximum). */
+const HISTORY_PAGE = 500;
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 
@@ -104,20 +108,21 @@ export class PatchWsClient {
   }
 
   /**
-   * Track a chat AND immediately request a replay of its existing stream.
+   * Track a chat AND immediately ask the server for its existing history.
    *
    * The spawn path renders live because the surface is the one driving the
    * turn — events arrive as the host produces them. The ATTACH/resume/browse
    * paths join a chat that is already producing (or has already produced)
-   * output, so without an explicit replay the event pane would stay empty
-   * until the next live event. Adding the chat to `seenChatIds` also means any
-   * future reconnect re-replays it via `openOnce`. NO FALLBACK: if we're not
-   * connected yet, the chat is still tracked and the replay fires on connect.
+   * output, so without an explicit history read the event pane would stay
+   * empty until the next live event. Adding the chat to `seenChatIds` also
+   * means any future reconnect catches it up via `openOnce`. NO FALLBACK: if
+   * we're not connected yet, the chat is still tracked and the read fires on
+   * connect.
    */
   attachChat(chatId: string): void {
     this.seenChatIds.add(chatId);
     if (this.client && this.state === 'connected') {
-      this.replayChat(this.client, chatId);
+      this.readHistory(this.client, chatId);
     }
   }
 
@@ -183,7 +188,7 @@ export class PatchWsClient {
     // late error AFTER connect. WireTestClient surfaces both via onError/onClose
     // instead of letting Node crash on an unhandled 'error'. We treat either as
     // a disconnect: drop the dead client and schedule a reconnect, which
-    // re-wires forwarders and re-replays every seen chat so the stream resumes.
+    // re-wires forwarders and catches up every seen chat so the stream resumes.
     const onDisconnect = (): void => {
       if (this.client !== client) return; // already replaced/closed
       this.rememberSeqs(client);
@@ -201,13 +206,15 @@ export class PatchWsClient {
     // against the live client — not only in the pre-connect window.
     this.forwardedTypes.clear();
     this.wireForwarders();
+    // A history page's entries reach the listeners through the client; here
+    // only the paging.
+    client.on('chat.history', (page) => this.onHistory(client, page));
     this.setState('connected');
 
-    // Replay per chat we've already seen (best-effort — server returns
-    // chat.error if the chat doesn't exist, which is fine). Runs AFTER
-    // forwarders are wired so replayed events actually dispatch to listeners.
+    // Catch up each chat we've already seen. Runs AFTER forwarders are wired
+    // so the entries actually dispatch to listeners.
     for (const chatId of this.seenChatIds) {
-      this.replayChat(client, chatId);
+      this.readHistory(client, chatId);
     }
 
     // Auto-reconnect on close.
@@ -227,11 +234,27 @@ export class PatchWsClient {
     }
   }
 
-  /** Ask for a chat's events after the last seq seen on any socket, or all of them. */
-  private replayChat(client: WireTestClient, chatId: string): void {
-    const seq = client.lastSeq(chatId);
-    const prior = this.lastSeqByChat.get(chatId);
-    client.replay(chatId, Math.max(seq ?? -1, prior ?? -1));
+  /** The highest seq seen for a chat on any socket; -1 for none. */
+  private cursor(client: WireTestClient, chatId: string): number {
+    return Math.max(client.lastSeq(chatId) ?? -1, this.lastSeqByChat.get(chatId) ?? -1);
+  }
+
+  /** Ask the server for a chat's entries after the last seq seen on any socket, or all of them. */
+  private readHistory(client: WireTestClient, chatId: string): void {
+    client.history(chatId, { after: this.cursor(client, chatId), limit: HISTORY_PAGE });
+  }
+
+  /**
+   * One page of a chat's history. The client delivers each entry to the
+   * listeners as a frame of its own (and counts its seq); this asks for the
+   * next page while more remain.
+   */
+  private onHistory(
+    client: WireTestClient,
+    page: Extract<WireEvent, { type: 'chat.history' }>,
+  ): void {
+    if (this.client !== client || page.branchId !== undefined) return;
+    if (page.more) this.readHistory(client, page.chatId);
   }
 
   private scheduleReconnect(): void {

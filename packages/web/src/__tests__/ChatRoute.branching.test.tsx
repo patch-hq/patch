@@ -137,7 +137,7 @@ describe('editing a user turn forks a track', () => {
   });
 
   const WS = () =>
-    ({ send: vi.fn(), requestReplay() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+    ({ send: vi.fn(), requestHistory() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
 
   it('the pencil carries the turn into the MAIN composer, keeping every control', () => {
     seedChat('c-fork', [
@@ -270,10 +270,10 @@ describe('editing a user turn forks a track', () => {
   });
 
   it('an edit keeps the new turn below the turns before it — no wipe and replay of the transcript', async () => {
-    const requestReplay = vi.fn();
+    const requestHistory = vi.fn();
     const ws = {
       send: vi.fn(),
-      requestReplay,
+      requestHistory,
     } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
     seedChat('c-fork', [
       { seq: 0, kind: 'message', role: 'user', content: 'first ask', at: 0 },
@@ -308,7 +308,7 @@ describe('editing a user turn forks a track', () => {
     );
     await waitFor(() => expect(screen.getByText('ask again')).toBeTruthy());
     // (opening the chat asks once, without force; the stale-cache refetch is the forced one)
-    expect(requestReplay).not.toHaveBeenCalledWith('c-fork', { force: true });
+    expect(requestHistory).not.toHaveBeenCalledWith('c-fork', { force: true });
     const contents = (useChatStore.getState().timelines['c-fork'] ?? []).map((e) => e.content);
     expect(contents).toEqual(['first ask', 'first answer', 'ask again']);
   });
@@ -508,10 +508,10 @@ describe('switching between tracks at a fork point', () => {
 
   it('the ‹ arrow switches to the previous track', () => {
     const send = vi.fn();
-    const requestReplay = vi.fn();
+    const requestHistory = vi.fn();
     seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
     useChatStore.getState().applyEvent(TWO_TRACKS);
-    renderChat('c-fork', { send, requestReplay } as unknown as Parameters<
+    renderChat('c-fork', { send, requestHistory } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
 
@@ -524,14 +524,14 @@ describe('switching between tracks at a fork point', () => {
     expect(useChatStore.getState().timelines['c-fork']).toEqual([]);
     // The cleared timeline always recomputes fromSeq -1 — forcing past the
     // dedup cursor is the only way the new track's history actually arrives
-    // (see api/ws.ts's requestReplay: without `force` this collides with the
+    // (see api/ws.ts's requestHistory: without `force` this collides with the
     // cursor cached by the chat's very first load and is silently dropped).
-    expect(requestReplay).toHaveBeenCalledWith('c-fork', { force: true });
+    expect(requestHistory).toHaveBeenCalledWith('c-fork', { force: true });
   });
 
   it('the edited turn on the new track carries the switcher too, and ‹ returns to the original', () => {
     const send = vi.fn();
-    const requestReplay = vi.fn();
+    const requestHistory = vi.fn();
     // The replacement is logged with a fresh seq (9), not the seq (4) of the
     // turn it replaced, which is no longer on this track.
     seedChat('c-fork', [
@@ -540,7 +540,7 @@ describe('switching between tracks at a fork point', () => {
       { seq: 9, kind: 'message', role: 'user', content: 'ask one, rephrased', at: 0 },
     ]);
     useChatStore.getState().applyEvent(TWO_TRACKS);
-    renderChat('c-fork', { send, requestReplay } as unknown as Parameters<
+    renderChat('c-fork', { send, requestHistory } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const switchers = screen.getAllByTestId('track-switcher');
@@ -572,7 +572,7 @@ describe('switching between tracks at a fork point', () => {
 
 describe('Retry on the message hover button and context menu', () => {
   const wsWith = (send: ReturnType<typeof vi.fn>) =>
-    ({ send, requestReplay() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+    ({ send, requestHistory() {} }) as unknown as Parameters<typeof ChatRoute>[0]['ws'];
 
   it('hover button on a settled user turn resends its text as a new turn', () => {
     const send = vi.fn();

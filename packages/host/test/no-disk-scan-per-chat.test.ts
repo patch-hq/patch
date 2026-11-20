@@ -3,14 +3,13 @@
 // `metaStore.list()` reads every chat's file. On reconnect the host replays
 // and re-emits state for every chat, so a `list()` anywhere on that path is
 // chats × chats file reads — it froze a 9,000-chat host twice (countRunningDelegates,
-// then listDelegates via replayChat). `list()` is for boot hydration only.
+// then listDelegates). `list()` is for boot hydration only.
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
@@ -47,15 +46,10 @@ describe('per-chat paths do not scan every chat on disk', () => {
     daemon.chatState.get(child)!.subagent = { parentChatId: parent, label: 'worker' };
 
     listCalls = 0;
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(parent, -1, (e) => replayed.push(e));
     const delegates = daemon.listDelegates(parent);
 
     expect(delegates.map((d) => d.id)).toEqual([child]);
     expect(delegates[0]!.status).toBe('running');
-    expect(
-      listCalls,
-      'replay/state build must use in-memory chat states, not metaStore.list()',
-    ).toBe(0);
+    expect(listCalls, 'state build must use in-memory chat states, not metaStore.list()').toBe(0);
   });
 });

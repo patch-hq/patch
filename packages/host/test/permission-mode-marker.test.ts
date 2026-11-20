@@ -16,6 +16,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { permissionModeChangeLine } from '../src/permissionMode.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -124,8 +125,7 @@ describe('the record survives the host that wrote it', () => {
     const chatId = await daemon.spawnChat({ folder });
     daemon.setChatPermissionMode(chatId, 'bypassPermissions');
 
-    const replayed: WireEvent[] = [];
-    restart(home).replayChat(chatId, -1, (e) => replayed.push(e));
+    const replayed = readBack(restart(home), chatId);
 
     expect(markers(replayed).map((m) => m.permissionModeChange)).toEqual(['bypassPermissions']);
   });
@@ -135,8 +135,7 @@ describe('the record survives the host that wrote it', () => {
     const chatId = await daemon.spawnChat({ folder });
     daemon.setChatPermissionMode(chatId, 'plan');
 
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+    const replayed = readBack(daemon, chatId);
 
     expect(markers(replayed)).toHaveLength(1);
   });
@@ -148,8 +147,7 @@ describe('the record survives the host that wrote it', () => {
     daemon.setChatPermissionMode(chatId, 'plan');
     const seq = markers(events)[0]?.seq as number;
 
-    const replayed: WireEvent[] = [];
-    restart(home).replayChat(chatId, seq, (e) => replayed.push(e));
+    const replayed = readBack(restart(home), chatId, { fromSeq: seq });
 
     expect(markers(replayed)).toHaveLength(0);
   });
@@ -162,8 +160,7 @@ describe('the record survives the host that wrote it', () => {
     await daemon.sendInput({ chatId, message: 'second', localId: 'L1' });
     await new Promise((r) => setTimeout(r, 30));
 
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+    const replayed = readBack(daemon, chatId);
 
     const shape = replayed
       .filter((e): e is ChatMessageEvent => e.type === 'chat.message')

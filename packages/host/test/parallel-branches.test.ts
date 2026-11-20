@@ -15,6 +15,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
@@ -66,9 +67,7 @@ function setup(
 }
 
 function replay(daemon: Daemon, chatId: string, branchId?: string): WireEvent[] {
-  const out: WireEvent[] = [];
-  daemon.replayChat(chatId, -1, (e) => out.push(e), branchId);
-  return out;
+  return readBack(daemon, chatId, branchId !== undefined ? { branchId } : {});
 }
 
 function userMessages(events: WireEvent[]): Array<{ seq: number; content: string }> {

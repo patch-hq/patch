@@ -193,7 +193,7 @@ describe('PatchWs zombie-socket liveness watchdog', () => {
   });
 });
 
-describe('PatchWs chat.replay cursor (I1-d1/d2)', () => {
+describe('PatchWs history cursor (I1-d1/d2)', () => {
   beforeEach(() => {
     FakeWS.instances = [];
     (globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
@@ -204,13 +204,12 @@ describe('PatchWs chat.replay cursor (I1-d1/d2)', () => {
     useChatStore.getState()._reset();
   });
 
-  it('requests fromSeq=-1 for the open chat with no rendered timeline (so seq 0 is not skipped)', async () => {
+  it('follows the open chat from -1 when it has no rendered timeline (so seq 0 is not skipped)', async () => {
     // A chat from GET /api/chats carries no stream state — emptyRow seeds
-    // lastSeq:0 but the timeline is empty. chat.replay.fromSeq is EXCLUSIVE,
-    // so replaying from 0 would drop the seq-0 user message (spec/12: pass -1
-    // when the surface has seen nothing; 0 deliberately skips seq 0).
-    // The chat is the OPEN one because a metadata-only roster row is no longer
-    // replayed on connect at all (spec/12 § Cold start loads metadata only).
+    // lastSeq:0 but the timeline is empty. The feed's `after` is EXCLUSIVE,
+    // so following from 0 would drop the seq-0 user message: -1 when the
+    // surface has seen nothing. The chat is the OPEN one because a
+    // metadata-only roster row is not followed on connect at all.
     useChatStore.getState().hydrate([
       {
         chatId: 'c-cold',
@@ -231,15 +230,17 @@ describe('PatchWs chat.replay cursor (I1-d1/d2)', () => {
     ws.connect();
     await Promise.resolve();
     const fake = FakeWS.instances[0]!;
-    const replay = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .find((e) => e.type === 'chat.replay' && e.chatId === 'c-cold');
-    expect(replay).toBeDefined();
-    expect(replay?.fromSeq).toBe(-1);
+    fake.receive({ type: 'auth.ok', hosts: [], accountId: 'a', surfaceId: 's', accountFeed: true });
+    const resume = fake.sent
+      .map(
+        (s) => JSON.parse(s) as { type: string; follow?: Array<{ chatId: string; after: number }> },
+      )
+      .find((e) => e.type === 'feed.resume');
+    expect(resume?.follow).toContainEqual({ chatId: 'c-cold', after: -1 });
     ws.close();
   });
 
-  it('requests fromSeq=<max durable seq> for a chat that already rendered events', async () => {
+  it('follows a chat that already rendered events from its max durable seq', async () => {
     useChatStore.getState().hydrate([
       {
         chatId: 'c-warm',
@@ -276,10 +277,13 @@ describe('PatchWs chat.replay cursor (I1-d1/d2)', () => {
     ws.connect();
     await Promise.resolve();
     const fake = FakeWS.instances[0]!;
-    const replay = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .find((e) => e.type === 'chat.replay' && e.chatId === 'c-warm');
-    expect(replay?.fromSeq).toBe(1);
+    fake.receive({ type: 'auth.ok', hosts: [], accountId: 'a', surfaceId: 's', accountFeed: true });
+    const resume = fake.sent
+      .map(
+        (s) => JSON.parse(s) as { type: string; follow?: Array<{ chatId: string; after: number }> },
+      )
+      .find((e) => e.type === 'feed.resume');
+    expect(resume?.follow).toContainEqual({ chatId: 'c-warm', after: 1 });
     ws.close();
   });
 });

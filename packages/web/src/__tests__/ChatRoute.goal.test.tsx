@@ -64,7 +64,7 @@ function seed(
 }
 
 function renderChat(
-  ws: { send: ReturnType<typeof vi.fn>; requestReplay?: ReturnType<typeof vi.fn> } | null = null,
+  ws: { send: ReturnType<typeof vi.fn>; requestHistory?: ReturnType<typeof vi.fn> } | null = null,
 ): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/chats/c1']}>
@@ -183,7 +183,7 @@ describe('ChatRoute — /goal command + goal banner', () => {
 
   it('`/goal <text>` sets the goal via the API AND starts a turn with the condition as the directive', async () => {
     seed(null);
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/goal Ship the release by Friday');
 
@@ -223,7 +223,7 @@ describe('ChatRoute — /goal command + goal banner', () => {
   it('reverts the goal + surfaces a toast on API failure (NO FALLBACK)', async () => {
     vi.mocked(api.setGoal).mockRejectedValueOnce(new Error('network down'));
     seed(null);
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/goal try this');
 
@@ -257,7 +257,7 @@ describe('ChatRoute — /goal command + goal banner', () => {
 
   it('opens from the pill and offers Edit goal; no bordered state badge', () => {
     seed('Ship the release by Friday');
-    renderChat({ send: vi.fn(), requestReplay: vi.fn() });
+    renderChat({ send: vi.fn(), requestHistory: vi.fn() });
     expect(screen.queryByText('Goal active')).not.toBeInTheDocument();
     const pill = screen.getByTestId('goal-pill');
     expect(pill).toHaveAttribute('aria-expanded', 'false');
@@ -283,7 +283,7 @@ describe('ChatRoute — /goal command + goal banner', () => {
 
   it('editing the goal text in the bar saves the new text via the API', async () => {
     seed('Ship the release by Friday');
-    renderChat({ send: vi.fn(), requestReplay: vi.fn() });
+    renderChat({ send: vi.fn(), requestHistory: vi.fn() });
     fireEvent.click(screen.getByTestId('goal-banner-text'));
     const input = screen.getByTestId('goal-edit-input');
     fireEvent.change(input, { target: { value: 'Ship the release by Monday' } });
@@ -299,7 +299,7 @@ describe('ChatRoute — /goal command + goal banner', () => {
 
   it('cancelling the goal modal changes nothing', () => {
     seed('Ship the release by Friday');
-    renderChat({ send: vi.fn(), requestReplay: vi.fn() });
+    renderChat({ send: vi.fn(), requestHistory: vi.fn() });
     fireEvent.click(screen.getByTestId('goal-banner-text'));
     fireEvent.change(screen.getByTestId('goal-edit-input'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByTestId('goal-edit-cancel'));

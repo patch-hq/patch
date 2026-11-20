@@ -425,14 +425,14 @@ describe('WsHub — onHostEvent forSurfaceId success path', () => {
       new Set([fakeConn]),
     );
     (hub as unknown as { onHostEvent: (event: WireEvent) => void }).onHostEvent({
-      type: 'chat.replay',
+      type: 'chat.input_ack',
       chatId: 'chat-1',
-      fromSeq: 0,
+      localId: 'L1',
       forSurfaceId: 'srf-target',
     } as unknown as WireEvent);
     expect(sent).toHaveLength(1);
     expect(sent[0]).not.toHaveProperty('forSurfaceId');
-    expect(sent[0]).toMatchObject({ type: 'chat.replay', chatId: 'chat-1' });
+    expect(sent[0]).toMatchObject({ type: 'chat.input_ack', chatId: 'chat-1' });
   });
 });
 

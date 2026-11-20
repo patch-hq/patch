@@ -17,6 +17,7 @@ import { Daemon, CONTINUE_MESSAGE } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
 import { entryText, transcriptFor } from './helpers/chatTranscript.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
@@ -854,8 +855,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       expect(reseededTexts(g2.runs[0]!)).toEqual([]);
       expect(goneDividers(second.events)).toHaveLength(1);
       // The record is untouched and still readable.
-      const replayed: WireEvent[] = [];
-      second.daemon.replayChat(chatId, 0, (ev) => replayed.push(ev));
+      const replayed = readBack(second.daemon, chatId, { fromSeq: 0 });
       expect(
         replayed.some((e) => e.type === 'chat.message' && e.content === 'reply:turn one'),
       ).toBe(true);
@@ -929,8 +929,7 @@ describe('a restart says so in the chat', () => {
     await second.daemon.continueChat(chatId);
     await tick(50);
 
-    const replayed: WireEvent[] = [];
-    second.daemon.replayChat(chatId, 0, (ev) => replayed.push(ev));
+    const replayed = readBack(second.daemon, chatId, { fromSeq: 0 });
     const order = replayed
       .filter((e) => e.type === 'chat.message')
       .map((e) => `${(e as { role: string }).role}:${(e as { content: string }).content}`);

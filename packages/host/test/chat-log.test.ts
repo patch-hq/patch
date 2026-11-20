@@ -668,14 +668,6 @@ describe('Host → history log', () => {
     expect(err.error.message).toMatch(/ENOSPC/);
     expect(daemon.chatState.get('fail')?.activity).toBe('errored');
     expect(metaStore.read('fail')?.lastError?.code).toBe('history_write_failed');
-    // Replayed later, the failure must be flagged so a surface draws an error
-    // card rather than a paragraph that reads as the model talking.
-    const replayed: Array<{ type: string; error?: true; content?: string }> = [];
-    daemon.replayChat('fail', -1, (e) => replayed.push(e as never));
-    const failed = replayed.find(
-      (e) => e.type === 'chat.message' && /turn failed/i.test(e.content ?? ''),
-    );
-    expect(failed?.error).toBe(true);
     daemon.shutdown();
     const end = lines(home, 'fail').filter((r) => r.rec.k === 'turn.end');
     expect(end.map((r) => r.rec)).toEqual([

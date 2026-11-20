@@ -1,5 +1,5 @@
 // What of a chat's own history log goes into the server's record (spec/01 §
-// Chat record): every logged entry with its provider id, every turn boundary,
+// Chat record): every logged entry with its provider id and branch, every turn boundary,
 // and every answered question. Shared by the live path (a turn boundary is sent
 // the moment the log writes it) and the one-time record import (the whole log).
 
@@ -89,7 +89,13 @@ export function recordEntries(
   for (const record of records) {
     const rec = record.rec;
     if (rec.k === 'event') {
-      out.push(withRef(wholeEvent(rec.event as WireEvent, record.seq, opts), record.nativeRef));
+      out.push(
+        withRef(
+          wholeEvent(rec.event as WireEvent, record.seq, opts),
+          record.nativeRef,
+          record.branchId,
+        ),
+      );
       continue;
     }
     const boundary = turnBoundaryOf(chatId, record);
@@ -136,6 +142,11 @@ function wholeEvent(event: WireEvent, seq: number, opts: RecordEntriesOptions): 
   }
 }
 
-function withRef(event: WireEvent, ref: NativeRef | undefined): WireEvent {
-  return ref === undefined ? event : ({ ...event, nativeRef: ref } as WireEvent);
+/** The entry with its provider id and the branch it is on (spec/04 § Branching). */
+function withRef(event: WireEvent, ref: NativeRef | undefined, branchId: string): WireEvent {
+  return {
+    ...event,
+    ...(ref === undefined ? {} : { nativeRef: ref }),
+    branchId,
+  } as WireEvent;
 }

@@ -7,7 +7,7 @@
 // - hello handshake on connect
 // - typed event emitter via `on(eventType, handler)`
 // - per-chat seq buffering
-// - replay request via `replay(chatId, fromSeq)`
+// - history pages from the server via `history(chatId, { after | before })`
 // - idempotent `sendInput({chatId, message, localId})` (server dedupes)
 //
 // Per portfolio convention: no fallbacks. If the WS errors we surface it.
@@ -20,7 +20,7 @@ import {
   type ClientType,
   type HelloEvent,
   type ChatInputEvent,
-  type ChatReplayEvent,
+  type ChatHistoryRequestEvent,
 } from './events.js';
 
 type EventForType<T extends WireEventType> = Extract<WireEvent, { type: T }>;
@@ -54,7 +54,7 @@ export class WireTestClient {
   private readonly compat: boolean;
   private ws: WebSocket | null = null;
   private readonly handlers = new Map<WireEventType, Set<Handler<WireEventType>>>();
-  // Highest seq seen per chatId — used so callers can `replay(chatId, lastSeq)`.
+  // Highest seq seen per chatId — used so callers can ask for what is new since it.
   private readonly lastSeqByChat = new Map<string, number>();
   private readonly errorHandlers = new Set<(err: Error) => void>();
   private readonly closeHandlers = new Set<(code: number, reason: string) => void>();
@@ -131,6 +131,17 @@ export class WireTestClient {
         }, 0);
         return;
       }
+      // A history page's entries reach handlers as frames of their own, as a
+      // surface applies them (spec/03 § Chat history): the entries, then what
+      // is still waiting on the reader, then what is queued. The page itself
+      // comes after, so a handler of it sees them taken in.
+      if (event.type === 'chat.history') {
+        for (const inner of [...event.entries, ...event.pending, ...event.queued]) {
+          const entry = inner as unknown as WireEvent;
+          this.recordSeq(entry);
+          this.dispatch(entry);
+        }
+      }
       this.recordSeq(event);
       this.dispatch(event);
     });
@@ -204,29 +215,35 @@ export class WireTestClient {
     this.send(event);
   }
 
-  /** Request replay of all events with seq > fromSeq for a chat. */
-  replay(chatId: string, fromSeq: number): void {
-    const event: ChatReplayEvent = { type: 'chat.replay', chatId, fromSeq };
+  /**
+   * Ask the server for a page of a chat's record (spec/03 § Chat history):
+   * entries after a position, the page before one, or (neither) its last page.
+   * The answer arrives as `chat.history` carrying the returned `requestId`, and
+   * each entry in it is also delivered to handlers as a frame of its own.
+   */
+  history(
+    chatId: string,
+    at: { after?: number; before?: number; limit?: number; branchId?: string } = {},
+  ): string {
+    const requestId = crypto.randomUUID();
+    const event: ChatHistoryRequestEvent = {
+      type: 'chat.history_request',
+      requestId,
+      chatId,
+      ...at,
+    };
     this.send(event);
+    return requestId;
   }
 
-  /**
-   * Last seq seen for a chat, or `undefined` if no chat-scoped event has
-   * arrived. Note: `chat.replay { fromSeq }` requires a non-negative number
-   * — call `replayFromLastSeen(chatId)` to handle the "nothing seen" case.
-   */
+  /** Last seq seen for a chat, or `undefined` if no chat-scoped event has arrived. */
   lastSeq(chatId: string): number | undefined {
     return this.lastSeqByChat.get(chatId);
   }
 
-  /**
-   * Convenience: request replay from the highest seq we've seen on this
-   * chat, or from `-1` (i.e. all events, including seq 0) if we haven't seen
-   * anything yet. Replay is exclusive (`seq > fromSeq`), so the never-seen
-   * case must use `-1` — `0` would skip the first event.
-   */
-  replayFromLastSeen(chatId: string): void {
-    this.replay(chatId, this.lastSeqByChat.get(chatId) ?? -1);
+  /** Ask for everything after the highest seq seen on this chat (all of it when none). */
+  historyFromLastSeen(chatId: string): string {
+    return this.history(chatId, { after: this.lastSeqByChat.get(chatId) ?? -1 });
   }
 
   /** Subscribe to a single event type. Returns an unsubscribe function. */

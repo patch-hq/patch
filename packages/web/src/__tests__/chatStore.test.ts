@@ -58,7 +58,7 @@ describe('chatStore reducer', () => {
     });
     tl = useChatStore.getState().timelines['c1'] ?? [];
     expect(tl.map((e) => e.role)).toEqual(['user', 'assistant']);
-    // On reconnect, chat.replay re-delivers the PERSISTED user turn. It must
+    // On reconnect, history read re-delivers the PERSISTED user turn. It must
     // reconcile onto the optimistic entry (promote seq, drop localId) — NOT dup.
     s.applyEvent({
       type: 'chat.message',
@@ -1060,8 +1060,8 @@ describe('chatStore reducer', () => {
     expect(useChatStore.getState().chats['c1']!.lastReadSeq).toBe(5);
   });
 
-  it('a chat.replay of old events does NOT re-mark a read chat unread', () => {
-    // Reproduces the original bug: opening a chat triggers a chat.replay that
+  it('a history read of old events does NOT re-mark a read chat unread', () => {
+    // Reproduces the original bug: opening a chat triggers a history read that
     // re-delivers the whole history. Under the old wall-clock model every
     // replayed chat.message bumped lastUpdated to "now", out-running the visit
     // timestamp and perpetually showing `done`. The seq watermark is immune.
@@ -1209,7 +1209,7 @@ describe('chatStore reducer', () => {
       .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
     useChatStore.getState().setActiveChat('c1'); // open it
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('read');
-    // A post-open chat.replay raises lastSeq while the chat is active — must
+    // A post-open history read raises lastSeq while the chat is active — must
     // stay read, not flip to done.
     useChatStore.getState().applyEvent({
       type: 'chat.message',
@@ -1477,8 +1477,8 @@ describe('chatStore reducer', () => {
     expect(tl.filter((e) => e.kind === 'tool_call')).toHaveLength(1);
   });
 
-  it('a re-delivered chat.replay does not duplicate tool_call/tool_result entries onto the tail (out of message order)', () => {
-    // ws.ts § requestReplay: "opening a chat requests its transcript, and the
+  it('a re-delivered history read does not duplicate tool_call/tool_result entries onto the tail (out of message order)', () => {
+    // ws.ts § requestHistory: "opening a chat requests its transcript, and the
     // socket completing its connect a moment later requests every held chat —
     // the active chat included, timeline still empty. Both computed
     // `fromSeq: -1`, so the host streamed the whole transcript twice. The
@@ -2228,7 +2228,7 @@ describe('chatStore — chat.provider_context (spec/02 § Provider-level context
     expect(pc['date']?.count).toBe(1);
   });
 
-  it('does not double-count a re-delivered chat.replay of the same occurrence', () => {
+  it('does not double-count a re-delivered history read of the same occurrence', () => {
     // Same re-delivered-replay guard as chat.tool_call/chat.tool_result:
     // opening a chat re-asks from fromSeq: -1, so a live event already applied
     // can arrive a second time.
@@ -3365,7 +3365,7 @@ describe('chatStore applyEvents — batched replay application', () => {
     localStorage.removeItem('patch.readState.v1');
   });
 
-  // A `chat.replay` arrives as one wire frame per transcript entry. Applying
+  // A history read arrives as one wire frame per transcript entry. Applying
   // them one at a time meant one store commit — and so one render of the whole
   // stream — per message, which is what made opening a chat fill in visibly,
   // one message at a time. A batch is applied as a single sequential fold.

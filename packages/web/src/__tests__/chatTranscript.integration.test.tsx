@@ -660,7 +660,7 @@ describe('integration: send-while-running queues then drains', () => {
 // so the voice turn is NOT shown twice (spec/12 § replay, chatStore reconcile).
 // ===========================================================================
 describe('integration: cold start loads metadata only (spec/12)', () => {
-  it('hydrates the whole roster from ONE GET /api/chats, replays the open chat, and syncs the rest one at a time', async () => {
+  it('hydrates the whole roster from ONE GET /api/chats and asks for the open chat alone', async () => {
     const rows = [makeRow('c1'), makeRow('c2'), makeRow('c3'), makeRow('c4')];
     const { fake } = await mountApp('/chats/c1', rows);
 
@@ -677,31 +677,20 @@ describe('integration: cold start loads metadata only (spec/12)', () => {
     );
     expect(rosterCalls).toHaveLength(1);
 
-    // The open chat asks for its transcript at once. The other rows are
-    // brought level in the background SERIALLY (spec/12 § Offline reading):
-    // with no answer yet, exactly one of them is in flight — the roster is
-    // never pulled as one burst.
+    // The open chat asks the server for its history; no other row's
+    // transcript is pulled — each loads when it is opened.
     await waitFor(() => {
-      const replayed = fake
+      const asked = fake
         .outbound()
-        .filter((e) => e.type === 'chat.replay')
+        .filter((e) => e.type === 'chat.history_request')
         .map((e) => e.chatId);
-      expect([...new Set(replayed)]).toEqual(['c1', 'c2']);
+      expect([...new Set(asked)]).toEqual(['c1']);
     });
-  });
-
-  it('with no chat open, background-syncs one chat at a time', async () => {
-    const rows = [makeRow('c1'), makeRow('c2'), makeRow('c3')];
-    const { fake } = await mountApp('/chats/new', rows);
-    await waitFor(() => expect(useChatStore.getState().chats['c3']).toBeDefined());
-    await waitFor(() =>
-      expect(fake.outbound().filter((e) => e.type === 'chat.replay')).toHaveLength(1),
-    );
   });
 });
 
-describe('integration: reconnect replay rebuilds transcript (voice turn reconciles)', () => {
-  it('reconnects, replays persisted history, and does not duplicate the optimistic voice echo', async () => {
+describe('integration: reconnect catch-up rebuilds transcript (voice turn reconciles)', () => {
+  it('reconnects, catches up from the server, and does not duplicate the optimistic voice echo', async () => {
     const { fake } = await mountApp('/chats/c1', [makeRow('c1')]);
 
     // A voice note lands its optimistic echo in the transcript (upload path).
@@ -740,15 +729,22 @@ describe('integration: reconnect replay rebuilds transcript (voice turn reconcil
         hosts: [],
         accountId: 'acc-1',
         surfaceId: 'web-1',
+        accountFeed: true,
       } as WireEvent);
       reconnected.receive({ type: 'host.online', hostId: 'd1' } as WireEvent);
     });
-    // On reconnect the client asked to replay this chat.
-    expect(reconnected.outbound().some((e) => e.type === 'chat.replay' && e.chatId === 'c1')).toBe(
-      true,
-    );
+    // On reconnect the client resumed the feed, following this chat.
+    expect(
+      reconnected
+        .outbound()
+        .some(
+          (e) =>
+            e.type === 'feed.resume' &&
+            (e as { follow: Array<{ chatId: string }> }).follow.some((f) => f.chatId === 'c1'),
+        ),
+    ).toBe(true);
 
-    // The host replays the PERSISTED history: the voice user turn (tagged
+    // The server sends the PERSISTED history: the voice user turn (tagged
     // `[voice • web]`) + its reply. The tagged copy must reconcile against the
     // optimistic echo by content, not duplicate it.
     act(() => {

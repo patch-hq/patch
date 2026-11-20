@@ -60,7 +60,7 @@ export interface ChatRow {
   /**
    * Local-only: the highest per-chat `seq` the user had seen the last time they
    * opened this chat. Drives unread vs read. We track read state by SEQ, not by
-   * wall-clock, because opening a chat triggers a `chat.replay` that re-delivers
+   * wall-clock, because opening a chat triggers a history read that re-delivers
    * the chat's history — those replayed events carry their ORIGINAL (≤ current)
    * seqs, so a seq-based watermark is immune to replay. A wall-clock model is
    * not: replayed messages would bump a `lastUpdated` to "now" and perpetually
@@ -172,7 +172,7 @@ export interface ChatRow {
   awaitingState?: boolean;
   /** Pending permission requests (unanswered). */
   pendingPermissions: PendingPermission[];
-  /** Highest seq we've seen — used for chat.replay on reconnect. */
+  /** Highest seq we've seen — the cursor history reads catch up from. */
   lastSeq: number;
   /**
    * The job whose `spawn` action created this chat (spec/08 § Action), or

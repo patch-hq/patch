@@ -209,7 +209,7 @@ async function startStack(): Promise<Stack> {
 async function handleServerEvent(
   event: WireEvent,
   daemon: Daemon,
-  sender: (e: WireEvent) => void,
+  _sender: (e: WireEvent) => void,
 ): Promise<void> {
   switch (event.type) {
     case 'chat.spawn_request':
@@ -227,13 +227,6 @@ async function handleServerEvent(
         localId: event.localId,
       });
       return;
-    case 'chat.replay': {
-      const surfaceId = event.forSurfaceId;
-      daemon.replayChat(event.chatId, event.fromSeq, (ev) => {
-        sender(surfaceId ? ({ ...(ev as object), forSurfaceId: surfaceId } as WireEvent) : ev);
-      });
-      return;
-    }
     default:
       return;
   }
@@ -300,7 +293,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
   }
 
   // ── D3-1 ──────────────────────────────────────────────────────────────────
-  it('D3-1: surface reconnect replays exactly the missed events (no gaps, no dupes)', async () => {
+  it('D3-1: surface reconnect reads exactly the missed events (no gaps, no dupes)', async () => {
     const surface = await connectSurface();
     const chatId = await spawnChat(surface, folder);
     // Focus so detail-level events (chat.message) fan out to this surface.
@@ -359,7 +352,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     const afterProduced = driver.lastSeq(chatId)!; // 8
     expect(afterProduced).toBeGreaterThan(beforeDrop);
 
-    // Reconnect the original surface and replay from beforeDrop.
+    // Reconnect the original surface and read what follows beforeDrop from the server.
     const surface2 = await connectSurface();
     surface2.send({ type: 'chat.focus_change', chatId });
     const replayed: number[] = [];
@@ -369,7 +362,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     surface2.on('chat.state', (e) => {
       if (e.chatId === chatId && typeof e.seq === 'number') replayed.push(e.seq);
     });
-    surface2.send({ type: 'chat.replay', chatId, fromSeq: beforeDrop });
+    surface2.history(chatId, { after: beforeDrop });
     await waitFor(() => replayed.some((s) => s >= afterProduced));
 
     // Every replayed event is strictly > beforeDrop (no <= redelivered),

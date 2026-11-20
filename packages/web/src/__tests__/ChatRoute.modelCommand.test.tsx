@@ -52,7 +52,7 @@ function seed(model: string | null = 'claude-sonnet-5-5'): void {
 }
 
 function renderChat(
-  ws: { send: ReturnType<typeof vi.fn>; requestReplay?: ReturnType<typeof vi.fn> } | null = null,
+  ws: { send: ReturnType<typeof vi.fn>; requestHistory?: ReturnType<typeof vi.fn> } | null = null,
 ): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/chats/c1']}>
@@ -94,7 +94,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('`/model <name>` sends `chat.model_request` for a unique catalogue match WITHOUT a chat turn', () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/model opus');
 
@@ -108,7 +108,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('matches case-insensitively on the catalogue label', () => {
     seed('claude-opus-5-5');
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/model SONNET 5.5');
 
@@ -121,7 +121,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('a bare `/model` is a usage error — no request sent', () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/model');
 
@@ -131,7 +131,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('a name matching nothing in the catalogue is refused, naming it', () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/model gpt-nonexistent');
 
@@ -141,7 +141,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('a name matching more than one catalogue entry is refused as ambiguous', () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/model 5.5');
 
@@ -151,7 +151,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('choosing the model the chat is already on is a silent no-op', () => {
     seed('claude-opus-5-5');
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/model opus');
 
@@ -161,7 +161,7 @@ describe('ChatRoute — /model command (spec/04 § Model)', () => {
 
   it('does NOT match a normal message (sends a real chat turn instead)', async () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('let us model this out');
 

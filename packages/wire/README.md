@@ -3,7 +3,7 @@
 Shared wire-protocol types, zod schemas, and codec for Patch. JSON over WebSocket
 text frames. Zero runtime deps beyond `zod`.
 
-> **Live server status.** The real `/ws` relay (chat fan-out, replay, session
+> **Live server status.** The real `/ws` relay (chat fan-out, history, session
 > state) is implemented in `@patch/server` (`ws-hub.ts`). The early group-1
 > echo-only stub is gone.
 
@@ -45,13 +45,16 @@ For tests, `@patch/wire/test-client` exports `WireTestClient` — a small typed
 client that handles the `hello` handshake, buffers per-chat `seq`, and provides
 `waitFor(eventType)`.
 
-## Idempotency and replay
+## Idempotency and history
 
 - Every chat-scoped event carries a per-chat monotonic `seq`.
 - `chat.input` requires a client-generated `localId` (UUID). The server dedupes
   on `(chatId, localId)`.
-- `chat.replay { chatId, fromSeq }` asks the host for every event with
-  `seq > fromSeq`, in order.
+- `chat.history_request { requestId, chatId, after? | before?, limit?, branchId? }`
+  asks the server for a page of a chat's record; it answers `chat.history`.
+  Only the server answers history — a host is never asked.
+- `branch-track.ts` (`branchChain`, `trackFilter`) works out which entries make
+  up one branch's track; the host and the server both use it.
 
 ## Event catalogue
 
@@ -116,11 +119,10 @@ events from user-driven ones (`spec/03-wire-protocol.md` § _Job-trigger events_
 
 ### Control
 
-| `type`        | Source      | Fields                             |
-| ------------- | ----------- | ---------------------------------- |
-| `hello`       | `events.ts` | `clientType, clientVersion, auth?` |
-| `ack`         | `events.ts` | `chatId?, seq`                     |
-| `chat.replay` | `events.ts` | `chatId, fromSeq`                  |
+| `type`  | Source      | Fields                             |
+| ------- | ----------- | ---------------------------------- |
+| `hello` | `events.ts` | `clientType, clientVersion, auth?` |
+| `ack`   | `events.ts` | `chatId?, seq`                     |
 
 ### Auth
 

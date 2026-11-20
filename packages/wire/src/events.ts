@@ -156,6 +156,14 @@ export type NativeRef = z.infer<typeof NativeRef>;
  */
 const nativeRefField = { nativeRef: NativeRef.optional() };
 
+/**
+ * On a logged entry a host sends the server: the branch (track) the entry is on
+ * (spec/04 § Branching). The server keeps it beside the entry, builds each
+ * branch's track from it, and never relays it to surfaces. A host sends it only
+ * to a server whose `auth.ok` carried `recordBranches: true`.
+ */
+const recordBranchField = { branchId: z.string().min(1).optional() };
+
 /** How a turn ended, as the host's log records it. */
 export const TurnOutcome = z.enum(['completed', 'stopped', 'failed', 'interrupted']);
 export type TurnOutcome = z.infer<typeof TurnOutcome>;
@@ -530,15 +538,11 @@ export type TodoItem = z.infer<typeof TodoItem>;
 // Session events (server/host → surfaces)
 
 /**
- * Routing envelope field present on host→server events that are streamed to
- * a SINGLE requesting surface rather than fanned out — i.e. `chat.replay`
- * results and the per-surface re-sync the host emits on (re)connect. The
- * server's `onHostEvent` reads it to route to one surface, then STRIPS it
- * before forwarding (so surfaces never see it). It must be an allowed key on
- * every replayable event schema, otherwise the server's strict `decode()`
- * rejects the inbound frame and per-surface replay silently breaks (the host
- * wraps each replayed event with this field — see host `replayChat` /
- * `index.ts` onAuthed). spec/12 § "Sequence-based replay".
+ * Routing envelope field present on host→server events that answer ONE
+ * surface rather than being fanned out (a reply to a surface's own request).
+ * The server's `onHostEvent` reads it to route to that surface, then STRIPS it
+ * before forwarding (so surfaces never see it). History is not one of these:
+ * surfaces read history only from the server (spec/03 § Chat history).
  */
 const forSurfaceIdField = { forSurfaceId: z.string().min(1).optional() };
 
@@ -1015,6 +1019,7 @@ export const ChatMessageEvent = z
      */
     midTurn: z.literal(true).optional(),
     ...nativeRefField,
+    ...recordBranchField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1052,7 +1057,7 @@ export type ChatInputAckEvent = z.infer<typeof ChatInputAckEvent>;
  * Mirrors the audio partial pattern (`audio.transcript_partial`): it is a
  * TRANSIENT live event and is NOT persisted / NOT replayed. The durable
  * record of the turn is the final `chat.message` (same `seq` as `messageSeq`
- * here), which is what `chat.replay` / `patch_history` reconstruct. A surface
+ * here), which is what history reads and `patch_history` return. A surface
  * accumulates `delta`s keyed by `messageSeq` to render the reply progressively,
  * then the matching `chat.message` arrives carrying the complete text and
  * supersedes the accumulator. Carries no own `seq` (not a replayable stream
@@ -1087,6 +1092,7 @@ export const ChatToolCallEvent = z
     // event. Absent only when a replayed line carries no usable timestamp.
     startedAt: z.number().int().nonnegative().optional(),
     ...nativeRefField,
+    ...recordBranchField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1117,6 +1123,7 @@ export const ChatToolResultEvent = z
     isError: z.boolean().optional(),
     seq: z.number().int().nonnegative(),
     ...nativeRefField,
+    ...recordBranchField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1170,6 +1177,7 @@ export const ChatNoteEvent = z
     seq: z.number().int().nonnegative(),
     createdAt: z.number().optional(),
     ...nativeRefField,
+    ...recordBranchField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1234,6 +1242,7 @@ export const ChatArtifactEvent = z
     updatedAt: z.number().int().nonnegative(),
     seq: z.number().int().nonnegative(),
     ...nativeRefField,
+    ...recordBranchField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -1257,6 +1266,7 @@ export const ChatToolRunSummaryEvent = z
     /** The run is still open: `summary` narrates it as it happens ("Looking at the picture…"). */
     live: z.literal(true).optional(),
     seq: z.number().int().nonnegative(),
+    ...recordBranchField,
     ...forSurfaceIdField,
   })
   .strict();
@@ -2160,8 +2170,8 @@ export const ChatBranch = z
      * (spec/04 § Parallel branches; spec/14 § Side threads panel — tab status
      * dot). Absent means idle. This is the one live per-branch signal the
      * host surfaces beyond permission requests — everything else about a
-     * side branch's content is pull-based (`chat.replay`/history,
-     * branch-scoped).
+     * side branch's content is pull-based (a history request naming
+     * the branch, answered by the server).
      */
     running: z.literal(true).optional(),
   })
@@ -2205,7 +2215,7 @@ export type ChatSendBackRequestEvent = z.infer<typeof ChatSendBackRequestEvent>;
 
 /**
  * The chat's track graph (spec/04 § Branching). Emitted on fork, on track
- * switch, and alongside a `chat.replay` so a reconnecting surface learns the
+ * switch, and by the server with a history answer so a surface learns the
  * graph without a separate request. Out-of-band: carries no `seq` and is not
  * part of the replayable event stream — it describes the chat, not a turn.
  *
@@ -7507,7 +7517,7 @@ export const HostRecordImportEvent = z
   .object({
     type: z.literal('host.record_import'),
     chatId: z.string().min(1),
-    /** Shallow like `chat.replay_batch`; the server validates each as a frame of its own. */
+    /** Typed shallowly; the server validates each as a frame of its own. */
     events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
     done: z.boolean(),
   })
@@ -7532,7 +7542,7 @@ export const HostOutboxEvent = z
   .object({
     type: z.literal('host.outbox'),
     position: z.number().int().nonnegative(),
-    /** Shallow like `chat.replay_batch`; the server validates it as a frame of its own. */
+    /** Typed shallowly; the server validates it as a frame of its own. */
     event: z.object({ type: z.string().min(1) }).passthrough(),
   })
   .strict();
@@ -10060,89 +10070,11 @@ export const FeedResetEvent = z
   .strict();
 export type FeedResetEvent = z.infer<typeof FeedResetEvent>;
 
-export const ChatReplayEvent = z
-  .object({
-    type: z.literal('chat.replay'),
-    chatId: z.string().min(1),
-    // Spec uses both `sinceSequence` (12-error-and-offline) and `fromSeq`
-    // (task brief). Canonicalise on `fromSeq`: the host emits all events with
-    // seq > fromSeq (exclusive — `fromSeq` is the last seq the caller already
-    // has). A fresh surface that has seen nothing passes `-1` to receive the
-    // full history including seq 0; `0` would skip the very first event.
-    fromSeq: z.number().int().gte(-1),
-    /**
-     * Replay a specific branch's own track (spec/04 § Branching — "Replay …
-     * can be requested per branch, so a surface can show several tracks side
-     * by side"). Absent means the chat's active branch — today's behaviour,
-     * unchanged.
-     */
-    branchId: z.string().min(1).optional(),
-    /**
-     * Server-internal routing tag; surfaces never set this. The server
-     * stamps it when forwarding `chat.replay` upstream so the host
-     * can route the replayed events back to the requesting surface only
-     * (per spec/04: replay is per-surface, not fanout). Surface-side codecs
-     * should never read this field.
-     */
-    forSurfaceId: z.string().min(1).optional(),
-    /**
-     * This surface can take the whole answer as `chat.replay_batch` frames
-     * rather than one frame per event (spec/12 § Sequence-based replay).
-     *
-     * OPT-IN, by the surface, deliberately. A host updates on its own
-     * schedule and a phone can be running an APK from weeks ago; a host
-     * that just started batching at a surface which does not know the event
-     * would leave that chat looking empty. Asking for it is proof the asker
-     * understands the answer.
-     */
-    batch: z.boolean().optional(),
-  })
-  .strict();
-export type ChatReplayEvent = z.infer<typeof ChatReplayEvent>;
-
 /**
- * A slice of a replay, as ONE frame carrying many events (spec/12 §
- * Sequence-based replay). Sent only to a surface that asked for it with
- * `chat.replay { batch: true }`.
- *
- * Why this exists: a 2,000-event chat was 2,000 separate WebSocket frames
- * crossing host -> server -> surface, each parsed, validated and applied on
- * its own, and drawn as it arrived. That trickle IS the "it loads them in and
- * then scrolls through the messages one by one" — measured at 1-2.5s of a
- * chat's open, against ~0.15s of actual rendering work.
- *
- * Chunked by serialised size rather than sent as one frame, so a huge chat
- * cannot build one enormous string on either end; `done` marks the last
- * chunk, so a surface knows when the transcript is whole. Events inside are
- * validated like any other, so batching costs the server no safety — it is
- * the same work it already did, minus 1,999 frames of overhead.
+ * Chunk ceiling, in serialised bytes, for one frame carrying many record entries
+ * (`host.record_import`).
  */
-export const ChatReplayBatchEvent = z
-  .object({
-    type: z.literal('chat.replay_batch'),
-    chatId: z.string().min(1),
-    /**
-     * In seq order, exactly the events an unbatched replay would have sent.
-     *
-     * Typed shallowly (an object carrying a `type`) rather than as the full
-     * `WireEvent` union, which cannot reference itself from inside one of its
-     * own members. The events are not re-validated here, and that is sound
-     * for one specific reason: every one of them was validated against
-     * `LogRecord` when the host WROTE it, and a replay reads them straight
-     * back off that log. This frame carries nothing that did not already pass
-     * the schema once. Anything arriving on the LIVE path is unaffected and
-     * still decoded individually.
-     */
-    events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
-    /** True on the final chunk of this replay. */
-    done: z.boolean(),
-    ...forSurfaceIdField,
-  })
-  .strict();
-export type ChatReplayBatchEvent = z.infer<typeof ChatReplayBatchEvent>;
-
-/** Chunk ceiling for a batched replay, in serialised bytes. */
-export const REPLAY_BATCH_BYTES = 512 * 1024;
+export const RECORD_FRAME_BYTES = 512 * 1024;
 
 // ---------------------------------------------------------------------------
 // Auth events (per spec/10-auth.md)
@@ -10267,6 +10199,13 @@ export const AuthOkEvent = z
      */
     recordComplete: z.literal(true).optional(),
     /**
+     * Sent to a host by a server whose record keeps each entry's branch
+     * (`branchId` on a logged entry) and takes a side branch's entries, which it
+     * keeps without broadcasting (spec/04 § Parallel branches). Absent: the host
+     * sends no branch and no side-branch entry.
+     */
+    recordBranches: z.literal(true).optional(),
+    /**
      * Sent to a host by a server that decides every chat's status from the
      * facts hosts report (spec/12 § Chat status). A host sends such a server no
      * `activity`, no `lastError` and its `queuedTurns`; to a server without the
@@ -10276,8 +10215,9 @@ export const AuthOkEvent = z
     serverStatus: z.literal(true).optional(),
     /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
-     * the account feed (`feed.resume`, spec/03 § Account feed). Absent: use
-     * `chat.replay`.
+     * the account feed (`feed.resume`, spec/03 § Account feed). Every current
+     * server sends it; surfaces read history only this way, so a surface told
+     * nothing says the server is too old to show history.
      */
     accountFeed: z.literal(true).optional(),
   })
@@ -10587,7 +10527,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchHostSearchDoneEvent,
   PatchBlobRequestEvent,
   PatchBlobResponseEvent,
-  ChatReplayBatchEvent,
   PatchChatMoveRequestEvent,
   PatchChatMoveResponseEvent,
   PatchChatSearchRequestEvent,
@@ -10665,7 +10604,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   // Control
   HelloEvent,
   AckEvent,
-  ChatReplayEvent,
   // Auth
   PairingNonceEvent,
   PairingSignedCredentialEvent,
@@ -10925,7 +10863,6 @@ export const EVENT_SCHEMAS = {
   'patch.host_search.done': PatchHostSearchDoneEvent,
   'patch.blob.request': PatchBlobRequestEvent,
   'patch.blob.response': PatchBlobResponseEvent,
-  'chat.replay_batch': ChatReplayBatchEvent,
   'patch.chat_move.request': PatchChatMoveRequestEvent,
   'patch.chat_move.response': PatchChatMoveResponseEvent,
   'patch.chat_search.request': PatchChatSearchRequestEvent,
@@ -10990,7 +10927,6 @@ export const EVENT_SCHEMAS = {
   'patch.diag.voice_inject': PatchDiagVoiceInjectEvent,
   hello: HelloEvent,
   ack: AckEvent,
-  'chat.replay': ChatReplayEvent,
   'pairing.nonce': PairingNonceEvent,
   'pairing.signed_credential': PairingSignedCredentialEvent,
   'auth.revoked': AuthRevokedEvent,

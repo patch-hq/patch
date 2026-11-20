@@ -18,7 +18,7 @@ import {
   AuthOkEvent,
   ChatErrorCode,
   ChatInputEvent,
-  ChatReplayEvent,
+  ChatHistoryRequestEvent,
   ChatSpawnRequestEvent,
   ChatSettingsEvent,
   ChatStateEvent,
@@ -506,7 +506,7 @@ describe('regression guards — what host addressing must NOT have changed', () 
     }
   });
 
-  it('keeps seq on the events that are replayed', () => {
+  it('keeps seq on the events a history read returns', () => {
     for (const type of [
       'chat.message',
       'chat.tool_call',
@@ -519,17 +519,14 @@ describe('regression guards — what host addressing must NOT have changed', () 
   });
 
   it('keeps the two cursors on their deliberately opposite boundaries', () => {
-    // spec/12 § Replay vs history cursors. `chat.replay.fromSeq` is EXCLUSIVE
-    // (the last seq the caller already has) so a fresh caller must be able to
-    // say -1; `since` on a history request is INCLUSIVE (the first seq the
-    // caller wants) so its floor is 0 and -1 is meaningless there. Host
-    // addressing must not have "aligned" them.
-    expect(
-      ChatReplayEvent.safeParse({ type: 'chat.replay', chatId: 'c1', fromSeq: -1 }).success,
-    ).toBe(true);
-    expect(
-      ChatReplayEvent.safeParse({ type: 'chat.replay', chatId: 'c1', fromSeq: -2 }).success,
-    ).toBe(false);
+    // A surface's history request's `after` is EXCLUSIVE (the last seq the
+    // caller already has) so a fresh caller must be able to say -1; `since` on
+    // the REST history request is INCLUSIVE (the first seq the caller wants)
+    // so its floor is 0 and -1 is meaningless there. Host addressing must not
+    // have "aligned" them.
+    const ask = { type: 'chat.history_request', requestId: 'r', chatId: 'c1' };
+    expect(ChatHistoryRequestEvent.safeParse({ ...ask, after: -1 }).success).toBe(true);
+    expect(ChatHistoryRequestEvent.safeParse({ ...ask, after: -2 }).success).toBe(false);
     expect(
       PatchChatHistoryRequestEvent.safeParse({
         type: 'patch.chat_history.request',

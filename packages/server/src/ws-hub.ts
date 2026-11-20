@@ -44,7 +44,7 @@ import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
 import type { ViewPositionStore } from './view-position.js';
-import { forSurfaces, QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
+import { entryBranch, forSurfaces, QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
 import type { CommitAcks } from './commit-acks.js';
 import type { QueueTracker } from './queue-tracker.js';
 import type { ServerQueue } from './server-queue.js';
@@ -92,9 +92,8 @@ interface ConnectedSurface {
    * `chat.focus_change {chatId}`. State-level events (chat.spawned /
    * chat.state / chat.stopped) are always fanned out per spec/04.
    *
-   * A pending replay also adds the chatId for the duration of the replay
-   * stream so a surface that requests `chat.replay` doesn't have to also
-   * `chat.focus_change` first.
+   * A history request adds the chatId too, so a surface that reads a chat's
+   * history doesn't have to also `chat.focus_change` first.
    */
   watchedChats: Set<string>;
   /**
@@ -113,9 +112,6 @@ interface ConnectedSurface {
  * unconditionally fanned out to all account surfaces — those drive the
  * sidebar.
  */
-/** Events per `chat.replay_batch` frame when the server answers a replay itself. */
-const REPLAY_CHUNK_EVENTS = 500;
-
 const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   'chat.message',
   // A note to the agent is its own entry in the chat's transcript (spec/04 §
@@ -224,16 +220,16 @@ export interface WsHubDeps {
   composerDrafts?: ComposerDraftStore;
   viewPosition?: ViewPositionStore;
   /**
-   * What each chat is holding behind a running turn. A surface that asks for a
-   * chat's replay is told the waiting messages too, since the host announces
+   * What each chat is holding behind a running turn. A surface that reads a
+   * chat's history is told the waiting messages too, since the host announces
    * them live only.
    */
   queueTracker?: QueueTracker;
   /** The server-run message queue, when it is turned on. */
   serverQueue?: ServerQueue;
   /**
-   * The transcripts the server has seen pass through it. Answers a replay for a
-   * chat whose host is offline, so the chat stays readable.
+   * The chat record (spec/01 § Chat record). Answers every surface's history
+   * request, whether or not the chat's host is online.
    */
   chatLogStore?: ChatLogStore;
   /** Told what the server committed, so each host can be told how far its chats reach. */
@@ -655,39 +651,40 @@ export class WsHub {
   ): void {
     const store = this.deps.chatLogStore;
     if (!store) return;
-    if (ask.branchId !== undefined) {
-      // A branch's own track is laid out by its host (spec/04 § Parallel
-      // branches); it answers with a replay addressed to this surface.
-      this.deps.hostLink.send(conn.surfaceId, {
-        type: 'chat.replay',
-        chatId: ask.chatId,
-        fromSeq: ask.after ?? -1,
-        branchId: ask.branchId,
-        batch: true,
-        forSurfaceId: conn.surfaceId,
-      });
-      return;
-    }
+    const row = this.deps.chatRegistry.get(ask.chatId);
+    // Every track is laid out from the record, a side branch's included
+    // (spec/04 § Branching): absent means the chat's active branch.
+    const branches = row?.branches ?? [];
+    const activeBranchId = row?.activeBranchId ?? undefined;
+    const branchId = ask.branchId ?? activeBranchId;
     const page = store.page(ask.chatId, {
       ...(ask.after !== undefined ? { after: ask.after } : {}),
       ...(ask.before !== undefined ? { before: ask.before } : {}),
       limit: ask.limit ?? HISTORY_PAGE_DEFAULT,
+      ...(branchId !== undefined ? { track: { branches, branchId } } : {}),
     });
-    const row = this.deps.chatRegistry.get(ask.chatId);
     // An approval is open only while the chat is waiting on it; a question
-    // stays open until it is answered, whatever became of the turn.
+    // stays open until it is answered, whatever became of the turn. Each is
+    // sent with the track it was raised on.
     const waiting = row?.chatStatus?.state === 'waiting_for_user';
     const pending = store
       .openRequests(ask.chatId)
       .filter(
         (r) =>
           waiting || (r.type === 'chat.permission_request' && r.request.tool === QUESTION_TOOL),
+      )
+      .filter(
+        (r) =>
+          r.type !== 'chat.permission_request' ||
+          branchId === undefined ||
+          (r.branchId ?? activeBranchId) === branchId,
       );
     conn.socket.send(
       encode({
         type: 'chat.history',
         requestId: ask.requestId,
         chatId: ask.chatId,
+        ...(ask.branchId !== undefined ? { branchId: ask.branchId } : {}),
         entries: page.entries,
         more: page.more,
         through: page.through,
@@ -697,6 +694,13 @@ export class WsHub {
     );
     for (const d of this.delegates.get(ask.chatId)?.values() ?? []) {
       conn.socket.send(encode(d));
+    }
+    // The chat's branch graph comes with its history, so a surface learns its
+    // tracks without asking (spec/04 § Branching).
+    if (row !== undefined && activeBranchId !== undefined && branches.length > 0) {
+      conn.socket.send(
+        encode({ type: 'chat.branches', chatId: ask.chatId, activeBranchId, branches }),
+      );
     }
   }
 
@@ -1431,7 +1435,11 @@ export class WsHub {
         surfaceId: claims.daemon_id,
         hosts: this.hostRoster(),
         ...(this.deps.chatLogStore
-          ? { recordImport: true as const, recordComplete: true as const }
+          ? {
+              recordImport: true as const,
+              recordComplete: true as const,
+              recordBranches: true as const,
+            }
           : {}),
         hostOutbox: true,
         // This server derives every chat's status itself (spec/12 § Chat status).
@@ -1688,7 +1696,7 @@ export class WsHub {
           conn.watchedChats.add(event.chatId);
         }
         // Forward upstream so the host can route notifications correctly.
-        // Stamp the originating surfaceId (same pattern as chat.replay) so the
+        // Stamp the originating surfaceId (the same addressed-reply pattern) so the
         // host can re-target that surface's open voice session — the bare
         // event has no surfaceId and the host link drops the routing arg.
         // spec/07 ## Focus-follow.
@@ -2006,26 +2014,6 @@ export class WsHub {
         );
         return;
       }
-      case 'chat.replay': {
-        conn.watchedChats.add(event.chatId);
-        // The server's record answers the history (spec/01 § History reads);
-        // the host is asked only for what follows it, which is how a surface
-        // also gets what is live on the host right now (questions it is waiting
-        // on, running subagents, the chat's state). Replay is per-surface: tag
-        // with the surfaceId so the host directs that back to this one only.
-        const answered = this.replayFromRecord(conn, event);
-        const tagged: WireEvent = {
-          ...event,
-          ...(answered !== null && answered > event.fromSeq ? { fromSeq: answered } : {}),
-          forSurfaceId: conn.surfaceId,
-        };
-        this.deps.hostLink.send(conn.surfaceId, tagged);
-        if (answered === null) this.replayHeldTranscript(conn, event);
-        for (const queued of this.deps.queueTracker?.snapshot(event.chatId) ?? []) {
-          conn.socket.send(encode(queued));
-        }
-        return;
-      }
       case 'hello': {
         slog.warn({}, 'unexpected hello after auth');
         conn.socket.close(CLOSE_BAD_FRAME, 'duplicate hello');
@@ -2037,73 +2025,6 @@ export class WsHub {
         conn.socket.close(CLOSE_BAD_FRAME, 'frame type not valid surface→server');
         return;
       }
-    }
-  }
-
-  /**
-   * Answer a surface's replay from the server's record, and say how far it
-   * reaches: null when the record cannot answer it (a branch other than the
-   * active one, which only its host can lay out, or a chat the server holds
-   * nothing of).
-   */
-  private replayFromRecord(
-    conn: { socket: { send(data: string): void } },
-    request: Extract<WireEvent, { type: 'chat.replay' }>,
-  ): number | null {
-    const store = this.deps.chatLogStore;
-    if (!store || request.branchId !== undefined || !store.has(request.chatId)) return null;
-    const events = store.replay(request.chatId, request.fromSeq);
-    const reach = Math.max(request.fromSeq, store.highWater(request.chatId));
-    if (request.batch !== true) {
-      for (const e of events) conn.socket.send(encode(e));
-      return reach;
-    }
-    // Always at least one frame, so the surface's loading state ends here
-    // even when it already had everything.
-    for (let i = 0; i === 0 || i < events.length; i += REPLAY_CHUNK_EVENTS) {
-      conn.socket.send(
-        encode({
-          type: 'chat.replay_batch',
-          chatId: request.chatId,
-          events: events.slice(i, i + REPLAY_CHUNK_EVENTS),
-          done: i + REPLAY_CHUNK_EVENTS >= events.length,
-        }),
-      );
-    }
-    return reach;
-  }
-
-  /**
-   * A replay for a chat whose host is offline cannot be answered by the host,
-   * so answer it from the transcript the server holds. The same goes for a chat
-   * the registry does not know yet: right after a server restart surfaces
-   * reconnect before any host has re-announced its chats. The request is still
-   * sent on: the host answers it when it is back, and a surface drops the
-   * events it already has.
-   */
-  private replayHeldTranscript(
-    conn: { socket: { send(data: string): void } },
-    request: Extract<WireEvent, { type: 'chat.replay' }>,
-  ): void {
-    const store = this.deps.chatLogStore;
-    if (!store) return;
-    const hostId = this.deps.chatRegistry.get(request.chatId)?.hostId;
-    const hostOffline = hostId === undefined || !this.deps.hostLink.isOnline(hostId);
-    const events = hostOffline ? store.read(request.chatId, request.fromSeq) : [];
-    if (events.length === 0) return;
-    if (request.batch !== true) {
-      for (const e of events) conn.socket.send(encode(e));
-      return;
-    }
-    for (let i = 0; i < events.length; i += REPLAY_CHUNK_EVENTS) {
-      conn.socket.send(
-        encode({
-          type: 'chat.replay_batch',
-          chatId: request.chatId,
-          events: events.slice(i, i + REPLAY_CHUNK_EVENTS),
-          done: i + REPLAY_CHUNK_EVENTS >= events.length,
-        }),
-      );
     }
   }
 
@@ -2164,20 +2085,18 @@ export class WsHub {
     // is written before anything is broadcast, so what a surface sees live is
     // already on the server's disk. A resend of one it holds is not broadcast
     // again, and an event that contradicts the log is refused and said so.
-    // A replay (addressed to one surface) is not new and is only kept.
+    // A side branch's entry is kept and not broadcast: no surface draws a
+    // second track live (spec/04 § Parallel branches); it is read by history.
     if (this.deps.chatLogStore) {
-      const replay =
-        event.type === 'chat.replay_batch' ||
-        typeof (event as { forSurfaceId?: unknown }).forSurfaceId === 'string';
-      if (replay) {
-        this.deps.chatLogStore.observe(event);
-      } else if (event.type === 'chat.turn_started' || event.type === 'chat.turn_ended') {
+      if (event.type === 'chat.turn_started' || event.type === 'chat.turn_ended') {
         // A turn boundary is a fact for the record and the chat's status
         // (spec/01 § Chat record), not something a surface draws.
         this.deps.chatLogStore.commit(event);
         return;
       } else {
-        this.deps.chatLogStore.notePermission(event);
+        const chatId = (event as { chatId?: unknown }).chatId;
+        const row = typeof chatId === 'string' ? this.deps.chatRegistry.get(chatId) : undefined;
+        this.deps.chatLogStore.notePermission(event, row?.activeBranchId ?? undefined);
         const outcome = this.deps.chatLogStore.commit(event);
         if (outcome === 'duplicate') return;
         if (outcome === 'conflict') {
@@ -2185,6 +2104,13 @@ export class WsHub {
             { type: event.type, chatId: (event as { chatId?: string }).chatId },
             'ws-hub: a host event contradicts the committed log; not broadcast',
           );
+          return;
+        }
+        if (row !== undefined && offTheLiveTrack(event, row)) {
+          if (outcome === 'new' || outcome === 'updated') {
+            const { seq } = event as { seq: number };
+            this.deps.commitAcks?.note(row.chatId, row.hostId, seq);
+          }
           return;
         }
         if (outcome === 'new' || outcome === 'updated') {
@@ -2358,7 +2284,7 @@ export class WsHub {
     if (!('forSurfaceId' in event)) {
       for (const tap of this.eventTaps) tap(event);
     }
-    // Per-surface replay events: route only to the requesting surface.
+    // Addressed events: route only to the requesting surface.
     if (
       'forSurfaceId' in event &&
       typeof (event as { forSurfaceId?: unknown }).forSurfaceId === 'string'
@@ -2586,4 +2512,25 @@ export class WsHub {
     }
     return count;
   }
+}
+
+/**
+ * Whether a host's entry is on a track no surface draws live: a side branch, or
+ * a branch the chat's graph does not name yet that is not its active one
+ * (spec/04 § Parallel branches). Such an entry is kept in the record and read
+ * through history; broadcasting it would interleave two conversations in the
+ * one view a surface draws for the chat.
+ */
+function offTheLiveTrack(
+  event: WireEvent,
+  row: {
+    branches: readonly { branchId: string; sideThread?: true }[];
+    activeBranchId: string | null;
+  },
+): boolean {
+  const branchId = entryBranch(event);
+  if (branchId === undefined || branchId === row.activeBranchId) return false;
+  const branch = row.branches.find((b) => b.branchId === branchId);
+  if (branch !== undefined) return branch.sideThread === true;
+  return row.activeBranchId !== null;
 }

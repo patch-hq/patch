@@ -81,7 +81,7 @@ describe('PatchWs — auth.ok resends the currently-open chat focus', () => {
   // open-time replay had just subscribed. The pane then kept whatever it held
   // while the chat moved on. The replay must be (re)asked AFTER the focus
   // frame so the live subscription is real.
-  it('asks for the held chat replay after the focus frame, so the subscription survives', async () => {
+  it('follows the held chat after the focus frame, so the subscription survives', async () => {
     useChatStore.setState({ activeChatId: null });
     useChatStore.getState().hydrate([
       {
@@ -114,14 +114,19 @@ describe('PatchWs — auth.ok resends the currently-open chat focus', () => {
     ws.connect();
     await Promise.resolve();
     const fake = FakeWS.instances[0]!;
-    fake.receive({ type: 'auth.ok', hosts: [], accountId: 'a', surfaceId: 's' });
-    const types = fake.sent.map((x) => JSON.parse(x) as { type: string; chatId?: string });
+    fake.receive({ type: 'auth.ok', hosts: [], accountId: 'a', surfaceId: 's', accountFeed: true });
+    const types = fake.sent.map(
+      (x) => JSON.parse(x) as { type: string; follow?: Array<{ chatId: string; after: number }> },
+    );
     const focusAt = types.findIndex((f) => f.type === 'chat.focus_change');
-    const replayAfter = types.findIndex(
-      (f, i) => i > focusAt && f.type === 'chat.replay' && f.chatId === 'c-held',
+    const resumeAfter = types.findIndex(
+      (f, i) =>
+        i > focusAt &&
+        f.type === 'feed.resume' &&
+        (f.follow ?? []).some((c) => c.chatId === 'c-held' && c.after === 3),
     );
     expect(focusAt).toBeGreaterThan(-1);
-    expect(replayAfter).toBeGreaterThan(focusAt);
+    expect(resumeAfter).toBeGreaterThan(focusAt);
     ws.close();
   });
 });

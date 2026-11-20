@@ -5,7 +5,7 @@ import pino from 'pino';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REPLAY_BATCH_BYTES, type WireEvent } from '@patch/wire';
+import { RECORD_FRAME_BYTES, type WireEvent } from '@patch/wire';
 import { RecordImport, RECORD_IMPORT_VERSION, framesOf } from '../src/recordImport.js';
 
 const silent = pino({ level: 'silent' });
@@ -17,7 +17,7 @@ const chatsOf = (sent: WireEvent[]) => sent.map((e) => (e as { chatId: string })
 
 describe('framesOf', () => {
   it('splits a chat into frames under the replay batch size, without routing tags', () => {
-    const big = 'x'.repeat(Math.floor(REPLAY_BATCH_BYTES / 2));
+    const big = 'x'.repeat(Math.floor(RECORD_FRAME_BYTES / 2));
     const frames = framesOf([
       { ...say('c1', 0, big), forSurfaceId: 's1' } as WireEvent,
       say('c1', 1, big),

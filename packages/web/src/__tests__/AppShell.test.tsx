@@ -108,7 +108,7 @@ vi.mock('../api/ws.js', async (importOriginal) => {
     send = wsSend;
     close = wsClose;
     connect = wsConnect;
-    requestReplay = wsRequestReplay;
+    requestHistory = wsRequestReplay;
     syncTranscripts = vi.fn();
   }
   return { ...actual, PatchWs: MockPatchWs };

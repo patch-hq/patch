@@ -1466,15 +1466,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     mime: 'image/png',
     data: 'iVBORw0KGgo=',
   },
-  'chat.replay_batch': {
-    type: 'chat.replay_batch',
-    chatId: 'c1',
-    events: [
-      { type: 'chat.message', chatId: 'c1', seq: 0, role: 'user', content: 'hi' },
-      { type: 'chat.message', chatId: 'c1', seq: 1, role: 'assistant', content: 'hello' },
-    ],
-    done: true,
-  },
   'patch.chat_move.request': {
     type: 'patch.chat_move.request',
     requestId: 'cm1',
@@ -1895,7 +1886,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     auth: 'jwt-token',
   },
   ack: { type: 'ack', chatId: 'c1', seq: 42 },
-  'chat.replay': { type: 'chat.replay', chatId: 'c1', fromSeq: 10 },
   'pairing.nonce': {
     type: 'pairing.nonce',
     nonce: 'abc',
@@ -2018,9 +2008,9 @@ describe('codec', () => {
     expect(() => decode(JSON.stringify(bad))).toThrow(WireDecodeError);
   });
 
-  test('decode throws on chat.replay missing fromSeq', () => {
-    const bad = { type: 'chat.replay', chatId: 'c1' };
-    expect(() => decode(JSON.stringify(bad))).toThrow(WireDecodeError);
+  test('decode refuses chat.replay: history is read from the server only', () => {
+    const gone = { type: 'chat.replay', chatId: 'c1', fromSeq: -1 };
+    expect(() => decode(JSON.stringify(gone))).toThrow(WireDecodeError);
   });
 
   test('decode throws on hello missing clientType', () => {
@@ -2169,13 +2159,26 @@ describe('codec', () => {
     });
   });
 
-  test('chat.replay accepts fromSeq=-1 (fresh surface wants all events incl. seq 0)', () => {
-    const ev: WireEvent = { type: 'chat.replay', chatId: 'c1', fromSeq: -1 };
+  test('chat.history_request accepts after=-1 (holds nothing yet) and refuses -2', () => {
+    const ev: WireEvent = { type: 'chat.history_request', requestId: 'r', chatId: 'c1', after: -1 };
     expect(decode(encode(ev))).toEqual(ev);
-    // -2 is still rejected.
     expect(() =>
-      decode(JSON.stringify({ type: 'chat.replay', chatId: 'c1', fromSeq: -2 })),
+      decode(
+        JSON.stringify({ type: 'chat.history_request', requestId: 'r', chatId: 'c1', after: -2 }),
+      ),
     ).toThrow(WireDecodeError);
+  });
+
+  test('a logged entry may carry its branch for the record', () => {
+    const ev: WireEvent = {
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'assistant',
+      content: 'hi',
+      seq: 3,
+      branchId: 'b1',
+    };
+    expect(decode(encode(ev))).toEqual(ev);
   });
 
   test('WireDecodeError surfaces the zod issue path + message on .message', () => {

@@ -457,23 +457,23 @@ function ChatDetailBody(): React.ReactElement {
   // Subscribe this surface to the open chat's DETAIL-level event stream
   // (chat.message / tool_call / tool_result / permission_request). The server
   // only fans detail events to surfaces that have explicitly subscribed via
-  // chat.replay / chat.focus_change (ws-hub DETAIL_LEVEL_EVENT_TYPES); the
-  // connect-time replay loop only covers chats already hydrated when the WS
-  // opened, so a chat opened later — or any chat whose roster hydrated after
-  // connect — would render its history but miss LIVE permission prompts and
-  // tool calls. Ask for a chat.replay on open so the open chat is always a
-  // watched chat AND any events missed since our cursor are backfilled.
+  // a history request / feed follow / chat.focus_change (ws-hub
+  // DETAIL_LEVEL_EVENT_TYPES); the feed resumed at connect only covers chats
+  // followed then, so a chat opened later would render its history but miss
+  // LIVE permission prompts and tool calls. Ask the server for its history on
+  // open so the open chat is always a watched chat AND any entries missed
+  // since our cursor are backfilled.
   //
   // Nothing happens here on a COLD START — the socket is not open yet, so the
   // request is dropped. `setActiveChat` above is what covers that case: the
-  // connect handler replays the active chat unconditionally once the link is
-  // up (src/api/ws.ts). The cursor itself lives there too, so both callers ask
+  // feed resumed once the link is up follows the active chat unconditionally
+  // (src/api/ws.ts). The cursor itself lives there too, so both callers ask
   // the same question and the chat is never replayed twice on one connection.
   //
   // The phone's own copy is painted FIRST, synchronously (spec/15 § Instant
   // open): a chat opened before is on screen in this very frame, even with
   // the socket still connecting, and the ask that follows is only for what
-  // is newer — `requestReplay` derives its cursor from the timeline, so
+  // is newer — `requestHistory` derives its cursor from the timeline, so
   // feeding the cache in is all it takes. This is also exactly what makes a
   // cold start instant, which is where the socket is not up anyway.
   const cachedBranch = React.useRef<string | null>(null);
@@ -496,11 +496,11 @@ function ChatDetailBody(): React.ReactElement {
         }
       }
     }
-    getWs().requestReplay(chatId);
+    getWs().requestHistory(chatId);
   }, [chatId]);
 
   // A replay can be lost without anyone being told — the host was restarting
-  // when it went out — and the same-cursor guard in `requestReplay` would then
+  // when it went out — and the same-cursor guard in `requestHistory` would then
   // swallow every later ask, leaving "No messages yet" on a chat that has
   // history. While an opened chat is still empty, ask again with backoff.
   const timelineEmpty = useChatStore((s) => (s.timelines[chatId]?.length ?? 0) === 0);
@@ -515,7 +515,7 @@ function ChatDetailBody(): React.ReactElement {
         console.warn(
           `[patch] chat ${chatId} still empty after open — asking for its transcript again`,
         );
-        getWs().requestReplay(chatId, { force: true });
+        getWs().requestHistory(chatId, { force: true });
         attempt += 1;
         schedule();
       }, EMPTY_RETRY_DELAYS_MS[attempt]);
@@ -536,7 +536,7 @@ function ChatDetailBody(): React.ReactElement {
       cachedBranch.current = null;
       dropTranscript(chatId);
       useChatStore.getState().clearTimeline(chatId);
-      getWs().requestReplay(chatId, { force: true });
+      getWs().requestHistory(chatId, { force: true });
       return;
     }
     cachedBranch.current = activeBranchId;

@@ -21,6 +21,7 @@ import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/s
 import { createHistoryReader, encodeFolder, type HistoryReader } from '../src/history.js';
 import { chatTranscriptPath } from '../src/claudeSessionStore.js';
 import { limitError } from './limitErrors.js';
+import { readBack } from './helpers/readBack.js';
 import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
@@ -1236,7 +1237,7 @@ describe('Host ChatRunner', () => {
     expect(OUT_OF_BAND_SEQ).toBe(-1);
   });
 
-  it('replayChat serves the in-memory tail under the mock SDK backend (no JSONL on disk)', async () => {
+  it('the record serves the whole chat under the mock SDK backend (no JSONL on disk)', async () => {
     const { daemon, sdk, folder } = setup();
     sdk.enqueue([
       { type: 'result', sessionId: 'sess-replay' },
@@ -1249,15 +1250,14 @@ describe('Host ChatRunner', () => {
     // message is persisted in the host's in-memory ring. A fresh surface
     // (seen nothing) replays from -1 and must receive the full history
     // including seq 0 (spec/04 § Access: JSONL *plus* in-memory tail).
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (ev) => replayed.push(ev));
+    const replayed = readBack(daemon, chatId);
     const messages = replayed.filter((e) => e.type === 'chat.message');
     expect(messages).toHaveLength(2);
     expect(messages[0]).toMatchObject({ role: 'user', content: 'hi', seq: 0 });
     expect(messages[1]).toMatchObject({ role: 'assistant', content: 'first', seq: 1 });
   });
 
-  it('replayChat with fromSeq filters out already-seen events (reconnect resync)', async () => {
+  it('reading after a seq leaves out already-seen events (reconnect resync)', async () => {
     const { daemon, sdk, folder } = setup();
     sdk.enqueue([
       { type: 'result', sessionId: 'sess-resync' },
@@ -1273,89 +1273,14 @@ describe('Host ChatRunner', () => {
 
     // A surface whose highest seen seq is 1 asks for everything after it, and
     // gets strictly that — never the reply it already rendered.
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, 1, (ev) => replayed.push(ev));
+    const replayed = readBack(daemon, chatId, { fromSeq: 1 });
     const contents = replayed
       .filter((e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message')
       .map((e) => e.content);
     expect(contents).toEqual(['again', 'b']);
   });
 
-  it('G2-d1: replayChat re-emits a still-pending permission request even when the transcript replays it as a plain tool_call', async () => {
-    // Mirror the live mock stack: the SDK backend writes a Claude-Code-shaped
-    // JSONL transcript, where a permission is recorded as an assistant
-    // `tool_use` block. On replay the history reader reconstructs that as a
-    // `chat.tool_call` (no approve/deny). The fix re-emits the canonical
-    // `chat.permission_request` for any STILL-PENDING permission so a surface
-    // that reconnects AFTER the turn can still resolve `awaiting-permission`.
-    const home = mkdtempSync(join(tmpdir(), 'patch-g2d1-home-'));
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-g2d1-folder-')));
-    mkdirSync(folder, { recursive: true });
-    const projectsRoot = mkdtempSync(join(tmpdir(), 'patch-g2d1-projects-'));
-    const metaStore = createMetaStore(home);
-    const sdk = createMockSdkBackend({ claudeProjectsRoot: projectsRoot });
-    const historyReader = createHistoryReader({ claudeProjectsRoot: projectsRoot });
-    let id = 0;
-    const daemon = new Daemon({
-      hostId: 'd1',
-      metaStore,
-      sdkBackend: sdk,
-      historyReader,
-      oauthAccessToken: 'fake-token',
-      emit: () => undefined,
-      logger: silent,
-      now: () => 1_700_000_000_000,
-      generateChatId: () => `g2d1-${++id}`,
-    });
-    const chatId = await daemon.spawnChat({ folder, prompt: 'please [[permission]] now' });
-    await new Promise((r) => setTimeout(r, 40));
-    expect(daemon.chatState.get(chatId)?.activity).toBe('awaiting-permission');
-
-    // The transcript exists and replays the permission as a bare tool_call —
-    // but the fix tops the replay up with the canonical permission_request.
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (ev) => replayed.push(ev));
-    const perm = replayed.find((e) => e.type === 'chat.permission_request');
-    expect(perm).toBeDefined();
-    const requestId = (perm as { requestId: string }).requestId;
-
-    // Once resolved, a later reconnect must NOT re-surface the (now decided)
-    // permission card.
-    daemon.submitPermissionResponse({ requestId, decision: 'approve' });
-    const replayed2: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (ev) => replayed2.push(ev));
-    expect(replayed2.some((e) => e.type === 'chat.permission_request')).toBe(false);
-  });
-
-  it('replayChat re-emits current chat.state so a surface that reconnects after a turn finished stops showing Stop (bug: "Patch showing stop after message has returned")', async () => {
-    const { daemon, sdk, folder } = setup();
-    sdk.enqueue([
-      { type: 'result', sessionId: 'sess-reconnect' },
-      { type: 'assistant', content: 'done', sessionId: 'sess-reconnect' },
-    ]);
-    const chatId = await daemon.spawnChat({ folder, prompt: 'hi' });
-    await new Promise((r) => setTimeout(r, 20));
-
-    // The turn has already settled back to idle by the time the surface
-    // reconnects — it missed the live running -> idle chat.state edge while
-    // disconnected. Replay must still hand it the CURRENT activity so a
-    // stale "running" (and the Stop button it drives) doesn't stick around
-    // forever.
-    expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
-
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (ev) => replayed.push(ev));
-    const state = replayed.find(
-      (e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state',
-    );
-    expect(state).toBeDefined();
-    // The host states its facts; `activity` rides along only for a server too
-    // old to decide status itself, and the server link strips it for one that does.
-    expect(state?.activity).toBe('idle');
-    expect(state?.queuedTurns).toBe(0);
-  });
-
-  describe('replayChat: a persisted turn is never emitted twice (patch/todo.md — "messages are getting repeated in chat history")', () => {
+  describe('read back: a persisted turn is never emitted twice (patch/todo.md — "messages are getting repeated in chat history")', () => {
     async function setupDrifted() {
       // Real mock stack: the SDK backend writes a Claude-Code-shaped JSONL, so
       // replay merges the persisted transcript (line-index-derived seqs — see
@@ -1409,8 +1334,7 @@ describe('Host ChatRunner', () => {
 
     it('a full replay emits the persisted turn once — not once from the transcript and again from the ring', async () => {
       const { daemon, chatId } = await setupDrifted();
-      const replayed: WireEvent[] = [];
-      daemon.replayChat(chatId, -1, (ev) => replayed.push(ev));
+      const replayed = readBack(daemon, chatId);
       const contents = assistantContents(replayed);
       expect(contents.filter((c) => c === 'second reply')).toHaveLength(1);
       expect(new Set(contents).size).toBe(contents.length);
@@ -1418,16 +1342,14 @@ describe('Host ChatRunner', () => {
 
     it('re-opening the chat (cursor = highest seq already rendered) replays nothing already held', async () => {
       const { daemon, chatId } = await setupDrifted();
-      const first: WireEvent[] = [];
-      daemon.replayChat(chatId, -1, (ev) => first.push(ev));
+      const first = readBack(daemon, chatId);
       // The surface's cursor is the highest durable seq it rendered — exactly
-      // what `requestReplay` computes from the timeline it now holds.
+      // what `requestHistory` computes from the timeline it now holds.
       const cursor = first.reduce((max, ev) => {
         const seq = (ev as { seq?: unknown }).seq;
         return typeof seq === 'number' && seq > max ? seq : max;
       }, -1);
-      const second: WireEvent[] = [];
-      daemon.replayChat(chatId, cursor, (ev) => second.push(ev));
+      const second = readBack(daemon, chatId, { fromSeq: cursor });
       expect(assistantContents(second)).toEqual([]);
     });
   });
@@ -3580,9 +3502,8 @@ describe('Host ChatRunner', () => {
         liveMessages,
       );
 
-      // WS `chat.replay {fromSeq: -1}` (exclusive, -1 = everything) — likewise.
-      const full: WireEvent[] = [];
-      daemon.replayChat(chatId, -1, (e) => full.push(e));
+      // The server's record (what every surface reads) — likewise.
+      const full = readBack(daemon, chatId);
       expect(msgs(full)).toEqual(liveMessages);
 
       // THE DEFECT: a surface reconnecting with the highest seq it saw live
@@ -3591,13 +3512,11 @@ describe('Host ChatRunner', () => {
         ...events.map(seqOf).filter((n): n is number => typeof n === 'number'),
       );
       expect(highestLive).toBe(4);
-      const tail: WireEvent[] = [];
-      daemon.replayChat(chatId, highestLive, (e) => tail.push(e));
+      const tail = readBack(daemon, chatId, { fromSeq: highestLive });
       expect(msgs(tail)).toEqual([]);
 
       // And a surface that saw only the first exchange gets exactly the rest.
-      const partial: WireEvent[] = [];
-      daemon.replayChat(chatId, 1, (e) => partial.push(e));
+      const partial = readBack(daemon, chatId, { fromSeq: 1 });
       expect(msgs(partial)).toEqual(['user:second question@2', 'assistant:second reply@4']);
     });
 
@@ -3632,8 +3551,7 @@ describe('Host ChatRunner', () => {
 
       // Replay: the prompt is at seq 0 — above the reply, not below it — and
       // appears exactly once even though the ring still holds its live copy.
-      const full: WireEvent[] = [];
-      daemon.replayChat(chatId, -1, (e) => full.push(e));
+      const full = readBack(daemon, chatId);
       expect(msgs(full)).toEqual(liveMessages);
       const userSeqs = full
         .filter((e) => e.type === 'chat.message' && (e as { role: string }).role === 'user')
@@ -3650,8 +3568,7 @@ describe('Host ChatRunner', () => {
       const highestLive = Math.max(
         ...events.map(seqOf).filter((n): n is number => typeof n === 'number'),
       );
-      const tail: WireEvent[] = [];
-      daemon.replayChat(chatId, highestLive, (e) => tail.push(e));
+      const tail = readBack(daemon, chatId, { fromSeq: highestLive });
       expect(msgs(tail)).toEqual([]);
     });
 
@@ -3702,8 +3619,7 @@ describe('Host ChatRunner', () => {
       expect(emittedLiveOnly.length).toBeGreaterThan(0);
       for (const e of emittedLiveOnly) expect((e as { seq?: number }).seq).toBeUndefined();
 
-      const replayed: WireEvent[] = [];
-      daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+      const replayed = readBack(daemon, chatId);
       for (const e of [...replayed, ...daemon.readHistory({ chatId, fromSeq: 0 }).events]) {
         expect(liveOnly.has(e.type)).toBe(false);
       }
@@ -3729,8 +3645,7 @@ describe('Host ChatRunner', () => {
         now: () => 1_700_000_000_000,
       });
       restarted.hydrate();
-      const replayed: WireEvent[] = [];
-      restarted.replayChat(chatId, -1, (e) => replayed.push(e));
+      const replayed = readBack(restarted, chatId);
       expect(msgs(replayed)).toEqual(before);
       restarted.shutdown();
     });
@@ -3843,7 +3758,7 @@ describe('Host ChatRunner', () => {
     });
   });
 
-  describe('resumeChat / replayChat / readHistory / sendInput: not-found and validation branches', () => {
+  describe('resumeChat / readHistory / sendInput: not-found and validation branches', () => {
     it('resumeChat throws ChatNotFoundError for a chat unknown both in-memory and on disk', async () => {
       const { daemon } = setup();
       await expect(daemon.resumeChat('totally-unknown')).rejects.toThrow(/chat not found/);
@@ -3881,13 +3796,6 @@ describe('Host ChatRunner', () => {
         generateChatId: () => 'unused',
       });
       await expect(daemon.resumeChat('requested-id')).rejects.toThrow(/chat not found/);
-    });
-
-    it('replayChat throws ChatNotFoundError for an unknown chat', () => {
-      const { daemon } = setup();
-      expect(() => daemon.replayChat('totally-unknown', -1, () => undefined)).toThrow(
-        /chat not found/,
-      );
     });
 
     it('readHistory throws ChatNotFoundError for an unknown chat', () => {

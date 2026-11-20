@@ -1,5 +1,5 @@
 // api/ws.ts — the RN WebSocket client (spec/05, spec/12). Exercises connect/
-// hello/replay-on-open, the message dispatch table, reconnect-with-backoff,
+// hello/feed-on-greeting, the message dispatch table, reconnect-with-backoff,
 // the AppState-driven heartbeat, safeSend vs send, and getWs/resetWs. Uses
 // the FakeWebSocket test double (installed as `global.WebSocket`) so every
 // scenario is driven deterministically without a real socket.
@@ -127,19 +127,42 @@ describe('connect() / openOnce()', () => {
     expect(usePresenceStore.getState().connection).toBe('reconnecting');
   });
 
-  it('replays every known chat by lastSeq on open', () => {
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'c1',
-        name: 'One',
-        folder: '~/x',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 1,
-      },
-    ]);
+  const row = (chatId: string, lastUpdated = 1) => ({
+    chatId,
+    name: chatId,
+    folder: '~/x',
+    chatStatus: { state: 'idle' as const, since: 0 },
+    status: 'active' as const,
+    pinned: false,
+    pinnedAt: null,
+    lastUpdated,
+  });
+  const greet = (sock: FakeWebSocket): void =>
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'auth.ok',
+        hosts: [],
+        accountId: 'a',
+        surfaceId: 's',
+        accountFeed: true,
+      }),
+    );
+  const sentOf = (sock: FakeWebSocket, type: string): Array<Record<string, unknown>> =>
+    sock.sent
+      .map((x) => JSON.parse(x as string) as Record<string, unknown>)
+      .filter((m) => m['type'] === type);
+  const follows = (sock: FakeWebSocket): Map<string, number> =>
+    new Map(
+      (
+        (sentOf(sock, 'feed.resume').at(-1)?.['follow'] ?? []) as Array<{
+          chatId: string;
+          after: number;
+        }>
+      ).map((f) => [f.chatId, f.after]),
+    );
+
+  it('asks for no chat history on open; the greeting resumes the feed', () => {
+    useChatStore.getState().hydrate([row('c1')]);
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -151,194 +174,44 @@ describe('connect() / openOnce()', () => {
     ws.connect();
     const sock = FakeWebSocket.last();
     sock.emitOpen();
-    const replay = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .find((m) => m.type === 'chat.replay');
-    expect(replay).toMatchObject({ type: 'chat.replay', chatId: 'c1', fromSeq: 5 });
+    expect(sentOf(sock, 'chat.history_request')).toEqual([]);
+    greet(sock);
+    expect(follows(sock).get('c1')).toBe(5);
+    expect(sentOf(sock, 'chat.history_request')).toEqual([]);
   });
 
-  it('requests no replay for metadata-only roster rows (cold start, spec/12)', () => {
-    // The roster comes from one metadata call; transcripts load on open, so a
-    // cold start must not pull one event stream per known chat.
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'c1',
-        name: 'One',
-        folder: '~/x',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 1,
-      },
-      {
-        chatId: 'c2',
-        name: 'Two',
-        folder: '~/y',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 2,
-      },
-    ]);
-    const ws = getWs();
-    ws.connect();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([]);
-  });
-
-  it('still replays the chat the surface has open', () => {
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'c1',
-        name: 'One',
-        folder: '~/x',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 1,
-      },
-      {
-        chatId: 'c2',
-        name: 'Two',
-        folder: '~/y',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 2,
-      },
-    ]);
-    useChatStore.getState().setActiveChat('c2');
-    const ws = getWs();
-    ws.connect();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays.map((m) => m.chatId)).toEqual(['c2']);
-  });
-
-  it('replays a BRAND-NEW chat seeded by ensureChat — the new-chat lock-up regression', () => {
-    // This is the mechanism behind "New chat locked up on mobile". The
-    // new-chat flow navigates to /chats/<id> the instant createChat returns,
-    // long before `chat.spawned`. The connect handler iterates
-    // `Object.keys(chats)`, so a chat with NO store row is invisible to it and
-    // never gets a `chat.replay` — and `chat.replay` is the ONLY thing that
-    // adds the chat to the connection's `watchedChats` on the server, which
-    // gates every `chat.message` / `chat.tool_call` / `chat.tool_result` /
-    // `chat.permission_request` (`DETAIL_LEVEL_EVENT_TYPES`, ws-hub.ts).
-    // Result: the user types, and no reply ever arrives.
-    //
-    // The phone hits this constantly and the desktop never does: mobile
-    // reconnects on every backgrounding and network change, and on a cold
-    // start the screen's own mount-time `requestReplay` no-ops silently
-    // because the socket isn't open yet (`readyState !== 1`).
-    //
-    // `ensureChat` is what puts the row there, so the loop can find it.
-    useChatStore.getState().ensureChat('c_new', '/home/tom/work');
-    useChatStore.getState().setActiveChat('c_new');
-    const ws = getWs();
-    ws.connect();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    // fromSeq -1: nothing has been rendered, so ask for the whole transcript.
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_new', fromSeq: -1, batch: true }]);
-  });
-
-  it('replays the open chat even when the roster has no row for it — the tapped-notification cold start', () => {
-    // Tapping an Android push cold-starts the app and deep-links straight to
-    // /chats/<id>. That chat is typically brand new (a job just spawned it and
-    // notified), so it is in neither the on-device roster cache nor the
-    // still-unanswered GET /api/chats: `chats` has no row for it at all. The
-    // connect handler iterates the chats it holds, so the ONE chat on screen
-    // was the one chat it skipped — and `chat.replay` is the only thing that
-    // adds a chat to the server's per-connection `watchedChats` (ws-hub.ts),
-    // which gates every chat.message / chat.tool_call / chat.tool_result /
-    // chat.permission_request. The user tapped the notification and got a
-    // blank chat that then stayed blank, live events and all.
+  it('follows the open chat even when the roster has no row for it — the tapped-notification cold start', () => {
+    // Tapping an Android push cold-starts the app and deep-links straight to a
+    // chat in neither the roster cache nor the unanswered GET /api/chats.
+    // Following it is what adds it to the server's per-connection watch list,
+    // which gates every live chat.message / tool call / permission prompt.
     useChatStore.getState().setActiveChat('c_push');
     const ws = getWs();
     ws.connect();
     const sock = FakeWebSocket.last();
     sock.emitOpen();
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_push', fromSeq: -1, batch: true }]);
+    greet(sock);
+    expect(follows(sock).get('c_push')).toBe(-1);
   });
 
-  it('re-issues the replay the detail screen asked for while the socket was still closed — exactly once', () => {
-    // The cold-start ORDERING itself. The screen mounts and asks for its
-    // replay before the socket has opened; `requestReplay` is best-effort, so
-    // it drops the frame AND does not record the cursor, which is what leaves
-    // the connect handler responsible for asking again.
-    //
-    // Exactly once matters: a second request from a different cursor on the
-    // same connection re-delivers the transcript, and mobile's store dedups a
-    // re-delivered permission card and error by identity but NOT a tool call.
+  it('a history ask the detail screen made while the socket was closed is not sent; the feed covers it', () => {
     useChatStore.getState().setActiveChat('c_push');
     const ws = getWs();
     ws.connect();
     const sock = FakeWebSocket.last();
-    // The screen mounts here: the socket exists but is still CONNECTING.
-    ws.requestReplay('c_push');
+    ws.requestHistory('c_push');
     expect(sock.sent).toEqual([]);
     sock.emitOpen();
-    // The screen's effect running again once the link is up changes nothing.
-    ws.requestReplay('c_push');
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_push', fromSeq: -1, batch: true }]);
+    greet(sock);
+    expect(follows(sock).get('c_push')).toBe(-1);
   });
 
-  it('asks from -1 for an open chat whose roster row is metadata-only', () => {
-    // A roster row (cached or freshly hydrated) carries no transcript, so its
-    // lastSeq is 0 — and fromSeq is EXCLUSIVE, so asking from 0 skips seq 0,
-    // the chat's first message. The cursor is what this surface has actually
-    // RENDERED, which for a metadata-only row is nothing.
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'c1',
-        name: 'One',
-        folder: '~/x',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        lastUpdated: 1,
-      },
-    ]);
-    useChatStore.getState().setActiveChat('c1');
-    const ws = getWs();
-    ws.connect();
-    const sock = FakeWebSocket.last();
-    sock.emitOpen();
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c1', fromSeq: -1, batch: true }]);
-  });
-
-  it('re-asks for the open chat on the NEXT connection, from the cursor it reached', () => {
-    // The per-connection cursor is cleared on every new socket: a reconnect
-    // (the phone backgrounds, the network flips) must catch up on whatever
-    // was missed while the link was down, from the last durable seq rendered.
+  it('re-follows the open chat on the NEXT connection, from the cursor it reached', () => {
     useChatStore.getState().setActiveChat('c_push');
     const ws = getWs();
     ws.connect();
     FakeWebSocket.last().emitOpen();
+    greet(FakeWebSocket.last());
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c_push',
@@ -350,19 +223,14 @@ describe('connect() / openOnce()', () => {
     vi.advanceTimersByTime(1000);
     const sock2 = FakeWebSocket.last();
     sock2.emitOpen();
-    const replays = sock2.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_push', fromSeq: 7, batch: true }]);
+    greet(sock2);
+    expect(follows(sock2).get('c_push')).toBe(7);
   });
 
   it('the cursor is the highest DURABLE seq rendered, not the last entry in the timeline', () => {
-    // Two entries must not move the cursor. An optimistic outgoing echo carries
-    // a negative placeholder seq until the host persists it, and a replay
-    // re-delivers every still-pending permission card whatever fromSeq asked
-    // for — so the card can land at an OLDER seq than the transcript's tail.
-    // Taking either as the cursor would ask the host for events it has
-    // already sent (and, from a negative seq, the whole transcript again).
+    // An optimistic outgoing echo carries a negative placeholder seq, and a
+    // pending permission card can land at an OLDER seq than the tail; neither
+    // may move the cursor.
     useChatStore.getState().setActiveChat('c_push');
     useChatStore.getState().applyEvent({
       type: 'chat.message',
@@ -383,20 +251,20 @@ describe('connect() / openOnce()', () => {
     ws.connect();
     const sock = FakeWebSocket.last();
     sock.emitOpen();
-    const replays = sock.sent
-      .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_push', fromSeq: 5, batch: true }]);
+    greet(sock);
+    expect(follows(sock).get('c_push')).toBe(5);
   });
 
-  it('calls deliveryTracker.onReconnect() on open', () => {
+  it('calls deliveryTracker.onReconnect() once greeted', () => {
     connectAndOpen();
+    greet(FakeWebSocket.last());
     expect(deliveryTracker.onReconnect).toHaveBeenCalled();
   });
 
-  it('starts the heartbeat on open when foregrounded', () => {
+  it('starts the heartbeat once greeted when foregrounded', () => {
     connectAndOpen();
     const sock = FakeWebSocket.last();
+    greet(sock);
     sock.sent.length = 0;
     vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
     const hb = sock.sent
@@ -446,25 +314,25 @@ describe('foreground catch-up of the open chat', () => {
       ] as never[]);
     const ws = connectAndOpen();
     const sock = FakeWebSocket.last();
-    ws.requestReplay('c_fg');
+    ws.requestHistory('c_fg');
     __emitAppStateChange('background');
     sock.sent.length = 0;
     __emitAppStateChange('active');
-    const replays = sock.sent
+    const asks = sock.sent
       .map((s) => JSON.parse(s as string))
-      .filter((m) => m.type === 'chat.replay');
-    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_fg', fromSeq: 4, batch: true }]);
+      .filter((m) => m.type === 'chat.history_request');
+    expect(asks).toEqual([expect.objectContaining({ chatId: 'c_fg', after: 4 })]);
   });
 
   it('asks for nothing on foreground when no chat is open', () => {
     const ws = connectAndOpen();
     const sock = FakeWebSocket.last();
-    ws.requestReplay('c_none');
+    ws.requestHistory('c_none');
     __emitAppStateChange('background');
     sock.sent.length = 0;
     __emitAppStateChange('active');
     expect(
-      sock.sent.map((s) => JSON.parse(s as string)).some((m) => m.type === 'chat.replay'),
+      sock.sent.map((s) => JSON.parse(s as string)).some((m) => m.type === 'chat.history_request'),
     ).toBe(false);
   });
 });
@@ -1006,27 +874,6 @@ describe('message dispatch', () => {
       .getState()
       .setHosts([{ hostId: 'd2', online: true, lastSeenAt: 1, host: null, accounts: [] }]);
     expect(Object.keys(usePresenceStore.getState().hosts)).toEqual(['d2']);
-  });
-
-  it('a pending-spawn chat.error inside a chat.replay_batch is still recorded as a host refusal', () => {
-    const sock = open();
-    useHostRefusalStore.getState()._reset();
-    sock.emitMessage(
-      JSON.stringify({
-        type: 'chat.replay_batch',
-        chatId: 'c1',
-        done: true,
-        events: [
-          {
-            type: 'chat.error',
-            chatId: 'pending-spawn',
-            error: { code: 'claude_settings_invalid', message: 'replayed refusal' },
-            seq: -1,
-          },
-        ],
-      }),
-    );
-    expect(useHostRefusalStore.getState().last).toMatchObject({ message: 'replayed refusal' });
   });
 
   // A refused settings.json / memory edit arrives as an out-of-band chat.error

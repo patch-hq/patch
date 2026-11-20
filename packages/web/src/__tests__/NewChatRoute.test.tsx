@@ -457,9 +457,9 @@ describe('/chats/new', () => {
         }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    // No `requestReplay` stub needed for the assertion to hold, but ChatRoute
+    // No `requestHistory` stub needed for the assertion to hold, but ChatRoute
     // calls it on mount, so it must exist.
-    const ws = { send: vi.fn(), requestReplay: vi.fn() } as unknown as PatchWs;
+    const ws = { send: vi.fn(), requestHistory: vi.fn() } as unknown as PatchWs;
 
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -508,7 +508,7 @@ describe('/chats/new', () => {
         }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const ws = { send: vi.fn(), requestReplay: vi.fn() } as unknown as PatchWs;
+    const ws = { send: vi.fn(), requestHistory: vi.fn() } as unknown as PatchWs;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>

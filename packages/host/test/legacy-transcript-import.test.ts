@@ -7,11 +7,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -31,9 +31,7 @@ function makeDaemon(home: string, projectsRoot: string) {
 }
 
 function userMessages(daemon: Daemon, chatId: string): string[] {
-  const out: WireEvent[] = [];
-  daemon.replayChat(chatId, -1, (e) => out.push(e));
-  return out
+  return readBack(daemon, chatId)
     .filter((e) => e.type === 'chat.message' && e.role === 'user')
     .map((e) => (e as { content: string }).content);
 }

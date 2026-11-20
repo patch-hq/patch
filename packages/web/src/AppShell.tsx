@@ -87,13 +87,7 @@ import { useVoiceStore } from './stores/voiceStore.js';
 import { composerHotkeyDown, composerHotkeyUp } from './lib/composerMic.js';
 import { api } from './api/rest.js';
 import { useDiscardUnsentNewChats } from './lib/unsentNewChat.js';
-import {
-  CHAT_INDEX_STALE_EVENT,
-  PatchWs,
-  defaultWsUrl,
-  getActiveWs,
-  setActiveWs,
-} from './api/ws.js';
+import { CHAT_INDEX_STALE_EVENT, PatchWs, defaultWsUrl, setActiveWs } from './api/ws.js';
 import {
   startVoiceNote,
   sendVoiceNote,
@@ -229,10 +223,6 @@ export function AppShell(): JSX.Element {
           hidden: c.hidden,
         })),
       );
-      // Bring each chat's transcript level with this roster in the background,
-      // so opening one shows its messages at once. Skips when the socket is not
-      // up yet; its connect handler sweeps instead.
-      getActiveWs()?.syncTranscripts();
       return r;
     },
   });

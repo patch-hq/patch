@@ -62,8 +62,8 @@ interface Props {
 // How long a row's preview must be QUIET before we show its new value.
 const PREVIEW_SETTLE_MS = 250;
 
-// Settle the row preview. On load / reconnect the host replays a burst of
-// events per chat (chat.replay), and every chat.message rewrites the row
+// Settle the row preview. On load / reconnect the server sends a burst of
+// entries per chat (history, the account feed), and every chat.message rewrites the row
 // preview — so a row would otherwise "flick" through every intermediate
 // message as it catches up. We hold the displayed preview steady until updates
 // for this row have been quiet for PREVIEW_SETTLE_MS, so the row lands on its

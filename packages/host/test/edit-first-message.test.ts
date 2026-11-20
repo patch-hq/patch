@@ -13,6 +13,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -42,9 +43,7 @@ function setup(opts: { turnDelayMs?: number } = {}) {
 }
 
 function replay(daemon: Daemon, chatId: string): WireEvent[] {
-  const out: WireEvent[] = [];
-  daemon.replayChat(chatId, -1, (e) => out.push(e), undefined);
-  return out;
+  return readBack(daemon, chatId);
 }
 
 function userMessages(events: WireEvent[]): Array<{ seq: number; content: string }> {

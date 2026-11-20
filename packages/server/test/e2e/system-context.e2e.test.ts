@@ -9,7 +9,7 @@
 //       → the agent receives it as plain text (the mock echoes its prompt)
 //       → the surface receives it as its own chat.note entry ahead of the user
 //         chat.message, which carries only what was typed
-//   chat.replay from a fresh surface
+//   a history read from a fresh surface
 //     → the same chat.note rebuilt from the persisted transcript.
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -92,7 +92,7 @@ describe('e2e notes: a note to the agent reaches the surface as its own entry', 
     await client.close();
     const client2 = await h.connectSurface('srf-sc1c');
     const replayed = record(client2, ['chat.message', 'chat.note']);
-    client2.replay(chatId, -1);
+    client2.history(chatId, { after: -1 });
     await until(
       () => userMessages(replayed, chatId).some((m) => m.content === 'go on then'),
       3000,

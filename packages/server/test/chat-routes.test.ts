@@ -685,94 +685,7 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('GET /api/chats/:id/history round-trips via host-link and returns events since seq', async () => {
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    let nextId = 0;
-    const built = await makeApp({
-      registry,
-      hostLink,
-      idGenerator: () => `01HHIST0${String(++nextId).padStart(19, '0')}`,
-    });
-    try {
-      // Seed a chat in the registry so the route doesn't 404.
-      hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'c-hist',
-        folder: '/work/h',
-      });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c-hist',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/h',
-      });
-
-      // Stand in for the host: reply to patch.chat_history.request with the
-      // events at/after the requested `since`.
-      const allEvents = [
-        {
-          type: 'chat.message' as const,
-          chatId: 'c-hist',
-          role: 'user' as const,
-          content: 'a',
-          seq: 0,
-        },
-        {
-          type: 'chat.message' as const,
-          chatId: 'c-hist',
-          role: 'assistant' as const,
-          content: 'b',
-          seq: 1,
-        },
-        {
-          type: 'chat.message' as const,
-          chatId: 'c-hist',
-          role: 'user' as const,
-          content: 'c',
-          seq: 2,
-        },
-      ];
-      const originalSend = hostLink.sendTo.bind(hostLink);
-      let seenSince: number | undefined = -1;
-      hostLink.sendTo = (hostId, surfaceId, event) => {
-        originalSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          seenSince = event.since;
-          const from = event.since ?? 0;
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: true,
-              events: allEvents.filter((e) => e.seq >= from),
-            });
-          });
-        }
-      };
-
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-hist/history?since=2',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(seenSince).toBe(2);
-      const body = res.json() as { events: Array<{ content: string; seq: number }> };
-      expect(body.events).toHaveLength(1);
-      expect(body.events[0]?.content).toBe('c');
-      expect(body.events[0]?.seq).toBe(2);
-    } finally {
-      await built.app.close();
-    }
-  });
-
-  it("GET /api/chats/:id/history answers from the server's own copy while the chat's host is offline", async () => {
+  it("GET /api/chats/:id/history answers from the server's record while the chat's host is offline", async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
     const built = await makeApp({ registry, hostLink });
@@ -795,15 +708,14 @@ describe('chat REST routes', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as { events: Array<{ seq: number }>; fromServerCopy?: boolean };
+      const body = res.json() as { events: Array<{ seq: number }> };
       expect(body.events.map((e) => e.seq)).toEqual([2, 3]);
-      expect(body.fromServerCopy).toBe(true);
     } finally {
       await built.app.close();
     }
   });
 
-  it("GET /api/chats/:id/history from the server's copy honours limit, and reads everything with no since", async () => {
+  it('GET /api/chats/:id/history from the record honours limit, and reads everything with no since', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
     const built = await makeApp({ registry, hostLink });
@@ -826,8 +738,8 @@ describe('chat REST routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect((res.json().events as Array<{ seq: number }>).map((e) => e.seq)).toEqual([0, 1, 2]);
-      // The host's answer names where the next page starts when the limit cut it
-      // short; the server's copy must too, or a pager stops after page one.
+      // The answer names where the next page starts when the limit cut it
+      // short, or a pager stops after page one.
       expect(res.json().nextFromSeq).toBe(3);
       const last = await built.app.inject({
         method: 'GET',
@@ -842,53 +754,65 @@ describe('chat REST routes', () => {
   });
 
   // spec/14 § Side threads panel — pulls a side thread's content through this
-  // REST path with a branchId, since a side branch isn't broadcast live.
-  it('GET /api/chats/:id/history?branchId=<id> passes branchId through to the host request', async () => {
+  // REST path with a branchId, since a side branch isn't broadcast live. The
+  // server lays the track out from its own record.
+  it("GET /api/chats/:id/history?branchId=<id> reads that branch's track from the record", async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
-    const built = await makeApp({ registry, hostLink, idGenerator: () => '01HHIST0BRANCH' });
+    const built = await makeApp({ registry, hostLink });
     try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-br', folder: '/work/h' });
       hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'c-hist-branch',
-        folder: '/work/h',
+        type: 'chat.branches',
+        chatId: 'c-br',
+        activeBranchId: 'main',
+        branches: [
+          {
+            branchId: 'main',
+            parentBranchId: null,
+            forkFromSeq: null,
+            label: 'main',
+            createdAt: 1,
+          },
+          {
+            branchId: 'side',
+            parentBranchId: 'main',
+            forkFromSeq: 0,
+            label: 'side 1',
+            createdAt: 2,
+            sideThread: true,
+          },
+        ],
       });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c-hist-branch',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/h',
+      const say = (seq: number, branchId: string) => ({
+        type: 'chat.message' as const,
+        chatId: 'c-br',
+        role: 'assistant' as const,
+        content: `m${seq}`,
+        seq,
+        branchId,
       });
-
+      hostLink.emit(say(0, 'main'));
+      hostLink.emit(say(1, 'side'));
+      hostLink.emit(say(2, 'main'));
+      const asked: string[] = [];
       const originalSend = hostLink.sendTo.bind(hostLink);
-      let seenBranchId: string | undefined;
       hostLink.sendTo = (hostId, surfaceId, event) => {
+        asked.push(event.type);
         originalSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          seenBranchId = event.branchId;
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: true,
-              events: [],
-            });
-          });
-        }
       };
-
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-hist-branch/history?branchId=c-hist-branch-b1',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(seenBranchId).toBe('c-hist-branch-b1');
+      const read = async (q: string): Promise<number[]> => {
+        const res = await built.app.inject({
+          method: 'GET',
+          url: `/api/chats/c-br/history${q}`,
+          headers: { authorization: `Bearer ${jwt}` },
+        });
+        expect(res.statusCode).toBe(200);
+        return (res.json().events as Array<{ seq: number }>).map((e) => e.seq);
+      };
+      expect(await read('?branchId=side')).toEqual([0, 1]);
+      expect(await read('')).toEqual([0, 2]);
+      expect(asked.filter((t) => t.includes('history'))).toEqual([]);
     } finally {
       await built.app.close();
     }
@@ -2912,30 +2836,12 @@ describe('chat REST routes', () => {
         pinned: false,
         folder: '/work/l',
       });
-      let seenLimit: number | undefined = -1;
-      const origSend = hostLink.sendTo.bind(hostLink);
-      hostLink.sendTo = (hostId, surfaceId, event) => {
-        origSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          seenLimit = event.limit;
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: true,
-              events: [],
-            });
-          });
-        }
-      };
-
       const ok = await built.app.inject({
         method: 'GET',
         url: '/api/chats/c-limit/history?limit=5',
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(ok.statusCode).toBe(200);
-      expect(seenLimit).toBe(5);
 
       const nonInteger = await built.app.inject({
         method: 'GET',
@@ -2957,134 +2863,6 @@ describe('chat REST routes', () => {
         headers: { authorization: `Bearer ${jwt}` },
       });
       expect(tooSmall.statusCode).toBe(400);
-    } finally {
-      await built.app.close();
-    }
-  });
-
-  it('GET /api/chats/:id/history surfaces nextFromSeq when the host returns one', async () => {
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    const built = await makeApp({ registry, hostLink });
-    try {
-      hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'c-next',
-        folder: '/work/n',
-      });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c-next',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/n',
-      });
-      const origSend = hostLink.sendTo.bind(hostLink);
-      hostLink.sendTo = (hostId, surfaceId, event) => {
-        origSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: true,
-              events: [],
-              nextFromSeq: 42,
-            });
-          });
-        }
-      };
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-next/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(200);
-      expect((res.json() as { nextFromSeq?: number }).nextFromSeq).toBe(42);
-    } finally {
-      await built.app.close();
-    }
-  });
-
-  it('GET /api/chats/:id/history returns 504 when the host never replies', async () => {
-    // Real timers: fake timers don't reliably interleave with fastify's
-    // internal inject() dispatch in this environment (the route's setTimeout
-    // registers AFTER a fake-timer advance() call has already returned,
-    // leaving it stuck forever) — so this waits out the real 5s timeout.
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    const built = await makeApp({ registry, hostLink });
-    try {
-      hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'c-timeout',
-        folder: '/work/t',
-      });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c-timeout',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/t',
-      });
-      // Never respond to patch.chat_history.request — let it time out.
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-timeout/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(504);
-      expect((res.json() as { error: string }).error).toBe('daemon_timeout');
-    } finally {
-      await built.app.close();
-    }
-  }, 8_000);
-
-  it('GET /api/chats/:id/history maps a host-side error to 502 (non chat_not_found)', async () => {
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    const built = await makeApp({ registry, hostLink });
-    try {
-      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-err', folder: '/work/e' });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c-err',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/e',
-      });
-      const origSend = hostLink.sendTo.bind(hostLink);
-      hostLink.sendTo = (hostId, surfaceId, event) => {
-        origSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: false,
-              error: { code: 'internal', message: 'reader crashed' },
-            });
-          });
-        }
-      };
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-err/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(502);
-      expect((res.json() as { error: string }).error).toBe('internal');
     } finally {
       await built.app.close();
     }
@@ -4483,52 +4261,6 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('GET /api/chats/:id/history maps a chat_not_found host error to 404', async () => {
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    const built = await makeApp({ registry, hostLink });
-    try {
-      hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'c-hist-404',
-        folder: '/work/h4',
-      });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c-hist-404',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/h4',
-      });
-      const origSend = hostLink.sendTo.bind(hostLink);
-      hostLink.sendTo = (hostId, surfaceId, event) => {
-        origSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: false,
-              error: { code: 'chat_not_found', message: 'gone' },
-            });
-          });
-        }
-      };
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-hist-404/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(404);
-    } finally {
-      await built.app.close();
-    }
-  });
-
   it('history/files/skills responses default missing optional fields ([] / "")', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
@@ -4721,7 +4453,7 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('history/files/skills host failures default code/message when `error` itself is omitted', async () => {
+  it('files/skills host failures default code/message when `error` itself is omitted', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
     const built = await makeApp({ registry, hostLink });
@@ -4745,16 +4477,7 @@ describe('chat REST routes', () => {
       const origSend = hostLink.send.bind(hostLink);
       const origSendTo = hostLink.sendTo.bind(hostLink);
       const intercept = (event: WireEvent): void => {
-        if (event.type === 'patch.chat_history.request') {
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: false,
-              // `error` omitted entirely.
-            });
-          });
-        } else if (event.type === 'patch.files.request') {
+        if (event.type === 'patch.files.request') {
           setImmediate(() => {
             hostLink.emit({
               type: 'patch.files.response',
@@ -4782,15 +4505,6 @@ describe('chat REST routes', () => {
         origSendTo(hostId, surfaceId, event);
         intercept(event);
       };
-
-      const hist = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/c-noerr/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(hist.statusCode).toBe(502);
-      expect((hist.json() as { error: string; message: string }).error).toBe('internal');
-      expect((hist.json() as { message: string }).message).toBe('history error');
 
       const files = await built.app.inject({
         method: 'GET',

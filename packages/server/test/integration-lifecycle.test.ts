@@ -78,16 +78,6 @@ class WiredHostLink implements HostLink {
         case 'chat.archive_request':
           await this.daemon.setArchived(event.chatId, event.archived);
           return;
-        case 'chat.replay': {
-          const surfaceId = event.forSurfaceId;
-          this.daemon.replayChat(event.chatId, event.fromSeq, (ev) => {
-            const tagged = surfaceId
-              ? ({ ...(ev as object), forSurfaceId: surfaceId } as WireEvent)
-              : ev;
-            this.emit(tagged);
-          });
-          return;
-        }
         default:
         // ignored
       }
@@ -306,7 +296,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       await c2.waitFor('host.online');
       const replayMessages: string[] = [];
       c2.on('chat.message', (e) => replayMessages.push(e.content));
-      c2.replay(chatId, 0);
+      c2.history(chatId, { after: 0 });
       await new Promise((r) => setTimeout(r, 100));
       // Replay comes from the chat's own log (spec/04 § History) and shows
       // what was actually said, not a harness transcript.
@@ -388,7 +378,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     }
   });
 
-  it('chat.replay resyncs from the in-memory tail under the mock SDK backend (no JSONL)', async () => {
+  it('a fresh surface reads the whole chat from the server under the mock SDK backend (no JSONL)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(52));
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
@@ -474,7 +464,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       const replayErrors: string[] = [];
       c2.on('chat.message', (e) => replayMessages.push(e.content));
       c2.on('chat.error', (e) => replayErrors.push(e.error.code));
-      c2.replayFromLastSeen(chatId);
+      c2.historyFromLastSeen(chatId);
       await new Promise((r) => setTimeout(r, 100));
       expect(replayErrors).toEqual([]);
       expect(replayMessages).toContain('tail-msg');

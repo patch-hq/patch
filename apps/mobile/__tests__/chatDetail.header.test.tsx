@@ -44,7 +44,7 @@ const apiMocks = {
 };
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
-const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 
 const startVoiceCallMock = vi.fn();
@@ -242,7 +242,7 @@ describe('chat-detail header', () => {
     // surface to the chat's detail events on the server. The cursor is derived
     // inside the ws client, so both it and the connect handler ask the same
     // question (see coldStartDeepLink.integration.test.tsx).
-    expect(wsMock.requestReplay).toHaveBeenCalledWith('c_new');
+    expect(wsMock.requestHistory).toHaveBeenCalledWith('c_new');
   });
 
   it('a spawn rejection on a brand-new chat is VISIBLE, not a silent empty room (spec/12 § No fallbacks)', () => {

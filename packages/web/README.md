@@ -34,11 +34,13 @@ production behind Caddy + the patch server.
    - TanStack Query cold-starts the chats list (`GET /api/chats`).
    - `PatchWs` opens `/ws`, sends `hello` with the bearer, dispatches every
      subsequent event into the right store.
-   - On reconnect: capped exponential backoff (1s → 30s) and per-chat
-     `chat.replay { fromSeq }` for the chats whose transcript we already hold
-     (the open chat + any with a rendered timeline). A cold start replays
-     nothing — the roster is the single `GET /api/chats` metadata call and each
-     transcript loads on open (spec/12 § Cold start loads metadata only).
+   - On reconnect: capped exponential backoff (1s → 30s), then `feed.resume`
+     following the chats whose transcript we already hold (the open chat + any
+     with a rendered timeline); the server catches each up from its record.
+     Opening a chat asks the server for its history (`chat.history_request`);
+     a host is never asked. A cold start asks for nothing — the roster is the
+     single `GET /api/chats` metadata call and each transcript loads on open
+     (spec/12 § Cold start loads metadata only).
 3. UI mutations issue REST POSTs (pin / archive / job CRUD) and optimistic
    store updates; failures push a red toast via `uiStore.pushError`.
 

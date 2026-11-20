@@ -1,6 +1,7 @@
 // Browser WebSocket client. Connects to /ws on the same origin; handshake
 // sends `hello` with stored bearer; reconnects with capped exponential
-// backoff and replays missed events per chat via `chat.replay`.
+// backoff and reads each chat's history from the server (`chat.history_request`,
+// the account feed); a host is never asked for history.
 //
 // Surfaces:
 //   - dispatches into chatStore / presenceStore / voiceStore
@@ -124,10 +125,10 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
 
 /**
  * How often the open chat is re-synced from its cursor while its turn is
- * running. The host records every event, but a live detail event that never
+ * running. The server records every event, but a live detail event that never
  * reaches this surface (a dropped subscription, a lost frame) is otherwise
- * never noticed: the pane freezes mid-turn with the spinner up. The replay
- * back-fills the gap and re-subscribes the socket to the chat.
+ * never noticed: the pane freezes mid-turn with the spinner up. The history
+ * read back-fills the gap and re-subscribes the socket to the chat.
  */
 export const RUNNING_RESYNC_MS = 5_000;
 /**
@@ -144,15 +145,13 @@ export const HEARTBEAT_LIVENESS_TIMEOUT_MS = 30_000;
 /**
  * How long an inbound store event is held so a burst commits once (~one frame).
  *
- * A `chat.replay` delivers a whole transcript at once — measured at 582 events
+ * A history page delivers many entries at once — measured at 582 events
  * in 444ms on a busy chat — and a commit per event meant a re-render of the
  * whole stream per message. That is what made opening a chat fill in visibly,
  * one message at a time, with the scroll chasing the growing content all the
  * way down. Matches `apps/mobile/src/api/ws.ts`.
  */
 export const STORE_BATCH_MS = 16;
-const SYNC_DEBOUNCE_MS = 1000;
-const SYNC_TIMEOUT_MS = 30_000;
 
 export class PatchWs {
   private ws: WebSocket | null = null;
@@ -173,36 +172,18 @@ export class PatchWs {
   /** True once this socket has received a heartbeat ack (arms the watchdog). */
   private pongSupported = false;
   /**
-   * The cursor each chat's last replay was asked from, ON THIS SOCKET. Cleared
+   * The cursor each chat's last history read was asked from, ON THIS SOCKET. Cleared
    * on every new connection, so a reconnect always re-asks (a drop before any
    * events arrived must still catch up) while one connection never asks the same
    * question twice.
    */
-  private readonly lastReplayCursor = new Map<string, number>();
-  /**
-   * The server answers history and runs the account feed (spec/05 § Loading):
-   * set from `auth.ok`. Then a chat's history is asked of the server alone, a
-   * page at a time, and the feed keeps the chats this surface holds current.
-   */
-  private accountFeed = false;
+  private readonly lastHistoryCursor = new Map<string, number>();
   /** History requests in flight: which chat, and which way the page runs. */
   private readonly historyAsks = new Map<
     string,
     { chatId: string; kind: 'last' | 'before' | 'after' }
   >();
   private historySeq = 0;
-  /**
-   * Background transcript sync (spec/12 § Offline reading, web variant): the
-   * `lastUpdated` each chat's transcript was last brought level with, the chats
-   * waiting their turn, the one in flight, and the timers that debounce
-   * triggers and bound a host that never answers. One chat at a time, so a
-   * whole library never arrives as one burst.
-   */
-  private readonly syncedAt = new Map<string, number>();
-  private syncQueue: Array<{ chatId: string; lastUpdated: number }> = [];
-  private syncing: { chatId: string; lastUpdated: number } | null = null;
-  private syncTimer: number | null = null;
-  private syncDebounce: number | null = null;
   /** Store events gathered so far in the current batch window, in arrival order. */
   private storeQueue: WireEvent[] = [];
   private storeFlushTimer: number | null = null;
@@ -226,9 +207,6 @@ export class PatchWs {
     this.stopHeartbeat();
     this.stopInputReports();
     this.stopRunningResync();
-    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
-    if (this.syncDebounce !== null) window.clearTimeout(this.syncDebounce);
-    this.syncTimer = this.syncDebounce = null;
     this.detachVisibility();
     // Commit anything still inside the batch window. Dropping it would lose
     // real, already-received transcript — the queue is not a cache.
@@ -374,8 +352,8 @@ export class PatchWs {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const { activeChatId, chats } = useChatStore.getState();
       if (activeChatId === null || statusOf(chats[activeChatId]) !== 'running') return;
-      this.lastReplayCursor.delete(activeChatId);
-      this.requestReplay(activeChatId);
+      this.lastHistoryCursor.delete(activeChatId);
+      this.requestHistory(activeChatId);
     }, RUNNING_RESYNC_MS);
   }
 
@@ -416,144 +394,38 @@ export class PatchWs {
     this.ws.send(JSON.stringify(event));
     // The hub reads `chatId: null` as "unsubscribe from everything": this
     // socket stops receiving every chat's detail events (the replies). The
-    // replay cursors record what the hub was last ASKED, and none of those
+    // history cursors record what the hub was last ASKED, and none of those
     // subscriptions stand any more — so a re-open that lands on the same
     // cursor must be sent, not discarded as a repeat, or the chat is never
     // resubscribed and the reply that arrived while away never renders.
-    if (event.type === 'chat.focus_change' && event.chatId === null) this.lastReplayCursor.clear();
+    if (event.type === 'chat.focus_change' && event.chatId === null) this.lastHistoryCursor.clear();
   }
 
   /**
-   * Bring every roster chat's transcript level with the roster, so opening one
-   * shows its messages at once instead of fetching them on arrival. Driven by
-   * the roster and by live `chat.state` changes, never a timer: a chat is
-   * fetched when its `lastUpdated` differs from the one it was last synced to.
-   * The open chat is skipped (it receives live events), as is a running chat
-   * (it settles with a fresh `lastUpdated`) and a chat on an offline host.
-   */
-  syncTranscripts(): void {
-    // The account feed keeps held chats current; nothing is fetched chat by chat.
-    if (this.accountFeed) return;
-    const { chats, activeChatId } = useChatStore.getState();
-    const hosts = usePresenceStore.getState().hosts;
-    const queued = new Set(this.syncQueue.map((q) => q.chatId));
-    for (const row of Object.values(chats)) {
-      if (row.chatId === activeChatId || queued.has(row.chatId)) continue;
-      if (this.syncing?.chatId === row.chatId) continue;
-      if (statusOf(row) === 'running') continue;
-      if (hosts[row.hostId]?.online === false) continue;
-      if (this.syncedAt.get(row.chatId) === row.lastUpdated) continue;
-      this.syncQueue.push({ chatId: row.chatId, lastUpdated: row.lastUpdated });
-    }
-    this.pumpSync();
-  }
-
-  /** Coalesce a burst of roster/state changes into one sweep. */
-  private scheduleSync(): void {
-    if (this.syncDebounce !== null) return;
-    this.syncDebounce = window.setTimeout(() => {
-      this.syncDebounce = null;
-      this.syncTranscripts();
-    }, SYNC_DEBOUNCE_MS);
-  }
-
-  private pumpSync(): void {
-    if (this.syncing !== null) return;
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    const next = this.syncQueue.shift();
-    if (next === undefined) return;
-    this.flushStoreQueue();
-    const timeline = useChatStore.getState().timelines[next.chatId];
-    const fromSeq =
-      timeline && timeline.length > 0
-        ? timeline.reduce(
-            (max, e) =>
-              e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max,
-            -1,
-          )
-        : -1;
-    this.syncing = next;
-    this.lastReplayCursor.set(next.chatId, fromSeq);
-    this.safeSend({ type: 'chat.replay', chatId: next.chatId, fromSeq, batch: true });
-    // A host that never answers is reported, not retried forever: the chat is
-    // simply not marked synced, so the next trigger asks again.
-    this.syncTimer = window.setTimeout(() => {
-      console.warn(`[ws] background sync of ${next.chatId} timed out`);
-      this.endSync(false);
-    }, SYNC_TIMEOUT_MS);
-  }
-
-  private endSync(done: boolean): void {
-    const finished = this.syncing;
-    this.syncing = null;
-    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
-    this.syncTimer = null;
-    if (done && finished) this.syncedAt.set(finished.chatId, finished.lastUpdated);
-    this.pumpSync();
-  }
-
-  /**
-   * Ask for a replay of every chat whose transcript this surface is holding —
-   * the chat it has open, plus any chat with a rendered timeline. Chats known
-   * only as metadata rows are skipped: their transcripts load lazily on open
-   * (spec/12 § Cold start loads metadata only).
+   * Ask the server for a chat's history from our current cursor (spec/03 §
+   * Chat history). Sent by a surface when it OPENS a chat; on connect the
+   * account feed catches up every chat this surface holds. The read also
+   * subscribes this surface to the chat's live detail events.
    *
-   * `hostId` narrows the sweep to one host, for a host that has just come
-   * back; omitted on a fresh socket, where every host is equally unknown.
-   * `force` drops each swept chat's dedup cursor first — a returning host
-   * usually leaves the cursor exactly where it was, so the request that heals
-   * the chat would otherwise be discarded as a repeat of the one that fetched
-   * the history we are now missing the tail of. Scoped to the chats being
-   * swept, so one host's restart never re-asks another host's.
-   */
-  private replayHeldChats(hostId?: string, force = false): void {
-    const { chats, timelines, activeChatId } = useChatStore.getState();
-    for (const chatId of Object.keys(chats)) {
-      const row = chats[chatId];
-      /* v8 ignore next -- defensive only: `chatId` is drawn from `Object.keys(chats)`, so `chats[chatId]` is always defined; this only exists to satisfy noUncheckedIndexedAccess. */
-      if (row === undefined) continue;
-      if (hostId !== undefined && row.hostId !== hostId) continue;
-      const held = chatId === activeChatId || (timelines[chatId]?.length ?? 0) > 0;
-      if (!held) continue;
-      if (force) this.lastReplayCursor.delete(chatId);
-      this.requestReplay(chatId);
-    }
-  }
-
-  /**
-   * Request the host replay a chat's transcript from our current cursor.
-   * Sent by a surface when it OPENS a chat, and on connect only for the chats
-   * whose transcript we already hold (spec/12 § Cold start loads metadata
-   * only): the connect-time loop covers neither a metadata-only roster row nor
-   * a chat that first appears afterward — spawned on another
-   * surface and learned about via the always-on state-level fanout — has no
-   * transcript until it is replayed. The replay also subscribes this surface
-   * to the chat's live detail events (spec/12 § Replay vs history cursors).
-   *
-   * `fromSeq` is EXCLUSIVE: only DURABLE entries count toward the cursor — an
+   * The cursor is EXCLUSIVE: only DURABLE entries count toward it — an
    * optimistic outgoing message carries a `localId` + a `Date.now()`
-   * placeholder seq (reconciled to its real seq on replay) and a streaming
-   * assistant entry isn't persisted yet, so including either would poison the
-   * cursor and skip real history. `-1` means "seen nothing" (full history);
-   * `0` deliberately skips the seq-0 first user message. No-op when the socket
-   * isn't open — the connect handler replays all known chats once the link is
-   * up.
+   * placeholder seq and a streaming assistant entry isn't persisted yet, so
+   * including either would poison the cursor and skip real history. Holding
+   * nothing asks for the chat's last screen. No-op when the socket isn't open
+   * — the connect handler resumes the feed once the link is up.
    *
    * `force` skips the dedup guard below. A caller that just cleared the
    * chat's timeline itself (switching tracks — `ChatRoute.tsx`'s
-   * `handleSwitchTrack`) recomputes `fromSeq -1` from that now-empty
-   * timeline, which collides with the cursor cached by the chat's very
-   * first load (also `-1`, set before any of its history had arrived) even
-   * though the active branch has since changed server-side. Without `force`
-   * the guard reads that as the exact repeat it exists to drop, the request
-   * never goes, and the cleared timeline never refills — the chat's history
-   * looks like it went missing until a full reload re-syncs it.
+   * `handleSwitchTrack`) recomputes the same empty cursor the chat's first
+   * load cached, though the active branch has since changed. Without `force`
+   * the guard reads that as a repeat, the request never goes, and the cleared
+   * timeline never refills.
    */
-  requestReplay(chatId: string, opts?: { force?: boolean }): void {
+  requestHistory(chatId: string, opts?: { force?: boolean }): void {
     // The cursor is derived from committed store state, so anything still
     // sitting in the batch window has to land first — otherwise `fromSeq` is
     // computed against a transcript missing its most recent entries and the
-    // host re-sends history we already hold. See `queueForStore`.
+    // server re-sends history we already hold. See `queueForStore`.
     this.flushStoreQueue();
     const timeline = useChatStore.getState().timelines[chatId];
     const fromSeq =
@@ -564,8 +436,8 @@ export class PatchWs {
               e.streaming !== true &&
               // A failed turn's error is fanned out to every surface, open
               // chat or not, so it can be the only entry held for a chat the
-              // surface never replayed. Counting it would put the cursor past
-              // the whole unseen history. A replayed error is de-duplicated.
+              // surface never read. Counting it would put the cursor past
+              // the whole unseen history. A re-delivered error is de-duplicated.
               e.kind !== 'error' &&
               e.seq > max
                 ? e.seq
@@ -573,36 +445,23 @@ export class PatchWs {
             -1,
           )
         : -1;
-    // Don't ask twice from the same cursor. Opening a chat requests its
-    // transcript, and the socket completing its connect a moment later requests
-    // every held chat — the active chat included, timeline still empty. Both
-    // computed `fromSeq: -1`, so the host streamed the whole transcript twice.
-    // The store now folds a re-delivered turn onto its canonical seq, so this is
-    // no longer a correctness fix — but a second full transcript over the wire
-    // is pure waste, and the request that would produce it is the wrong one to
-    // send. Keyed on the cursor: a LATER replay from a further-on cursor (a
-    // genuine reconnect catch-up) is a different question and always goes.
-    if (!opts?.force && this.lastReplayCursor.get(chatId) === fromSeq) return;
+    // Don't ask twice from the same cursor: a second copy of the same page over
+    // the wire is pure waste. Keyed on the cursor: a LATER read from a
+    // further-on cursor (a genuine catch-up) is a different question and
+    // always goes.
+    if (!opts?.force && this.lastHistoryCursor.get(chatId) === fromSeq) return;
     // Recorded only if it actually went. A request made before the socket was
     // open is dropped by `safeSend`, and remembering THAT would suppress the
     // connect-time request that is supposed to replace it — leaving the chat
     // empty forever, which is worse than the duplicate this guard prevents.
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.lastReplayCursor.set(chatId, fromSeq);
-    // A replay is the host's authoritative statement of what is still true
-    // for this chat from `fromSeq` on — including whether anything is still
-    // pending a decision. Clear first: a host restart wipes its in-memory
-    // pendingPermissions with no wire event to say so, so a request answered
-    // (or simply forgotten) before this client reconnected has no other way
-    // to stop showing the indigo badge forever. `replayChat` re-emits
-    // `chat.permission_request` only for what is genuinely still open, so
-    // anything real re-lands within the same replay.
+    this.lastHistoryCursor.set(chatId, fromSeq);
+    // A history answer states what is still pending a decision on the chat
+    // (`pending`). Clear first, so a request answered or forgotten while this
+    // client was away stops showing the indigo badge; anything genuinely open
+    // re-lands with the answer.
     useChatStore.getState().clearPendingPermissions(chatId);
-    if (this.accountFeed) {
-      this.askHistory(chatId, fromSeq >= 0 ? { after: fromSeq } : {});
-    } else {
-      this.safeSend({ type: 'chat.replay', chatId, fromSeq, batch: true });
-    }
+    this.askHistory(chatId, fromSeq >= 0 ? { after: fromSeq } : {});
     useChatStore.getState().setReplaying(chatId, true);
   }
 
@@ -625,7 +484,6 @@ export class PatchWs {
 
   /** The page before the earliest entry this surface holds, as the reader scrolls up. */
   loadEarlier(chatId: string): void {
-    if (!this.accountFeed) return;
     if (useChatStore.getState().historyLoadingEarlier[chatId]) return;
     this.flushStoreQueue();
     const timeline = useChatStore.getState().timelines[chatId] ?? [];
@@ -648,7 +506,11 @@ export class PatchWs {
     this.flushStoreQueue();
     const { chats, timelines, activeChatId } = useChatStore.getState();
     const follow: Array<{ chatId: string; after: number }> = [];
-    for (const chatId of Object.keys(chats)) {
+    // The open chat is followed even before the roster lists it (a deep link
+    // on a cold start): following is what subscribes this socket to it.
+    const ids = new Set(Object.keys(chats));
+    if (activeChatId !== null) ids.add(activeChatId);
+    for (const chatId of ids) {
       const timeline = timelines[chatId];
       const held = chatId === activeChatId || (timeline?.length ?? 0) > 0;
       if (!held) continue;
@@ -656,7 +518,7 @@ export class PatchWs {
         (max, e) => (e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max),
         -1,
       );
-      this.lastReplayCursor.set(chatId, after);
+      this.lastHistoryCursor.set(chatId, after);
       follow.push({ chatId, after });
     }
     const after = loadFeedPos();
@@ -670,15 +532,9 @@ export class PatchWs {
     // server pongs (a new server across a reconnect might not support acks).
     this.pongSupported = false;
     this.lastInboundAt = Date.now();
-    // A new socket has heard nothing: every held chat may need its replay again,
+    // A new socket has heard nothing: every held chat may need its history again,
     // including one whose previous request died with the old connection.
-    this.lastReplayCursor.clear();
-    // A background fetch in flight died with the old socket; its chat was never
-    // marked synced, so the connect-time sweep asks for it again.
-    this.syncing = null;
-    this.syncQueue = [];
-    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
-    this.syncTimer = null;
+    this.lastHistoryCursor.clear();
 
     const ws = new WebSocket(this.url);
     this.ws = ws;
@@ -707,29 +563,10 @@ export class PatchWs {
       // treated as "this surface can't connect at all".
       usePresenceStore.getState().noteWsOpen(this.url);
 
-      // Replay missed events for every chat we know about.
-      //
-      // `chat.replay.fromSeq` is EXCLUSIVE (host emits seq > fromSeq) and is a
-      // reconnect/dedup cursor: the highest seq we have ALREADY rendered.
-      // spec/12 § "Replay vs history cursors": a surface that has seen nothing
-      // must pass `-1` to get full history — `0` deliberately SKIPS seq 0 (the
-      // chat's first user message). A freshly-hydrated chat (GET /api/chats
-      // carries no stream state) has `lastSeq: 0` but an EMPTY timeline, so
-      // replaying from `0` would silently drop the seq-0 user turn. Derive the
-      // cursor from the timeline we have actually applied: the max rendered seq,
-      // or `-1` when nothing has been rendered yet.
-      //
-      // We replay ONLY the chats whose transcript this surface is already
-      // holding: the chat it has open, plus any chat with a rendered timeline.
-      // spec/12 § "Cold start loads metadata only": a freshly-booted surface
-      // has nothing but the `GET /api/chats` metadata snapshot, and replaying
-      // every row from it cost one inbound event stream per chat — each
-      // rewriting store rows and re-rendering the sidebar — for transcripts
-      // nobody is looking at. Transcripts load lazily on open (ChatRoute calls
-      // requestReplay), so the cold-start cost is the single metadata call.
-      // Reconnect is unchanged: anything already rendered still catches up.
-      this.replayHeldChats();
-      this.syncTranscripts();
+      // Missed events for every chat this surface holds are caught up by the
+      // account feed once `auth.ok` arrives (`resumeFeed`); transcripts of
+      // chats only known as roster rows load lazily on open (spec/12 § Cold
+      // start loads metadata only).
 
       // spec/12 § "Survives a server restart" — the server's in-memory
       // surface→host buffer is gone across a restart, so any input we sent
@@ -937,7 +774,6 @@ export class PatchWs {
       // frame — including hosts that are asleep and will never announce
       // themselves.
       usePresenceStore.getState().setHosts(event.hosts);
-      this.accountFeed = event.accountFeed === true;
       // Live update (spec/14 § Live updates): the server reports the bundle it
       // serves on every auth.ok. A deploy restarts the server, so this
       // reconnect delivers the new hash — reload if it changed.
@@ -960,15 +796,10 @@ export class PatchWs {
       // announce, not a no-op to skip.
       this.send({ type: 'chat.focus_change', chatId: useChatStore.getState().activeChatId });
       // The hub reads `chatId: null` as "unsubscribe from everything" and
-      // clears this socket's watched chats — including every chat the
-      // open-time replay (sent before auth completed) had just subscribed. A
-      // pane showing such a chat then sat on stale state while the chat moved
-      // on, missing every live event after a reconnect. Ask again now that
-      // the focus frame is behind us: the replay re-subscribes and catches up
-      // from the cursor. Forced, because the cursor is unchanged since the
-      // request it replaces.
-      if (this.accountFeed) this.resumeFeed();
-      else this.replayHeldChats(undefined, true);
+      // clears this socket's watched chats. Resume the feed now that the focus
+      // frame is behind us: it re-subscribes every held chat and catches each
+      // up from the cursor this surface holds.
+      this.resumeFeed();
       // spec/14 § Composer — push every draft the server never confirmed
       // (typed while offline, or a save that failed mid-flight) now that the
       // link is back.
@@ -991,16 +822,8 @@ export class PatchWs {
     }
     if (event.type === 'host.online') {
       usePresenceStore.getState().setHostOnline(event.hostId, true);
-      // The host just came back, and this surface's socket to the SERVER may
-      // never have dropped — a host restart (a deploy, a crash) does not
-      // reconnect us. Nothing else asks for what we missed: the connect-time
-      // sweep only runs on a fresh socket, and ChatRoute only replays when the
-      // chat or the link changes identity. Without this a chat sits there
-      // holding whatever it had when the host went down, silently missing
-      // every event emitted since, with no error anywhere.
-      // With the feed, a returning host's events reach this surface live from
-      // the server's record; there is nothing to ask for.
-      if (!this.accountFeed) this.replayHeldChats(event.hostId, true);
+      // A returning host's events reach this surface live from the server's
+      // record; there is no history to ask for.
       // The server flushes its buffer, but a copy lost to a flap at flush time
       // would never arrive — redeliver every still-pending input so
       // queued-while-offline turns land promptly and any lost one heals
@@ -1418,10 +1241,6 @@ export class PatchWs {
     // permission state (e.g. the spoken "yes"/"no" was parsed host-side and
     // the turn resumed) so the banner doesn't linger after a voice answer.
     if (event.type === 'chat.state') {
-      // A chat other than the one on screen changed: keep its transcript
-      // current in the background. Frames that arrive inside our own
-      // background fetch of that chat are its replay, not news.
-      if (this.syncing?.chatId !== event.chatId) this.scheduleSync();
       const pending = useVoiceStore.getState().permission;
       if (
         pending &&
@@ -1450,12 +1269,11 @@ export class PatchWs {
     // Stays SYNCHRONOUS: the tracker's timers are keyed to when the event
     // actually arrived, not to when the store next commits.
     deliveryTracker.observe(event);
-    // A batched replay is one frame carrying the whole answer (spec/12 §
-    // Sequence-based replay). Unpack it into the same queue the live path
-    // uses — same events, same order, same reducer — and commit immediately
-    // rather than waiting out the coalescing frame: there is nothing more
-    // coming to coalesce WITH, and the point of asking for a batch was to
-    // paint the transcript once instead of watching it arrive.
+    // A history page is one frame carrying many entries (spec/03 § Chat
+    // history). Unpack it into the same queue the live path uses — same
+    // events, same order, same reducer — and commit immediately rather than
+    // waiting out the coalescing frame: there is nothing more coming to
+    // coalesce WITH, and the transcript should paint once.
     if (event.type === 'chat.history') {
       const ask = this.historyAsks.get(event.requestId);
       this.historyAsks.delete(event.requestId);
@@ -1501,21 +1319,6 @@ export class PatchWs {
     ) {
       noteFeedPos(event.feedPos);
     }
-    if (event.type === 'chat.replay_batch') {
-      // Each inner event goes back through dispatch() so it gets the same
-      // special-case side effects as a live one (diff rail, voice banner,
-      // permission ack, host-refusal toast). dispatch() queues the chat events;
-      // the flush below commits them at once.
-      for (const inner of event.events) this.dispatch(inner as WireEvent);
-      this.flushStoreQueue();
-      // The loading state ends with the LAST chunk, not the first: until then
-      // the transcript may still be arriving, and an empty one is not yet empty.
-      if (event.done) {
-        useChatStore.getState().setReplaying(event.chatId, false);
-        if (this.syncing?.chatId === event.chatId) this.endSync(true);
-      }
-      return;
-    }
     // Chat events go to chatStore — coalesced, see queueForStore.
     this.queueForStore(event);
   }
@@ -1547,7 +1350,7 @@ export class PatchWs {
    * reply and the `chat.state` that clears the spinner — queued together in
    * the batch that threw — never land, leaving the chat spinning forever with
    * no error on screen. Same remedy as a malformed frame above: fail loud and
-   * reload, which re-syncs every open chat from the host's own replay
+   * reload, which re-reads every open chat from the server's record
    * instead of leaving the store's in-memory state silently short.
    */
   private flushStoreQueue(): void {

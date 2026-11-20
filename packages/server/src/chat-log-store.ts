@@ -3,7 +3,7 @@
 // Every transcript event a host sends passes through `commit` before anything
 // is broadcast: it is written to the chat's append-only file first, so what a
 // surface has seen live is always already on the server's disk. A resend of an
-// event the server holds is a no-op, so a host that replays after a dropped link
+// event the server holds is a no-op, so a host that resends after a dropped link
 // cannot double a message. Live streaming (deltas, state, progress) is not part
 // of the transcript and never touches this.
 //
@@ -12,6 +12,12 @@
 // Turn boundaries (`chat.turn_started`, `chat.turn_ended`) are kept beside the
 // entries too, by turn id: each sits at the chat's highest seq when it happened
 // and takes no seq of its own, so it can never collide with an entry.
+//
+// Each entry's branch is kept beside it the same way, so the record can lay out
+// any branch's track itself (spec/04 § Branching): a side branch's entries are
+// sent here by its host and kept, though they are never broadcast. Every
+// surface reads history from here, whether the chat's host is online or not
+// (spec/03 § Chat history).
 //
 // Hosts deliver through their outbox (spec/01 § Host outbox): the server
 // acknowledges an outbox position only after `makeDurable` has made every write
@@ -42,7 +48,9 @@ import {
   TURN_BOUNDARY_TYPES,
   type ChatTurnEndedEvent,
   type ChatTurnStartedEvent,
+  trackFilter,
   type NativeRef,
+  type TrackBranch,
   type WireEvent,
 } from '@patch/wire';
 import {
@@ -83,7 +91,7 @@ function previewOf(result: unknown, json: string): string {
   return headCodePoints(text, PREVIEW_CHARS);
 }
 
-/** The events a replay is made of: the transcript, as opposed to live-only frames. */
+/** The events a chat's history is made of: the transcript, as opposed to live-only frames. */
 export function isTranscriptEvent(event: WireEvent): boolean {
   switch (event.type) {
     case 'chat.message':
@@ -119,11 +127,34 @@ function withoutRef<E extends WireEvent>(event: E): { bare: E; ref: NativeRef | 
   return { bare: bare as E, ref: nativeRef };
 }
 
-/** What a surface is sent of a host's event: everything but the provider id. */
+/** A logged entry without the branch it may carry; any other event as it is. */
+function withoutBranch<E extends WireEvent>(event: E): { bare: E; branchId: string | undefined } {
+  if (!isTranscriptEvent(event) && event.type !== 'chat.tool_run_summary') {
+    return { bare: event, branchId: undefined };
+  }
+  const { branchId, ...bare } = event as E & { branchId?: unknown };
+  return { bare: bare as E, branchId: typeof branchId === 'string' ? branchId : undefined };
+}
+
+/** The branch a logged entry says it is on, if it says. */
+export function entryBranch(event: WireEvent): string | undefined {
+  return withoutBranch(event).branchId;
+}
+
+/**
+ * What a surface is sent of a host's event: everything but the provider id and
+ * the entry's branch, which are the record's.
+ */
 export function forSurfaces<E extends WireEvent>(event: E): E {
-  return (event as { nativeRef?: unknown }).nativeRef === undefined
-    ? event
-    : withoutRef(event).bare;
+  const { bare } = withoutBranch(event);
+  return (bare as { nativeRef?: unknown }).nativeRef === undefined ? bare : withoutRef(bare).bare;
+}
+
+/** Which branch's track a history read is for (spec/04 § Branching). */
+export interface TrackAsk {
+  /** The chat's branch graph; empty for a chat that has only ever had one track. */
+  branches: readonly TrackBranch[];
+  branchId: string;
 }
 
 /** The tool whose question the user answers in a card rather than approves (spec/04 § Questions). */
@@ -177,6 +208,8 @@ export class ChatLogStore {
   private readonly chats = new Map<string, Map<number, WireEvent>>();
   /** Each held entry's provider id, by chat and seq. */
   private readonly refs = new Map<string, Map<number, NativeRef>>();
+  /** Each held entry's branch, by chat and seq, where its host said. */
+  private readonly entryBranches = new Map<string, Map<number, string>>();
   /** Each chat's turns, by turn id. */
   private readonly turnsByChat = new Map<string, Map<string, RecordedTurn>>();
   /**
@@ -196,7 +229,7 @@ export class ChatLogStore {
   private readonly open = new Map<string, Map<string, WireEvent>>();
   private readonly questions = new Map<
     string,
-    Map<string, { request: WireEvent; response?: WireEvent }>
+    Map<string, { request: WireEvent; response?: WireEvent; branchId?: string }>
   >();
 
   /** Chat files appended to since the last `makeDurable`, not yet fsynced. */
@@ -235,20 +268,23 @@ export class ChatLogStore {
     }
     const { chatId, seq } = event as { chatId?: unknown; seq?: unknown };
     if (typeof chatId !== 'string' || typeof seq !== 'number' || seq < 0) return 'ignored';
-    // A replay and the live stream carry the same event under the same seq.
-    // Drop the routing tag a replay frame carries; it is not part of the event.
+    // Drop any routing tag; it is not part of the event.
     const { forSurfaceId: _route, ...whole } = event as WireEvent & { forSurfaceId?: string };
     void _route;
-    const { bare, ref: sent } = withoutRef(whole as WireEvent);
+    const { bare: unbranched, branchId: sentBranch } = withoutBranch(whole as WireEvent);
+    const { bare, ref: sent } = withoutRef(unbranched);
     // A big tool result is kept as a reference to a stored body, so one of them
-    // never weighs down the log or a replay of it.
+    // never weighs down the log or a history page.
     const stored = this.externalize(bare);
     const log = this.load(chatId);
     const had = log.get(seq);
     const json = JSON.stringify(stored);
     const heldRef = this.refs.get(chatId)?.get(seq);
-    // A resend without the provider id (an older host) never takes it away.
+    const heldBranch = this.entryBranches.get(chatId)?.get(seq);
+    // A resend without the provider id or branch (an older host, log sync)
+    // never takes either away.
     const ref = sent ?? (had !== undefined ? heldRef : undefined);
+    const branchId = sentBranch ?? (had !== undefined ? heldBranch : undefined);
     let outcome: CommitOutcome = 'new';
     if (had !== undefined) {
       if (identityOf(had) !== identityOf(stored)) {
@@ -259,21 +295,23 @@ export class ChatLogStore {
         return 'conflict';
       }
       if (JSON.stringify(had) === json) {
-        if (sameRef(heldRef, ref)) return 'duplicate';
-        // Only the provider id is new (a record import topping it up): kept,
-        // and nothing a surface shows has changed.
+        if (sameRef(heldRef, ref) && heldBranch === branchId) return 'duplicate';
+        // Only the provider id or branch is new (a record import topping it
+        // up): kept, and nothing a surface shows has changed.
         this.setRef(chatId, seq, ref);
-        this.append(chatId, lineOf(stored, ref), false);
+        this.setBranch(chatId, seq, branchId);
+        this.append(chatId, lineOf(stored, ref, branchId), false);
         return 'duplicate';
       }
       outcome = 'updated';
     }
     log.set(seq, stored);
     this.setRef(chatId, seq, ref);
+    this.setBranch(chatId, seq, branchId);
     this.trim(log);
     this.append(
       chatId,
-      lineOf(stored, ref),
+      lineOf(stored, ref, branchId),
       event.type === 'chat.message' && event.role === 'user',
     );
     return outcome;
@@ -332,6 +370,25 @@ export class ChatLogStore {
     return turns;
   }
 
+  /** The branch the entry at `seq` is on, when its host said. */
+  branchOf(chatId: string, seq: number): string | undefined {
+    this.load(chatId);
+    return this.entryBranches.get(chatId)?.get(seq);
+  }
+
+  private setBranch(chatId: string, seq: number, branchId: string | undefined): void {
+    let held = this.entryBranches.get(chatId);
+    if (branchId === undefined) {
+      held?.delete(seq);
+      return;
+    }
+    if (!held) {
+      held = new Map();
+      this.entryBranches.set(chatId, held);
+    }
+    held.set(seq, branchId);
+  }
+
   private setRef(chatId: string, seq: number, ref: NativeRef | undefined): void {
     let refs = this.refs.get(chatId);
     if (ref === undefined) {
@@ -345,12 +402,8 @@ export class ChatLogStore {
     refs.set(seq, ref);
   }
 
-  /** Take in events that are not new to surfaces: a replay, or a batch of one. */
+  /** Take in an event that is not new to surfaces (a record import): kept, never broadcast. */
   observe(event: WireEvent): void {
-    if (event.type === 'chat.replay_batch') {
-      for (const inner of event.events) this.observe(inner as WireEvent);
-      return;
-    }
     this.notePermission(event);
     this.commit(event);
   }
@@ -358,9 +411,10 @@ export class ChatLogStore {
   /**
    * Keep a question and its answer (spec/01 § Chat record). Takes any event and
    * ignores everything but a question's request and the response to one; never
-   * changes what is broadcast.
+   * changes what is broadcast. `activeBranchId` is the chat's active branch as
+   * the server knows it, which a request naming no branch is on.
    */
-  notePermission(event: WireEvent): void {
+  notePermission(event: WireEvent, activeBranchId?: string): void {
     if (event.type === 'chat.permission_request') {
       // Every request is open until answered; only a question is history.
       const { forSurfaceId: _r, ...open } = event as WireEvent & { forSurfaceId?: string };
@@ -377,8 +431,19 @@ export class ChatLogStore {
       const asked = this.questionsOf(event.chatId);
       const held = asked.get(event.requestId);
       if (held && JSON.stringify(held.request) === JSON.stringify(whole)) return;
-      asked.set(event.requestId, { ...held, request: whole as WireEvent });
-      this.append(event.chatId, JSON.stringify({ question: whole }), false);
+      const branchId = event.branchId ?? held?.branchId ?? activeBranchId;
+      asked.set(event.requestId, {
+        ...held,
+        request: whole as WireEvent,
+        ...(branchId !== undefined ? { branchId } : {}),
+      });
+      this.append(
+        event.chatId,
+        JSON.stringify(
+          branchId !== undefined ? { question: whole, branchId } : { question: whole },
+        ),
+        false,
+      );
       return;
     }
     if (event.type === 'chat.permission_response' && typeof event.chatId === 'string') {
@@ -395,17 +460,26 @@ export class ChatLogStore {
   }
 
   /**
-   * The chat's record with `seq > fromSeq` as a surface replays it: the log in
-   * seq order, with each question placed at its own seq and followed by its
-   * answer once it has one. A question with no answer yet is the host's to
-   * show: it restates the questions it is still waiting on.
+   * The chat's record with `seq > fromSeq` as a surface reads it: the log in
+   * seq order, with each answered question placed at its own seq and followed
+   * by its answer. A question with no answer yet is live state, sent with each
+   * page (`openRequests`). With `track`, only that branch's track.
    */
-  replay(chatId: string, fromSeq: number): WireEvent[] {
-    const events = this.read(chatId, fromSeq);
+  entries(chatId: string, fromSeq: number, track?: TrackAsk): WireEvent[] {
+    const inTrack = this.trackTest(track);
+    const events = this.read(chatId, fromSeq).filter((e) => {
+      const seq = (e as { seq: number }).seq;
+      return inTrack(seq, this.entryBranches.get(chatId)?.get(seq));
+    });
     const asked = [...this.questionsOf(chatId).values()]
       .filter(
-        (q): q is { request: WireEvent; response: WireEvent } =>
-          q.response !== undefined && (q.request as { seq: number }).seq > fromSeq,
+        (q): q is { request: WireEvent; response: WireEvent; branchId?: string } =>
+          q.response !== undefined &&
+          (q.request as { seq: number }).seq > fromSeq &&
+          inTrack(
+            (q.request as { seq: number }).seq,
+            q.branchId ?? this.branchBefore(chatId, (q.request as { seq: number }).seq),
+          ),
       )
       .sort((a, b) => (a.request as { seq: number }).seq - (b.request as { seq: number }).seq);
     if (asked.length === 0) return events;
@@ -430,9 +504,9 @@ export class ChatLogStore {
    */
   page(
     chatId: string,
-    at: { after?: number; before?: number; limit: number },
+    at: { after?: number; before?: number; limit: number; track?: TrackAsk },
   ): { entries: WireEvent[]; more: boolean; through: number } {
-    const all = this.replay(chatId, -1);
+    const all = this.entries(chatId, -1, at.track);
     const through = this.highWater(chatId);
     const seqOf = (e: WireEvent, i: number): number => {
       const seq = (e as { seq?: unknown }).seq;
@@ -466,7 +540,41 @@ export class ChatLogStore {
     return [...(this.open.get(chatId)?.values() ?? [])];
   }
 
-  private questionsOf(chatId: string): Map<string, { request: WireEvent; response?: WireEvent }> {
+  /**
+   * Whether an entry at `seq` on `branchId` belongs to the track asked for. An
+   * entry whose host never said its branch (written before branches were
+   * recorded) is on the root branch. A chat with no branch graph is one track.
+   */
+  private trackTest(
+    track: TrackAsk | undefined,
+  ): (seq: number, branchId: string | undefined) => boolean {
+    if (track === undefined || track.branches.length === 0) return () => true;
+    const root = track.branches.find((b) => b.parentBranchId === null)?.branchId;
+    const test = trackFilter(track.branches, track.branchId);
+    return (seq, branchId) => {
+      const on = branchId ?? root;
+      return on !== undefined && test(seq, on);
+    };
+  }
+
+  /** The branch of the nearest entry before `seq` whose branch is known. */
+  private branchBefore(chatId: string, seq: number): string | undefined {
+    const held = this.entryBranches.get(chatId);
+    if (!held) return undefined;
+    let best = -1;
+    let branch: string | undefined;
+    for (const [s, b] of held) {
+      if (s < seq && s > best) {
+        best = s;
+        branch = b;
+      }
+    }
+    return branch;
+  }
+
+  private questionsOf(
+    chatId: string,
+  ): Map<string, { request: WireEvent; response?: WireEvent; branchId?: string }> {
     this.load(chatId);
     let asked = this.questions.get(chatId);
     if (!asked) {
@@ -682,10 +790,12 @@ export class ChatLogStore {
         const rec = event as { question?: WireEvent; answer?: WireEvent; turn?: WireEvent };
         // A torn last line from a crash, or a record that is not an event, is skipped.
         if (typeof seq === 'number') {
-          const { bare, ref } = withoutRef(event);
+          const { bare: unbranched, branchId } = withoutBranch(event);
+          const { bare, ref } = withoutRef(unbranched);
           log.set(seq, bare);
-          // The latest line for a seq says what is kept, provider id included.
+          // The latest line for a seq says what is kept, provider id and branch included.
           this.setRef(chatId, seq, ref);
+          this.setBranch(chatId, seq, branchId);
         } else if (rec.turn !== undefined && TURN_BOUNDARY_TYPES.has(rec.turn.type)) {
           const b = rec.turn as ChatTurnStartedEvent | ChatTurnEndedEvent;
           const turns = this.turnsByChat.get(chatId) ?? new Map<string, RecordedTurn>();
@@ -698,7 +808,12 @@ export class ChatLogStore {
           const q = rec.question;
           const asked = this.questions.get(chatId) ?? new Map();
           this.questions.set(chatId, asked);
-          asked.set(q.requestId, { ...asked.get(q.requestId), request: q });
+          const branchId = (event as { branchId?: unknown }).branchId;
+          asked.set(q.requestId, {
+            ...asked.get(q.requestId),
+            request: q,
+            ...(typeof branchId === 'string' ? { branchId } : {}),
+          });
         } else if (rec.answer?.type === 'chat.permission_response') {
           const held = this.questions.get(chatId)?.get(rec.answer.requestId);
           if (held) held.response = rec.answer;
@@ -732,9 +847,17 @@ export class ChatLogStore {
   }
 }
 
-/** One log line: the entry, with its provider id when it has one. */
-function lineOf(event: WireEvent, ref: NativeRef | undefined): string {
-  return JSON.stringify(ref === undefined ? event : { ...event, nativeRef: ref });
+/** One log line: the entry, with its provider id and branch when it has them. */
+function lineOf(
+  event: WireEvent,
+  ref: NativeRef | undefined,
+  branchId: string | undefined,
+): string {
+  return JSON.stringify({
+    ...event,
+    ...(ref === undefined ? {} : { nativeRef: ref }),
+    ...(branchId === undefined ? {} : { branchId }),
+  });
 }
 
 /** A chat id is a ULID or a fixed thread name, but never trust it as a path segment. */

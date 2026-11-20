@@ -39,7 +39,7 @@ const msg = (content: string): ChatEventEntry[] => [
   { kind: 'message', role: 'assistant', content, seq: 3 } as ChatEventEntry,
 ];
 
-const ws = { send: vi.fn(), requestReplay: vi.fn() };
+const ws = { send: vi.fn(), requestHistory: vi.fn() };
 
 function mount(): void {
   render(
@@ -51,7 +51,7 @@ function mount(): void {
 
 beforeEach(() => {
   sent.length = 0;
-  ws.requestReplay.mockClear();
+  ws.requestHistory.mockClear();
   useChatStore.setState({
     chats: { a: row('a', 'first chat', 10), b: row('b', 'second chat', 20) },
     timelines: { a: msg('Message from A'), b: msg('Message from B') },
@@ -64,7 +64,7 @@ describe('TriagePage', () => {
     expect(screen.getByTestId('triage-title').textContent).toBe('first chat');
     expect(screen.getByTestId('triage-message').textContent).toContain('Message from A');
     expect(screen.getByTestId('triage-count').textContent).toBe('2 waiting');
-    expect(ws.requestReplay).toHaveBeenCalledWith('a');
+    expect(ws.requestHistory).toHaveBeenCalledWith('a');
   });
 
   it('keeps Send off until there is text', () => {

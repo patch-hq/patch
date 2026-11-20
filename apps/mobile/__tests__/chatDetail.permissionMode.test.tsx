@@ -29,7 +29,7 @@ vi.mock('../src/api/rest', () => ({
   },
 }));
 
-const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));

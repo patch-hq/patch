@@ -22,7 +22,7 @@ import { useUiStore } from '../src/stores/uiStore';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import type { ChatListRow } from '../src/stores/types';
 
-const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 
 import { ManagerChatsList, ManagerSegments } from '../src/components/ManagerChats';

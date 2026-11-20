@@ -111,7 +111,6 @@ export async function bootstrap(): Promise<void> {
   try {
     const list = await api.listChats();
     useChatStore.getState().hydrate(list.chats.map(toChatListRow));
-    getWs().syncTranscripts();
   } catch (e) {
     useUiStore.getState().pushError(`failed to fetch chats: ${(e as Error).message}`);
   }

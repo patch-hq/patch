@@ -105,7 +105,7 @@ describe('ChatRoute — a message with attachments shows at once, pending, while
     setActiveWs(null);
     _resetSendQueue();
     send = vi.fn();
-    ws = { send, requestReplay: vi.fn() } as unknown as Ws;
+    ws = { send, requestHistory: vi.fn() } as unknown as Ws;
     let n = 0;
     vi.stubGlobal('URL', {
       ...URL,

@@ -502,7 +502,7 @@ describe('WS hub relay', () => {
     }
   });
 
-  it('tells a surface that asks for a replay what the chat is still holding in its queue', async () => {
+  it("tells a surface that reads a chat's history what the chat is still holding in its queue", async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -531,8 +531,15 @@ describe('WS hub relay', () => {
 
       const late = await makeAuthedClient(h, user, 'srf-late');
       const seen: string[] = [];
-      late.on('chat.queued', (e) => seen.push(`${e.localId}:${e.message}:${e.queueSeq}`));
-      late.replay('chat-1', -1);
+      late.on('chat.history', (page) => {
+        for (const e of page.queued as Array<{
+          localId: string;
+          message: string;
+          queueSeq: number;
+        }>)
+          seen.push(`${e.localId}:${e.message}:${e.queueSeq}`);
+      });
+      late.history('chat-1');
       await new Promise((r) => setTimeout(r, 50));
 
       expect(seen).toEqual(['L3:text L3:2']);
@@ -542,7 +549,7 @@ describe('WS hub relay', () => {
     }
   });
 
-  it("answers a replay itself from its record, whether or not the chat's host is online", async () => {
+  it("answers history from its record alone, whether or not the chat's host is online", async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(14));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -558,29 +565,98 @@ describe('WS hub relay', () => {
           seq,
         });
       }
-
-      // Host online: the server answers the history; the host is asked only for
-      // what follows the record.
+      const pages: number[][] = [];
       const online = await makeAuthedClient(h, user, 'srf-online');
-      const fromOnline: number[] = [];
-      online.on('chat.message', (e) => fromOnline.push(e.seq));
-      online.replay('chat-1', -1);
+      online.on('chat.history', (p) =>
+        pages.push(p.entries.map((e) => (e as { seq: number }).seq)),
+      );
+      online.history('chat-1');
       await new Promise((r) => setTimeout(r, 50));
-      expect(fromOnline).toEqual([1, 2, 3]);
-      const asked = h.hostLink.sent.filter((s) => s.event.type === 'chat.replay');
-      expect(asked.map((s) => (s.event as { fromSeq: number }).fromSeq)).toEqual([3]);
 
-      // Host offline: the server answers from its own copy, after the seq asked for.
       const offline = await makeAuthedClient(h, user, 'srf-offline');
       h.hostLink.setStatus('offline');
-      const fromOffline: number[] = [];
-      offline.on('chat.message', (e) => fromOffline.push(e.seq));
-      offline.replay('chat-1', 1);
+      offline.on('chat.history', (p) =>
+        pages.push(p.entries.map((e) => (e as { seq: number }).seq)),
+      );
+      offline.history('chat-1', { after: 1 });
       await new Promise((r) => setTimeout(r, 50));
-      expect(fromOffline).toEqual([2, 3]);
 
+      expect(pages).toEqual([
+        [1, 2, 3],
+        [2, 3],
+      ]);
+      // The host is never asked for history.
+      expect(h.hostLink.sent.some((s) => /history|replay/.test(s.event.type))).toBe(false);
       await online.close();
       await offline.close();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("keeps a side thread's entries without broadcasting them, and serves its track on request", async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(15));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry });
+    try {
+      h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+      h.hostLink.emit({
+        type: 'chat.branches',
+        chatId: 'chat-1',
+        activeBranchId: 'main',
+        branches: [
+          {
+            branchId: 'main',
+            parentBranchId: null,
+            forkFromSeq: null,
+            label: 'main',
+            createdAt: 1,
+          },
+          {
+            branchId: 'side',
+            parentBranchId: 'main',
+            forkFromSeq: 1,
+            label: 'side 1',
+            createdAt: 2,
+            sideThread: true,
+          },
+        ],
+      });
+      const say = (seq: number, branchId: string) =>
+        ({
+          type: 'chat.message',
+          chatId: 'chat-1',
+          role: 'assistant',
+          content: `m${seq}`,
+          seq,
+          branchId,
+        }) as const;
+      const watcher = await makeAuthedClient(h, user, 'srf-side');
+      const live: Array<Record<string, unknown>> = [];
+      watcher.on('chat.message', (e) => live.push(e as unknown as Record<string, unknown>));
+      watcher.history('chat-1');
+      await new Promise((r) => setTimeout(r, 50));
+      h.hostLink.emit(say(1, 'main'));
+      h.hostLink.emit(say(2, 'side'));
+      h.hostLink.emit(say(3, 'main'));
+      await new Promise((r) => setTimeout(r, 50));
+      // Live: the main track only, and no entry carries its branch.
+      expect(live.map((e) => e['seq'])).toEqual([1, 3]);
+      expect(live[0]).not.toHaveProperty('branchId');
+
+      const pages: Array<{ branchId?: string; seqs: number[] }> = [];
+      watcher.on('chat.history', (p) =>
+        pages.push({
+          ...(p.branchId !== undefined ? { branchId: p.branchId } : {}),
+          seqs: p.entries.map((e) => (e as { seq: number }).seq),
+        }),
+      );
+      watcher.history('chat-1', { branchId: 'side' });
+      watcher.history('chat-1');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(pages).toEqual([{ branchId: 'side', seqs: [1, 2] }, { seqs: [1, 3] }]);
+      await watcher.close();
     } finally {
       await h.close();
     }
@@ -663,8 +739,11 @@ describe('WS hub relay', () => {
 
       const reader = await makeAuthedClient(h, user, 'srf-read');
       const replayed: string[] = [];
-      reader.on('chat.artifact', (e) => replayed.push(e.artifactId));
-      reader.replay('chat-1', -1);
+      reader.on('chat.history', (p) => {
+        for (const e of p.entries)
+          if (e.type === 'chat.artifact') replayed.push((e as { artifactId: string }).artifactId);
+      });
+      reader.history('chat-1');
       await new Promise((r) => setTimeout(r, 50));
       expect(replayed).toEqual(['a1']);
       await watcher.close();
@@ -703,7 +782,7 @@ describe('WS hub relay', () => {
           watcher.on(type, (e) => seen.push(e as unknown as Record<string, unknown>));
         }
         // Following the chat, so its live stream reaches this surface.
-        watcher.replay('chat-1', -1);
+        watcher.history('chat-1');
         await new Promise((r) => setTimeout(r, 50));
         for (const e of boundaries('chat-1')) h.hostLink.emit(e as never);
         await new Promise((r) => setTimeout(r, 50));
@@ -796,7 +875,7 @@ describe('WS hub relay', () => {
           { seqs: [9], more: false, through: 9 },
         ]);
         // Opening never asks the host for history.
-        expect(h.hostLink.sent.some((s) => s.event.type === 'chat.replay')).toBe(false);
+        expect(h.hostLink.sent.some((s) => /history|replay/.test(s.event.type))).toBe(false);
         await c.close();
       } finally {
         await h.close();
@@ -899,7 +978,8 @@ describe('WS hub relay', () => {
         h.hostLink.emit(msg('chat-a', 1));
         h.hostLink.emit(msg('chat-b', 2));
         await new Promise((r) => setTimeout(r, 50));
-        expect(live).toEqual(['chat-a:0', 'chat-b:2']);
+        // The catch-up page's entries also reach the client as frames.
+        expect(live).toEqual(['chat-a:0', 'chat-b:1', 'chat-b:2']);
         await c.close();
       } finally {
         await h.close();
@@ -954,18 +1034,12 @@ describe('WS hub relay', () => {
     });
   });
 
-  it('replays daemon-emitted chat events to subscribed surfaces (replay flow)', async () => {
+  it('catches a surface up from its cursor, then sends it what follows live', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(12));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     const h = await startServer({ registry });
     try {
-      const c1 = await makeAuthedClient(h, user, 'srf-1');
-      // First surface fires off an input — establishes interest in chat-1.
-      c1.sendInput({ chatId: 'chat-1', message: 'foo', localId: 'L1' });
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Host publishes 5 chat.message events.
       for (let seq = 1; seq <= 5; seq++) {
         h.hostLink.emit({
           type: 'chat.message',
@@ -975,38 +1049,23 @@ describe('WS hub relay', () => {
           seq,
         });
       }
-
-      // Connect a second surface and replay from seq=2: the server answers 3-5
-      // from its record and relays the request upstream for what follows 5.
       const c2 = await makeAuthedClient(h, user, 'srf-2');
+      // The page's entries reach the client as frames, as live ones do.
       const got: number[] = [];
-      const unsub = c2.on('chat.message', (e) => got.push(e.seq));
-      c2.replay('chat-1', 2);
+      c2.on('chat.message', (e) => got.push(e.seq));
+      c2.history('chat-1', { after: 2 });
       await new Promise((r) => setTimeout(r, 50));
       expect(got).toEqual([3, 4, 5]);
 
-      const replayRequests = h.hostLink.sent.filter((s) => s.event.type === 'chat.replay');
-      expect(replayRequests).toHaveLength(1);
-      const replayEvent = replayRequests[0]?.event;
-      if (replayEvent && replayEvent.type === 'chat.replay') {
-        expect(replayEvent.chatId).toBe('chat-1');
-        expect(replayEvent.fromSeq).toBe(5);
-      }
-
-      // What the host adds past the record (seq 6) reaches the surface that asked.
       h.hostLink.emit({
         type: 'chat.message',
         chatId: 'chat-1',
         role: 'assistant',
         content: 'm6',
         seq: 6,
-        forSurfaceId: 'srf-2',
       });
       await new Promise((r) => setTimeout(r, 50));
-      unsub();
       expect(got).toEqual([3, 4, 5, 6]);
-
-      await c1.close();
       await c2.close();
     } finally {
       await h.close();

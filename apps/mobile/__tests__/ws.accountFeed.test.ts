@@ -45,23 +45,21 @@ afterEach(() => {
 });
 
 describe('phone with the account feed', () => {
-  it('resumes the feed on connect, following the chat on screen, and replays nothing', () => {
-    // A phone that found the feed last time it connected.
-    store().set('patch.accountFeed', '1');
+  it('resumes the feed on connect, following the chat on screen, and asks nothing chat by chat', () => {
     useChatStore.setState({ activeChatId: 'c1' });
     const ws = connect();
     FakeWebSocket.last().emitMessage(JSON.stringify(authOk));
     const [resume] = sent('feed.resume');
     expect(resume).toBeDefined();
     expect(resume!['after']).toBeUndefined();
-    expect(sent('chat.replay')).toEqual([]);
+    expect(sent('chat.history_request')).toEqual([]);
     ws.close();
   });
 
   it('opens a chat on its last screen and pages older entries into record order', () => {
     const ws = connect();
     FakeWebSocket.last().emitMessage(JSON.stringify(authOk));
-    ws.requestReplay('c1');
+    ws.requestHistory('c1');
     const [ask] = sent('chat.history_request');
     expect(ask).toMatchObject({ chatId: 'c1', limit: 100 });
     FakeWebSocket.last().emitMessage(
@@ -177,13 +175,13 @@ describe('phone with the account feed', () => {
     expect(sent('chat.history_request')).toEqual([]);
     // The open chat was answered by the feed: asking again is only for what
     // follows its last screen…
-    ws.requestReplay('c1');
+    ws.requestHistory('c1');
     expect(sent('chat.history_request')).toEqual([
       expect.objectContaining({ chatId: 'c1', after: 99 }),
     ]);
     // …while a followed chat whose answer went only to the offline copy asks
     // for its own last screen when opened.
-    ws.requestReplay('c2');
+    ws.requestHistory('c2');
     expect(sent('chat.history_request')[1]).toEqual(
       expect.objectContaining({ chatId: 'c2', limit: 100 }),
     );

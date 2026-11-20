@@ -51,7 +51,7 @@ function seed(reminder: string | null): void {
 }
 
 function renderChat(
-  ws: { send: ReturnType<typeof vi.fn>; requestReplay?: ReturnType<typeof vi.fn> } | null = null,
+  ws: { send: ReturnType<typeof vi.fn>; requestHistory?: ReturnType<typeof vi.fn> } | null = null,
 ): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/chats/c1']}>
@@ -101,7 +101,7 @@ describe('ChatRoute — /remind command + reminder banner', () => {
 
   it('`/remind <text>` sets the reminder via the API and shows the banner WITHOUT sending a message', async () => {
     seed(null);
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/remind Do not touch the prod database');
 

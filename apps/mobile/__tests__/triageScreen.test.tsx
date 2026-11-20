@@ -18,7 +18,7 @@ vi.mock('../src/lib/sendQueue', () => ({
   },
 }));
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ requestReplay: (id: string) => replays.push(id) }),
+  getWs: () => ({ requestHistory: (id: string) => replays.push(id) }),
 }));
 
 const row = (chatId: string, name: string, lastUpdated: number): ChatRow =>

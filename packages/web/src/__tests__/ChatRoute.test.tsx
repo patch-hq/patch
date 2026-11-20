@@ -1314,7 +1314,7 @@ describe('ChatRoute regression', () => {
       modified: 'const a = 2;',
     });
     expect(useUiStore.getState().pendingDiffByChat['c-perm-diff']).not.toBeUndefined();
-    const ws = { send() {}, requestReplay() {} } as unknown as Parameters<
+    const ws = { send() {}, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm-diff', ws);
@@ -1335,7 +1335,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    const ws = { send() {}, requestReplay() {} } as unknown as Parameters<
+    const ws = { send() {}, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm', ws);
@@ -1384,7 +1384,7 @@ describe('ChatRoute regression', () => {
         ],
       },
     }));
-    const ws = { send, requestReplay() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+    const ws = { send, requestHistory() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
     // The escape hatch sends over `getActiveWs()` (same pattern as the
     // Composer's mode dropdown), which in production is the same connection
     // as the `ws` prop (`AppShell.tsx` wires both to one instance) — mirror
@@ -1478,7 +1478,7 @@ describe('ChatRoute regression', () => {
       { permissionMode: 'default' },
     );
     const send = vi.fn();
-    const ws = { send, requestReplay() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+    const ws = { send, requestHistory() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
     renderChat('c-perm-sess', ws);
     fireEvent.click(screen.getByTestId('permission-approve-session'));
     expect(screen.getByTestId('permission').getAttribute('data-resolved')).toBe('approve');
@@ -1497,7 +1497,7 @@ describe('ChatRoute regression', () => {
       { seq: 1, kind: 'permission', tool: 'Edit', requestId: 'req-a', at: 0 },
       { seq: 2, kind: 'permission', tool: 'Bash', requestId: 'req-b', at: 0 },
     ]);
-    renderChat('c-perm-two', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-perm-two', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const sweeps = screen.getAllByTestId('permission-approve-all');
@@ -1521,7 +1521,7 @@ describe('ChatRoute regression', () => {
     ]);
     renderChat('c-perm-two-then-one', {
       send: vi.fn(),
-      requestReplay() {},
+      requestHistory() {},
     } as unknown as Parameters<typeof ChatRoute>[0]['ws']);
     expect(screen.getAllByTestId('permission-approve-all')).toHaveLength(2);
     // Answer one on its own: a resolved request is no longer outstanding, so
@@ -1541,7 +1541,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    const ws = { send() {}, requestReplay() {} } as unknown as Parameters<
+    const ws = { send() {}, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm-focus', ws);
@@ -1561,7 +1561,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    const ws = { send() {}, requestReplay() {} } as unknown as Parameters<
+    const ws = { send() {}, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm-key-approve', ws);
@@ -1581,7 +1581,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    const ws = { send() {}, requestReplay() {} } as unknown as Parameters<
+    const ws = { send() {}, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm-key-deny', ws);
@@ -1601,7 +1601,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    const ws = { send() {}, requestReplay() {} } as unknown as Parameters<
+    const ws = { send() {}, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm-key-2', ws);
@@ -1622,7 +1622,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    const ws = { send: vi.fn(), requestReplay: vi.fn() } as unknown as Parameters<
+    const ws = { send: vi.fn(), requestHistory: vi.fn() } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws'];
     renderChat('c-perm-resolved-key', ws);
@@ -1638,7 +1638,7 @@ describe('ChatRoute regression', () => {
     seedChat('c-perm-single-approve', [
       { seq: 1, kind: 'permission', tool: 'Edit', requestId: 'req-sa', at: 0 },
     ]);
-    renderChat('c-perm-single-approve', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-perm-single-approve', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const [approveBtn] = screen.getByTestId('permission').querySelectorAll('button');
@@ -1657,7 +1657,7 @@ describe('ChatRoute regression', () => {
     seedChat('c-perm-single-deny', [
       { seq: 1, kind: 'permission', tool: 'Edit', requestId: 'req-sd', at: 0 },
     ]);
-    renderChat('c-perm-single-deny', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-perm-single-deny', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const buttons = screen.getByTestId('permission').querySelectorAll('button');
@@ -1707,7 +1707,7 @@ describe('ChatRoute regression', () => {
     seedChat('c-perm-throws', [
       { seq: 1, kind: 'permission', tool: 'Edit', requestId: 'req-throws', at: 0 },
     ]);
-    renderChat('c-perm-throws', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-perm-throws', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     clickApprove();
@@ -1725,7 +1725,7 @@ describe('ChatRoute regression', () => {
     seedChat('c-perm-nodiff', [
       { seq: 1, kind: 'permission', tool: 'Edit', requestId: 'req-nodiff', at: 0 },
     ]);
-    renderChat('c-perm-nodiff', { send: vi.fn(), requestReplay: vi.fn() } as unknown as Parameters<
+    renderChat('c-perm-nodiff', { send: vi.fn(), requestHistory: vi.fn() } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     clickApprove();
@@ -1746,7 +1746,7 @@ describe('ChatRoute regression', () => {
     });
     renderChat('c-perm-mismatch', {
       send: vi.fn(),
-      requestReplay: vi.fn(),
+      requestHistory: vi.fn(),
     } as unknown as Parameters<typeof ChatRoute>[0]['ws']);
     clickApprove();
     expect(useUiStore.getState().pendingDiffByChat['c-perm-mismatch']?.requestId).toBe(
@@ -1759,7 +1759,7 @@ describe('ChatRoute regression', () => {
   it('sends a message through the composer: optimistic echo + ws chat.input', async () => {
     const send = vi.fn();
     seedChat('c-send', []);
-    renderChat('c-send', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-send', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const composer = screen.getByTestId('composer-input');
@@ -1783,7 +1783,7 @@ describe('ChatRoute regression', () => {
     useToolsStore.getState()._reset();
     useToolsStore.getState().toggle('c-tools-send', 'Bash');
     seedChat('c-tools-send', []);
-    renderChat('c-tools-send', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-tools-send', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const composer = screen.getByTestId('composer-input');
@@ -1801,7 +1801,7 @@ describe('ChatRoute regression', () => {
     const send = vi.fn();
     useToolsStore.getState()._reset();
     seedChat('c-tools-none', []);
-    renderChat('c-tools-none', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-tools-none', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     const composer = screen.getByTestId('composer-input');
@@ -1832,7 +1832,7 @@ describe('ChatRoute regression', () => {
         ['c-stop']: { ...s.chats['c-stop']!, chatStatus: { state: 'running', since: 0 } },
       },
     }));
-    renderChat('c-stop', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-stop', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     fireEvent.click(screen.getByTestId('stop-btn'));
@@ -1858,7 +1858,7 @@ describe('ChatRoute regression', () => {
         },
       }));
     setStatus('interrupted');
-    const { unmount } = renderChat('c-cut', { send, requestReplay() {} } as unknown as Parameters<
+    const { unmount } = renderChat('c-cut', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     expect(screen.getByTestId('turn-cut-off')).toHaveTextContent('Turn interrupted');
@@ -1899,7 +1899,7 @@ describe('ChatRoute regression', () => {
         },
       },
     }));
-    renderChat('c-stop-throws', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-stop-throws', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     fireEvent.click(screen.getByTestId('stop-btn'));
@@ -1923,7 +1923,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    renderChat('c-unqueue', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-unqueue', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     expect(screen.getByTestId('queued-badge')).toBeInTheDocument();
@@ -1956,7 +1956,7 @@ describe('ChatRoute regression', () => {
     seedChat('c-unqueue-throws', [
       { seq: 1, kind: 'message', role: 'user', content: 'x', queued: true, localId: 'Q3', at: 0 },
     ]);
-    renderChat('c-unqueue-throws', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-unqueue-throws', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     fireEvent.click(screen.getByTestId('queued-remove'));
@@ -1991,7 +1991,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    renderChat('c-promote', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-promote', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     // Promote the SECOND queued turn.
@@ -2028,7 +2028,7 @@ describe('ChatRoute regression', () => {
       { seq: 1, kind: 'message', role: 'user', content: 'a', queued: true, localId: 'R1', at: 0 },
       { seq: 2, kind: 'message', role: 'user', content: 'b', queued: true, localId: 'R2', at: 0 },
     ]);
-    renderChat('c-promote-throws', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-promote-throws', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     fireEvent.click(screen.getAllByTestId('queued-promote')[1]!);
@@ -2047,7 +2047,7 @@ describe('ChatRoute regression', () => {
   // only observable here.
   describe('sending while a turn runs only queues (spec/04 § Message queueing)', () => {
     function wsMock(send: ReturnType<typeof vi.fn>) {
-      return { send, requestReplay() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+      return { send, requestHistory() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
     }
     const types = (send: ReturnType<typeof vi.fn>): string[] =>
       send.mock.calls.map((c) => (c[0] as { type: string }).type);
@@ -2238,7 +2238,7 @@ describe('ChatRoute regression', () => {
         ],
         { chatStatus: { state: 'running', since: 0 } },
       );
-      renderChat('c-no-auto', { send, requestReplay() {} } as unknown as Parameters<
+      renderChat('c-no-auto', { send, requestHistory() {} } as unknown as Parameters<
         typeof ChatRoute
       >[0]['ws']);
       act(() => {
@@ -2270,7 +2270,7 @@ describe('ChatRoute regression', () => {
     // (mirrors a real failed delivery: submit() was called, then the timeout
     // path called failDelivery without ever removing the pending entry).
     deliveryTracker.submit('c-retry', 'retry me', 'L-retry');
-    setActiveWs({ send, requestReplay() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws']);
+    setActiveWs({ send, requestHistory() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws']);
     renderChat('c-retry');
     expect(screen.getByTestId('delivery-failed')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('delivery-retry'));
@@ -2357,7 +2357,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    renderChat('c-turn-retry', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-turn-retry', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     fireEvent.click(screen.getByTestId('turn-retry'));
@@ -2396,7 +2396,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    renderChat('c-turn-fail-continue', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-turn-fail-continue', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     expect(screen.getByTestId('turn-retry')).toBeInTheDocument();
@@ -2507,7 +2507,7 @@ describe('ChatRoute regression', () => {
         at: 0,
       },
     ]);
-    renderChat('c-stop-continue', { send, requestReplay() {} } as unknown as Parameters<
+    renderChat('c-stop-continue', { send, requestHistory() {} } as unknown as Parameters<
       typeof ChatRoute
     >[0]['ws']);
     fireEvent.click(screen.getByTestId('turn-stopped-continue'));

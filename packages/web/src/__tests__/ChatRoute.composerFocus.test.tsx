@@ -60,7 +60,7 @@ function GoTo({ to }: { to: string }): JSX.Element {
 function renderAt(chatId: string, switchTo?: string) {
   const ws = {
     send() {},
-    requestReplay() {},
+    requestHistory() {},
   } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
   return render(
     <MemoryRouter initialEntries={[`/chats/${chatId}`]}>

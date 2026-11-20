@@ -629,7 +629,7 @@ useChatStore.getState().hydrate([
     lastUpdated: 0,
   },
   // No seeded timeline — driven live via `__store.applyEvent` by the spec
-  // itself (a re-delivered `chat.replay` doesn't duplicate/reorder tool
+  // itself (a re-delivered history read doesn't duplicate/reorder tool
   // calls — spec/12 § "No message deduplication beyond seq").
   {
     chatId: 'chat_replay_dupe',
@@ -4111,7 +4111,7 @@ const harnessWs: PatchWs | null =
             });
           }
         },
-        requestReplay: () => {},
+        requestHistory: () => {},
       } as unknown as PatchWs)
     : null;
 

@@ -14,16 +14,18 @@
 // Progress is versioned. A host whose earlier import (which sent only what the
 // record then lacked) finished runs this one once more over every chat, which
 // tops the record up with turn boundaries and provider ids, and then stops.
+// Version 3 runs it once more so the record learns which branch each entry is
+// on and holds every side branch's entries (spec/04 § Branching).
 
 import * as nodeFs from 'node:fs';
 import { dirname } from 'node:path';
 import type { Logger } from 'pino';
-import { REPLAY_BATCH_BYTES, type WireEvent } from '@patch/wire';
+import { RECORD_FRAME_BYTES, type WireEvent } from '@patch/wire';
 
 /** Give up on this connection if a chat's acknowledgement takes longer than this. */
 export const RECORD_IMPORT_ACK_TIMEOUT_MS = 30_000;
 /** The progress file's version: a file of an earlier one means the import runs again. */
-export const RECORD_IMPORT_VERSION = 2;
+export const RECORD_IMPORT_VERSION = 3;
 /** Most events in one `host.record_import` frame. */
 const EVENTS_PER_FRAME = 200;
 
@@ -47,7 +49,7 @@ export interface RecordImportOptions {
   defer?: (fn: () => void) => void;
 }
 
-/** Split a chat's entries into frames no bigger than a replay batch. */
+/** Split a chat's entries into frames no bigger than `RECORD_FRAME_BYTES`. */
 export function framesOf(events: readonly WireEvent[]): WireEvent[][] {
   const frames: WireEvent[][] = [[]];
   let bytes = 0;
@@ -56,7 +58,7 @@ export function framesOf(events: readonly WireEvent[]): WireEvent[][] {
     void _route;
     const size = JSON.stringify(e).length;
     const open = frames[frames.length - 1]!;
-    if (open.length > 0 && (open.length >= EVENTS_PER_FRAME || bytes + size > REPLAY_BATCH_BYTES)) {
+    if (open.length > 0 && (open.length >= EVENTS_PER_FRAME || bytes + size > RECORD_FRAME_BYTES)) {
       frames.push([]);
       bytes = 0;
     }

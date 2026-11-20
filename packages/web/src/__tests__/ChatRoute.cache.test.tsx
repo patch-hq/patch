@@ -88,15 +88,15 @@ describe('the device’s cached transcript', () => {
       resolutions: [],
     });
     hydrate('c-cache');
-    const requestReplay = vi.fn();
-    renderChat('c-cache', { send() {}, requestReplay });
+    const requestHistory = vi.fn();
+    renderChat('c-cache', { send() {}, requestHistory });
 
     await waitFor(() => {
       expect(useChatStore.getState().timelines['c-cache']?.length).toBe(2);
     });
-    // And only then is the host asked — `requestReplay` derives its cursor
+    // And only then is the host asked — `requestHistory` derives its cursor
     // from the timeline, so by now it is asking for seq > 1, not the lot.
-    expect(requestReplay).toHaveBeenCalledWith('c-cache');
+    expect(requestHistory).toHaveBeenCalledWith('c-cache');
   });
 
   it('redraws a cached question as answered, with the picks, from the saved resolution', async () => {
@@ -119,7 +119,7 @@ describe('the device’s cached transcript', () => {
       ],
     });
     hydrate('c-cache');
-    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    renderChat('c-cache', { send() {}, requestHistory: vi.fn() });
     await waitFor(() => {
       const e = useChatStore.getState().timelines['c-cache']?.[0];
       expect(e?.permissionResolved).toBe('approve');
@@ -136,7 +136,7 @@ describe('the device’s cached transcript', () => {
     });
     hydrate('c-cache');
     const { act, screen } = await import('@testing-library/react');
-    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    renderChat('c-cache', { send() {}, requestHistory: vi.fn() });
     await waitFor(() => expect(useChatStore.getState().timelines['c-cache']?.length).toBe(1));
 
     act(() => useChatStore.getState().setReplaying('c-cache', true));
@@ -149,7 +149,7 @@ describe('the device’s cached transcript', () => {
   it('shows no catching-up line on a chat the device holds nothing of', async () => {
     hydrate('c-cache');
     const { act, screen } = await import('@testing-library/react');
-    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    renderChat('c-cache', { send() {}, requestHistory: vi.fn() });
     act(() => useChatStore.getState().setReplaying('c-cache', true));
     expect(screen.queryByTestId('catching-up')).toBeNull();
   });
@@ -157,9 +157,9 @@ describe('the device’s cached transcript', () => {
   it('still asks the host when the device holds nothing', async () => {
     loadTranscript.mockResolvedValue(null);
     hydrate('c-cache');
-    const requestReplay = vi.fn();
-    renderChat('c-cache', { send() {}, requestReplay });
-    await waitFor(() => expect(requestReplay).toHaveBeenCalledWith('c-cache'));
+    const requestHistory = vi.fn();
+    renderChat('c-cache', { send() {}, requestHistory });
+    await waitFor(() => expect(requestHistory).toHaveBeenCalledWith('c-cache'));
     expect(useChatStore.getState().timelines['c-cache'] ?? []).toHaveLength(0);
   });
 
@@ -170,8 +170,8 @@ describe('the device’s cached transcript', () => {
       resolutions: [],
     });
     hydrate('c-cache');
-    const requestReplay = vi.fn();
-    renderChat('c-cache', { send() {}, requestReplay });
+    const requestHistory = vi.fn();
+    renderChat('c-cache', { send() {}, requestHistory });
     await waitFor(() => expect(useChatStore.getState().timelines['c-cache']?.length).toBe(1));
 
     // The host's own word on which branch is live — a fork or an edit.
@@ -187,13 +187,13 @@ describe('the device’s cached transcript', () => {
     await waitFor(() => expect(dropTranscript).toHaveBeenCalledWith('c-cache'));
     // Dropped whole and refetched, not merged into a half-right transcript.
     expect(useChatStore.getState().timelines['c-cache'] ?? []).toHaveLength(0);
-    expect(requestReplay).toHaveBeenCalledWith('c-cache', { force: true });
+    expect(requestHistory).toHaveBeenCalledWith('c-cache', { force: true });
   });
 
   it('records the branch the cached events belong to when they agree', async () => {
     loadTranscript.mockResolvedValue(null);
     hydrate('c-cache');
-    renderChat('c-cache', { send() {}, requestReplay: vi.fn() });
+    renderChat('c-cache', { send() {}, requestHistory: vi.fn() });
     useChatStore.getState().applyEvent({
       type: 'chat.branches',
       chatId: 'c-cache',
