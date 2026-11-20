@@ -60,7 +60,9 @@ foreground audio service into `AndroidManifest.xml`.
 ```bash
 cd apps/mobile
 pnpm install
-pnpm prebuild        # → expo prebuild --platform android --no-install
+pnpm native:prebuild # → expo prebuild --platform android --no-install
+                     # (not named `prebuild`: pnpm would run that before every `build`
+                     #  and rewrite the committed android/ project)
 git add android      # commit the generated tree
 ```
 
