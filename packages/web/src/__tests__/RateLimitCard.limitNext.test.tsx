@@ -3,6 +3,7 @@
 // re-run on its own (decision 25).
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { RateLimitCard, limitNextText } from '../components/RateLimitCard.js';
 import { setActiveWs } from '../api/ws.js';
 import type { ChatRow } from '../stores/types.js';
@@ -41,7 +42,11 @@ describe('the limit card under decision 25', () => {
   it('a chat whose credit came back offers Continue, and Continue re-sends the turn', () => {
     const sent: unknown[] = [];
     setActiveWs({ send: (e: unknown) => sent.push(e) } as never);
-    render(<RateLimitCard row={row({ creditReturned: true, limitNext: 'ask' })} />);
+    render(
+      <MemoryRouter>
+        <RateLimitCard row={row({ creditReturned: true, limitNext: 'ask' })} />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('rate-limit-headline').textContent).toMatch(/Credit available again/);
     const send = screen.getByTestId('rate-limit-send');
     expect(send.textContent).toBe('Continue');
@@ -51,7 +56,11 @@ describe('the limit card under decision 25', () => {
   });
 
   it('out of credit says nothing runs until the user continues', () => {
-    render(<RateLimitCard row={row({ limitBlock: { scope: 'unknown' }, limitNext: 'ask' })} />);
+    render(
+      <MemoryRouter>
+        <RateLimitCard row={row({ limitBlock: { scope: 'unknown' }, limitNext: 'ask' })} />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('rate-limit-next').textContent).toMatch(/until you continue/);
     expect(screen.getByTestId('rate-limit-send').textContent).toBe('Continue');
   });
