@@ -2226,8 +2226,6 @@ export class WsHub {
       event.type === 'patch.chat_search.response' ||
       // A host's question to the server-run queue is answered by the server alone.
       event.type === 'patch.queue_pull.request' ||
-      // What the server asked a host to resend is taken into the log, not shown to surfaces.
-      event.type === 'patch.log_sync.batch' ||
       // History the record lacked, sent once: kept, never shown as new.
       event.type === 'host.record_import' ||
       // Turn boundaries are the record's and the status's, never drawn.

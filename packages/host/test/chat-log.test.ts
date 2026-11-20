@@ -73,13 +73,13 @@ function appendEvent(
 }
 
 describe('ChatLog', () => {
-  it('knows the latest user/assistant message, live and after a restart', () => {
+  it('knows the latest assistant message (never a user one), live and after a restart', () => {
     const home = tmp('chatlog-last-');
     const log = makeLog(home);
     expect(log.lastMessage('c1')).toBeNull();
     const s0 = log.allocate('c1', 0, 'c1-b0');
     appendEvent(log, 'c1', msg('c1', s0, 'question', 'user'), { sync: true });
-    expect(log.lastMessage('c1')).toBe('question');
+    expect(log.lastMessage('c1')).toBeNull();
     const s1 = log.allocate('c1', 0, 'c1-b0');
     appendEvent(log, 'c1', msg('c1', s1, 'the answer', 'assistant'), { sync: true });
     const s2 = log.allocate('c1', 0, 'c1-b0');

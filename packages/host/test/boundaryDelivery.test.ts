@@ -430,61 +430,6 @@ describe('the host log and the server (spec/01 § Message log)', () => {
       .map((e) => (e as { seq: number }).seq);
     expect(last).toBeGreaterThanOrEqual(Math.max(...messageSeqs));
   });
-
-  it('hands over its logged events after a seq, oldest first', async () => {
-    const { daemon, folder } = setup(echo);
-    const chatId = await daemon.spawnChat({ folder });
-    await daemon.sendInput({ chatId, message: 'one', localId: 'A' });
-    await daemon.sendInput({ chatId, message: 'two', localId: 'B' });
-    const all = daemon.eventsAfter(chatId, -1) as Array<{ seq: number; content?: string }>;
-    const seqs = all.map((e) => e.seq);
-    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
-    expect(all.map((e) => e.content)).toContain('re:two');
-    const tail = daemon.eventsAfter(chatId, seqs[1]!) as Array<{ seq: number }>;
-    expect(tail.every((e) => e.seq > seqs[1]!)).toBe(true);
-    expect(tail.length).toBe(all.length - 2);
-  });
-
-  it("rebuilds a lost log from the server's events, once, and carries its numbering on above them", async () => {
-    const source = setup(echo);
-    const sourceChat = await source.daemon.spawnChat({ folder: source.folder });
-    await source.daemon.sendInput({ chatId: sourceChat, message: 'one', localId: 'A' });
-    await source.daemon.sendInput({ chatId: sourceChat, message: 'two', localId: 'B' });
-    const held = source.daemon.eventsAfter(sourceChat, -1);
-
-    // A host that lost its log: a fresh chat, holding nothing.
-    const lost = setup(echo);
-    const chatId = await lost.daemon.spawnChat({ folder: lost.folder });
-    const written = lost.daemon.restoreEvents(chatId, held);
-    expect(written).toBeGreaterThan(0);
-
-    const restored = lost.daemon.eventsAfter(chatId, -1) as Array<{
-      seq: number;
-      content?: string;
-    }>;
-    expect(restored.map((e) => e.content)).toEqual(
-      (held as Array<{ content?: string }>).map((e) => e.content),
-    );
-    // Sent twice, written once.
-    expect(lost.daemon.restoreEvents(chatId, held)).toBe(0);
-
-    // New messages carry on above what was restored.
-    const top = Math.max(...restored.map((e) => e.seq));
-    await lost.daemon.sendInput({ chatId, message: 'three', localId: 'C' });
-    const after = lost.daemon.eventsAfter(chatId, top) as Array<{ seq: number }>;
-    expect(after.length).toBeGreaterThan(0);
-    expect(after.every((e) => e.seq > top)).toBe(true);
-  });
-
-  it('skips events that are not part of a transcript when restoring', async () => {
-    const { daemon, folder } = setup(echo);
-    const chatId = await daemon.spawnChat({ folder });
-    expect(
-      daemon.restoreEvents(chatId, [
-        { type: 'chat.message_delta', chatId, messageSeq: 1, delta: 'x' } as never,
-      ]),
-    ).toBe(0);
-  });
 });
 
 describe('a message from one chat to another (submitInput)', () => {

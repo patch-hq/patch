@@ -29,7 +29,10 @@ describe("the inbound link's event gate", () => {
     link.attach(socket as never, 'd1');
     return { link, heard, socket };
   }
-  const frame = (e: WireEvent): Buffer => Buffer.from(encode(e));
+  // A transcript event reaches the server only inside an outbox frame.
+  let position = 0;
+  const frame = (e: WireEvent): Buffer =>
+    Buffer.from(encode({ type: 'host.outbox', position: position++, event: e } as WireEvent));
 
   it('passes every frame on while no gate is set', () => {
     const { heard, socket } = setup();

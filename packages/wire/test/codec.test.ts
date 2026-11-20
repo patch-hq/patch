@@ -1168,19 +1168,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'qp1',
     items: [{ type: 'chat.input', chatId: 'c1', message: 'while you work', localId: 'L1' }],
   },
-  'patch.log_sync.request': { type: 'patch.log_sync.request', chatId: 'c1', afterSeq: 12 },
-  'patch.log_sync.batch': {
-    type: 'patch.log_sync.batch',
-    chatId: 'c1',
-    events: [{ type: 'chat.message', chatId: 'c1', role: 'user', content: 'hi', seq: 13 }],
-    done: true,
-  },
-  'patch.log_restore': {
-    type: 'patch.log_restore',
-    chatId: 'c1',
-    events: [{ type: 'chat.message', chatId: 'c1', role: 'user', content: 'hi', seq: 13 }],
-    done: false,
-  },
   'chat.committed': { type: 'chat.committed', chatId: 'c1', through: 41 },
   'chat.turn_started': {
     type: 'chat.turn_started',

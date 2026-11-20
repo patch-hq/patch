@@ -40,6 +40,7 @@ import { createMetaStore } from '../../../host/src/meta.js';
 import { createMockSdkBackend, type MockSdkBackend } from '../../../host/src/sdkBackend.js';
 import { createHistoryReader } from '../../../host/src/history.js';
 import { createServerLink, type ServerLink } from '../../../host/src/serverLink.js';
+import { Outbox } from '../../../host/src/outbox.js';
 import { ensureSpecialThreads } from '../../../host/src/specialThreads.js';
 // J1: the REAL host files handler (server↔host file-content round-trip was
 // previously untested end-to-end — see files.e2e.test.ts). `handleFileOpRequest`
@@ -263,6 +264,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
   link = createServerLink({
     url: `${wsUrl}/ws`,
     daemonKey,
+    outbox: new Outbox({ path: join(patchHome, 'outbox.jsonl'), logger: silent }),
     clientVersion: '1',
     logger: silent,
     backoffSchedule: opts.hostBackoffMs ?? [25, 50, 100, 200],

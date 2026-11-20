@@ -1,5 +1,6 @@
 import { cutoffMs } from './cleanup.js';
 import { removeRetiredNativeCopies } from './retiredNativeCopies.js';
+import { removeRetiredTelegramFolder } from './retiredTelegramThread.js';
 import type { ElevenLabsTtsModel } from './audio/elevenlabs.js';
 import { applyClaudeProviderSettings } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
@@ -2763,50 +2764,6 @@ async function startHost(
         artifactPublisher.handleResponse(event);
         return;
       }
-      if (event.type === 'patch.log_sync.request') {
-        // The server's log of this chat is behind ours (spec/01 § Message log):
-        // send what it lacks, from our own log, in order.
-        let events: WireEvent[] = [];
-        try {
-          events = daemon.eventsAfter(event.chatId, event.afterSeq);
-        } catch (err) {
-          logger.warn({ chatId: event.chatId, err }, 'log sync: could not read the chat');
-        }
-        // Chunked by size as well as count, so one chat's big results never make
-        // a frame the link refuses.
-        const chunks: WireEvent[][] = [[]];
-        let bytes = 0;
-        for (const e of events) {
-          const size = JSON.stringify(e).length;
-          const open = chunks[chunks.length - 1]!;
-          if (open.length > 0 && (open.length >= 200 || bytes + size > REPLAY_BATCH_BYTES)) {
-            chunks.push([]);
-            bytes = 0;
-          }
-          chunks[chunks.length - 1]!.push(e);
-          bytes += size;
-        }
-        chunks.forEach((chunk, i) => {
-          emit({
-            type: 'patch.log_sync.batch',
-            chatId: event.chatId,
-            events: chunk,
-            done: i === chunks.length - 1,
-          });
-        });
-        return;
-      }
-      if (event.type === 'patch.log_restore') {
-        // Our log of this chat is behind the server's: write what it lacks.
-        try {
-          const written = daemon.restoreEvents(event.chatId, event.events as WireEvent[]);
-          if (written > 0)
-            logger.info({ chatId: event.chatId, written }, 'log restored from the server');
-        } catch (err) {
-          logger.warn({ chatId: event.chatId, err }, 'log restore: could not write the chat');
-        }
-        return;
-      }
       if (event.type === 'host.record_import_ack') {
         recordImport?.onAck(event.chatId);
         return;
@@ -4221,6 +4178,7 @@ async function startHost(
     },
     logger,
   });
+  removeRetiredTelegramFolder(config.patchHome, logger);
   // Durable record of every cross-chat tool call this host has made or
   // served (Settings → Activity, spec/06 § Cross-chat toolset).
   const toolLogStore = new ToolLogStore(config.patchHome);

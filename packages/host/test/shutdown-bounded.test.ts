@@ -17,6 +17,7 @@ import type { SdkBackend } from '../src/sdkBackend.js';
 import { runShutdownSteps } from '../src/shutdownSteps.js';
 import { buildControl } from '../src/control.js';
 import { createServerLink } from '../src/serverLink.js';
+import { memoryOutbox } from './helpers/memoryOutbox.js';
 
 const idle: SdkBackend = {
   run: async function* () {
@@ -148,6 +149,7 @@ describe('closing the pieces that wait on outside peers', () => {
     await new Promise<void>((r) => http.listen(0, '127.0.0.1', () => r()));
     const { port } = http.address() as AddressInfo;
     const link = createServerLink({
+      outbox: memoryOutbox(),
       url: `ws://127.0.0.1:${port}`,
       daemonKey: 'k',
       hostId: 'd1',

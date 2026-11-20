@@ -30,6 +30,7 @@ import {
   heldMessageExpiredText,
   decode,
   encode,
+  isOutboxEvent,
   isReservedSpecialThread,
   OUT_OF_BAND_SEQ,
   type WireEvent,
@@ -104,8 +105,13 @@ export interface HostLink {
    * Returns true if a live socket was closed.
    */
   forget(hostId: string): boolean;
-  /** Has this host sent through its outbox on its current link (spec/01 § Host outbox)? */
-  usesOutbox?(hostId: string): boolean;
+  /**
+   * Make what a host's outbox frames committed durable before their positions
+   * are acknowledged (spec/01 § Host outbox). Throws when that cannot be
+   * done; the link then acknowledges nothing more on that socket and drops it,
+   * so the host resends everything the server has not acknowledged.
+   */
+  setOutboxCommit?(flush: () => void): void;
   close(): Promise<void>;
 }
 
@@ -262,7 +268,7 @@ interface HostLinkState {
  */
 export class InboundHostLink implements HostLink {
   private readonly hosts = new Map<string, HostLinkState>();
-  private readonly outboxHosts = new Set<string>();
+  private outboxCommit: (() => void) | null = null;
   private readonly eventHandlers = new Set<(e: WireEvent, from: string | null) => void>();
   private readonly statusHandlers = new Set<(s: 'online' | 'offline') => void>();
   private readonly hostStatusHandlers = new Set<
@@ -409,19 +415,39 @@ export class InboundHostLink implements HostLink {
     // so a burst of events is one acknowledgement.
     let ackThrough = -1;
     let ackTimer: NodeJS.Timeout | null = null;
+    // Once the record could not be written, nothing more is acknowledged on
+    // this socket: an acknowledgement covers every position below it.
+    let ackBroken = false;
+    const sendAck = (): void => {
+      ackTimer = null;
+      if (ackBroken || link.socket !== socket || socket.readyState !== socket.OPEN) return;
+      try {
+        this.outboxCommit?.();
+      } catch (err) {
+        ackBroken = true;
+        this.opts.logger.error(
+          { err: (err as Error).message, hostId, through: ackThrough },
+          'host outbox: the record could not be written; not acknowledging, dropping the link so the host resends',
+        );
+        socket.close(1011, 'record write failed');
+        return;
+      }
+      socket.send(encode({ type: 'host.outbox_ack', through: ackThrough }));
+    };
     const noteCommitted = (position: number): void => {
       if (position > ackThrough) ackThrough = position;
       if (ackTimer) return;
-      ackTimer = setTimeout(() => {
-        ackTimer = null;
-        if (link.socket === socket && socket.readyState === socket.OPEN) {
-          socket.send(encode({ type: 'host.outbox_ack', through: ackThrough }));
-        }
-      }, OUTBOX_ACK_DELAY_MS);
+      ackTimer = setTimeout(sendAck, OUTBOX_ACK_DELAY_MS);
       ackTimer.unref();
     };
-    if (attachOpts.outbox) this.outboxHosts.add(hostId);
-    else this.outboxHosts.delete(hostId);
+    if (!attachOpts.outbox) {
+      this.opts.logger.error(
+        { hostId },
+        'host predates the outbox: its transcript events are refused until it updates',
+      );
+    }
+    // A bare transcript event is said once per socket, not once per frame.
+    let refusedBare = false;
     socket.on('close', () => {
       if (ackTimer) clearTimeout(ackTimer);
     });
@@ -437,7 +463,6 @@ export class InboundHostLink implements HostLink {
         if (event.type === 'host.outbox') {
           // The wrapped event is a frame in its own right: validated as one.
           outboxPosition = event.position;
-          this.outboxHosts.add(hostId);
           event = decode(JSON.stringify(event.event));
         }
       } catch (err) {
@@ -447,11 +472,24 @@ export class InboundHostLink implements HostLink {
         );
         return;
       }
+      if (outboxPosition === null && isOutboxEvent(event)) {
+        // The outbox is the only way a transcript event reaches the record
+        // (spec/01 § Host outbox): one sent bare would be held by nobody.
+        if (!refusedBare) {
+          refusedBare = true;
+          this.opts.logger.error(
+            { hostId, type: event.type },
+            'host sent a transcript event outside its outbox; refused',
+          );
+        }
+        return;
+      }
       if (outboxPosition !== null) {
         // Every handler runs synchronously and the log is written before
         // they return, so the position is committed once this frame is
         // handled — whatever became of it (a resent duplicate, a stray, a
-        // refused contradiction). Resending it could change nothing.
+        // refused contradiction). Resending it could change nothing. What was
+        // written is made durable before the acknowledgement goes (`sendAck`).
         const position = outboxPosition;
         try {
           this.handleHostFrame(event, hostId);
@@ -492,8 +530,8 @@ export class InboundHostLink implements HostLink {
     );
   }
 
-  usesOutbox(hostId: string): boolean {
-    return this.outboxHosts.has(hostId);
+  setOutboxCommit(flush: () => void): void {
+    this.outboxCommit = flush;
   }
 
   private flushBuffers(hostId: string): void {

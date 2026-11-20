@@ -123,8 +123,9 @@ that finished while no host was up is reported as if the host had been there. A
 command that died with the machine left no exit code, and is reported failed as
 interrupted, never re-run. The server waits for a script's result for its timeout
 plus the acknowledgement bound (20 seconds), so a host that is down for longer than
-that has the fire recorded as unanswered first, and the result it reports when it
-returns is not recorded.
+that has the fire recorded as unanswered first; the result it reports when it
+returns, interrupted included, is then recorded against the same fire and shown in
+place of the unanswered row (`08-triggers-and-jobs.md` § Logs).
 
 A turn's identity for reattachment is its turn id. A turn that arrives without
 one (a spawn prompt, so every job-fired chat's first turn) is given one when it
@@ -1002,6 +1003,12 @@ event up to it (`01-server.md` § Host outbox), and the host then drops those
 events. After a reconnect the host resends everything after the last
 acknowledgement, oldest first; the server drops a resend it already holds. There
 is no per-chat comparison and the server never asks a host for history.
+
+The outbox is the only way a recorded event leaves the host: anything the link
+sends that the record keeps goes through it, including what the link's own
+callbacks send on connect. A server that does not answer `hostOutbox: true` is
+sent none of it; the outbox holds it, said once in the log, until a server that
+takes it connects.
 
 A turn's start and end go into the outbox the moment the chat's own log writes
 them, with each entry's `nativeRef`, so the end a restarted host writes for a

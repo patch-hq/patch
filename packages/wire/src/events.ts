@@ -1524,10 +1524,8 @@ export const ChatStateEvent = z
     preferredAccountId: z.string().min(1).nullable().optional(),
     chatId: z.string().min(1),
     /**
-     * The highest seq this host's own log of the chat has recorded. The server
-     * compares it with what it has committed: a host ahead is asked for what the
-     * server missed (`patch.log_sync.request`), a host behind is given what it
-     * lost (`patch.log_restore`). Optional: an older host never says.
+     * The highest seq this host's own log of the chat has recorded. Optional:
+     * an older host never says.
      */
     lastSeq: z.number().int().nonnegative().optional(),
     /**
@@ -7381,50 +7379,6 @@ export const ServerQueueModeEvent = z
   .strict();
 export type ServerQueueModeEvent = z.infer<typeof ServerQueueModeEvent>;
 
-/**
- * Server -> host: send what the server is missing (spec/01 § Message log). The
- * host answers with `patch.log_sync.batch` frames carrying its own logged events
- * of the chat after `afterSeq`, in order. Sent when a host's log of a chat reaches
- * further than the server's, for instance after a link that dropped for longer
- * than the host's resend buffer holds.
- */
-export const PatchLogSyncRequestEvent = z
-  .object({
-    type: z.literal('patch.log_sync.request'),
-    chatId: z.string().min(1),
-    afterSeq: z.number().int().gte(-1),
-  })
-  .strict();
-export type PatchLogSyncRequestEvent = z.infer<typeof PatchLogSyncRequestEvent>;
-
-/** Host -> server: events the server asked for, in seq order. `done` closes the answer. */
-export const PatchLogSyncBatchEvent = z
-  .object({
-    type: z.literal('patch.log_sync.batch'),
-    chatId: z.string().min(1),
-    /** Shallow like `chat.replay_batch`: each was validated when the host logged it. */
-    events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
-    done: z.boolean(),
-  })
-  .strict();
-export type PatchLogSyncBatchEvent = z.infer<typeof PatchLogSyncBatchEvent>;
-
-/**
- * Server -> host: events this host's log of the chat lacks, in seq order, so the
- * host's local copy can be rebuilt from the server's (a host whose log was lost,
- * or that another host ran the chat past). The host writes each into its own log
- * and carries its numbering on above them.
- */
-export const PatchLogRestoreEvent = z
-  .object({
-    type: z.literal('patch.log_restore'),
-    chatId: z.string().min(1),
-    events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
-    done: z.boolean(),
-  })
-  .strict();
-export type PatchLogRestoreEvent = z.infer<typeof PatchLogRestoreEvent>;
-
 /** Server -> host: ownership reconciliation is complete; startup work may resume. */
 export const HostReconciledEvent = z
   .object({ type: z.literal('host.reconciled'), ...hostIdField })
@@ -7523,10 +7477,10 @@ export type HostRecordImportAckEvent = z.infer<typeof HostRecordImportAckEvent>;
 /**
  * Host -> server: one transcript event from the host's outbox (spec/01 § Host
  * outbox). `position` numbers the host's outbox across every chat; the server
- * commits `event` exactly as if it had arrived bare, then acknowledges the
- * position with `host.outbox_ack`. A host resends everything after the last
- * acknowledged position whenever it reconnects. Sent only to a server whose
- * `auth.ok` carried `hostOutbox: true`.
+ * commits `event` durably, then acknowledges the position with
+ * `host.outbox_ack`. A host resends everything after the last acknowledged
+ * position whenever it reconnects. The only way a transcript event reaches the
+ * server: one sent bare is refused.
  */
 export const HostOutboxEvent = z
   .object({
@@ -9948,7 +9902,9 @@ export const HelloEvent = z
     auth: z.string().min(1).optional(),
     /**
      * A host that delivers transcript events through its outbox (spec/01 §
-     * Host outbox). The server then never compares its log with the host's.
+     * Host outbox). Every current host sends it: the outbox is the only way a
+     * transcript event reaches the server, so a host without it has nothing
+     * recorded until it updates.
      */
     outbox: z.literal(true).optional(),
   })
@@ -10251,7 +10207,8 @@ export const AuthOkEvent = z
     recordImport: z.literal(true).optional(),
     /**
      * Sent to a host by a server that takes transcript events through the host
-     * outbox (`host.outbox`, spec/01 § Host outbox). Absent: send them bare.
+     * outbox (`host.outbox`, spec/01 § Host outbox). Absent: the server predates
+     * the outbox, and the host holds its transcript events until it is updated.
      */
     hostOutbox: z.literal(true).optional(),
     /**
@@ -10531,9 +10488,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchWatchOutputRequestEvent,
   PatchWatchOutputResponseEvent,
   ServerQueueModeEvent,
-  PatchLogSyncRequestEvent,
-  PatchLogSyncBatchEvent,
-  PatchLogRestoreEvent,
   ChatCommittedEvent,
   ChatTurnStartedEvent,
   ChatTurnEndedEvent,
@@ -10869,9 +10823,6 @@ export const EVENT_SCHEMAS = {
   'patch.watch_output.request': PatchWatchOutputRequestEvent,
   'patch.watch_output.response': PatchWatchOutputResponseEvent,
   'server.queue_mode': ServerQueueModeEvent,
-  'patch.log_sync.request': PatchLogSyncRequestEvent,
-  'patch.log_sync.batch': PatchLogSyncBatchEvent,
-  'patch.log_restore': PatchLogRestoreEvent,
   'chat.committed': ChatCommittedEvent,
   'chat.turn_started': ChatTurnStartedEvent,
   'chat.turn_ended': ChatTurnEndedEvent,

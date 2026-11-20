@@ -16,9 +16,10 @@
 // leaving surfaces stuck in `connecting`/daemon-unknown for a full second
 // (spec/12 ## Surface connection state model: "its first reconnect backoff step
 // is short (≤1s)"). Thereafter it backs off 1s -> 2s -> 5s -> 10s, capped 30s.
-// Offline buffering (spec/12): outbound events queue in an EventBuffer while
-// disconnected (cap 10k, drop-oldest with a logged warn) and flush on
-// reconnect. NO FALLBACK: a bad daemonKey -> the server closes the socket; we
+// Transcript events go through the host outbox (spec/02 § Host outbox) and
+// nothing else: kept on disk until the server acknowledges them, resent after
+// every reconnect. Live-only events queue in an EventBuffer while disconnected
+// (cap 10k, drop-oldest with a logged warn) and flush on reconnect. NO FALLBACK: a bad daemonKey -> the server closes the socket; we
 // surface the close code and keep retrying (a revoked key never silently
 // succeeds).
 //
@@ -131,11 +132,11 @@ export interface ServerLinkOptions {
    */
   onGreetingUnreadable?: (err: WireDecodeError) => void;
   /**
-   * The host outbox (spec/02 § Host outbox). Transcript events go here rather
-   * than the offline buffer: kept on disk until the server acknowledges them,
-   * and resent after every reconnect. Absent (tests), they buffer like any other.
+   * The host outbox (spec/02 § Host outbox), the only way a transcript event
+   * leaves this host: kept on disk until the server acknowledges it, and
+   * resent after every reconnect.
    */
-  outbox?: Outbox;
+  outbox: Outbox;
   /** Test hooks. */
   wsFactory?: (url: string) => WebSocket;
   backoffSchedule?: readonly number[];
@@ -252,7 +253,7 @@ interface ServerLinkHelloFrame {
   clientGitSha?: string;
   clientBuiltAt?: string;
   auth: string;
-  outbox?: true;
+  outbox: true;
 }
 
 /** How long a clean close may wait for the server's answer before the socket is dropped. */
@@ -325,27 +326,31 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   /** Send one outbox entry the way this connection's server takes it. */
   function sendOutboxEntry(position: number, outboxed: WireEvent): void {
+    // A server that predates the outbox would not keep it: it is held here
+    // until the server is updated (said once, at auth).
+    if (!serverTakesOutbox) return;
     // An older server's reader refuses what it does not know: it is sent no
     // turn boundaries and no provider ids. The outbox keeps them either way.
-    if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(outboxed.type)) {
-      if (!serverTakesOutbox) opts.outbox?.ack(position);
-      return;
-    }
+    if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(outboxed.type)) return;
     const event = serverKeepsRecord ? outboxed : withoutNativeRef(outboxed);
-    if (serverTakesOutbox) {
-      rawSend({ type: 'host.outbox', position, event });
+    rawSend({ type: 'host.outbox', position, event });
+  }
+
+  /**
+   * Send now, on the open socket. A transcript event still goes through the
+   * outbox, so nothing handed to the link's callbacks can bypass it.
+   */
+  function sendNow(event: WireEvent): void {
+    if (isOutboxEvent(event)) {
+      sendOutboxEntry(opts.outbox.append(event), event);
       return;
     }
-    // A server that predates the outbox never acknowledges: what it was sent
-    // is all it will get, as before the outbox existed.
     rawSend(event);
-    opts.outbox?.ack(position);
   }
 
   /** After `auth.ok`: everything the server has not acknowledged, in order. */
   function flushOutbox(): void {
     const outbox = opts.outbox;
-    if (!outbox) return;
     const owed = [...outbox.pending()];
     if (owed.length > 0) {
       log.info(
@@ -438,7 +443,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         ...(opts.clientGitSha ? { clientGitSha: opts.clientGitSha } : {}),
         ...(opts.clientBuiltAt ? { clientBuiltAt: opts.clientBuiltAt } : {}),
         auth: opts.daemonKey,
-        ...(opts.outbox ? { outbox: true as const } : {}),
+        outbox: true,
       };
       socket.send(JSON.stringify(hello));
       log.info('server-link: sent host hello, awaiting auth.ok');
@@ -507,17 +512,23 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         serverTakesOutbox = event.hostOutbox === true;
         serverKeepsRecord = event.recordComplete === true;
         log.info('server-link: authenticated (auth.ok)');
+        if (!serverTakesOutbox) {
+          log.error(
+            { owed: opts.outbox.pending().length },
+            'server-link: the server predates the host outbox; transcript events are held until it is updated',
+          );
+        }
         flushOutbox();
         flushBuffer();
-        opts.onAuthed?.(rawSend, event);
+        opts.onAuthed?.(sendNow, event);
         return;
       }
       if (event.type === 'host.outbox_ack') {
-        opts.outbox?.ack(event.through);
+        opts.outbox.ack(event.through);
         return;
       }
       // `host.online` is server-emitted bookkeeping; nothing to do here.
-      opts.onFrame?.(event, rawSend);
+      opts.onFrame?.(event, sendNow);
     });
 
     socket.on('close', (code: number, reason: Buffer) => {
@@ -564,14 +575,13 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     },
     send(event: WireEvent): void {
       const open = online && ws !== undefined && ws.readyState === WebSocket.OPEN;
-      if (opts.outbox && isOutboxEvent(event)) {
+      if (isOutboxEvent(event)) {
         const position = opts.outbox.append(event);
         // Offline, the outbox already holds it for the reconnect.
         if (open) sendOutboxEntry(position, event);
         return;
       }
-      // With no outbox, only a server known to keep them is sent turn
-      // boundaries and provider ids.
+      // Only a server known to keep them is sent turn boundaries and provider ids.
       if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(event.type)) return;
       const sendable = serverKeepsRecord ? event : withoutNativeRef(event);
       // `online` stays true until the socket's `close` event, but a socket that
@@ -589,7 +599,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       return {
         online,
         bufferSize: buffer.size(),
-        outboxOwed: opts.outbox?.pending().length ?? 0,
+        outboxOwed: opts.outbox.pending().length,
         bufferMaxPerChat: opts.bufferMaxPerChat ?? DEFAULT_BUFFER_PER_CHAT,
         offlineSince: online ? null : (offlineSince ?? Date.now()),
       };

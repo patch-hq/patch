@@ -281,7 +281,13 @@ async function startFakeServer(): Promise<FakeServer> {
         for (const r of helloResolvers.splice(0)) r();
         return;
       }
-      const event = decode(raw.toString('utf8'));
+      let event = decode(raw.toString('utf8'));
+      // The outbox frame is how a host sends its transcript (spec/01 § Host
+      // outbox): kept as the event it carries, and acknowledged at once.
+      if (event.type === 'host.outbox') {
+        ws.send(encode({ type: 'host.outbox_ack', through: event.position }));
+        event = decode(JSON.stringify(event.event));
+      }
       received.push(event);
       // Auto-ack jobs RPCs so RemoteJobsStore.list()/etc (which awaits a real
       // patch.jobs.response) doesn't hang for its full timeout in tests that
@@ -310,7 +316,13 @@ async function startFakeServer(): Promise<FakeServer> {
       sawHello ? Promise.resolve() : new Promise<void>((resolve) => helloResolvers.push(resolve)),
     authNow: () => {
       current?.send(
-        JSON.stringify({ type: 'auth.ok', hosts: [], accountId: 'acct-1', surfaceId: 'daemon-1' }),
+        JSON.stringify({
+          type: 'auth.ok',
+          hosts: [],
+          accountId: 'acct-1',
+          surfaceId: 'daemon-1',
+          hostOutbox: true,
+        }),
       );
       current?.send(JSON.stringify({ type: 'host.online', hostId: 'd1' }));
     },
@@ -2215,45 +2227,6 @@ describe('src/index.ts main() — full host boot', () => {
       await waitFor(() => JSON.stringify(hostJson()['smallJobModels']) === '["m9"]');
       // ...and the refused engine is not saved.
       expect(hostJson()['speechBackend']).toBeUndefined();
-    } finally {
-      await boot.cleanup();
-    }
-  }, 30_000);
-
-  it("rebuilds a chat's log from log_restore frames and hands its own log back on log_sync", async () => {
-    const boot = await bootMain();
-    try {
-      await boot.fakeServer.waitForAuthed();
-      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-main-logsync-')));
-      const chatId = await boot.ready.daemon.spawnChat({ folder, model: 'claude-opus-5' });
-      const say = (seq: number, role: 'user' | 'assistant', content: string): WireEvent =>
-        ({ type: 'chat.message', chatId, role, content, seq }) as WireEvent;
-
-      boot.fakeServer.send({
-        type: 'patch.log_restore',
-        chatId,
-        events: [say(5, 'user', 'question'), say(6, 'assistant', 'answer')],
-        done: true,
-      } as WireEvent);
-      await waitFor(() => boot.ready.daemon.eventsAfter(chatId, -1).length === 2);
-
-      boot.fakeServer.send({ type: 'patch.log_sync.request', chatId, afterSeq: 5 } as WireEvent);
-      const batch = (await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'patch.log_sync.batch' && e.chatId === chatId,
-      )) as { events: Array<{ seq: number; content: string }>; done: boolean };
-      expect(batch.done).toBe(true);
-      expect(batch.events.map((e) => [e.seq, e.content])).toEqual([[6, 'answer']]);
-
-      // A chat the host does not have is answered with an empty, finished batch.
-      boot.fakeServer.send({
-        type: 'patch.log_sync.request',
-        chatId: 'nope',
-        afterSeq: -1,
-      } as WireEvent);
-      const none = (await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'patch.log_sync.batch' && e.chatId === 'nope',
-      )) as { events: unknown[]; done: boolean };
-      expect(none).toMatchObject({ events: [], done: true });
     } finally {
       await boot.cleanup();
     }
