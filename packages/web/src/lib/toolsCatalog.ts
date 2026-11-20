@@ -332,7 +332,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     description:
       'Runs a shell command as a durable background task the host itself owns, holds a real pid for, and can kill.',
     params:
-      'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number, wakeOnMatch?: string',
+      'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number, wakeOnMatch?: string, rerunOnReboot?: boolean',
   },
   {
     name: patchToolId('patch_watch_list'),

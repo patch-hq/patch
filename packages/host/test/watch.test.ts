@@ -697,6 +697,7 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       chatId: 'c-boot',
       command: 'echo hello-tail; sleep 30',
       description: 'killed by reboot',
+      rerunOnReboot: false,
       timeoutSec: 600,
       cwd: depsA.home,
     });
@@ -716,6 +717,70 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       expect(msg).toMatch(/rebooted/);
       expect(msg).toContain('hello-tail');
       expect(msg).toContain('echo hello-tail; sleep 30');
+    } finally {
+      schedulerB.dispose();
+    }
+  });
+
+  it('re-runs a watch killed by a reboot, keeping its task id, and says so in one line', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-rerun',
+      command: 'echo run-marker; sleep 30',
+      description: 'wait for pr',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    await flushUntil(() => readProgress(rec.outputFile).lastLine === 'run-marker');
+    process.kill(-rec.pid, 'SIGKILL');
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-rerun'],
+      bootTime: () => Date.now() + 1000,
+    });
+    const schedulerB = mkScheduler(depsB);
+    try {
+      await flushUntil(() => depsB.delivered.length > 0);
+      const after = schedulerB.list('c-rerun')[0]!;
+      expect(after.taskId).toBe(rec.taskId);
+      expect(after.status).toBe('running');
+      expect(after.pid).not.toBe(rec.pid);
+      expect(after.rerunCount).toBe(1);
+      expect(after.killed).toBeUndefined();
+      expect(depsB.delivered[0]!.message).toMatch(/restarted after a reboot/);
+      expect(depsB.delivered[0]!.message).not.toMatch(/NOT been re-run/);
+      schedulerB.stop('c-rerun', rec.taskId);
+    } finally {
+      schedulerB.dispose();
+    }
+  });
+
+  it('does not re-run a reboot-killed watch after a plain host restart', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-norerun',
+      command: 'sleep 30',
+      description: 'host restart only',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    process.kill(-rec.pid, 'SIGKILL');
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-norerun'],
+      bootTime: () => 0,
+    });
+    const schedulerB = mkScheduler(depsB);
+    try {
+      await flushUntil(() => depsB.delivered.length > 0);
+      expect(schedulerB.list('c-norerun')[0]?.killed).toBe(true);
+      expect(depsB.delivered[0]!.message).toMatch(/NOT been re-run/);
     } finally {
       schedulerB.dispose();
     }
