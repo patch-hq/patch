@@ -1,7 +1,7 @@
 // Manual sort: project headers drag into a saved order (spec/14 § Sidebar ordering).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { useChatStore } from '../stores/chatStore.js';
