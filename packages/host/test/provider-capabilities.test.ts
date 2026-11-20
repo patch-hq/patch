@@ -41,7 +41,7 @@ const codes = (events: WireEvent[]): string[] =>
 describe('capability gating in the chat core', () => {
   it('refuses an edit on a provider that does not declare editAtMessage', async () => {
     const { daemon, events, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder, model: 'gemini/gemini-3-pro' });
+    const chatId = await daemon.spawnChat({ folder, model: 'acp/gemini/gemini-3-pro' });
     events.length = 0;
     await daemon.forkChat({ chatId, seq: 0, message: 'edited', localId: 'l1' });
     expect(codes(events)).toEqual(['capability_unsupported']);
@@ -50,7 +50,7 @@ describe('capability gating in the chat core', () => {
 
   it('refuses a side thread on a provider that does not declare branchAtTurn', async () => {
     const { daemon, events, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder, model: 'gemini/gemini-3-pro' });
+    const chatId = await daemon.spawnChat({ folder, model: 'acp/gemini/gemini-3-pro' });
     events.length = 0;
     await daemon.sideChat({ chatId, seq: 0, message: 'aside', localId: 'l1' });
     expect(codes(events)).toEqual(['capability_unsupported']);
