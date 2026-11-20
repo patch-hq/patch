@@ -164,13 +164,16 @@ describe('facts', () => {
     expect(factsOnTurnStarted(before, 't')).toEqual(facts({ openTurns: ['t'] }));
   });
 
-  test('an approval does not outlive the last open turn; a question does', () => {
+  test('a request stays open past its turn until the host resolves it', () => {
     let f = factsOnTurnStarted(emptyFacts(), 't');
     f = factsOnRequestRaised(f, 'a', 'Bash');
     f = factsOnRequestRaised(f, 'q', 'AskUserQuestion');
-    f = factsOnTurnEnded(f, 't', 'stopped', undefined);
-    expect(f.openRequests).toEqual([{ id: 'q', question: true }]);
-    expect(factsOnRequestResolved(f, 'q').openRequests).toEqual([]);
+    f = factsOnTurnEnded(f, 't', 'completed', undefined);
+    expect(deriveStatus(f).state).toBe('waiting_for_user');
+    f = factsOnRequestResolved(f, 'a');
+    f = factsOnRequestResolved(f, 'q');
+    expect(f.openRequests).toEqual([]);
+    expect(deriveStatus(f).state).toBe('idle');
   });
 
   test('a side branch is its own turn: the chat runs until both end', () => {

@@ -17,6 +17,7 @@ import { createMetaStore } from '../src/meta.js';
 import { createHistoryReader } from '../src/history.js';
 import { chatStateFromMeta } from '../src/chatState.js';
 import { buildTodoEditNote } from '../src/todos.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -62,7 +63,7 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
 
     daemon.setTodos(chatId, LIST);
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv).toBeDefined();
     expect(stateEv && 'todos' in stateEv && stateEv.todos).toEqual(LIST);
   });
@@ -75,7 +76,7 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
 
     daemon.setTodos(chatId, []);
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'todos' in stateEv && stateEv.todos).toEqual([]);
   });
 

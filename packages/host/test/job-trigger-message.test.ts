@@ -15,6 +15,7 @@ import type { ChatMessageEvent, WireEvent } from '@patch/wire';
 import { Daemon, chatInputToSendOptions } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const tick = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -189,7 +190,7 @@ describe('job trigger turn (spec/08 § Action, spec/14 § Job trigger turn)', ()
     // Nothing is re-sent, with a hidden reminder or otherwise (spec/12 §
     // Continue): the cut-off tick is reported as a fact and waits for Continue.
     expect(userMessages(events, chatId)).toHaveLength(0);
-    const states = events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    const states = asServerSees(events).filter((e) => e.type === 'chat.state' && e.chatId === chatId);
     expect(states.at(-1)).toMatchObject({ interrupted: true });
   });
 });

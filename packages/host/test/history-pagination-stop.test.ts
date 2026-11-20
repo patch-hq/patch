@@ -21,6 +21,7 @@ import { Daemon, HISTORY_PAGE_HARD_CAP } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -51,7 +52,7 @@ function setup(opts: { turnDelayMs?: number } = {}) {
 }
 
 function lastActivity(events: WireEvent[]): ChatActivity | undefined {
-  const states = events.filter((e) => e.type === 'chat.state');
+  const states = asServerSees(events).filter((e) => e.type === 'chat.state');
   const last = states[states.length - 1] as unknown as { activity: ChatActivity } | undefined;
   return last?.activity;
 }
