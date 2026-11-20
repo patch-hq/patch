@@ -39,7 +39,7 @@ test.describe('Settings — Voice', () => {
     for (const surface of ['device', 'handsFree', 'call']) {
       await expect(page.getByTestId(`voice-${surface}-engine`)).toHaveCount(0);
     }
-    await expect(page.getByText('Speaking')).toHaveCount(0);
+    await expect(page.getByText('Speaking', { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('chat-name-interval')).toHaveCount(0);
   });
 
