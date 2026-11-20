@@ -13,16 +13,16 @@
 //      to arrive here rather than only in the target's log. A frame naming the
 //      raising host is its own audit record and is NOT relayed (that would
 //      spawn the chat twice).
-//   2. `patch.list_chats.request` is answered from the server's chat mirror,
+//   2. `patch.list_chats.request` is answered from the server's chat index,
 //      because only the server sees every host's chats. Each entry names the
 //      host it lives on, so the calling agent can address it afterwards.
 //   2b. `patch.search_chats.request` is answered by `chat-search.ts` from the
-//      chat mirror and the transcripts the server holds.
+//      chat index and the server's record.
 //   2c. `patch.peek.request` / `patch.history.request` are answered here from
 //      the server's record and chat status (`agent-reads.ts`); no host is
 //      asked, so a chat on an offline host reads like any other.
 //   3. `patch.send_to` / `patch.stop` carrying a `requestId` are relayed to
-//      whichever host the chat mirror says OWNS `targetChatId` — resolved here
+//      whichever host the chat index says OWNS `targetChatId` — resolved here
 //      rather than by the caller naming a host, because `patch_send_to` takes
 //      only a chatId (an agent learns which chat lives where from
 //      `patch_list_chats`, not the other way round). The owning host's
@@ -102,7 +102,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
 
   /**
    * Where does `targetChatId` actually live, and can it be reached right now?
-   * The only place that knows is the chat mirror — `patch_send_to`/`patch_stop`
+   * The only place that knows is the chat index — `patch_send_to`/`patch_stop`
    * are handed a bare chatId, never a host.
    */
   const resolveTargetHost = (

@@ -393,7 +393,7 @@ unprovisioned keeps running chats on the others.
 
 Chat titles, status lines, tool-run labels, branch send-back summaries, link summaries and recurrence translation are small one-shot model queries. They share one ordered model list: the first entry is the set model, and each later entry is tried in order when the one before it fails. The default is `claude-haiku-4-5-20251001` then `claude-sonnet-4-5`. The list is the shared setting `smallJobModels` (`01-server.md` § Settings), changed with `patch settings set small-job-models a,b` (set model first), and applies to every host from its next job. An empty list, an empty entry or a model named twice is refused when the setting is written. `PATCH_SMALL_JOB_MODELS` is not read.
 
-This is separate from account choice (`10-auth.md` § Choosing an account): the account is chosen first, then the models are walked on it. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps, rotation digests) and Codex chats, which run on their own model, are not part of this list.
+This is separate from account choice (`10-auth.md` § Choosing an account): the account is chosen first, then the models are walked on it. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps) and Codex chats, which run on their own model, are not part of this list.
 
 ## Permission mode
 

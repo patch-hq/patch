@@ -21,7 +21,7 @@ describe('parseGoalOutcome', () => {
   });
 
   it('returns null for an ordinary system message', () => {
-    expect(parseGoalOutcome('Session rotated · digest carried over')).toBeNull();
+    expect(parseGoalOutcome('Session rotated · the last 2 messages carried over')).toBeNull();
     expect(parseGoalOutcome('')).toBeNull();
   });
 

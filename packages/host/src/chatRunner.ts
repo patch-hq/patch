@@ -642,27 +642,9 @@ export interface HostOptions {
     lastAssistantText: string;
   }) => Promise<string>;
   /**
-   * Session-handoff digest generator (spec/06 § Session rotation, spec/04 §
-   * History — "switch and compact"; `rotationDigest.ts`). When set,
-   * `rotateThread` uses it to ask the OUTGOING session for a handoff before
-   * retiring it, and a compact provider switch uses it the same way before
-   * building the target's small starting context. OPTIONAL — both callers
-   * refuse rather than starting a fresh session/switch with nothing carried
-   * over (NO FALLBACK). `model` names the resuming session's OWN model, so a
-   * Codex `resumeSessionId` resumes on Codex rather than being sent to Claude.
-   */
-  generateDigest?: (input: {
-    chatId: string;
-    resumeSessionId: string;
-    folder: string;
-    model?: string | null;
-    /** The private config dir the provider runs under for this chat, if any. */
-    configDir?: string;
-  }) => Promise<string | null>;
-  /**
    * The Manager sweep's one decision call (spec/06 § Sweep;
    * `managerSweepGen.ts`). OPTIONAL — `runManagerSweep` refuses rather than
-   * guessing when it's unset (NO FALLBACK), same contract as `generateDigest`.
+   * guessing when it's unset (NO FALLBACK).
    */
   decideSweep?: (input: {
     digest: string;
@@ -1060,8 +1042,11 @@ export const SESSION_RESTART_TURN_REMINDER = noteBlock(
     'you cannot see.',
 );
 
-/** Longest stretch of one message a Manager handover note carries. */
+/** Longest stretch of one message a handover note carries. */
 const MANAGER_HANDOVER_MESSAGE_CHARS = 4_000;
+
+/** Messages a session rotation carries over when no `managerContextWindow` is set. */
+const ROTATION_CARRY_MESSAGES = 40;
 
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
@@ -2174,11 +2159,9 @@ export class Daemon {
    * G2-d1: the full, still-unresolved `chat.permission_request` wire event per
    * chat (keyed by `${chatId}:${requestId}`). A permission is recorded in the
    * SDK transcript as a plain assistant `tool_use` block (Claude Code's shape),
-   * so on a `chat.replay`/reload the history reader reconstructs it as a
-   * `chat.tool_call` — losing the approve/deny affordance and stranding the
-   * user in `awaiting-permission` with no way to resolve it. We re-emit any
-   * pending permission_request at the end of `replayChat` so a surface that
-   * reconnects AFTER the turn produced the prompt still renders the permission
+   * so the request itself is kept here until it is resolved: it decides whether
+   * the chat is paused on a decision, and it is re-sent with its current
+   * deadline when one changes, so every surface still renders the permission
    * card. Covers EVERY permission tool (not just file edits, unlike
    * `pendingPermissions` which is edit-specific). Cleared on resolution.
    */
@@ -4958,9 +4941,8 @@ export class Daemon {
   /**
    * `patch_delegate_list` — every subagent `parentChatId` has created, newest first.
    *
-   * Reads the in-memory chat states, never `metaStore.list()`: `replayChat`
-   * calls this once per chat, and on reconnect every chat replays, so a disk
-   * scan here was chats × chats file reads (the second time that froze a
+   * Reads the in-memory chat states, never `metaStore.list()`: this used to
+   * run once per chat on every reconnect, so a disk scan here was chats × chats file reads (the second time that froze a
    * 9,000-chat host). `state.subagent` mirrors `meta.subagent`.
    */
   listDelegates(parentChatId: string): DelegateSummary[] {
@@ -5930,21 +5912,6 @@ export class Daemon {
   }
 
   /**
-   * Retire a special thread's underlying Claude session and start a fresh
-   * one, seeded with a handoff digest from the outgoing session (spec/06 §
-   * Session rotation, `rotationDigest.ts`). The scheduled, deliberate
-   * alternative to "wait for the SDK's own auto-compact to eventually fire" —
-   * Manager alone ran 18 days on ~750k cached tokens a turn without a single
-   * one. `chatId` never changes: only the session underneath it does, so
-   * pinning, ingress wiring and sidebar identity are untouched.
-   *
-   * NO FALLBACK: refuses to rotate a chat that's mid-turn (the caller should
-   * retry next cycle), a chat with no digest generator wired, or one whose
-   * digest generation failed — starting a fresh session with nothing carried
-   * over is not a degraded rotation, it is a different, worse operation this
-   * method does not perform silently.
-   */
-  /**
    * spec/04 § Resume — the chat's provider session is gone and Patch does not
    * rebuild it. The session id is cleared so the next turn starts a fresh
    * session, and a divider in the record says plainly that the model's memory
@@ -5992,44 +5959,85 @@ export class Daemon {
     const meta = this.opts.metaStore.read(chatId);
     if (window === undefined || window <= 0 || !state?.sessionId || !meta) return '';
     const from = meta.sessionFromSeq ?? 0;
+    if (this.recordMessages(chatId).filter((m) => m.seq >= from).length <= window) return '';
+    const handoff = this.recordHandoff(chatId, window);
+    this.retireSession(chatId);
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `New session · the last ${handoff.carried} messages carried over`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
+    this.opts.logger.info(
+      { chatId, window, carried: handoff.carried },
+      'manager: fresh session, recent conversation carried in a visible note',
+    );
+    return handoff.note;
+  }
+
+  /** The chat's user and assistant messages on its active track, from Patch's record. */
+  private recordMessages(
+    chatId: string,
+  ): Array<{ seq: number; role: 'user' | 'assistant'; content: string }> {
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta) return [];
     const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    const messages = readTrack(this.chatLog, chatId, meta, branchId, -1).flatMap(({ event }) =>
-      event.type === 'chat.message' && event.role !== 'system' && event.content.trim() !== ''
+    return readTrack(this.chatLog, chatId, meta, branchId, -1).flatMap(({ event }) =>
+      event.type === 'chat.message' &&
+      (event.role === 'user' || event.role === 'assistant') &&
+      event.content.trim() !== ''
         ? [{ seq: event.seq, role: event.role, content: event.content }]
         : [],
     );
-    if (messages.filter((m) => m.seq >= from).length <= window) return '';
-    const recent = messages.slice(-window);
+  }
+
+  /**
+   * A special thread's fresh session is handed the last `window` messages of
+   * Patch's own record, quoted, as a `Handoff` note for the front of its first
+   * turn (spec/06 § Bounded context, § Session rotation). The note is an entry
+   * like any other, so what the new session was given is in the record.
+   */
+  private recordHandoff(chatId: string, window: number): { note: string; carried: number } {
+    const name = chatId === SPECIAL_THREAD_IDS.manager ? 'Manager' : 'Speakers';
+    const recent = this.recordMessages(chatId).slice(-window);
     const lines = recent.map(
       (m) =>
-        `${m.role === 'user' ? 'User' : 'Manager'}: ${m.content.length > MANAGER_HANDOVER_MESSAGE_CHARS ? `${m.content.slice(0, MANAGER_HANDOVER_MESSAGE_CHARS)}…` : m.content}`,
+        `${m.role === 'user' ? 'User' : name}: ${m.content.length > MANAGER_HANDOVER_MESSAGE_CHARS ? `${m.content.slice(0, MANAGER_HANDOVER_MESSAGE_CHARS)}…` : m.content}`,
     );
-    state.sessionId = undefined;
-    state.sessionAccountId = undefined;
+    return {
+      carried: recent.length,
+      note: noteBlock(
+        'Handoff',
+        `This is a fresh session of the ${name} thread. The last ${recent.length} messages of its conversation follow, as Patch recorded them; older ones are in its history.\n\n${lines.join('\n\n')}`,
+      ),
+    };
+  }
+
+  /** Clear the chat's session so its next turn starts a fresh one. */
+  private retireSession(chatId: string): void {
+    const state = this.chatState.get(chatId);
+    if (state) {
+      state.sessionId = undefined;
+      state.sessionAccountId = undefined;
+    }
     this.opts.metaStore.update(chatId, (m) => {
       const { sessionId: _session, sessionAccountId: _account, ...rest } = m;
       void _session;
       void _account;
       return { ...rest, updatedAt: this.opts.now() };
     });
-    this.emit({
-      type: 'chat.message',
-      chatId,
-      role: 'system',
-      content: `New session · the last ${recent.length} messages carried over`,
-      seq: this.bumpSeq(chatId),
-      createdAt: this.opts.now(),
-    });
-    this.opts.logger.info(
-      { chatId, window, carried: recent.length },
-      'manager: fresh session, recent conversation carried in a visible note',
-    );
-    return noteBlock(
-      'Handoff',
-      `This is a fresh session of the Manager thread. The last ${recent.length} messages of its conversation follow, as Patch recorded them; older ones are in its history.\n\n${lines.join('\n\n')}`,
-    );
   }
 
+  /**
+   * Retire a special thread's provider session and start a fresh one (spec/06
+   * § Session rotation): the scheduled alternative to waiting for the
+   * provider's own compaction. The fresh session's first message carries the
+   * last messages of Patch's record as a visible `Handoff` note. `chatId` never
+   * changes: only the session underneath it does. Refuses a chat that's
+   * mid-turn (the caller retries next cycle).
+   */
   async rotateThread(chatId: string): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
@@ -6039,58 +6047,40 @@ export class Daemon {
     if (state.activity === 'running' || state.activity === 'awaiting-permission') {
       throw new Error(`rotateThread: ${chatId} is mid-turn`);
     }
-    if (!this.opts.generateDigest) {
-      throw new Error('rotateThread: no digest generator configured');
-    }
-    const outgoingSessionId = state.sessionId;
-    if (outgoingSessionId === undefined) {
+    if (state.sessionId === undefined) {
       // Nothing to rotate away from — a thread that has never run a turn (or
-      // was already rotated onto a session that has not run one yet) has no
-      // history to hand off.
+      // was already rotated onto a session that has not run one yet).
       this.opts.logger.info({ chatId }, 'rotateThread: no session yet, nothing to rotate');
       return;
     }
-    const digest = await this.opts.generateDigest({
+    // What the fresh session is given comes from Patch's own record, never
+    // from a request to the outgoing session the user would not see.
+    const handoff = this.recordHandoff(
       chatId,
-      resumeSessionId: outgoingSessionId,
-      folder: state.folder,
-      ...(await this.readySession(chatId, this.harnessOf(chatId), outgoingSessionId)),
-    });
-    if (digest === null) {
-      this.opts.logger.warn(
-        { chatId },
-        'rotateThread: digest generation failed; skipping this cycle rather than rotating blind',
-      );
-      return;
-    }
-    const at = this.opts.now();
-    // Boundary marker on the OUTGOING session's transcript, same arrangement
-    // a compaction boundary uses (compaction.ts / spec/02 § Context
-    // compression) — a system chat.message so it replays with the rest of the
-    // chat instead of vanishing on re-entry.
-    const seq = this.bumpSeq(chatId);
+      this.opts.managerContextWindow ?? ROTATION_CARRY_MESSAGES,
+    );
+    // Boundary marker, same arrangement a compaction boundary uses — a system
+    // chat.message, so it shows with the rest of the chat.
     this.emit({
       type: 'chat.message',
       chatId,
       role: 'system',
-      content: 'Session rotated · digest carried over',
-      seq,
-      createdAt: at,
+      content: `Session rotated · the last ${handoff.carried} messages carried over`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
     });
-    // Clear the session so the next turn starts fresh — the same "session
-    // lost, start clean" idiom `runQuery` already uses for an orphaned resume
-    // id (above), just deliberate here rather than a recovery from a bad state.
-    state.sessionId = undefined;
-    this.opts.metaStore.update(chatId, (m) => {
-      const { sessionId: _drop, ...rest } = m;
-      void _drop;
-      return { ...rest, updatedAt: at };
-    });
-    this.opts.logger.info({ chatId }, 'rotateThread: session rotated, seeding fresh session');
+    this.retireSession(chatId);
+    this.opts.logger.info(
+      { chatId, carried: handoff.carried },
+      'rotateThread: session rotated, fresh session gets a visible handoff from the record',
+    );
+    // The fresh session's first message: the handoff note (its own entry in
+    // the record) and a line saying why it is there. Patch started it, not a person.
     await this.sendInput({
       chatId,
-      message: `[rotation] Picking up from a rotated session. Handoff from the outgoing one:\n\n${digest}`,
-      localId: `rotation-${chatId}-${at}`,
+      message: `${handoff.note}Picking up after a scheduled session rotation.`,
+      localId: `rotation-${chatId}-${this.opts.now()}`,
+      origin: 'machine',
     });
   }
 
@@ -10362,8 +10352,8 @@ export class Daemon {
 
     // The user turn is a `chat.message` like any other (spec/03 § Session
     // events: `{chatId, role, content, seq}`), so it is emitted HERE, live, at
-    // its own canonical seq — the same slot it will occupy in `chat.replay` and
-    // in `GET /api/chats/:id/history`.
+    // its own canonical seq — the same slot it occupies in the server's record
+    // and in `GET /api/chats/:id/history`.
     //
     // It has to be. Claude Code persists the prompt as a user turn, so replay
     // reconstructs it; if it never took a canonical seq live, the live and
@@ -10499,13 +10489,7 @@ export class Daemon {
       } finally {
         if (turnIds) this.envelopeRefs.delete(chatId);
       }
-      if (retryOfSeq !== undefined) {
-        // Claude Code's transcript stores this re-send as an ordinary user turn
-        // and knows nothing about the one it is repeating, so a replay would
-        // re-expand the fold into one bubble per attempt. Record the link where
-        // replay can splice it back in (`replayChat`, like permissionModeMarks).
-        this.recordRetryMark(chatId, raw.seq, retryOfSeq);
-      } else {
+      if (retryOfSeq === undefined) {
         // FIRST attempt: the turn now HAS a bubble, so from here on it can be
         // named. Re-persist the crash marker with it, or a host killed after
         // this point resumes the turn with no anchor and draws a second bubble
@@ -13006,8 +12990,8 @@ export class Daemon {
       };
       // G2-d1: remember the full request so a surface reconnecting AFTER this
       // turn (the permission lands in the transcript as a bare `tool_use`, which
-      // replays as a `chat.tool_call` with no approve/deny) still gets the
-      // permission card — re-emitted in `replayChat`. Keyed like
+      // records as a `chat.tool_call` with no approve/deny) still gets the
+      // permission card while it is pending. Keyed like
       // `pendingPermissions` so resolution clears both.
       this.pendingPermissionEvents.set(`${chatId}:${env.permission.requestId}`, ev);
       this.emit(ev);
@@ -13422,9 +13406,8 @@ export class Daemon {
       ? { at: this.opts.now() + windowMs, windowMs, paused: true }
       : { at: this.opts.now() + windowMs, windowMs };
     const denyMessage = questionExpiredMessage(windowMs / 1000, this.questionExpiry.expiredPrompt);
-    // Replayed verbatim to a surface that reconnects after the reset
-    // (`replayChat`), so it must carry the SAME deadline the live update
-    // below announces, not the stale one from when the question was asked.
+    // Kept as the pending request, so it must carry the SAME deadline the live
+    // update below announces, not the stale one from when the question was asked.
     this.pendingPermissionEvents.set(key, { ...ev, expiry });
     gate.expiry = undefined;
     if (!paused)
@@ -14070,7 +14053,7 @@ export class Daemon {
    */
   private hydrateReplayAttachments(chatId: string, events: WireEvent[]): WireEvent[] {
     const state = this.chatState.get(chatId);
-    /* v8 ignore next -- defensive only: both callers (readHistory, replayChat) already resolved and confirmed this exact chatId's state synchronously (throwing ChatNotFoundError otherwise) immediately before calling this method, with no `await` in between — state cannot go missing here via the public API. */
+    /* v8 ignore next -- defensive only: its caller (readHistory) already resolved and confirmed this exact chatId's state synchronously (throwing ChatNotFoundError otherwise) immediately before calling this method, with no `await` in between — state cannot go missing here via the public API. */
     if (!state) return events;
     let manifest: AttachmentManifest | null = null;
     return events.map((ev) => {
@@ -15830,25 +15813,6 @@ export class Daemon {
   }
 
   /**
-   * Record that the user message at `seq` is a RE-SEND of the turn at
-   * `retryOfSeq` (spec/12 § A turn is owed until it settles).
-   *
-   * Claude Code's transcript persists every re-sent prompt as an ordinary user
-   * turn and has no idea it is a repeat of an earlier one, so without this a
-   * reload re-expands the fold into one bubble per attempt — the exact
-   * duplication the fold exists to remove, reappearing on refresh. `replayChat`
-   * splices these back on by seq, the same way `permissionModeMarks` are.
-   */
-  private recordRetryMark(chatId: string, seq: number, retryOfSeq: number): void {
-    if (!this.opts.metaStore.read(chatId)) return;
-    this.opts.metaStore.update(chatId, (m) => ({
-      ...m,
-      retryMarks: [...(m.retryMarks ?? []), { seq, retryOfSeq }],
-      updatedAt: this.opts.now(),
-    }));
-  }
-
-  /**
    * Say in the chat that this turn runs on a different account because the
    * last one ran out (spec/10 § Backend credentials). Emitted as a system line,
    * so it is logged and replayed like every other message.
@@ -16087,7 +16051,7 @@ export class Daemon {
 
   /**
    * Build the current `chat.state` frame without emitting it — the pure half
-   * of `emitState`, reused by `replayFromLog` so a reconnecting surface always
+   * of `emitState`, so a caller that needs the frame (a status probe, a test)
    * gets an authoritative activity even when it missed the live running ->
    * idle edge while disconnected (patch/todo.md — "Patch showing stop after
    * message has returned").

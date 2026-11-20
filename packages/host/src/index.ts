@@ -174,7 +174,6 @@ import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
 import { makeToolRunSummarizer } from './toolRunGen.js';
 import { makeBranchSendBackSummarizer } from './branchSendBackGen.js';
-import { makeDigestGenerator } from './rotationDigest.js';
 import { makeRecurrenceTranslator } from './recurrenceTranslate.js';
 import { makeLinkSummariser } from './linkSummary.js';
 import {
@@ -5152,7 +5151,6 @@ async function startHost(
     // spec/06 § Session rotation — the handoff digest a scheduled rotation
     // asks the outgoing special-thread session to write for itself before
     // it's retired.
-    generateDigest: makeDigestGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
     // spec/06 § Sweep — the sweep's one decision call, plus the cross-host
     // relays it uses to read a non-local candidate's recent messages and to
     // nudge/wake one (same relays `patch_history`/`patch_send_to` use).

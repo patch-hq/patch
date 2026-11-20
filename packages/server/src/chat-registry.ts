@@ -2,10 +2,10 @@
 // events from the host. Drives REST endpoints like `GET /api/chats` so HTTP
 // surfaces (CLI cold-start, mobile pull-to-refresh) don't need a live WS.
 //
-// This is a thin mirror — the host remains the source of truth for a chat's
-// work, but the server OWNS what it last knew: the mirror is written to
-// `<dataDir>/chat-registry.json` as it changes and read back at startup, so a
-// restart begins from what the server knew rather than from nothing. The
+// The host runs a chat's work and reports facts about it; the server owns the
+// chat index built from them: written to `chat-index.jsonl` in the account's
+// folder as it changes and read back at startup, so a restart begins from what
+// the server knew rather than from nothing. The
 // server's record decides that a chat exists, not a host's report of what it
 // holds: a chat a host does not mention again after a restart (its folder was
 // not carried across, its host was replaced) stays, and goes only when it is

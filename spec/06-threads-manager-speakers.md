@@ -24,7 +24,7 @@ The toolset is not what makes them special — every chat in patch has the same 
 
 Each thread is a single chat. Each record grows forever; the provider session under it is resumed turn to turn and rotated on a schedule (§ Session rotation).
 
-Anything Patch delivers into a special thread — a broadcast the user replies to, a sweep digest, a rotation digest, a handover — is a visible message in the thread's record (`04-chats-and-folders.md` § Notes to the agent). Nothing reaches either thread's model unseen.
+Anything Patch delivers into a special thread — a broadcast the user replies to, a sweep digest, a rotation handoff, a handover — is a visible message in the thread's record (`04-chats-and-folders.md` § Notes to the agent). Nothing reaches either thread's model unseen.
 
 ## Where special threads run
 
@@ -263,13 +263,13 @@ A special thread's session would otherwise grow until the provider's own compact
 
 Account settings (`specialThreadModel`, `rotationEnabled`, `rotationTime`, `01-server.md` § Responsibilities) govern this: `rotationTime` (`HH:MM`, local) is when a due rotation runs, once per calendar day per thread, skipping a thread that's disabled or mid-turn (retried the following day, not immediately). At the scheduled time:
 
-1. The outgoing session is asked — resumed, not re-fed from scratch, so it rides its own prompt cache — to write a short handoff: standing facts, anything open, preferences learned. Not a recap.
-2. A `system` `chat.message` records the boundary ("Session rotated · digest carried over"), same arrangement a compaction boundary uses (`02-host.md` § Context compression), so it shows with the rest of the chat.
-3. The session is retired and a fresh one starts on `specialThreadModel`; the digest is its first message, an ordinary visible message in the thread's record.
+1. The carry-over is built from Patch's own record, not by asking the outgoing session anything: the last `managerContextWindow` messages of the thread (40 when unset), quoted as `User:` and `Manager:` (or `Speakers:`) lines, the same handoff the Manager's bounded context uses (§ Bounded context).
+2. A `system` `chat.message` records the boundary ("Session rotated · the last N messages carried over"), same arrangement a compaction boundary uses (`02-host.md` § Context compression), so it shows with the rest of the chat.
+3. The session is retired and a fresh one starts on `specialThreadModel`. Its first message is a turn Patch starts (`origin: 'machine'`): the carry-over as a `Handoff` note (`04-chats-and-folders.md` § Notes to the agent) followed by "Picking up after a scheduled session rotation." Both are entries in the thread's record, so everything the new session was given is visible there.
 
 The home host puts both threads on `specialThreadModel` when they are created and whenever the setting changes. A model the host's catalogue does not offer is refused, so before any AI is connected (no catalogue at all) nothing is set; the host tries again after each successful catalogue read, so the first sign-in puts the threads on their model without the setting having to change.
 
-The chat's own id (`thread_manager`, etc.) never changes — only the session underneath it — so pinning, ingress wiring and sidebar identity are untouched. A digest generation failure skips that day's rotation rather than starting a fresh session with nothing carried over (NO FALLBACK, `12-error-and-offline.md` § Principles).
+The chat's own id (`thread_manager`, etc.) never changes — only the session underneath it — so pinning, ingress wiring and sidebar identity are untouched. A thread with no session yet has nothing to rotate and is left alone.
 
 ## Bounded context
 

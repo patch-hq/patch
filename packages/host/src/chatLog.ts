@@ -14,7 +14,7 @@
 // shutdown; a process crash loses nothing either way (the write() already
 // reached the kernel), only a host crash can lose the last second.
 //
-// Reads: every replay comes from here (chatRunner's `replayFromLog`).
+// Reads: the host's own history reads, and its record import to the server.
 
 import { createHash } from 'node:crypto';
 import * as nodeFs from 'node:fs';

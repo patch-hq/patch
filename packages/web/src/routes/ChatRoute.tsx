@@ -665,8 +665,8 @@ export function ChatRoute({
     return () => clearTimeout(timer);
   }, [chatId, ws, timelineEmpty]);
 
-  // The host is the record, and this is the moment it says which track the
-  // chat is actually on. A fork, an edit or a branch switch makes everything
+  // The server's record says which track the chat is actually on, and this is
+  // the moment it says so. A fork, an edit or a branch switch makes everything
   // painted from the cache the WRONG track — so it is thrown away whole and
   // refetched, never merged into something that looks plausible. Loud,
   // because a cache disagreeing with its host is worth knowing about.

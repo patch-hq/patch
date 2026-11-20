@@ -531,8 +531,8 @@ function ChatDetailBody(): React.ReactElement {
     return () => clearTimeout(timer);
   }, [chatId, timelineEmpty]);
 
-  // The host is the record, and this is where it says which track the chat is
-  // on. A fork, an edit or a branch switch makes everything painted from the
+  // The server's record says which track the chat is on, and this is where it
+  // says so. A fork, an edit or a branch switch makes everything painted from the
   // cache the WRONG track — thrown away whole and refetched, never merged
   // into something that merely looks right.
   const activeBranchId = useChatStore((s) => s.branchGraphs?.[chatId]?.activeBranchId ?? null);
