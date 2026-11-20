@@ -45,6 +45,9 @@ export interface ManagerQuickTool {
 }
 
 export const ADD_TASK_TOOL_NAME = 'add_task';
+export const COMPLETE_TASK_TOOL_NAME = 'complete_task';
+export const REMOVE_TASK_TOOL_NAME = 'remove_task';
+export const READ_PROJECT_TOOL_NAME = 'read_project';
 export const CALENDAR_AGENDA_TOOL_NAME = 'calendar_agenda';
 export const ADD_EVENT_TOOL_NAME = 'add_event';
 export const ASK_AGENT_TOOL_NAME = 'ask_agent';
@@ -58,8 +61,39 @@ export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
     params: {
       content: 'The task, as a short phrase.',
       due: 'When it is due, in plain words ("tomorrow", "friday", "2026-12-01"); empty for none.',
+      project: 'The list it belongs on ("Groceries"), as the user said it; empty for the Inbox.',
     },
     required: ['content'],
+  },
+  {
+    name: COMPLETE_TASK_TOOL_NAME,
+    description:
+      "Tick off a task in the user's to-do list (Todoist) by a few words of its text. Answers at " +
+      'once. If several tasks match it says so: ask the user which.',
+    params: {
+      task: 'A few words of the task text.',
+      project: 'The list it is on, as the user said it; empty to look in every list.',
+    },
+    required: ['task'],
+  },
+  {
+    name: REMOVE_TASK_TOOL_NAME,
+    description:
+      "Delete a task from the user's to-do list (Todoist) by a few words of its text, when the " +
+      'user asks to remove it. A finished task is complete_task instead. Answers at once.',
+    params: {
+      task: 'A few words of the task text.',
+      project: 'The list it is on, as the user said it; empty to look in every list.',
+    },
+    required: ['task'],
+  },
+  {
+    name: READ_PROJECT_TOOL_NAME,
+    description:
+      "Read out the open tasks on one of the user's to-do lists (Todoist), such as Groceries. " +
+      'Answers at once.',
+    params: { project: 'The list name, as the user said it.' },
+    required: ['project'],
   },
   {
     name: CALENDAR_AGENDA_TOOL_NAME,
@@ -147,7 +181,9 @@ export const MANAGER_TOOL_PARAMS = {
 export const MANAGER_VOICE_PREAMBLE = `${DEFAULT_MANAGER_VOICE_PROMPT}\n\n`;
 
 export const MANAGER_TOOLS_RULE =
-  `To add a to-do call ${ADD_TASK_TOOL_NAME}; to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}; ` +
+  `To add a to-do call ${ADD_TASK_TOOL_NAME} (with the list when the user names one); to tick one ` +
+  `off call ${COMPLETE_TASK_TOOL_NAME}; to delete one call ${REMOVE_TASK_TOOL_NAME}; to hear a ` +
+  `list call ${READ_PROJECT_TOOL_NAME}; to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}; ` +
   `to book something call ${ADD_EVENT_TOOL_NAME}. A request to log, add or remind is one of these ` +
   `— never go looking for a chat for it. To find a chat call ${FIND_CHATS_TOOL_NAME}; to say how ` +
   `one is getting on call ${CHAT_STATUS_TOOL_NAME}; to tell or ask an existing chat something call ` +
@@ -252,7 +288,12 @@ export interface ManagerVoiceHostDeps {
   /** Deliver a message to a chat on another host. */
   sendRemote(req: { chatId: string; message: string }): Promise<void>;
   /** Add a to-do; resolves with the task as it was filed. Rejects when Todoist is unreachable. */
-  addTask(req: { content: string; due: string }): Promise<string>;
+  addTask(req: { content: string; due: string; project: string }): Promise<string>;
+  /** Open to-dos, on one project or (empty name) across all. Rejects when the project is unknown. */
+  listTasks(project: string): Promise<Array<{ id: string; content: string }>>;
+  /** Tick one to-do off, or delete it; resolve once Todoist has done it. */
+  closeTask(id: string): Promise<void>;
+  deleteTask(id: string): Promise<void>;
   /** Run the calendar tool with these arguments; resolves with its output. */
   calendar(args: string[]): Promise<string>;
   /** Hand a request to the Manager chat's own agent; resolves once it has it. */
@@ -265,6 +306,7 @@ export interface ManagerVoiceHostDeps {
 }
 
 const LIST_LIMIT = 8;
+const READ_LIMIT = 25;
 
 /** The server's status in words the voice can say. */
 function statusWords(state: string | undefined): string {
@@ -378,9 +420,56 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
       };
       if (name === ADD_TASK_TOOL_NAME) {
         const content = need('content');
-        const out = await deps.addTask({ content, due: (args['due'] ?? '').trim() });
+        const out = await deps.addTask({
+          content,
+          due: (args['due'] ?? '').trim(),
+          project: (args['project'] ?? '').trim(),
+        });
         deps.recordNote(`task added: ${content}`);
         return out;
+      }
+      if (name === COMPLETE_TASK_TOOL_NAME || name === REMOVE_TASK_TOOL_NAME) {
+        const wanted = need('task');
+        const project = (args['project'] ?? '').trim();
+        const tasks = await deps.listTasks(project);
+        const where = project === '' ? '' : ` on "${project}"`;
+        const lower = wanted.toLowerCase();
+        const exact = tasks.filter((t) => t.content.toLowerCase() === lower);
+        const terms = words(wanted);
+        const found =
+          exact.length > 0
+            ? exact
+            : tasks.filter((t) => {
+                const hay = words(t.content);
+                return terms.every((w) => hay.some((h) => h.startsWith(w)));
+              });
+        if (found.length === 0)
+          throw new ManagerChatLookupError(`No open task${where} matches "${wanted}".`);
+        if (found.length > 1) {
+          throw new ManagerChatLookupError(
+            `Several tasks${where} match "${wanted}": ${found
+              .slice(0, LIST_LIMIT)
+              .map((t) => `"${t.content}"`)
+              .join(', ')}. Ask the user which one.`,
+          );
+        }
+        const task = found[0]!;
+        if (name === COMPLETE_TASK_TOOL_NAME) {
+          await deps.closeTask(task.id);
+          deps.recordNote(`task ticked off: ${task.content}`);
+          return `Ticked off "${task.content}".`;
+        }
+        await deps.deleteTask(task.id);
+        deps.recordNote(`task removed: ${task.content}`);
+        return `Removed "${task.content}".`;
+      }
+      if (name === READ_PROJECT_TOOL_NAME) {
+        const project = need('project');
+        const tasks = await deps.listTasks(project);
+        if (tasks.length === 0) return `"${project}" has no open tasks.`;
+        const shown = tasks.slice(0, READ_LIMIT).map((t) => t.content);
+        const more = tasks.length > READ_LIMIT ? ` (and ${tasks.length - READ_LIMIT} more)` : '';
+        return `"${project}" has ${tasks.length} open: ${shown.join('; ')}${more}.`;
       }
       if (name === CALENDAR_AGENDA_TOOL_NAME) {
         const from = (args['from'] ?? '').trim();
