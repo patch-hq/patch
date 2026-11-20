@@ -37,7 +37,7 @@ import {
 } from './types.js';
 import { refreshArtifact } from '../lib/artifactRefresh.js';
 import { saveResolution } from '../lib/transcriptCache.js';
-import { loadReadState, saveReadWatermark } from '../lib/readState.js';
+import { loadReadState, resetReadWatermark, saveReadWatermark } from '../lib/readState.js';
 import { clearComposerDraft } from './composerDraftStore.js';
 
 /**
@@ -485,6 +485,8 @@ interface ChatState {
   /** The retry never reached the host: drop the pending attempt it opened. */
   cancelRetryAttempt(chatId: string, retryOfSeq: number): void;
   markRead(chatId: string): void;
+  /** Step the read watermark back below the latest seq so the chat reads as unread. */
+  markUnread(chatId: string): void;
   setKebabOpen(chatId: string | null): void;
   /** Local optimistic update for archive (REST POST issued by component). */
   setArchived(chatId: string, archived: boolean): void;
@@ -3344,6 +3346,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     // Persist the watermark so the visit→read transition survives a reload.
     saveReadWatermark(chatId, nextRead);
+  },
+
+  markUnread(chatId) {
+    const row = get().chats[chatId];
+    if (!row || row.lastSeq < 0) return;
+    const nextRead = row.lastSeq - 1;
+    if (row.lastReadSeq === nextRead) return;
+    set({ chats: { ...get().chats, [chatId]: { ...row, lastReadSeq: nextRead } } });
+    resetReadWatermark(chatId, nextRead);
   },
 
   setKebabOpen(chatId) {

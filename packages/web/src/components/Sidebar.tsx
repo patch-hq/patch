@@ -39,6 +39,7 @@ import {
   PanelRightOpen,
   Layers,
   Target,
+  MailOpen,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
 import {
@@ -2490,6 +2491,16 @@ const ChatRowView = memo(function ChatRowView({
         icon: <Pencil size={14} aria-hidden />,
         run: () => void applyRename(),
       },
+      ...(row.lastSeq >= 0 && row.lastSeq <= row.lastReadSeq
+        ? [
+            {
+              id: 'mark-unread',
+              label: 'Mark as unread',
+              icon: <MailOpen size={14} aria-hidden />,
+              run: () => useChatStore.getState().markUnread(row.chatId),
+            },
+          ]
+        : []),
       {
         id: 'pin',
         label: row.pinned ? 'Unpin' : 'Pin',
@@ -3105,6 +3116,12 @@ function bulkContextItems(chatIds: string[], navigate: (to: string) => void): Co
     useSelectionStore.getState().clear();
   };
   return [
+    {
+      id: 'mark-unread',
+      label: 'Mark as unread',
+      icon: <MailOpen size={14} aria-hidden />,
+      run: each((chatId) => useChatStore.getState().markUnread(chatId)),
+    },
     {
       id: 'pin',
       label: pinTo ? 'Pin' : 'Unpin',
