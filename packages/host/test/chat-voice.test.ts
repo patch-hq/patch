@@ -57,7 +57,7 @@ function setup() {
     now: () => Date.UTC(2026, 9, 4, 12),
     generateChatId: () => `chat-${++id}`,
     sessionProbe: createClaudeSessionProbe({
-      claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-chatvoice-claude-')),
+      sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-chatvoice-claude-')),
     }),
   });
   const open: VoiceSessionLike[] = [];

@@ -439,7 +439,7 @@ describe('spec/04 § Branching — edit forks are unchanged', () => {
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     const firstTurn = userMessages(replay(daemon, chatId))[0]!;
-    const mainSessionId = metaStore.read(chatId)!.claudeSessionId;
+    const mainSessionId = metaStore.read(chatId)!.sessionId;
 
     events.length = 0;
     await daemon.forkChat({
@@ -451,6 +451,6 @@ describe('spec/04 § Branching — edit forks are unchanged', () => {
 
     const graph = lastBranches(events);
     expect(graph.activeBranchId).toBe(graph.branches[1]!.branchId);
-    expect(metaStore.read(chatId)!.claudeSessionId).not.toBe(mainSessionId);
+    expect(metaStore.read(chatId)!.sessionId).not.toBe(mainSessionId);
   });
 });

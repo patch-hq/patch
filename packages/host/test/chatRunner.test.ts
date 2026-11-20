@@ -52,7 +52,7 @@ function setup(
     // Otherwise defaults to reading the REAL ~/.claude.json / ~/.claude/settings.json
     // of whatever host runs this suite — a test asserting exact SDK options
     // must not depend on that.
-    discoverClaudeMcpServers: () => [],
+    discoverMcpServers: () => [],
     ...(opts.onRateLimit ? { onRateLimit: opts.onRateLimit } : {}),
     ...(opts.sleepGuard ? { sleepGuard: opts.sleepGuard } : {}),
   });
@@ -100,7 +100,7 @@ describe('Host ChatRunner', () => {
 
     // Meta persisted with claudeSessionId + bumped nextSeq.
     const meta = metaStore.read(chatId);
-    expect(meta?.claudeSessionId).toBe('sess-A');
+    expect(meta?.sessionId).toBe('sess-A');
     expect(meta?.nextSeq).toBe(2);
 
     // chat_state has the message.
@@ -108,7 +108,7 @@ describe('Host ChatRunner', () => {
     expect(state?.lastMessages).toHaveLength(1);
     expect(state?.lastMessages[0]?.content).toBe('hi there');
     expect(state?.activity).toBe('idle');
-    expect(state?.claudeSessionId).toBe('sess-A');
+    expect(state?.sessionId).toBe('sess-A');
   });
 
   // patch/todo.md — "show which model is in use on the top bar": the host
@@ -673,7 +673,7 @@ describe('Host ChatRunner', () => {
       folder,
       name: 'rehydrated',
       nextSeq: 7,
-      claudeSessionId: 'session-X',
+      sessionId: 'session-X',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -682,7 +682,7 @@ describe('Host ChatRunner', () => {
     expect(s).toBeDefined();
     expect(s?.activity).toBe('idle');
     expect(s?.nextSeq).toBe(7);
-    expect(s?.claudeSessionId).toBe('session-X');
+    expect(s?.sessionId).toBe('session-X');
     expect(s?.name).toBe('rehydrated');
   });
 
@@ -763,7 +763,7 @@ describe('Host ChatRunner', () => {
       chatId,
       folder,
       name: null,
-      claudeSessionId: 'sess-legacy',
+      sessionId: 'sess-legacy',
       nextSeq: 2,
       createdAt: 1,
       updatedAt: 2,
@@ -922,7 +922,7 @@ describe('Host ChatRunner', () => {
     expect(sdk.lastOptions()?.resumeSessionId).toBeUndefined();
     const state = daemon.chatState.get('thread_manager');
     expect(state?.activity).toBe('idle');
-    expect(state?.claudeSessionId).toBe('sess-firstturn');
+    expect(state?.sessionId).toBe('sess-firstturn');
     // No claude_session_missing error was emitted.
     const errEv = events.find((e) => e.type === 'chat.error');
     expect(errEv).toBeUndefined();
@@ -937,11 +937,11 @@ describe('Host ChatRunner', () => {
     // contextless start, NOT an error.
     expect(sdk.lastOptions()?.resumeSessionId).toBeUndefined();
     expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
-    expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-fresh');
+    expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-fresh');
   });
 
   it('F1: real backend + resume id with NO transcript on disk → clears id, starts FRESH (no hang)', async () => {
-    // Regression for the F1-audible blocker: a `claudeSessionId` persisted by a
+    // Regression for the F1-audible blocker: a `sessionId` persisted by a
     // prior MOCK run (mock writes `mock-session-*.jsonl`, never
     // `<sessionId>.jsonl`) is not resumable by the REAL Claude Agent SDK, whose
     // `query({ resume })` HANGS forever on a missing transcript. The host must
@@ -977,7 +977,7 @@ describe('Host ChatRunner', () => {
       folder,
       name: 'speakers',
       nextSeq: 4,
-      claudeSessionId: 'phantom-uuid-no-transcript',
+      sessionId: 'phantom-uuid-no-transcript',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -996,11 +996,11 @@ describe('Host ChatRunner', () => {
     expect(sdk.lastOptions()?.resumeSessionId).toBeUndefined();
     const state = daemon.chatState.get('thread_speakers');
     expect(state?.activity).toBe('idle');
-    expect(state?.claudeSessionId).toBe('fresh-real-sess');
+    expect(state?.sessionId).toBe('fresh-real-sess');
     // No claude_session_missing error (this is a resumable-fresh recovery).
     expect(events.find((e) => e.type === 'chat.error')).toBeUndefined();
     // The orphaned id was dropped from meta before the new one was captured.
-    expect(metaStore.read('thread_speakers')?.claudeSessionId).toBe('fresh-real-sess');
+    expect(metaStore.read('thread_speakers')?.sessionId).toBe('fresh-real-sess');
   });
 
   it('F1: real backend + resume id WITH a transcript on disk → resumes normally (no false clear)', async () => {
@@ -1035,7 +1035,7 @@ describe('Host ChatRunner', () => {
       folder,
       name: 'resumable',
       nextSeq: 4,
-      claudeSessionId: 'real-sess-99',
+      sessionId: 'real-sess-99',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -1077,7 +1077,7 @@ describe('Host ChatRunner', () => {
       folder,
       name: 'mirror',
       nextSeq: 4,
-      claudeSessionId: 'mirror-only-sess',
+      sessionId: 'mirror-only-sess',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -1097,7 +1097,7 @@ describe('Host ChatRunner', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(sdk.lastOptions()?.resumeSessionId).toBe('mirror-only-sess');
-    expect(metaStore.read('mirror-chat')?.claudeSessionId).toBe('mirror-only-sess');
+    expect(metaStore.read('mirror-chat')?.sessionId).toBe('mirror-only-sess');
   });
 
   it('F5: resumed chat whose folder is gone goes errored on input, no SDK query', async () => {
@@ -1107,7 +1107,7 @@ describe('Host ChatRunner', () => {
       folder: '/no/such/path/anymore',
       name: 'stale',
       nextSeq: 0,
-      claudeSessionId: 'sess-Z',
+      sessionId: 'sess-Z',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -1134,7 +1134,7 @@ describe('Host ChatRunner', () => {
       folder: '/no/such/path/archived',
       name: 'old',
       nextSeq: 0,
-      claudeSessionId: 'sess-A',
+      sessionId: 'sess-A',
       status: 'archived',
       archivedAt: 5,
       createdAt: 1,
@@ -1159,7 +1159,7 @@ describe('Host ChatRunner', () => {
       folder: '/no/such/path/active',
       name: 'live',
       nextSeq: 0,
-      claudeSessionId: 'sess-B',
+      sessionId: 'sess-B',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -1202,7 +1202,7 @@ describe('Host ChatRunner', () => {
       folder,
       name: null,
       nextSeq: 5,
-      claudeSessionId: 'sess-K',
+      sessionId: 'sess-K',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -2218,7 +2218,7 @@ describe('Host ChatRunner', () => {
       const { daemon, folder } = setupRotatable(async () => 'a digest');
       const chatId = await daemon.spawnChat({ folder });
       await expect(daemon.rotateThread(chatId)).resolves.toBeUndefined();
-      expect(daemon.chatState.get(chatId)?.claudeSessionId).toBeUndefined();
+      expect(daemon.chatState.get(chatId)?.sessionId).toBeUndefined();
     });
 
     it('refuses to rotate an ordinary (non-special) chat', async () => {
@@ -2236,7 +2236,7 @@ describe('Host ChatRunner', () => {
       const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 20));
       await expect(daemon.rotateThread(chatId)).rejects.toThrow(/no digest generator/i);
-      expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-outgoing');
+      expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-outgoing');
     });
 
     it('skips the cycle (does not rotate) when digest generation fails', async () => {
@@ -2248,7 +2248,7 @@ describe('Host ChatRunner', () => {
       const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 20));
       await daemon.rotateThread(chatId);
-      expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-outgoing');
+      expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-outgoing');
     });
 
     it('retires the outgoing session, marks the boundary, and seeds a fresh one with the digest', async () => {
@@ -2263,7 +2263,7 @@ describe('Host ChatRunner', () => {
       ]);
       const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 20));
-      expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-outgoing');
+      expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-outgoing');
 
       // The rotation's own seeded turn, once the session has been cleared.
       sdk.enqueue([
@@ -2289,8 +2289,8 @@ describe('Host ChatRunner', () => {
       expect(seededOpts?.resumeSessionId).toBeUndefined();
 
       // Landed on the NEW session, meta persisted.
-      expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-fresh');
-      expect(metaStore.read(chatId)?.claudeSessionId).toBe('sess-fresh');
+      expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-fresh');
+      expect(metaStore.read(chatId)?.sessionId).toBe('sess-fresh');
     });
 
     it('refuses to rotate a chat that is mid-turn', async () => {
@@ -2545,7 +2545,7 @@ describe('Host ChatRunner', () => {
         chatId: 'resumable-clean',
         folder,
         name: null,
-        claudeSessionId: 'sess-resumable',
+        sessionId: 'sess-resumable',
         nextSeq: 1,
         createdAt: 1,
         updatedAt: 2,
@@ -2554,7 +2554,7 @@ describe('Host ChatRunner', () => {
         chatId: 'lost-clean',
         folder,
         name: null,
-        claudeSessionId: 'sess-missing-xyz',
+        sessionId: 'sess-missing-xyz',
         nextSeq: 1,
         createdAt: 1,
         updatedAt: 2,
@@ -2588,7 +2588,7 @@ describe('Host ChatRunner', () => {
         chatId: 'running-lost',
         folder,
         name: null,
-        claudeSessionId: 'sess-never-existed',
+        sessionId: 'sess-never-existed',
         nextSeq: 1,
         createdAt: 1,
         updatedAt: 2,
@@ -2748,13 +2748,13 @@ describe('Host ChatRunner', () => {
       expect(sdk.lastOptions()?.skills).toBeUndefined();
     });
 
-    it('passes harnessConfig.memoryEnabled through as settings.autoMemoryEnabled (spec/14 § Agent behavior — Memory toggle)', async () => {
+    it('passes harnessConfig.memoryEnabled to the adapter (spec/14 § Agent behavior — Memory toggle)', async () => {
       const { daemon, sdk, folder } = setup();
       sdk.enqueue([{ type: 'result', sessionId: 's1' }]);
       daemon.setHarnessConfig({ memoryEnabled: false });
       await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 20));
-      expect(sdk.lastOptions()?.settings).toEqual({ autoMemoryEnabled: false });
+      expect(sdk.lastOptions()?.memoryEnabled).toBe(false);
     });
 
     it('memoryEnabled: true is stated explicitly too, not just omitted (Memory toggle)', async () => {
@@ -2763,35 +2763,7 @@ describe('Host ChatRunner', () => {
       daemon.setHarnessConfig({ memoryEnabled: true });
       await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 20));
-      expect(sdk.lastOptions()?.settings).toEqual({ autoMemoryEnabled: true });
-    });
-
-    it('passes harnessConfig.claudeMdExcludePaths through as settings.claudeMdExcludes (CLAUDE.md toggle, off)', async () => {
-      const { daemon, sdk, folder } = setup();
-      sdk.enqueue([{ type: 'result', sessionId: 's1' }]);
-      daemon.setHarnessConfig({
-        claudeMdExcludePaths: ['/home/x/.patch/threads/manager/CLAUDE.md'],
-      });
-      await daemon.spawnChat({ folder, prompt: 'hello' });
-      await new Promise((r) => setTimeout(r, 20));
-      expect(sdk.lastOptions()?.settings).toEqual({
-        claudeMdExcludes: ['/home/x/.patch/threads/manager/CLAUDE.md'],
-      });
-    });
-
-    it('memoryEnabled and claudeMdExcludePaths merge into ONE settings object when both are set', async () => {
-      const { daemon, sdk, folder } = setup();
-      sdk.enqueue([{ type: 'result', sessionId: 's1' }]);
-      daemon.setHarnessConfig({
-        memoryEnabled: false,
-        claudeMdExcludePaths: ['/home/x/.patch/threads/speakers/CLAUDE.md'],
-      });
-      await daemon.spawnChat({ folder, prompt: 'hello' });
-      await new Promise((r) => setTimeout(r, 20));
-      expect(sdk.lastOptions()?.settings).toEqual({
-        autoMemoryEnabled: false,
-        claudeMdExcludes: ['/home/x/.patch/threads/speakers/CLAUDE.md'],
-      });
+      expect(sdk.lastOptions()?.memoryEnabled).toBe(true);
     });
 
     it("passes harnessConfig.mcpServers through to the SDK as the turn's extra MCP servers (Settings → MCP)", async () => {
@@ -2826,7 +2798,7 @@ describe('Host ChatRunner', () => {
       // No setHarnessConfig call.
       await daemon.spawnChat({ folder, prompt: 'hello' });
       await new Promise((r) => setTimeout(r, 20));
-      expect(sdk.lastOptions()?.settings).toBeUndefined();
+      expect(sdk.lastOptions()?.memoryEnabled).toBeUndefined();
       expect(sdk.lastOptions()?.extraMcpServers).toEqual([]);
     });
   });
@@ -3625,7 +3597,7 @@ describe('Host ChatRunner', () => {
         chatId,
         folder,
         name: null,
-        claudeSessionId: 'sess-loop',
+        sessionId: 'sess-loop',
         nextSeq: 3,
         createdAt: 1,
         updatedAt: 2,

@@ -275,7 +275,7 @@ export class CodexBackend implements SdkBackend {
       };
       // A fork keeps everything through the entry the record names; Codex
       // forks at whole turns, so it keeps the turn that holds that entry.
-      const point = opts.fork?.resumeAtUuid;
+      const point = opts.fork?.throughNativeId;
       const fresh = !prior || (opts.fork && point === null);
       const codexPrior = prior && prior.startsWith('codex-') ? prior : undefined;
       const lastTurnId =

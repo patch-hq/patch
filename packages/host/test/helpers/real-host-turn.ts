@@ -32,7 +32,7 @@ for await (const env of createRealSdkBackend().run({
   cwd: a.cwd,
   chatId: a.chatId,
   ...(a.sessionId ? { resumeSessionId: a.sessionId } : {}),
-  claudeConfigDir: a.claudeConfigDir,
+  configDir: a.claudeConfigDir,
   model: 'claude-haiku-5-5',
   permissionMode: 'bypassPermissions',
   abortController: new AbortController(),

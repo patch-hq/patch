@@ -201,7 +201,7 @@ function setup(
       },
     },
     sessionProbe: { hasSession: (o: { sessionId: string }) => known.has(o.sessionId) },
-    claudeProjectsRoot: join(root, 'projects'),
+    sessionStoreRoot: join(root, 'projects'),
     resolveOAuth: async (_model, turn) => {
       const a = accounts.resolve('fake', route(turn?.preferredAccountId), turn !== undefined);
       return { ok: true as const, accessToken: '', ...(a ? { accountId: a.id } : {}) };

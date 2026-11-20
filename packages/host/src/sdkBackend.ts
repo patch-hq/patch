@@ -67,7 +67,7 @@ export interface SdkEnvelope {
    * turn's final `assistant` message).
    */
   content?: string;
-  /** Capture this on result messages → meta.claudeSessionId. */
+  /** Capture this on result messages → meta.sessionId. */
   sessionId?: string;
   /** Tool-call envelope. */
   tool?: { name: string; args: unknown; callId: string };
@@ -168,11 +168,11 @@ export interface SdkRunOptions {
   /**
    * Run this turn as the first turn of a FORK of `resumeSessionId` (spec/04 §
    * Branching — editing a user turn starts a new track). The resumed session is
-   * replayed only up to `resumeAtUuid` (the shared prefix; `null` = fork from an
+   * replayed only up to `throughNativeId` (the shared prefix; `null` = fork from an
    * empty context) and the turn lands in a BRAND-NEW session, leaving the parent
    * transcript untouched so the original track stays re-openable.
    */
-  fork?: { resumeAtUuid: string | null } | undefined;
+  fork?: { throughNativeId: string | null } | undefined;
   /**
    * The id the provider records this turn's user message under, for a provider
    * that takes one (`branching.userTurnIds`): Patch records it as the message's
@@ -214,14 +214,12 @@ export interface SdkRunOptions {
    */
   skills?: string[] | 'all' | undefined;
   /**
-   * SDK `options.settings` (spec/14 § Agent behavior) — an inline settings
-   * object loaded into the highest-priority "flag settings" layer, ahead of
-   * whatever the host's own `settings.json` says. Used for the Memory and
-   * CLAUDE.md toggles (`autoMemoryEnabled`, `claudeMdExcludes`) so flipping
-   * either is a per-query override, never a file write another chat might be
-   * reading concurrently.
+   * spec/14 § Agent behavior — the Memory toggle. Claude applies it through
+   * the SDK's `settings` flag layer (`autoMemoryEnabled`), the highest-priority
+   * settings source, so flipping it is a per-turn override and never a write to
+   * a settings file another chat might be reading. Absent: the provider's own.
    */
-  settings?: Options['settings'];
+  memoryEnabled?: boolean;
   /**
    * SDK `options.settingSources` — which filesystem settings layers to load
    * (user/project/local). Omitted ⇒ the SDK default, so every existing call
@@ -303,13 +301,14 @@ export interface SdkRunOptions {
     sessionAllow?: boolean;
   }>;
   /**
-   * The chat's own Claude config dir (`~/.patch/chats/<chatId>/claude`, spec/04
-   * § History). Claude runs under it as `CLAUDE_CONFIG_DIR`, so the one
-   * conversation file is read and written in place on every turn and resume.
-   * Absent for the mock and for any caller not passing it: Claude then uses
-   * its own default config dir.
+   * The private config dir the provider runs under for this chat, if it keeps
+   * one (the provider's `configDir` trait). Claude's is the chat's own
+   * `~/.patch/chats/<chatId>/claude` (spec/04 § History), run as
+   * `CLAUDE_CONFIG_DIR`, so the one conversation file is read and written in
+   * place on every turn and resume. Absent for the mock and for any caller not
+   * passing it: Claude then uses its own default config dir.
    */
-  claudeConfigDir?: string;
+  configDir?: string;
   /**
    * An Anthropic-compatible model endpoint the turn runs against instead of
    * Anthropic (spec/02 § Provider adapters): Claude Code is pointed at it with
@@ -412,9 +411,9 @@ function appendTranscriptEntry(
 
 /**
  * Mock-side session fork: copy the parent transcript's shared prefix (every
- * entry up to and INCLUDING `resumeAtUuid`) into a fresh session file, so the
+ * entry up to and INCLUDING `throughNativeId`) into a fresh session file, so the
  * new track starts with the shared history and the parent file is untouched.
- * `resumeAtUuid: null` forks from an empty context. Mirrors what the real SDK's
+ * `throughNativeId: null` forks from an empty context. Mirrors what the real SDK's
  * `forkSession` + `resumeSessionAt` does on disk.
  */
 function forkTranscript(
@@ -422,13 +421,13 @@ function forkTranscript(
   cwd: string,
   parentSessionId: string,
   newSessionId: string,
-  resumeAtUuid: string | null,
+  throughNativeId: string | null,
 ): void {
   const dir = join(projectsRoot, encodeFolder(cwd));
   mkdirSync(dir, { recursive: true });
   const parentPath = join(dir, `${parentSessionId}.jsonl`);
   const newPath = join(dir, `${newSessionId}.jsonl`);
-  if (resumeAtUuid === null || !existsSync(parentPath)) {
+  if (throughNativeId === null || !existsSync(parentPath)) {
     writeFileSync(newPath, '', 'utf8');
     return;
   }
@@ -443,7 +442,7 @@ function forkTranscript(
       typeof parsed === 'object' && parsed !== null
         ? (parsed as Record<string, unknown>)['uuid']
         : undefined;
-    if (uuid === resumeAtUuid) break;
+    if (uuid === throughNativeId) break;
   }
   writeFileSync(newPath, prefix.length > 0 ? prefix.join('\n') + '\n' : '', 'utf8');
 }
@@ -607,7 +606,7 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
           runOpts.cwd,
           runOpts.resumeSessionId ?? '',
           sessionId,
-          runOpts.fork!.resumeAtUuid,
+          runOpts.fork!.throughNativeId,
         );
       }
 
@@ -1082,7 +1081,7 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   } else if (isAnthropicApiKey(opts.oauthAccessToken))
     env['ANTHROPIC_API_KEY'] = opts.oauthAccessToken;
   else env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
-  if (opts.claudeConfigDir !== undefined) env['CLAUDE_CONFIG_DIR'] = opts.claudeConfigDir;
+  if (opts.configDir !== undefined) env['CLAUDE_CONFIG_DIR'] = opts.configDir;
   // An unattended agent must not reach the 1Password desktop app: with the
   // integration on, every `op` call raises a macOS "would like to access data
   // from other apps" prompt, blamed on the host. Off, `op` fails fast (service
@@ -1413,7 +1412,7 @@ function forkOptsFor(opts: SdkRunOptions): Record<string, unknown> {
   return {
     forkSession: true,
     ...chosen,
-    ...(opts.fork.resumeAtUuid !== null ? { resumeSessionAt: opts.fork.resumeAtUuid } : {}),
+    ...(opts.fork.throughNativeId !== null ? { resumeSessionAt: opts.fork.throughNativeId } : {}),
   };
 }
 
@@ -2048,7 +2047,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       mcpServers,
       ...systemPromptOption(opts),
       ...(opts.skills !== undefined ? { skills: opts.skills } : {}),
-      ...(opts.settings !== undefined ? { settings: opts.settings } : {}),
+      ...(opts.memoryEnabled !== undefined
+        ? { settings: { autoMemoryEnabled: opts.memoryEnabled } }
+        : {}),
       ...(opts.settingSources !== undefined ? { settingSources: opts.settingSources } : {}),
       ...inferenceProfileOptions(opts),
     },
@@ -2351,7 +2352,9 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       mcpServers,
       ...systemPromptOption(opts),
       ...(opts.skills !== undefined ? { skills: opts.skills } : {}),
-      ...(opts.settings !== undefined ? { settings: opts.settings } : {}),
+      ...(opts.memoryEnabled !== undefined
+        ? { settings: { autoMemoryEnabled: opts.memoryEnabled } }
+        : {}),
       ...(opts.settingSources !== undefined ? { settingSources: opts.settingSources } : {}),
     },
   });

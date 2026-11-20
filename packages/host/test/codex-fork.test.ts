@@ -85,7 +85,7 @@ describe('Codex fork', () => {
         oauthAccessToken: '',
         abortController: new AbortController(),
         resumeSessionId: 'codex-parent',
-        fork: { resumeAtUuid: 'a1' },
+        fork: { throughNativeId: 'a1' },
       } as any))
         events.push(e);
       const fork = calls.find((c) => c.method === 'thread/fork')!;

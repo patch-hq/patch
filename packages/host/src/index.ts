@@ -15,6 +15,7 @@ import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexSessions } from './codexSessions.js';
+import { discoverClaudeMcpServers } from './claudeConfigMcp.js';
 import { ModelEndpointRegistry } from './modelEndpoints.js';
 // Entry point for the patch-daemon process.
 //
@@ -4983,6 +4984,12 @@ async function startHost(
     // Whether a chat's provider session can still be resumed, asked of the
     // chat's own provider. Claude's probe looks at the SAME root the SDK backend
     // writes to (real: ~/.claude/projects; mock: an isolated per-home dir).
+    // Where Claude Code keeps sessions shared across chats: the SAME root the
+    // SDK backend writes to (real: ~/.claude/projects; mock: per-home dir).
+    sessionStoreRoot: config.claudeProjectsRoot,
+    // The user's own MCP servers for a folder, from Claude Code's config,
+    // shared into every chat's turns whatever its provider.
+    discoverMcpServers: discoverClaudeMcpServers,
     sessionProbe: (() => {
       const probes: Record<ProviderId, SessionProbe> = {
         claude: createClaudeSessionProbe({ claudeProjectsRoot: config.claudeProjectsRoot }),

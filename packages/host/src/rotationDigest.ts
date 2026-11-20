@@ -33,8 +33,8 @@ const MAX_DIGEST_LEN = 2000;
 
 export interface GenerateDigestInput {
   chatId: string;
-  /** The chat's own `CLAUDE_CONFIG_DIR`, where a Claude session's file lives. */
-  claudeConfigDir?: string;
+  /** The private config dir the provider runs under for this chat, if any. */
+  configDir?: string;
   /** The outgoing session to resume and ask for a self-summary. */
   resumeSessionId: string;
   folder: string;
@@ -92,7 +92,7 @@ export function makeDigestGenerator(
             prompt: DIGEST_PROMPT,
             cwd: input.folder,
             resumeSessionId: input.resumeSessionId,
-            ...(input.claudeConfigDir ? { claudeConfigDir: input.claudeConfigDir } : {}),
+            ...(input.configDir ? { configDir: input.configDir } : {}),
             abortController,
             oauthAccessToken: accessToken,
             permissionMode: 'bypassPermissions',

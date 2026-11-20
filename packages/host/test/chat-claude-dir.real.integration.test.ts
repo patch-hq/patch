@@ -67,7 +67,7 @@ async function turn(
     cwd,
     chatId: 'real-dir',
     ...(resumeSessionId ? { resumeSessionId } : {}),
-    claudeConfigDir: chatClaudeDir(chatDir),
+    configDir: chatClaudeDir(chatDir),
     model: MODEL,
     permissionMode: 'bypassPermissions',
     abortController: new AbortController(),
@@ -136,7 +136,7 @@ describe(`one conversation file per chat, real Claude${realClaudeEnabled() ? '' 
       const args = {
         token: tok!,
         cwd,
-        claudeConfigDir: chatClaudeDir(chatDir),
+        configDir: chatClaudeDir(chatDir),
         turnsDir,
         runner: { command: process.execPath, args: ['--import', tsx, runnerScript] },
         chatId: 'real-dir',

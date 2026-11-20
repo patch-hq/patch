@@ -1,5 +1,5 @@
 // One chat's unreadable meta.json must not stop the host loading the rest.
-// On 28 Sep 2026 an agent hand-edited a thread's meta to `claudeSessionId: null`;
+// On 28 Sep 2026 an agent hand-edited a thread's meta to `sessionId: null`;
 // hydrate threw on it and the host crash-looped, dropping every chat on the
 // host until the file was repaired by hand.
 
@@ -47,7 +47,7 @@ describe('hydrate with an unreadable meta.json', () => {
 
     const p = join(home, 'chats', broken, 'meta.json');
     const meta = JSON.parse(readFileSync(p, 'utf8'));
-    meta.claudeSessionId = null;
+    meta.sessionId = null;
     writeFileSync(p, JSON.stringify(meta));
 
     const logs: Array<Record<string, unknown>> = [];
@@ -57,7 +57,7 @@ describe('hydrate with an unreadable meta.json', () => {
     expect(second.chatState.get(good)).toBeDefined();
     expect(second.chatState.get(broken)).toBeUndefined();
     expect(second.unreadableChats()).toEqual([
-      { chatId: broken, path: p, error: 'claudeSessionId: Expected string, received null' },
+      { chatId: broken, path: p, error: 'sessionId: Expected string, received null' },
     ]);
     expect(logs).toContainEqual(expect.objectContaining({ level: 50, chatId: broken, path: p }));
     second.shutdown();

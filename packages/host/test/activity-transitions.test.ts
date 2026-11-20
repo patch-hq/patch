@@ -154,7 +154,7 @@ describe('C1 resume with invalid claudeSessionId → errored (spec/04 Resume)', 
       chatId: 'stale-session',
       folder,
       name: null,
-      claudeSessionId: 'sess-gone',
+      sessionId: 'sess-gone',
       nextSeq: 0,
       createdAt: 1,
       updatedAt: 2,
@@ -183,7 +183,7 @@ describe('C1 resume with invalid claudeSessionId → errored (spec/04 Resume)', 
     const errEv = events.find((e) => e.type === 'chat.error');
     expect(errEv && 'error' in errEv && errEv.error.code).toBe('claude_session_invalid');
     expect(daemon.chatState.get('stale-session')?.status).toBe('errored');
-    expect(metaStore.read('stale-session')?.claudeSessionId).toBeUndefined();
+    expect(metaStore.read('stale-session')?.sessionId).toBeUndefined();
     daemon.shutdown();
   });
 });

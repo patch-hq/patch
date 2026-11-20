@@ -21,15 +21,10 @@ export interface TranscriptEntry {
  * takes it as harness-written — it is still the host's seed.
  */
 export function transcriptFor(
-  o: Pick<SdkRunOptions, 'claudeConfigDir' | 'cwd' | 'resumeSessionId'>,
+  o: Pick<SdkRunOptions, 'configDir' | 'cwd' | 'resumeSessionId'>,
 ): TranscriptEntry[] {
-  if (!o.claudeConfigDir || !o.resumeSessionId) return [];
-  const path = join(
-    o.claudeConfigDir,
-    'projects',
-    encodeFolder(o.cwd),
-    `${o.resumeSessionId}.jsonl`,
-  );
+  if (!o.configDir || !o.resumeSessionId) return [];
+  const path = join(o.configDir, 'projects', encodeFolder(o.cwd), `${o.resumeSessionId}.jsonl`);
   const read = (p: string): string => (existsSync(p) ? readFileSync(p, 'utf8') : '');
   return (read(path) + read(`${path}.stripped`))
     .split('\n')

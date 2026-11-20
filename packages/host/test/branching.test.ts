@@ -82,7 +82,7 @@ describe('spec/04 § Branching — edit a user turn forks a new track', () => {
     const before = replay(daemon, chatId);
     const secondTurn = userMessages(before).find((m) => m.content === 'second question');
     expect(secondTurn).toBeDefined();
-    const rootSessionId = metaStore.read(chatId)?.claudeSessionId;
+    const rootSessionId = metaStore.read(chatId)?.sessionId;
     expect(rootSessionId).toBeTruthy();
 
     events.length = 0;
@@ -106,8 +106,8 @@ describe('spec/04 § Branching — edit a user turn forks a new track', () => {
 
     // The fork got its OWN Claude session — the original is not mutated.
     const meta = metaStore.read(chatId)!;
-    expect(meta.claudeSessionId).toBeTruthy();
-    expect(meta.claudeSessionId).not.toBe(rootSessionId);
+    expect(meta.sessionId).toBeTruthy();
+    expect(meta.sessionId).not.toBe(rootSessionId);
 
     // The new track: shared prefix (`first question`) + the edited turn.
     // The turn it replaced is gone from THIS track.
@@ -122,7 +122,7 @@ describe('spec/04 § Branching — edit a user turn forks a new track', () => {
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
-    const rootSessionId = metaStore.read(chatId)!.claudeSessionId;
+    const rootSessionId = metaStore.read(chatId)!.sessionId;
     const secondTurn = userMessages(replay(daemon, chatId)).find(
       (m) => m.content === 'second question',
     )!;
@@ -139,7 +139,7 @@ describe('spec/04 § Branching — edit a user turn forks a new track', () => {
     await daemon.switchBranch(chatId, rootBranchId);
 
     expect(lastBranches(events).activeBranchId).toBe(rootBranchId);
-    expect(metaStore.read(chatId)!.claudeSessionId).toBe(rootSessionId);
+    expect(metaStore.read(chatId)!.sessionId).toBe(rootSessionId);
     const back = userMessages(replay(daemon, chatId)).map((m) => m.content);
     expect(back).toContain('second question');
     expect(back).not.toContain('second question, rephrased');
@@ -205,7 +205,7 @@ describe('spec/04 § Branching — forking while a turn is running', () => {
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     const turn = userMessages(replay(daemon, chatId))[0]!;
-    const rootSessionId = metaStore.read(chatId)!.claudeSessionId;
+    const rootSessionId = metaStore.read(chatId)!.sessionId;
 
     // A turn is in flight when the edit lands (type-ahead, spec/04 § queueing).
     const inFlight = daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
@@ -218,7 +218,7 @@ describe('spec/04 § Branching — forking while a turn is running', () => {
     const graph = lastBranches(events);
     expect(graph.branches).toHaveLength(2);
     expect(graph.activeBranchId).toBe(graph.branches[1]!.branchId);
-    expect(metaStore.read(chatId)!.claudeSessionId).not.toBe(rootSessionId);
+    expect(metaStore.read(chatId)!.sessionId).not.toBe(rootSessionId);
     const after = userMessages(replay(daemon, chatId)).map((m) => m.content);
     expect(after).toContain('rephrased');
     expect(after).not.toContain('second question');
@@ -245,7 +245,7 @@ describe('spec/04 § Branching — NO FALLBACK on a bad fork/switch', () => {
     const { daemon, events, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const sessionBefore = metaStore.read(chatId)!.claudeSessionId;
+    const sessionBefore = metaStore.read(chatId)!.sessionId;
 
     events.length = 0;
     await daemon.switchBranch(chatId, 'branch-that-does-not-exist');
@@ -253,7 +253,7 @@ describe('spec/04 § Branching — NO FALLBACK on a bad fork/switch', () => {
     const err = events.find((e) => e.type === 'chat.error');
     expect(err).toBeDefined();
     expect((err as { error: { code: string } }).error.code).toBe('branch_not_found');
-    expect(metaStore.read(chatId)!.claudeSessionId).toBe(sessionBefore);
+    expect(metaStore.read(chatId)!.sessionId).toBe(sessionBefore);
   });
 });
 
@@ -263,7 +263,7 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
-    const mainSessionId = metaStore.read(chatId)!.claudeSessionId;
+    const mainSessionId = metaStore.read(chatId)!.sessionId;
     // The first answer: a side thread hangs off an entry the provider gave an
     // id, and a user's own message has none.
     const firstTurn = replay(daemon, chatId).find(
@@ -289,7 +289,7 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     // a side branch runs independently and never becomes active, unlike an
     // edit fork. The main track's own session is therefore untouched too.
     expect(graph.activeBranchId).toBe(graph.branches[0]!.branchId);
-    expect(metaStore.read(chatId)!.claudeSessionId).toBe(mainSessionId);
+    expect(metaStore.read(chatId)!.sessionId).toBe(mainSessionId);
 
     // The main track (the default/active replay) is completely undisturbed —
     // the side branch's content never lands on it.
@@ -325,11 +325,11 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     const meta = createMetaStore(home).read(chatId)!;
     expect(asked.nativeRef).toEqual({
       harness: 'claude',
-      sessionId: meta.claudeSessionId,
+      sessionId: meta.sessionId,
       id: expect.any(String),
     });
     const sessionFile = readFileSync(
-      join(projectsRoot, encodeFolder(folder), `${meta.claudeSessionId}.jsonl`),
+      join(projectsRoot, encodeFolder(folder), `${meta.sessionId}.jsonl`),
       'utf8',
     );
     expect(sessionFile).toContain(`"uuid":"${asked.nativeRef.id}"`);
@@ -338,8 +338,8 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     await daemon.sideChat({ chatId, seq: asked.seq, message: 'aside', localId: 'l2' });
     expect(events.filter((e) => e.type === 'chat.error')).toEqual([]);
     expect(sdk.lastOptions()?.fork).toEqual({
-      resumeAtUuid: asked.nativeRef.id,
-      fromSessionId: meta.claudeSessionId,
+      throughNativeId: asked.nativeRef.id,
+      fromSessionId: meta.sessionId,
     });
     expect(lastBranches(events).branches).toHaveLength(2);
   });
@@ -404,7 +404,7 @@ describe('spec/04 § Branching — active track and written track never disagree
           forkFromSeq: null,
           label: 'main',
           createdAt: m.updatedAt,
-          sessionId: m.claudeSessionId,
+          sessionId: m.sessionId,
         },
         {
           branchId: `${chatId}-b1`,
@@ -460,7 +460,7 @@ describe('spec/04 § Branching — the fork point comes from the record', () => 
     await daemon.forkChat({ chatId, seq: second.seq, message: 'second, again', localId: 'l3' });
     expect(events.filter((e) => e.type === 'chat.error')).toEqual([]);
     expect(sdk.lastOptions()?.fork).toEqual({
-      resumeAtUuid: firstAnswer.nativeRef.id,
+      throughNativeId: firstAnswer.nativeRef.id,
       fromSessionId: firstAnswer.nativeRef.sessionId,
     });
   });
@@ -474,7 +474,7 @@ describe('spec/04 § Branching — the fork point comes from the record', () => 
     )!;
     await daemon.sideChat({ chatId, seq: answer.seq, message: 'why?', localId: 'l2' });
     expect(sdk.lastOptions()?.fork).toEqual({
-      resumeAtUuid: answer.nativeRef.id,
+      throughNativeId: answer.nativeRef.id,
       fromSessionId: answer.nativeRef.sessionId,
     });
   });

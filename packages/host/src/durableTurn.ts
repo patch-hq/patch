@@ -123,8 +123,12 @@ export function turnDirFor(config: DurableTurnConfig, chatId: string): string {
   return join(config.turnsDir, chatId);
 }
 
-/** The pid of the claude process running this chat's turn, if its runner has recorded one. */
-export function claudePidFor(config: DurableTurnConfig, chatId: string): number | undefined {
+/**
+ * The pid of the agent process running this chat's turn, if its runner has
+ * recorded one (under `claudePid` in the runner's info file, the name runners
+ * of every build write).
+ */
+export function agentPidFor(config: DurableTurnConfig, chatId: string): number | undefined {
   return (
     readJson<{ claudePid?: number | null }>(join(turnDirFor(config, chatId), RUNNER_INFO))
       ?.claudePid ?? undefined

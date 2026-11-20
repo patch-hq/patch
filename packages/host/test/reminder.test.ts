@@ -86,7 +86,7 @@ describe('Host setReminder (patch/todo.md — Reminders)', () => {
       logger: silent,
       now: () => 1_700_000_000_000,
       sessionProbe: createClaudeSessionProbe({
-        claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-reminder-claude2-')),
+        sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-reminder-claude2-')),
       }),
     });
     await host2.resumeChat(chatId);

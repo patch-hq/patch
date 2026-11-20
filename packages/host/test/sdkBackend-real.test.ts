@@ -537,7 +537,7 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     // A fork keeps the parent's prefix through the entry and lands in the chosen session.
     await run({
       resumeSessionId: 'sess-parent',
-      fork: { resumeAtUuid: 'u-kept' },
+      fork: { throughNativeId: 'u-kept' },
       newSessionId: 'sess-fork',
     });
     expect(calls[1]!.options).toMatchObject({
@@ -687,7 +687,7 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     expect(calls[2]!.options['mcpServers']).toBeUndefined();
   });
 
-  it('passes opts.settings through to the SDK query options (Memory + CLAUDE.md toggles)', async () => {
+  it('applies the Memory toggle as the SDK settings flag layer (autoMemoryEnabled)', async () => {
     const calls: Array<{ prompt: unknown; options: Record<string, unknown> }> = [];
     const { createRealSdkBackend } = await loadRealBackend((args) => {
       calls.push(args as { prompt: unknown; options: Record<string, unknown> });
@@ -709,15 +709,11 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
         cwd: '/tmp',
         abortController: ac,
         oauthAccessToken: 'tok',
-        settings: {
-          autoMemoryEnabled: false,
-          claudeMdExcludes: ['/tmp/threads/manager/CLAUDE.md'],
-        },
+        memoryEnabled: false,
       }),
     );
     expect(calls[1]!.options['settings']).toEqual({
       autoMemoryEnabled: false,
-      claudeMdExcludes: ['/tmp/threads/manager/CLAUDE.md'],
     });
   });
 

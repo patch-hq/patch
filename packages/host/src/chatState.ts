@@ -303,7 +303,7 @@ export interface ChatState {
   turnRetrying: boolean;
   lastMessages: ChatMessageSnapshot[];
   lastUpdated: number;
-  claudeSessionId: string | undefined;
+  sessionId: string | undefined;
   /**
    * SDK `query()` model override (CLI pass-through flag `--model`, spec/13 ##
    * Flag pass-through). Chosen at spawn and changeable at any point after it
@@ -339,7 +339,7 @@ export interface ChatState {
    */
   preferredAccountId?: string;
   /** Account that owns the current Claude provider-session cache. */
-  claudeSessionAccountId?: string;
+  sessionAccountId?: string;
   /**
    * Tools the user has switched OFF for this chat in the surface's Tools panel
    * (patch/todo.md — "allow the user to turn them on and off"). Carried on every
@@ -481,8 +481,8 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     turnRetrying: false,
     lastMessages: [],
     lastUpdated: meta.updatedAt,
-    claudeSessionId: meta.claudeSessionId,
-    claudeSessionAccountId: meta.claudeSessionAccountId,
+    sessionId: meta.sessionId,
+    sessionAccountId: meta.sessionAccountId,
     model: meta.model ?? undefined,
     effort: meta.effort ?? undefined,
     permissionMode: meta.permissionMode ?? undefined,
