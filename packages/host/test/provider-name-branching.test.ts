@@ -44,7 +44,6 @@ const BASELINE: Record<string, number> = {
   'apps/mobile/src/components/settings/ProviderOwnSettings.tsx': 1,
   'apps/mobile/src/components/settings/providers.tsx': 2,
   'packages/host/src/index.ts': 6,
-  'packages/host/src/rotationDigest.ts': 1,
 };
 
 /** Shapes of provider-name branching. Each match is one count. */

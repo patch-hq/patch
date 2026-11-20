@@ -2193,7 +2193,7 @@ describe('Host ChatRunner', () => {
   });
 
   describe('rotateThread (spec/06 § Session rotation)', () => {
-    function setupRotatable(generateDigest: HostOptions['generateDigest']) {
+    function setupRotatable() {
       const home = mkdtempSync(join(tmpdir(), 'patch-rotate-'));
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-rotate-folder-')));
       mkdirSync(folder, { recursive: true });
@@ -2209,13 +2209,12 @@ describe('Host ChatRunner', () => {
         logger: silent,
         now: () => 1_700_000_000_000,
         generateChatId: () => SPECIAL_THREAD_IDS.manager,
-        ...(generateDigest ? { generateDigest } : {}),
       });
       return { daemon, sdk, events, folder, metaStore };
     }
 
-    it('refuses to rotate a special thread with no session yet', async () => {
-      const { daemon, folder } = setupRotatable(async () => 'a digest');
+    it('does nothing for a special thread with no session yet', async () => {
+      const { daemon, folder } = setupRotatable();
       const chatId = await daemon.spawnChat({ folder });
       await expect(daemon.rotateThread(chatId)).resolves.toBeUndefined();
       expect(daemon.chatState.get(chatId)?.sessionId).toBeUndefined();
@@ -2227,66 +2226,55 @@ describe('Host ChatRunner', () => {
       await expect(daemon.rotateThread(chatId)).rejects.toThrow(/not a special thread/i);
     });
 
-    it('refuses with no digest generator wired, rather than rotating blind', async () => {
-      const { daemon, sdk, folder } = setupRotatable(undefined);
+    it('carries the record over in a visible note: nothing is asked of the outgoing session', async () => {
+      const { daemon, sdk, events, folder, metaStore } = setupRotatable();
       sdk.enqueue([
         { type: 'result', sessionId: 'sess-outgoing' },
-        { type: 'assistant', content: 'hi', sessionId: 'sess-outgoing' },
+        {
+          type: 'assistant',
+          content: 'Noted: terse replies from now on.',
+          sessionId: 'sess-outgoing',
+        },
       ]);
-      const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
-      await new Promise((r) => setTimeout(r, 20));
-      await expect(daemon.rotateThread(chatId)).rejects.toThrow(/no digest generator/i);
-      expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-outgoing');
-    });
-
-    it('skips the cycle (does not rotate) when digest generation fails', async () => {
-      const { daemon, sdk, folder } = setupRotatable(async () => null);
-      sdk.enqueue([
-        { type: 'result', sessionId: 'sess-outgoing' },
-        { type: 'assistant', content: 'hi', sessionId: 'sess-outgoing' },
-      ]);
-      const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
-      await new Promise((r) => setTimeout(r, 20));
-      await daemon.rotateThread(chatId);
-      expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-outgoing');
-    });
-
-    it('retires the outgoing session, marks the boundary, and seeds a fresh one with the digest', async () => {
-      const digestCalls: Array<{ resumeSessionId: string }> = [];
-      const { daemon, sdk, events, folder, metaStore } = setupRotatable(async (input) => {
-        digestCalls.push({ resumeSessionId: input.resumeSessionId });
-        return 'Tom prefers terse replies; nothing blocking right now.';
-      });
-      sdk.enqueue([
-        { type: 'result', sessionId: 'sess-outgoing' },
-        { type: 'assistant', content: 'hi', sessionId: 'sess-outgoing' },
-      ]);
-      const chatId = await daemon.spawnChat({ folder, prompt: 'hello' });
+      const chatId = await daemon.spawnChat({ folder, prompt: 'keep replies terse' });
       await new Promise((r) => setTimeout(r, 20));
       expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-outgoing');
+      const runsBefore = sdk.calls?.length;
 
-      // The rotation's own seeded turn, once the session has been cleared.
       sdk.enqueue([
         { type: 'result', sessionId: 'sess-fresh' },
         { type: 'assistant', content: 'got it', sessionId: 'sess-fresh' },
       ]);
+      events.length = 0;
       await daemon.rotateThread(chatId);
       await new Promise((r) => setTimeout(r, 20));
 
-      // Asked the OUTGOING session for its digest, not a fresh one.
-      expect(digestCalls).toEqual([{ resumeSessionId: 'sess-outgoing' }]);
-
-      // The boundary is a system chat.message, same arrangement a compaction
-      // boundary uses, so it replays with the rest of the chat.
+      // The boundary is a system chat.message, so it shows with the rest of the chat.
       const boundary = events.find(
-        (e) => e.type === 'chat.message' && e.role === 'system' && e.content?.includes('rotated'),
+        (e) => e.type === 'chat.message' && e.role === 'system' && e.content.includes('rotated'),
       );
-      expect(boundary).toBeDefined();
+      expect(boundary).toMatchObject({
+        content: 'Session rotated · the last 2 messages carried over',
+      });
 
-      // The seeded turn carried the digest through to the fresh session.
-      const seededOpts = sdk.lastOptions();
-      expect(seededOpts?.prompt).toContain('Tom prefers terse replies');
-      expect(seededOpts?.resumeSessionId).toBeUndefined();
+      // Exactly one run: the fresh session's first turn. The outgoing session
+      // was never resumed to be asked anything.
+      if (runsBefore !== undefined) expect(sdk.calls!.length).toBe(runsBefore + 1);
+      const seeded = sdk.lastOptions();
+      expect(seeded?.resumeSessionId).toBeUndefined();
+      expect(seeded?.prompt).toContain('User: keep replies terse');
+      expect(seeded?.prompt).toContain('Manager: Noted: terse replies from now on.');
+
+      // Everything the fresh session was sent is in the record: the handoff as
+      // its own note, and the message that went with it, started by Patch.
+      const note = events.find((e) => e.type === 'chat.note');
+      expect(note).toMatchObject({ label: 'Handoff' });
+      expect((note as { text: string }).text).toContain('User: keep replies terse');
+      const first = events.find((e) => e.type === 'chat.message' && e.role === 'user');
+      expect(first).toMatchObject({
+        content: 'Picking up after a scheduled session rotation.',
+        origin: 'machine',
+      });
 
       // Landed on the NEW session, meta persisted.
       expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-fresh');
@@ -2294,7 +2282,7 @@ describe('Host ChatRunner', () => {
     });
 
     it('refuses to rotate a chat that is mid-turn', async () => {
-      const { daemon, sdk, folder } = setupRotatable(async () => 'digest');
+      const { daemon, sdk, folder } = setupRotatable();
       // A backend whose run() never yields until aborted — same shape as the
       // "let the query reach running before aborting" tests above — keeps the
       // chat genuinely `running` for the guard to see.
