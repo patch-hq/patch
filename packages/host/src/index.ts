@@ -79,6 +79,7 @@ import {
   type SettingsAdoptRequestEvent,
   type SettingsAdoptResponseEvent,
   type SettingsSnapshotEvent,
+  type SharedAcpAccount,
   type SharedSecrets,
   type SharedSettings,
   type SharedSettingsPatch,
@@ -832,10 +833,14 @@ async function startHost(
   const localHistory = new CodexHistory(retiredLocalHistoryDir(config.patchHome), 'local');
   // ACP agents (spec/02 § Provider adapters): which agents exist is the shared
   // `acpAgents` setting over the built-in list; this host offers those whose
-  // command it has. Their credential is a shared provider key.
+  // command it has. Their credential is the agent's first ACP account, which
+  // the server sends with every snapshot (spec/10 § Backend credentials), else
+  // a shared provider key, else the agent's own sign-in on this host.
   let onAcpChange: () => void = () => undefined;
+  let acpAccounts: SharedAcpAccount[] = [];
   const acpRegistry = new AcpRegistry({
     providerKey: (id) => providerKeys.get(id),
+    accountKey: (agentId) => acpAccounts.find((a) => a.agentId === agentId)?.apiKey,
     baseEnv: () => ({ ...process.env }),
     scratchDir: join(config.patchHome, 'acp-probe'),
     clientVersion: VERSION,
@@ -2448,6 +2453,12 @@ async function startHost(
     // Before the settings, which apply the endpoints the keys belong to.
     await part('model endpoint keys', () => {
       endpointKeys = snapshot.secrets.endpointKeys;
+    });
+    await part('ACP accounts', () => {
+      const next = snapshot.secrets.acp ?? [];
+      const changed = JSON.stringify(next) !== JSON.stringify(acpAccounts);
+      acpAccounts = next;
+      if (changed) onAcpChange();
     });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
     await part('Claude accounts', () => {

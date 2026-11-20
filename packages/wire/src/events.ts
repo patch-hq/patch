@@ -2856,6 +2856,22 @@ export const SharedCodexAccount = z
   .strict();
 export type SharedCodexAccount = z.infer<typeof SharedCodexAccount>;
 
+/**
+ * One ACP agent's account (spec/10 § Backend credentials): an API key the
+ * server holds encrypted and hands to every host, passed to the agent in its
+ * `apiKeyEnv`. An agent's turns use the first account held for it.
+ */
+export const SharedAcpAccount = z
+  .object({
+    id: z.string().min(1),
+    /** The ACP agent (`AcpAgentConfig.id`) this account signs in. */
+    agentId: z.string().min(1),
+    label: z.string().min(1),
+    apiKey: z.string().min(1),
+  })
+  .strict();
+export type SharedAcpAccount = z.infer<typeof SharedAcpAccount>;
+
 /** Every host credential shared by the account, in order. Server-owned keys are never in this shape. */
 export const SharedSecrets = z
   .object({
@@ -2876,6 +2892,11 @@ export const SharedSecrets = z
      * when no endpoint has one, so a snapshot without keys is unchanged.
      */
     endpointKeys: z.record(z.string().regex(MODEL_ENDPOINT_ID), z.string().min(1)).optional(),
+    /**
+     * ACP agents' accounts, in order. Absent when there are none, so a
+     * snapshot without any is unchanged for an older host.
+     */
+    acp: z.array(SharedAcpAccount).optional(),
   })
   .strict();
 export type SharedSecrets = z.infer<typeof SharedSecrets>;
@@ -2923,6 +2944,21 @@ export const SharedSecretsSummary = z
         })
         .strict(),
     ),
+    /** ACP agents' accounts, never the key. Absent from an older server. */
+    acp: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            agentId: z.string().min(1),
+            label: z.string().min(1),
+            last4: z.string().min(1).max(4).optional(),
+            /** The account's one state, derived by the server (spec/10 § Account states). */
+            state: AccountState.optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     /** The model endpoints that have a key saved, never the key. */
     endpointKeys: z
       .array(

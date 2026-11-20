@@ -77,7 +77,7 @@ export class AcpSignedOutError extends TurnFailedError {
   override readonly name = 'AcpSignedOutError';
   constructor(label: string) {
     super(
-      `${label} is not signed in on this host. Add its key under Settings → Providers, or sign in to it on this host.`,
+      `${label} is not signed in on this host. Add an account for it under Settings → AI accounts, or sign in to it on this host.`,
       undefined,
     );
   }
@@ -265,7 +265,7 @@ export class AcpBackend implements SdkBackend {
     if (durableReq) {
       const durable = new DurableCodexProcess(
         recovered ? durableReq : { ...durableReq, attach: undefined },
-        { name: agent.label, harness: "acp" },
+        { name: agent.label, harness: 'acp' },
       );
       proc = {
         write: (line) => durable.write(line),

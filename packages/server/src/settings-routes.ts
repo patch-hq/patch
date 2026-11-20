@@ -553,6 +553,34 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     handle(undefined, (req) => shared.revokeProviderKey(keyOf(req))),
   );
 
+  // ---- ACP agents' accounts (spec/10 § Signing in) ----
+  // An API key, validated by the server and stored encrypted; write-only.
+  const AcpAddBody = z
+    .object({ apiKey: z.string().min(1), label: z.string().min(1).optional() })
+    .strict();
+  const AcpKeyBody = z.object({ apiKey: z.string().min(1) }).strict();
+  const acpOf = (req: FastifyRequest) => req.params as { agentId: string; accountId: string };
+  app.post(
+    '/api/accounts/acp/:agentId',
+    handle(AcpAddBody, async (req, body) => {
+      await shared.addAcpAccount(acpOf(req).agentId, body.apiKey, body.label);
+    }),
+  );
+  app.put(
+    '/api/accounts/acp/:agentId/:accountId/key',
+    handle(AcpKeyBody, async (req, body) => {
+      const { agentId, accountId } = acpOf(req);
+      await shared.replaceAcpKey(agentId, accountId, body.apiKey);
+    }),
+  );
+  app.delete(
+    '/api/accounts/acp/:agentId/:accountId',
+    handle(undefined, (req) => {
+      const { agentId, accountId } = acpOf(req);
+      shared.removeAcpAccount(agentId, accountId);
+    }),
+  );
+
   // A model endpoint's key (spec/02 § Provider adapters): write-only, like a provider key.
   const endpointOf = (req: FastifyRequest) => (req.params as { endpointId: string }).endpointId;
   app.put(

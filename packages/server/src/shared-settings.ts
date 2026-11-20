@@ -57,6 +57,9 @@ import {
   isAnthropicApiKey,
   type ProviderBackendId,
   limitBehaviourFromAutoResume,
+  resolveAcpAgents,
+  type AcpAgentConfig,
+  type SharedAcpAccount,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { AccountStateTracker } from './account-states.js';
@@ -460,6 +463,17 @@ export class SharedSettingsService {
         const check = this.keyChecks.get(id);
         return { id, set: true, last4: value.slice(-4), ...(check ? { check } : {}) };
       }),
+      ...(this.secrets.acp
+        ? {
+            acp: this.secrets.acp.map((a) => ({
+              id: a.id,
+              agentId: a.agentId,
+              label: a.label,
+              ...(a.apiKey.length >= PROVIDER_KEY_MIN_LENGTH ? { last4: a.apiKey.slice(-4) } : {}),
+              state: this.acpStateOf(a),
+            })),
+          }
+        : {}),
       ...(this.secrets.endpointKeys
         ? {
             endpointKeys: Object.entries(this.secrets.endpointKeys).map(([id, value]) => ({
@@ -497,11 +511,17 @@ export class SharedSettingsService {
     });
   }
 
+  /** An ACP account is an API key: it has no subscription windows to read. */
+  private acpStateOf(a: SharedAcpAccount): AccountState {
+    return this.accountStates.stateFor(a.id, { hasCredential: true, apiKey: true });
+  }
+
   private stateKeys(): Map<string, string> {
     const out = new Map<string, string>();
     for (const a of [...this.secrets.claude, ...this.secrets.codex]) {
       out.set(a.id, JSON.stringify(this.stateOf(a)));
     }
+    for (const a of this.secrets.acp ?? []) out.set(a.id, JSON.stringify(this.acpStateOf(a)));
     return out;
   }
 
@@ -1239,6 +1259,121 @@ export class SharedSettingsService {
     const key = accountsKeyForBackend(backendId);
     const held$ = this.secrets[key] as { id: string }[];
     this.secrets[key] = accountIds.map((id) => held$.find((a) => a.id === id)!) as never;
+    this.commit({ secrets: true });
+  }
+
+  // ---- ACP accounts (spec/10 § Backend credentials, § Signing in) ----
+
+  /** The agent an account can be added for: known, and taking an API key. */
+  private acpAgentFor(agentId: string): AcpAgentConfig & { apiKeyEnv: string } {
+    const agent = resolveAcpAgents(this.settings.acpAgents).find((a) => a.id === agentId);
+    if (!agent) throw new SettingsError(404, 'unknown_agent', `No ACP agent ${agentId}`);
+    if (agent.apiKeyEnv === undefined) {
+      throw new SettingsError(
+        400,
+        'no_api_key',
+        `${agent.label} takes no API key; it runs on its own sign-in on each host`,
+      );
+    }
+    return agent as AcpAgentConfig & { apiKeyEnv: string };
+  }
+
+  /**
+   * A key fit to store for `agent`: well formed, not already connected, and
+   * accepted by the provider where the agent names a check. A refusal stores
+   * nothing; so does a check that could not reach the provider, since neither
+   * says the key works.
+   */
+  private async validAcpKey(
+    agent: AcpAgentConfig,
+    value: string,
+    replacing?: string,
+  ): Promise<string> {
+    const key = value.trim();
+    if (key.length < PROVIDER_KEY_MIN_LENGTH || /\s/.test(key)) {
+      throw new SettingsError(
+        400,
+        'invalid_value',
+        `A key must be at least ${PROVIDER_KEY_MIN_LENGTH} characters with no whitespace`,
+      );
+    }
+    const clash = (this.secrets.acp ?? []).find(
+      (a) => a.agentId === agent.id && a.apiKey === key && a.id !== replacing,
+    );
+    if (clash) {
+      throw new SettingsError(
+        409,
+        'account_exists',
+        `That key is already connected as ${clash.label}`,
+      );
+    }
+    if (agent.apiKeyCheck !== undefined) {
+      const check = await checkProviderKey(agent.apiKeyCheck, key, this.opts.keyCheckFetch);
+      if (check.status === 'rejected') {
+        throw new SettingsError(400, 'credential_rejected', check.message ?? 'The key was refused');
+      }
+      if (check.status === 'unreachable') {
+        throw new SettingsError(
+          502,
+          'credential_unreachable',
+          check.message ?? 'Could not reach the provider to check the key',
+        );
+      }
+    }
+    return key;
+  }
+
+  /** Sign an ACP agent in with an API key: a new account, last in its order. */
+  async addAcpAccount(agentId: string, apiKey: string, label?: string): Promise<SharedAcpAccount> {
+    this.requireSecrets();
+    const agent = this.acpAgentFor(agentId);
+    const key = await this.validAcpKey(agent, apiKey);
+    const held = (this.secrets.acp ?? []).filter((a) => a.agentId === agentId);
+    const account: SharedAcpAccount = {
+      id: randomUUID(),
+      agentId,
+      label:
+        label?.trim() || (held.length === 0 ? agent.label : `${agent.label} ${held.length + 1}`),
+      apiKey: key,
+    };
+    this.secrets.acp = [...(this.secrets.acp ?? []), account];
+    this.opts.logger?.info(
+      { accountId: account.id, agentId },
+      'shared settings: ACP account added',
+    );
+    this.commit({ secrets: true });
+    return account;
+  }
+
+  private findAcp(agentId: string, accountId: string): SharedAcpAccount {
+    const account = (this.secrets.acp ?? []).find(
+      (a) => a.id === accountId && a.agentId === agentId,
+    );
+    if (!account) {
+      throw new SettingsError(404, 'account_not_found', `No ${agentId} account ${accountId}`);
+    }
+    return account;
+  }
+
+  /** Sign in again: a new key on the same account, keeping its id, label and position. */
+  async replaceAcpKey(agentId: string, accountId: string, apiKey: string): Promise<void> {
+    this.requireSecrets();
+    this.findAcp(agentId, accountId);
+    const key = await this.validAcpKey(this.acpAgentFor(agentId), apiKey, accountId);
+    // Looked up again: the account may have gone while the check was out.
+    this.findAcp(agentId, accountId).apiKey = key;
+    this.accountStates.credentialReplaced(accountId);
+    this.commit({ secrets: true });
+  }
+
+  removeAcpAccount(agentId: string, accountId: string): void {
+    this.requireSecrets();
+    this.findAcp(agentId, accountId);
+    const rest = (this.secrets.acp ?? []).filter((a) => a.id !== accountId);
+    // Absent rather than empty, so a snapshot with none is unchanged for older hosts.
+    if (rest.length === 0) delete this.secrets.acp;
+    else this.secrets.acp = rest;
+    this.accountStates.forget(accountId);
     this.commit({ secrets: true });
   }
 

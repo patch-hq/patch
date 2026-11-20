@@ -1056,6 +1056,22 @@ export const api = {
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
     }),
+  // spec/10 § Signing in — an ACP agent's account: an API key, checked and stored by the server.
+  addAcpAccount: (agentId: string, apiKey: string, label?: string) =>
+    request<SharedState>(`/api/accounts/acp/${encodeURIComponent(agentId)}`, {
+      method: 'POST',
+      body: { apiKey, ...(label ? { label } : {}) },
+    }),
+  replaceAcpKey: (agentId: string, accountId: string, apiKey: string) =>
+    request<SharedState>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}/key`,
+      { method: 'PUT', body: { apiKey } },
+    ),
+  removeAcpAccount: (agentId: string, accountId: string) =>
+    request<SharedState>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}`,
+      { method: 'DELETE' },
+    ),
   // spec/02 § Provider adapters — a model endpoint's key, write-only.
   setEndpointKey: (endpointId: string, value: string) =>
     request<SharedState>(`/api/providers/endpoints/${encodeURIComponent(endpointId)}/key`, {

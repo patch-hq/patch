@@ -1,15 +1,19 @@
 // Agent Client Protocol agents (spec/02 § Provider adapters).
 //
 // Every ACP agent runs through the one `acp` provider. An agent is DATA, not
-// code: the command that starts it speaking ACP on stdio, a label, and which
-// of the shared provider keys (Settings → Providers) it reads from which
-// environment variable. Patch ships the entries below; an account adds more,
-// or replaces one by id, through the shared `acpAgents` setting.
+// code: the command that starts it speaking ACP on stdio, a label, which of
+// the shared provider keys (Settings → Providers) it reads from which
+// environment variable, and the variable an ACP account's API key is passed in
+// (Settings → AI accounts; spec/10 § Backend credentials). Patch ships the
+// entries below; an account adds more, or replaces one by id, through the
+// shared `acpAgents` setting.
 //
 // A model of an ACP agent is `acp/<agent id>/<the agent's own model id>`.
 
 import { z } from 'zod';
 import { ProviderKeyId } from './provider-keys.js';
+
+const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
 
 export const AcpAgentConfig = z
   .object({
@@ -26,7 +30,21 @@ export const AcpAgentConfig = z
      * shared provider key (`{ "GEMINI_API_KEY": "gemini" }`). A key that is not
      * set leaves the variable to the agent's own sign-in.
      */
-    keys: z.record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/), ProviderKeyId).optional(),
+    keys: z.record(z.string().regex(ENV_NAME), ProviderKeyId).optional(),
+    /**
+     * The environment variable the agent reads an API key from, which a signed
+     * in ACP account's key is passed in (`GEMINI_API_KEY`). It wins over a
+     * shared provider key mapped to the same variable. Without one the agent
+     * takes no account: it runs on its own sign-in on each host.
+     */
+    apiKeyEnv: z.string().regex(ENV_NAME).optional(),
+    /**
+     * The provider-key check that validates an account's key before the server
+     * stores it (a free, read-only request; spec/10 § Signing in). Without one
+     * a key is stored unchecked and the agent's own answer on the next turn or
+     * probe says whether it works.
+     */
+    apiKeyCheck: ProviderKeyId.optional(),
     /**
      * The agent's own session mode for each Patch permission mode it has one
      * for. Without one, Patch answers the agent's permission requests itself
@@ -52,6 +70,8 @@ export const BUILTIN_ACP_AGENTS: readonly AcpAgentConfig[] = [
     command: 'gemini',
     args: ['--acp'],
     keys: { GEMINI_API_KEY: 'gemini' },
+    apiKeyEnv: 'GEMINI_API_KEY',
+    apiKeyCheck: 'gemini',
     modes: { default: 'default', acceptEdits: 'autoEdit', bypassPermissions: 'yolo' },
   },
 ];
