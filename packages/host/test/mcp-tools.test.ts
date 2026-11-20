@@ -51,6 +51,13 @@ describe('patch-tools MCP server — full client round-trip', () => {
       localKey: LOCAL_KEY,
       daemon,
       jobs,
+      // patch_peek reads the server's record; stand in for the server here.
+      peekFromServer: async (req) => ({
+        chat_state: { chatId: req.targetChatId, chatStatus: { state: 'idle' } },
+        events: [],
+        truncated: false,
+      }),
+      historyFromServer: async () => ({ events: [] }),
     });
     await app.listen({ path: socketPath });
 
@@ -358,11 +365,12 @@ describe('patch-tools MCP server — full client round-trip', () => {
       arguments: { chatId: spawned.chatId },
     })) as { content: { text: string }[] };
     const peeked = JSON.parse(peek.content[0]!.text) as {
-      chat_state: { activity: string };
+      chat_state: { chatId: string; chatStatus: { state: string } };
       events: unknown[];
       truncated: boolean;
     };
-    expect(peeked.chat_state.activity).toBe('idle');
+    expect(peeked.chat_state.chatId).toBe(spawned.chatId);
+    expect(peeked.chat_state.chatStatus.state).toBe('idle');
     expect(Array.isArray(peeked.events)).toBe(true);
     expect(typeof peeked.truncated).toBe('boolean');
 
@@ -434,9 +442,8 @@ describe('patch-tools MCP server — full client round-trip', () => {
       name: 'patch_peek',
       arguments: { chatId: 'caller-1', limit: 5 },
     })) as { content: { text: string }[]; isError?: boolean };
-    // caller-1 is on disk from the seeding above but was never loaded; naming it
-    // opens it (spec/02 § Chat loading). We only care that the `limit`
-    // query-param branch in mcp.ts's patch_peek wrapper was taken.
+    // We only care that the `limit` query-param branch in mcp.ts's patch_peek
+    // wrapper was taken.
     expect(peeked.content[0]!.text).toContain('"chatId":"caller-1"');
 
     const spawned = (await client.callTool({

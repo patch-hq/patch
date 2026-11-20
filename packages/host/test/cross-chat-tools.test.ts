@@ -1,5 +1,6 @@
-// Cross-chat tools (group 9 task A): UDS endpoint behaviour for every
-// patch_* tool. Uses Fastify's `.inject()` for direct request injection —
+// Cross-chat tools (group 9 task A): UDS endpoint behaviour for the patch_*
+// tools a host answers itself (patch_peek / patch_history read the server:
+// remote-fallback-tools.test.ts). Uses Fastify's `.inject()` for direct request injection —
 // no socket plumbing — and the mock SDK + MemoryJobsStore.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -42,70 +43,6 @@ function setup() {
   const upstream: WireEvent[] = [];
   return { daemon, sdk, jobs, folder, home, events, upstream };
 }
-
-describe('UDS internal endpoints — patch_peek', () => {
-  it('returns full chat_state on hit', async () => {
-    const { daemon, sdk, folder, jobs } = setup();
-    sdk.enqueue([{ type: 'assistant', content: 'hello world', sessionId: 'S' }]);
-    const chatId = await daemon.spawnChat({ folder, prompt: 'hi' });
-    await new Promise((r) => setTimeout(r, 30));
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/peek/${chatId}`,
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      // spec/06: { chat_state, events, truncated }
-      expect(body.chat_state.chatId).toBe(chatId);
-      expect(body.chat_state.activity).toBe('idle');
-      expect(body.chat_state.lastMessages).toHaveLength(1);
-      expect(body.chat_state.lastMessage).toBe('hello world');
-      expect(body.chat_state.status).toBe('active');
-      expect(Array.isArray(body.events)).toBe(true);
-      expect(body.events.length).toBeGreaterThan(0);
-      expect(body.truncated).toBe(false);
-    } finally {
-      await app.close();
-    }
-  });
-
-  it.each(['0', '0.5', '-1', 'abc'])(
-    'rejects limit=%s with a 400 instead of returning no events',
-    async (limit) => {
-      const { daemon, jobs } = setup();
-      const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-      try {
-        const res = await app.inject({
-          method: 'GET',
-          url: `/internal/peek/nope?limit=${limit}`,
-          headers: { authorization: `Bearer ${LOCAL_KEY}` },
-        });
-        expect(res.statusCode).toBe(400);
-      } finally {
-        await app.close();
-      }
-    },
-  );
-
-  it('returns 404 for unknown chatId', async () => {
-    const { daemon, jobs } = setup();
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/internal/peek/nope',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(res.statusCode).toBe(404);
-      expect(res.json().error).toBe('chat_not_found');
-    } finally {
-      await app.close();
-    }
-  });
-});
 
 describe('UDS internal endpoints — patch_send_to', () => {
   it('queues input + emits patch.send_to wire event when callerChatId given', async () => {
@@ -383,62 +320,6 @@ describe('patch_spawn records the chat that launched the new one', () => {
       const plain = await daemon.spawnChat({ folder });
       const plainSpawned = events.find((e) => e.type === 'chat.spawned' && e.chatId === plain);
       expect(plainSpawned).not.toHaveProperty('parentChatId');
-    } finally {
-      await app.close();
-    }
-  });
-});
-
-describe('UDS internal endpoints — patch_history', () => {
-  it('returns empty events for chat with no claudeSessionId', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}`,
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ events: [] });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('rejects chatId not found with 404', async () => {
-    const { daemon, jobs } = setup();
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/internal/history/missing',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(res.statusCode).toBe(404);
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('clamps limit > 200 to the hard cap (200) instead of rejecting', async () => {
-    // spec/06 patch_history: the 200 ceiling is a CLAMP, not a 400 — a caller
-    // asking for limit:5000 gets at most the newest 200 events (mirrors the
-    // job-runs cap). C2-6.
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}?limit=5000`,
-        headers: AUTH,
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json() as { events: unknown[] };
-      expect(Array.isArray(body.events)).toBe(true);
-      expect(body.events.length).toBeLessThanOrEqual(200);
     } finally {
       await app.close();
     }

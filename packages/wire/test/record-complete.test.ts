@@ -56,6 +56,15 @@ describe('the whole record on the wire', () => {
     expect(isOutboxEvent({ ...end, seq: -2 } as WireEvent)).toBe(false);
   });
 
+  it('a tool-log entry goes through the outbox though it belongs to no chat', () => {
+    const entry = {
+      type: 'patch.tool_log.entry',
+      entry: { ts: 1, tool: 'patch_peek', durationMs: 2, ok: true },
+    } as WireEvent;
+    expect(decode(encode(entry))).toEqual(entry);
+    expect(isOutboxEvent(entry)).toBe(true);
+  });
+
   it('a turn boundary is refused below -1 or with an outcome it does not know', () => {
     expect(() =>
       decode(

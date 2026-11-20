@@ -1,20 +1,17 @@
-// `patch_activity` reads through the chats' own logs on every online host
-// (spec/06 § Cross-chat toolset): GET /api/activity and the daemon-facing
-// `patch.activity.request` both fan out `patch.activity.read.request` frames,
-// merge the answers and join them against the chat mirror.
+// `patch_activity` reads the server's chat record (spec/06 § Cross-chat
+// toolset): GET /api/activity and the daemon-facing `patch.activity.request`
+// both read the user messages the record holds and join them against the chat
+// index. No host is asked, so a chat on an offline host is answered for too.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
-import type { PatchActivityReadRequestEvent, WireEvent } from '@patch/wire';
+import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
-
-// `d1` is the stand-in link's own host; the two added hosts join it.
-const ONLINE_HOSTS = ['d1', 'host-a', 'host-b'];
 
 let dir: string;
 beforeEach(() => {
@@ -77,49 +74,44 @@ async function setup() {
       url: `/api/activity?${qs}`,
       headers: { authorization: `Bearer ${jwt}` },
     });
-  const readRequests = (): Array<{ hostId?: string; event: PatchActivityReadRequestEvent }> =>
-    hostLink.sent.filter(
-      (s): s is { surfaceId: string; hostId?: string; event: PatchActivityReadRequestEvent } =>
-        s.event.type === 'patch.activity.read.request',
-    );
-  const answeredIds = new Set<string>();
-  const answerAll = async (
-    byHost: Record<
-      string,
-      Array<{
-        chatId: string;
-        text: string;
-        ts: number;
-        kind?: 'job' | 'hook' | 'goal' | 'machine';
-      }>
-    >,
+  const seqs = new Map<string, number>();
+  /** Put user messages into the server's record, as each host's outbox would. */
+  const seed = (
+    rows: Array<{
+      chatId: string;
+      text: string;
+      ts: number;
+      extra?: Record<string, unknown>;
+    }>,
   ) => {
-    const unanswered = () => readRequests().filter((r) => !answeredIds.has(r.event.requestId));
-    for (let i = 0; i < 100 && unanswered().length < ONLINE_HOSTS.length; i++) {
-      await new Promise((r) => setTimeout(r, 5));
-    }
-    for (const r of unanswered()) {
-      answeredIds.add(r.event.requestId);
-      hostLink.injectHostEvent({
-        type: 'patch.activity.read.response',
-        requestId: r.event.requestId,
-        messages: byHost[r.hostId!] ?? [],
+    for (const r of rows) {
+      const seq = seqs.get(r.chatId) ?? 0;
+      seqs.set(r.chatId, seq + 1);
+      built.chatLogStore.commit({
+        type: 'chat.message',
+        chatId: r.chatId,
+        seq,
+        role: 'user',
+        content: r.text,
+        createdAt: r.ts,
+        ...r.extra,
       } as WireEvent);
     }
   };
-  return { built, hostLink, get, readRequests, answerAll };
+  return { built, hostLink, get, seed };
 }
 
 describe('GET /api/activity', () => {
-  it('merges every online host’s user messages, oldest first, enriched from the mirror, with no chatSessions', async () => {
-    const { built, get, answerAll, readRequests } = await setup();
+  it('reads every chat’s user messages from the record, oldest first, enriched from the index, with no chatSessions', async () => {
+    const { built, hostLink, get, seed } = await setup();
     try {
-      const pending = get('since=1000&until=9000');
-      await answerAll({
-        'host-a': [{ chatId: 'c-a', text: 'second', ts: 3000 }],
-        'host-b': [{ chatId: 'c-b', text: 'first', ts: 2000 }],
-      });
-      const res = await pending;
+      seed([
+        { chatId: 'c-a', text: 'second', ts: 3000 },
+        { chatId: 'c-b', text: 'first', ts: 2000 },
+      ]);
+      // A host being offline changes nothing: no host is asked.
+      hostLink.dropOnlineHost('host-b');
+      const res = await get('since=1000&until=9000');
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         messages: [
@@ -142,49 +134,73 @@ describe('GET /api/activity', () => {
         ],
         messagesTruncated: false,
       });
-      expect(
-        readRequests()
-          .map((r) => r.hostId)
-          .sort(),
-      ).toEqual(ONLINE_HOSTS.slice().sort());
+      expect(hostLink.sent.filter((s) => s.event.type.startsWith('patch.activity'))).toEqual([]);
     } finally {
       await built.app.close();
     }
   });
 
-  it('carries a host-reported kind through the join untouched, and omits it when absent', async () => {
-    const { built, get, answerAll } = await setup();
+  it('only counts user messages, and says what produced the ones no person typed', async () => {
+    const { built, get, seed } = await setup();
     try {
-      const pending = get('since=1000&until=9000');
-      await answerAll({
-        'host-a': [{ chatId: 'c-a', text: 'a nudge', ts: 3000, kind: 'machine' }],
-        'host-b': [{ chatId: 'c-b', text: 'typed by hand', ts: 2000 }],
-      });
-      const res = await pending;
+      seed([
+        { chatId: 'c-b', text: 'typed by hand', ts: 2000 },
+        { chatId: 'c-a', text: 'a nudge', ts: 3000, extra: { origin: 'machine' } },
+        { chatId: 'c-a', text: 'job fire', ts: 3100, extra: { jobTrigger: true } },
+        { chatId: 'c-a', text: 'reply', ts: 3200, extra: { role: 'assistant' } },
+      ]);
+      const res = await get('since=1000&until=9000');
       expect(res.json()).toMatchObject({
         messages: [
           { chatId: 'c-b', text: 'typed by hand', ts: 2000 },
           { chatId: 'c-a', text: 'a nudge', ts: 3000, kind: 'machine' },
+          { chatId: 'c-a', text: 'job fire', ts: 3100, kind: 'job' },
         ],
       });
+      expect(res.json().messages).toHaveLength(3);
       expect('kind' in res.json().messages[0]).toBe(false);
     } finally {
       await built.app.close();
     }
   });
 
-  it('truncates at limit and resumes from the cursor; drops chats the mirror does not know', async () => {
-    const { built, get, answerAll } = await setup();
+  it('marks a turn re-sent after a restart note as machine-made', async () => {
+    const { built, get, seed } = await setup();
     try {
-      const pending = get('since=0&until=9000&limit=2');
-      await answerAll({
-        'host-a': [
-          { chatId: 'c-a', text: 'one', ts: 1000 },
-          { chatId: 'gone', text: 'ghost', ts: 1500 },
-          { chatId: 'c-a', text: 'three', ts: 3000 },
-        ],
-      });
-      const body = (await pending).json() as {
+      seed([{ chatId: 'c-a', text: 'start', ts: 1000 }]);
+      built.chatLogStore.commit({
+        type: 'chat.note',
+        chatId: 'c-a',
+        seq: 1,
+        label: 'Turn interrupted by restart',
+      } as WireEvent);
+      built.chatLogStore.commit({
+        type: 'chat.message',
+        chatId: 'c-a',
+        seq: 2,
+        role: 'user',
+        content: 'Carry on',
+        createdAt: 2000,
+      } as WireEvent);
+      const res = await get('since=0&until=9000');
+      expect(res.json().messages.map((m: { kind?: string }) => m.kind ?? 'person')).toEqual([
+        'person',
+        'machine',
+      ]);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('truncates at limit and resumes from the cursor; drops chats the index does not know', async () => {
+    const { built, get, seed } = await setup();
+    try {
+      seed([
+        { chatId: 'c-a', text: 'one', ts: 1000 },
+        { chatId: 'gone', text: 'ghost', ts: 1500 },
+        { chatId: 'c-a', text: 'three', ts: 3000 },
+      ]);
+      const body = (await get('since=0&until=9000&limit=2')).json() as {
         messages: Array<{ text: string }>;
         messagesTruncated: boolean;
         nextMessagesCursor: number;
@@ -192,30 +208,33 @@ describe('GET /api/activity', () => {
       expect(body.messages.map((m) => m.text)).toEqual(['one']);
       expect(body.messagesTruncated).toBe(true);
       expect(body.nextMessagesCursor).toBe(1501);
+      const next = (await get(`since=0&until=9000&limit=2&messagesCursor=1501`)).json() as {
+        messages: Array<{ text: string }>;
+        messagesTruncated: boolean;
+      };
+      expect(next.messages.map((m) => m.text)).toEqual(['three']);
+      expect(next.messagesTruncated).toBe(false);
     } finally {
       await built.app.close();
     }
   });
 
   it('never ends a page inside a run of equal timestamps, so the next page loses none of it', async () => {
-    const { built, get, answerAll } = await setup();
+    const { built, get, seed } = await setup();
     try {
-      const pending = get('since=0&until=9000&limit=2');
-      await answerAll({
-        'host-a': [
-          { chatId: 'c-a', text: 'one', ts: 1000 },
-          { chatId: 'c-a', text: 'two-a', ts: 2000 },
-        ],
-        'host-b': [{ chatId: 'c-b', text: 'two-b', ts: 2000 }],
-      });
-      const body = (await pending).json() as {
+      seed([
+        { chatId: 'c-a', text: 'one', ts: 1000 },
+        { chatId: 'c-a', text: 'two-a', ts: 2000 },
+        { chatId: 'c-b', text: 'two-b', ts: 2000 },
+      ]);
+      const body = (await get('since=0&until=9000&limit=2')).json() as {
         messages: Array<{ text: string }>;
         messagesTruncated: boolean;
         nextMessagesCursor: number;
       };
       expect(body.messages.map((m) => m.text)).toEqual(['one']);
       expect(body.messagesTruncated).toBe(true);
-      // The host reads `ts >= since`: resuming AT 2000 picks up both.
+      // The read takes `ts >= since`: resuming AT 2000 picks up both.
       expect(body.nextMessagesCursor).toBe(2000);
     } finally {
       await built.app.close();
@@ -223,29 +242,13 @@ describe('GET /api/activity', () => {
   });
 
   it('returns the whole run when equal timestamps fill the page, then moves past it', async () => {
-    const { built, hostLink, get, answerAll, readRequests } = await setup();
+    const { built, get, seed } = await setup();
     try {
-      const pending = get('since=0&until=9000&limit=1');
-      const run = {
-        'host-a': [{ chatId: 'c-a', text: 'a', ts: 2000 }],
-        'host-b': [{ chatId: 'c-b', text: 'b', ts: 2000 }],
-      };
-      await answerAll(run);
-      // A second read for the run itself: exactly that instant, uncapped.
-      for (let i = 0; i < 100 && readRequests().length < 2 * ONLINE_HOSTS.length; i++) {
-        await new Promise((r) => setTimeout(r, 5));
-      }
-      const second = readRequests().slice(ONLINE_HOSTS.length);
-      expect(second).toHaveLength(ONLINE_HOSTS.length);
-      for (const r of second) {
-        expect([r.event.since, r.event.until]).toEqual([2000, 2000]);
-        hostLink.injectHostEvent({
-          type: 'patch.activity.read.response',
-          requestId: r.event.requestId,
-          messages: run[r.hostId as keyof typeof run] ?? [],
-        } as WireEvent);
-      }
-      const body = (await pending).json() as {
+      seed([
+        { chatId: 'c-a', text: 'a', ts: 2000 },
+        { chatId: 'c-b', text: 'b', ts: 2000 },
+      ]);
+      const body = (await get('since=0&until=9000&limit=1')).json() as {
         messages: Array<{ text: string }>;
         messagesTruncated: boolean;
         nextMessagesCursor: number;
@@ -258,16 +261,16 @@ describe('GET /api/activity', () => {
     }
   });
 
-  it('clamps the window to 30 days and asks each host for limit+1 rows', async () => {
-    const { built, get, answerAll, readRequests } = await setup();
+  it('clamps the window to 30 days', async () => {
+    const { built, get, seed } = await setup();
     try {
       const until = Date.now();
-      const pending = get(`since=0&until=${until}&limit=10`);
-      await answerAll({});
-      await pending;
-      const req = readRequests()[0]!.event;
-      expect(req.until - req.since).toBe(30 * 24 * 60 * 60 * 1000);
-      expect(req.limit).toBe(11);
+      seed([
+        { chatId: 'c-a', text: 'too old', ts: until - 31 * 24 * 60 * 60 * 1000 },
+        { chatId: 'c-a', text: 'recent', ts: until - 1000 },
+      ]);
+      const body = (await get(`since=0&until=${until}&limit=10`)).json();
+      expect(body.messages.map((m: { text: string }) => m.text)).toEqual(['recent']);
     } finally {
       await built.app.close();
     }
@@ -287,15 +290,15 @@ describe('GET /api/activity', () => {
 
 describe('patch.activity.request (a host’s patch_activity)', () => {
   it('answers the asking host with a patch.activity.response', async () => {
-    const { built, hostLink, answerAll } = await setup();
+    const { built, hostLink, seed } = await setup();
     try {
+      seed([{ chatId: 'c-a', text: 'hi', ts: 2000 }]);
       hostLink.injectHostEvent({
         type: 'patch.activity.request',
         sourceChatId: 'caller',
         since: 1000,
         until: 9000,
       } as WireEvent);
-      await answerAll({ 'host-a': [{ chatId: 'c-a', text: 'hi', ts: 2000 }] });
       for (
         let i = 0;
         i < 100 && !hostLink.sent.some((s) => s.event.type === 'patch.activity.response');
@@ -318,14 +321,12 @@ describe('patch.activity.request (a host’s patch_activity)', () => {
 });
 
 describe('chat dwell sessions (opt-in)', () => {
-  it('GET /api/activity?includeSessions=true adds server-recorded sessions, enriched, dropping chats the mirror does not know', async () => {
+  it('GET /api/activity?includeSessions=true adds server-recorded sessions, enriched, dropping chats the index does not know', async () => {
     const base = Date.now() - 60_000;
     seedDwell(base);
-    const { built, get, answerAll } = await setup();
+    const { built, get } = await setup();
     try {
-      const pending = get(`since=${base}&until=${base + 5000}&includeSessions=true`);
-      await answerAll({});
-      const res = await pending;
+      const res = await get(`since=${base}&until=${base + 5000}&includeSessions=true`);
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         messages: [],
@@ -360,20 +361,20 @@ describe('chat dwell sessions (opt-in)', () => {
   it('pages sessions with sessionsCursor (which implies includeSessions) independently of messages', async () => {
     const base = Date.now() - 60_000;
     seedDwell(base);
-    const { built, get, answerAll } = await setup();
+    const { built, get } = await setup();
     try {
-      const p1 = get(`since=${base}&until=${base + 5000}&includeSessions=true&limit=1`);
-      await answerAll({});
-      const page1 = (await p1).json();
+      const page1 = (
+        await get(`since=${base}&until=${base + 5000}&includeSessions=true&limit=1`)
+      ).json();
       expect(page1.chatSessions.map((c: { chatId: string }) => c.chatId)).toEqual(['c-a']);
       expect(page1.sessionsTruncated).toBe(true);
       expect(page1.nextSessionsCursor).toBe(base + 1);
 
-      const p2 = get(
-        `since=${base}&until=${base + 5000}&limit=1&sessionsCursor=${page1.nextSessionsCursor}`,
-      );
-      await answerAll({});
-      const page2 = (await p2).json();
+      const page2 = (
+        await get(
+          `since=${base}&until=${base + 5000}&limit=1&sessionsCursor=${page1.nextSessionsCursor}`,
+        )
+      ).json();
       expect(page2.chatSessions.map((c: { chatId: string }) => c.chatId)).toEqual(['c-b']);
     } finally {
       await built.app.close();
@@ -389,29 +390,10 @@ describe('chat dwell sessions (opt-in)', () => {
     }
   });
 
-  it('a host that sets includeSessions on patch.activity.request gets chatSessions back; one that does not never does', async () => {
+  it('a host that sets includeSessions on patch.activity.request gets chatSessions back', async () => {
     const base = Date.now() - 60_000;
     seedDwell(base);
-    const { built, hostLink, answerAll } = await setup();
-    const reply = async (sourceChatId: string) => {
-      for (
-        let i = 0;
-        i < 100 &&
-        !hostLink.sent.some(
-          (s) =>
-            s.event.type === 'patch.activity.response' &&
-            (s.event as { sourceChatId: string }).sourceChatId === sourceChatId,
-        );
-        i++
-      ) {
-        await new Promise((r) => setTimeout(r, 5));
-      }
-      return hostLink.sent.find(
-        (s) =>
-          s.event.type === 'patch.activity.response' &&
-          (s.event as { sourceChatId: string }).sourceChatId === sourceChatId,
-      )!.event;
-    };
+    const { built, hostLink } = await setup();
     try {
       hostLink.injectHostEvent({
         type: 'patch.activity.request',
@@ -420,8 +402,16 @@ describe('chat dwell sessions (opt-in)', () => {
         until: base + 5000,
         includeSessions: true,
       } as WireEvent);
-      await answerAll({});
-      const withSessions = await reply('new-host');
+      for (
+        let i = 0;
+        i < 100 && !hostLink.sent.some((s) => s.event.type === 'patch.activity.response');
+        i++
+      ) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      const withSessions = hostLink.sent.find(
+        (s) => s.event.type === 'patch.activity.response',
+      )!.event;
       expect(withSessions).toMatchObject({
         sessionsTruncated: false,
         chatSessions: [{ chatId: 'c-a' }, { chatId: 'c-b' }],
@@ -434,50 +424,13 @@ describe('chat dwell sessions (opt-in)', () => {
   it('asking for sessions with no log fails rather than returning an empty list', async () => {
     const { createActivityReader } = await import('../src/activity.js');
     const { ChatRegistry } = await import('../src/chat-registry.js');
+    const { ChatLogStore } = await import('../src/chat-log-store.js');
     const reader = createActivityReader({
-      hostLink: new InProcessHostLink(),
+      chatLogStore: new ChatLogStore({ logger: { warn: () => undefined } }),
       chatRegistry: new ChatRegistry(),
     });
     await expect(reader.query({ since: 0, until: 10, includeSessions: true })).rejects.toThrow(
       /sessions are not recorded/,
     );
-    reader.close();
-  });
-});
-
-describe('read retry', () => {
-  it('retries a host that was silent for one attempt, and still fails if it stays silent', async () => {
-    const { createActivityReader } = await import('../src/activity.js');
-    const { ChatRegistry } = await import('../src/chat-registry.js');
-    const hostLink = new InProcessHostLink();
-    const reader = createActivityReader({
-      hostLink,
-      chatRegistry: new ChatRegistry(),
-      readTimeoutMs: 20,
-    });
-    const reqs = () => hostLink.sent.filter((s) => s.event.type === 'patch.activity.read.request');
-    const answerLatest = () =>
-      hostLink.injectHostEvent({
-        type: 'patch.activity.read.response',
-        requestId: (reqs().at(-1)!.event as PatchActivityReadRequestEvent).requestId,
-        messages: [],
-      } as WireEvent);
-    // A simulated clock: on a loaded runner, real waits let the retry time out
-    // too before the test answered it, and that rejection had no listener yet.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      const ok = reader.query({ since: 0, until: 1000 });
-      await vi.advanceTimersByTimeAsync(20); // first attempt times out unanswered
-      expect(reqs().length).toBe(2);
-      answerLatest();
-      await expect(ok).resolves.toMatchObject({ messagesTruncated: false });
-      const dead = reader.query({ since: 0, until: 1000 });
-      const refused = expect(dead).rejects.toThrow(/did not answer/);
-      await vi.advanceTimersByTimeAsync(40); // both attempts go unanswered
-      await refused;
-    } finally {
-      vi.useRealTimers();
-      reader.close();
-    }
   });
 });

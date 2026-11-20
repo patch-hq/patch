@@ -334,6 +334,37 @@ describe('server link with an outbox', () => {
     });
   });
 
+  describe('tool-log entries: kept by a server that answers reads', () => {
+    const entry = (ts: number): WireEvent =>
+      ({
+        type: 'patch.tool_log.entry',
+        entry: { ts, tool: 'patch_peek', durationMs: 1, ok: true },
+      }) as WireEvent;
+
+    it('go through the outbox to a server with `serverReads`', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true, serverReads: true }));
+      s.sent.length = 0;
+      link.send(entry(1));
+      expect(s.sent).toEqual([{ type: 'host.outbox', position: 0, event: entry(1) }]);
+      expect(link.answersReads()).toBe(true);
+    });
+
+    it('are held for a server without it, and sent once one with it connects', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
+      s.sent.length = 0;
+      link.send(entry(1));
+      expect(s.sent).toEqual([]);
+      expect(link.answersReads()).toBe(false);
+      s.close(1006);
+      link.start();
+      const again = connect(authOk({ hostOutbox: true, recordComplete: true, serverReads: true }));
+      const resent = again.sent.filter((f) => f['type'] === 'host.outbox');
+      expect(resent.map((f) => f['event'])).toEqual([entry(1)]);
+    });
+  });
+
   // spec/12 § Chat status: a server that decides status itself says
   // `serverStatus`; until a host sees it, it sends chat.state exactly as before,
   // so a host that updates first still works with the server it finds.

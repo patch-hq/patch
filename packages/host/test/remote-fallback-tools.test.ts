@@ -1,14 +1,9 @@
-// Cross-host fallback for patch_peek / patch_history / patch_send_to
-// (spec/03 § Cross-chat tools, spec/06 § Cross-chat toolset).
-//
-// The defect this file locks down: these three only ever asked THIS
-// host's own local chat state, so a chatId that lives on another
-// registered host — one `patch_list_chats` had just named — 404'd as
-// `chat_not_found`, indistinguishable from a chat that never existed
-// anywhere. `peekRemoteChat`/`historyRemoteChat`/`sendToRemoteChat` are the
-// injectable hooks production wires to the host's cross-host relay
-// (index.ts); this file exercises the UDS endpoint's use of them directly,
-// the same way cross-chat-tools.test.ts exercises the local-hit path.
+// patch_peek / patch_history read from the server; patch_send_to and
+// `patch chats get` fall back to the owning host or the server when the chat
+// is not local (spec/03 § Cross-chat tools, spec/06 § Cross-chat toolset).
+// `peekFromServer`/`historyFromServer`/`sendToRemoteChat` are the injectable
+// hooks production wires to the host's server link (index.ts); this file
+// exercises the UDS endpoint's use of them directly.
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
@@ -42,28 +37,25 @@ function setup(remote: Partial<BuildOptions> = {}) {
   return { daemon, jobs, ...remote };
 }
 
-describe('patch_peek — falls back to the owning host when not local', () => {
-  it('calls peekRemoteChat with the caller + target + limit, and returns its result verbatim', async () => {
+describe('patch_peek — read from the server, whichever host owns the chat', () => {
+  it('calls peekFromServer with the caller + target + limit, and returns its result verbatim', async () => {
     const calls: unknown[] = [];
-    const remoteResult = {
-      chat_state: { chatId: 'chat-on-host-b', activity: 'idle' },
+    const logged: unknown[] = [];
+    const serverResult = {
+      chat_state: { chatId: 'chat-on-host-b', chatStatus: { state: 'idle' } },
       events: [{ type: 'chat.message' }],
       truncated: false,
     };
-    const { daemon, jobs } = setup({
-      peekRemoteChat: async (req) => {
-        calls.push(req);
-        return remoteResult;
-      },
-    });
+    const { daemon, jobs } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async (req) => {
+      peekFromServer: async (req) => {
         calls.push(req);
-        return remoteResult;
+        return serverResult;
       },
+      toolLogger: (entry) => logged.push(entry),
     });
     try {
       const res = await app.inject({
@@ -72,28 +64,29 @@ describe('patch_peek — falls back to the owning host when not local', () => {
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual(remoteResult);
+      expect(res.json()).toEqual(serverResult);
       expect(calls).toEqual([{ sourceChatId: 'mgr', targetChatId: 'chat-on-host-b', limit: 10 }]);
+      expect(logged).toMatchObject([
+        { tool: 'patch_peek', callerChatId: 'mgr', targetChatId: 'chat-on-host-b', ok: true },
+      ]);
     } finally {
       await app.close();
     }
   });
 
-  it('never calls the remote hook when the chat IS local', async () => {
-    const { daemon, jobs, folder } = {
-      ...setup(),
-      folder: mkdtempSync(join(tmpdir(), 'patch-relay-folder-')),
-    };
+  it('asks the server even when the chat is this host’s own', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'patch-relay-folder-'));
     mkdirSync(folder, { recursive: true });
+    const { daemon, jobs } = setup();
     const chatId = await daemon.spawnChat({ folder, prompt: 'hi' });
-    let calledRemote = false;
+    const asked: string[] = [];
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async () => {
-        calledRemote = true;
-        throw new Error('should not be called');
+      peekFromServer: async (req) => {
+        asked.push(req.targetChatId);
+        return { chat_state: { chatId }, events: [], truncated: false };
       },
     });
     try {
@@ -103,19 +96,19 @@ describe('patch_peek — falls back to the owning host when not local', () => {
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(calledRemote).toBe(false);
+      expect(asked).toEqual([chatId]);
     } finally {
       await app.close();
     }
   });
 
-  it('a chat_not_found from the remote relay surfaces as a 404, not a 502', async () => {
+  it('a chat_not_found from the server surfaces as a 404, not a 502', async () => {
     const { daemon, jobs } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async () => {
+      peekFromServer: async () => {
         throw new RemoteRelayError('chat_not_found', 'no such chat: chat-ghost');
       },
     });
@@ -132,14 +125,14 @@ describe('patch_peek — falls back to the owning host when not local', () => {
     }
   });
 
-  it('an offline-host refusal surfaces as a 502 naming the reason', async () => {
+  it('a server that cannot be reached surfaces as a 502 naming the reason', async () => {
     const { daemon, jobs } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async () => {
-        throw new RemoteRelayError('host_not_registered', 'host host-b is offline');
+      peekFromServer: async () => {
+        throw new RemoteRelayError('host_not_registered', 'the link to the Patch server is down');
       },
     });
     try {
@@ -149,21 +142,21 @@ describe('patch_peek — falls back to the owning host when not local', () => {
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
       expect(res.statusCode).toBe(502);
-      expect(res.json().message).toContain('host-b');
+      expect(res.json().message).toContain('Patch server');
     } finally {
       await app.close();
     }
   });
 
-  it('with no callerChatId, falls back to the plain local 404 (no relay attempted)', async () => {
+  it('with no callerChatId (the CLI) still reads from the server', async () => {
     const { daemon, jobs } = setup();
-    let calledRemote = false;
+    const calls: unknown[] = [];
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async () => {
-        calledRemote = true;
+      peekFromServer: async (req) => {
+        calls.push(req);
         return { chat_state: {}, events: [], truncated: false };
       },
     });
@@ -173,18 +166,33 @@ describe('patch_peek — falls back to the owning host when not local', () => {
         url: '/internal/peek/chat-on-host-b',
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
-      expect(res.statusCode).toBe(404);
-      expect(calledRemote).toBe(false);
+      expect(res.statusCode).toBe(200);
+      expect(calls).toEqual([{ sourceChatId: 'cli', targetChatId: 'chat-on-host-b', limit: 50 }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('with no server to read from, answers 503', async () => {
+    const { daemon, jobs } = setup();
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/internal/peek/x',
+        headers: { authorization: `Bearer ${LOCAL_KEY}` },
+      });
+      expect(res.statusCode).toBe(503);
     } finally {
       await app.close();
     }
   });
 });
 
-describe('patch_history — falls back to the owning host when not local', () => {
-  it('calls historyRemoteChat and returns its result verbatim', async () => {
+describe('patch_history — read from the server, whichever host owns the chat', () => {
+  it('calls historyFromServer and returns its result verbatim', async () => {
     const { daemon, jobs } = setup();
-    const remoteResult = {
+    const serverResult = {
       events: [{ type: 'chat.message' } as unknown as WireEvent],
       nextFromSeq: 5,
     };
@@ -192,14 +200,14 @@ describe('patch_history — falls back to the owning host when not local', () =>
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      historyRemoteChat: async (req) => {
+      historyFromServer: async (req) => {
         expect(req).toEqual({
           sourceChatId: 'mgr',
           targetChatId: 'chat-on-host-b',
           fromSeq: 2,
           limit: 20,
         });
-        return remoteResult;
+        return serverResult;
       },
     });
     try {
@@ -209,19 +217,44 @@ describe('patch_history — falls back to the owning host when not local', () =>
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual(remoteResult);
+      expect(res.json()).toEqual(serverResult);
     } finally {
       await app.close();
     }
   });
 
-  it('a chat_not_found from the remote relay surfaces as a 404', async () => {
+  it('clamps a huge limit to 200 rather than refusing', async () => {
+    const { daemon, jobs } = setup();
+    let asked: number | undefined;
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      historyFromServer: async (req) => {
+        asked = req.limit;
+        return { events: [] };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/internal/history/c?limit=5000&callerChatId=mgr',
+        headers: { authorization: `Bearer ${LOCAL_KEY}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(asked).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('a chat_not_found from the server surfaces as a 404', async () => {
     const { daemon, jobs } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      historyRemoteChat: async () => {
+      historyFromServer: async () => {
         throw new RemoteRelayError('chat_not_found', 'no such chat: chat-ghost');
       },
     });
@@ -232,6 +265,26 @@ describe('patch_history — falls back to the owning host when not local', () =>
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
       expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a malformed query', async () => {
+    const { daemon, jobs } = setup();
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      historyFromServer: async () => ({ events: [] }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/internal/history/c?fromSeq=-1',
+        headers: { authorization: `Bearer ${LOCAL_KEY}` },
+      });
+      expect(res.statusCode).toBe(400);
     } finally {
       await app.close();
     }
@@ -302,10 +355,10 @@ describe('GET /chats/:id (patch chats get) — falls back to the owning host whe
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async (req) => {
+      peekFromServer: async (req) => {
         calls.push(req);
         return {
-          chat_state: { chatId: 'chat-on-host-b', activity: 'idle' },
+          chat_state: { chatId: 'chat-on-host-b', chatStatus: { state: 'idle' } },
           events: [],
           truncated: false,
         };
@@ -318,7 +371,7 @@ describe('GET /chats/:id (patch chats get) — falls back to the owning host whe
         headers: { authorization: `Bearer ${LOCAL_KEY}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ chatId: 'chat-on-host-b', activity: 'idle' });
+      expect(res.json()).toEqual({ chatId: 'chat-on-host-b', chatStatus: { state: 'idle' } });
       expect(calls).toEqual([{ sourceChatId: 'cli', targetChatId: 'chat-on-host-b', limit: 1 }]);
     } finally {
       await app.close();
@@ -331,7 +384,7 @@ describe('GET /chats/:id (patch chats get) — falls back to the owning host whe
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      peekRemoteChat: async () => {
+      peekFromServer: async () => {
         throw new RemoteRelayError('chat_not_found', 'no such chat');
       },
     });

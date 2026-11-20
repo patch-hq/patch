@@ -94,7 +94,6 @@ import {
 import { RateLimiter } from './rate-limit.js';
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
-import { buildPeekResult, stripBinaryPayloads } from './peek.js';
 import { probeFolderAccess } from './folderAccess.js';
 
 /** A stop refused because the chat's provider does not declare interrupt (spec/02 § Provider adapters). */
@@ -249,29 +248,25 @@ export interface BuildOptions {
     nextSessionsCursor?: number;
   }>;
   /**
-   * Read another chat's live state cross-host (spec/03 § Cross-chat tools):
-   * emits `patch.peek.request` and resolves with the OWNING host's own
-   * `{ chat_state, events, truncated }`. Only called once this host's own
-   * `chatState` has already come back empty for the id — `patch_peek` never
-   * says which host a chat lives on, so the local miss IS the signal to ask
-   * the server to relay. Rejects with a `RemoteRelayError` when no host
-   * has ever reported that chat, or the host that owns it is offline. When
-   * unset, a chat not found locally 404s exactly as before this existed.
-   */
-  /**
    * Whether this host runs the Manager. When it does not, a local copy of a
    * reserved special thread is stale (the Manager moved), so patch_send_to /
-   * patch_peek / patch_history addressed to one skip it and relay to the host
-   * that does run it. Unset means "do not special-case".
+   * patch_stop addressed to one skip it and relay to the host that does run
+   * it. Unset means "do not special-case".
    */
   runsManager?: () => boolean;
-  peekRemoteChat?: (req: {
+  /**
+   * `patch_peek` (spec/03 § Cross-chat tools): the server's answer from its own
+   * record and chat status, for a chat on any host, online or not. Rejects
+   * with a `RemoteRelayError` when the server does not know the chat or
+   * cannot be reached. Unset, the tool answers 503.
+   */
+  peekFromServer?: (req: {
     sourceChatId: string;
     targetChatId: string;
     limit?: number;
   }) => Promise<{ chat_state: unknown; events: unknown[]; truncated: boolean }>;
-  /** `patch_history`'s cross-host sibling to `peekRemoteChat`, same contract. */
-  historyRemoteChat?: (req: {
+  /** `patch_history`'s sibling to `peekFromServer`, same contract. */
+  historyFromServer?: (req: {
     sourceChatId: string;
     targetChatId: string;
     fromSeq?: number;
@@ -1052,13 +1047,13 @@ const LinkFileBody = z
   .strict();
 
 // patch_history: the 200 hard cap is a CLAMP, not a rejection (mirrors the
-// job-runs route). A caller asking for limit:5000 must get the newest 200
-// events, not a 400. The real ceiling is enforced in Daemon.readHistory.
+// job-runs route). A caller asking for limit:5000 must get the first 200
+// events, not a 400.
 const HistoryQuery = z
   .object({
     fromSeq: z.coerce.number().int().nonnegative().optional(),
     limit: z.coerce.number().int().positive().optional(),
-    /** The calling chat — needed to relay a cross-host `patch_history`. */
+    /** The calling chat, named on the request the server answers. */
     callerChatId: z.string().min(1).optional(),
   })
   .strict();
@@ -1283,10 +1278,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     const state = opts.daemon.chatState.resolve(req.params.id);
     if (!state) {
       // Not on THIS host — `patch chats get` on a chat another host owns.
-      // Same relay as patch_peek (one event, only the chat_state is kept).
-      if (opts.peekRemoteChat) {
+      // Read from the server like patch_peek (only the chat_state is kept).
+      if (opts.peekFromServer) {
         try {
-          const remote = await opts.peekRemoteChat({
+          const remote = await opts.peekFromServer({
             sourceChatId: 'cli',
             targetChatId: req.params.id,
             limit: 1,
@@ -2037,20 +2032,21 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return { resumeSessionId: diag.resumeSessionId ?? null, at: diag.at };
   });
 
-  // patch_peek — spec/06: returns { chat_state, events, truncated }.
-  //   chat_state — the chat_state snapshot (activity, name, folder, last update).
-  //   events     — the most-recent slice of the chat's wire stream
+  // patch_peek — spec/06: returns { chat_state, events, truncated }, built by
+  // the server from its record and chat status (spec/03 § Cross-chat tools):
+  //   chat_state — the chat's list entry and server status, with its host and
+  //                whether that host is online.
+  //   events     — the most-recent slice of the chat's record
   //                (default limit 50, configurable via ?limit up to 200).
-  //   truncated  — true when older events exist beyond the returned slice; the
+  //   truncated  — true when older entries exist beyond the returned slice; the
   //                calling agent should call patch_history to paginate.
-  // No LLM summary pass — this is the "what's going on right now" window.
+  // No LLM summary pass, and no host is asked: a chat on an offline host
+  // reads like any other.
   app.get<{ Params: { id: string }; Querystring: { limit?: string; callerChatId?: string } }>(
     '/internal/peek/:id',
     async (req, reply) => {
       const start = Date.now();
       if (require503(reply)) return;
-      // Parse + clamp the requested limit (default 50, hard cap 200 per spec) —
-      // needed either way, so resolved before the local/remote branch.
       let limit = 50;
       if (req.query.limit !== undefined) {
         const parsed = Math.floor(Number(req.query.limit));
@@ -2062,70 +2058,40 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         }
         limit = Math.min(200, parsed);
       }
-      // eventCount/hasClaudeSession in the result: how much this chat has ever
-      // said, and whether the model still remembers any of it. `events` is a
-      // RING held in memory by this process, so a chat hydrated from disk and
-      // not touched since returns none of its history — which reads as "empty
-      // chat" when it is nothing of the sort. These two are read from the
-      // chat's own state, so they are true whether or not the ring is warm:
-      // `eventCount: 23, hasClaudeSession: false` is the whole diagnosis of a
-      // chat whose session has been lost, in the first thing an agent looks at.
-      const local = isForeignSpecialThread(req.params.id)
-        ? undefined
-        : buildPeekResult(opts.daemon!, req.params.id, limit);
-      if (!local) {
-        // Not on THIS host — spec/03 § Cross-chat tools: relayed to whichever
-        // host the server's chat mirror says owns it, resolved from a bare
-        // chatId since `patch_peek` never says which host. NO FALLBACK to
-        // this host's own chats: an agent asking about a chat it just learned
-        // of via `patch_list_chats` must get that chat, or a real error.
-        if (opts.peekRemoteChat && req.query.callerChatId !== undefined) {
-          try {
-            const remote = await opts.peekRemoteChat({
-              sourceChatId: req.query.callerChatId,
-              targetChatId: req.params.id,
-              limit,
-            });
-            toolLog({
-              tool: 'patch_peek',
-              targetChatId: req.params.id,
-              durationMs: Date.now() - start,
-              ok: true,
-            });
-            return stripBinaryPayloads(remote);
-          } catch (err) {
-            const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
-            toolLog({
-              tool: 'patch_peek',
-              targetChatId: req.params.id,
-              durationMs: Date.now() - start,
-              ok: false,
-              err: code,
-            });
-            return reply.code(code === 'chat_not_found' ? 404 : 502).send({
-              error: code,
-              message: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
+      if (!opts.peekFromServer) {
+        return reply
+          .code(503)
+          .send({ error: 'unavailable', message: 'patch_peek: no Patch server to read from' });
+      }
+      try {
+        const result = await opts.peekFromServer({
+          sourceChatId: req.query.callerChatId ?? 'cli',
+          targetChatId: req.params.id,
+          limit,
+        });
         toolLog({
           tool: 'patch_peek',
+          ...(req.query.callerChatId !== undefined ? { callerChatId: req.query.callerChatId } : {}),
+          targetChatId: req.params.id,
+          durationMs: Date.now() - start,
+          ok: true,
+        });
+        return result;
+      } catch (err) {
+        const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
+        toolLog({
+          tool: 'patch_peek',
+          ...(req.query.callerChatId !== undefined ? { callerChatId: req.query.callerChatId } : {}),
           targetChatId: req.params.id,
           durationMs: Date.now() - start,
           ok: false,
-          err: 'chat_not_found',
+          err: code,
         });
-        return reply
-          .code(404)
-          .send({ error: 'chat_not_found', message: `chat not found: ${req.params.id}` });
+        return reply.code(code === 'chat_not_found' ? 404 : 502).send({
+          error: code,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
-      toolLog({
-        tool: 'patch_peek',
-        targetChatId: req.params.id,
-        durationMs: Date.now() - start,
-        ok: true,
-      });
-      return stripBinaryPayloads(local);
     },
   );
 
@@ -3416,15 +3382,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
   });
 
-  // patch_history.
+  // patch_history — a page of the chat's record, read from the server
+  // (spec/03 § Cross-chat tools) whichever host owns the chat.
   app.get<{ Params: { id: string } }>('/internal/history/:id', async (req, reply) => {
     const start = Date.now();
     if (require503(reply)) return;
     const params = StopParams.safeParse(req.params);
     // Unreachable: fastify's router never matches `:id` against an empty
-    // segment (a bare `/internal/history/` 404s at the router, before this
-    // handler runs), so `id` is always a non-empty string and this zod check
-    // can never fail. Kept for defense-in-depth.
+    // segment, so `id` is always a non-empty string. Kept for defense-in-depth.
     /* v8 ignore next 3 */
     if (!params.success) {
       return reply.code(400).send({ error: 'invalid_input', message: params.error.message });
@@ -3433,69 +3398,38 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!q.success) {
       return reply.code(400).send({ error: 'invalid_input', message: q.error.message });
     }
+    if (!opts.historyFromServer) {
+      return reply
+        .code(503)
+        .send({ error: 'unavailable', message: 'patch_history: no Patch server to read from' });
+    }
+    const caller = q.data.callerChatId !== undefined ? { callerChatId: q.data.callerChatId } : {};
     try {
-      if (isForeignSpecialThread(params.data.id)) throw new ChatNotFoundError(params.data.id);
-      const slice = opts.daemon!.readHistory({
-        chatId: params.data.id,
+      const result = await opts.historyFromServer({
+        sourceChatId: q.data.callerChatId ?? 'cli',
+        targetChatId: params.data.id,
         ...(q.data.fromSeq !== undefined ? { fromSeq: q.data.fromSeq } : {}),
-        ...(q.data.limit !== undefined ? { limit: q.data.limit } : {}),
+        ...(q.data.limit !== undefined ? { limit: Math.min(200, q.data.limit) } : {}),
       });
       toolLog({
         tool: 'patch_history',
+        ...caller,
         targetChatId: params.data.id,
         durationMs: Date.now() - start,
         ok: true,
       });
-      const out: { events: WireEvent[]; nextFromSeq?: number } = { events: slice.events };
-      if (slice.nextFromSeq !== undefined) out.nextFromSeq = slice.nextFromSeq;
-      return stripBinaryPayloads(out);
+      return result;
     } catch (err) {
-      // Not on THIS host — spec/03 § Cross-chat tools, same relay `patch_peek`
-      // uses above. NO FALLBACK to a local-only 404 when the caller can be
-      // told which host actually holds this history, or that none does.
-      if (
-        err instanceof ChatNotFoundError &&
-        opts.historyRemoteChat &&
-        q.data.callerChatId !== undefined
-      ) {
-        try {
-          const remote = await opts.historyRemoteChat({
-            sourceChatId: q.data.callerChatId,
-            targetChatId: params.data.id,
-            ...(q.data.fromSeq !== undefined ? { fromSeq: q.data.fromSeq } : {}),
-            ...(q.data.limit !== undefined ? { limit: q.data.limit } : {}),
-          });
-          toolLog({
-            tool: 'patch_history',
-            targetChatId: params.data.id,
-            durationMs: Date.now() - start,
-            ok: true,
-          });
-          return stripBinaryPayloads(remote);
-        } catch (remoteErr) {
-          const code = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
-          toolLog({
-            tool: 'patch_history',
-            targetChatId: params.data.id,
-            durationMs: Date.now() - start,
-            ok: false,
-            err: code,
-          });
-          return reply.code(code === 'chat_not_found' ? 404 : 502).send({
-            error: code,
-            message: remoteErr instanceof Error ? remoteErr.message : String(remoteErr),
-          });
-        }
-      }
-      const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
+      const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
       toolLog({
         tool: 'patch_history',
+        ...caller,
         targetChatId: params.data.id,
         durationMs: Date.now() - start,
         ok: false,
         err: code,
       });
-      return reply.code(code === 'chat_not_found' ? 404 : 500).send({
+      return reply.code(code === 'chat_not_found' ? 404 : 502).send({
         error: code,
         message: err instanceof Error ? err.message : String(err),
       });

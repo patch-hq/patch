@@ -3168,36 +3168,7 @@ describe('Host ChatRunner', () => {
     });
   });
 
-  describe('getRecentEvents / lastQueryDiagnostics', () => {
-    it('returns the tail and flags truncated when limited below the ring size', async () => {
-      const { daemon, sdk, folder } = setup();
-      sdk.enqueue([
-        { type: 'assistant', content: 'a' },
-        { type: 'assistant', content: 'b' },
-        { type: 'assistant', content: 'c' },
-      ]);
-      const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
-      await new Promise((r) => setTimeout(r, 30));
-      const full = daemon.getRecentEvents(chatId, 200);
-      expect(full.truncated).toBe(false);
-      const limited = daemon.getRecentEvents(chatId, 1);
-      expect(limited.truncated).toBe(true);
-      expect(limited.events).toHaveLength(1);
-    });
-
-    it('caps the ring at 200 events per chat and marks it truncated', async () => {
-      const { daemon, sdk, folder } = setup();
-      const script: Array<{ type: 'assistant'; content: string }> = [];
-      for (let i = 0; i < 205; i++) script.push({ type: 'assistant', content: `msg-${i}` });
-      sdk.enqueue([...script, { type: 'result', sessionId: 'sess-cap' }]);
-      const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
-      await new Promise((r) => setTimeout(r, 300));
-      const { events, truncated } = daemon.getRecentEvents(chatId, 200);
-      expect(truncated).toBe(true);
-      expect(events).toHaveLength(200);
-      expect((events[events.length - 1] as { content?: string }).content).toBe('msg-204');
-    });
-
+  describe('lastQueryDiagnostics', () => {
     it('lastQueryDiagnostics: undefined before any query, then records the resume argument used', async () => {
       const { daemon, sdk, folder } = setup();
       expect(daemon.lastQueryDiagnostics('no-such-chat')).toBeUndefined();
@@ -4380,16 +4351,6 @@ describe('Host ChatRunner', () => {
       const requestId = daemon.injectPermissionRequest('no-such-chat', 'Bash', 'rm -rf');
       expect(requestId).toBeUndefined();
       expect(events).toHaveLength(0);
-    });
-  });
-
-  describe('getRecentEvents: an empty ring (chat with no events yet)', () => {
-    it('returns an empty, non-truncated slice', async () => {
-      const { daemon, folder } = setup();
-      const chatId = await daemon.spawnChat({ folder });
-      const { events, truncated } = daemon.getRecentEvents(chatId, 50);
-      expect(events).toEqual([]);
-      expect(truncated).toBe(false);
     });
   });
 
