@@ -10212,7 +10212,10 @@ export class Daemon {
     // macOS holds the first read of ~/Documents, ~/Desktop and ~/Downloads until
     // the user answers a privacy prompt. Say so now rather than leave the chat
     // on its typing dots; the next message re-checks.
-    const folderAdvice = await checkChatFolderAccess(state.folder);
+    // Only macOS can hold the read; skipping the await elsewhere keeps the
+    // preflight's timing unchanged.
+    const folderAdvice =
+      process.platform === 'darwin' ? await checkChatFolderAccess(state.folder) : null;
     if (folderAdvice !== null) {
       this.failPreflight(chatId, 'sdk_error', folderAdvice);
       return false;
