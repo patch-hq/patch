@@ -36,7 +36,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
   }) => {
     await page.goto(HOSTS);
     await setClaudeSettings(page, [], { settingsJson: '{"model":"opus"}' });
-    await expect(page.getByTestId(EDITOR)).toContainText('Set');
+    await expect(page.getByTestId(EDITOR)).toContainText('Customised');
     await page.goto(settingsUrl('agent'));
     await expect(page.getByTestId('claude-settings-shared')).toHaveCount(0);
     await page.goto(settingsUrl('providers'));
