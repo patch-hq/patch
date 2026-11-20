@@ -20,7 +20,7 @@ import { LogRecord, type WireEvent } from '@patch/wire';
 import { Daemon } from '../../host/src/chatRunner.js';
 import { createMetaStore } from '../../host/src/meta.js';
 import { createMockSdkBackend } from '../../host/src/sdkBackend.js';
-import { createHistoryReader, encodeFolder } from '../../host/src/history.js';
+import { createClaudeSessionProbe, encodeFolder } from '../../host/src/history.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import type { HostLink } from '../src/host-link.js';
@@ -164,7 +164,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
       oauthAccessToken: 'fake',
       emit: (e) => link.emit(e),
       logger: silent,
-      historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
     });
     link.daemon = daemon;
 
@@ -268,7 +268,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
         oauthAccessToken: 'fake',
         emit: (e) => link.emit(e),
         logger: silent,
-        historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+        sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
       });
       link.daemon = d;
       return d;

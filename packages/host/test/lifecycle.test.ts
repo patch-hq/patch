@@ -12,7 +12,7 @@ import { ChatNotFoundError, Daemon, FolderNotFoundError } from '../src/chatRunne
 import * as chatRunnerModule from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
@@ -35,7 +35,7 @@ function setup(opts: { now?: () => number; claudeProjectsRoot?: string } = {}) {
     logger: silent,
     now: opts.now ?? (() => 1_700_000_000_000),
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
   });
   return { daemon, sdk, events, home, folder, metaStore, claudeRoot };
 }

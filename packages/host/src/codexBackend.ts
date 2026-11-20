@@ -2,9 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { LimitFacts, SdkBackend, SdkEnvelope, SdkRunOptions } from './sdkBackend.js';
 import { TurnFailedError, trackLiveRun } from './sdkBackend.js';
 import { isAccountExhausted } from './accountFailover.js';
-import { persistedUserContent } from './history.js';
 import { CodexAccounts } from './codexAccounts.js';
-import { CodexHistory } from './codexHistory.js';
+import { CodexSessions } from './codexSessions.js';
 import type { CodexNotification, RpcObject } from './codexClient.js';
 import { discoverSkills, skillCatalogueText } from './projectSkills.js';
 import { DurableCodexProcess } from './codexDurable.js';
@@ -45,6 +44,24 @@ export function codexThinking(item: RpcObject, complete: boolean): SdkEnvelope |
     ...(typeof item.id === 'string' ? { nativeId: item.id } : {}),
   };
 }
+/**
+ * The Codex turn that holds item `itemId` on thread `threadId`, read through
+ * Codex's own `thread/read`. A fork point the thread does not hold is an error:
+ * forking anywhere else would quietly give the new branch the wrong context.
+ */
+export async function codexTurnHolding(
+  client: { request(method: string, params: RpcObject): Promise<RpcObject> },
+  threadId: string,
+  itemId: string,
+): Promise<string> {
+  const snapshot = await client.request('thread/read', { threadId, includeTurns: true });
+  const turns = (snapshot.thread?.turns ?? []) as RpcObject[];
+  const turn = turns.find((t) => (t.items ?? []).some((i: RpcObject) => i.id === itemId));
+  if (!turn || typeof turn.id !== 'string')
+    throw new Error('The message to branch from is not in this Codex thread');
+  return turn.id;
+}
+
 function codexItemEnvelope(item: RpcObject, complete: boolean): SdkEnvelope | undefined {
   if (item.type === 'agentMessage' && complete) return { type: 'assistant', content: item.text };
   const name =
@@ -153,7 +170,7 @@ export function codexDisabledMcpTools(disabledTools: readonly string[] | undefin
 export class CodexBackend implements SdkBackend {
   constructor(
     private accounts: CodexAccounts,
-    readonly history: CodexHistory,
+    readonly sessions: CodexSessions,
     /** The account's model endpoints; a chat on one runs with no Codex login. */
     private readonly endpoints?: ModelEndpointRegistry,
   ) {}
@@ -256,20 +273,22 @@ export class CodexBackend implements SdkBackend {
         ...(opts.systemPrompt ? { baseInstructions: opts.systemPrompt } : {}),
         ...(opts.toolsPrompt ? { developerInstructions: opts.toolsPrompt } : {}),
       };
+      // A fork keeps everything through the entry the record names; Codex
+      // forks at whole turns, so it keeps the turn that holds that entry.
       const point = opts.fork?.resumeAtUuid;
       const fresh = !prior || (opts.fork && point === null);
       const codexPrior = prior && prior.startsWith('codex-') ? prior : undefined;
+      const lastTurnId =
+        !fresh && !attached && opts.fork && point
+          ? await codexTurnHolding(client, codexPrior!.slice(6), point)
+          : undefined;
       const params = fresh
         ? base
         : {
             ...base,
             threadId: codexPrior!.slice(6),
-            path: this.history.providerPath(codexPrior!),
-            ...(point?.startsWith('before:')
-              ? { beforeTurnId: point.slice(7) }
-              : point?.startsWith('through:')
-                ? { lastTurnId: point.slice(8) }
-                : {}),
+            path: this.sessions.providerPath(codexPrior!),
+            ...(lastTurnId !== undefined ? { lastTurnId } : {}),
           };
       // A turn the previous host left running is already on its thread, which
       // that host started or resumed, injected into and sent the prompt to.
@@ -281,8 +300,7 @@ export class CodexBackend implements SdkBackend {
           );
       const threadId: string = response.thread.id;
       const sessionId = 'codex-' + threadId;
-      this.history.begin(sessionId, response.thread.path);
-      if (!attached && codexPrior && point) this.history.fork(codexPrior, sessionId, point);
+      this.sessions.begin(sessionId, response.thread.path);
       yield { type: 'system', sessionId };
       const queue: CodexNotification[] = [];
       let wake: (() => void) | undefined;
@@ -313,7 +331,7 @@ export class CodexBackend implements SdkBackend {
                 });
                 const turn = snapshot.thread.turns?.find((t: RpcObject) => t.id === turnId);
                 if (turn && turn.status !== 'inProgress') {
-                  this.history.setPending(sessionId, null);
+                  this.sessions.setPending(sessionId, null);
                   return;
                 }
                 await new Promise((resolve) => setTimeout(resolve, 100));
@@ -328,7 +346,7 @@ export class CodexBackend implements SdkBackend {
       };
       opts.abortController.signal.addEventListener('abort', interrupt, { once: true });
       try {
-        const pending = attached ? null : this.history.pending(sessionId);
+        const pending = attached ? null : this.sessions.pending(sessionId);
         let previous: RpcObject | undefined;
         if (pending) {
           const snapshot = await client.request('thread/read', { threadId, includeTurns: true });
@@ -349,13 +367,9 @@ export class CodexBackend implements SdkBackend {
             pending.prompt === opts.prompt
           )
             previous = undefined;
-          if (!previous) this.history.setPending(sessionId, null);
+          if (!previous) this.sessions.setPending(sessionId, null);
         }
         if (pending && previous) {
-          this.history.append(sessionId, previous.id, opts.chatId ?? threadId, {
-            type: 'user',
-            content: persistedUserContent(pending.prompt) ?? pending.prompt,
-          });
           toolsStarted =
             previous.items?.some((i: RpcObject) => Boolean(codexItem(i, false))) ?? false;
           if (previous.status === 'inProgress') {
@@ -365,16 +379,10 @@ export class CodexBackend implements SdkBackend {
               );
             turnId = previous.id;
           } else {
-            this.history.setPending(sessionId, null);
+            this.sessions.setPending(sessionId, null);
             for (const item of previous.items ?? []) {
-              const startedItem = codexItem(item, false);
-              if (startedItem)
-                this.history.append(sessionId, previous.id, opts.chatId ?? threadId, startedItem);
               const envelope = codexItem(item, true);
-              if (envelope) {
-                this.history.append(sessionId, previous.id, opts.chatId ?? threadId, envelope);
-                if (pending.prompt === opts.prompt) yield envelope;
-              }
+              if (envelope && pending.prompt === opts.prompt) yield envelope;
             }
             if (pending.prompt === opts.prompt) {
               yield { type: 'result', sessionId };
@@ -385,7 +393,7 @@ export class CodexBackend implements SdkBackend {
         if (!turnId) {
           if (opts.abortController.signal.aborted) throw new Error('Codex turn interrupted');
           const clientId = randomUUID();
-          this.history.setPending(sessionId, { id: clientId, prompt: opts.prompt });
+          this.sessions.setPending(sessionId, { id: clientId, prompt: opts.prompt });
           // Codex never scans .claude/skills, so hand it a freshly-read
           // catalogue every turn (no cache: renames show up immediately).
           const catalogue = opts.cwd ? skillCatalogueText(discoverSkills(opts.cwd)) : undefined;
@@ -399,10 +407,6 @@ export class CodexBackend implements SdkBackend {
           });
           turnId = started.turn.id;
         }
-        this.history.append(sessionId, turnId!, opts.chatId ?? threadId, {
-          type: 'user',
-          content: persistedUserContent(opts.prompt) ?? opts.prompt,
-        });
         if (opts.abortController.signal.aborted) interrupt();
         while (true) {
           if (opts.abortController.signal.aborted) {
@@ -510,10 +514,7 @@ export class CodexBackend implements SdkBackend {
             };
             continue;
           }
-          if (envelope) {
-            this.history.append(sessionId, turnId!, opts.chatId ?? threadId, envelope);
-            yield envelope;
-          }
+          if (envelope) yield envelope;
           // A tool call just finished: the tool boundary. Codex takes input
           // into the turn that is already running through `turn/steer`, which
           // is how a message sent mid-turn reaches the agent before the turn
@@ -540,7 +541,7 @@ export class CodexBackend implements SdkBackend {
           }
           if (message.method === 'turn/completed') {
             const turn = message.params.turn;
-            this.history.setPending(sessionId, null);
+            this.sessions.setPending(sessionId, null);
             if (turn.status !== 'completed')
               throw new CodexTurnError(
                 turn.error?.message ?? `Codex turn ${turn.status}`,

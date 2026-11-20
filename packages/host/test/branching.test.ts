@@ -2,19 +2,19 @@
 // Editing a user turn forks a new TRACK from that turn: the prefix is shared,
 // the original track is left intact, and the user switches between them.
 //
-// Driven against the mock SDK backend configured to persist a real
-// Claude-Code-shaped JSONL transcript, so the fork point is resolved from a
-// genuine transcript (the same on-disk contract the real SDK provides) rather
-// than a hand-rolled stub.
+// The fork point comes from the chat's own record: the provider id
+// (`nativeRef`) each entry carries. Driven against the mock SDK backend, which
+// gives each entry an id as the real SDK does and forks its session file at
+// one.
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatBranchesEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { readBack } from './helpers/readBack.js';
@@ -37,14 +37,14 @@ function setup(opts: { turnDelayMs?: number } = {}) {
     hostId: 'd1',
     metaStore,
     sdkBackend: sdk,
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
   });
-  return { daemon, sdk, events, folder, metaStore };
+  return { daemon, sdk, events, folder, metaStore, home, projectsRoot };
 }
 
 function branchEvents(events: WireEvent[]): ChatBranchesEvent[] {
@@ -264,8 +264,11 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
     const mainSessionId = metaStore.read(chatId)!.claudeSessionId;
-    const firstTurn = userMessages(replay(daemon, chatId)).find(
-      (m) => m.content === 'first question',
+    // The first answer: a side thread hangs off an entry the provider gave an
+    // id, and a user's own message has none.
+    const firstTurn = replay(daemon, chatId).find(
+      (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
+        e.type === 'chat.message' && e.role === 'assistant',
     )!;
 
     events.length = 0;
@@ -304,6 +307,22 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     expect(onSide).toContain('first question');
     expect(onSide).toContain('a question on the side');
     expect(onSide).not.toContain('second question');
+  });
+
+  it('refuses a user message: it carries no provider id to fork at', async () => {
+    const { daemon, events, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    const asked = userMessages(replay(daemon, chatId))[0]!;
+
+    events.length = 0;
+    await daemon.sideChat({ chatId, seq: asked.seq, message: 'aside', localId: 'l2' });
+
+    const err = events.find((e) => e.type === 'chat.error') as
+      | { error: { code: string } }
+      | undefined;
+    expect(err?.error.code).toBe('fork_point_not_found');
+    expect(events.some((e) => e.type === 'chat.branches')).toBe(false);
   });
 
   it('hangs off an ASSISTANT message too — asking about an answer is the common case', async () => {
@@ -389,5 +408,85 @@ describe('spec/04 § Branching — active track and written track never disagree
     expect(userMessages(replay(daemon, chatId)).map((m) => m.content)).not.toContain(
       'second question',
     );
+  });
+});
+
+describe('spec/04 § Branching — the fork point comes from the record', () => {
+  /** The chat's log lines, as `chatLog.ts` wrote them. */
+  function logOf(home: string, chatId: string): Array<Record<string, any>> {
+    return readFileSync(join(home, 'chats', chatId, 'events.jsonl'), 'utf8')
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l));
+  }
+
+  it("an edit forks at the nativeRef of the entry before the edited turn, never reading the provider's session", async () => {
+    const { daemon, sdk, events, folder, home, projectsRoot } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
+    const second = userMessages(replay(daemon, chatId)).find(
+      (m) => m.content === 'second question',
+    )!;
+    const firstAnswer = logOf(home, chatId).find(
+      (r) => r.rec?.event?.type === 'chat.message' && r.rec.event.role === 'assistant',
+    )!;
+    expect(firstAnswer.nativeRef?.id).toEqual(expect.any(String));
+
+    // Emptying the provider's session files changes nothing: Patch does not look.
+    rmSync(projectsRoot, { recursive: true, force: true });
+    mkdirSync(projectsRoot, { recursive: true });
+
+    events.length = 0;
+    await daemon.forkChat({ chatId, seq: second.seq, message: 'second, again', localId: 'l3' });
+    expect(events.filter((e) => e.type === 'chat.error')).toEqual([]);
+    expect(sdk.lastOptions()?.fork).toEqual({ resumeAtUuid: firstAnswer.nativeRef.id });
+  });
+
+  it('a side thread forks at the nativeRef of the entry it hangs off', async () => {
+    const { daemon, sdk, folder, home } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    const answer = logOf(home, chatId).find(
+      (r) => r.rec?.event?.type === 'chat.message' && r.rec.event.role === 'assistant',
+    )!;
+    await daemon.sideChat({ chatId, seq: answer.seq, message: 'why?', localId: 'l2' });
+    expect(sdk.lastOptions()?.fork).toEqual({ resumeAtUuid: answer.nativeRef.id });
+  });
+
+  it('refuses an edit whose earlier entries were recorded before provider ids were kept', async () => {
+    const { daemon, events, folder, home } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
+    const second = userMessages(replay(daemon, chatId)).find(
+      (m) => m.content === 'second question',
+    )!;
+    // An older chat: the same log, with no provider ids on its entries.
+    const path = join(home, 'chats', chatId, 'events.jsonl');
+    daemon.shutdown();
+    writeFileSync(
+      path,
+      logOf(home, chatId)
+        .map(({ nativeRef: _ref, ...r }) => JSON.stringify(r) + '\n')
+        .join(''),
+    );
+    const reopened = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: createMockSdkBackend(),
+      oauthAccessToken: 'tok',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+    });
+    reopened.hydrate();
+    events.length = 0;
+    await reopened.forkChat({ chatId, seq: second.seq, message: 'again', localId: 'l3' });
+    const err = events.find((e) => e.type === 'chat.error') as
+      | { error: { code: string } }
+      | undefined;
+    expect(err?.error.code).toBe('fork_point_not_found');
+    reopened.shutdown();
   });
 });

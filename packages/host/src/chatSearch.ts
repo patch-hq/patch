@@ -1,37 +1,33 @@
 // Chat search (spec/02 § Chat search, spec/03 § Chat search).
 //
 // Searches every chat on this host — its name, and the text of every user and
-// assistant message in its transcript — and answers with ranked hits carrying a
-// highlighted snippet and the matched message's canonical seq for jump-to.
+// assistant message in its log — and answers with ranked hits carrying a
+// highlighted snippet and the matched message's seq for jump-to.
 //
-// WHERE THE TEXT COMES FROM. Patch stores no chat history (principles.md; the
-// chat directory "holds ... no transcript", spec/04 § History): the backend's
-// own JSONL is the one store. So the index here is a DERIVED, IN-MEMORY cache
-// of that JSONL, never written anywhere. It is built once in the background
-// when the host starts and then kept current incrementally: every search
-// stats each chat's transcript and reads only the bytes appended since the last
-// look (the backends append; a file that shrank or a session that changed is
-// re-read whole). A restart simply rebuilds it.
+// WHERE THE TEXT COMES FROM. Each chat's own log (`~/.patch/chats/<id>/
+// events.jsonl`, spec/04 § History), the same record every surface draws from;
+// a provider's session files are never read (spec/04 § History). The index is
+// a DERIVED, IN-MEMORY cache of the logs, never written anywhere. It is built
+// once in the background when the host starts and then kept current
+// incrementally: every search stats each chat's log and reads only the bytes
+// appended since the last look. A restart simply rebuilds it.
 //
-// WHY NOT A SCAN PER QUERY, OR SQLite FTS. On the host this was built against,
-// the transcripts of ~2,200 live chats are 1.7 GB, of which the searchable
-// text — user and assistant messages — is ~14 MB; the rest is tool output,
-// tool inputs, thinking and attachments. A per-query scan re-reads the 1.7 GB
-// (1.6 s warm, 6.5 s cold, and the raw bytes are JSON-escaped, so they cannot
-// even be matched case-insensitively as-is). An FTS index would be a second,
-// persisted copy of every message — the thing the principle forbids — plus a
-// native dependency on every host. Holding the 14 MB in memory answers a query
-// in tens of milliseconds and stores nothing.
+// WHY NOT A SCAN PER QUERY, OR SQLite FTS. Chat histories run to gigabytes, of
+// which the searchable text — user and assistant messages — is a few percent;
+// the rest is tool output, tool inputs and thinking. A per-query scan re-reads
+// all of it (seconds, and the raw bytes are JSON-escaped, so they cannot even
+// be matched case-insensitively as-is). An FTS index would be a second,
+// persisted copy of every message plus a native dependency on every host.
+// Holding the message text in memory answers a query in tens of milliseconds
+// and stores nothing.
 //
-// WHAT IS SEARCHED. User and assistant message text exactly as replay renders
-// it (it goes through `jsonlLineToWire`, the replay path itself, so command
-// wrappers, injected reminders, `isMeta` turns and synthetic replies are
-// already gone). Tool calls and their output are NOT searched: they are 99% of
-// the bytes and would drown every query in file dumps and command output — a
-// search for a word finds every chat that ever `cat`-ed a file containing it.
+// WHAT IS SEARCHED. User and assistant message text exactly as the record
+// holds it, on the chat's current track. Tool calls and their output are NOT
+// searched: they are most of the bytes and would drown every query in file
+// dumps and command output — a search for a word finds every chat that ever
+// `cat`-ed a file containing it.
 
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   compareChatSearchHits,
   highlightRanges,
@@ -41,14 +37,10 @@ import {
   type ChatSearchHit,
   type ChatSearchSection,
   type ChatStatus,
+  type TrackSegment,
   type WireEvent,
-  providerForSessionId,
-  type ProviderId,
-  isRetiredLocalSessionId,
 } from '@patch/wire';
 export { highlightRanges, makeSnippet };
-import { encodeFolder, eventIdentity, jsonlLineToWire } from './history.js';
-import { identityHash, readSeqIndexFile } from './seqIndex.js';
 
 /** The fields of a chat the search reads — a subset of `ChatState`. */
 export interface SearchableChat {
@@ -64,21 +56,18 @@ export interface SearchableChat {
   lastUpdated: number;
   /** The ACTIVE track's session (spec/04 § Branching); absent before the first turn. */
   claudeSessionId: string | undefined;
+  /**
+   * The chat's current track (spec/04 § Branching): only its messages are
+   * searched. Absent for a chat that has never branched, whose log is one track.
+   */
+  track?: TrackSegment[];
 }
 
 export interface ChatSearchIndexOptions {
-  /** Where Claude Code writes transcripts (`~/.claude/projects`). */
-  claudeProjectsRoot: string;
-  /** Where the Codex backend writes its history (`<patch home>/openai-history`). */
-  codexHistoryRoot: string;
-  /** Where local-model sessions' history lives (same format as Codex's). */
-  localHistoryRoot: string;
-  /** Where ACP agents' turns are recorded (`acpBackend.ts`). */
-  acpHistoryRoot?: string;
-  /** A chat's canonical-seq sidecar — read, never written. */
-  seqIndexPath: (chatId: string) => string;
+  /** A chat's own log (`~/.patch/chats/<id>/events.jsonl`). */
+  logPath: (chatId: string) => string;
   now: () => number;
-  /** A transcript line that is not valid JSON — skipped, and reported here. */
+  /** A log line that is not valid JSON — skipped, and reported here. */
   onCorruptLine?: (info: { path: string; message: string }) => void;
 }
 
@@ -86,20 +75,17 @@ interface IndexedMessage {
   role: 'user' | 'assistant';
   text: string;
   lower: string;
-  /** `identityHash(eventIdentity(...))` — what the seq sidecar is keyed on. */
-  hash: string;
-  /** How many earlier messages in this transcript share `hash`. */
-  occurrence: number;
+  branchId: string;
+  seq: number;
   createdAt: number | null;
 }
 
 interface ChatEntry {
   path: string;
-  kind: 'claude' | 'codex';
   /** Bytes consumed — always the end of a complete line. */
   offset: number;
-  messages: IndexedMessage[];
-  occurrences: Map<string, number>;
+  /** One per branch and seq: a rewritten entry replaces the one it supersedes. */
+  messages: Map<string, IndexedMessage>;
 }
 
 export interface ChatSearchResult {
@@ -112,32 +98,19 @@ export interface ChatSearchResult {
 /** Characters of context either side of the match in a snippet. */
 
 /**
- * A long JSONL line is only worth parsing if it can yield message text. Every
- * one of these, found structurally (unescaped quotes — the same bytes inside a
- * JSON string are always `\"`-escaped, so text cannot fake them) near the start
- * of the line, marks a line whose content block is tool traffic, thinking or an
- * attachment. Checking only the head keeps the scan off the megabytes of tool
- * output a single line can carry.
+ * Only a log line that holds a message is worth parsing. A record's envelope
+ * (version, seq, time, branch, turn, native id) sits ahead of the event, so the
+ * event type is always near the start; checking only the head keeps the scan
+ * off the tool output a single line can carry.
  */
-const SKIP_MARKERS = [
-  '"type":"tool_result"',
-  '"type":"tool_use"',
-  '"type":"thinking"',
-  '"type":"redacted_thinking"',
-  '"attachment":{',
-  '"type":"progress"',
-  '"type":"queue-operation"',
-].map((m) => Buffer.from(m));
-const HEAD_BYTES = 512;
-/** One shared, never-read map: search keeps messages only, so tool names are moot. */
-const UNUSED_TOOL_NAMES = new Map<string, string>();
-/** Read transcripts in slices, so one huge file never needs one huge buffer. */
+const MESSAGE_MARKER = Buffer.from('"type":"chat.message"');
+const HEAD_BYTES = 1024;
+/** Read logs in slices, so one huge file never needs one huge buffer. */
 const READ_CHUNK = 8 * 1024 * 1024;
 
-function isSkippable(line: Buffer): boolean {
+function holdsMessage(line: Buffer): boolean {
   const head = line.length > HEAD_BYTES ? line.subarray(0, HEAD_BYTES) : line;
-  for (const m of SKIP_MARKERS) if (head.indexOf(m) >= 0) return true;
-  return false;
+  return head.indexOf(MESSAGE_MARKER) >= 0;
 }
 
 /** Query → distinct lowercase terms; a "quoted run" is one exact-phrase term. */
@@ -194,61 +167,29 @@ export class ChatSearchIndex {
     private readonly hostId: string,
   ) {}
 
-  /** The transcript a chat's active track lives in, or null before its first turn. */
-  private transcriptOf(chat: SearchableChat): { path: string; kind: 'claude' | 'codex' } | null {
-    const sessionId = chat.claudeSessionId;
-    if (!sessionId) return null;
-    // Chats on the retired local-model loop keep their history in Codex's format.
-    if (isRetiredLocalSessionId(sessionId)) {
-      return { path: join(this.opts.localHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' };
-    }
-    // Where each provider's adapter keeps its transcripts, and in which format.
-    const transcripts: Record<ProviderId, () => { path: string; kind: 'claude' | 'codex' } | null> =
-      {
-        claude: () => ({
-          path: join(this.opts.claudeProjectsRoot, encodeFolder(chat.folder), `${sessionId}.jsonl`),
-          kind: 'claude',
-        }),
-        codex: () => ({
-          path: join(this.opts.codexHistoryRoot, `${sessionId}.jsonl`),
-          kind: 'codex',
-        }),
-        acp: () =>
-          this.opts.acpHistoryRoot
-            ? { path: join(this.opts.acpHistoryRoot, `${sessionId}.jsonl`), kind: 'codex' }
-            : null,
-      };
-    return transcripts[providerForSessionId(sessionId)!]();
-  }
-
   /**
-   * Bring one chat's entry up to date with its transcript. Returns false when
-   * the chat has a session but its transcript is gone from disk (the backend
-   * pruned it) — only its name and preview can be searched.
+   * Bring one chat's entry up to date with its log. Returns false when the
+   * chat's log is missing from disk — only its name and preview can be searched.
    */
   private refreshChat(chat: SearchableChat): boolean {
-    const source = this.transcriptOf(chat);
-    if (source === null) {
-      this.entries.delete(chat.chatId);
-      return true;
-    }
-    const st = statSync(source.path, { throwIfNoEntry: false });
+    const path = this.opts.logPath(chat.chatId);
+    const st = statSync(path, { throwIfNoEntry: false });
     if (st === undefined) {
       this.entries.delete(chat.chatId);
       return false;
     }
     let entry = this.entries.get(chat.chatId);
-    // A different session (a track switch, a rotation) or a file that is now
-    // SHORTER than what was read (rewritten, not appended) is re-read whole.
-    if (!entry || entry.path !== source.path || st.size < entry.offset) {
-      entry = { ...source, offset: 0, messages: [], occurrences: new Map() };
+    // A log that is now SHORTER than what was read (rewritten, not appended)
+    // is re-read whole.
+    if (!entry || st.size < entry.offset) {
+      entry = { path, offset: 0, messages: new Map() };
       this.entries.set(chat.chatId, entry);
     }
-    if (st.size > entry.offset) this.readAppended(chat.chatId, entry, st.size);
+    if (st.size > entry.offset) this.readAppended(entry, st.size);
     return true;
   }
 
-  private readAppended(chatId: string, entry: ChatEntry, size: number): void {
+  private readAppended(entry: ChatEntry, size: number): void {
     const fd = openSync(entry.path, 'r');
     try {
       let carry: Buffer = Buffer.alloc(0);
@@ -268,7 +209,7 @@ export class ChatSearchIndex {
           const line = buf.subarray(start, nl);
           start = nl + 1;
           entry.offset += line.length + 1;
-          if (line.length > 0) this.ingestLine(chatId, entry, line);
+          if (line.length > 0) this.ingestLine(entry, line);
         }
         // An unterminated tail is a line still being written: leave it for the
         // next refresh rather than reading half of it.
@@ -279,44 +220,37 @@ export class ChatSearchIndex {
     }
   }
 
-  private ingestLine(chatId: string, entry: ChatEntry, line: Buffer): void {
-    if (entry.kind === 'claude' && isSkippable(line)) return;
-    let events: WireEvent[];
+  private ingestLine(entry: ChatEntry, line: Buffer): void {
+    if (!holdsMessage(line)) return;
+    let record: { seq?: unknown; branchId?: unknown; rec?: { k?: unknown; event?: WireEvent } };
     try {
-      if (entry.kind === 'claude') {
-        events = jsonlLineToWire(line.toString('utf8'), chatId, 0, UNUSED_TOOL_NAMES);
-      } else {
-        const parsed = JSON.parse(line.toString('utf8')) as { event?: WireEvent };
-        events = parsed.event ? [parsed.event] : [];
-      }
+      record = JSON.parse(line.toString('utf8'));
     } catch (err) {
       this.opts.onCorruptLine?.({ path: entry.path, message: (err as Error).message });
       return;
     }
-    for (const ev of events) {
-      if (ev.type !== 'chat.message') continue;
-      if (ev.role !== 'user' && ev.role !== 'assistant') continue;
-      if (ev.content.length === 0) continue;
-      const key = eventIdentity(ev);
-      /* v8 ignore next -- a chat.message always has an identity */
-      if (key === null) continue;
-      const hash = identityHash(key);
-      const occurrence = entry.occurrences.get(hash) ?? 0;
-      entry.occurrences.set(hash, occurrence + 1);
-      entry.messages.push({
-        role: ev.role,
-        text: ev.content,
-        lower: matchForm(ev.content),
-        hash,
-        occurrence,
-        createdAt: typeof ev.createdAt === 'number' ? ev.createdAt : null,
-      });
+    const ev = record.rec?.k === 'event' ? record.rec.event : undefined;
+    if (ev?.type !== 'chat.message' || typeof record.seq !== 'number') return;
+    if (ev.role !== 'user' && ev.role !== 'assistant') return;
+    const branchId = typeof record.branchId === 'string' ? record.branchId : '';
+    const key = `${branchId} ${record.seq}`;
+    if (ev.content.length === 0) {
+      entry.messages.delete(key);
+      return;
     }
+    entry.messages.set(key, {
+      role: ev.role,
+      text: ev.content,
+      lower: matchForm(ev.content),
+      branchId,
+      seq: record.seq,
+      createdAt: typeof ev.createdAt === 'number' ? ev.createdAt : null,
+    });
   }
 
   /**
    * Build the index in the background, yielding to the event loop between
-   * chats so the host stays responsive while ~GBs of transcript are read.
+   * chats so the host stays responsive while the logs are read.
    */
   async warm(chats: SearchableChat[]): Promise<void> {
     for (const chat of chats) {
@@ -326,17 +260,17 @@ export class ChatSearchIndex {
     }
   }
 
-  /** How many chats the index currently holds a transcript for. */
+  /** How many chats the index currently holds a log for. */
   size(): number {
     return this.entries.size;
   }
 
   /**
    * Search `chats` for `query`, returning the top `limit` hits. Deleted chats
-   * are never searched. Brings every chat up to date with its transcript first,
+   * are never searched. Brings every chat up to date with its log first,
    * so a message written a moment ago is findable. Archived chats are left out
    * unless `includeArchived`, hidden ones unless `includeHidden`. With `fullText` false only
-   * chat names are searched and no transcript is read.
+   * chat names are searched and no log is read.
    */
   search(
     chats: SearchableChat[],
@@ -368,17 +302,17 @@ export class ChatSearchIndex {
       if (fullText && !this.refreshChat(chat)) transcriptsMissing += 1;
       if (terms.length === 0) continue;
       const nameMatch = chat.name !== null && includesAll(matchForm(chat.name), terms);
-      const messages = fullText ? (this.entries.get(chat.chatId)?.messages ?? []) : [];
+      const messages = fullText ? (this.entries.get(chat.chatId)?.messages.values() ?? []) : [];
+      const bounds = chat.track ? new Map(chat.track.map((t) => [t.branchId, t.upperBound])) : null;
       let matches = 0;
       let newest: IndexedMessage | null = null;
-      for (let i = messages.length - 1; i >= 0; i -= 1) {
-        const m = messages[i]!;
+      for (const m of messages) {
+        if (bounds && !(m.seq <= (bounds.get(m.branchId) ?? -1))) continue;
         if (!includesAll(m.lower, terms)) continue;
         matches += 1;
-        if (newest === null) newest = m;
+        if (newest === null || m.seq > newest.seq) newest = m;
       }
-      // The stored first-message preview stands in for a transcript that has
-      // no match — most often one the backend has since pruned from disk.
+      // The stored first-message preview stands in for a log that has no match.
       const previewMatch =
         fullText &&
         matches === 0 &&
@@ -411,15 +345,13 @@ export class ChatSearchIndex {
     }
     found.sort((a, b) => compareChatSearchHits(a.hit, b.hit));
     const top = found.slice(0, limit);
-    // Snippets and seqs are only worth making for the hits going back, so only
-    // their text is windowed and only their sidecars are read.
+    // Snippets are only worth making for the hits going back.
     for (const { hit, message, previewMatch } of top) {
       if (message !== null) {
-        const seqs = readSeqIndexFile(this.opts.seqIndexPath(hit.chatId), hit.chatId);
         hit.snippet = {
           ...makeSnippet(message.text, terms),
           role: message.role,
-          seq: seqs.get(message.hash)?.[message.occurrence] ?? null,
+          seq: message.seq,
           createdAt: message.createdAt,
         };
       } else if (previewMatch) {

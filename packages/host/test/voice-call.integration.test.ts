@@ -21,7 +21,7 @@ import type { WireEvent } from '@patch/wire';
 import { encodeAudio, DEFAULT_VOICE_CONFIG, type VoiceConfig } from '@patch/wire/audio';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createChatVoice } from '../src/audio/chatVoice.js';
 import { createVoiceReplyBridge } from '../src/audio/replyBridge.js';
 import { createVoiceLedger } from '../src/audio/voiceLedger.js';
@@ -118,7 +118,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     logger: silent,
     now: () => Date.now(),
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({
+    sessionProbe: createClaudeSessionProbe({
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-call-claude-')),
     }),
   });

@@ -18,7 +18,7 @@ import {
 } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader, encodeFolder, type HistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe, encodeFolder } from '../src/history.js';
 import { chatTranscriptPath } from '../src/claudeSessionStore.js';
 import { limitError } from './limitErrors.js';
 import { readBack } from './helpers/readBack.js';
@@ -965,7 +965,7 @@ describe('Host ChatRunner', () => {
       metaStore,
       sdkBackend: sdk,
       sdkBackendKind: 'real',
-      historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
       oauthAccessToken: 'fake-token',
       emit: (e) => events.push(e),
       logger: silent,
@@ -1023,7 +1023,7 @@ describe('Host ChatRunner', () => {
       metaStore,
       sdkBackend: sdk,
       sdkBackendKind: 'real',
-      historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
       oauthAccessToken: 'fake-token',
       emit: (e) => events.push(e),
       logger: silent,
@@ -1065,7 +1065,7 @@ describe('Host ChatRunner', () => {
       metaStore,
       sdkBackend: sdk,
       sdkBackendKind: 'real',
-      historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
       oauthAccessToken: 'fake-token',
       emit: (e) => events.push(e),
       logger: silent,
@@ -1294,13 +1294,13 @@ describe('Host ChatRunner', () => {
       const projectsRoot = mkdtempSync(join(tmpdir(), 'patch-dup-projects-'));
       const metaStore = createMetaStore(home);
       const sdk = createMockSdkBackend({ claudeProjectsRoot: projectsRoot });
-      const historyReader = createHistoryReader({ claudeProjectsRoot: projectsRoot });
+      const sessionProbe = createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot });
       let id = 0;
       const daemon = new Daemon({
         hostId: 'd1',
         metaStore,
         sdkBackend: sdk,
-        historyReader,
+        sessionProbe,
         oauthAccessToken: 'fake-token',
         emit: () => undefined,
         logger: silent,
@@ -2079,41 +2079,6 @@ describe('Host ChatRunner', () => {
       expect(() => daemon.hydrate()).not.toThrow();
       expect(daemon.chatState.get('gone-on-hydrate')).toBeDefined();
     });
-
-    it('G2-d4: backfill catches an unreadable transcript and leaves preview null', () => {
-      const home = mkdtempSync(join(tmpdir(), 'patch-backfill-catch-'));
-      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-backfill-catch-folder-')));
-      mkdirSync(folder, { recursive: true });
-      const metaStore = createMetaStore(home);
-      const brokenReader: HistoryReader = {
-        hasSession: () => true,
-        read: () => {
-          throw new Error('boom reading transcript');
-        },
-      };
-      const daemon = new Daemon({
-        hostId: 'd1',
-        metaStore,
-        sdkBackend: createMockSdkBackend(),
-        historyReader: brokenReader,
-        oauthAccessToken: 'tok',
-        emit: () => undefined,
-        logger: silent,
-        now: () => 1_700_000_000_000,
-        generateChatId: () => 'unused',
-      });
-      metaStore.write({
-        chatId: 'legacy-unreadable',
-        folder,
-        name: null,
-        claudeSessionId: 'sess-1',
-        nextSeq: 2,
-        createdAt: 1,
-        updatedAt: 2,
-      });
-      daemon.hydrate();
-      expect(daemon.chatState.get('legacy-unreadable')?.preview).toBeNull();
-    });
   });
 
   describe('spawnChat edge branches', () => {
@@ -2557,12 +2522,12 @@ describe('Host ChatRunner', () => {
       mkdirSync(folder, { recursive: true });
       const projectsRoot = mkdtempSync(join(tmpdir(), 'patch-clean-projects-'));
       const metaStore = createMetaStore(home);
-      const historyReader = createHistoryReader({ claudeProjectsRoot: projectsRoot });
+      const sessionProbe = createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot });
       const daemon = new Daemon({
         hostId: 'd1',
         metaStore,
         sdkBackend: createMockSdkBackend(),
-        historyReader,
+        sessionProbe,
         oauthAccessToken: 'tok',
         emit: () => undefined,
         logger: silent,
@@ -3418,7 +3383,7 @@ describe('Host ChatRunner', () => {
         hostId: 'd1',
         metaStore,
         sdkBackend: sdk,
-        historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+        sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
         oauthAccessToken: 'fake-token',
         emit: (e) => events.push(e),
         logger: silent,
@@ -3609,7 +3574,7 @@ describe('Host ChatRunner', () => {
         hostId: 'd1',
         metaStore: createMetaStore(home),
         sdkBackend: createMockSdkBackend({ claudeProjectsRoot: projectsRoot }),
-        historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+        sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
         oauthAccessToken: 'fake-token',
         emit: () => undefined,
         logger: silent,
@@ -3717,7 +3682,7 @@ describe('Host ChatRunner', () => {
         hostId: 'd1',
         metaStore,
         sdkBackend: createMockSdkBackend(),
-        historyReader: createHistoryReader({ claudeProjectsRoot: folder }),
+        sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: folder }),
         oauthAccessToken: 'tok',
         emit: () => undefined,
         logger: silent,

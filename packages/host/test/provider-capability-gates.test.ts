@@ -23,7 +23,7 @@ vi.mock('@patch/wire', async (importOriginal) => {
 });
 
 const { Daemon, CapabilityUnsupportedError } = await import('../src/chatRunner.js');
-const { createHistoryReader } = await import('../src/history.js');
+const { createClaudeSessionProbe } = await import('../src/history.js');
 const { createMetaStore } = await import('../src/meta.js');
 const { createMockSdkBackend } = await import('../src/sdkBackend.js');
 
@@ -37,7 +37,7 @@ function setup() {
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: createMockSdkBackend({ claudeProjectsRoot: projectsRoot }),
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: pino({ level: 'silent' }),

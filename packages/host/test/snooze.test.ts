@@ -17,7 +17,7 @@ import type { WireEvent } from '@patch/wire';
 import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 const T0 = 1_700_000_000_000;
@@ -39,7 +39,7 @@ function setup(opts: { now?: () => number; home?: string } = {}) {
     logger: silent,
     now: opts.now ?? (() => T0),
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
   });
   return { daemon, events, home, folder, metaStore };
 }

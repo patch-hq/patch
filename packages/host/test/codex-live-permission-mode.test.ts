@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import { CodexBackend } from '../src/codexBackend.js';
 import { setLiveRunPermissionMode } from '../src/sdkBackend.js';
 
@@ -14,7 +14,7 @@ async function runWithApproval(
   startMode: 'default' | 'plan' = 'default',
 ) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-live-mode-'));
-  const history = new CodexHistory(root);
+  const history = new CodexSessions(root);
   let listener: ((m: any) => void) | undefined;
   const responses: any[] = [];
   const asked: any[] = [];

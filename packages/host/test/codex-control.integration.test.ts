@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 import type { WireEvent } from '@patch/wire';
 import { codexIdentity } from '../src/codexIdentity.js';
 import { CodexAccounts } from '../src/codexAccounts.js';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import { CodexBackend } from '../src/codexBackend.js';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
@@ -56,13 +56,13 @@ it.skipIf(process.env['PATCH_REAL_CODEX'] !== '1')(
       expect((await client.request('account/read')).account.type).toBe('chatgpt');
       const models = await accounts.models();
       const model = models.find((m) => /mini|luna/.test(m.id)) ?? models[0]!;
-      const history = new CodexHistory(join(root, 'history'));
+      const history = new CodexSessions(join(root, 'history'));
       const events: WireEvent[] = [];
       const daemon = new Daemon({
         hostId: 'test',
         metaStore: createMetaStore(join(root, 'chats')),
         sdkBackend: new CodexBackend(accounts, history),
-        historyReader: history,
+        sessionProbe: history,
         resolveOAuth: async () => {
           const selected = await accounts.resolve();
           return { ok: true, accessToken: '', accountId: selected.accountId };

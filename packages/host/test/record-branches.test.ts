@@ -16,7 +16,7 @@ import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { createServerLink } from '../src/serverLink.js';
 import { Outbox } from '../src/outbox.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 const dirs: string[] = [];
@@ -38,7 +38,7 @@ function setup() {
     hostId: 'd1',
     metaStore: createMetaStore(tmp('record-branches-')),
     sdkBackend: sdk,
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     recordOnly: (e) => recorded.push(e),
@@ -71,7 +71,7 @@ describe("an entry's branch, for the server's record", () => {
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'L1' });
     await settle();
-    const first = events.find((e) => e.type === 'chat.message' && e.role === 'user') as {
+    const first = events.find((e) => e.type === 'chat.message' && e.role === 'assistant') as {
       seq: number;
     };
     events.length = 0;

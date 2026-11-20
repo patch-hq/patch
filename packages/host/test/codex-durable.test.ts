@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CodexBackend } from '../src/codexBackend.js';
 import { CodexClient } from '../src/codexClient.js';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import type { DurableCodexProcess } from '../src/codexDurable.js';
 import {
   detachDurableTurns,
@@ -39,7 +39,7 @@ function setup() {
       args: ['--import', tsx, resolve(here, '../src/bin/turn-runner.ts')],
     },
   };
-  const history = new CodexHistory(root);
+  const history = new CodexSessions(root);
   const clients: CodexClient[] = [];
   const accounts: any = {
     resolveChosen: async () => ({ accountId: 'a' }),

@@ -43,7 +43,6 @@ import {
 } from './acpRegistry.js';
 import { AcpTranslator } from './acpTranslate.js';
 import { DurableCodexProcess } from './codexDurable.js';
-import type { CodexHistory } from './codexHistory.js';
 import { keepRunnerLog, retireTurn, turnDirFor } from './durableTurn.js';
 import { RUNNER_IN, RUNNER_OUT } from './turnRunner.js';
 import {
@@ -167,7 +166,6 @@ const CANCEL_GRACE_MS = 15_000;
 export class AcpBackend implements SdkBackend {
   constructor(
     private readonly registry: AcpRegistry,
-    readonly history: CodexHistory,
     private readonly clientVersion: string,
     /** Told when the agent refuses the account a turn ran on as signed out, so it is skipped. */
     private readonly onAccountSignedOut?: (accountId: string) => void,
@@ -374,7 +372,6 @@ export class AcpBackend implements SdkBackend {
       let sessionId: string;
       if (recovered) {
         sessionId = encodeAcpSessionId(agent.id, recovered.sessionId!);
-        this.history.begin(sessionId);
         yield { type: 'system', sessionId };
       } else {
         const opened = await this.openSession(
@@ -391,17 +388,12 @@ export class AcpBackend implements SdkBackend {
         );
         nativeSessionId = opened.nativeId;
         sessionId = encodeAcpSessionId(agent.id, opened.nativeId);
-        this.history.begin(sessionId);
         yield { type: 'system', sessionId };
         await this.chooseModel(conn, agent, opened.nativeId, opened.session, parsed.modelId);
         await this.chooseMode(conn, agent, opened.nativeId, opened.session, mode);
         if (aborted()) return;
         const promptId = conn.peekNextId();
         translator = new AcpTranslator(`${opened.nativeId}:${String(promptId)}`);
-        this.history.append(sessionId, String(promptId), opts.chatId ?? sessionId, {
-          type: 'user',
-          content: opts.prompt,
-        });
         promptAnswer = conn.request<PromptResponse>('session/prompt', {
           sessionId: opened.nativeId,
           prompt: promptBlocks(opts, agent, opened.capabilities.image),
@@ -422,7 +414,6 @@ export class AcpBackend implements SdkBackend {
         },
       );
       const turnTranslator = translator!;
-      const turnRef = turnTranslator.key;
       for (;;) {
         while (queue.length > 0) {
           const item = queue.shift()!;
@@ -430,7 +421,6 @@ export class AcpBackend implements SdkBackend {
             proc.noteConsumed?.(item.consumed);
             continue;
           }
-          this.history.append(sessionId, turnRef, opts.chatId ?? sessionId, item.env);
           yield item.env;
         }
         if (settled) break;
@@ -441,7 +431,6 @@ export class AcpBackend implements SdkBackend {
         wake = undefined;
       }
       for (const env of turnTranslator.flush()) {
-        this.history.append(sessionId, turnRef, opts.chatId ?? sessionId, env);
         yield env;
       }
       const s = settled as { result?: PromptResponse; error?: unknown };

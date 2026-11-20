@@ -8,7 +8,7 @@
 // answered. A silent success is the one failure mode this app is not allowed.
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -16,12 +16,6 @@ import type { ChatMessageEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import {
-  createHistoryReader,
-  encodeFolder,
-  jsonlLineToWire,
-  type CanonicalSeqIndex,
-} from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -144,151 +138,5 @@ describe('synthetic assistant messages', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(assistantTexts(events)).toContain('plain reply');
-  });
-});
-
-/**
- * The exact on-disk entry Claude Code wrote, copied from a real transcript:
- * `model: "<synthetic>"`, a fully zeroed `usage`, and none of the error markers
- * set — `isMeta` null, `isApiErrorMessage` false, `error` null. The ONLY thing
- * that says this is not the model talking is the structure.
- */
-const SYNTHETIC_LINE = JSON.stringify({
-  parentUuid: '04d7a50d-62b9-406a-8795-e6432a571fd4',
-  isSidechain: false,
-  type: 'assistant',
-  uuid: 'bfe08f0a-41bb-4a9a-93e3-c8cc3f30862c',
-  timestamp: '2026-09-09T21:48:03.684Z',
-  message: {
-    id: 'f34c198b-abec-4351-894a-e4d1178d3f41',
-    model: '<synthetic>',
-    role: 'assistant',
-    stop_reason: 'stop_sequence',
-    type: 'message',
-    usage: {
-      input_tokens: 0,
-      output_tokens: 0,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-      service_tier: null,
-    },
-    content: [{ type: 'text', text: 'No response requested.' }],
-  },
-  isMeta: null,
-  isApiErrorMessage: false,
-  error: null,
-  userType: 'external',
-  sessionId: 'sess-1',
-});
-
-const realAssistantLine = (text: string): string =>
-  JSON.stringify({
-    type: 'assistant',
-    uuid: `u-${text.slice(0, 8)}`,
-    message: {
-      role: 'assistant',
-      model: 'claude-opus-5',
-      usage: { input_tokens: 4_312, output_tokens: 11 },
-      content: [{ type: 'text', text }],
-    },
-  });
-
-describe('synthetic assistant messages — replayed from the transcript', () => {
-  it('drops the CLI-generated entry when the transcript is translated', () => {
-    expect(jsonlLineToWire(SYNTHETIC_LINE, 'c1', 0)).toEqual([]);
-  });
-
-  it('still replays a real model reply', () => {
-    expect(jsonlLineToWire(realAssistantLine('here you go'), 'c1', 3)).toEqual([
-      { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'here you go', seq: 3 },
-    ]);
-  });
-
-  // Structural, never prose. An agent that writes the sentence out loud — in a
-  // chat about this very bug, say — is the model talking and must still render.
-  it('still replays a real reply that quotes the synthetic wording', () => {
-    expect(jsonlLineToWire(realAssistantLine('No response requested.'), 'c1', 3)).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'c1',
-        role: 'assistant',
-        content: 'No response requested.',
-        seq: 3,
-      },
-    ]);
-  });
-
-  // An older CLI may report no usage at all. Absent is not zero: calling a
-  // genuine turn fake and deleting it is the worse failure.
-  it('still replays an assistant entry that carries no usage', () => {
-    const line = JSON.stringify({
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        model: 'claude-opus-5',
-        content: [{ type: 'text', text: 'ok' }],
-      },
-    });
-    expect(jsonlLineToWire(line, 'c1', 1)).toEqual([
-      { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'ok', seq: 1 },
-    ]);
-  });
-
-  // The compaction notice is a `system` / `compact_boundary` entry, read before
-  // the assistant gate — the guard must not reach it.
-  it('still replays a compaction boundary', () => {
-    const line = JSON.stringify({
-      type: 'system',
-      subtype: 'compact_boundary',
-      content: 'Conversation compacted',
-      compactMetadata: { trigger: 'auto', preTokens: 168165 },
-      uuid: 'boundary-1',
-    });
-    expect(jsonlLineToWire(line, 'c1', 7)).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'c1',
-        role: 'system',
-        content: 'Context compressed · from 168k',
-        seq: 7,
-        compaction: { trigger: 'auto', preTokens: 168165 },
-      },
-    ]);
-  });
-
-  it('a whole transcript replays without the CLI notice, and without spending a seq on it', () => {
-    const root = mkdtempSync(join(tmpdir(), 'patch-synth-history-'));
-    const folder = '/work/proj';
-    const dir = join(root, encodeFolder(folder));
-    mkdirSync(dir, { recursive: true });
-    const sessionId = 'sess-1';
-    writeFileSync(
-      join(dir, `${sessionId}.jsonl`),
-      [
-        JSON.stringify({ type: 'user', message: { content: 'go' } }),
-        SYNTHETIC_LINE,
-        SYNTHETIC_LINE,
-        realAssistantLine('done'),
-      ].join('\n') + '\n',
-      'utf8',
-    );
-
-    let next = 0;
-    const seqIndex: CanonicalSeqIndex = { resolve: (keys) => keys.map(() => next++) };
-    const events = createHistoryReader({ claudeProjectsRoot: root }).read({
-      chatId: 'c1',
-      folder,
-      sessionId,
-      fromSeq: -1,
-      seqIndex,
-    });
-
-    expect(assistantTexts(events)).not.toContain('No response requested.');
-    // Two turns, numbered 0 and 1: the dropped entries never reach the index,
-    // so replayed seqs match what the live stream stamped.
-    expect(events).toEqual([
-      { type: 'chat.message', chatId: 'c1', role: 'user', content: 'go', seq: 0 },
-      { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'done', seq: 1 },
-    ]);
   });
 });

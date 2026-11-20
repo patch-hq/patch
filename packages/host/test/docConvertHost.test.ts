@@ -23,7 +23,7 @@ import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { readSidecar } from '../src/docSidecar.js';
 
 const silent = pino({ level: 'silent' });
@@ -48,7 +48,7 @@ function setup() {
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({
+    sessionProbe: createClaudeSessionProbe({
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-docconv-claude-')),
     }),
   });

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 
@@ -23,7 +23,7 @@ function setup() {
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: createMockSdkBackend({ claudeProjectsRoot: projectsRoot }),
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: pino({ level: 'silent' }),

@@ -35,7 +35,6 @@ import { SharedMcpPool } from './sharedMcp.js';
 // Per spec/02-host.md and spec/04-chats-and-folders.md.
 
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   fsyncSync,
@@ -64,7 +63,6 @@ import {
   openSnoozeRecord,
   providerDescriptor,
   retiredModelNotice,
-  providerForSessionId,
   modelSupportsEffort,
   ChatErrorCode,
   heldMessageExpiredText,
@@ -130,11 +128,11 @@ import {
   type SdkRunOptions,
 } from './sdkBackend.js';
 import {
-  createHistoryReader,
+  createClaudeSessionProbe,
   eventIdentity,
+  identityHash,
   persistedUserContent,
-  type CanonicalSeqIndex,
-  type HistoryReader,
+  type SessionProbe,
   defaultClaudeProjectsRoot,
 } from './history.js';
 import {
@@ -517,14 +515,16 @@ export interface HostOptions {
   now?: () => number;
   /** Test hook: id generator. */
   generateChatId?: () => string;
-  /** Inject a history reader (tests). Defaults to ~/.claude/projects. */
-  historyReader?: HistoryReader;
   /**
-   * Root Claude Code persists native transcripts under (spec/04 § History).
-   * Defaults to `~/.claude/projects`. Needed here (not just inside the
-   * default `historyReader`) for the Claude `sessionStore`'s own local-disk
-   * fallback (`claudeSessionStore.ts`) and for a provider switch's
-   * reconstruction — both run outside `historyReader`'s closure.
+   * Whether a chat's provider session can still be resumed (tests inject one).
+   * Defaults to Claude Code's session store under `claudeProjectsRoot`.
+   */
+  sessionProbe?: SessionProbe;
+  /**
+   * Root Claude Code keeps its sessions under. Defaults to
+   * `~/.claude/projects`. Needed here (not just inside the default
+   * `sessionProbe`) for the Claude `sessionStore`'s own local-disk store
+   * (`claudeSessionStore.ts`).
    */
   claudeProjectsRoot?: string;
   /**
@@ -1299,7 +1299,6 @@ import {
   formatAgentReturn,
   isGroupableToolCall,
 } from '@patch/wire';
-import { identityHash, readSeqIndexFile } from './seqIndex.js';
 import { ChatLog, HistoryWriteError } from './chatLog.js';
 import { readTrack, readTrackRecords } from './readTrack.js';
 import { recordEntries, turnBoundaryOf } from './recordEntries.js';
@@ -2316,7 +2315,7 @@ export class Daemon {
    * attempt returned null / is still in flight.
    */
   private readonly titleGenerated = new Set<string>();
-  private readonly historyReader: HistoryReader;
+  private readonly sessionProbe: SessionProbe;
   private readonly claudeProjectsRoot: string;
   /** The chats' own history log and seq authority (spec/04 § History). */
   readonly chatLog: ChatLog;
@@ -2424,8 +2423,9 @@ export class Daemon {
       this.sendSideBranchEntry(chatId, record);
     });
     this.claudeProjectsRoot = options.claudeProjectsRoot ?? defaultClaudeProjectsRoot();
-    this.historyReader =
-      options.historyReader ?? createHistoryReader({ claudeProjectsRoot: this.claudeProjectsRoot });
+    this.sessionProbe =
+      options.sessionProbe ??
+      createClaudeSessionProbe({ claudeProjectsRoot: this.claudeProjectsRoot });
     // spec/02 § Self-wake: the host owns durable per-chat timers. On fire it
     // re-invokes the SAME chat (resuming its Claude session) — the agent declares
     // intent via patch_wake_me and ends its turn; the host does the waiting.
@@ -6856,83 +6856,6 @@ export class Daemon {
     return this.chatLog.readBlobBytes(sha);
   }
 
-  /** Chats whose harness transcript has been checked against their log this process. */
-  private readonly legacyImportChecked = new Set<string>();
-
-  /**
-   * Bring transcript the chat's own log never held into the log (spec/04 §
-   * History). Replay reads only the log, so turns emitted before the log
-   * existed (`log.start` `legacyUpTo`), or whose seq was only reserved, would
-   * otherwise never show: the app drew the last few turns while the agent
-   * still had the whole conversation. Each transcript event whose canonical
-   * seq has no event record is appended under that seq, then an `import`
-   * record says it is done. Single-branch chats only: a forked chat's
-   * transcript copies its parent's prefix, so it cannot be attributed to one
-   * track here. A failure is logged and retried next replay; it never blocks
-   * the replay itself.
-   */
-  private importLegacyTranscript(chatId: string): void {
-    if (this.legacyImportChecked.has(chatId)) return;
-    const state = this.chatState.get(chatId);
-    const meta = this.opts.metaStore.read(chatId);
-    const sessionId = state?.claudeSessionId;
-    if (!state || !meta || !sessionId) return;
-    if ((meta.branches?.length ?? 1) > 1) {
-      this.legacyImportChecked.add(chatId);
-      return;
-    }
-    try {
-      const records = this.chatLog.read(chatId);
-      if (records.some((r) => r.rec.k === 'import' && r.rec.sessionId === sessionId)) {
-        this.legacyImportChecked.add(chatId);
-        return;
-      }
-      if (!this.historyReader.hasSession({ folder: state.folder, sessionId })) {
-        this.legacyImportChecked.add(chatId);
-        return;
-      }
-      const branchId = meta.branches?.[0]?.branchId ?? this.branchIdFor(chatId);
-      const logged = new Set<number>();
-      for (const r of records) if (r.rec.k === 'event') logged.add(r.seq);
-      const transcript = this.historyReader.read({
-        chatId,
-        folder: state.folder,
-        sessionId,
-        fromSeq: -1,
-        seqIndex: this.canonicalSeqIndex(chatId),
-      });
-      let imported = 0;
-      for (const ev of transcript) {
-        const seq = (ev as { seq: number }).seq;
-        if (logged.has(seq) || !LOGGED_EVENT_TYPES.has(ev.type as never)) continue;
-        this.chatLog.append(chatId, { k: 'event', event: ev as never }, { branchId, seq });
-        imported += 1;
-      }
-      this.chatLog.append(
-        chatId,
-        {
-          k: 'import',
-          harness: providerForSessionId(sessionId) ?? 'claude',
-          sessionId,
-          records: imported,
-        },
-        { branchId, sync: true },
-      );
-      this.legacyImportChecked.add(chatId);
-      if (imported > 0) {
-        this.opts.logger.info(
-          { chatId, imported },
-          'history: imported transcript missing from the chat log',
-        );
-      }
-    } catch (err) {
-      this.opts.logger.error(
-        { chatId, err: (err as Error).message },
-        'history: importing the harness transcript into the chat log failed',
-      );
-    }
-  }
-
   /**
    * Read a slice of a chat's persisted history. Used by `patch_history`.
    * Returns events with seq >= fromSeq (or fromSeq=0 for the start), capped
@@ -6956,7 +6879,6 @@ export class Daemon {
     const meta = this.opts.metaStore.read(req.chatId);
     if (!meta) throw new ChatNotFoundError(req.chatId);
     const targetBranchId = req.branchId ?? meta.activeBranchId ?? this.branchIdFor(req.chatId);
-    this.importLegacyTranscript(req.chatId);
     const all = readTrack(
       this.chatLog,
       req.chatId,
@@ -8452,62 +8374,52 @@ export class Daemon {
   }
 
   /**
-   * Fork point for a user turn Patch logged but Claude never persisted — the
-   * turn was stopped before the session wrote it, so it is in this chat's own
-   * log and missing from the transcript. The prefix it shares is everything up
-   * to the event before it on this track, which IS in the transcript: resume
-   * just after that event. No such earlier event means an empty prefix.
+   * Where a new branch forks from, read from the chat's own record (spec/04 §
+   * Branching): the provider's id (`nativeRef`) of the last entry the new
+   * branch keeps. Patch never reads the provider's session to find it.
    *
-   * Returns `null` (and the edit is refused) when `seq` is not a user turn in
-   * Patch's own log, or when NO earlier event can be found in the transcript —
-   * that is a real mismatch, not a stopped turn. Earlier events that are
-   * themselves unpersisted (consecutive stopped turns) are skipped over.
+   * - `edit`: `seq` must be a user turn on `branchId`'s track; the branch keeps
+   *   everything before it, so the point is the nearest earlier entry that
+   *   carries a `nativeRef`. A user turn the provider never answered carries
+   *   none and is passed over, so editing after a stopped turn works. With no
+   *   provider output before it at all, the branch starts from an empty
+   *   context (`null`).
+   * - `side`: the branch keeps the entry at `seq` itself, so that entry must
+   *   carry a `nativeRef`.
+   *
+   * Returns `null` (the request is refused) when there is no such point: `seq`
+   * is not on the track, an edit names something other than a user turn, or
+   * the entries it needs were recorded before Patch kept provider ids.
    */
-  private unpersistedForkPoint(
+  private recordForkPoint(
     chatId: string,
-    sessionId: string,
+    branchId: string,
     seq: number,
+    kind: 'edit' | 'side',
   ): { resumeAtUuid: string | null } | null {
     const meta = this.opts.metaStore.read(chatId);
-    const state = this.chatState.get(chatId);
-    if (!meta || !state) return null;
-    const records = readTrackRecords(
-      this.chatLog,
-      chatId,
-      meta,
-      meta.activeBranchId ?? this.branchIdFor(chatId),
-    );
-    let target: WireEvent | undefined;
-    // Every earlier event that Claude would have persisted, nearest last. The
-    // nearest may itself be unpersisted (a second stopped turn in a row, a
-    // queued message), so the walk below keeps going back until one resolves.
-    const candidates: number[] = [];
+    if (!meta) return null;
+    const records = readTrackRecords(this.chatLog, chatId, meta, branchId);
+    let earlierRef: NativeRef | undefined;
+    let earlierOutput = false;
     for (const record of records) {
       if (record.rec.k !== 'event') continue;
       const ev = record.rec.event;
       if (record.seq === seq) {
-        target = ev;
-        break;
+        if (kind === 'side') return record.nativeRef ? { resumeAtUuid: record.nativeRef.id } : null;
+        if (!(ev.type === 'chat.message' && ev.role === 'user')) return null;
+        if (earlierRef) return { resumeAtUuid: earlierRef.id };
+        return earlierOutput ? null : { resumeAtUuid: null };
       }
       if (record.seq > seq) continue;
-      const fromTranscript =
-        (ev.type === 'chat.message' && (ev.role === 'user' || ev.role === 'assistant')) ||
+      if (record.nativeRef) earlierRef = record.nativeRef;
+      if (
+        (ev.type === 'chat.message' && ev.role === 'assistant') ||
         ev.type === 'chat.tool_call' ||
-        ev.type === 'chat.tool_result';
-      if (fromTranscript) candidates.push(record.seq);
+        ev.type === 'chat.tool_result'
+      )
+        earlierOutput = true;
     }
-    if (!(target?.type === 'chat.message' && target.role === 'user')) return null;
-    if (candidates.length === 0) return { resumeAtUuid: null };
-    for (let i = candidates.length - 1; i >= 0; i -= 1) {
-      const point = this.historyReader.sidePoint({
-        folder: state.folder,
-        sessionId,
-        seq: candidates[i]!,
-        seqIndex: this.canonicalSeqIndex(chatId),
-      });
-      if (point) return point;
-    }
-    // Earlier events exist but none is in the transcript: a real mismatch.
     return null;
   }
 
@@ -8562,17 +8474,11 @@ export class Daemon {
 
     const sessionId = state.claudeSessionId;
     const hasSession = sessionId !== undefined && sessionId.length > 0;
-    // A first turn stopped before Claude made a session persisted nothing, yet
-    // the surface shows it at seq 0. It is the one turn that can exist without a
-    // transcript, and its fork point is an empty context.
-    const point: { resumeAtUuid: string | null } | null = hasSession
-      ? (this.historyReader.forkPoint({
-          folder: state.folder,
-          sessionId,
-          seq: req.seq,
-          seqIndex: this.canonicalSeqIndex(req.chatId),
-          chatDir: this.chatDirFor(req.chatId),
-        }) ?? this.unpersistedForkPoint(req.chatId, sessionId, req.seq))
+    // A first turn stopped before the provider made a session may not even be
+    // in the record yet, though the surface shows it at seq 0. It is the one
+    // turn that can exist without a session, and it forks from an empty context.
+    const point = hasSession
+      ? this.recordForkPoint(req.chatId, graph.activeBranchId, req.seq, 'edit')
       : req.seq === 0
         ? { resumeAtUuid: null }
         : null;
@@ -8588,7 +8494,7 @@ export class Daemon {
       });
       this.opts.logger.warn(
         { chatId: req.chatId, seq: req.seq },
-        'fork refused: seq is not a user turn in this transcript (NO FALLBACK)',
+        'fork refused: no fork point for this seq in the record (NO FALLBACK)',
       );
       return;
     }
@@ -8683,13 +8589,7 @@ export class Daemon {
     const sessionId = fromBranch.sessionId;
     const point =
       sessionId !== undefined && sessionId.length > 0
-        ? this.historyReader.sidePoint({
-            folder: state.folder,
-            sessionId,
-            seq: req.seq,
-            seqIndex: this.canonicalSeqIndex(req.chatId),
-            chatDir: this.chatDirFor(req.chatId),
-          })
+        ? this.recordForkPoint(req.chatId, fromBranchId, req.seq, 'side')
         : null;
     if (!point) {
       this.emit({
@@ -8703,7 +8603,7 @@ export class Daemon {
       });
       this.opts.logger.warn(
         { chatId: req.chatId, seq: req.seq },
-        'side thread refused: seq is not in this transcript (NO FALLBACK)',
+        'side thread refused: no provider id for this seq in the record (NO FALLBACK)',
       );
       return;
     }
@@ -9267,17 +9167,6 @@ export class Daemon {
       localId,
       createdAt: this.opts.now(),
     };
-    // spec/14 § Side threads panel — "branching again from inside the panel"
-    // hangs a NEW side thread off a message that lives only on this branch's
-    // own session. That later `sideChat` call resolves its fork point by
-    // walking THIS branch's own raw SDK transcript (`history.ts#sidePoint`),
-    // which re-derives a canonical seq from the identity-hash index — so this
-    // turn's identity must be recorded here, exactly as the active branch's
-    // own `sendInput` already does for the same reason, or the walk allocates
-    // a fresh seq that never matches `userSeq` and the nested fork is refused
-    // as `fork_point_not_found`.
-    const identityKey = eventIdentity(userEvent);
-    if (identityKey !== null) this.recordCanonicalSeq(chatId, identityHash(identityKey), userSeq);
     try {
       // The side branch's turn opens in the log like any other, so the server
       // sees it start as well as end (spec/12 § Chat status).
@@ -9381,7 +9270,8 @@ export class Daemon {
         abortController.signal,
         (env) => env.type === 'tool_result',
       )) {
-        const r = this.handleBranchEnvelope(chatId, branchId, turnId, env);
+        if (env.sessionId !== undefined) newSessionId = env.sessionId;
+        const r = this.handleBranchEnvelope(chatId, branchId, turnId, env, newSessionId);
         if (r.sessionId !== undefined) newSessionId = r.sessionId;
       }
       outcome = abortController.signal.aborted ? 'stopped' : 'completed';
@@ -9440,14 +9330,27 @@ export class Daemon {
     branchId: string,
     turnId: string,
     env: SdkEnvelope,
+    /** The session this envelope belongs to, for the entries' `nativeRef`. */
+    sessionId: string | undefined,
   ): { sessionId?: string } {
     if (env.permission) {
       this.handlePermissionEnvelope(chatId, env, undefined, branchId);
       return { sessionId: env.sessionId };
     }
+    // The provider's id rides on each entry, as on the active branch, so a
+    // side thread can itself be branched from (spec/04 § Side threads).
+    const nativeRef: NativeRef | undefined =
+      env.nativeId !== undefined && sessionId
+        ? { harness: this.harnessOf(chatId), sessionId, id: env.nativeId }
+        : undefined;
     const append = (event: LoggedEvent): void => {
       try {
-        this.chatLog.append(chatId, { k: 'event', event }, { branchId }, turnId);
+        this.chatLog.append(
+          chatId,
+          { k: 'event', event },
+          { branchId, ...(nativeRef ? { nativeRef } : {}) },
+          turnId,
+        );
       } catch (err) {
         this.opts.logger.error({ chatId, branchId, err }, 'side branch: could not record an event');
       }
@@ -9495,12 +9398,6 @@ export class Daemon {
             seq,
             createdAt: this.opts.now(),
           };
-          // Same reason as the branch's own user turn, above: a later
-          // `sideChat` naming this message as ITS fork point walks this
-          // branch's own raw SDK transcript and needs this identity recorded
-          // to re-derive the same seq.
-          const key = eventIdentity(msgEvent);
-          if (key !== null) this.recordCanonicalSeq(chatId, identityHash(key), seq);
           append(msgEvent);
         }
         break;
@@ -9599,9 +9496,6 @@ export class Daemon {
         seq: this.bumpSeq(chatId),
         createdAt: this.opts.now(),
       };
-      const key = eventIdentity(ev);
-      /* v8 ignore next -- chat.note always has an identity. */
-      if (key !== null) this.recordCanonicalSeq(chatId, identityHash(key), ev.seq);
       this.emit(ev);
     }
   }
@@ -9934,7 +9828,7 @@ export class Daemon {
       if (!state.claudeSessionId) continue;
       // Lost iff the captured session's transcript is gone on disk.
       if (
-        this.historyReader.hasSession({
+        this.sessionProbe.hasSession({
           folder: state.folder,
           sessionId: state.claudeSessionId,
           chatDir: this.chatDirFor(state.chatId),
@@ -10219,7 +10113,7 @@ export class Daemon {
       this.opts.sdkBackendKind === 'real' &&
       typeof state.claudeSessionId === 'string' &&
       state.claudeSessionId.length > 0 &&
-      !this.historyReader.hasSession({
+      !this.sessionProbe.hasSession({
         folder: state.folder,
         sessionId: state.claudeSessionId,
         chatDir: this.chatDirFor(chatId),
@@ -10563,9 +10457,6 @@ export class Daemon {
         ...(origin === 'machine' ? { origin } : {}),
       };
       userMessageSeq = raw.seq;
-      const key = eventIdentity(raw);
-      /* v8 ignore next -- chat.message always has an identity; the null branch exists only to satisfy the union-wide return type of eventIdentity. */
-      if (key !== null) this.recordCanonicalSeq(chatId, identityHash(key), raw.seq);
       const [hydrated] = this.hydrateReplayAttachments(chatId, [raw]);
       try {
         this.emit(hydrated as ChatMessageEvent);
@@ -15384,11 +15275,9 @@ export class Daemon {
    * The chat's whole record as the server takes it, for the one-time record
    * import (spec/01 § Chat record): every entry of its log, whole and with its
    * provider id and branch, every turn boundary and every settled question.
-   * Transcript the log never held is brought into it first.
    */
   recordForImport(chatId: string): WireEvent[] {
     if (!this.chatState.get(chatId)) throw new ChatNotFoundError(chatId);
-    this.importLegacyTranscript(chatId);
     let unreadable = 0;
     const restartState = { afterMarker: false };
     const entries = recordEntries(chatId, this.chatLog.read(chatId), {
@@ -15441,77 +15330,9 @@ export class Daemon {
     }
   }
 
-  /**
-   * Absolute path of a chat's canonical-seq index sidecar. Lives beside
-   * `meta.json` / `seq` in `~/.patch/chats/<chatId>/` (spec/02 § Local storage),
-   * derived from the meta store so there is one owner of that layout.
-   */
-  private seqIndexPath(chatId: string): string {
-    return join(dirname(this.opts.metaStore.pathFor(chatId)), 'seqindex.jsonl');
-  }
-
-  /**
-   * Record that `seq` is the canonical seq of the event whose payload identity
-   * hashes to `hash` — the durable half of "the seq a surface saw live is the
-   * seq that message replays under". Append-only, one `{seq,hash}` line per
-   * persisted-class event; no message text (see `identityHash`).
-   *
-   * First write per seq wins on read, so a seq recorded deliberately (the user
-   * turn, keyed on the text Claude Code will persist) is never displaced by the
-   * automatic record `emit()` makes of the same event's rendered form.
-   */
-  private recordCanonicalSeq(chatId: string, hash: string, seq: number): void {
-    const path = this.seqIndexPath(chatId);
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, `${JSON.stringify({ seq, hash })}\n`, 'utf8');
-  }
-
-  /**
-   * The chat's canonical seq index, as `history.ts` consumes it: transcript
-   * event identities in order → the seqs the host stamped when it emitted
-   * them live.
-   *
-   * A key with no recorded seq was never emitted by this host — a transcript
-   * that predates the sidecar, or a turn produced by `claude --resume` in a
-   * terminal. It has no canonical seq yet, so one is ALLOCATED here and
-   * recorded, making every later read return the same number. That assignment
-   * is a one-off migration step, not a fallback: nothing is guessed and nothing
-   * is renumbered twice.
-   */
-  private canonicalSeqIndex(chatId: string): CanonicalSeqIndex {
-    return {
-      resolve: (keys: string[]): number[] => {
-        const recorded = this.readSeqIndex(chatId);
-        return keys.map((key) => {
-          const hash = identityHash(key);
-          const queued = recorded.get(hash);
-          const known = queued?.shift();
-          if (known !== undefined) return known;
-          const seq = this.bumpSeq(chatId);
-          this.recordCanonicalSeq(chatId, hash, seq);
-          // The seq now belongs to a transcript entry the history log has no
-          // record of; hold it there so it is never handed out again.
-          this.chatLog.reserve(chatId, seq, this.branchIdFor(chatId));
-          return seq;
-        });
-      },
-    };
-  }
-
-  /**
-   * Read the sidecar into `hash → seqs in recording order`. Repeated payloads
-   * (the user asking the same thing twice) each hold their own entry and are
-   * consumed in order, so the n-th occurrence in the transcript resolves to the
-   * n-th seq. A seq recorded more than once keeps its FIRST entry only.
-   */
-  private readSeqIndex(chatId: string): Map<string, number[]> {
-    return readSeqIndexFile(this.seqIndexPath(chatId), chatId);
-  }
-
-  /**
    * Central emit wrapper. Records chat-scoped stream events into the per-chat
-   * recent-events ring (backing patch_peek) and their canonical seq into the
-   * chat's seq index, before fanning out via the injected emit. Every event the
+   * recent-events ring (backing patch_peek) before fanning out via the
+   * injected emit. Every event the
    * host emits goes through here.
    */
   private emit(event: WireEvent, o: { skipHistory?: boolean } = {}): void {
@@ -15545,17 +15366,6 @@ export class Daemon {
       }
       nativeRef = logged.nativeRef;
       branchId = logged.branchId;
-    }
-    if (typeof chatId === 'string' && chatId.length > 0 && typeof seq === 'number' && seq >= 0) {
-      // Persisted-class events (messages / tool calls / tool results) are the
-      // ones Claude Code also writes to its transcript, so they are the ones
-      // replay has to renumber back to their live seq. Live-only events carry
-      // no seq at all and never reach here; errors / artifacts / permission
-      // requests have a seq but no identity, and are never in the transcript.
-      const key = eventIdentity(event);
-      if (key !== null && this.chatState.has(chatId)) {
-        this.recordCanonicalSeq(chatId, identityHash(key), seq);
-      }
     }
     // spec/02 § Native subagent dispatch — a `patch_delegate` subagent is
     // invisible to the user: the local bookkeeping above (seq index, history

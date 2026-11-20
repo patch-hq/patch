@@ -14,7 +14,8 @@ import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
-import { CodexHistory } from './codexHistory.js';
+import { CodexSessions } from './codexSessions.js';
+import { branchChain } from './readTrack.js';
 import { ModelEndpointRegistry } from './modelEndpoints.js';
 import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 // Entry point for the patch-daemon process.
@@ -59,7 +60,7 @@ import { ChatMoveError } from './chatMove.js';
 import { expandHome } from './expandHome.js';
 import { gitDirtyPaths } from './git-dirty.js';
 import { listFilesRecursive } from './files-recursive.js';
-import { createHistoryReader } from './history.js';
+import { agentHeldSession, createClaudeSessionProbe, type SessionProbe } from './history.js';
 import type {
   ChatErrorCode,
   McpServerConfig,
@@ -803,20 +804,16 @@ async function startHost(
     onSignedIn: (requestId, account) =>
       link.send({ type: 'settings.account_signed_in', hostId: selfHostId, requestId, account }),
   });
-  const codexHistory = new CodexHistory(join(config.patchHome, 'openai-history'));
-  // spec/02 § Chat search — an in-memory index derived from the backends' own
-  // transcripts (never persisted). Built in the background once the chats are
-  // hydrated (below), then kept current by every search.
+  const codexSessions = new CodexSessions(join(config.patchHome, 'openai-history'));
+  // spec/02 § Chat search — an in-memory index of each chat's own log (never
+  // persisted). Built in the background once the chats are hydrated (below),
+  // then kept current by every search.
   const chatSearch = new ChatSearchIndex(
     {
-      claudeProjectsRoot: config.claudeProjectsRoot,
-      codexHistoryRoot: join(config.patchHome, 'openai-history'),
-      localHistoryRoot: retiredLocalHistoryDir(config.patchHome),
-      acpHistoryRoot: join(config.patchHome, 'acp-history'),
-      seqIndexPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'seqindex.jsonl'),
+      logPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'events.jsonl'),
       now: () => Date.now(),
       onCorruptLine: ({ path, message }) =>
-        logger.warn({ path, err: message }, 'chat search: skipping unreadable JSONL line'),
+        logger.warn({ path, err: message }, 'chat search: skipping unreadable log line'),
     },
     selfHostId,
   );
@@ -829,9 +826,7 @@ async function startHost(
   // spec/02 § Provider adapters — local models and routers are endpoints
   // inside Codex and Claude Code, set once for the account.
   const modelEndpoints = new ModelEndpointRegistry();
-  const codexBackend = new CodexBackend(codexAccounts, codexHistory, modelEndpoints);
-  // What chats on the retired local-model loop wrote, read for their history only.
-  const localHistory = new CodexHistory(retiredLocalHistoryDir(config.patchHome), 'local');
+  const codexBackend = new CodexBackend(codexAccounts, codexSessions, modelEndpoints);
   // ACP agents (spec/02 § Provider adapters): which agents exist is the shared
   // `acpAgents` setting over the built-in list; this host offers those whose
   // command it has. Their credential is the agent's first ACP account, which
@@ -855,8 +850,7 @@ async function startHost(
     clientVersion: VERSION,
     onChange: () => onAcpChange(),
   });
-  const acpHistory = new CodexHistory(join(config.patchHome, 'acp-history'), 'acp');
-  const acpBackend = new AcpBackend(acpRegistry, acpHistory, VERSION, (accountId) => {
+  const acpBackend = new AcpBackend(acpRegistry, VERSION, (accountId) => {
     acpAccounts.markSignedOut(accountId);
     logger.warn(
       { accountId },
@@ -3066,7 +3060,16 @@ async function startHost(
             // A patch_delegate subagent never reaches the server to be indexed
             // any other way, but filter it out here too rather than rely on
             // that alone (spec/02 § Native subagent dispatch).
-            listChats: () => daemon.listAll().filter((c) => !c.subagent),
+            listChats: () =>
+              daemon
+                .listAll()
+                .filter((c) => !c.subagent)
+                .map((c) => {
+                  const meta = metaStore.read(c.chatId);
+                  return meta?.branches && meta.activeBranchId
+                    ? { ...c, track: branchChain(meta, meta.activeBranchId) }
+                    : c;
+                }),
             hostId: selfHostId,
             logger,
           },
@@ -4985,33 +4988,27 @@ async function startHost(
     metaStore,
     sdkBackend: routedBackend,
     sdkBackendKind: config.sdkBackend,
-    // Reader for Claude Code transcripts. Points at the SAME root the SDK
-    // backend writes to (real: ~/.claude/projects; mock: isolated per-home dir),
-    // so persisted history is genuinely paginable on the live stack.
-    historyReader: (() => {
-      const claudeHistory = createHistoryReader({
-        claudeProjectsRoot: config.claudeProjectsRoot,
-        onCorruptLine: ({ path, lineNumber, message }) =>
-          logger.warn(
-            { path, lineNumber, err: message },
-            'history: skipping unreadable JSONL line',
-          ),
-      });
-      // Each provider's transcripts are read by its own adapter's reader.
-      const readers: Record<ProviderId, typeof claudeHistory> = {
-        claude: claudeHistory,
-        codex: codexHistory,
-        acp: acpHistory,
+    // Whether a chat's provider session can still be resumed, asked of the
+    // chat's own provider. Claude's probe looks at the SAME root the SDK backend
+    // writes to (real: ~/.claude/projects; mock: an isolated per-home dir).
+    sessionProbe: (() => {
+      const probes: Record<ProviderId, SessionProbe> = {
+        claude: createClaudeSessionProbe({ claudeProjectsRoot: config.claudeProjectsRoot }),
+        codex: codexSessions,
+        acp: agentHeldSession,
       };
-      const readerFor = (sessionId: string) =>
-        isRetiredLocalSessionId(sessionId)
-          ? localHistory
-          : readers[providerForSessionId(sessionId)!];
+      // A chat on the retired local-model loop keeps the session it had, so
+      // host cleanup never takes it for lost; it cannot run another turn.
+      const retiredLocal: SessionProbe = {
+        hasSession: ({ sessionId }) =>
+          existsSync(join(retiredLocalHistoryDir(config.patchHome), `${sessionId}.jsonl`)),
+      };
       return {
-        hasSession: (o) => readerFor(o.sessionId).hasSession(o),
-        read: (o) => readerFor(o.sessionId).read(o),
-        forkPoint: (o) => readerFor(o.sessionId).forkPoint(o),
-        sidePoint: (o) => readerFor(o.sessionId).sidePoint(o),
+        hasSession: (o) =>
+          (isRetiredLocalSessionId(o.sessionId)
+            ? retiredLocal
+            : probes[providerForSessionId(o.sessionId)!]
+          ).hasSession(o),
       };
     })(),
     // OAuth gate (spec/10-auth.md): the gate protects the real SDK path only;

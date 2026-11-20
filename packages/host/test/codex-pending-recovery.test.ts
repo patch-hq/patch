@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import { CodexBackend } from '../src/codexBackend.js';
 import type { SdkEnvelope } from '../src/sdkBackend.js';
 
@@ -10,7 +10,7 @@ import type { SdkEnvelope } from '../src/sdkBackend.js';
 // that no thread turn carries. That must not wedge the chat.
 function harness(threadTurns: unknown[], readFails = false) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-pending-'));
-  const history = new CodexHistory(root);
+  const history = new CodexSessions(root);
   const sid = 'codex-thread1';
   history.begin(sid);
   history.setPending(sid, { id: 'lost-client-id', prompt: 'build it' });

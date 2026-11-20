@@ -14,7 +14,7 @@ import pino from 'pino';
 import type { TodoItem, WireEvent } from '@patch/wire';
 import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { chatStateFromMeta } from '../src/chatState.js';
 import { buildTodoEditNote } from '../src/todos.js';
 import { asServerSees } from './serverView.js';
@@ -48,7 +48,7 @@ function setup() {
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({
+    sessionProbe: createClaudeSessionProbe({
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-todos-claude-')),
     }),
   });

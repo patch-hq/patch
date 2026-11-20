@@ -13,7 +13,6 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { AcpBackend, AcpSignedOutError } from '../src/acpBackend.js';
 import { AcpRegistry } from '../src/acpRegistry.js';
-import { CodexHistory } from '../src/codexHistory.js';
 import {
   detachDurableTurns,
   inspectTurn,
@@ -46,8 +45,7 @@ function setup(env: Record<string, string> = {}) {
     clientVersion: '1.0.0',
   });
   registry.setConfigured([fakeAgent()]);
-  const history = new CodexHistory(join(root, 'history'), 'acp');
-  const backend = new AcpBackend(registry, history, '1.0.0');
+  const backend = new AcpBackend(registry, '1.0.0');
   const config: DurableTurnConfig = {
     turnsDir: join(root, 'turns'),
     runner: {
@@ -60,7 +58,7 @@ function setup(env: Record<string, string> = {}) {
       .split('\n')
       .filter(Boolean)
       .map((l) => JSON.parse(l));
-  return { root, cwd, registry, backend, history, config, requests };
+  return { root, cwd, registry, backend, config, requests };
 }
 
 function opts(over: Partial<SdkRunOptions>): SdkRunOptions {
@@ -87,7 +85,7 @@ const said = (envs: SdkEnvelope[]) =>
 
 describe('an ACP turn', () => {
   it('runs a turn: text, thought, a tool call asked through Patch, a plan, and the result', async () => {
-    const { backend, cwd, history, requests } = setup();
+    const { backend, cwd, requests } = setup();
     const asked: unknown[] = [];
     const envs = await collect(
       backend.run(
@@ -129,8 +127,6 @@ describe('an ACP turn', () => {
         env: [{ name: 'PATCH_CHAT_ID', value: 'c1' }],
       },
     ]);
-    // The history reader has the turn.
-    expect(history.hasSession({ folder: cwd, sessionId })).toBe(true);
   }, 30_000);
 
   it('answers permission itself under bypass, and puts the agent in its own matching mode', async () => {
@@ -315,12 +311,9 @@ describe('a chat on an ACP model', () => {
           })();
         },
       },
-      historyReader: {
+      sessionProbe: {
         hasSession: (o: { sessionId: string }) => known.has(o.sessionId),
-        read: () => [],
-        forkPoint: () => null,
-        sidePoint: () => null,
-      } as any,
+      },
       claudeProjectsRoot: join(root, 'projects'),
       oauthAccessToken: 'tok',
       emit: (e) => events.push(e),

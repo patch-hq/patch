@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import { CodexBackend } from '../src/codexBackend.js';
 import type { SdkEnvelope } from '../src/sdkBackend.js';
 
@@ -10,7 +10,7 @@ import type { SdkEnvelope } from '../src/sdkBackend.js';
 // next tool call finishes, not after the whole turn.
 function harness(opts: { steerFails?: boolean; waiting?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-steer-'));
-  const history = new CodexHistory(root);
+  const history = new CodexSessions(root);
   const calls: { method: string; params: any }[] = [];
   let listener: ((m: any) => void) | undefined;
   const emit = (method: string, params: object): void =>

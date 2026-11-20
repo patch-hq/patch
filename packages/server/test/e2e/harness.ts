@@ -38,7 +38,7 @@ import {
 } from '../../../host/src/chatRunner.js';
 import { createMetaStore } from '../../../host/src/meta.js';
 import { createMockSdkBackend, type MockSdkBackend } from '../../../host/src/sdkBackend.js';
-import { createHistoryReader } from '../../../host/src/history.js';
+import { createClaudeSessionProbe } from '../../../host/src/history.js';
 import { createServerLink, type ServerLink } from '../../../host/src/serverLink.js';
 import { Outbox } from '../../../host/src/outbox.js';
 import { ensureSpecialThreads } from '../../../host/src/specialThreads.js';
@@ -257,7 +257,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
       sdkBackend: hostSdk,
       sdkBackendKind: 'mock',
       oauthAccessToken: 'fake-oauth',
-      historyReader: createHistoryReader({ claudeProjectsRoot: hostClaudeRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: hostClaudeRoot }),
       emit,
       logger: silent,
       generateTitle: wrappedTitle,

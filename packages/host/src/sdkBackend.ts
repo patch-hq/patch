@@ -322,12 +322,10 @@ export interface MockSdkBackend extends SdkBackend {
 export interface MockSdkBackendOptions {
   /**
    * Root that mirrors Claude Code's `~/.claude/projects` layout. When set, the
-   * mock writes a real JSONL transcript here per turn, so the host's
-   * `HistoryReader` (which backs `patch_history` / `chat.replay`) has genuine
-   * persisted older events to paginate — the SAME on-disk contract the real
-   * SDK provides. WHEN UNSET (the unit-test default) the mock persists nothing
-   * and stays a pure in-memory echo, so tests that inject their own reader are
-   * untouched. The live host passes its configured root (see index.ts).
+   * mock writes a real JSONL session file here per turn, as Claude Code does,
+   * so a session can be found, resumed and forked like a real one. WHEN UNSET
+   * (the unit-test default) the mock persists nothing and stays a pure
+   * in-memory echo. The live host passes its configured root (see index.ts).
    */
   claudeProjectsRoot?: string;
   /**
@@ -351,11 +349,8 @@ export interface MockSdkBackendOptions {
  * transcript (a prompt of `/ha-update\n\n<body> ` was persisted with args
  * carrying neither the leading newlines nor the trailing space).
  *
- * The mock reproduces that rewrite so the round trip the canonical seq index
- * depends on — live `chat.message` identity == replayed identity — is
- * exercisable off the real SDK. Without it the mock's transcript is
- * byte-identical to the prompt, which is the ONE shape that can never catch a
- * normalisation mismatch (spec/04 § History).
+ * The mock reproduces that rewrite so its session file matches what Claude
+ * Code would have written for the same prompt.
  *
  * A command NAME is required, not a bare leading slash, so an absolute path
  * (`/tmp/x`) stays a plain user turn exactly as real Claude Code leaves it.
@@ -372,8 +367,8 @@ export function claudeCodePersistedUserTurn(prompt: string): string {
 }
 
 /** Append one Claude-Code-shaped JSONL line (role + text) to the transcript. */
-function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: string): void {
-  appendTranscriptEntry(path, {
+function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: string): string {
+  return appendTranscriptEntry(path, {
     type: role,
     message: { role, content: [{ type: 'text', text }] },
   });
@@ -388,8 +383,10 @@ function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: st
  * transcript would be un-forkable and the fork path un-exercisable off the real
  * SDK.
  */
-function appendTranscriptEntry(path: string, entry: Record<string, unknown>): void {
-  appendFileSync(path, JSON.stringify({ uuid: randomUUID(), ...entry }) + '\n', 'utf8');
+function appendTranscriptEntry(path: string, entry: Record<string, unknown>): string {
+  const uuid = randomUUID();
+  appendFileSync(path, JSON.stringify({ uuid, ...entry }) + '\n', 'utf8');
+  return uuid;
 }
 
 /**
@@ -431,12 +428,8 @@ function forkTranscript(
 }
 
 /**
- * Persist a single SDK envelope to the on-disk transcript in the SAME shape
- * Claude Code writes — so the host's HistoryReader reconstructs the FULL
- * wire-event stream (tool calls, tool results, permission prompts) on
- * `chat.replay` / `patch_history`, not just plain assistant text. Without this
- * an attach/resume to an already-produced chat would replay messages only and
- * the event pane would render no tool lines (G1-15).
+ * Persist a single SDK envelope to the mock's session file in the SAME shape
+ * Claude Code writes, and return the entry's uuid (the envelope's `nativeId`).
  *
  * Block shapes mirror real Claude Code JSONL:
  *   - assistant text   → assistant message, content `[{type:'text', text}]`
@@ -446,13 +439,12 @@ function forkTranscript(
  *                        (Claude Code records the proposed call; the surface
  *                        re-derives the approve/deny affordance on replay).
  */
-function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
+function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): string | undefined {
   if ((ev.type === 'assistant' || ev.type === 'user') && ev.content) {
-    appendTranscriptLine(path, ev.type, ev.content);
-    return;
+    return appendTranscriptLine(path, ev.type, ev.content);
   }
   if (ev.type === 'tool_use' && ev.tool) {
-    appendTranscriptEntry(path, {
+    return appendTranscriptEntry(path, {
       type: 'assistant',
       message: {
         role: 'assistant',
@@ -461,10 +453,9 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ],
       },
     });
-    return;
   }
   if (ev.type === 'tool_result' && ev.toolResult) {
-    appendTranscriptEntry(path, {
+    return appendTranscriptEntry(path, {
       type: 'user',
       message: {
         role: 'user',
@@ -478,10 +469,9 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ],
       },
     });
-    return;
   }
   if (ev.type === 'permission' && ev.permission) {
-    appendTranscriptEntry(path, {
+    return appendTranscriptEntry(path, {
       type: 'assistant',
       message: {
         role: 'assistant',
@@ -498,14 +488,12 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ],
       },
     });
-    return;
   }
   if (ev.type === 'system' && ev.compaction) {
     // Claude Code's own on-disk shape for a boundary (spec/02 § Context
     // compression): a top-level `system` entry, camelCase metadata, no message
-    // block. Written exactly so the HistoryReader parses this and a real
-    // transcript with the same branch.
-    appendTranscriptEntry(path, {
+    // block.
+    return appendTranscriptEntry(path, {
       type: 'system',
       subtype: 'compact_boundary',
       content: 'Conversation compacted',
@@ -516,9 +504,9 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ...(ev.compaction.durationMs !== undefined ? { durationMs: ev.compaction.durationMs } : {}),
       },
     });
-    return;
   }
   // `result` / other `system` envelopes carry no chat-visible content — skip.
+  return undefined;
 }
 
 /** Wait `ms`, resolving early (without throwing) if the abort signal fires. */
@@ -921,10 +909,12 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
               },
             ];
 
-      // Persist this turn to the on-disk transcript BEFORE streaming, so a
-      // mid-turn `patch_history` (and post-turn pagination) see real older
-      // events. We log the user prompt then each assistant text envelope.
-      // Only when a projects root is configured (live host); unit tests skip.
+      // Persist this turn to the session file BEFORE streaming, as Claude Code
+      // does. Only when a projects root is configured (live host); unit tests
+      // skip.
+      // Each entry's id rides on the envelope as `nativeId`, as the real SDK's
+      // message uuid does.
+      const entryIds = new Map<SdkEnvelope, string>();
       if (projectsRoot !== undefined) {
         const dir = join(projectsRoot, encodeFolder(runOpts.cwd));
         try {
@@ -932,7 +922,8 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
           const transcript = join(dir, `${sessionId}.jsonl`);
           appendTranscriptLine(transcript, 'user', claudeCodePersistedUserTurn(runOpts.prompt));
           for (const ev of script) {
-            appendEnvelopeToTranscript(transcript, ev);
+            const uuid = appendEnvelopeToTranscript(transcript, ev);
+            if (uuid !== undefined && ev.nativeId === undefined) entryIds.set(ev, uuid);
           }
         } catch (err) {
           // NO FALLBACK silencing: a transcript write failure is surfaced so
@@ -949,10 +940,14 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
         await Promise.resolve();
         // Stamp the (stable) sessionId onto the result so the host captures
         // it and resumes into the SAME transcript next turn.
+        const nativeId = entryIds.get(ev);
         if (ev.type === 'result' && !ev.sessionId) {
           yield { ...ev, sessionId };
         } else {
-          yield ev;
+          // Like the real SDK, an entry says which session it is in.
+          yield nativeId !== undefined
+            ? { ...ev, nativeId, sessionId: ev.sessionId ?? sessionId }
+            : ev;
         }
       }
 

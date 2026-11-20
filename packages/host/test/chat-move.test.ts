@@ -11,7 +11,7 @@ import { SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { ChatMoveError } from '../src/chatMove.js';
 
 const silent = pino({ level: 'silent' });
@@ -35,7 +35,7 @@ function host(hostId: string) {
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${hostId}-${++id}`,
     claudeProjectsRoot: claudeRoot,
-    historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
   });
   return { daemon, events, sdk, metaStore, folder, home };
 }

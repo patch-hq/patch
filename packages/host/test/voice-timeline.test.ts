@@ -14,7 +14,7 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -48,7 +48,7 @@ function setup(opts: { costPerTurn?: number } = {}) {
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({
+    sessionProbe: createClaudeSessionProbe({
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-voicetl-claude-')),
     }),
   });

@@ -14,7 +14,7 @@ import type { WireEvent } from '@patch/wire';
 import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
@@ -37,7 +37,7 @@ function setup(opts: { now?: () => number } = {}) {
     logger: silent,
     now: opts.now ?? (() => 1_700_000_000_000),
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
   });
   return { daemon, events, folder, metaStore };
 }
@@ -85,7 +85,7 @@ describe('Host setReminder (patch/todo.md — Reminders)', () => {
       emit: (e) => events.push(e),
       logger: silent,
       now: () => 1_700_000_000_000,
-      historyReader: createHistoryReader({
+      sessionProbe: createClaudeSessionProbe({
         claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-reminder-claude2-')),
       }),
     });

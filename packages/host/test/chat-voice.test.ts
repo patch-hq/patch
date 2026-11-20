@@ -11,7 +11,7 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createChatVoice } from '../src/audio/chatVoice.js';
 import { createVoiceLedger } from '../src/audio/voiceLedger.js';
 import type { VoiceSessionLike } from '../src/audio/voice-session-like.js';
@@ -56,7 +56,7 @@ function setup() {
     logger: silent,
     now: () => Date.UTC(2026, 9, 4, 12),
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({
+    sessionProbe: createClaudeSessionProbe({
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-chatvoice-claude-')),
     }),
   });

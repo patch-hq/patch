@@ -15,7 +15,7 @@
 // case below is the COMMON one, not an edge case.
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -24,7 +24,6 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { translateSdkMessage } from '../src/sdkBackend.js';
-import { jsonlLineToWire, encodeFolder } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -245,113 +244,5 @@ describe('Host — compaction boundary on the wire', () => {
       (e) => e.type === 'chat.message' && (e as { chatId: string }).chatId === chatId,
     ) as unknown as Array<{ role: string }>;
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant']);
-  });
-});
-
-describe('history replay — a persisted compaction boundary', () => {
-  it('reconstructs the boundary from the JSONL Claude Code writes', () => {
-    // Verbatim shape from a real ~/.claude/projects transcript.
-    const line = JSON.stringify({
-      parentUuid: null,
-      type: 'system',
-      subtype: 'compact_boundary',
-      content: 'Conversation compacted',
-      isMeta: false,
-      uuid: 'c0310345-2569-4b3e-933a-c90850f4bf19',
-      compactMetadata: { trigger: 'auto', preTokens: 168165 },
-      sessionId: '7a0bc341',
-    });
-    expect(jsonlLineToWire(line, 'chat-1', 7)).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'chat-1',
-        role: 'system',
-        content: 'Context compressed · from 168k',
-        seq: 7,
-        compaction: { trigger: 'auto', preTokens: 168165 },
-      },
-    ]);
-  });
-
-  it('reconstructs both counts and the duration when the transcript has them', () => {
-    const line = JSON.stringify({
-      type: 'system',
-      subtype: 'compact_boundary',
-      content: 'Conversation compacted',
-      compactMetadata: {
-        trigger: 'manual',
-        preTokens: 168165,
-        postTokens: 42118,
-        durationMs: 3200,
-      },
-      uuid: 'u2',
-    });
-    expect(jsonlLineToWire(line, 'chat-1', 3)).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'chat-1',
-        role: 'system',
-        content: 'Context compressed · 168k → 42k',
-        seq: 3,
-        compaction: { trigger: 'manual', preTokens: 168165, postTokens: 42118, durationMs: 3200 },
-      },
-    ]);
-  });
-
-  it('throws on a boundary line whose figures are unusable', () => {
-    const line = JSON.stringify({
-      type: 'system',
-      subtype: 'compact_boundary',
-      compactMetadata: { trigger: 'auto' },
-      uuid: 'u3',
-    });
-    expect(() => jsonlLineToWire(line, 'chat-1', 1)).toThrow(/compact_boundary/);
-  });
-
-  it('still ignores every other system line in the transcript', () => {
-    const line = JSON.stringify({ type: 'system', subtype: 'init', uuid: 'u4' });
-    expect(jsonlLineToWire(line, 'chat-1', 1)).toEqual([]);
-  });
-
-  it('survives a round trip through the transcript the mock backend writes', async () => {
-    const projectsRoot = mkdtempSync(join(tmpdir(), 'patch-projects-'));
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-folder-')));
-    const sdk = createMockSdkBackend({ claudeProjectsRoot: projectsRoot });
-    sdk.enqueue([
-      {
-        type: 'system',
-        content: 'Context compressed · from 168k',
-        compaction: { trigger: 'auto', preTokens: 168165 },
-      },
-      { type: 'result', sessionId: 'sess-R' },
-    ]);
-    const ac = new AbortController();
-    for await (const emitted of sdk.run({
-      prompt: 'go',
-      cwd: folder,
-      abortController: ac,
-      resumeSessionId: 'sess-R',
-    })) {
-      void emitted; // drain the stream so the transcript is written
-    }
-
-    const transcript = join(projectsRoot, encodeFolder(folder), 'sess-R.jsonl');
-    const lines = readFileSync(transcript, 'utf8')
-      .split('\n')
-      .filter((l) => l.length > 0);
-    const boundary = lines.find((l) => l.includes('compact_boundary'));
-    expect(boundary).toBeDefined();
-    // Written in Claude Code's on-disk camelCase shape, so the reader that
-    // parses real transcripts parses this one identically.
-    expect(jsonlLineToWire(boundary!, 'chat-1', 5)).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'chat-1',
-        role: 'system',
-        content: 'Context compressed · from 168k',
-        seq: 5,
-        compaction: { trigger: 'auto', preTokens: 168165 },
-      },
-    ]);
   });
 });

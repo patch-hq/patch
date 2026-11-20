@@ -12,7 +12,7 @@ import pino from 'pino';
 import type { WireEvent, AttachmentRef } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { attachmentsDirFor } from '../src/chatMove.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type MockSdkBackend } from '../src/sdkBackend.js';
 
@@ -30,7 +30,7 @@ function setup(): { daemon: Daemon; sdk: MockSdkBackend; folder: string; home: s
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: sdk,
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: silent,

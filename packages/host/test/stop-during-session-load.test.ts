@@ -10,7 +10,7 @@ import pino from 'pino';
 import { describe, expect, it } from 'vitest';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type SdkBackend } from '../src/sdkBackend.js';
 
@@ -42,7 +42,7 @@ describe('stop while a resumed turn is getting ready', () => {
       metaStore: createMetaStore(home),
       sdkBackend: sdk,
       sdkBackendKind: 'real',
-      historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
       oauthAccessToken: 'tok',
       emit: (e) => events.push(e),
       logger: pino({ level: 'silent' }),

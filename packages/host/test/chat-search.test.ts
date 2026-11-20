@@ -1,17 +1,9 @@
-// Chat search (spec/02 § Chat search): an in-memory index derived from the
-// backends' own transcripts, kept current incrementally, answering ranked hits
-// with snippets and the matched message's canonical seq.
+// Chat search (spec/02 § Chat search): an in-memory index of each chat's own
+// log, kept current incrementally, answering ranked hits with snippets and the
+// matched message's seq.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WireEvent } from '@patch/wire';
@@ -23,35 +15,27 @@ import {
   queryTerms,
   type SearchableChat,
 } from '../src/chatSearch.js';
-import { encodeFolder, eventIdentity } from '../src/history.js';
-import { identityHash } from '../src/seqIndex.js';
 
 const NOW = 1_800_000_000_000;
 const FOLDER = '/home/tom/project';
 
 let root: string;
-let claudeRoot: string;
-let codexRoot: string;
 let chatsRoot: string;
 let corrupt: { path: string; message: string }[];
+let nextSeq: number;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'patch-chat-search-'));
-  claudeRoot = join(root, 'claude-projects');
-  codexRoot = join(root, 'openai-history');
   chatsRoot = join(root, 'chats');
-  mkdirSync(join(claudeRoot, encodeFolder(FOLDER)), { recursive: true });
-  mkdirSync(codexRoot, { recursive: true });
   corrupt = [];
+  nextSeq = 0;
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 function index(): ChatSearchIndex {
   return new ChatSearchIndex(
     {
-      claudeProjectsRoot: claudeRoot,
-      codexHistoryRoot: codexRoot,
-      seqIndexPath: (chatId) => join(chatsRoot, chatId, 'seqindex.jsonl'),
+      logPath: (chatId) => join(chatsRoot, chatId, 'events.jsonl'),
       now: () => NOW,
       onCorruptLine: (info) => corrupt.push(info),
     },
@@ -74,49 +58,40 @@ function chat(over: Partial<SearchableChat> & { chatId: string }): SearchableCha
   };
 }
 
+/** One line of a chat's log, as `chatLog.ts` writes it. */
+function record(event: Record<string, unknown>, seq = nextSeq++, branchId = 'b0'): string {
+  return JSON.stringify({
+    v: 1,
+    seq,
+    at: NOW,
+    branchId,
+    nativeRef: { harness: 'claude', sessionId: 's', id: `u-${seq}` },
+    rec: { k: 'event', event: { chatId: 'c', seq, ...event } },
+  });
+}
 const user = (text: string, ts = '2026-09-01T10:00:00.000Z'): string =>
-  JSON.stringify({ type: 'user', timestamp: ts, message: { role: 'user', content: text } });
+  record({ type: 'chat.message', role: 'user', content: text, createdAt: Date.parse(ts) });
 const assistant = (text: string, ts = '2026-09-01T10:00:05.000Z'): string =>
-  JSON.stringify({
-    type: 'assistant',
-    timestamp: ts,
-    message: { role: 'assistant', model: 'claude-opus-5', content: [{ type: 'text', text }] },
-  });
-const toolUse = (id: string, input: unknown): string =>
-  JSON.stringify({
-    type: 'assistant',
-    message: {
-      role: 'assistant',
-      model: 'claude-opus-5',
-      content: [{ type: 'tool_use', id, name: 'Bash', input }],
-    },
-  });
-const toolResult = (id: string, content: string): string =>
-  JSON.stringify({
-    type: 'user',
-    message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content }] },
-  });
+  record({ type: 'chat.message', role: 'assistant', content: text, createdAt: Date.parse(ts) });
+const toolUse = (id: string, args: unknown): string =>
+  record({ type: 'chat.tool_call', tool: 'Bash', args, callId: id });
+const toolResult = (id: string, result: string): string =>
+  record({ type: 'chat.tool_result', tool: 'Bash', result, callId: id });
+const thinking = (text: string): string =>
+  JSON.stringify({ v: 1, seq: -1, at: NOW, rec: { k: 'thinking', text } });
 
-function transcriptPath(c: SearchableChat): string {
-  return join(claudeRoot, encodeFolder(c.folder), `${c.claudeSessionId}.jsonl`);
+function logPath(c: SearchableChat): string {
+  return join(chatsRoot, c.chatId, 'events.jsonl');
 }
-function writeTranscript(c: SearchableChat, lines: string[]): void {
-  writeFileSync(transcriptPath(c), lines.map((l) => `${l}\n`).join(''));
-}
-/** Record canonical seqs for messages, as chatRunner's emit() would. */
-function recordSeq(chatId: string, role: 'user' | 'assistant', content: string, seq: number): void {
-  const ev = { type: 'chat.message', chatId, role, content, seq } as WireEvent;
-  mkdirSync(join(chatsRoot, chatId), { recursive: true });
-  appendFileSync(
-    join(chatsRoot, chatId, 'seqindex.jsonl'),
-    `${JSON.stringify({ seq, hash: identityHash(eventIdentity(ev)!) })}\n`,
-  );
+function writeLog(c: SearchableChat, lines: string[]): void {
+  mkdirSync(join(chatsRoot, c.chatId), { recursive: true });
+  writeFileSync(logPath(c), lines.map((l) => `${l}\n`).join(''));
 }
 
 describe('chat search index', () => {
   it('finds user and assistant text case-insensitively, every term in one message', () => {
     const c = chat({ chatId: 'c1', name: 'Heating' });
-    writeTranscript(c, [
+    writeLog(c, [
       user('Why is the Boiler losing pressure?'),
       assistant('The boiler pressure drops when the expansion vessel fails.'),
       user('pressure only'),
@@ -139,15 +114,15 @@ describe('chat search index', () => {
   it('treats a quoted run as an exact phrase, across a line break', () => {
     const c1 = chat({ chatId: 'c1' });
     const c2 = chat({ chatId: 'c2' });
-    writeTranscript(c1, [user('the expansion vessel is split')]);
-    writeTranscript(c2, [user('vessel for the expansion\nbut not in that order')]);
+    writeLog(c1, [user('the expansion vessel is split')]);
+    writeLog(c2, [user('vessel for the expansion\nbut not in that order')]);
     const idx = index();
     expect(idx.search([c1, c2], 'expansion vessel', 20).total).toBe(2);
     const r = idx.search([c1, c2], '"expansion vessel"', 20);
     expect(r.hits.map((h) => h.chatId)).toEqual(['c1']);
     expect(r.hits[0]!.snippet!.highlights).toEqual([[4, 20]]);
     const wrapped = chat({ chatId: 'c3' });
-    writeTranscript(wrapped, [user('the expansion\n  vessel')]);
+    writeLog(wrapped, [user('the expansion\n  vessel')]);
     expect(idx.search([wrapped], '"expansion vessel"', 20).total).toBe(1);
     // A phrase and a plain term must both hold.
     expect(idx.search([c1], '"expansion vessel" split', 20).total).toBe(1);
@@ -161,8 +136,8 @@ describe('chat search index', () => {
       claudeSessionId: 'sess-1234-abcd',
     });
     const other = chat({ chatId: 'zzzz', name: 'Other' });
-    writeTranscript(c, [user('nothing relevant')]);
-    writeTranscript(other, [user('nothing')]);
+    writeLog(c, [user('nothing relevant')]);
+    writeLog(other, [user('nothing')]);
     for (const fullText of [true, false]) {
       const r = index().search([c, other], 'a0e4c9bf-62ea-4dd2-863d-7236a0a433dd', 20, fullText);
       expect(r.hits.map((h) => h.chatId)).toEqual([c.chatId]);
@@ -173,11 +148,11 @@ describe('chat search index', () => {
     expect(index().search([c, other], 'a0e4c9bf 62ea', 20).total).toBe(0);
   });
 
-  it('searches names only when fullText is false, reading no transcript', () => {
+  it('searches names only when fullText is false, reading no log', () => {
     const named = chat({ chatId: 'n', name: 'Garden plan' });
     const said = chat({ chatId: 's', name: 'Other', preview: 'garden preview' });
-    writeTranscript(named, [user('nothing')]);
-    writeTranscript(said, [user('the garden is wet')]);
+    writeLog(named, [user('nothing')]);
+    writeLog(said, [user('the garden is wet')]);
     const idx = index();
     expect(
       idx
@@ -189,7 +164,7 @@ describe('chat search index', () => {
     expect(r.hits.map((h) => h.chatId)).toEqual(['n']);
     expect(r.hits[0]).toMatchObject({ nameMatch: true, messageMatches: 0, snippet: null });
     expect(idx.search([named, said], '"garden plan"', 20, false).total).toBe(1);
-    // A pruned transcript is not "missing" when none was going to be read.
+    // A missing log is not "missing" when none was going to be read.
     const gone = chat({ chatId: 'g', name: 'garden gone' });
     expect(index().search([gone], 'garden', 20, false).transcriptsMissing).toBe(0);
   });
@@ -197,8 +172,8 @@ describe('chat search index', () => {
   it('leaves archived chats out unless includeArchived is set', () => {
     const live = chat({ chatId: 'live', name: 'Garden live' });
     const old = chat({ chatId: 'old', name: 'Garden old', status: 'archived' });
-    writeTranscript(live, [user('nothing')]);
-    writeTranscript(old, [user('nothing')]);
+    writeLog(live, [user('nothing')]);
+    writeLog(old, [user('nothing')]);
     const idx = index();
     expect(idx.search([live, old], 'garden', 20).hits.map((h) => h.chatId)).toEqual(['live']);
     expect(idx.search([live, old], 'garden', 20, false, false).total).toBe(1);
@@ -213,8 +188,8 @@ describe('chat search index', () => {
   it('leaves hidden chats out unless includeHidden is set', () => {
     const live = chat({ chatId: 'live', name: 'Garden live' });
     const tucked = chat({ chatId: 'tucked', name: 'Garden tucked', hidden: true });
-    writeTranscript(live, [user('nothing')]);
-    writeTranscript(tucked, [user('nothing')]);
+    writeLog(live, [user('nothing')]);
+    writeLog(tucked, [user('nothing')]);
     const idx = index();
     expect(idx.search([live, tucked], 'garden', 20).hits.map((h) => h.chatId)).toEqual(['live']);
     expect(
@@ -227,18 +202,11 @@ describe('chat search index', () => {
 
   it('does not search tool calls, tool output or thinking', () => {
     const c = chat({ chatId: 'c1' });
-    writeTranscript(c, [
+    writeLog(c, [
       user('list the files'),
       toolUse('t1', { command: 'cat secret-kumquat.txt' }),
       toolResult('t1', 'kumquat '.repeat(20_000)),
-      JSON.stringify({
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          model: 'claude-opus-5',
-          content: [{ type: 'thinking', thinking: 'the kumquat file' }],
-        },
-      }),
+      thinking('the kumquat file'),
       assistant('Done.'),
     ]);
     expect(index().search([c], 'kumquat', 20).total).toBe(0);
@@ -248,9 +216,9 @@ describe('chat search index', () => {
     const older = chat({ chatId: 'old', name: 'Garden plan', lastUpdated: NOW - 5000 });
     const newer = chat({ chatId: 'new', lastUpdated: NOW - 10 });
     const middle = chat({ chatId: 'mid', lastUpdated: NOW - 100 });
-    writeTranscript(older, [user('nothing here')]);
-    writeTranscript(newer, [assistant('the garden needs water')]);
-    writeTranscript(middle, [user('garden gnomes')]);
+    writeLog(older, [user('nothing here')]);
+    writeLog(newer, [assistant('the garden needs water')]);
+    writeLog(middle, [user('garden gnomes')]);
     const r = index().search([middle, newer, older], 'garden', 20);
     expect(r.hits.map((h) => h.chatId)).toEqual(['new', 'mid', 'old']);
     expect(r.hits[2]!).toMatchObject({ nameMatch: true, nameHighlights: [[0, 6]], snippet: null });
@@ -282,14 +250,14 @@ describe('chat search index', () => {
 
   it('finds a message appended after the last search, and waits for an unfinished line', () => {
     const c = chat({ chatId: 'c1' });
-    writeTranscript(c, [user('first message')]);
+    writeLog(c, [user('first message')]);
     const idx = index();
     expect(idx.search([c], 'walnut', 20).total).toBe(0);
     // Half a line: the backend is still writing it.
     const line = assistant('a walnut tree');
-    appendFileSync(transcriptPath(c), line.slice(0, 20));
+    appendFileSync(logPath(c), line.slice(0, 20));
     expect(idx.search([c], 'walnut', 20).total).toBe(0);
-    appendFileSync(transcriptPath(c), `${line.slice(20)}\n`);
+    appendFileSync(logPath(c), `${line.slice(20)}\n`);
     const r = idx.search([c], 'walnut', 20);
     expect(r.total).toBe(1);
     expect(r.hits[0]!.snippet!.text).toBe('a walnut tree');
@@ -297,23 +265,49 @@ describe('chat search index', () => {
     expect(idx.search([c], 'message', 20).hits[0]!.messageMatches).toBe(1);
   });
 
-  it('re-reads a transcript that was rewritten shorter, or a session that changed', () => {
+  it('re-reads a log that was rewritten shorter', () => {
     const c = chat({ chatId: 'c1' });
-    writeTranscript(c, [user('alpha one'), user('alpha two'), user('alpha three')]);
+    writeLog(c, [user('alpha one'), user('alpha two'), user('alpha three')]);
     const idx = index();
     expect(idx.search([c], 'alpha', 20).hits[0]!.messageMatches).toBe(3);
-    writeTranscript(c, [user('alpha only')]);
+    writeLog(c, [user('alpha only')]);
     expect(idx.search([c], 'alpha', 20).hits[0]!.messageMatches).toBe(1);
-    const switched = { ...c, claudeSessionId: 's-other-track' };
-    writeTranscript(switched, [user('beta')]);
-    expect(idx.search([switched], 'alpha', 20).total).toBe(0);
-    expect(idx.search([switched], 'beta', 20).total).toBe(1);
   });
 
-  it('counts a transcript the backend pruned, and still matches its stored preview', () => {
+  it("searches only the chat's current track when it has branched", () => {
+    const c = chat({
+      chatId: 'c1',
+      track: [
+        { branchId: 'b1', upperBound: Number.POSITIVE_INFINITY },
+        { branchId: 'b0', upperBound: 0 },
+      ],
+    });
+    writeLog(c, [
+      record({ type: 'chat.message', role: 'user', content: 'shared otter' }, 0),
+      record({ type: 'chat.message', role: 'user', content: 'original otter' }, 1),
+      record({ type: 'chat.message', role: 'user', content: 'edited otter' }, 2, 'b1'),
+      record({ type: 'chat.message', role: 'user', content: 'side otter' }, 3, 'b2'),
+    ]);
+    const hit = index().search([c], 'otter', 20).hits[0]!;
+    expect(hit.messageMatches).toBe(2);
+    expect(hit.snippet!.text).toBe('edited otter');
+  });
+
+  it('a later entry at the same seq on the same branch replaces the earlier one', () => {
+    const c = chat({ chatId: 'c1' });
+    writeLog(c, [
+      record({ type: 'chat.message', role: 'user', content: 'draft walrus' }, 3),
+      record({ type: 'chat.message', role: 'user', content: 'final heron' }, 3),
+      record({ type: 'chat.message', role: 'user', content: 'other branch walrus' }, 3, 'b1'),
+    ]);
+    const idx = index();
+    expect(idx.search([c], 'heron', 20).total).toBe(1);
+    expect(idx.search([c], 'walrus', 20).hits[0]!.messageMatches).toBe(1);
+  });
+
+  it('counts a chat whose log is missing, and still matches its stored preview', () => {
     const gone = chat({ chatId: 'gone', preview: 'Plan the Cornwall trip' });
-    const fresh = chat({ chatId: 'fresh', claudeSessionId: undefined, name: 'New' });
-    const r = index().search([gone, fresh], 'cornwall', 20);
+    const r = index().search([gone], 'cornwall', 20);
     expect(r.transcriptsMissing).toBe(1);
     expect(r.total).toBe(1);
     expect(r.hits[0]!.snippet).toEqual({
@@ -325,46 +319,33 @@ describe('chat search index', () => {
     });
   });
 
-  it("resolves the matched message's canonical seq, occurrence by occurrence, without writing", () => {
+  it("carries the matched message's own seq", () => {
     const c = chat({ chatId: 'c1' });
-    writeTranscript(c, [user('yes'), assistant('ok'), user('yes'), assistant('otter found')]);
-    recordSeq('c1', 'user', 'yes', 4);
-    recordSeq('c1', 'assistant', 'ok', 5);
-    recordSeq('c1', 'user', 'yes', 9);
-    const sidecar = join(chatsRoot, 'c1', 'seqindex.jsonl');
-    const before = readFileSync(sidecar, 'utf8');
+    writeLog(c, [user('yes'), assistant('ok'), user('yes'), assistant('otter found')]);
     const idx = index();
-    // The most recent "yes" is the SECOND occurrence → the second recorded seq.
-    expect(idx.search([c], 'yes', 20).hits[0]!.snippet!.seq).toBe(9);
-    // Never emitted live, never replayed: no seq, and none is allocated.
-    expect(idx.search([c], 'otter', 20).hits[0]!.snippet!.seq).toBeNull();
-    expect(readFileSync(sidecar, 'utf8')).toBe(before);
-    expect(existsSync(join(chatsRoot, 'c2'))).toBe(false);
+    expect(idx.search([c], 'yes', 20).hits[0]!.snippet!.seq).toBe(2);
+    expect(idx.search([c], 'otter', 20).hits[0]!.snippet!.seq).toBe(3);
   });
 
   it('reports and skips a corrupt line', () => {
     const c = chat({ chatId: 'c1' });
-    writeTranscript(c, [user('before'), '{"type":"user", not json', user('after heron')]);
+    writeLog(c, [
+      user('before'),
+      '{"v":1,"rec":{"k":"event","event":{"type":"chat.message", not json',
+      user('after heron'),
+    ]);
     const r = index().search([c], 'heron', 20);
     expect(r.total).toBe(1);
     expect(corrupt).toHaveLength(1);
-    expect(corrupt[0]!.path).toBe(transcriptPath(c));
+    expect(corrupt[0]!.path).toBe(logPath(c));
   });
 
-  it('reads the Codex backend history', () => {
+  it('indexes every provider the same way, from the record alone', () => {
     const c = chat({ chatId: 'cx', claudeSessionId: 'codex-abc' });
-    const ev = (role: 'user' | 'assistant', content: string): string =>
-      JSON.stringify({
-        turnId: 't1',
-        event: { type: 'chat.message', chatId: 'cx', role, content, seq: 0, createdAt: 5 },
-      });
-    writeFileSync(
-      join(codexRoot, 'codex-abc.jsonl'),
-      `${ev('user', 'tell me about lichen')}\n${JSON.stringify({ turnId: 't1', event: { type: 'chat.tool_call', chatId: 'cx', tool: 'x', args: { q: 'lichen' }, callId: 'k', seq: 0 } })}\n`,
-    );
+    writeLog(c, [user('tell me about lichen'), toolUse('k', { q: 'lichen' })]);
     const r = index().search([c], 'lichen', 20);
     expect(r.hits[0]!.messageMatches).toBe(1);
-    expect(r.hits[0]!.snippet).toMatchObject({ role: 'user', createdAt: 5 });
+    expect(r.hits[0]!.snippet).toMatchObject({ role: 'user' });
   });
 
   it('returns the top `limit` hits and the full total', () => {
@@ -379,8 +360,8 @@ describe('chat search index', () => {
   it('warm() builds the index for every live chat', async () => {
     const a = chat({ chatId: 'a' });
     const d = chat({ chatId: 'd', status: 'deleted' });
-    writeTranscript(a, [user('x')]);
-    writeTranscript(d, [user('y')]);
+    writeLog(a, [user('x')]);
+    writeLog(d, [user('y')]);
     const idx = index();
     await idx.warm([a, d]);
     expect(idx.size()).toBe(1);
@@ -460,7 +441,7 @@ describe('handleChatSearchRequest', () => {
 
   it('passes fullText from the request to the search', async () => {
     const c = chat({ chatId: 'c1', name: 'Other' });
-    writeTranscript(c, [user('the walnut tree')]);
+    writeLog(c, [user('the walnut tree')]);
     const ask = async (fullText: boolean | undefined): Promise<number> => {
       const sent: WireEvent[] = [];
       await handleChatSearchRequest(
@@ -489,10 +470,6 @@ describe('handleChatSearchRequest', () => {
   });
 
   it('answers a failure as ok:false with the reason', async () => {
-    const c = chat({ chatId: 'c1' });
-    writeTranscript(c, [user('oak')]);
-    mkdirSync(join(chatsRoot, 'c1'), { recursive: true });
-    writeFileSync(join(chatsRoot, 'c1', 'seqindex.jsonl'), 'not json\n');
     const sent: WireEvent[] = [];
     await handleChatSearchRequest(
       {
@@ -505,7 +482,9 @@ describe('handleChatSearchRequest', () => {
       {
         index: index(),
         ready: Promise.resolve(),
-        listChats: () => [c],
+        listChats: () => {
+          throw new Error('chat list unreadable');
+        },
         hostId: 'host-a',
         logger,
       },

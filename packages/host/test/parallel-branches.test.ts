@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatBranchesEvent, ChatMessageEvent, ChatStateEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { readBack } from './helpers/readBack.js';
@@ -52,7 +52,7 @@ function setup(
     hostId: 'd1',
     metaStore,
     sdkBackend: sdk,
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: silent,
@@ -75,6 +75,16 @@ function userMessages(events: WireEvent[]): Array<{ seq: number; content: string
     .filter(
       (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
         e.type === 'chat.message' && e.role === 'user',
+    )
+    .map((e) => ({ seq: e.seq, content: e.content }));
+}
+
+/** The assistant's replies: the entries a side thread hangs off. */
+function replies(events: WireEvent[]): Array<{ seq: number; content: string }> {
+  return events
+    .filter(
+      (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
+        e.type === 'chat.message' && e.role === 'assistant',
     )
     .map((e) => ({ seq: e.seq, content: e.content }));
 }
@@ -102,7 +112,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, sdk, events, folder } = setup({ turnDelayMs: 120 });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     // Count the turns in flight at once, rather than timing them: "faster than
     // two turns back to back" measured the host as much as the host, and
@@ -145,7 +155,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     events.length = 0;
     const sidePromise = daemon.sideChat({
@@ -185,7 +195,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, events, folder, metaStore } = setup({ turnDelayMs: 200 });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     const sidePromise = daemon.sideChat({
       chatId,
@@ -209,7 +219,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, events, folder } = setup({ turnDelayMs: 150 });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     // The active branch is idle; only a side branch is working.
     expect(lastState(events).activity).toBe('idle');
@@ -233,7 +243,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     await daemon.sideChat({
       chatId,
@@ -253,7 +263,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, events, folder } = setup({ turnDelayMs: 100 });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     const sidePromise = daemon.sideChat({
       chatId,
@@ -279,7 +289,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     await daemon.sideChat({
       chatId,
@@ -288,11 +298,10 @@ describe('spec/04 § Branching — parallel branches', () => {
       localId: 's1',
     });
     const sideBranchId = lastBranches(events).branches[1]!.branchId;
-    // [0] is the shared prefix message ("first question", inherited from the
-    // root); [1] is the side branch's OWN first turn ("go find out
-    // something") — forking off that is what exercises nesting off content
-    // that lives only on the side branch's own track.
-    const sideFirstTurn = userMessages(replay(daemon, chatId, sideBranchId))[1]!;
+    // The last reply on the side branch is its OWN first turn's answer —
+    // forking off that is what exercises nesting off content that lives only
+    // on the side branch's own track.
+    const sideFirstTurn = replies(replay(daemon, chatId, sideBranchId)).at(-1)!;
 
     await daemon.sideChat({
       chatId,
@@ -321,7 +330,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     events.length = 0;
     await daemon.sideChat({
@@ -344,7 +353,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
     await daemon.sideChat({ chatId, seq: firstTurn.seq, message: 'hi', localId: 's1' });
     const sideBranchId = metaStore.read(chatId)!.branches![1]!.branchId;
 
@@ -362,7 +371,7 @@ describe('spec/04 § Send back', () => {
     const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const firstTurn = userMessages(replay(daemon, chatId))[0]!;
+    const firstTurn = replies(replay(daemon, chatId))[0]!;
 
     await daemon.sideChat({
       chatId,

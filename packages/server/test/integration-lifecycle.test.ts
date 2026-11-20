@@ -14,7 +14,7 @@ import { OUT_OF_BAND_SEQ, type WireEvent, type ChatErrorCode } from '@patch/wire
 import { Daemon, FolderNotFoundError, ChatNotFoundError } from '../../host/src/chatRunner.js';
 import { createMetaStore } from '../../host/src/meta.js';
 import { createMockSdkBackend } from '../../host/src/sdkBackend.js';
-import { createHistoryReader } from '../../host/src/history.js';
+import { createClaudeSessionProbe } from '../../host/src/history.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import type { HostLink } from '../src/host-link.js';
@@ -208,7 +208,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       oauthAccessToken: 'fake',
       emit: (e) => link.emit(e),
       logger: silent,
-      historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
     });
     link.daemon = daemon;
 
@@ -340,7 +340,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       oauthAccessToken: 'fake',
       emit: (e) => link.emit(e),
       logger: silent,
-      historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
     });
     link.daemon = daemon;
 
@@ -411,7 +411,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
       emit: (e) => link.emit(e),
       logger: silent,
       // claudeRoot stays empty: the mock backend never writes a JSONL.
-      historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
     });
     link.daemon = daemon;
 
@@ -510,7 +510,7 @@ describe('integration: archiving on one surface reaches the other', () => {
         oauthAccessToken: 'fake',
         emit: (e) => link.emit(e),
         logger: silent,
-        historyReader: createHistoryReader({ claudeProjectsRoot: patchHome }),
+        sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: patchHome }),
       });
       link.daemon = daemon;
       const built = await buildAll({ logger: false, registry, hostLink: link });
