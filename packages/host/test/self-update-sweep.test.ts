@@ -53,3 +53,21 @@ describe('sweepUpdateWorkDirs', () => {
     expect(existsSync(join(root, 'patch-update-old'))).toBe(false);
   });
 });
+
+describe('update work folder', () => {
+  it('lives under the host home, not the system temp dir', async () => {
+    const { updateWorkRoot } = await import('../src/selfUpdate.js');
+    expect(updateWorkRoot('/home/u/.patch')).toBe('/home/u/.patch/update-work');
+  });
+
+  it('sweeping a folder that does not exist yet is a no-op', () => {
+    expect(sweepUpdateWorkDirs(join(tmpdir(), 'sweep-missing-never-made'))).toEqual([]);
+  });
+
+  it('says plainly when the disk is full', async () => {
+    const { describeUpdateRefusal } = await import('../src/selfUpdate.js');
+    expect(describeUpdateRefusal('self-update failed: ENOSPC: No space left on device')).toMatch(
+      /out of disk space/,
+    );
+  });
+});

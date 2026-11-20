@@ -44,6 +44,8 @@ export interface HostDescriptionInput {
   updateAvailable: boolean;
   /** A newer build is published but not yet built for this host. */
   updatePending?: boolean | undefined;
+  /** Why the last update attempt was refused, in words a surface can show. */
+  updateRefused?: string | undefined;
   permissionModeDefault: SdkPermissionMode;
   permissionOverrides: number;
   /**
@@ -141,6 +143,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.builtAt !== undefined ? { builtAt: input.builtAt } : {}),
     updateAvailable: input.updateAvailable,
     ...(input.updatePending ? { updatePending: true } : {}),
+    ...(input.updateRefused ? { updateRefused: input.updateRefused } : {}),
     permissionModeDefault: input.permissionModeDefault,
     permissionOverrides: input.permissionOverrides,
     ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),

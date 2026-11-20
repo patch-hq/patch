@@ -3205,6 +3205,8 @@ export const HostInfoEvent = z
     updateAvailable: z.boolean(),
     /** A newer build is published but this host's artifact is still being built; it applies on its own when it lands. */
     updatePending: z.boolean().optional(),
+    /** The last update attempt was refused; the words to show (e.g. the disk is full). Absent once an attempt is not refused. */
+    updateRefused: z.string().optional(),
     /** Applies to NEW chats on this host (spec/02 § Permission mode). */
     permissionModeDefault: PermissionMode,
     /** How many of this host's chats carry a per-chat override. */

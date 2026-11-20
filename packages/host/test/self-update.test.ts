@@ -7,6 +7,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { checkForUpdate, verifyArtifactSignature, compareVersions } from '../src/selfUpdate.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /** Sign a hex digest exactly as scripts/build-host.mjs does. */
 function signDigest(digestHex: string): { sig: string; publicKeyB64Url: string } {
@@ -160,7 +163,7 @@ describe('applyUpdate outcome', () => {
       internalToken: secret,
       currentVersion: '0.1.0',
       target: 'linux-x64',
-      patchHome: '/nonexistent',
+      patchHome: mkdtempSync(join(tmpdir(), 'upd-home-')),
       logger: { info() {}, warn() {}, error() {} } as never,
       // Fails at the manifest fetch; the message must still never carry the token.
       fetchImpl: (async () => {
@@ -487,7 +490,7 @@ describe('update path: every step is bounded, a stall is reported not awaited', 
       internalToken: 'secret-internal-token',
       currentVersion: '0.1.0',
       target: 'linux-x64',
-      patchHome: '/nonexistent',
+      patchHome: mkdtempSync(join(tmpdir(), 'upd-home-')),
       logger,
       fetchImpl,
       timeoutMs: 50,

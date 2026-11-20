@@ -191,6 +191,9 @@ function HostListRow({
       ) : report?.updatePending ? (
         <span data-testid={`host-${host.hostId}-update-pending`}>Update pending</span>
       ) : null}
+      {report?.updateRefused ? (
+        <span data-testid={`host-${host.hostId}-update-refused`}>{report.updateRefused}</span>
+      ) : null}
       <span className="set-chev" aria-hidden="true">
         ›
       </span>
