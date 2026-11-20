@@ -190,6 +190,20 @@ describe('FolderRegistry.browse', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('create makes the folder (and parents) then lists it; a file in the way throws', async () => {
+    const fresh = mkdtempSync(join(tmpdir(), 'patch-create-'));
+    const target = join(fresh, 'new-parent', 'my-first-patch');
+    const res = await browseReg().browse(target, { create: true });
+    expect(res.dir).toBe(target);
+    expect(res.entries).toEqual([]);
+    // creating an existing dir is fine
+    await browseReg().browse(target, { create: true });
+    await expect(
+      browseReg().browse(join(root, 'file.txt', 'sub'), { create: true }),
+    ).rejects.toThrow();
+    rmSync(fresh, { recursive: true, force: true });
+  });
+
   function browseReg() {
     return new FolderRegistry({
       source: { listChats: () => [] },

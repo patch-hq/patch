@@ -250,6 +250,39 @@ describe('GET /api/folders/browse', () => {
     }
   }
 
+  it('POST /api/folders/create forwards create:true and needs a dir', async () => {
+    const { registry, jwt } = await bootstrap();
+    const seen: Array<{ dir?: string; create?: boolean }> = [];
+    const hostLink = new FakeBrowseHost((event) => {
+      seen.push({ dir: event.dir, create: event.create });
+      return { ok: true, dir: event.dir ?? null, parent: null, entries: [] };
+    });
+    const built = await buildAll({ logger: false, registry, hostLink });
+    try {
+      const headers = { authorization: `Bearer ${jwt}` };
+      const bad = await built.app.inject({
+        method: 'POST',
+        url: '/api/folders/create?hostId=d1',
+        headers,
+      });
+      expect(bad.statusCode).toBe(400);
+      const ok = await built.app.inject({
+        method: 'POST',
+        url: '/api/folders/create?hostId=d1&dir=%2Fhome%2Fx%2Fnew',
+        headers,
+      });
+      expect(ok.statusCode).toBe(200);
+      expect(seen).toEqual([{ dir: '/home/x/new', create: true }]);
+      const noAuth = await built.app.inject({
+        method: 'POST',
+        url: '/api/folders/create?hostId=d1&dir=%2Fa',
+      });
+      expect(noAuth.statusCode).toBe(401);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('requires auth', async () => {
     const { registry } = await bootstrap();
     const hostLink = new FakeBrowseHost(() => ({ ok: true, entries: [] }));

@@ -8205,6 +8205,11 @@ export const PatchFoldersBrowseRequestEvent = z
      * roots (the published folder list) as `entries`, with `dir`/`parent` null.
      */
     dir: z.string().min(1).optional(),
+    /**
+     * Create `dir` (and any missing parents) on the host before listing it.
+     * Needs `dir`. An existing directory is simply listed.
+     */
+    create: z.boolean().optional(),
   })
   .strict();
 export type PatchFoldersBrowseRequestEvent = z.infer<typeof PatchFoldersBrowseRequestEvent>;

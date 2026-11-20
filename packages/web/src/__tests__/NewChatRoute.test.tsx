@@ -1936,6 +1936,67 @@ describe('/chats/new', () => {
     expect(chosenFolderLabel()).toBe('portfolio');
   });
 
+  it('a typed path that does not exist offers Create; creating selects it', async () => {
+    stubPickerFetch();
+    const base = vi.mocked(fetch);
+    const created: string[] = [];
+    vi.stubGlobal('fetch', (async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/api/folders/create') && init?.method === 'POST') {
+        created.push(decodeURIComponent(path.split('dir=')[1] as string));
+        return new Response(
+          JSON.stringify({
+            hostId: 'h',
+            dir: '/home/tom/my-first-patch',
+            parent: '/home/tom',
+            entries: [],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (path.includes('dir=%2Fhome%2Ftom%2Fmy-first-patch')) {
+        return new Response(JSON.stringify({ error: 'folder_not_found', message: 'nope' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return base(path, init);
+    }) as unknown as typeof fetch);
+    renderPicker();
+    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
+    fireEvent.change(await screen.findByTestId('new-chat-folder'), {
+      target: { value: '/home/tom/my-first-patch' },
+    });
+    const create = await screen.findByTestId('folder-create');
+    expect(create).toHaveTextContent('/home/tom/my-first-patch');
+    fireEvent.click(create);
+    await waitFor(() => expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument());
+    expect(created).toEqual(['/home/tom/my-first-patch']);
+    expect(chosenFolderLabel()).toBe('my-first-patch');
+  });
+
+  it('New folder in the browser creates inside the browsed directory', async () => {
+    stubPickerFetch();
+    const base = vi.mocked(fetch);
+    const created: string[] = [];
+    vi.stubGlobal('fetch', (async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/api/folders/create') && init?.method === 'POST') {
+        created.push(decodeURIComponent(path.split('dir=')[1] as string));
+        return new Response(
+          JSON.stringify({ hostId: 'h', dir: created[0], parent: null, entries: [] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return base(path, init);
+    }) as unknown as typeof fetch);
+    renderPicker();
+    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
+    fireEvent.click(await screen.findByTestId('folder-browser-entry-portfolio'));
+    fireEvent.click(await screen.findByTestId('folder-browser-new'));
+    fireEvent.change(screen.getByTestId('folder-browser-new-name'), { target: { value: 'fresh' } });
+    fireEvent.click(screen.getByTestId('folder-browser-new-create'));
+    await waitFor(() => expect(created).toEqual(['/home/tom/projects/portfolio/fresh']));
+  });
+
   it('attaches to a NEW chat: uploads to the DRAFT at attach time, promotes to the real id on send, then delivers (step 3 of 3)', async () => {
     // Step 3 of 3 (spec/14 & spec/15 § Composer → Attachments) — no chatId
     // exists yet when a file is attached to a new-chat draft, so it uploads
@@ -1975,6 +2036,12 @@ describe('/chats/new', () => {
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
+      }
+      if (u.startsWith('/api/folders/browse')) {
+        return new Response(JSON.stringify({ dir: '/x', parent: null, entries: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       throw new Error(`unexpected fetch: ${u}`);
     });
@@ -2475,9 +2542,14 @@ describe('/chats/new', () => {
     // handleStartVoiceNote → createChatInFolder directly, genuinely
     // re-entering while the first call is still in flight.)
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
-    const createCallsBefore = fetchMock.mock.calls.filter(
-      (c) => String(c[0]) === '/api/chats' && (c[1] as RequestInit | undefined)?.method === 'POST',
-    ).length;
+    const postCalls = () =>
+      fetchMock.mock.calls.filter(
+        (c) =>
+          String(c[0]) === '/api/chats' && (c[1] as RequestInit | undefined)?.method === 'POST',
+      ).length;
+    // The send first asks the host whether the typed folder exists.
+    await waitFor(() => expect(postCalls()).toBe(1));
+    const createCallsBefore = postCalls();
     expect(createCallsBefore).toBe(1);
     // A second, concurrent creation attempt while the first is still in
     // flight must bail out via the `if (submitting) return null;` guard

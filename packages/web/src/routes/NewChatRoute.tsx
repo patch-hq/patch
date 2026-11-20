@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CONNECT_PATH, providerNameForModel } from '../components/ClaudeDisconnectedBanner.js';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   folderName,
   folderLabels,
@@ -666,6 +666,54 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     enabled: suggestHome,
   });
   const homeFolder = suggestHome ? (homeBrowse?.dir ?? null) : null;
+
+  // Does the path typed in the field exist on the chosen host? A path that is
+  // not one of the known folders is asked of the host (debounced), so the
+  // picker can offer to create it and a send never goes out for one that
+  // is missing. Only an explicit 404 means missing; any other failure is not
+  // treated as "missing" (no guessing).
+  const queryClient = useQueryClient();
+  const typedPath = folder.trim();
+  const [debouncedTyped, setDebouncedTyped] = useState(typedPath);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTyped(typedPath), 250);
+    return () => clearTimeout(t);
+  }, [typedPath]);
+  const typedIsPath = debouncedTyped.startsWith('/') || debouncedTyped.startsWith('~');
+  const { error: typedErr } = useQuery({
+    queryKey: ['folder-exists', pickerHostId, debouncedTyped],
+    queryFn: () => api.browseFolders(pickerHostId as string, debouncedTyped),
+    enabled:
+      pickerOpen && pickerHostId !== null && typedIsPath && !folderOptions.includes(debouncedTyped),
+    retry: false,
+    staleTime: 0,
+  });
+  const typedMissing =
+    typedPath === debouncedTyped &&
+    typedErr instanceof ApiError &&
+    typedErr.status === 404 &&
+    typedIsPath;
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState<string | null>(null);
+  async function createFolderAt(path: string): Promise<void> {
+    if (pickerHostId === null || creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      const made = await api.createFolder(pickerHostId, path);
+      await queryClient.invalidateQueries({ queryKey: ['folders-browse'] });
+      await queryClient.invalidateQueries({ queryKey: ['folder-exists'] });
+      userEditedFolder.current = true;
+      setFolder(made.dir ?? path);
+      setFolderHostId(pickerHostId);
+      setChosenHostId(pickerHostId);
+      setNewFolderName(null);
+      setPickerOpen(false);
+    } catch (err) {
+      pushError(`Couldn’t create the folder: ${(err as Error).message}`);
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
   // A failed chat creation is reported by `pushError` alone — one surface per
   // failure (spec/12 § Principles). It used to ALSO render the identical text
   // as a paragraph at the top of the panel; two copies of one message read as
@@ -757,6 +805,23 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     if (submitting) return null;
     setSubmitting(true);
     try {
+      // A typed path the host does not have must not go out: the send would
+      // only fail. Ask the host, and if it is missing, open the picker where
+      // "Create" is offered.
+      if (pickerHostId !== null && !folderOptions.includes(trimmed)) {
+        try {
+          await api.browseFolders(pickerHostId, trimmed);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) {
+            setDebouncedTyped(trimmed);
+            setPickerOpen(true);
+            pushError(`${trimmed} doesn’t exist yet. Create it from the folder picker.`);
+            setSubmitting(false);
+            return null;
+          }
+          throw err;
+        }
+      }
       if (pickerHostId === null) {
         pushError('Choose which host to start the chat on.');
         setSubmitting(false);
@@ -1260,6 +1325,17 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                       }
                     }}
                   />
+                  {typedMissing ? (
+                    <button
+                      type="button"
+                      className="folder-create"
+                      data-testid="folder-create"
+                      disabled={creatingFolder}
+                      onClick={() => void createFolderAt(typedPath)}
+                    >
+                      Create “{typedPath}”
+                    </button>
+                  ) : null}
                   {/* RECENT — configured + recently-used folders. These are
                     shortcuts: one tap SELECTS the folder and closes the picker
                     ("start here"). Each row shows the folder NAME (bold) as the
@@ -1403,6 +1479,47 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                     {/* SELECT the currently-browsed directory (distinct from the
                           drill rows above). Absent at the roots view — you can't open
                           a chat in the synthetic "Projects" root. */}
+                    {browse?.dir ? (
+                      newFolderName === null ? (
+                        <button
+                          type="button"
+                          className="folder-browser-new"
+                          data-testid="folder-browser-new"
+                          onClick={() => setNewFolderName('')}
+                        >
+                          New folder
+                        </button>
+                      ) : (
+                        <form
+                          className="folder-browser-newform"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const name = newFolderName.trim();
+                            if (name && browse.dir)
+                              void createFolderAt(`${browse.dir.replace(/\/$/, '')}/${name}`);
+                          }}
+                        >
+                          <input
+                            type="text"
+                            className="folder-input"
+                            data-testid="folder-browser-new-name"
+                            aria-label="new folder name"
+                            placeholder="Folder name"
+                            autoFocus
+                            value={newFolderName}
+                            onChange={(e) => setNewFolderName(e.target.value)}
+                          />
+                          <button
+                            type="submit"
+                            className="folder-browser-new"
+                            data-testid="folder-browser-new-create"
+                            disabled={creatingFolder || !newFolderName.trim()}
+                          >
+                            Create
+                          </button>
+                        </form>
+                      )
+                    ) : null}
                     {browse?.dir ? (
                       <button
                         type="button"
