@@ -3334,15 +3334,22 @@ async function startHost(
         }
         createSpecialThreads();
         announceSpecialThreads();
+        // Every special thread carries on from the server's high-water mark,
+        // or the server refuses its new entries as clashing with ones it holds.
+        const MANAGER_THREAD: SpecialThreadId = 'thread_manager';
+        const nextSeqs = event.nextSeqs ?? { [MANAGER_THREAD]: event.nextSeq };
+        for (const [chatId, nextSeq] of Object.entries(nextSeqs)) {
+          if (chatId !== MANAGER_THREAD) daemon.noteCommitted(chatId, nextSeq - 1);
+        }
         daemon
-          .handOverThread('thread_manager', {
-            nextSeq: event.nextSeq,
+          .handOverThread(MANAGER_THREAD, {
+            nextSeq: nextSeqs[MANAGER_THREAD] ?? event.nextSeq,
             fromHostName: event.fromHostName,
             toHostName: event.toHostName,
             message: event.message,
           })
           .catch((err) => logger.error({ err }, 'manager: handover failed'));
-        logger.info({ epoch: event.epoch, nextSeq: event.nextSeq }, 'manager: home moved here');
+        logger.info({ epoch: event.epoch, nextSeqs }, 'manager: home moved here');
         return;
       }
       if (event.type === 'host.set_manager') {

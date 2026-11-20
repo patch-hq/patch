@@ -2304,6 +2304,48 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
+  it('a new Manager home carries Speakers on from the server’s high-water mark', async () => {
+    const boot = await bootMain({ __NOT_MANAGER__: '1' });
+    try {
+      await boot.fakeServer.waitForAuthed();
+      boot.fakeServer.send({
+        type: 'host.manager_handover',
+        hostId: 'd1',
+        epoch: 1,
+        nextSeq: 12,
+        nextSeqs: { thread_manager: 12, thread_speakers: 40 },
+        fromHostName: 'Laptop',
+        toHostName: 'Server',
+        message: '',
+      });
+      await waitFor(() => boot.ready.daemon.chatState.has('thread_speakers'));
+      await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'chat.message' && e.chatId === 'thread_manager' && e.role === 'system',
+      );
+      const before = boot.fakeServer.received.length;
+      boot.fakeServer.send({
+        type: 'chat.input',
+        chatId: 'thread_speakers',
+        message: 'after the move',
+        localId: 'speakers-after-move',
+      });
+      await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'chat.message' && e.chatId === 'thread_speakers' && e.role === 'assistant',
+        15_000,
+      );
+      const seqs = boot.fakeServer.received
+        .slice(before)
+        .filter((e) => (e as { chatId?: string }).chatId === 'thread_speakers' && 'seq' in e)
+        .map((e) => (e as { seq: number }).seq)
+        .filter((seq) => seq >= 0);
+      expect(seqs.length).toBeGreaterThan(0);
+      expect(Math.min(...seqs)).toBe(40);
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
   it('ignores a handover addressed to another host', async () => {
     const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
