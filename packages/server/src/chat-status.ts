@@ -53,6 +53,13 @@ export interface ChatStatusFacts {
    * the owed turn.
    */
   limit: { reason: string; resetsAt?: number; accountId?: string; message?: string } | null;
+  /**
+   * The host's latest frame says it holds a turn owed on a limit
+   * (`chat.state.limitNext`). A limit stands only while this does, whichever of
+   * the two facts arrived first: a turn's end that reaches the server after the
+   * host let the turn go (a provider switch) never pauses the chat.
+   */
+  limitHeld: boolean;
   /** The account the chat's latest turn ran on (`chat.state.account`). */
   accountId: string | null;
   /** The host has scheduled another attempt at a turn that met a transient error. */
@@ -83,6 +90,7 @@ export function emptyFacts(): ChatStatusFacts {
     lastEnd: null,
     interrupted: false,
     limit: null,
+    limitHeld: false,
     accountId: null,
     retrying: false,
     hostQueued: 0,
@@ -103,8 +111,10 @@ const noAccounts: AccountStateLookup = () => undefined;
  * account it ran on (spec/12 § Limits and sign-in). Signed out asks for sign-in
  * and out of credit stops; neither is retried. A limit the account confirms, or
  * one the server cannot check, is a pause until the reset. Where no reset is
- * known at all the limit is treated as out (spec/10 § Limits). An account with
- * credit again leaves the owed turn paused until it runs or the user continues it.
+ * known at all there is nothing to wait for: it stops as a limit with the
+ * provider's words (`limit_no_reset`) and the user continues it; it is not out of
+ * credit, which only the account's own `out` state says. An account with credit
+ * again leaves the owed turn paused until it runs or the user continues it.
  */
 function limitStatus(
   limit: NonNullable<ChatStatusFacts['limit']>,
@@ -119,17 +129,11 @@ function limitStatus(
     ...(limit.message !== undefined ? { message: limit.message } : {}),
     ...about,
   });
-  const outOfCredit = (message: string | undefined): StatusTarget => ({
-    state: 'failed',
-    reason: 'out_of_credit',
-    ...(message !== undefined ? { message } : {}),
-    ...about,
-  });
   switch (account?.state) {
     case 'signed_out':
       return { state: 'waiting_for_sign_in', reason: 'signed_out', ...about };
     case 'out':
-      return outOfCredit(account.message);
+      return { state: 'failed', reason: 'out_of_credit', message: account.message, ...about };
     case 'broken':
       return { state: 'failed', reason: 'account_broken', message: account.message, ...about };
     case 'ready':
@@ -138,7 +142,13 @@ function limitStatus(
     case 'limited':
     case undefined: {
       const resetsAt = (account?.state === 'limited' ? account.until : undefined) ?? limit.resetsAt;
-      return resetsAt !== undefined ? paused(resetsAt) : outOfCredit(limit.message);
+      if (resetsAt !== undefined) return paused(resetsAt);
+      return {
+        state: 'failed',
+        reason: 'limit_no_reset',
+        ...(limit.message !== undefined ? { message: limit.message } : {}),
+        ...about,
+      };
     }
   }
 }
@@ -170,7 +180,7 @@ export function deriveStatus(
   }
   if (facts.held.length > 0) return { state: 'queued_offline' };
   if (owed || facts.retrying || facts.hostQueued > 0) return { state: 'running' };
-  if (facts.limit) {
+  if (facts.limit && facts.limitHeld) {
     const accountId = facts.limit.accountId ?? facts.accountId ?? undefined;
     return limitStatus(
       { ...facts.limit, ...(accountId !== undefined ? { accountId } : {}) },
@@ -239,6 +249,7 @@ export function factsFromHostState(
     return {
       ...prev,
       ...limitLifted(prev, limitHeld ? prev.limit : null),
+      limitHeld,
       accountId,
       interrupted: event.interrupted === true,
       retrying: event.turnRetrying === true || overloadRetry,
@@ -263,6 +274,8 @@ export function factsFromHostState(
   return {
     ...prev,
     ...limitLifted(prev, limit),
+    // An older host's block is its own word that it holds the turn.
+    limitHeld: limit !== null,
     accountId,
     interrupted: event.interrupted === true,
     retrying: event.turnRetrying === true,
@@ -283,7 +296,12 @@ function limitLifted(
   prev: ChatStatusFacts,
   limit: ChatStatusFacts['limit'],
 ): Pick<ChatStatusFacts, 'limit' | 'lastEnd'> {
-  if (prev.limit !== null && limit === null && prev.lastEnd?.outcome === 'failed') {
+  if (
+    prev.limit !== null &&
+    prev.limitHeld &&
+    limit === null &&
+    prev.lastEnd?.outcome === 'failed'
+  ) {
     return { limit, lastEnd: null };
   }
   return { limit, lastEnd: prev.lastEnd };
@@ -325,7 +343,9 @@ export function restoredFacts(
     : saved.held === true
       ? ['*']
       : [];
-  return { ...emptyFacts(), ...saved, held };
+  // Facts saved before `limitHeld` was kept: a limit then stood on its own.
+  const limitHeld = saved.limitHeld ?? (saved.limit !== undefined && saved.limit !== null);
+  return { ...emptyFacts(), ...saved, held, limitHeld };
 }
 
 export function factsOnTurnEnded(
@@ -335,14 +355,17 @@ export function factsOnTurnEnded(
   error: { code: string; message: string } | undefined,
   limit?: TurnLimit,
 ): ChatStatusFacts {
+  // A limit reported for a turn the host has already let go (its frame saying
+  // so arrived first): nothing is owed, so the turn is not a failure to read.
+  const released = limit !== undefined && !prev.limitHeld;
   return {
     ...prev,
     openTurns: prev.openTurns.filter((t) => t !== turnId),
-    lastEnd: { outcome, ...(error ? { error } : {}) },
+    lastEnd: released ? null : { outcome, ...(error ? { error } : {}) },
     ...(limit !== undefined
       ? {
-          // A host sends this only for a turn it holds owed; it stands until
-          // the next turn starts or a frame says the host no longer holds it.
+          // A host sends this only for a turn it holds owed; it stands while
+          // the host's frames say it holds it, until the next turn starts.
           limit: {
             reason: limit.scope,
             ...(limit.resetsAt !== undefined ? { resetsAt: limit.resetsAt } : {}),

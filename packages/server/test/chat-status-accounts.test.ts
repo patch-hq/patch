@@ -5,7 +5,12 @@
 
 import { describe, test, expect } from 'vitest';
 import type { AccountState, ChatStateEvent, TurnLimit, WireEvent } from '@patch/wire';
-import { deriveStatus, emptyFacts, type ChatStatusFacts } from '../src/chat-status.js';
+import {
+  deriveStatus,
+  emptyFacts,
+  restoredFacts,
+  type ChatStatusFacts,
+} from '../src/chat-status.js';
 import { ChatRegistry } from '../src/chat-registry.js';
 
 const facts = (over: Partial<ChatStatusFacts>): ChatStatusFacts => ({ ...emptyFacts(), ...over });
@@ -17,6 +22,7 @@ const lookup =
 describe('deriveStatus with account states', () => {
   const limited = facts({
     limit: { reason: 'session', resetsAt: 500, accountId: 'a', message: 'limit reached' },
+    limitHeld: true,
   });
 
   test('a limit the account confirms pauses until the account says it resets', () => {
@@ -56,20 +62,33 @@ describe('deriveStatus with account states', () => {
     });
   });
 
-  test('a limit no one states a reset for is out of credit (spec/10 § Limits)', () => {
-    const noReset = facts({ limit: { reason: 'unknown', accountId: 'a', message: 'spent' } });
-    expect(deriveStatus(noReset, false, lookup({ a: { state: 'limited' } }))).toMatchObject({
+  test('a limit no one states a reset for stops as a limit, never as out of credit', () => {
+    const noReset = facts({
+      limit: { reason: 'unknown', accountId: 'a', message: 'Quota exceeded' },
+      limitHeld: true,
+    });
+    expect(deriveStatus(noReset, false, lookup({ a: { state: 'limited' } }))).toEqual({
       state: 'failed',
-      reason: 'out_of_credit',
-      message: 'spent',
+      reason: 'limit_no_reset',
+      message: 'Quota exceeded',
+      accountId: 'a',
     });
     // An account the server does not hold: the fact alone.
-    expect(deriveStatus(noReset)).toMatchObject({ state: 'failed', reason: 'out_of_credit' });
+    expect(deriveStatus(noReset)).toMatchObject({ state: 'failed', reason: 'limit_no_reset' });
     expect(deriveStatus(limited)).toMatchObject({ state: 'paused', resetsAt: 500 });
   });
 
+  test('a limit the host no longer holds is not a pause', () => {
+    expect(deriveStatus({ ...limited, limitHeld: false }).state).toBe('idle');
+  });
+
+  test('facts saved before the host held flag was kept still pause on their limit', () => {
+    expect(restoredFacts({ limit: { reason: 'session', resetsAt: 5 } }).limitHeld).toBe(true);
+    expect(restoredFacts({ limit: null }).limitHeld).toBe(false);
+  });
+
   test('the account of the latest turn stands in when the limit names none', () => {
-    const f = facts({ accountId: 'a', limit: { reason: 'week', resetsAt: 5 } });
+    const f = facts({ accountId: 'a', limit: { reason: 'week', resetsAt: 5 }, limitHeld: true });
     expect(deriveStatus(f, false, lookup({ a: { state: 'signed_out' } }))).toMatchObject({
       state: 'waiting_for_sign_in',
       accountId: 'a',
@@ -230,6 +249,57 @@ describe('ChatRegistry: limits from a host that reports them as facts', () => {
     reg.accountStatesChanged();
     expect(reg.get('c1')?.chatStatus?.state).toBe('paused');
     expect(reg.factsOf('c1')?.openTurns).toEqual([]);
+  });
+
+  test('a limit with no reset stops as a limit with the provider words, not as out of credit', () => {
+    const { reg, states } = make();
+    states['a'] = { state: 'ready' };
+    reg.observe(started('t1'));
+    reg.observe(state({ limitNext: 'ask' }));
+    reg.observe(endedOnLimit('t1', { accountId: 'a', scope: 'unknown', message: 'Quota hit' }));
+    // Credit on the account, but nothing stated when the limit lifts: still paused for Continue.
+    expect(reg.get('c1')?.chatStatus?.state).toBe('paused');
+    states['a'] = { state: 'limited' };
+    reg.accountStatesChanged();
+    expect(reg.get('c1')?.chatStatus).toMatchObject({
+      state: 'failed',
+      reason: 'limit_no_reset',
+      message: 'Quota hit',
+    });
+  });
+
+  test('provider switch: a limit fact that arrives after the host let the turn go never pauses', () => {
+    const { reg } = make();
+    reg.observe(started('t1'));
+    reg.observe(state({ limitNext: 'switch_provider' }));
+    // The user switched provider before the turn's end reached the server.
+    reg.observe(state({ limitNext: null }));
+    reg.observe(endedOnLimit('t1', limitA));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+    // And stays so as account states move: the old chat runs no other turn.
+    reg.accountStatesChanged();
+    expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+  });
+
+  test('resume: a limit fact that arrives after the release is overtaken by the next turn', () => {
+    const { reg } = make();
+    reg.observe(started('t1'));
+    reg.observe(state({ limitNext: 'resume_at_reset' }));
+    reg.observe(state({ limitNext: null }));
+    reg.observe(endedOnLimit('t1', limitA));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+    reg.observe(started('t2'));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+  });
+
+  test('a limit fact that arrives before the frame saying the host holds it pauses once it does', () => {
+    const { reg } = make();
+    reg.observe(started('t1'));
+    reg.observe(endedOnLimit('t1', limitA));
+    reg.observe(state({ limitNext: 'resume_at_reset' }));
+    expect(reg.get('c1')?.chatStatus).toMatchObject({ state: 'paused', resetsAt: 500 });
+    reg.observe(state({ limitNext: null }));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
   });
 
   test('a limitBlock on its own does not pause a chat whose host reports limits as facts', () => {
