@@ -99,6 +99,7 @@ import {
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
   MANAGER_TOOL_NAMES,
+  managerToolSet,
   stringArgs,
   MANAGER_TOOL_PARAMS,
   SEND_TO_CHAT_BLOCKING_DESCRIPTION,
@@ -395,7 +396,11 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   private instructions(): string {
     let text =
       (this.deps.manager
-        ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
+        ? managerHostedInstruction(
+            false,
+            this.deps.manager.voicePrompt?.(),
+            this.deps.manager.enabledTools?.(),
+          )
         : hostedVoiceInstruction(this.effectiveHandoff())) +
       (this.deps.lookBack !== undefined && this.historyAllowed() ? `\n\n${LOOK_BACK_RULE}` : '');
     if (this.deps.device) text += `\n\n${this.deps.device.prompt()}`;
@@ -412,7 +417,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       tools: [
         // A Manager call has its own tools and no agent behind it; `never` has no agent either.
         ...(this.deps.manager
-          ? managerRealtimeTools()
+          ? managerRealtimeTools(this.deps.manager?.enabledTools?.())
           : handoff === 'never'
             ? []
             : [
@@ -1118,7 +1123,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
 }
 
 /** The Manager call's tools, in Realtime's function shape. */
-function managerRealtimeTools(): Array<Record<string, unknown>> {
+function managerRealtimeTools(enabledTools?: readonly string[]): Array<Record<string, unknown>> {
+  const on = managerToolSet(enabledTools);
   const fn = (
     name: string,
     description: string,
@@ -1144,5 +1150,5 @@ function managerRealtimeTools(): Array<Record<string, unknown>> {
       message: MANAGER_TOOL_PARAMS.message,
     }),
     ...MANAGER_QUICK_TOOLS.map((t) => fn(t.name, t.description, t.params, t.required)),
-  ];
+  ].filter((t) => on.has(t['name'] as string));
 }

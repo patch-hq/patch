@@ -280,6 +280,23 @@ describe('prompts', () => {
     expect(managerHostedInstruction(false)).toContain('returns once the chat has answered');
   });
 
+  test('the rules name only the tools that are switched on', () => {
+    const text = managerHostedInstruction(false, undefined, ['add_task', 'find_chats']);
+    expect(text).toContain('add_task');
+    expect(text).toContain(FIND_CHATS_TOOL_NAME);
+    for (const off of [
+      'send_to_chat',
+      'chat_status',
+      'add_event',
+      'calendar_agenda',
+      'ask_agent',
+    ]) {
+      expect(text).not.toContain(off);
+    }
+    expect(text).not.toContain('returns once the chat has answered');
+    expect(text).toContain('you cannot do from this call');
+  });
+
   test('the account’s voice prompt replaces the built-in one; the tool rules stay', () => {
     const custom = 'You are my assistant. Answer questions yourself when you can.';
     for (const asyncResult of [true, false]) {

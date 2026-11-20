@@ -79,7 +79,8 @@ import {
   stringArgs,
   MANAGER_BLOCKING_REPLY_RULE,
   MANAGER_TOOL_PARAMS,
-  MANAGER_TOOLS_RULE,
+  managerToolsRule,
+  managerToolSet,
   MANAGER_VOICE_PREAMBLE,
   ManagerChatLookupError,
   managerReplyMessage,
@@ -411,15 +412,23 @@ export const HOSTED_VOICE_INSTRUCTION = hostedVoiceInstruction('auto');
  * Manager). `asyncResult`: a chat's reply arrives later as a message (Gemini)
  * rather than as the send tool's own return (OpenAI Realtime, ElevenLabs).
  */
-export function managerHostedInstruction(asyncResult: boolean, voicePrompt?: string): string {
+export function managerHostedInstruction(
+  asyncResult: boolean,
+  voicePrompt?: string,
+  enabledTools?: readonly string[],
+): string {
   const preamble = voicePrompt?.trim() ? `${voicePrompt.trim()}\n\n` : MANAGER_VOICE_PREAMBLE;
   return (
     preamble +
     FRAGMENT_RULE +
-    MANAGER_TOOLS_RULE +
+    managerToolsRule(enabledTools) +
     ACKNOWLEDGEMENT_RULE +
     '\n\n' +
-    (asyncResult ? MANAGER_ASYNC_REPLY_RULE : MANAGER_BLOCKING_REPLY_RULE)
+    (managerToolSet(enabledTools).has(SEND_TO_CHAT_TOOL_NAME)
+      ? asyncResult
+        ? MANAGER_ASYNC_REPLY_RULE
+        : MANAGER_BLOCKING_REPLY_RULE
+      : '')
   ).trimEnd();
 }
 
@@ -460,7 +469,8 @@ function stringTool(
 }
 
 /** The Manager call's tools (spec/07 § A call to the Manager). */
-function managerDeclarations(): GeminiFunctionDeclaration[] {
+function managerDeclarations(enabledTools?: readonly string[]): GeminiFunctionDeclaration[] {
+  const on = managerToolSet(enabledTools);
   return [
     stringTool(
       FIND_CHATS_TOOL_NAME,
@@ -474,7 +484,7 @@ function managerDeclarations(): GeminiFunctionDeclaration[] {
       message: MANAGER_TOOL_PARAMS.message,
     }),
     ...MANAGER_QUICK_TOOLS.map((t) => stringTool(t.name, t.description, t.params, t.required)),
-  ];
+  ].filter((d) => on.has(d.name));
 }
 
 function buildSetupMessage(
@@ -487,11 +497,12 @@ function buildSetupMessage(
   spokenAloud = '',
   voiceName?: string,
   managerPrompt?: string,
+  managerTools?: readonly string[],
 ): GeminiSetupMessage {
   const declarations: GeminiFunctionDeclaration[] = [
     // A Manager call has its own tools and no agent behind it; `never` has no agent either.
     ...(manager
-      ? managerDeclarations()
+      ? managerDeclarations(managerTools)
       : handoff === 'never'
         ? []
         : [
@@ -545,7 +556,7 @@ function buildSetupMessage(
           {
             text: withBriefing(
               (manager
-                ? managerHostedInstruction(true, managerPrompt)
+                ? managerHostedInstruction(true, managerPrompt, managerTools)
                 : hostedVoiceInstruction(handoff, true)) +
                 (lookBack ? `\n\n${LOOK_BACK_RULE}` : '') +
                 (spokenAloud ? `\n\n${spokenAloud}` : ''),
@@ -862,6 +873,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           this.deps.spokenAloud,
           this.deps.voice,
           this.deps.manager?.voicePrompt?.(),
+          this.deps.manager?.enabledTools?.(),
         ),
       ),
     );

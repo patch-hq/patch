@@ -6,7 +6,12 @@
 
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
-import { DEFAULT_MANAGER_VOICE_PROMPT, DEFAULT_SWEEP_PROMPT } from '@patch/wire';
+import {
+  DEFAULT_MANAGER_VOICE_PROMPT,
+  DEFAULT_SWEEP_PROMPT,
+  MANAGER_VOICE_TOOLS,
+  type ManagerVoiceToolId,
+} from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { Toggle } from '../../components/Toggle.js';
@@ -20,6 +25,18 @@ import { DeliverySlider } from './DeliverySlider.js';
 import { ManagerHomeGroup } from './ManagerHomeGroup.js';
 import { ManagerInstructionsRow } from './ManagerInstructionsRow.js';
 import { PromptRow } from './PromptsPage.js';
+
+/** The tool list with one tool switched on or off, in the catalogue's order. */
+function toggled(
+  current: readonly ManagerVoiceToolId[],
+  id: ManagerVoiceToolId,
+  next: boolean,
+): ManagerVoiceToolId[] {
+  const set = new Set(current);
+  if (next) set.add(id);
+  else set.delete(id);
+  return MANAGER_VOICE_TOOLS.map((t) => t.id).filter((x) => set.has(x));
+}
 
 export function ManagerPage(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -68,6 +85,27 @@ export function ManagerPage(): JSX.Element {
           onSave={(text) => patchShared('sweep prompt', { sweepPrompt: text })}
           onReset={() => patchShared('sweep prompt', { sweepPrompt: DEFAULT_SWEEP_PROMPT })}
         />
+      </Group>
+
+      <Group label="Voice tools" testid="settings-manager-tools">
+        {MANAGER_VOICE_TOOLS.map((t) => {
+          const on = preferences.managerVoiceTools.includes(t.id);
+          return (
+            <Row key={t.id} title={t.label} sub={t.sub} testid={`manager-tool-${t.id}`}>
+              <Toggle
+                checked={on}
+                disabled={!loaded}
+                ariaLabel={t.label}
+                testid={`manager-tool-${t.id}-toggle`}
+                onChange={(next) =>
+                  void patchShared('Manager voice tools', {
+                    managerVoiceTools: toggled(preferences.managerVoiceTools, t.id, next),
+                  })
+                }
+              />
+            </Row>
+          );
+        })}
       </Group>
 
       <Group label="Sweep" testid="settings-sweep">

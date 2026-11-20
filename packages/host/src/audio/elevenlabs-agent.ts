@@ -83,6 +83,7 @@ import {
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
   MANAGER_TOOL_NAMES,
+  managerToolSet,
   stringArgs,
   MANAGER_TOOL_PARAMS,
   SEND_TO_CHAT_BLOCKING_DESCRIPTION,
@@ -348,7 +349,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     const tools: Array<ReturnType<ElevenLabsAgentSession['clientTool']>> = [];
     if (this.deps.manager) {
       // A Manager call (spec/07 § A call to the Manager): its own tools, no agent behind it.
-      tools.push(
+      const on = managerToolSet(this.deps.manager.enabledTools?.());
+      const managerTools = [
         this.clientTool(
           FIND_CHATS_TOOL_NAME,
           FIND_CHATS_DESCRIPTION,
@@ -365,7 +367,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
         ...MANAGER_QUICK_TOOLS.map((t) =>
           this.clientTool(t.name, t.description, t.params, t.required),
         ),
-      );
+      ];
+      tools.push(...managerTools.filter((t) => on.has(t.tool_config.name)));
     } else if (handoff !== 'never') {
       tools.push(
         this.clientTool(DISPATCH_TOOL_NAME, DISPATCH_TOOL_DESCRIPTION, {
@@ -395,7 +398,11 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
           prompt: {
             prompt: withBriefing(
               (this.deps.manager
-                ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
+                ? managerHostedInstruction(
+                    false,
+                    this.deps.manager.voicePrompt?.(),
+                    this.deps.manager.enabledTools?.(),
+                  )
                 : hostedVoiceInstruction(handoff)) +
                 (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : '') +
                 (this.deps.spokenAloud ? `\n\n${this.deps.spokenAloud}` : ''),

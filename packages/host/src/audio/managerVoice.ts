@@ -146,18 +146,66 @@ export const MANAGER_TOOL_PARAMS = {
 /** The built-in voice prompt; Settings → Manager can replace it (`managerVoicePrompt`). */
 export const MANAGER_VOICE_PREAMBLE = `${DEFAULT_MANAGER_VOICE_PROMPT}\n\n`;
 
-export const MANAGER_TOOLS_RULE =
-  `To add a to-do call ${ADD_TASK_TOOL_NAME}; to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}; ` +
-  `to book something call ${ADD_EVENT_TOOL_NAME}. A request to log, add or remind is one of these ` +
-  `— never go looking for a chat for it. To find a chat call ${FIND_CHATS_TOOL_NAME}; to say how ` +
-  `one is getting on call ${CHAT_STATUS_TOOL_NAME}; to tell or ask an existing chat something call ` +
-  `${SEND_TO_CHAT_TOOL_NAME} with the chat and the message, phrased for that chat. Only when the ` +
-  `user names a chat does it go there. Real work that none of these covers — research, changes, ` +
-  `anything needing more than a lookup — call ${ASK_AGENT_TOOL_NAME}. If a chat name could mean ` +
-  'more than one chat, the tool says so: ask the user which one, naming the choices. Never guess ' +
-  'a chat or invent what one is doing, and never say a task or event was added, or a chat or ' +
-  'agent told something, unless the tool returned that it was done. If a tool reports it failed ' +
-  'or is not set up, say so plainly. Keep every spoken answer to one or two short sentences.\n\n';
+/** The tool ids the voice has on a call; an absent setting means all of them. */
+export function managerToolSet(enabled?: readonly string[]): ReadonlySet<string> {
+  return enabled ? new Set(enabled) : MANAGER_TOOL_NAMES;
+}
+
+/** The rule text for the tools the voice actually has; nothing about the ones switched off. */
+export function managerToolsRule(enabled?: readonly string[]): string {
+  const on = managerToolSet(enabled);
+  const has = (n: string): boolean => on.has(n);
+  const parts: string[] = [];
+  const direct: string[] = [];
+  if (has(ADD_TASK_TOOL_NAME)) direct.push(`to add a to-do call ${ADD_TASK_TOOL_NAME}`);
+  if (has(CALENDAR_AGENDA_TOOL_NAME))
+    direct.push(`to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}`);
+  if (has(ADD_EVENT_TOOL_NAME)) direct.push(`to book something call ${ADD_EVENT_TOOL_NAME}`);
+  if (direct.length > 0) {
+    const text = direct.join('; ');
+    parts.push(`${text[0]!.toUpperCase()}${text.slice(1)}.`);
+  }
+  if (has(ADD_TASK_TOOL_NAME) || has(ADD_EVENT_TOOL_NAME)) {
+    parts.push(
+      has(FIND_CHATS_TOOL_NAME) || has(SEND_TO_CHAT_TOOL_NAME)
+        ? 'A request to log, add or remind is one of these — never go looking for a chat for it.'
+        : 'A request to log, add or remind is one of these.',
+    );
+  }
+  if (has(FIND_CHATS_TOOL_NAME)) parts.push(`To find a chat call ${FIND_CHATS_TOOL_NAME}.`);
+  if (has(CHAT_STATUS_TOOL_NAME)) {
+    parts.push(`To say how one is getting on call ${CHAT_STATUS_TOOL_NAME}.`);
+  }
+  if (has(SEND_TO_CHAT_TOOL_NAME)) {
+    parts.push(
+      `To tell or ask an existing chat something call ${SEND_TO_CHAT_TOOL_NAME} with the chat and ` +
+        'the message, phrased for that chat. Only when the user names a chat does it go there.',
+    );
+  }
+  if (has(ASK_AGENT_TOOL_NAME)) {
+    parts.push(
+      'Real work that none of these covers — research, changes, anything needing more than a ' +
+        `lookup — call ${ASK_AGENT_TOOL_NAME}.`,
+    );
+  } else {
+    parts.push('Anything none of your tools covers, you cannot do from this call: say so plainly.');
+  }
+  if (has(FIND_CHATS_TOOL_NAME) || has(CHAT_STATUS_TOOL_NAME) || has(SEND_TO_CHAT_TOOL_NAME)) {
+    parts.push(
+      'If a chat name could mean more than one chat, the tool says so: ask the user which one, ' +
+        'naming the choices. Never guess a chat or invent what one is doing.',
+    );
+  }
+  parts.push(
+    'Never say a task or event was added, or a chat or agent told something, unless the tool ' +
+      'returned that it was done. If a tool reports it failed or is not set up, say so plainly. ' +
+      'Keep every spoken answer to one or two short sentences.',
+  );
+  return `${parts.join(' ')}\n\n`;
+}
+
+/** The full default rule (every tool on). */
+export const MANAGER_TOOLS_RULE = managerToolsRule();
 
 /** The async variant (Gemini): the send is answered at once and the reply arrives later. */
 export const MANAGER_ASYNC_REPLY_RULE =
@@ -197,6 +245,8 @@ export interface ManagerSendAccepted {
 export interface ManagerVoiceTools {
   /** Who the voice is told it is (`host.settings` → `managerVoicePrompt`). Absent: the built-in text. */
   voicePrompt?: () => string;
+  /** The tool ids the voice has on a call (`managerVoiceTools`). Absent: all of them. */
+  enabledTools?: () => readonly string[];
   /** Run one of {@link MANAGER_QUICK_TOOLS}; rejects when the action failed or is not set up. */
   quick(name: string, args: Record<string, string>): Promise<string>;
   findChats(query: string): Promise<string>;
@@ -261,6 +311,7 @@ export interface ManagerVoiceHostDeps {
   recordNote(line: string): void;
   /** The account's Manager voice prompt, read at the start of each call. */
   voicePrompt?: () => string;
+  enabledTools?: () => readonly string[];
   now?: () => number;
 }
 
@@ -370,6 +421,7 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
 
   return {
     ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
+    ...(deps.enabledTools ? { enabledTools: deps.enabledTools } : {}),
     async quick(name, args) {
       const need = (k: string): string => {
         const v = (args[k] ?? '').trim();

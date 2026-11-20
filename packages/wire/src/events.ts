@@ -16,7 +16,7 @@ import {
   SpeechToTextEngine,
 } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
-import { DEFAULT_MANAGER_VOICE_PROMPT } from './manager-voice-prompt.js';
+import { DEFAULT_MANAGER_VOICE_PROMPT, MANAGER_VOICE_TOOL_IDS } from './manager-voice-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
   DEFAULT_VOICE_DEVICE_PROMPT,
@@ -2565,6 +2565,8 @@ export const SharedSettings = z
     voiceDevicePrompt: z.string().min(1),
     /** Who the voice is on a call to the Manager chat (spec/07 § A call to the Manager). */
     managerVoicePrompt: z.string().min(1),
+    /** Which tools the Manager's voice has on a call (Settings → Manager → Tools). */
+    managerVoiceTools: z.array(z.enum(MANAGER_VOICE_TOOL_IDS)),
     /** People recognised by voice on a voice device (spec/16 § Who is speaking). */
     voiceProfiles: z.array(VoiceProfile).max(VOICE_PROFILES_MAX),
     /** How sure a voice match must be (cosine similarity); Settings offers relaxed, normal and strict. */
@@ -2773,6 +2775,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   },
   voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
   managerVoicePrompt: DEFAULT_MANAGER_VOICE_PROMPT,
+  managerVoiceTools: [...MANAGER_VOICE_TOOL_IDS],
   voiceProfiles: [],
   voiceMatchThreshold: VOICE_MATCH_THRESHOLD,
   dictationPauseSeconds: 10,
