@@ -189,6 +189,31 @@ describe('pads', () => {
     }
   });
 
+  it('a resize keeps the text size it scaled to', async () => {
+    const { built, create } = await makeApp();
+    try {
+      const pad = await create();
+      const r = await built.app.inject({
+        method: 'POST',
+        url: `${pad.frameUrl}api/changes`,
+        payload: {
+          screen: 'index',
+          kind: 'resize',
+          target: SEL,
+          fromWidth: 100,
+          fromHeight: 20,
+          width: 200,
+          height: 40,
+          fontSize: 32,
+        },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(JSON.stringify(r.json())).toContain('"fontSize":32');
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('changes are shared and fold; Send draws pictures and delivers into the owning chat; the reply closes the batch', async () => {
     const { built, hostLink, create, ask } = await makeApp();
     try {

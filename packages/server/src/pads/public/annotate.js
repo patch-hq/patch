@@ -28,6 +28,7 @@ function annotate({ others, cur, n }) {
     else if (c.kind === 'resize') {
       el.style.width = `${c.width}px`;
       el.style.height = `${c.height}px`;
+      if (c.fontSize) el.style.fontSize = `${c.fontSize}px`;
     } else if (c.kind === 'text') el.textContent = c.after;
     else if (c.kind === 'delete' && c.id !== cur.id) el.style.display = 'none';
   }
