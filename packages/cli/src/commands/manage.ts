@@ -40,7 +40,9 @@ export function registerManageCommands(program: Command): void {
         const t = getTransport(opts);
         const res = await t.get<{ chats: ChatSummary[] }>(pickPath(t, '/chats', '/api/chats'));
         const chats = opts.active
-          ? res.chats.filter((c) => c.chatStatus !== undefined && ACTIVE_STATES.has(c.chatStatus.state))
+          ? res.chats.filter(
+              (c) => c.chatStatus !== undefined && ACTIVE_STATES.has(c.chatStatus.state),
+            )
           : res.chats;
         if (opts.json) {
           emitJson({ chats });

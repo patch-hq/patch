@@ -119,9 +119,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   // A chat needs work to wait for; a project waits for the whole project, so
   // one busy chat is enough. The host refuses the rest.
   const hasWork = (c: ChatRow): boolean =>
-    isRunning(c) ||
-    c.goal !== null ||
-    (c.pendingWake != null && c.pendingWake.every === undefined);
+    isRunning(c) || c.goal !== null || (c.pendingWake != null && c.pendingWake.every === undefined);
   const canUntilComplete =
     targets.length > 0 && (isProject ? targets.some(hasWork) : targets.every(hasWork));
   const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];

@@ -21,10 +21,7 @@ import type { ChatRow } from '../stores/types';
 export function needsAttention(row: ChatRow): boolean {
   const badge = deriveBadge(row);
   return (
-    badge === 'done' ||
-    badge === 'permission' ||
-    badge === 'errored' ||
-    row.statusKind === 'report'
+    badge === 'done' || badge === 'permission' || badge === 'errored' || row.statusKind === 'report'
   );
 }
 

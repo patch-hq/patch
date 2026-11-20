@@ -156,7 +156,14 @@ describe('deriveBadge — mobile read/unread and full precedence', () => {
   });
   it('working beats unread', () => {
     expect(
-      deriveBadge(row({ chatStatus: { state: 'running', since: 0 }, lastUpdated: 5, lastSeq: 5, lastReadSeq: 0 })),
+      deriveBadge(
+        row({
+          chatStatus: { state: 'running', since: 0 },
+          lastUpdated: 5,
+          lastSeq: 5,
+          lastReadSeq: 0,
+        }),
+      ),
     ).toBe('working');
   });
   it('background beats monitoring beats read', () => {

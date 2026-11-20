@@ -65,7 +65,9 @@ function setup(opts: { err: () => Error; accountResetsAt?: number }) {
 }
 
 const lastState = (events: WireEvent[]): ChatStateEvent | undefined =>
-  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state').at(-1);
+  asServerSees(events)
+    .filter((e): e is ChatStateEvent => e.type === 'chat.state')
+    .at(-1);
 
 const stated = (facts: LimitFacts) => (): TurnFailedError =>
   new TurnFailedError(NO_RESET_SENTENCE, facts);

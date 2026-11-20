@@ -60,9 +60,7 @@ describe('awaitsReply', () => {
           chatStatus: { state: 'waiting_for_user', since: 0 },
         }),
       ),
-    ).toBe(
-      true,
-    );
+    ).toBe(true);
   });
 });
 

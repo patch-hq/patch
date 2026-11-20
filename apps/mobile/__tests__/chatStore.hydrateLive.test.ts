@@ -66,7 +66,9 @@ describe('hydrate after live frames', () => {
       lastUpdated: 20,
     } as never);
 
-    s.hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 10 })]);
+    s.hydrate([
+      toChatListRow({ ...ENTRY, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 10 }),
+    ]);
 
     expect(chat().chatStatus?.state).toBe('running');
     expect(chat().lastUpdated).toBe(20);
@@ -83,7 +85,9 @@ describe('hydrate after live frames', () => {
     });
     expect(chat().awaitingPermission).toBe(true);
 
-    s.hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 40 })]);
+    s.hydrate([
+      toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 40 }),
+    ]);
 
     expect(chat().chatStatus?.state).toBe('running');
     expect(chat().awaitingPermission).toBe(false);
@@ -92,7 +96,9 @@ describe('hydrate after live frames', () => {
   it('still lets a NEWER roster answer win over the stored state', () => {
     useChatStore
       .getState()
-      .hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 30 })]);
+      .hydrate([
+        toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 30 }),
+      ]);
     expect(chat().chatStatus?.state).toBe('running');
     expect(chat().lastUpdated).toBe(30);
   });
@@ -101,7 +107,9 @@ describe('hydrate after live frames', () => {
     const s = useChatStore.getState();
     s.appendLocalUserMessage('c1', 'go', 'l1');
     expect(deriveBadge(chat())).not.toBe('working');
-    s.hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 15 })]);
+    s.hydrate([
+      toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 15 }),
+    ]);
     expect(deriveBadge(chat())).toBe('working');
     s.applyEvent({
       type: 'chat.state',

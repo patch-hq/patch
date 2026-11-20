@@ -607,7 +607,10 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
     actSync(() => {
       const row = useChatStore.getState().chats['c1']!;
       useChatStore.setState({
-        chats: { ...useChatStore.getState().chats, c1: { ...row, chatStatus: { state: 'idle', since: 0 } } },
+        chats: {
+          ...useChatStore.getState().chats,
+          c1: { ...row, chatStatus: { state: 'idle', since: 0 } },
+        },
       });
     });
     expect(queryHost(r.root, byTestId('composer-stop'))).toBeNull();
@@ -675,7 +678,10 @@ describe('Composer — Send stays active across the send→running gap', () => {
     actSync(() => {
       const row = useChatStore.getState().chats['c1']!;
       useChatStore.setState({
-        chats: { ...useChatStore.getState().chats, c1: { ...row, chatStatus: { state: 'running', since: 0 } } },
+        chats: {
+          ...useChatStore.getState().chats,
+          c1: { ...row, chatStatus: { state: 'running', since: 0 } },
+        },
       });
     });
     expect(queryHost(r.root, byTestId('composer-stop'))).not.toBeNull();
@@ -731,7 +737,10 @@ describe('Composer — Send stays active across the send→running gap', () => {
     actSync(() => {
       const row = useChatStore.getState().chats['c1']!;
       useChatStore.setState({
-        chats: { ...useChatStore.getState().chats, c1: { ...row, chatStatus: { state: 'idle', since: 0 } } },
+        chats: {
+          ...useChatStore.getState().chats,
+          c1: { ...row, chatStatus: { state: 'idle', since: 0 } },
+        },
       });
     });
     const send = findHost(r.root, byLabel('Send message'));

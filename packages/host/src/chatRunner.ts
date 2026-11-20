@@ -10432,8 +10432,13 @@ export class Daemon {
         seq: OUT_OF_BAND_SEQ,
       });
       this.recordRefusedTurn(chatId, {
-        code: ChatErrorCode.parse(providerDescriptor(harnessOfModel(state.model)).loginRequiredCode),
-        message: harnessTraitsForModel(state.model).signedOutMessage(this.opts.hostId, oauth.reason),
+        code: ChatErrorCode.parse(
+          providerDescriptor(harnessOfModel(state.model)).loginRequiredCode,
+        ),
+        message: harnessTraitsForModel(state.model).signedOutMessage(
+          this.opts.hostId,
+          oauth.reason,
+        ),
       });
       this.chatState.setActivity(chatId, 'idle');
       this.emitState(chatId);
@@ -15229,10 +15234,7 @@ export class Daemon {
    * the chat's status from turn facts alone, can say why (spec/12 § Chat
    * status). A turn already open records its own end instead.
    */
-  private recordRefusedTurn(
-    chatId: string,
-    error: { code: ChatErrorCode; message: string },
-  ): void {
+  private recordRefusedTurn(chatId: string, error: { code: ChatErrorCode; message: string }): void {
     const state = this.chatState.get(chatId);
     if (!state || this.chatLog.currentTurnId(chatId) !== undefined) return;
     const turnId = randomUUID();

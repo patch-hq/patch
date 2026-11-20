@@ -404,7 +404,11 @@ describe('ChatHeader', () => {
   });
 
   it('shows the waiting-on-you pill when awaiting permission', () => {
-    render(<ChatHeader row={row({ awaitingPermission: true, chatStatus: { state: 'waiting_for_user', since: 0 } })} />);
+    render(
+      <ChatHeader
+        row={row({ awaitingPermission: true, chatStatus: { state: 'waiting_for_user', since: 0 } })}
+      />,
+    );
     expect(screen.getByTestId('waiting-on-you')).toBeInTheDocument();
   });
 

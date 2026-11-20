@@ -97,7 +97,9 @@ describe('syncTranscripts', () => {
   });
 
   it('leaves a running chat alone until it settles', () => {
-    useChatStore.getState().hydrate([{ ...row('c1', 1), chatStatus: { state: 'running', since: 0 } }]);
+    useChatStore
+      .getState()
+      .hydrate([{ ...row('c1', 1), chatStatus: { state: 'running', since: 0 } }]);
     const sock = open();
     getWs().syncTranscripts();
     expect(replays(sock)).toEqual([]);

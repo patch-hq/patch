@@ -46,7 +46,6 @@ import type {
   ChatErrorCode,
   ChatStateEvent,
   ChatStatusInfo,
-  ChatStatusState,
   EffortLevel,
   PendingWake,
   TodoItem,

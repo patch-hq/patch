@@ -56,7 +56,13 @@ function state(activity: 'running' | 'errored' | 'idle' | 'host_offline'): void 
     chatId: 'c1',
     hostId: 'd1',
     permissionMode: 'auto',
-    chatStatus: { state: ({ running: 'running', idle: 'idle', errored: 'failed' } as Record<string, string>)[activity] ?? activity, since: 0 },
+    chatStatus: {
+      state:
+        ({ running: 'running', idle: 'idle', errored: 'failed' } as Record<string, string>)[
+          activity
+        ] ?? activity,
+      since: 0,
+    },
     lastUpdated: 1,
   });
 }
@@ -312,7 +318,13 @@ describe('chatStore — a failed mark does not outlive the turn running again', 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      chatStatus: { state: ({ running: 'running', idle: 'idle', errored: 'failed' } as Record<string, string>)[activity] ?? activity, since: 0 },
+      chatStatus: {
+        state:
+          ({ running: 'running', idle: 'idle', errored: 'failed' } as Record<string, string>)[
+            activity
+          ] ?? activity,
+        since: 0,
+      },
       lastUpdated,
     });
   }
