@@ -64,6 +64,27 @@
     if (!t || t === d.documentElement || t === d.body) return null;
     return t;
   }
+  // What a tap selects: the thing the eye sees as one object. A bare icon or
+  // label inside a bubble is part of the bubble, so climb to the nearest
+  // ancestor that draws its own box (a fill or a border) rather than leave the
+  // rest of it behind when it is dragged. Double-tap still steps in to the part.
+  function drawsBox(n) {
+    var cs = win().getComputedStyle(n);
+    var bg = cs.backgroundColor;
+    var filled = bg && bg !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(bg);
+    return filled || cs.backgroundImage !== 'none' || parseFloat(cs.borderTopWidth) > 0 || parseFloat(cs.borderLeftWidth) > 0;
+  }
+  function pick(pt) {
+    var t = hit(pt); if (!t) return t;
+    var d = doc(), vw = d.documentElement.clientWidth, vh = d.documentElement.clientHeight;
+    if (drawsBox(t)) return t;
+    for (var p = t.parentElement; p && p !== d.body && p !== d.documentElement; p = p.parentElement) {
+      var r = p.getBoundingClientRect();
+      if (r.width >= vw * 0.9 && r.height >= vh * 0.5) break; // a page-sized wrapper isn't an object
+      if (drawsBox(p)) return p;
+    }
+    return t;
+  }
   function inFrame(node) { return node && doc() && doc().contains(node) && node.isConnected; }
 
   // ---------- naming elements ----------
@@ -381,7 +402,13 @@
       selLabel.textContent = labelFor(sel);
       selLabel.style.left = r.left + 'px'; selLabel.style.top = Math.max(r.top, 18) + 'px';
       var pts = { nw: [r.left, r.top], ne: [r.right, r.top], sw: [r.left, r.bottom], se: [r.right, r.bottom] };
-      handles.forEach(function (h) { var p = pts[h.dataset.pos]; h.style.left = p[0] + 'px'; h.style.top = p[1] + 'px'; });
+      // Handles sit outside the corners so a small element is never buried under them.
+      var off = handles[0].offsetWidth / 2;
+      handles.forEach(function (h) {
+        var pos = h.dataset.pos, p = pts[pos];
+        h.style.left = (p[0] + (pos[1] === 'e' ? off : -off)) + 'px';
+        h.style.top = (p[1] + (pos[0] === 's' ? off : -off)) + 'px';
+      });
       // Actions sit just outside the selection, never over it, so they are
       // not under the finger that made the selection.
       var gap = delBtn.offsetWidth / 2 + 6;
@@ -538,9 +565,9 @@
     if (tool === 'addtext') { e.preventDefault(); startAddText(pt); return; }
     if (tool === 'draw') { e.preventDefault(); startStroke(e, pt); return; }
     if (SHAPE_TOOLS.indexOf(tool) >= 0) { e.preventDefault(); startStroke(e, pt, tool); return; }
-    var t = hit(pt);
+    var t = pick(pt);
     // A box-dragged group moves as one; a single element only moves when the pointer is on it, so a neighbour never rides along.
-    var onSel = sel && t && (t === sel || (selGroup && sel.contains(t)));
+    var onSel = sel && t && (t === sel || hit(pt) === sel || (selGroup && sel.contains(t)));
     drag = {
       mode: onSel ? 'press-sel' : 'press', el: onSel ? sel : t, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY,
       id: e.pointerId, base: onSel ? currentTranslate(sel) : null, scroller: scrollerFor(t),
@@ -550,7 +577,7 @@
   layer.addEventListener('pointermove', function (e) {
     if (tool === 'interact' || (drag && drag.stroke)) return;
     if (!drag) {
-      if (e.pointerType === 'mouse' && tool === 'select') { hoverEl = hit(local(e)); draw(); }
+      if (e.pointerType === 'mouse' && tool === 'select') { hoverEl = pick(local(e)); draw(); }
       return;
     }
     var dx = (e.clientX - drag.x0) / scale, dy = (e.clientY - drag.y0) / scale, far = Math.abs(dx) + Math.abs(dy);
