@@ -36,6 +36,10 @@ const AddDeviceBody = z.object({ label: z.string().trim().min(1).max(60) }).stri
 /** WebSocket close code for a refused credential (application range). */
 const CLOSE_UNAUTHORISED = 4401;
 
+/** Ping a device this often; a device silent for the timeout is dropped so it reconnects. */
+const DEVICE_PING_INTERVAL_MS = 10_000;
+const DEVICE_SILENCE_TIMEOUT_MS = 30_000;
+
 export interface DeviceControlDeps {
   logger: Logger;
   registry: Registry;
@@ -50,6 +54,13 @@ export interface DeviceControlDeps {
   /** Text the session's host should speak as soon as the device joins (announcements). */
   queueSpeech?: (sessionId: string, text: string) => void;
   nowMs?: () => number;
+  /**
+   * Liveness probing of device sockets. A connection that dies without closing
+   * (a proxy or the server restarting under it) would otherwise stay listed as
+   * online while no wake ever arrives; with no pong or frame inside the timeout
+   * the socket is terminated, so the device sees the drop and reconnects.
+   */
+  keepalive?: { pingIntervalMs: number; silenceTimeoutMs: number };
   /** Test seam: credential verifier. */
   verifyCredential?: typeof verifySurfaceCredential;
 }
@@ -77,6 +88,9 @@ interface Socket {
   readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  ping(): void;
+  terminate(): void;
+  on(event: 'pong', handler: () => void): void;
   on(event: 'message', handler: (data: Buffer) => void): void;
   on(event: 'close', handler: () => void): void;
   on(event: 'error', handler: (err: Error) => void): void;
@@ -167,7 +181,32 @@ export function registerDeviceControlRoute(
     // the device's hello (sent the instant the socket opens) isn't lost.
     const held: Buffer[] = [];
     let ready: ((data: Buffer) => void) | null = null;
-    socket.on('message', (data: Buffer) => (ready ? ready(data) : held.push(data)));
+    let lastAlive = now();
+    const { pingIntervalMs, silenceTimeoutMs } = deps.keepalive ?? {
+      pingIntervalMs: DEVICE_PING_INTERVAL_MS,
+      silenceTimeoutMs: DEVICE_SILENCE_TIMEOUT_MS,
+    };
+    const keepalive = setInterval(() => {
+      if (now() - lastAlive > silenceTimeoutMs) {
+        deps.logger.warn(
+          { silentMs: now() - lastAlive },
+          'device-control: device silent; dropping',
+        );
+        socket.terminate();
+        return;
+      }
+      socket.ping();
+    }, pingIntervalMs);
+    keepalive.unref();
+    socket.on('pong', () => {
+      lastAlive = now();
+    });
+    socket.on('close', () => clearInterval(keepalive));
+    socket.on('message', (data: Buffer) => {
+      lastAlive = now();
+      if (ready) ready(data);
+      else held.push(data);
+    });
     const header = req.headers['authorization'];
     void authenticate(typeof header === 'string' ? header : undefined).then(
       ({ deviceId, label, accountId }) => {
