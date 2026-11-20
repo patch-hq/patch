@@ -3,16 +3,14 @@
 //   GET /api/chats/search?q=<query>&limit=<n>&offset=<n>&fullText=<true|false>
 //                         &includeArchived=<true|false>&includeHidden=<true|false>
 //
-// Searches every chat on every host (archived and hidden ones only on request) — names and the full text of what was
-// said. Each ONLINE host is asked with one `patch.chat_search.request`; a host
-// that is offline is answered for from the server's own record of its chats
-// (`chat-log-store.ts`). What comes back is merged under the one shared ranking
-// (`compareChatSearchHits`) and paged.
+// Searches every chat on every host (archived and hidden ones only on request)
+// — names, the stored first-message preview and the full text of what was said
+// — from the server's chat index and its record (`chat-log-store.ts`). No host
+// is asked, so a chat on an offline host is found like any other. Hits are
+// ranked under the one shared ordering (`compareChatSearchHits`) and paged.
 //
-// NO SILENT OMISSION: every registered host is named in `hosts[]` with what
-// happened to it — searched, offline (not asked), timed out, or failed — so a
-// result list missing a host's chats always says so. Auth is exactly the
-// other chat routes': a live surface credential.
+// Every host is still named in `hosts[]`, with how many of its chats were
+// searched. Auth is exactly the other chat routes': a live surface credential.
 
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
@@ -23,44 +21,28 @@ import {
   CHAT_SEARCH_MIN_QUERY,
   compareChatSearchHits,
   highlightRanges,
+  makeSnippet,
   parseSearchQuery,
   SPECIAL_THREAD_IDS,
   type ChatSearchSection,
   type ChatSearchHit,
   type ChatSearchHostResult,
   type ChatSearchResponse,
-  type WireEvent,
 } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ChatLogStore } from './chat-log-store.js';
+import { matchForm } from './record-search.js';
 import { requireAuth } from './folder-routes.js';
 
 export interface ChatSearchRoutesDeps {
   logger: Logger;
   registry: Registry;
-  hostLink: HostLink;
+  hostLink: Pick<HostLink, 'onlineHostIds'>;
   chatRegistry: ChatRegistry;
-  /** The server's record of every chat, searched for chats whose host is offline. */
-  chatLogStore: Pick<ChatLogStore, 'holds' | 'searchMessages'>;
-  idGenerator: () => string;
-}
-
-/**
- * How long one host has to answer. Generous because the first search after a
- * host restart waits for that host's index to finish building (seconds on a
- * host with gigabytes of transcript); a host that misses it is named as timed
- * out, and the others' results still come back.
- */
-export const CHAT_SEARCH_TIMEOUT_MS = 15_000;
-
-type Response = Extract<WireEvent, { type: 'patch.chat_search.response' }>;
-
-interface HostOutcome {
-  status: ChatSearchHostResult;
-  hits: ChatSearchHit[];
-  total: number;
+  /** The server's record of every chat, whose message text is searched. */
+  chatLogStore: Pick<ChatLogStore, 'searchMessages'>;
 }
 
 /** A query parameter as a bounded integer, or a message saying why not. */
@@ -99,28 +81,75 @@ function sectionOf(
   return chat.pinned ? 'pinned' : 'folders';
 }
 
-export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchRoutesDeps): void {
-  const pending = new Map<
-    string,
-    { resolve: (ev: Response) => void; timeout: NodeJS.Timeout; hostId: string }
-  >();
-  deps.hostLink.onEvent((event: WireEvent, from) => {
-    if (event.type !== 'patch.chat_search.response') return;
-    const w = pending.get(event.requestId);
-    if (!w) return;
-    // Only the host that was asked may answer for itself.
-    if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
-      deps.logger.warn(
-        { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
-        'chat search: response from a host that was not asked; ignoring',
-      );
-      return;
-    }
-    pending.delete(event.requestId);
-    clearTimeout(w.timeout);
-    w.resolve(event);
-  });
+const includesAll = (lower: string, terms: string[]): boolean =>
+  terms.every((t) => lower.includes(t));
 
+/**
+ * Search the server's index and record. Returns every hit, ranked, and how
+ * many chats each host had searched.
+ */
+export function searchRecord(
+  deps: Pick<ChatSearchRoutesDeps, 'chatRegistry' | 'chatLogStore'>,
+  query: string,
+  opts: { fullText: boolean; includeArchived: boolean; includeHidden: boolean; now: number },
+): { hits: ChatSearchHit[]; searchedByHost: Map<string, number> } {
+  const terms = parseSearchQuery(query);
+  const idQuery = query.trim().toLowerCase();
+  const asId = /^[a-z0-9_-]+$/.test(idQuery) ? idQuery : null;
+  const hits: ChatSearchHit[] = [];
+  const searchedByHost = new Map<string, number>();
+  // The index lists hidden chats only on their own, so they are asked for apart.
+  const rows = [
+    ...deps.chatRegistry.list({ includeArchived: true, includeSnoozed: true }),
+    ...(opts.includeHidden ? deps.chatRegistry.list({ hiddenOnly: true }) : []),
+  ];
+  for (const chat of rows) {
+    if (chat.status === 'deleted') continue;
+    if (chat.status === 'archived' && !opts.includeArchived) continue;
+    if (chat.hidden && !opts.includeHidden) continue;
+    searchedByHost.set(chat.hostId, (searchedByHost.get(chat.hostId) ?? 0) + 1);
+    if (terms.length === 0 && asId === null) continue;
+    const nameMatch =
+      chat.name !== null && terms.length > 0 && includesAll(matchForm(chat.name), terms);
+    const found = opts.fullText ? deps.chatLogStore.searchMessages(chat.chatId, terms) : null;
+    // The stored first-message preview stands in where the record holds no
+    // match (a chat whose early entries the record never received).
+    const previewMatch =
+      opts.fullText &&
+      found === null &&
+      chat.preview !== null &&
+      terms.length > 0 &&
+      includesAll(matchForm(chat.preview), terms);
+    // Pasting a chat's id finds that chat.
+    const idMatch = asId !== null && chat.chatId.toLowerCase().includes(asId);
+    if (!nameMatch && !found && !previewMatch && !idMatch) continue;
+    hits.push({
+      chatId: chat.chatId,
+      hostId: chat.hostId,
+      name: chat.name,
+      preview: chat.preview,
+      folder: chat.folder,
+      status: chat.status,
+      section: sectionOf(chat, opts.now),
+      pinned: chat.pinned,
+      snoozedUntil: chat.snoozedUntil,
+      lastUpdated: chat.lastUpdated,
+      jobId: chat.jobId,
+      nameMatch,
+      nameHighlights: nameMatch ? highlightRanges(chat.name!, terms) : [],
+      messageMatches: found?.messageMatches ?? (previewMatch ? 1 : 0),
+      snippet:
+        found?.snippet ??
+        (previewMatch
+          ? { ...makeSnippet(chat.preview!, terms), role: 'user', seq: null, createdAt: null }
+          : null),
+    });
+  }
+  hits.sort(compareChatSearchHits);
+  return { hits, searchedByHost };
+}
+
+export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchRoutesDeps): void {
   /** Every host this account knows: registered ones, plus any attached link. */
   function hostIds(): string[] {
     const ids = deps.registry.registeredHostIds();
@@ -128,120 +157,6 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
       if (!ids.includes(linked)) ids.push(linked);
     }
     return ids;
-  }
-
-  /**
-   * An offline host cannot answer, so answer for it from what the server holds:
-   * the chat registry's names and the server's record of what was said. Hits
-   * are flagged `mirrored` (the wire's name for "answered by the server") so a
-   * surface can say the host is not reachable right now.
-   */
-  function searchRecord(
-    hostId: string,
-    query: string,
-    fullText: boolean,
-    includeArchived: boolean,
-    includeHidden: boolean,
-  ): HostOutcome {
-    const hostName = deps.registry.hostName(hostId) ?? null;
-    const offline = { hostId, hostName, state: 'offline' as const };
-    const terms = parseSearchQuery(query);
-    const now = Date.now();
-    const hits: ChatSearchHit[] = [];
-    let recordedChats = 0;
-    for (const chat of deps.chatRegistry.list({ includeArchived: true, includeSnoozed: true })) {
-      if (chat.hostId !== hostId || chat.status === 'deleted') continue;
-      if (chat.status === 'archived' && !includeArchived) continue;
-      if (chat.hidden && !includeHidden) continue;
-      if (chat.name === null && !deps.chatLogStore.holds(chat.chatId)) continue;
-      recordedChats++;
-      const name = chat.name ?? '';
-      const lowerName = name.toLowerCase();
-      const nameMatch = terms.length > 0 && terms.every((t) => lowerName.includes(t));
-      const found = fullText ? deps.chatLogStore.searchMessages(chat.chatId, terms) : null;
-      const idQuery = query.trim().toLowerCase();
-      const idMatch = /^[a-z0-9_-]+$/.test(idQuery) && chat.chatId.toLowerCase().includes(idQuery);
-      if (!nameMatch && !found && !idMatch) continue;
-      hits.push({
-        chatId: chat.chatId,
-        hostId,
-        name: chat.name,
-        preview: chat.preview,
-        folder: chat.folder,
-        status: chat.status,
-        section: sectionOf(chat, now),
-        pinned: chat.pinned,
-        snoozedUntil: chat.snoozedUntil,
-        lastUpdated: chat.lastUpdated,
-        jobId: null,
-        nameMatch,
-        nameHighlights: nameMatch ? highlightRanges(name, terms) : [],
-        messageMatches: found?.messageMatches ?? 0,
-        snippet: found?.snippet ?? null,
-        mirrored: true,
-      });
-    }
-    hits.sort(compareChatSearchHits);
-    return {
-      status: recordedChats > 0 ? { ...offline, mirroredChats: recordedChats } : offline,
-      hits,
-      total: hits.length,
-    };
-  }
-
-  async function askHost(
-    hostId: string,
-    surfaceId: string,
-    query: string,
-    depth: number,
-    fullText: boolean,
-    includeArchived: boolean,
-    includeHidden: boolean,
-  ): Promise<HostOutcome> {
-    const hostName = deps.registry.hostName(hostId) ?? null;
-    if (!deps.hostLink.isOnline(hostId)) {
-      return searchRecord(hostId, query, fullText, includeArchived, includeHidden);
-    }
-    const requestId = deps.idGenerator();
-    const result = await new Promise<Response | 'timeout'>((resolve) => {
-      const timeout = setTimeout(() => {
-        pending.delete(requestId);
-        resolve('timeout');
-      }, CHAT_SEARCH_TIMEOUT_MS);
-      pending.set(requestId, { resolve, timeout, hostId });
-      deps.hostLink.sendTo(hostId, surfaceId, {
-        type: 'patch.chat_search.request',
-        requestId,
-        hostId,
-        query,
-        limit: depth,
-        fullText,
-        ...(includeArchived ? { includeArchived } : {}),
-        ...(includeHidden ? { includeHidden } : {}),
-      });
-    });
-    if (result === 'timeout') {
-      deps.logger.warn({ hostId }, 'chat search: host did not answer in time');
-      return { status: { hostId, hostName, state: 'timeout' }, hits: [], total: 0 };
-    }
-    if (!result.ok) {
-      const message = result.error?.message ?? 'search failed';
-      deps.logger.warn({ hostId, err: message }, 'chat search: host answered with a failure');
-      return { status: { hostId, hostName, state: 'error', message }, hits: [], total: 0 };
-    }
-    return {
-      status: {
-        hostId,
-        hostName,
-        state: 'searched',
-        ...(result.searchedChats !== undefined ? { searchedChats: result.searchedChats } : {}),
-        ...(result.transcriptsMissing !== undefined
-          ? { transcriptsMissing: result.transcriptsMissing }
-          : {}),
-      },
-      hits: result.hits ?? [],
-      total: result.total ?? 0,
-    };
   }
 
   app.get<{
@@ -254,9 +169,8 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
       includeHidden?: string;
     };
   }>('/api/chats/search', async (req, reply) => {
-    let auth;
     try {
-      auth = await requireAuth(req, deps.registry);
+      await requireAuth(req, deps.registry);
     } catch (e) {
       return reply
         .code((e as Error & { statusCode?: number }).statusCode ?? 401)
@@ -315,26 +229,27 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
         .send({ error: 'invalid_query', message: 'includeHidden must be true or false' });
     }
     const includeHidden = hiddenRaw === 'true' || hiddenRaw === '1';
-    // Each host sends its own top `depth`; the merged top `depth` is always
-    // inside their union, so this page is exact.
     const depth = Math.min(offset + limit, CHAT_SEARCH_MAX_DEPTH);
-    const outcomes = await Promise.all(
-      hostIds().map((hostId) =>
-        askHost(hostId, auth.surfaceId, query, depth, fullText, includeArchived, includeHidden),
-      ),
-    );
-    const merged = outcomes
-      .flatMap((o) => o.hits)
-      .map((hit) => ({ ...hit, jobId: deps.chatRegistry.get(hit.chatId)?.jobId ?? null }))
-      .sort(compareChatSearchHits);
-    const total = outcomes.reduce((n, o) => n + o.total, 0);
+    const { hits, searchedByHost } = searchRecord(deps, query, {
+      fullText,
+      includeArchived,
+      includeHidden,
+      now: Date.now(),
+    });
+    const total = hits.length;
     const end = offset + limit;
+    const hosts: ChatSearchHostResult[] = hostIds().map((hostId) => ({
+      hostId,
+      hostName: deps.registry.hostName(hostId) ?? null,
+      state: 'searched',
+      searchedChats: searchedByHost.get(hostId) ?? 0,
+    }));
     const body: ChatSearchResponse = {
       query,
-      hits: merged.slice(offset, depth),
+      hits: hits.slice(offset, depth),
       total,
       nextOffset: end < Math.min(total, CHAT_SEARCH_MAX_DEPTH) ? end : null,
-      hosts: outcomes.map((o) => o.status),
+      hosts,
     };
     return reply.code(200).send(body);
   });
