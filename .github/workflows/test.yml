@@ -131,6 +131,12 @@ jobs:
           else
             node scripts/verify.mjs "${args[@]}"
           fi
+      # A test run must not rewrite committed files (a stray expo prebuild once
+      # regenerated apps/mobile/android/ mid-run).
+      - name: Tree is unchanged by the run
+        run: |
+          git status --porcelain -- apps/mobile/android | tee /tmp/android-drift.txt
+          [ ! -s /tmp/android-drift.txt ] || { echo "::error::the run modified apps/mobile/android"; exit 1; }
       - name: Memory log and kernel OOM kills
         if: failure()
         run: |
