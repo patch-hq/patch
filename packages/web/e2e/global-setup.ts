@@ -24,11 +24,15 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   const browser = await chromium.launch();
   try {
     for (const route of ROUTES) {
-      // A page of its own per route. The harness has no backend, so its /api
-      // calls are refused and retried; Chromium counts those against the page
-      // and, a few navigations in, starts failing every request with
-      // ERR_INSUFFICIENT_RESOURCES — on the fifth load of one shared page.
+      // The harness has no backend, so its /api calls would be refused and
+      // retried in a tight loop; Chromium answers that loop with
+      // ERR_INSUFFICIENT_RESOURCES on whichever navigation it lands in, on a
+      // shared page or a fresh one. Warm-up only needs the modules compiled, so
+      // /api is answered here and never reaches the dead proxy.
       const page = await browser.newPage({ baseURL });
+      await page.route('**/api/**', (r) =>
+        r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+      );
       // `networkidle`: every module the route imports has been requested and
       // served, so the dev server has compiled it.
       await page.goto(route, { waitUntil: 'networkidle', timeout: 180_000 });
