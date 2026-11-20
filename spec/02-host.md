@@ -281,8 +281,9 @@ was last sent in memory and asks the agent again when they change.
   offers `default`). The answer is kept for ten minutes, a failed one for one,
   and asked again when the agent's entry or keys change. Each installed agent is
   a row in Settings → Hosts (`acp:<agent>`) with the state the agent gave:
-  ready, not signed in (add an account for it under Settings → AI accounts, or
-  sign in to the agent on that host), or not working, with the
+  ready, not signed in (add an API key for it under Settings → AI accounts, or
+  sign it in on that host from there with its own sign-in, `10-auth.md` §
+  Signing in), or not working, with the
   agent's own words behind Details. A signed-out or broken agent lists no models
   and says why against the `acp` backend in the model picker.
 - A turn is one agent process: `initialize`, the chat's session (new, or the

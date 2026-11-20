@@ -9,6 +9,7 @@ import { HARNESS_TRAITS } from './harnesses.js';
 import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
 import { ACP_BACKEND_ID, AcpRegistry } from './acpRegistry.js';
 import { AcpAccounts, type AcpRoute } from './acpAccounts.js';
+import type { AcpLogin } from './acpLogin.js';
 import { AcpBackend } from './acpBackend.js';
 import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
@@ -80,6 +81,8 @@ import {
   type SettingsAdoptRequestEvent,
   type SettingsAdoptResponseEvent,
   type SettingsSnapshotEvent,
+  type AcpLoginRequestEvent,
+  type AcpLoginUpdateEvent,
   type AccountStrategy,
   type SharedSecrets,
   type SharedSettings,
@@ -822,6 +825,7 @@ async function startHost(
   const acpAvailabilityPath = join(config.patchHome, 'acp-account-availability.json');
   let sendAcpReport: () => void = () => undefined;
   const acpAccounts = new AcpAccounts({
+    hostId: selfHostId,
     initial: readAccountExhaustion(acpAvailabilityPath),
     onChange: (entries) => {
       try {
@@ -1420,6 +1424,8 @@ async function startHost(
       scriptPayload: true,
       // A turn that met a limit is said on its end; the server reads the account (spec/12).
       limitFacts: true,
+      // An ACP agent's own sign-in can be run here (spec/10 § Signing in).
+      acpLogin: true,
       audioRelayHost: config.audio.relayHost,
       backends: [
         {
@@ -1547,13 +1553,98 @@ async function startHost(
     publishHost();
   };
 
+  /**
+   * Each installed agent's own sign-in on this host, as its last probe found
+   * it (spec/10 § Signing in → an ACP agent). Only for an agent that runs on
+   * no API-key account here: a probe of one that does was given the key, and
+   * says nothing about the agent's own login.
+   */
+  const noteAcpLogins = (): void => {
+    for (const agent of acpRegistry.installed()) {
+      const usesKeys = agent.apiKeyEnv !== undefined && acpAccounts.forAgent(agent.id).length > 0;
+      const probe = acpRegistry.lastProbe(agent.id);
+      if (usesKeys || !probe) continue;
+      const known = acpAccounts.hostLogin(agent.id) !== undefined;
+      if (!known && !probe.loginMethods?.length) continue;
+      const label = `${agent.label} · signed in on ${hostName} only`;
+      if (probe.state.state === 'ready' || probe.state.state === 'near_limit')
+        acpAccounts.setLogin(agent.id, label, true);
+      else if (probe.state.state === 'signed_out') acpAccounts.setLogin(agent.id, label, false);
+    }
+  };
+  /** ACP sign-ins running on this host, by login id; at most one per agent. */
+  const acpLogins = new Map<string, { agentId: string; login: AcpLogin }>();
+  const startAcpLogin = async (
+    req: AcpLoginRequestEvent,
+    send: (e: WireEvent) => void,
+  ): Promise<void> => {
+    const update = (
+      u: Omit<AcpLoginUpdateEvent, 'type' | 'hostId' | 'loginId' | 'agentId'>,
+    ): void =>
+      send({
+        type: 'acp.login_update',
+        hostId: selfHostId,
+        loginId: req.loginId,
+        agentId: req.agentId,
+        ...u,
+      });
+    const agent = acpRegistry.agent(req.agentId);
+    if (!agent || !acpRegistry.command(agent)) {
+      update({
+        status: 'failed',
+        message: `${agent?.label ?? req.agentId} is not installed on ${hostName}`,
+      });
+      return;
+    }
+    if ([...acpLogins.values()].some((l) => l.agentId === agent.id)) {
+      update({
+        status: 'failed',
+        message: `A sign-in to ${agent.label} is already running on ${hostName}`,
+      });
+      return;
+    }
+    let methods: { id: string }[];
+    try {
+      methods = await acpRegistry.loginMethods(agent);
+    } catch (err) {
+      update({ status: 'failed', message: `${agent.label}: ${(err as Error).message}` });
+      return;
+    }
+    if (!methods.some((m) => m.id === req.methodId)) {
+      update({
+        status: 'failed',
+        message: `${agent.label} offers no sign-in "${req.methodId}" (it offers: ${methods.map((m) => m.id).join(', ') || 'none'})`,
+      });
+      return;
+    }
+    const label = `${agent.label} · signed in on ${hostName} only`;
+    const login = acpRegistry.login(agent, req.methodId, (u) => {
+      update({
+        status: u.status,
+        ...(u.url !== undefined ? { url: u.url } : {}),
+        ...(u.userCode !== undefined ? { userCode: u.userCode } : {}),
+        ...(u.loopback !== undefined ? { loopback: u.loopback } : {}),
+        ...(u.message !== undefined ? { message: u.message } : {}),
+      });
+      if (u.status === 'complete') acpAccounts.setLogin(agent.id, label, true);
+    });
+    acpLogins.set(req.loginId, { agentId: agent.id, login });
+    logger.info({ agentId: agent.id, methodId: req.methodId }, 'ACP sign-in started on this host');
+    void login.done.then((status) => {
+      acpLogins.delete(req.loginId);
+      logger.info({ agentId: agent.id, status }, 'ACP sign-in on this host ended');
+    });
+  };
   /** Re-publish this host's self-description to every surface. */
   const publishHost = (): void => {
     link.send(describeHost());
   };
   // An ACP agent's sign-in state or the configured list changed: Settings →
   // Hosts shows the fresh rows.
-  onAcpChange = publishHost;
+  onAcpChange = (): void => {
+    noteAcpLogins();
+    publishHost();
+  };
   // A provider key an ACP agent reads changed: its next probe sees the new one.
   providerKeys.onChange(() => publishHost());
   // A provider key set or revoked from Settings: every surface's Keys block and
@@ -3127,6 +3218,48 @@ async function startHost(
         sender(await answerAdopt(event));
         return;
       }
+      // spec/10 § Signing in → an ACP agent: the agent's own sign-in, run here.
+      if (event.type === 'acp.login_request') {
+        if (!isForThisHost(event.hostId, event.type)) return;
+        await startAcpLogin(event, sender);
+        return;
+      }
+      if (event.type === 'acp.login_callback') {
+        if (!isForThisHost(event.hostId, event.type)) return;
+        const run = acpLogins.get(event.loginId);
+        const update = (message: string): void =>
+          sender({
+            type: 'acp.login_update',
+            hostId: selfHostId,
+            loginId: event.loginId,
+            agentId: run?.agentId ?? '',
+            status: 'waiting',
+            message,
+          });
+        if (!run) {
+          sender({
+            type: 'acp.login_update',
+            hostId: selfHostId,
+            loginId: event.loginId,
+            agentId: 'unknown',
+            status: 'failed',
+            message: 'That sign-in is not running on this host any more',
+          });
+          return;
+        }
+        try {
+          await run.login.replay(event.url);
+          update('Address received; finishing the sign-in…');
+        } catch (err) {
+          update((err as Error).message);
+        }
+        return;
+      }
+      if (event.type === 'acp.login_cancel') {
+        if (!isForThisHost(event.hostId, event.type)) return;
+        acpLogins.get(event.loginId)?.login.cancel();
+        return;
+      }
       if (event.type === 'host.claude_settings_set') {
         if (!isForThisHost(event.hostId, event.type)) return;
         try {
@@ -4698,13 +4831,15 @@ async function startHost(
           };
         if (!acpRegistry.command(agent))
           return { ok: false, reason: `${agent.label} is not installed on this host.` };
-        // An agent with accounts runs on one; one without runs on its provider
-        // key or its own sign-in.
+        // An agent with accounts runs on one (the API key is the default); one
+        // without runs on its own sign-in on this host, which is an account of
+        // this host's alone, or on a provider key.
         const account =
           agent.apiKeyEnv !== undefined
             ? acpAccounts.resolve(agent.id, acpRoute(turn?.preferredAccountId), turn !== undefined)
             : undefined;
-        return { ok: true, accessToken: '', ...(account ? { accountId: account.id } : {}) };
+        const accountId = account?.id ?? acpAccounts.hostLogin(agent.id)?.id;
+        return { ok: true, accessToken: '', ...(accountId ? { accountId } : {}) };
       },
       // A chat on an agent runs on, and can be locked to, that agent's accounts only.
       heldAccounts: (model) => {
@@ -4713,7 +4848,12 @@ async function startHost(
           ? acpAccounts.forAgent(agentId).map((x) => ({ id: x.id, label: x.label }))
           : [];
       },
-      accountLabel: (accountId) => acpAccounts.get(accountId)?.label,
+      accountLabel: (accountId) =>
+        acpAccounts.get(accountId)?.label ??
+        acpRegistry
+          .agents()
+          .map((a) => acpAccounts.hostLogin(a.id))
+          .find((l) => l?.id === accountId)?.label,
       accountSpent: (accountId) => ({ spent: acpAccounts.isSkipped(accountId) }),
       // The agent refused this account with a limit: the turn runs again on the
       // next of the agent's accounts that has not been refused, if any.

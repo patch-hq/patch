@@ -35,6 +35,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { AcpClosedError, AcpConnection, AcpRpcError, ACP_AUTH_REQUIRED } from './acpConnection.js';
 import { AcpChildProcess } from './acpProcess.js';
+import { AcpLogin, loginMethodsOf, type LoginMethod, type LoginUpdate } from './acpLogin.js';
 
 export const ACP_BACKEND_ID = providerDescriptor('acp').backendId;
 
@@ -45,6 +46,8 @@ export interface AcpProbe {
   version?: string;
   capabilities: AcpAgentCapabilities;
   models: Array<{ id: string; label: string }>;
+  /** The agent's own sign-in methods that log in rather than take a key (`acpLogin.ts`). */
+  loginMethods?: LoginMethod[];
   at: number;
 }
 
@@ -277,6 +280,9 @@ export class AcpRegistry {
       ...((update.version ?? prev?.version) !== undefined
         ? { version: (update.version ?? prev?.version)! }
         : {}),
+      ...((update.loginMethods ?? prev?.loginMethods) !== undefined
+        ? { loginMethods: (update.loginMethods ?? prev?.loginMethods)! }
+        : {}),
       at: this.now(),
     };
     const changed = JSON.stringify(prev?.state) !== JSON.stringify(next.state);
@@ -360,8 +366,39 @@ export class AcpRegistry {
         ...(state && (state.state === 'broken' || state.state === 'out')
           ? { error: state.message }
           : {}),
+        ...(probe?.loginMethods?.length ? { loginMethods: probe.loginMethods } : {}),
       };
     });
+  }
+
+  /** The sign-in methods the agent offered at its last probe; asks it when none is fresh. */
+  async loginMethods(agent: AcpAgentConfig): Promise<LoginMethod[]> {
+    return (await this.probe(agent)).loginMethods ?? [];
+  }
+
+  /**
+   * Run one of the agent's own sign-in methods on this host. The login is the
+   * agent's, kept in its own files here. Its environment carries no account key,
+   * so the agent signs in with the method asked for rather than a key it was given.
+   */
+  login(agent: AcpAgentConfig, methodId: string, onUpdate: (u: LoginUpdate) => void): AcpLogin {
+    const command = this.command(agent);
+    if (!command) throw new Error(`${agent.command} is not installed on this host`);
+    const env = this.env(agent);
+    if (agent.apiKeyEnv !== undefined) delete env[agent.apiKeyEnv];
+    for (const name of Object.keys(agent.keys ?? {})) delete env[name];
+    const run = new AcpLogin({
+      agent,
+      command,
+      methodId,
+      env,
+      cwd: this.o.scratchDir,
+      initializeParams: initializeParams(this.o.clientVersion),
+      onUpdate,
+    });
+    // Signed in or not, what the agent says about itself has changed.
+    void run.done.then(() => this.probe(agent, true).catch(() => undefined));
+    return run;
   }
 
   private now(): number {
@@ -412,6 +449,8 @@ export class AcpRegistry {
       }
       const capabilities = agentCapabilities(init);
       const version = init.agentInfo?.version || undefined;
+      const loginMethods = loginMethodsOf(init);
+      const logins = loginMethods.length > 0 ? { loginMethods } : {};
       try {
         const session = await Promise.race([
           conn.request<NewSessionResponse>('session/new', {
@@ -425,6 +464,7 @@ export class AcpRegistry {
           capabilities,
           models: sessionModels(agent, session),
           ...(version ? { version } : {}),
+          ...logins,
           at: this.now(),
         };
       } catch (err) {
@@ -434,6 +474,7 @@ export class AcpRegistry {
             capabilities,
             models: [],
             ...(version ? { version } : {}),
+            ...logins,
             at: this.now(),
           };
         return {
@@ -441,6 +482,7 @@ export class AcpRegistry {
           capabilities,
           models: [],
           ...(version ? { version } : {}),
+          ...logins,
           at: this.now(),
         };
       }
@@ -474,7 +516,7 @@ function probeFailure(err: unknown, exitReason: string | undefined, stderr: stri
 export function describeProbeState(state: AccountState): string {
   switch (state.state) {
     case 'signed_out':
-      return 'not signed in. Add an account for it under Settings → AI accounts, or sign in to it on this host.';
+      return 'not signed in. Add an API key for it under Settings → AI accounts, or sign in to it on this host from there.';
     case 'broken':
     case 'out':
       return state.message;

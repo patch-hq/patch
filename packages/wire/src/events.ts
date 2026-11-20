@@ -659,9 +659,99 @@ export const HostBackend = z
     state: z.enum(['present', 'installing', 'absent', 'logged-out', 'failed']),
     /** Why `failed`/`absent`, verbatim. Absent otherwise. */
     error: z.string().min(1).optional(),
+    /**
+     * An ACP agent's own sign-in methods that log in rather than take a key
+     * (`initialize.authMethods`), which Patch can run on this host
+     * (`acp.login_request`). Absent for every other backend, and for an agent
+     * that offers none.
+     */
+    loginMethods: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            name: z.string().min(1),
+            description: z.string().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 export type HostBackend = z.infer<typeof HostBackend>;
+
+/**
+ * Where an ACP agent's own sign-in on one host stands (spec/10 § Signing in →
+ * an ACP agent). The login lives in the agent's own files on that host: it is
+ * never stored on the server or shared with another host.
+ */
+export const AcpLoginStatus = z.enum(['starting', 'waiting', 'complete', 'failed', 'cancelled']);
+export type AcpLoginStatus = z.infer<typeof AcpLoginStatus>;
+
+/**
+ * Server → host: run an ACP agent's own sign-in method (`authenticate`) on this
+ * host. The host answers with `acp.login_update`s, the last one `complete`,
+ * `failed` or `cancelled`. Sent only to a host that says `acpLogin`.
+ */
+export const AcpLoginRequestEvent = z
+  .object({
+    type: z.literal('acp.login_request'),
+    hostId: z.string().min(1),
+    loginId: z.string().min(1),
+    agentId: z.string().min(1),
+    methodId: z.string().min(1),
+  })
+  .strict();
+export type AcpLoginRequestEvent = z.infer<typeof AcpLoginRequestEvent>;
+
+/**
+ * Server → host: the address the person's browser ended on after signing in,
+ * pasted on a surface. When the agent waits for its provider to redirect to a
+ * loopback address on the host (`http://127.0.0.1:<port>/…`), a browser on any
+ * other device cannot reach it; the host replays that address locally.
+ */
+export const AcpLoginCallbackEvent = z
+  .object({
+    type: z.literal('acp.login_callback'),
+    hostId: z.string().min(1),
+    loginId: z.string().min(1),
+    url: z.string().min(1),
+  })
+  .strict();
+export type AcpLoginCallbackEvent = z.infer<typeof AcpLoginCallbackEvent>;
+
+/** Server → host: stop a sign-in that is still running. */
+export const AcpLoginCancelEvent = z
+  .object({
+    type: z.literal('acp.login_cancel'),
+    hostId: z.string().min(1),
+    loginId: z.string().min(1),
+  })
+  .strict();
+export type AcpLoginCancelEvent = z.infer<typeof AcpLoginCancelEvent>;
+
+/**
+ * Host → server: how an ACP agent's sign-in on this host is going. `url` is the
+ * address the agent asked the person to open and `userCode` a code to enter
+ * there, as the agent gave them; `loopback` says the agent waits for a redirect
+ * to an address on this host, which a browser elsewhere cannot reach, so a
+ * surface offers to paste the address the browser ended on. `message` is why it
+ * failed, or the agent's own words.
+ */
+export const AcpLoginUpdateEvent = z
+  .object({
+    type: z.literal('acp.login_update'),
+    hostId: z.string().min(1),
+    loginId: z.string().min(1),
+    agentId: z.string().min(1),
+    status: AcpLoginStatus,
+    url: z.string().min(1).optional(),
+    userCode: z.string().min(1).optional(),
+    loopback: z.boolean().optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+export type AcpLoginUpdateEvent = z.infer<typeof AcpLoginUpdateEvent>;
 
 /** State of one optional component on one host (spec/02 § Optional components). */
 export const HostComponentState = z.enum(['not-installed', 'downloading', 'installed', 'failed']);
@@ -3347,6 +3437,11 @@ export const HostInfoEvent = z
      * its `chat.state.limitBlock` as the pause.
      */
     limitFacts: z.boolean().optional(),
+    /**
+     * This host can run an ACP agent's own sign-in (`acp.login_request`).
+     * Optional: an older host never says, and is never asked.
+     */
+    acpLogin: z.boolean().optional(),
     /**
      * Where the SERVER can reach this host's own audio WSS (`<host>:<port>`,
      * no scheme) to relay a voice session for a chat that lives here but was
@@ -10459,6 +10554,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   SettingsSecretUpdateEvent,
   SettingsAdoptRequestEvent,
   SettingsAdoptResponseEvent,
+  AcpLoginRequestEvent,
+  AcpLoginCallbackEvent,
+  AcpLoginCancelEvent,
+  AcpLoginUpdateEvent,
   SettingsAccountSignedInEvent,
   HostClaudeSettingsSetEvent,
   HostClaudeMemorySetEvent,
@@ -10795,6 +10894,10 @@ export const EVENT_SCHEMAS = {
   'settings.secret_update': SettingsSecretUpdateEvent,
   'settings.adopt.request': SettingsAdoptRequestEvent,
   'settings.adopt.response': SettingsAdoptResponseEvent,
+  'acp.login_request': AcpLoginRequestEvent,
+  'acp.login_callback': AcpLoginCallbackEvent,
+  'acp.login_cancel': AcpLoginCancelEvent,
+  'acp.login_update': AcpLoginUpdateEvent,
   'settings.account_signed_in': SettingsAccountSignedInEvent,
   'host.claude_settings_set': HostClaudeSettingsSetEvent,
   'host.claude_memory_set': HostClaudeMemorySetEvent,

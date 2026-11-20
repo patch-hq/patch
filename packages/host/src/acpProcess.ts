@@ -22,7 +22,12 @@ export class AcpChildProcess {
 
   constructor(private readonly spec: AcpSpawnSpec) {}
 
-  start(onLine: (line: string) => void, onExit: (reason: string) => void): void {
+  start(
+    onLine: (line: string) => void,
+    onExit: (reason: string) => void,
+    /** Each chunk the agent writes to stderr, as it comes (a sign-in prints its hand-off there). */
+    onStderr?: (chunk: string) => void,
+  ): void {
     const child = spawn(this.spec.command, this.spec.args, {
       cwd: this.spec.cwd,
       env: this.spec.env,
@@ -33,6 +38,7 @@ export class AcpChildProcess {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       this.stderr = (this.stderr + chunk).slice(-STDERR_KEEP);
+      onStderr?.(chunk);
     });
     child.stdin.on('error', () => undefined);
     createInterface({ input: child.stdout }).on('line', (line) => {

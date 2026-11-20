@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { Linking, View } from 'react-native';
-import { api, type ChatGPTSignInStarted } from '../../api/rest';
+import { api, type AcpLoginView, type ChatGPTSignInStarted } from '../../api/rest';
 import { space } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { problemText } from './sharedWrite';
@@ -202,6 +202,143 @@ export function ClaudeSignInFlow({ accountId, onDone }: Props): React.ReactEleme
         </ButtonRow>
       )}
       {error ? <ErrorLine testID="claude-signin-error" message={error} /> : null}
+    </View>
+  );
+}
+
+const ACP_LOGIN_TERMINAL = new Set(['complete', 'failed', 'cancelled']);
+
+/**
+ * An ACP agent's own sign-in, run on one host (spec/10 § Signing in → an ACP
+ * agent). The host runs it and the login stays in the agent's own files there:
+ * it is that host's only. The phone opens the address the agent gave, shows any
+ * code, and when the agent waits for a redirect on the host, sends back the
+ * address the browser ended on.
+ */
+export function AcpHostLoginFlow({
+  agentId,
+  agentLabel,
+  hostId,
+  hostLabel,
+  methodId,
+  onDone,
+}: {
+  agentId: string;
+  agentLabel: string;
+  hostId: string;
+  hostLabel: string;
+  methodId: string;
+  onDone?: (view: AcpLoginView) => void;
+}): React.ReactElement {
+  const [login, setLogin] = React.useState<AcpLoginView | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [pasted, setPasted] = React.useState('');
+  const live = React.useRef(true);
+  React.useEffect(
+    () => () => {
+      live.current = false;
+    },
+    [],
+  );
+  React.useEffect(() => {
+    if (!login || ACP_LOGIN_TERMINAL.has(login.status)) {
+      if (login) onDone?.(login);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api.acpLogin(agentId, login.loginId).then(
+        (v) => live.current && setLogin(v),
+        (e: unknown) => live.current && setError(problemText(e)),
+      );
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [login, agentId]);
+
+  const start = async (): Promise<void> => {
+    setError(null);
+    try {
+      setLogin(await api.startAcpLogin(agentId, hostId, methodId));
+    } catch (e) {
+      setError(problemText(e));
+    }
+  };
+  const send = async (): Promise<void> => {
+    if (!login || pasted.trim() === '') return;
+    try {
+      setLogin(await api.acpLoginCallback(agentId, login.loginId, pasted.trim()));
+      setPasted('');
+    } catch (e) {
+      setError(problemText(e));
+    }
+  };
+  const cancel = async (): Promise<void> => {
+    if (!login) return;
+    try {
+      setLogin(await api.cancelAcpLogin(agentId, login.loginId));
+    } catch (e) {
+      setError(problemText(e));
+    }
+  };
+  const id = `acp-login-${agentId}-${hostId}`;
+  const running = login !== null && !ACP_LOGIN_TERMINAL.has(login.status);
+
+  return (
+    <View style={{ marginTop: space.sm }} testID={`${id}-flow`}>
+      {!running ? (
+        <ButtonRow>
+          <SettingsButton
+            testID={`${id}-start`}
+            label={`Sign in on ${hostLabel}`}
+            onPress={() => void start()}
+          />
+        </ButtonRow>
+      ) : (
+        <>
+          {login.status === 'starting' ? (
+            <Muted testID={`${id}-starting`}>{`Starting ${agentLabel} on ${hostLabel}…`}</Muted>
+          ) : null}
+          {login.url ? (
+            <SettingsButton
+              testID={`${id}-url`}
+              label={`Open the ${agentLabel} sign-in page`}
+              onPress={() => void Linking.openURL(login.url!)}
+            />
+          ) : null}
+          {login.userCode ? <Muted testID={`${id}-code`}>{`Code: ${login.userCode}`}</Muted> : null}
+          {login.message ? <Muted testID={`${id}-message`}>{login.message}</Muted> : null}
+          {login.loopback ? (
+            <>
+              <Field
+                testID={`${id}-paste`}
+                accessibilityLabel="The address your browser ended on"
+                placeholder="Paste the address the browser ended on"
+                value={pasted}
+                onChangeText={setPasted}
+              />
+              <ButtonRow>
+                <SettingsButton
+                  testID={`${id}-send`}
+                  label="Send"
+                  disabled={pasted.trim() === ''}
+                  onPress={() => void send()}
+                />
+              </ButtonRow>
+            </>
+          ) : null}
+          <ButtonRow>
+            <SettingsButton
+              testID={`${id}-cancel`}
+              label="Cancel"
+              variant="quiet"
+              onPress={() => void cancel()}
+            />
+          </ButtonRow>
+        </>
+      )}
+      {login?.status === 'failed' ? (
+        <ErrorLine testID={`${id}-failed`} message={login.message ?? 'The sign-in failed'} />
+      ) : null}
+      {error ? <ErrorLine testID={`${id}-error`} message={error} /> : null}
     </View>
   );
 }

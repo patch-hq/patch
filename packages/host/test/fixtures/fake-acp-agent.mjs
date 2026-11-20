@@ -16,12 +16,20 @@
 //   FAKE_ACP_LOG        file every request is appended to, as JSON lines
 //   FAKE_ACP_NEED_KEY   when set, session/new refuses unless FAKE_ACP_KEY is set
 //   FAKE_ACP_NO_LOAD    when set, the agent does not advertise loadSession
+//   FAKE_ACP_LOGIN      when set, the agent offers its own sign-in (as Gemini CLI
+//                       does) and FAKE_ACP_NEED_KEY is met by a login as well
+//                       as a key: `browser-login` prints an address whose
+//                       redirect comes back to a loopback listener here,
+//                       `device-login` prints a code to enter and finishes
+//                       after FAKE_ACP_DEVICE_MS, and `api-key` is the key
+//                       method, which is not a login
 
 import { agent, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable, Writable } from 'node:stream';
+import { createServer } from 'node:http';
 
 const STATE = process.env.FAKE_ACP_STATE ?? join(process.cwd(), '.fake-acp');
 mkdirSync(STATE, { recursive: true });
@@ -66,12 +74,66 @@ const app = agent({ name: 'fake-acp' })
         loadSession: !process.env.FAKE_ACP_NO_LOAD,
         promptCapabilities: { image: false },
       },
-      authMethods: [],
+      authMethods: process.env.FAKE_ACP_LOGIN
+        ? [
+            { id: 'browser-login', name: 'Log in with Fake', description: 'A browser sign-in' },
+            { id: 'device-login', name: 'Log in with a code' },
+            {
+              id: 'api-key',
+              name: 'Fake API key',
+              _meta: { 'api-key': { provider: 'fake' } },
+            },
+          ]
+        : [],
     };
+  })
+  .onRequest('authenticate', async ({ params }) => {
+    log({ method: 'authenticate', params });
+    const loggedIn = () => writeFileSync(join(STATE, 'login'), params.methodId);
+    if (params.methodId === 'device-login') {
+      process.stderr.write(
+        'To sign in, open https://fake.example.com/device and enter the code WXYZ-1234\n',
+      );
+      await sleep(Number(process.env.FAKE_ACP_DEVICE_MS ?? 200));
+      loggedIn();
+      return {};
+    }
+    if (params.methodId !== 'browser-login')
+      throw new RequestError(-32602, `No sign-in method ${params.methodId}`);
+    // As Gemini CLI does: a loopback listener for the provider's redirect, and
+    // the address to open written to stderr.
+    await new Promise((resolve, reject) => {
+      const server = createServer((req, res) => {
+        const url = new URL(req.url, 'http://127.0.0.1');
+        if (url.pathname !== '/oauth2callback') {
+          res.writeHead(404).end();
+          return;
+        }
+        const ok = url.searchParams.get('code') === 'good';
+        res.writeHead(ok ? 200 : 400).end(ok ? 'signed in' : 'bad code');
+        server.close();
+        if (ok) {
+          loggedIn();
+          resolve();
+        } else reject(new RequestError(-32000, 'The sign-in was refused'));
+      });
+      server.listen(0, '127.0.0.1', () => {
+        const port = server.address().port;
+        const redirect = encodeURIComponent(`http://127.0.0.1:${port}/oauth2callback`);
+        process.stderr.write(
+          `\n\nAttempting to open authentication page in your browser.\nOtherwise navigate to:\n\nhttps://accounts.fake.example.com/o/oauth2/auth?client_id=x&redirect_uri=${redirect}&state=s\n\n`,
+        );
+      });
+    });
+    return {};
   })
   .onRequest('session/new', ({ params }) => {
     log({ method: 'session/new', params });
-    if (process.env.FAKE_ACP_NEED_KEY && !process.env.FAKE_ACP_KEY)
+    if (
+      process.env.FAKE_ACP_NEED_KEY &&
+      !process.env.FAKE_ACP_KEY &&
+      !existsSync(join(STATE, 'login'))
+    )
       throw new RequestError(
         -32000,
         'Authentication required: Gemini API key is missing or not configured.',

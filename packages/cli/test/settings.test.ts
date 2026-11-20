@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { Command } from 'commander';
 import {
   acpAccountLines,
+  acpHostLogin,
   acpSignIn,
   chatgptDeviceSignIn,
   parseBooleanValue,
@@ -55,7 +56,7 @@ test("accounts acp lists, signs in and removes ACP agents' accounts", () => {
   assert.ok(acp, 'accounts acp');
   assert.deepEqual(
     acp.commands.map((c) => c.name()),
-    ['list', 'sign-in', 'order', 'strategy', 'remove'],
+    ['list', 'login', 'sign-in', 'order', 'strategy', 'remove'],
   );
 });
 
@@ -182,4 +183,49 @@ test('accounts signin reports a failed sign-in in the server’s words', async (
     ),
     /same ChatGPT account as Work/,
   );
+});
+
+test('an ACP sign-in on a host prints the hand-off, sends a pasted address, and waits for the end', async () => {
+  const lines: string[] = [];
+  const posts: Array<[string, unknown]> = [];
+  const views = [
+    { loginId: 'l1', hostId: 'h1', agentId: 'gemini', status: 'starting' },
+    {
+      loginId: 'l1',
+      hostId: 'h1',
+      agentId: 'gemini',
+      status: 'waiting',
+      url: 'https://accounts.example.com/auth',
+      loopback: true,
+    },
+    { loginId: 'l1', hostId: 'h1', agentId: 'gemini', status: 'complete' },
+  ];
+  let polled = 0;
+  const t = {
+    post: async <T>(p: string, b?: unknown): Promise<T> => {
+      posts.push([p, b]);
+      return views[0] as T;
+    },
+    get: async <T>(_p: string): Promise<T> => views[Math.min(++polled, 2)] as T,
+  };
+  const view = await acpHostLogin(
+    t,
+    { agentId: 'gemini', hostId: 'h1', methodId: 'oauth-personal' },
+    {
+      say: (l) => lines.push(l),
+      paste: async () => 'http://127.0.0.1:4000/oauth2callback?code=x',
+      sleep: async () => undefined,
+    },
+  );
+  assert.equal(view.status, 'complete');
+  assert.deepEqual(posts[0], [
+    '/api/accounts/acp/gemini/login',
+    { hostId: 'h1', methodId: 'oauth-personal' },
+  ]);
+  assert.ok(lines.includes('Open https://accounts.example.com/auth'));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(posts[1], [
+    '/api/accounts/acp/gemini/login/l1/callback',
+    { url: 'http://127.0.0.1:4000/oauth2callback?code=x' },
+  ]);
 });

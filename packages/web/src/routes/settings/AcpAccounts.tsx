@@ -6,7 +6,7 @@
 // sign-in on each host and has nothing to add here.
 
 import type { JSX, ReactNode } from 'react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { describeAccountState, resolveAcpAgents, type AcpAgentConfig } from '@patch/wire';
 import { api, type SharedState } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
@@ -14,6 +14,7 @@ import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { formatResetLocal } from '../../lib/usage.js';
 import { writeShared } from './sharedWrite.js';
+import { AcpHostLogins } from './AcpHostLogin.js';
 import { RankedList } from './accountList.js';
 import { STRATEGIES, STRATEGY_LABELS, STRATEGY_TITLES } from './SharedAccounts.js';
 import { Group, Note, Pills, Row } from './ui.js';
@@ -29,17 +30,29 @@ interface Editing {
 export function AcpAccounts(): JSX.Element | null {
   const configured = usePreferencesStore((s) => s.preferences.acpAgents);
   const shared = usePreferencesStore((s) => s.shared);
-  const agents = resolveAcpAgents(configured).filter((a) => a.apiKeyEnv !== undefined);
+  const hosts = usePresenceStore((s) => s.hosts);
+  // An agent shows when it takes a key, or some host offers to sign it in.
+  const offersLogin = (agentId: string): boolean =>
+    Object.values(hosts).some((h) =>
+      h.host?.backends.some((b) => b.id === `acp:${agentId}` && (b.loginMethods?.length ?? 0) > 0),
+    );
+  const agents = resolveAcpAgents(configured).filter(
+    (a) => a.apiKeyEnv !== undefined || offersLogin(a.id),
+  );
   if (agents.length === 0) return null;
   return (
     <>
       {agents.map((agent) => (
-        <AgentGroup
-          key={agent.id}
-          agent={agent}
-          rows={(shared?.secrets.acp ?? []).filter((a) => a.agentId === agent.id)}
-          loaded={shared !== null}
-        />
+        <Fragment key={agent.id}>
+          {agent.apiKeyEnv !== undefined ? (
+            <AgentGroup
+              agent={agent}
+              rows={(shared?.secrets.acp ?? []).filter((a) => a.agentId === agent.id)}
+              loaded={shared !== null}
+            />
+          ) : null}
+          <AcpHostLogins agent={agent} />
+        </Fragment>
       ))}
     </>
   );

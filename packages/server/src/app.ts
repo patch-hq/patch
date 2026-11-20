@@ -1,6 +1,7 @@
 // Fastify app factory — exported separately from the listener so tests can
 // `await build()` and call `app.inject()` without binding a port.
 
+import { AcpLogins } from './acp-logins.js';
 import { multipartByteRanges, parseByteRanges } from './byte-range.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath, sep } from 'node:path';
@@ -846,6 +847,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const newChatDraftAttachmentsDir =
     process.env['PATCH_NEW_CHAT_DRAFT_ATTACHMENTS_DIR'] ??
     join(accountDir, 'new-chat-draft-attachments');
+
+  // ---- an ACP agent's own sign-in on one host (spec/10 § Signing in) ----
+  const acpLogins = new AcpLogins({
+    sendToHost: (hostId, event) => hostLink.sendTo(hostId, SETTINGS_SURFACE, event),
+    isOnline: (hostId) => hostLink.isOnline(hostId),
+    hostCanLogin: (hostId) => wsHub.hostAcpLogin(hostId),
+    hostName: (hostId) => registry.hostName(hostId),
+  });
+  hostLink.onEvent((event) => acpLogins.observe(event));
 
   // ---- shared settings (spec/01 § Settings) + the Manager sweep ----
   // Same dataDir resolution as the jobs subsystem: absent one (a test that
@@ -2265,6 +2275,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     registerSettingsRoutes(app, {
       registry,
       shared: accountSettings,
+      acpLogins,
       ...(opts.exchangeClaudeCode ? { exchangeClaudeCode: opts.exchangeClaudeCode } : {}),
       ...(opts.listenForClaudeSignIn ? { listenForClaudeSignIn: opts.listenForClaudeSignIn } : {}),
       ...(opts.chatgptDevice ? { chatgptDevice: opts.chatgptDevice } : {}),

@@ -32,6 +32,8 @@ export interface AcpRoute {
 
 export interface AcpAccountsOptions {
   now?: () => number;
+  /** This host, which names its agents' own sign-ins (`hostLoginId`). */
+  hostId?: string;
   /** Refusals kept from before a restart. */
   initial?: readonly PersistedAccountExhaustion[];
   /** What is skipped, and what the agent last said, changed: persist and report it. */
@@ -45,6 +47,12 @@ export class AcpAccounts {
   private restored: PersistedAccountExhaustion[];
   /** When the agent last completed a turn on each account. */
   private readonly worked = new Map<string, number>();
+  /**
+   * Each agent's own sign-in on this host, by agent: signed in or not, and
+   * since when. Not an account the server holds: the login lives in the
+   * agent's own files here, so it is this host's alone (`hostLoginId`).
+   */
+  private readonly logins = new Map<string, { label: string; signedIn: boolean; at: number }>();
   private readonly now: () => number;
 
   constructor(private readonly o: AcpAccountsOptions = {}) {
@@ -116,11 +124,52 @@ export class AcpAccounts {
 
   /** The agent refused this account as signed out, or its key as invalid: skip it until it has a new key. */
   markSignedOut(accountId: string, reason: string): void {
+    const login = this.loginAgentOf(accountId);
+    if (login !== undefined) {
+      this.setLogin(login, this.logins.get(login)?.label ?? login, false, reason);
+      return;
+    }
     this.skip(accountId, reason, 'out', { strategy: 'priority' });
+  }
+
+  /**
+   * Whether the agent is signed in on this host with its own sign-in. Changes
+   * are reported like any account's: signed out as a sign-in refusal, signed in
+   * as a reading taken then.
+   */
+  setLogin(agentId: string, label: string, signedIn: boolean, reason?: string): void {
+    const prev = this.logins.get(agentId);
+    if (prev?.signedIn === signedIn && prev.label === label) return;
+    this.logins.set(agentId, { label, signedIn, at: this.now() });
+    this.loginReasons.set(agentId, reason);
+    this.changed();
+  }
+
+  private readonly loginReasons = new Map<string, string | undefined>();
+
+  /** The agent's own sign-in on this host as an account id, when it has one. */
+  hostLogin(agentId: string): { id: string; label: string; signedIn: boolean } | undefined {
+    const l = this.logins.get(agentId);
+    return l ? { id: this.hostLoginId(agentId), label: l.label, signedIn: l.signedIn } : undefined;
+  }
+
+  /** The account id of an agent's own sign-in on this host: `acp-login:<host>:<agent>`. */
+  hostLoginId(agentId: string): string {
+    return `acp-login:${this.o.hostId ?? 'host'}:${agentId}`;
+  }
+
+  private loginAgentOf(accountId: string): string | undefined {
+    const prefix = `acp-login:${this.o.hostId ?? 'host'}:`;
+    return accountId.startsWith(prefix) ? accountId.slice(prefix.length) : undefined;
   }
 
   /** The agent completed a turn on this account: it has credit and a working key. */
   noteWorked(accountId: string): void {
+    const login = this.loginAgentOf(accountId);
+    if (login !== undefined) {
+      this.setLogin(login, this.logins.get(login)?.label ?? login, true);
+      return;
+    }
     const account = this.get(accountId);
     if (!account) return;
     this.worked.set(accountId, this.now());
@@ -145,22 +194,38 @@ export class AcpAccounts {
       type: 'host.account',
       hostId,
       backendId,
-      connected: this.accounts.length > 0,
-      accounts: this.accounts.map((a) => {
-        const r = refused.get(a.id);
-        const worked = this.worked.get(a.id);
-        return {
-          id: a.id,
-          label: a.label,
-          connected: true,
-          kind: 'apiKey' as const,
-          ...(r?.kind === 'out' ? { needsSignIn: true, error: r.reason } : {}),
-          ...(r?.kind === 'limit'
-            ? { refusal: { kind: 'limit' as const, message: r.reason, at: r.at ?? this.now() } }
-            : {}),
-          ...(worked !== undefined && r === undefined ? { usage: { at: worked } } : {}),
-        };
-      }),
+      connected: this.accounts.length > 0 || [...this.logins.values()].some((l) => l.signedIn),
+      accounts: [
+        ...this.accounts.map((a) => {
+          const r = refused.get(a.id);
+          const worked = this.worked.get(a.id);
+          return {
+            id: a.id,
+            label: a.label,
+            connected: true,
+            kind: 'apiKey' as const,
+            ...(r?.kind === 'out' ? { needsSignIn: true, error: r.reason } : {}),
+            ...(r?.kind === 'limit'
+              ? { refusal: { kind: 'limit' as const, message: r.reason, at: r.at ?? this.now() } }
+              : {}),
+            ...(worked !== undefined && r === undefined ? { usage: { at: worked } } : {}),
+          };
+        }),
+        // Each agent's own sign-in on this host: this host's account alone.
+        ...[...this.logins.entries()].map(([agentId, l]) => ({
+          id: this.hostLoginId(agentId),
+          label: l.label,
+          connected: l.signedIn,
+          ...(l.signedIn
+            ? { usage: { at: l.at } }
+            : {
+                needsSignIn: true,
+                ...(this.loginReasons.get(agentId)
+                  ? { error: this.loginReasons.get(agentId)! }
+                  : {}),
+              }),
+        })),
+      ],
     };
   }
 
