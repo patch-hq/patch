@@ -119,7 +119,7 @@ async function checkAgent(): Promise<DiagnosticCheck> {
       return {
         ...base,
         status: 'fail',
-        detail: 'server is up, but no agent (host) is connected to it',
+        detail: 'the server is running, but no host is connected to it',
       };
     }
     if (res.status === 401) {
@@ -151,7 +151,7 @@ function fixFor(c: DiagnosticCheck): string | undefined {
         : c.detail.startsWith('not checked')
           ? 'Pair this phone again.'
           : c.detail.includes('no agent')
-            ? 'Wake the host that runs the agent and make sure Patch is running there.'
+            ? 'Open Patch on the computer that runs your host, so it starts again.'
             : 'Check the server is running and reachable, then retry.';
     case 'websocket':
       return 'Tap Retry now. If it keeps failing while the server check passes, a proxy, VPN or firewall is blocking live connections.';

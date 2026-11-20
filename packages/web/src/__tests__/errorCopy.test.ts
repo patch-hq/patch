@@ -79,7 +79,7 @@ describe('humaniseError', () => {
   it('says the host is not answering for a daemon_timeout, keeping the code as detail', () => {
     const out = humaniseError({ code: 'daemon_timeout' }, 'models');
     expect(out.sentence).toBe(
-      'That host isn’t answering. It may be offline. Try again when it’s back.',
+      'That host isn’t answering. If it runs on this computer, choose Restart host in the banner at the top. Otherwise open Patch on that computer.',
     );
     expect(out.detail).toBe('daemon_timeout');
   });

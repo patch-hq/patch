@@ -326,6 +326,9 @@ contextBridge.exposeInMainWorld('patch', {
         hostId: string | null;
       }>;
     },
+    restart(): Promise<void> {
+      return ipcRenderer.invoke('patch:local-host:restart');
+    },
     defaultName(): Promise<string> {
       return ipcRenderer.invoke('patch:local-host:default-name') as Promise<string>;
     },

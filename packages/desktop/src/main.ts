@@ -84,7 +84,9 @@ import { loadRetryDelay, shouldRetryLoad } from './load-retry';
 import { MOUNT_DEADLINE_MS, MOUNT_PROBE, blankWindowPage } from './blank-window';
 import { readHostLink, serverLostText, watchServerLink } from './server-watch';
 import {
+  ensureHostAnswering,
   friendlyComputerName,
+  hostProcess,
   installLocalHost,
   localHostStatus,
   serverOrigin,
@@ -129,7 +131,7 @@ let SERVER_URL = process.env['PATCH_SERVER_URL'] ?? (app.isPackaged ? '' : DEV_S
 /** The first page the main window loads: SERVER_URL plus the credential in its fragment. */
 let initialUrl: string | null = null;
 /** What the first run started (the local server, a relay bridge), to stop at quit. */
-let activeLaunch: { stop(): Promise<void> } | null = null;
+let activeLaunch: { stop(): Promise<void>; mode?: 'local' | 'remote' | 'relay' } | null = null;
 /**
  * spec/05 § Keep running — present only when this computer runs Patch itself:
  * open at login, and the system kept awake on mains power so a phone reaches it.
@@ -899,6 +901,42 @@ function keepRunningMenuItems(k: KeepRunning): Electron.MenuItemConstructorOptio
       click: (item) => set({ keepAwake: item.checked }),
     },
   ];
+}
+
+/** The host process this computer runs, via its launchd or systemd service. */
+function localHostProcess(): ReturnType<typeof hostProcess> {
+  return hostProcess({ home: app.getPath('home'), uid: process.getuid?.() ?? 0 });
+}
+
+/**
+ * After the server is up: start the host on this computer if Quit or Turn off
+ * left it stopped, and if it is running but does not answer within a few
+ * seconds, kill it and start a fresh one. Not awaited: the window opens
+ * meanwhile, and the offline banner carries a Restart host button if this fails.
+ */
+function ensureLocalHost(credential: string, origin: string): void {
+  if (!localHostStatus(app.getPath('home')).installed) return;
+  void ensureHostAnswering({
+    process: localHostProcess(),
+    answering: async () => {
+      try {
+        const res = await fetch(`${origin}/api/daemon/healthz`, {
+          headers: { authorization: `Bearer ${credential}` },
+          signal: AbortSignal.timeout(1500),
+        });
+        return res.status === 200;
+      } catch {
+        return false;
+      }
+    },
+  }).then(
+    (how) => console.log(`[patch] local host: ${how}`),
+    (err: unknown) =>
+      console.error(
+        '[patch] local host: could not bring it up',
+        err instanceof Error ? err.message : err,
+      ),
+  );
 }
 
 /**
@@ -2024,8 +2062,21 @@ function setupAutoUpdater(): void {
     if (!keepRunning || process.platform !== 'darwin')
       throw new Error('This computer does not run the Patch server as a service');
     await loadFirstRun().turnOffLocalServer(app.getPath('home'));
+    // The host on this Mac goes with it, for real: a host left running with no
+    // server only looks like a working Patch that has stopped answering.
+    if (localHostStatus(app.getPath('home')).installed) {
+      await localHostProcess().stop({ keepOff: true });
+    }
   });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
+  // Restart host: kill the host process on this computer and start a fresh one.
+  // The way back from a host that hung, with no terminal and no log-out.
+  ipcMain.handle('patch:local-host:restart', async () => {
+    if (!localHostStatus(app.getPath('home')).installed) {
+      throw new Error('This computer does not run a Patch host.');
+    }
+    await localHostProcess().restart();
+  });
   ipcMain.handle('patch:local-host:default-name', () => friendlyComputerName());
   ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown; name?: unknown }) =>
     installLocalHost({
@@ -2294,7 +2345,13 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
     });
     activeLaunch = launched;
     console.log(`[patch] start: ${launched.mode} server at ${new URL(launched.appUrl).origin}`);
-    if (launched.mode === 'local') startKeepRunning(userData);
+    if (launched.mode === 'local') {
+      startKeepRunning(userData);
+      const url = new URL(launched.appUrl);
+      const credential = new URLSearchParams(url.hash.slice(1)).get('credential');
+      if (credential === null) throw new Error('The local server launch carried no credential.');
+      ensureLocalHost(credential, url.origin);
+    }
     // A first run goes on to the welcome steps: AI sign-in, defaults, phone.
     initialUrl = launched.firstRun
       ? firstRun.welcomeUrl(launched.appUrl, launched.mode)
@@ -2514,6 +2571,14 @@ export function bootstrap(): void {
     tray?.destroy();
     // The server this Mac runs for itself (or the bridge to a relayed one) stops
     // with the app; quitting waits for it so the port is free next time.
+    // Quitting ends the host process on this computer too (it is a service of its
+    // own, so it would otherwise outlive the app); opening Patch starts a fresh one.
+    const hostStopped =
+      activeLaunch?.mode === 'local' && localHostStatus(app.getPath('home')).installed
+        ? localHostProcess()
+            .stop()
+            .catch((err: unknown) => console.error('[patch] stopping the host failed', err))
+        : Promise.resolve();
     if (activeLaunch) {
       e.preventDefault();
       const launched = activeLaunch;
@@ -2522,10 +2587,12 @@ export function bootstrap(): void {
       // second app.quit() issued while this one is still unwinding is ignored.
       // A stop that resolves at once (a remembered remote server has nothing to
       // stop) lands exactly there, and the app hung with no window, never exiting.
-      void launched
-        .stop()
-        .catch((err: unknown) => console.error('[patch] stopping the server failed', err))
-        .finally(() => app.exit(0));
+      void Promise.all([
+        hostStopped,
+        launched
+          .stop()
+          .catch((err: unknown) => console.error('[patch] stopping the server failed', err)),
+      ]).finally(() => app.exit(0));
     }
   });
 

@@ -1,11 +1,12 @@
 // HostOfflineBanner — per-chat banner shown when the server WS is up but
 // the host is offline.
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import * as desktopBridge from '../lib/desktopBridge.js';
 
 describe('HostOfflineBanner', () => {
   beforeEach(() => {
@@ -35,7 +36,7 @@ describe('HostOfflineBanner', () => {
     usePresenceStore.setState({ connection: 'connected', hostOnline: false });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-      'No host is online. Messages are queued and sent when one reconnects.',
+      'No host is online. Messages are queued and sent when one reconnects. If the host runs on this computer, restart it.',
     );
   });
 
@@ -110,6 +111,44 @@ describe('HostOfflineBanner', () => {
     it('renders nothing app-wide while some host is still online', () => {
       const { container } = render(<HostOfflineBanner />);
       expect(container).toBeEmptyDOMElement();
+    });
+  });
+
+  describe('Restart host', () => {
+    afterEach(() => vi.restoreAllMocks());
+    const withBridge = (restart: () => Promise<void>, installed = true) =>
+      vi.spyOn(desktopBridge, 'getDesktopBridge').mockReturnValue({
+        localHost: {
+          status: () => Promise.resolve({ installed, hostId: 'H1' }),
+          restart,
+        },
+      } as never);
+
+    it('is offered in the desktop app when this computer runs the host, and restarts it', async () => {
+      const restart = vi.fn(() => Promise.resolve());
+      withBridge(restart);
+      usePresenceStore.setState({ connection: 'connected', hostOnline: false });
+      render(<HostOfflineBanner />);
+      fireEvent.click(await screen.findByTestId('daemon-offline-restart'));
+      await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+    });
+
+    it('says so when the restart fails', async () => {
+      withBridge(() => Promise.reject(new Error('launchctl failed')));
+      usePresenceStore.setState({ connection: 'connected', hostOnline: false });
+      render(<HostOfflineBanner />);
+      fireEvent.click(await screen.findByTestId('daemon-offline-restart'));
+      expect(await screen.findByTestId('daemon-offline-restart-error')).toHaveTextContent(
+        'The host did not restart: launchctl failed',
+      );
+    });
+
+    it('is not offered when this computer has no host, or outside the desktop app', async () => {
+      withBridge(() => Promise.resolve(), false);
+      usePresenceStore.setState({ connection: 'connected', hostOnline: false });
+      render(<HostOfflineBanner />);
+      await screen.findByTestId('daemon-offline-banner');
+      expect(screen.queryByTestId('daemon-offline-restart')).toBeNull();
     });
   });
 });

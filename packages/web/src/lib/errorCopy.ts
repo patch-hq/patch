@@ -62,7 +62,10 @@ const CODES: ReadonlyArray<readonly [string, Copy]> = [
   ['no_machine_chosen', { sentence: 'Choose a host. The model list comes from it.' }],
   [
     'daemon_timeout',
-    { sentence: 'That host isn’t answering. It may be offline. Try again when it’s back.' },
+    {
+      sentence:
+        'That host isn’t answering. If it runs on this computer, choose Restart host in the banner at the top. Otherwise open Patch on that computer.',
+    },
   ],
   ['unknown_host', { sentence: 'That host is no longer registered. Pick another one.' }],
   ['folder_not_found', { sentence: 'That folder isn’t on that host. Pick another project.' }],

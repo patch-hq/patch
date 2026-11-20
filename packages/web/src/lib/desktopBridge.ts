@@ -166,6 +166,8 @@ export interface PatchDesktopBridge {
   localServer?: { turnOff(): Promise<void> };
   localHost?: {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
+    /** Kill the host process on this computer and start a fresh one. */
+    restart(): Promise<void>;
     /** The name the person gave this computer, not its network hostname. */
     defaultName(): Promise<string>;
     install(

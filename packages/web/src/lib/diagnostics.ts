@@ -112,8 +112,8 @@ async function checkAgent(): Promise<DiagnosticCheck> {
       return {
         ...base,
         status: 'fail',
-        detail: 'server is up, but no agent (host) is connected to it',
-        fix: 'Wake the host that runs the agent and make sure Patch is running there.',
+        detail: 'the server is running, but no host is connected to it',
+        fix: 'Open Patch on the computer that runs your host. If it is this computer, choose Restart host in the banner.',
       };
     }
     if (res.status === 401) {
