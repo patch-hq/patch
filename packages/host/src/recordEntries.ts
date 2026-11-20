@@ -45,6 +45,7 @@ export function turnBoundaryOf(
       at: record.at,
       outcome: rec.outcome,
       ...(rec.error !== undefined ? { error: rec.error } : {}),
+      ...(rec.limit !== undefined ? { limit: rec.limit } : {}),
       branchId: record.branchId,
     };
   }
