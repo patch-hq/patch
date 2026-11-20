@@ -139,7 +139,7 @@ describe('runDiagnostics', () => {
     const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
     expect(byId.server!.status).toBe('pass');
     expect(byId.agent!.status).toBe('fail');
-    expect(byId.agent!.detail).toMatch(/agent/i);
+    expect(byId.agent!.detail).toMatch(/no host is connected/i);
   });
 
   it('reports the server unreachable with the thrown network error', async () => {
