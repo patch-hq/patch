@@ -9,7 +9,7 @@
 // and gives up on the child after a deadline. A stuck child costs one process,
 // not the host.
 
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 
 export const LISTING_TIMEOUT_MS = 4_000;
 
@@ -46,6 +46,7 @@ export const listChildDirs: ListChildDirs = (dir, timeoutMs = LISTING_TIMEOUT_MS
       child.kill('SIGKILL');
       child.stdout.destroy();
       child.stderr.destroy();
+      announcePermissionWait(dir);
       settle({ kind: 'timeout' });
     }, timeoutMs);
     let out = '';
@@ -74,4 +75,28 @@ export const listChildDirs: ListChildDirs = (dir, timeoutMs = LISTING_TIMEOUT_MS
 export function listingTimeoutMessage(dir: string): string {
   const name = dir.split('/').filter(Boolean).pop() ?? dir;
   return `macOS is asking for permission to open ${name} — look for a dialog on the Mac, or choose another folder`;
+}
+
+const lastAnnounced = new Map<string, number>();
+const ANNOUNCE_EVERY_MS = 60_000;
+
+/**
+ * The macOS privacy dialog is easy to miss behind other windows, so a listing
+ * that is waiting on it also raises a system notification pointing at it.
+ * Once a minute per folder; macOS only.
+ */
+export function announcePermissionWait(
+  dir: string,
+  opts: { platform?: NodeJS.Platform; now?: number; run?: typeof execFile } = {},
+): boolean {
+  if ((opts.platform ?? process.platform) !== 'darwin') return false;
+  const now = opts.now ?? Date.now();
+  if (now - (lastAnnounced.get(dir) ?? -Infinity) < ANNOUNCE_EVERY_MS) return false;
+  lastAnnounced.set(dir, now);
+  const name = dir.split('/').filter(Boolean).pop() ?? dir;
+  const script = `display notification "Patch is waiting for permission to open ${name.replace(/[\\"]/g, '')}. Look for a macOS dialog and click Allow." with title "Patch needs your permission"`;
+  (opts.run ?? execFile)('osascript', ['-e', script], { timeout: 5_000 }, (err) => {
+    if (err) console.warn(`could not raise the permission notification: ${err.message}`);
+  });
+  return true;
 }

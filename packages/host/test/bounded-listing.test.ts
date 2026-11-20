@@ -39,3 +39,23 @@ describe('FolderRegistry.browse with a stuck listing', () => {
     await expect(reg.browse('/Users/x/Documents')).rejects.toThrow(/permission to open Documents/);
   });
 });
+
+describe('announcePermissionWait', () => {
+  it('notifies once a minute per folder, on macOS only', async () => {
+    const { announcePermissionWait } = await import('../src/boundedListing.js');
+    const calls: string[][] = [];
+    const run = ((_c: string, args: string[]) => void calls.push(args)) as never;
+    expect(announcePermissionWait('/h/Documents', { platform: 'linux', run })).toBe(false);
+    expect(announcePermissionWait('/h/Documents', { platform: 'darwin', now: 1e6, run })).toBe(
+      true,
+    );
+    expect(
+      announcePermissionWait('/h/Documents', { platform: 'darwin', now: 1e6 + 1000, run }),
+    ).toBe(false);
+    expect(
+      announcePermissionWait('/h/Documents', { platform: 'darwin', now: 1e6 + 61_000, run }),
+    ).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![1]).toMatch(/permission to open Documents/);
+  });
+});
