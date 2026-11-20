@@ -311,11 +311,17 @@ was last sent in memory and asks the agent again when they change.
   permission left unanswered, and takes the prompt's answer whether it arrives
   now or arrived while no host was attached.
 - Account state (`10-auth.md` § Account states) is what ACP shows: signed out
-  when the agent refuses a session for want of a sign-in, limited when a turn is
-  refused with a quota error (with no reset time, so the turn fails visibly
-  rather than parking), broken with the agent's message otherwise. ACP carries no
-  usage readings, and an agent may accept a session with a key its model API
-  later refuses; that refusal fails the turn in the agent's words.
+  when the agent refuses a session for want of a sign-in or the provider rejects
+  its key, limited when a turn is refused with a quota error (with no reset
+  time, so the turn fails visibly rather than parking), broken with the agent's
+  message otherwise. For an agent running on an ACP account, the host records
+  each refusal against that account (kept across a restart in
+  `<patchHome>/acp-account-availability.json`), skips it when picking the next
+  turn's account, and reports it, with each turn the agent completed on an
+  account, as its `host.account` for the `acp` backend, from which the server
+  derives the account's state. ACP carries no usage readings, and an agent may
+  accept a session with a key its model API later refuses; that refusal fails
+  the turn in the agent's words.
 
 Switching off native tools is a capability. Where Patch has its own version of
 something a provider also offers natively (subagents, scheduled self-wakes), the

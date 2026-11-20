@@ -95,6 +95,25 @@ describe('deriveStatus with account states', () => {
     });
   });
 
+  test('a failed turn on a limited account stops as a limit, never as out of credit', () => {
+    const failed = facts({
+      accountId: 'acp1',
+      lastEnd: {
+        outcome: 'failed',
+        error: { code: 'sdk_error', message: 'Gemini CLI: 429 quota' },
+      },
+    });
+    expect(deriveStatus(failed, false, lookup({ acp1: { state: 'limited' } }))).toEqual({
+      state: 'failed',
+      reason: 'limit_no_reset',
+      message: 'Gemini CLI: 429 quota',
+      accountId: 'acp1',
+    });
+    expect(
+      deriveStatus(failed, false, lookup({ acp1: { state: 'limited', until: 9_000 } })),
+    ).toMatchObject({ state: 'failed', reason: 'limited', resetsAt: 9_000 });
+  });
+
   test('a failed turn on a signed-out or spent account stops and asks', () => {
     const failed = facts({
       accountId: 'a',

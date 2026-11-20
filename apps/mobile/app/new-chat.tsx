@@ -35,7 +35,7 @@ import {
   pickAvailableModel,
   type EffortLevel,
   type PermissionMode,
-  accountsKeyForModel,
+  lockableAccounts,
 } from '@patch/wire';
 import { useModelCatalog } from '../src/lib/models';
 import { api, ApiError } from '../src/api/rest';
@@ -178,8 +178,7 @@ export default function NewChat(): React.ReactElement {
   const experimental = useExperimentalFeatures();
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
   const preferable = React.useMemo(() => {
-    const key = accountsKeyForModel(effectiveModel);
-    return ((key !== null ? sharedSecrets?.[key] : undefined) ?? []).filter((a) => a.connected);
+    return lockableAccounts(sharedSecrets, effectiveModel).filter((a) => a.connected);
   }, [sharedSecrets, effectiveModel]);
   React.useEffect(() => {
     if (preferredAccountId !== null && !preferable.some((a) => a.id === preferredAccountId)) {

@@ -75,13 +75,23 @@ export function decodeAcpSessionId(
 /** A turn the agent refused for want of a sign-in or key. */
 export class AcpSignedOutError extends TurnFailedError {
   override readonly name = 'AcpSignedOutError';
-  constructor(label: string) {
+  constructor(
+    label: string,
+    /** The provider refused the key itself, in the agent's words; absent for a missing sign-in. */
+    readonly rejectedKey?: string,
+  ) {
     super(
-      `${label} is not signed in on this host. Add an account for it under Settings → AI accounts, or sign in to it on this host.`,
+      rejectedKey !== undefined
+        ? `${label} refused its API key: ${rejectedKey}. Replace the key under Settings → AI accounts.`
+        : `${label} is not signed in on this host. Add an account for it under Settings → AI accounts, or sign in to it on this host.`,
       undefined,
     );
   }
 }
+
+/** A provider refusing the key itself: invalid, revoked or not allowed. */
+const REJECTED_KEY =
+  /api[ _-]?key (is )?not valid|API_KEY_INVALID|invalid api[ _-]?key|api key expired|permission[ _]denied|\b401\b|\b403\b/i;
 
 /**
  * A turn the agent refused with a quota or rate limit. `retrySafe` says no tool
@@ -169,8 +179,13 @@ export class AcpBackend implements SdkBackend {
     private readonly registry: AcpRegistry,
     readonly history: CodexHistory,
     private readonly clientVersion: string,
-    /** Told when the agent refuses the account a turn ran on as signed out, so it is skipped. */
-    private readonly onAccountSignedOut?: (accountId: string) => void,
+    /** What the agent said about the account a turn ran on: facts for its account state. */
+    private readonly onAccount?: {
+      /** Refused as signed out, or its key rejected, in Patch's words. */
+      signedOut(accountId: string, reason: string): void;
+      /** The agent completed a turn on it. */
+      worked(accountId: string): void;
+    },
   ) {}
 
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
@@ -178,9 +193,11 @@ export class AcpBackend implements SdkBackend {
       yield* this.runTurn(opts);
     } catch (err) {
       if (err instanceof AcpSignedOutError && opts.accountId !== undefined)
-        this.onAccountSignedOut?.(opts.accountId);
+        this.onAccount?.signedOut(opts.accountId, err.message);
       throw err;
     }
+    if (opts.accountId !== undefined && !opts.abortController.signal.aborted)
+      this.onAccount?.worked(opts.accountId);
   }
 
   private async *runTurn(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
@@ -678,6 +695,11 @@ export class AcpBackend implements SdkBackend {
     if (isAuthError(err)) {
       this.registry.noteTurn(agent.id, { state: { state: 'signed_out' } });
       return new AcpSignedOutError(agent.label);
+    }
+    const said = (err as Error)?.message ?? String(err);
+    if (!(err instanceof AcpClosedError) && REJECTED_KEY.test(said)) {
+      this.registry.noteTurn(agent.id, { state: { state: 'signed_out' } });
+      return new AcpSignedOutError(agent.label, said);
     }
     if (err instanceof AcpClosedError) {
       const tail = stderr ? ` (${stderr.slice(-300)})` : '';

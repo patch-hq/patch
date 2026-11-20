@@ -212,6 +212,17 @@ export function deriveStatus(
         accountId: accountId!,
       };
     }
+    if (account?.state === 'limited') {
+      // A limit nobody parked (an ACP agent's states no reset): it stopped as a
+      // limit, in the provider's words, never as out of credit.
+      return {
+        state: 'failed',
+        reason: account.until !== undefined ? 'limited' : 'limit_no_reset',
+        ...(err ? { message: err.message } : {}),
+        ...(account.until !== undefined ? { resetsAt: account.until } : {}),
+        accountId: accountId!,
+      };
+    }
     if (err && SIGNED_OUT_CODES.has(err.code)) {
       // Signed in again since: nothing is owed, so the chat is at rest.
       if (account !== undefined) return { state: 'idle' };

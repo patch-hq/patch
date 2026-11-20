@@ -17,7 +17,7 @@ import {
   isJunkFolder,
   isReservedSpecialThread,
   permissionModesFor,
-  accountsKeyForModel,
+  lockableAccounts,
 } from '@patch/wire';
 import { describeRecurrence, parseRecurrenceFields } from '@patch/wire';
 import { api, ApiError } from '../api/rest.js';
@@ -1410,8 +1410,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
    * past. Fixed when the chat is created, like the model.
    */
   function accountField(): JSX.Element | null {
-    const accountsKey = accountsKeyForModel(form.spawnModel);
-    const accounts = (accountsKey !== null ? sharedAccounts?.[accountsKey] : undefined) ?? [];
+    const accounts = lockableAccounts(sharedAccounts, form.spawnModel);
     const value = form.spawnAccount;
     const extra =
       value && !accounts.some((a) => a.id === value)
