@@ -25,6 +25,7 @@ import {
   chmodSync,
   existsSync,
   statSync,
+  readdirSync,
 } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -185,14 +186,27 @@ function makeFolder(): string {
  * Under the home directory instead: a real path, no dot segment, not scratch.
  */
 const projectFolders: string[] = [];
+const PROJECT_PREFIX = 'patch-test-project-';
+function removeProjectFolders(): void {
+  for (const dir of projectFolders.splice(0)) rmSync(dir, { recursive: true, force: true });
+}
+// afterAll does not run when the worker is killed or a test run times out, and
+// these live under $HOME (not /tmp), so they would stay there for good. A sync
+// `exit` hook covers a worker that dies; the sweep below covers a hard kill.
+process.once('exit', removeProjectFolders);
+for (const name of readdirSync(homedir())) {
+  if (!name.startsWith(PROJECT_PREFIX)) continue;
+  const full = join(homedir(), name);
+  if (Date.now() - statSync(full).mtimeMs > 60 * 60 * 1000) {
+    rmSync(full, { recursive: true, force: true });
+  }
+}
 function makeProjectFolder(): string {
-  const dir = realpathSync(mkdtempSync(join(homedir(), 'patch-test-project-')));
+  const dir = realpathSync(mkdtempSync(join(homedir(), PROJECT_PREFIX)));
   projectFolders.push(dir);
   return dir;
 }
-afterAll(() => {
-  for (const dir of projectFolders) rmSync(dir, { recursive: true, force: true });
-});
+afterAll(removeProjectFolders);
 
 // ---------------------------------------------------------------------------
 // Helpers
