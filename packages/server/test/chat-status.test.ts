@@ -239,6 +239,11 @@ describe('transitions', () => {
     ['queued_offline', 'running'],
     ['paused', 'idle'],
     ['waiting_for_sign_in', 'idle'],
+    ['paused', 'failed'],
+    ['paused', 'waiting_for_sign_in'],
+    ['waiting_for_sign_in', 'paused'],
+    ['failed', 'paused'],
+    ['failed', 'waiting_for_sign_in'],
   ] as const)('%s → %s is allowed', (from, to) => {
     expect(isAllowedTransition(from, to)).toBe(true);
   });
@@ -248,7 +253,7 @@ describe('transitions', () => {
     ['idle', 'failed'],
     ['failed', 'idle'],
     ['host_offline', 'host_restarting'],
-    ['paused', 'failed'],
+    ['paused', 'interrupted'],
   ] as const)('%s → %s is not', (from, to) => {
     expect(isAllowedTransition(from, to)).toBe(false);
   });
