@@ -65,7 +65,8 @@ test('main covers every verify layer exactly once per slice kind, browser in fou
     s.map((x) => x.name),
     [
       'checks',
-      'unit host',
+      'unit host 1/2',
+      'unit host 2/2',
       'unit web',
       'unit rest',
       'browser 1/4',
@@ -84,4 +85,15 @@ test('main covers every verify layer exactly once per slice kind, browser in fou
     'types',
     'unit',
   ]);
+});
+
+test('the host suite is split over two runners, by vitest shard', () => {
+  const host = slices(['@patch/host'], { browser: false }).filter((x) => x.layers === 'unit');
+  assert.deepEqual(
+    host.map((x) => [x.name, x.packages, x.unitShard]),
+    [
+      ['unit host 1/2', '@patch/host', '1/2'],
+      ['unit host 2/2', '@patch/host', '2/2'],
+    ],
+  );
 });

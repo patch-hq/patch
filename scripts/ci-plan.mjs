@@ -7,8 +7,8 @@
 //   node scripts/ci-plan.mjs --base origin/main  a PR: the cheap layers, and the
 //                                                unit suites this diff reaches
 //
-// Each slice is {name, layers, packages, shard, system}: the verify.mjs
-// --layers and --packages it runs, its PATCH_BROWSER_SHARD, and whether the
+// Each slice is {name, layers, packages, shard, unitShard, system}: the
+// verify.mjs --layers, --packages and --unit-shard it runs, its PATCH_BROWSER_SHARD, and whether the
 // runner needs Chromium, Xvfb and the keyring. Together a run's slices cover
 // every layer it is meant to run; no runner repeats another's work.
 //
@@ -24,6 +24,9 @@ import { pathToFileURL } from 'node:url';
 // The suites big enough to want a runner each; the rest share one.
 // host ~8 min, web ~4.5 min, everything else together ~5.5 min (Nov 2026).
 const OWN_RUNNER = ['@patch/host', '@patch/web'];
+// Suites still the slowest slice on one runner, split by vitest --shard. The
+// host's was the PR check's critical path.
+const UNIT_SHARDS = { '@patch/host': 2 };
 
 /** Root-level paths that cannot change a unit suite's result. */
 const DOC_ONLY = [/^spec\//, /^docs\//, /^design\//, /^[^/]+\.md$/];
@@ -57,22 +60,34 @@ export function slices(packages, { browser }) {
       layers: 'lint,types,mock,personal,scripts',
       packages: '',
       shard: '',
+      unitShard: '',
       system: false,
     },
   ];
   for (const b of buckets(packages)) {
-    out.push({
-      name: `unit ${b.name}`,
-      layers: 'unit',
-      packages: b.packages,
-      shard: '',
-      system: true,
-    });
+    const n = UNIT_SHARDS[b.packages] ?? 1;
+    for (let i = 1; i <= n; i++) {
+      out.push({
+        name: n === 1 ? `unit ${b.name}` : `unit ${b.name} ${i}/${n}`,
+        layers: 'unit',
+        packages: b.packages,
+        shard: '',
+        unitShard: n === 1 ? '' : `${i}/${n}`,
+        system: true,
+      });
+    }
   }
   if (browser) {
     for (let i = 1; i <= BROWSER_SHARDS; i++) {
       const shard = `${i}/${BROWSER_SHARDS}`;
-      out.push({ name: `browser ${shard}`, layers: 'browser', packages: '', shard, system: true });
+      out.push({
+        name: `browser ${shard}`,
+        layers: 'browser',
+        packages: '',
+        shard,
+        unitShard: '',
+        system: true,
+      });
     }
   }
   return out;

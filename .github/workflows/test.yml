@@ -17,8 +17,8 @@
 # A red main goes to needs-attention.yml as main-failed.
 #
 # scripts/ci-plan.mjs decides the slices: one runner each for the cheap layers,
-# the host suites, the web suites and the remaining packages, plus the four
-# browser shards on main. No runner repeats another's work.
+# the host suites (in two halves), the web suites and the remaining packages,
+# plus the four browser shards on main. No runner repeats another's work.
 #
 # Runs only in the project's public repository: Actions minutes are free there.
 
@@ -73,8 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # The runners are one shared pool with release.yml: keep a PR to four.
-      max-parallel: ${{ github.event_name == 'pull_request' && 4 || 8 }}
+      # The runners are one shared pool with release.yml: keep a PR to five.
+      max-parallel: ${{ github.event_name == 'pull_request' && 5 || 9 }}
       matrix:
         slice: ${{ fromJSON(needs.plan.outputs.slices) }}
     steps:
@@ -112,6 +112,7 @@ jobs:
           PATCH_BROWSER_SHARD: ${{ matrix.slice.shard }}
           LAYERS: ${{ matrix.slice.layers }}
           PACKAGES: ${{ matrix.slice.packages }}
+          UNIT_SHARD: ${{ matrix.slice.unitShard }}
           SYSTEM: ${{ matrix.slice.system }}
           # Logs who sends any SIGKILL or group kill (scripts/ci-killtrace.cjs).
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-killtrace.cjs
@@ -119,6 +120,7 @@ jobs:
           [ -n "$PATCH_BROWSER_SHARD" ] || unset PATCH_BROWSER_SHARD
           args=(--layers="$LAYERS")
           [ -z "$PACKAGES" ] || args+=(--packages="$PACKAGES")
+          [ -z "$UNIT_SHARD" ] || args+=(--unit-shard="$UNIT_SHARD")
           # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
           # tests keep credentials in the native keyring (Secret Service over D-Bus).
           if [ "$SYSTEM" = true ]; then
