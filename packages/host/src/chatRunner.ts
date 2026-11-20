@@ -7,6 +7,7 @@ import {
 } from './harnesses.js';
 import {
   inspectTurnDir,
+  stampTurnLocalId,
   listTurnDirs,
   retireTurn,
   turnDirFor,
@@ -3900,6 +3901,7 @@ export class Daemon {
         const head = pending[0];
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
+          stampTurnLocalId(disk.dir, resendLocalId);
           this.durableAttach.set(m.chatId, { consumed: disk.consumed, localId: resendLocalId });
           if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
