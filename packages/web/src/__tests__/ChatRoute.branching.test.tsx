@@ -112,7 +112,7 @@ describe('editing a user turn forks a track', () => {
       { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
     ]);
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'gemini/gemini-3-pro' } },
+      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'acp/gemini/gemini-3-pro' } },
     }));
     renderChat('c-fork');
     expect(screen.queryAllByTestId('msg-edit')).toHaveLength(0);
@@ -127,7 +127,7 @@ describe('editing a user turn forks a track', () => {
     expect(screen.getAllByTestId('msg-side-thread-trigger').length).toBeGreaterThan(0);
     cleanup();
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'gemini/gemini-3-pro' } },
+      chats: { ...s.chats, 'c-fork': { ...s.chats['c-fork']!, model: 'acp/gemini/gemini-3-pro' } },
     }));
     renderChat('c-fork');
     expect(screen.queryAllByTestId('msg-side-thread-trigger')).toHaveLength(0);
