@@ -336,6 +336,42 @@ describe('webhook ingress', () => {
     }
   });
 
+  it('a github delivery carries its event name and delivery id beside the body', async () => {
+    const { built, link } = await setup();
+    try {
+      const job = built.jobs.create({
+        name: 'gh',
+        trigger: { type: 'webhook', scheme: 'github', secret: 'sekret' },
+        filter: 'github.event = "check_suite"',
+        action: {
+          type: 'message',
+          chatId: 'c_manager',
+          prompt: '{{github.event}} {{github.delivery}}',
+        },
+      });
+      const body = JSON.stringify({ action: 'completed' });
+      const sig = `sha256=${createHmac('sha256', 'sekret').update(body).digest('hex')}`;
+      const res = await built.app.inject({
+        method: 'POST',
+        url: `/api/webhooks/${job.id}`,
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': sig,
+          'x-github-event': 'check_suite',
+          'x-github-delivery': 'd-123',
+        },
+        payload: body,
+      });
+      expect(res.statusCode).toBe(200);
+      const sent = link.sent.find((s) => s.event.type === 'chat.input');
+      expect(sent?.event.type === 'chat.input' && sent.event.message).toContain(
+        'check_suite d-123',
+      );
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('spec-style payload.* filter rejects a non-matching body (no dispatch)', async () => {
     const { built, link } = await setup();
     try {

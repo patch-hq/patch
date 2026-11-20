@@ -412,6 +412,26 @@ A fire's turn is a `user` turn — the job dispatched it on the user's behalf, n
 
 Suppression follows the chat, not the turn: a turn the user types into a suppressed job's chat is silent too, because the flag names this job's chats as not worth a doorbell rather than this fire. Only the doorbell is silenced — a `patch_notify` from inside the run still reaches the user, which is how a job that mostly has nothing to say still reports the fire that does.
 
+### The command gets the trigger event
+
+A `script` action's command and a gate's command both get the event that fired them,
+written to a file named in `PATCH_PAYLOAD_FILE`: the same JSON view a prompt renders
+against (`{ payload, now }`, plus `gate` once a gate has passed it, plus `github` on a
+GitHub webhook). Without it a webhook-triggered script would know only that something
+arrived, never what, so anything that acts on the event had to live outside Patch. A
+file rather than an environment variable, because a webhook body runs to tens of
+kilobytes. The host writes it 0600 beside the run's other files and removes it with
+them. `PATCH_JOB_ID` and `PATCH_FIRE_ID` name the job and the fire.
+
+A cron or recurrence fire's file holds only `firedAt` and `now`. A host older than this
+never declared `scriptPayload` and is never sent the event, so `PATCH_PAYLOAD_FILE` is
+unset there rather than pointing at nothing.
+
+A GitHub webhook also carries `github: { event, delivery }`, from the `X-GitHub-Event`
+and `X-GitHub-Delivery` headers: GitHub names the event in a header, not the body, and a
+`check_suite` and a `workflow_run` delivery are otherwise hard to tell apart. Filters and
+templates read it too (`github.event = 'check_suite'`).
+
 ## Autonomy prompt
 
 Every fire is unattended — there is nobody at the keyboard to answer a question a chat stops to ask — so every fire carries an autonomy prompt, text prepended to the fire's first user-turn. There is no way to turn it off. It is set ONCE for all jobs, as the account setting `jobAutonomyPrompt` (the Jobs page's defaults area, `14-design-web.md` § Jobs view), whose default is:

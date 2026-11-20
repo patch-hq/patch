@@ -146,9 +146,21 @@ export class JobRuns {
     this.bootTime = deps.bootTime ?? defaultBootTime;
   }
 
-  private paths(key: string): { rec: string; out: string; err: string; exit: string } {
+  private paths(key: string): {
+    rec: string;
+    out: string;
+    err: string;
+    exit: string;
+    payload: string;
+  } {
     const base = join(this.deps.runDir, key);
-    return { rec: `${base}.json`, out: `${base}.out`, err: `${base}.err`, exit: `${base}.exit` };
+    return {
+      rec: `${base}.json`,
+      out: `${base}.out`,
+      err: `${base}.err`,
+      exit: `${base}.exit`,
+      payload: `${base}.payload.json`,
+    };
   }
 
   private write(rec: JobRunRecord): void {
@@ -237,6 +249,15 @@ export class JobRuns {
     //
     // The command travels in the ENVIRONMENT rather than inside the `-c` string so
     // there is no quoting to get wrong — a gate is full of quotes and heredocs.
+    // The trigger event, for a command that needs to know what fired it
+    // (spec/08 § The command gets the trigger event). A file rather than an
+    // environment variable: a webhook body runs to tens of kilobytes, past what
+    // an environment comfortably holds. Removed with the run's other files.
+    const payloadEnv: Record<string, string> = {};
+    if (event.payload !== undefined) {
+      writeFileSync(p.payload, JSON.stringify(event.payload), { encoding: 'utf8', mode: 0o600 });
+      payloadEnv['PATCH_PAYLOAD_FILE'] = p.payload;
+    }
     const launch = inWorkSlice('/bin/bash', ['-lc', 'exec /bin/bash -c "$PATCH_JOB_COMMAND"']);
     const outFd = openSync(p.out, 'a');
     const errFd = openSync(p.err, 'a');
@@ -244,7 +265,13 @@ export class JobRuns {
     try {
       child = spawn('/bin/sh', ['-c', WRAPPER, 'sh', p.exit, launch.command, ...launch.args], {
         cwd: folder,
-        env: { ...process.env, PATCH_JOB_COMMAND: event.command },
+        env: {
+          ...process.env,
+          PATCH_JOB_COMMAND: event.command,
+          PATCH_JOB_ID: event.jobId,
+          PATCH_FIRE_ID: event.fireId,
+          ...payloadEnv,
+        },
         // Its own process group: the host can kill the whole run on a timeout,
         // and the host's own exit reaches none of it.
         detached: true,

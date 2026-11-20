@@ -280,6 +280,13 @@ export interface DispatcherOptions {
    */
   hostReported?: (hostId: string) => boolean;
   /**
+   * Does this host take a script or gate fire's trigger event
+   * (`job.exec_request.payload`, host.info `scriptPayload`)? An older host's
+   * strict schema would refuse the whole request over the field, so it is
+   * sent only where declared. Defaults to "no".
+   */
+  hostTakesPayload?: (hostId: string) => boolean;
+  /**
    * The model a job's chat runs on when the job's action names none — the
    * account's `defaultModel` (spec/08 § Action).
    *
@@ -679,6 +686,7 @@ export class JobDispatcher {
   private readonly chatHost: (chatId: string) => string | null;
   private readonly chatModel: (chatId: string) => string | null;
   private readonly hostReported: (hostId: string) => boolean;
+  private readonly hostTakesPayload: (hostId: string) => boolean;
   private readonly ackTimeoutMs: number;
   private readonly ackRetries: number;
   private readonly ackRetryDelayMs: number;
@@ -766,6 +774,7 @@ export class JobDispatcher {
     this.chatHost = opts.chatHost ?? ((): string | null => null);
     this.chatModel = opts.chatModel ?? ((): string | null => null);
     this.hostReported = opts.hostReported ?? ((): boolean => true);
+    this.hostTakesPayload = opts.hostTakesPayload ?? ((): boolean => false);
     this.chatActivity = opts.chatActivity ?? ((): ChatActivity | null => null);
     this.chatHasWorked = opts.chatHasWorked;
     this.defaultModel = opts.defaultModel ?? ((): string | undefined => undefined);
@@ -2253,6 +2262,7 @@ export class JobDispatcher {
       folder: gate.folder,
       command: gate.command,
       timeoutMs: gate.timeoutMs ?? GATE_DEFAULT_TIMEOUT_MS,
+      ...(this.hostTakesPayload(gate.hostId) ? { payload } : {}),
     };
     // Routed by the event's own `hostId`, exactly as a script action's is.
     this.hostLink.send(DISPATCH_SURFACE_ID, event);
@@ -2370,6 +2380,9 @@ export class JobDispatcher {
         folder: action.folder,
         command: action.command,
         timeoutMs: action.timeoutMs ?? SCRIPT_ACTION_DEFAULT_TIMEOUT_MS,
+        // What fired it, with the gate's words if a gate passed it — the view
+        // a prompt would render against (spec/08 § The command gets the trigger event).
+        ...(this.hostTakesPayload(action.hostId) ? { payload: renderView(payload, gated) } : {}),
       };
     } else if (action.type === 'spawn') {
       const chatId = this.idGenerator();

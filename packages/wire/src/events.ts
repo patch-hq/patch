@@ -3233,6 +3233,13 @@ export const HostInfoEvent = z
      */
     serverQueue: z.boolean().optional(),
     /**
+     * This host takes a script or gate fire's trigger event
+     * (`job.exec_request.payload`) and hands it to the command in
+     * `PATCH_PAYLOAD_FILE`. Optional: an older host never says, and is never
+     * sent one.
+     */
+    scriptPayload: z.boolean().optional(),
+    /**
      * Where the SERVER can reach this host's own audio WSS (`<host>:<port>`,
      * no scheme) to relay a voice session for a chat that lives here but was
      * opened from a surface that only reaches the server (spec/07 § Voice is
@@ -9086,6 +9093,16 @@ export const JobExecRequestEvent = z
     command: z.string().min(1),
     /** Kill and fail after this long. The server always sends it. */
     timeoutMs: z.number().int().min(1000).max(600_000),
+    /**
+     * The trigger event this fire is answering — the same view its templates
+     * render against (`{ payload, now, … }`, plus `gate` once a gate has
+     * passed). The host writes it to a file and names it in
+     * `PATCH_PAYLOAD_FILE`, so a script can read what it was fired for
+     * (spec/08 § The command gets the trigger event). Sent only to a host that
+     * declared `scriptPayload`: an older host's strict schema would refuse the
+     * whole request over a field it does not know.
+     */
+    payload: z.unknown().optional(),
   })
   .strict();
 export type JobExecRequestEvent = z.infer<typeof JobExecRequestEvent>;
