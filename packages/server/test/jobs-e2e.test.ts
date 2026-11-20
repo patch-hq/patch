@@ -336,7 +336,6 @@ describe('jobs E2E [running server]', () => {
       type: 'chat.state',
       chatId: spawnedChatId,
       permissionMode: 'bypassPermissions',
-      activity: 'idle',
       lastUpdated: Date.now(),
       status: 'active',
       hidden: true,
@@ -464,9 +463,15 @@ describe('jobs E2E [running server]', () => {
       folder: '/work',
     } as WireEvent);
     h.hostLink.emit({
+      type: 'chat.turn_started',
+      chatId: heldChat,
+      turnId: 'held',
+      seq: -1,
+      at: 1,
+    });
+    h.hostLink.emit({
       type: 'chat.state',
       chatId: heldChat,
-      activity: 'running',
       lastUpdated: 1,
       permissionMode: 'bypassPermissions',
     } as WireEvent);
@@ -485,14 +490,20 @@ describe('jobs E2E [running server]', () => {
     h.hostLink.emit({
       type: 'chat.state',
       chatId: heldChat,
-      activity: 'running',
       lastUpdated: 2,
       permissionMode: 'bypassPermissions',
     } as WireEvent);
     h.hostLink.emit({
+      type: 'chat.turn_ended',
+      chatId: heldChat,
+      turnId: 'held',
+      seq: -1,
+      at: 3,
+      outcome: 'completed',
+    });
+    h.hostLink.emit({
       type: 'chat.state',
       chatId: heldChat,
-      activity: 'idle',
       lastUpdated: 3,
       permissionMode: 'bypassPermissions',
     } as WireEvent);

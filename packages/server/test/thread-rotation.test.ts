@@ -15,6 +15,7 @@ import { ChatRegistry } from '../src/chat-registry.js';
 import { ThreadRotator } from '../src/thread-rotation.js';
 import { DEFAULT_SETTINGS, type AccountSettings } from '../src/settings.js';
 import { SharedSettingsService } from '../src/shared-settings.js';
+import { turnEnded, turnStarted } from './support/turn-facts.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -100,12 +101,13 @@ describe('ThreadRotator', () => {
   });
 
   test('skips a thread mid-turn, and does not retry it later the same day', () => {
-    seed(SPECIAL_THREAD_IDS.manager, { activity: 'running' });
+    seed(SPECIAL_THREAD_IDS.manager);
+    chats.observe(turnStarted(SPECIAL_THREAD_IDS.manager));
     expect(rotator.tick()).toBe(false);
     expect(rotated).toEqual([]);
     // Same minute, chat finishes its turn — still not retried today; the
     // day-key was already consumed at the first attempt.
-    chats.observe(state(SPECIAL_THREAD_IDS.manager, { activity: 'idle' }));
+    chats.observe(turnEnded(SPECIAL_THREAD_IDS.manager));
     expect(rotator.tick()).toBe(false);
     expect(rotated).toEqual([]);
   });

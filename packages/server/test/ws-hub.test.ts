@@ -596,6 +596,7 @@ describe('WS hub relay', () => {
       const c = await makeAuthedClient(h, user, 'srf-status');
       const seen: string[] = [];
       c.on('chat.state', (e) => seen.push(e.chatStatus?.state ?? 'none'));
+      // A host's activity is not the server's word: only the turn fact makes it run.
       h.hostLink.emit({
         type: 'chat.state',
         chatId: 'chat-1',
@@ -604,8 +605,15 @@ describe('WS hub relay', () => {
         permissionMode: 'auto',
         lastUpdated: 2,
       });
+      h.hostLink.emit({
+        type: 'chat.turn_started',
+        chatId: 'chat-1',
+        turnId: 't1',
+        seq: -1,
+        at: 3,
+      });
       await new Promise((r) => setTimeout(r, 50));
-      expect(seen).toEqual(['running']);
+      expect(seen).toEqual(['idle', 'running']);
       await c.close();
     } finally {
       await h.close();

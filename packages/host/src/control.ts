@@ -3514,7 +3514,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
             pinned: c.pinned,
             pinnedAt: c.pinnedAt,
             lastUpdated: c.lastUpdated,
-            activity: c.activity,
           },
         ]),
     );
@@ -3527,7 +3526,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         q.data.callerChatId,
         q.data.archived !== undefined ? q.data.archived : undefined,
       );
-      const merged = account.map((entry) => local.get(entry.chatId) ?? entry);
+      // The server's entry for every chat: its status is the server's to decide
+      // (spec/12 § Chat status), so this host's own view never replaces it.
+      const merged = account;
       toolLog({ tool: 'patch_list_chats', durationMs: Date.now() - start, ok: true });
       return { chats: merged };
     }

@@ -954,7 +954,9 @@ export class JobDispatcher {
     // A held slot lasts until its chat stops working (spec/08 ## Concurrency).
     // This is the same stream the ChatRegistry mirrors, so the gate sees a
     // chat's activity at the moment the registry does.
+    // `activity` is the server's own reading, put on by the registry's gate.
     if (event.type === 'chat.state') {
+      if (event.activity === undefined) return;
       this.observeChatActivity(event.chatId, event.activity, event.rateLimitResumingAt ?? null);
       return;
     }
@@ -2355,9 +2357,7 @@ export class JobDispatcher {
           // later fire is a `chat.input` into one that already has a home.
           hidden: action.startHidden === true,
           // Creation-time only, like `spawn`'s; omitted means the host default.
-          ...(action.permissionMode !== undefined
-            ? { permissionMode: action.permissionMode }
-            : {}),
+          ...(action.permissionMode !== undefined ? { permissionMode: action.permissionMode } : {}),
           // spec/04 § Goals, spec/08 ## Action — set once, when this fire
           // creates the durable chat.
           ...(action.goal !== undefined ? { goal: action.goal } : {}),

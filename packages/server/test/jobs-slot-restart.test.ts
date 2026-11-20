@@ -15,6 +15,7 @@ import { InProcessHostLink } from '../src/host-link.js';
 import { JobLogs } from '../src/jobs/logs.js';
 import { JobDispatcher } from '../src/jobs/dispatcher.js';
 import type { Job } from '../src/jobs/types.js';
+import { createHostFacts } from './support/turn-facts.js';
 
 const logger = pino({ level: 'debug' });
 const JOB_ID = 'j_00000000000000000000000012';
@@ -62,7 +63,14 @@ const spawnRequests = (link: InProcessHostLink): string[] =>
 describe('a job slot across a server restart', () => {
   let dir: string;
   let registryPath: string;
+  /** The host reports facts (a turn started, a turn ended); the server decides. */
+  let hostFacts = createHostFacts();
+  const emitHost = (link: InProcessHostLink, e: WireEvent): void => {
+    for (const f of hostFacts(e)) link.emit(f);
+  };
+
   beforeEach(() => {
+    hostFacts = createHostFacts();
     dir = mkdtempSync(join(tmpdir(), 'patch-slotrestart-'));
     registryPath = join(dir, 'chat-registry.json');
   });
@@ -78,6 +86,8 @@ describe('a job slot across a server restart', () => {
       persistPath: registryPath,
       jobChatLinks: { get: () => JOB_ID },
     });
+    // As app.ts: the registry's gate applies each host frame's facts first.
+    link.setEventGate((e) => registry.gate(e));
     link.onEvent((e) => registry.observe(e));
     const dispatcher = new JobDispatcher({
       dataDir: dir,
@@ -99,13 +109,13 @@ describe('a job slot across a server restart', () => {
     expect(p.dispatcher.dispatch(job, { n: 1 }, 'todoist').status).toBe('sent');
     expect(p.dispatcher.dispatch(job, { n: 2 }, 'todoist').status).toBe('queued');
     const chatId = spawnRequests(p.link)[0] as string;
-    p.link.emit(spawned(chatId));
+    emitHost(p.link, spawned(chatId));
     // A chat that has only been announced reports idle, before its first turn.
-    if (lastKnown !== 'never-ran') p.link.emit(state(chatId, 'running'));
+    if (lastKnown !== 'never-ran') emitHost(p.link, state(chatId, 'running'));
     // What the registry last knew. The dispatcher goes down before it sees the
     // chat finish, which is how a slot is left behind for a chat that is done.
     if (lastKnown !== 'running' && lastKnown !== 'never-ran') {
-      p.registry.observe(state(chatId, lastKnown));
+      for (const f of hostFacts(state(chatId, lastKnown))) p.registry.observe(f);
     }
     p.registry.flush();
     // A dispatcher acts once on startup, a tick after it is built. Let that happen
@@ -146,7 +156,7 @@ describe('a job slot across a server restart', () => {
     expect(p.dispatcher.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
 
     // The host reports it finished: the slot goes, once.
-    p.link.emit(state(chatId, 'idle'));
+    emitHost(p.link, state(chatId, 'idle'));
     expect(spawnRequests(p.link)).toHaveLength(1);
     expect(p.dispatcher.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 0 });
     p.dispatcher.close();
@@ -158,7 +168,7 @@ describe('a job slot across a server restart', () => {
     const p = boot();
     p.link.setStatus('offline');
     p.link.setStatus('online');
-    p.link.emit(foldersList()); // the host reports, and does not mention that chat
+    emitHost(p.link, foldersList()); // the host reports, and does not mention that chat
     await Promise.resolve();
     expect(spawnRequests(p.link)).toHaveLength(0);
     expect(p.dispatcher.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
@@ -174,9 +184,9 @@ describe('a job slot across a server restart', () => {
     expect(spawnRequests(p.link)).toHaveLength(0); // unknown for now
 
     // The host re-announces: the chat exists and is idle, then its list closes.
-    p.link.emit(spawned(chatId));
-    p.link.emit(finishedReport(chatId));
-    p.link.emit(foldersList());
+    emitHost(p.link, spawned(chatId));
+    emitHost(p.link, finishedReport(chatId));
+    emitHost(p.link, foldersList());
     await Promise.resolve();
 
     expect(spawnRequests(p.link)).toHaveLength(1);
@@ -190,9 +200,9 @@ describe('a job slot across a server restart', () => {
     const p = boot();
     p.link.setStatus('offline');
     p.link.setStatus('online');
-    p.link.emit(spawned(chatId));
-    p.link.emit(state(chatId, 'running'));
-    p.link.emit(foldersList());
+    emitHost(p.link, spawned(chatId));
+    emitHost(p.link, state(chatId, 'running'));
+    emitHost(p.link, foldersList());
     await Promise.resolve();
     expect(spawnRequests(p.link)).toHaveLength(0);
     expect(p.dispatcher.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
@@ -208,8 +218,8 @@ describe('a job slot across a server restart', () => {
     expect(p.dispatcher.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
 
     // Once it does run and finish, the slot goes.
-    p.link.emit(state(chatId, 'running'));
-    p.link.emit(state(chatId, 'idle'));
+    emitHost(p.link, state(chatId, 'running'));
+    emitHost(p.link, state(chatId, 'idle'));
     expect(spawnRequests(p.link)).toHaveLength(1);
     p.dispatcher.close();
   });
@@ -220,9 +230,9 @@ describe('a job slot across a server restart', () => {
     const p = boot();
     p.link.setStatus('offline');
     p.link.setStatus('online');
-    p.link.emit(spawned(chatId));
-    p.link.emit(state(chatId, 'idle', { preview: 'go', lastUpdated: Date.now() + 1_000 }));
-    p.link.emit(foldersList());
+    emitHost(p.link, spawned(chatId));
+    emitHost(p.link, state(chatId, 'idle', { preview: 'go', lastUpdated: Date.now() + 1_000 }));
+    emitHost(p.link, foldersList());
     await Promise.resolve();
     expect(spawnRequests(p.link)).toHaveLength(0);
     expect(p.dispatcher.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
@@ -235,9 +245,9 @@ describe('a job slot across a server restart', () => {
     const p = boot();
     p.link.setStatus('offline');
     p.link.setStatus('online');
-    p.link.emit(spawned(chatId));
-    p.link.emit(state(chatId, 'idle', { lastUpdated: Date.now() + 60_000 }));
-    p.link.emit(foldersList());
+    emitHost(p.link, spawned(chatId));
+    emitHost(p.link, state(chatId, 'idle', { lastUpdated: Date.now() + 60_000 }));
+    emitHost(p.link, foldersList());
     await Promise.resolve();
     expect(spawnRequests(p.link)).toHaveLength(0);
     p.dispatcher.close();
@@ -249,7 +259,7 @@ describe('a job slot across a server restart', () => {
     p.link.setStatus('offline');
     p.link.setStatus('online');
     expect(spawnRequests(p.link)).toHaveLength(0);
-    p.link.emit(state(chatId, 'errored'));
+    emitHost(p.link, state(chatId, 'errored'));
     expect(spawnRequests(p.link)).toHaveLength(1);
     p.dispatcher.close();
   });

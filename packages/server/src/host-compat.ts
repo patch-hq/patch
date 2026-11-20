@@ -17,7 +17,10 @@
  * that makes a wire frame's new shape mandatory rather than additive — that is
  * the moment older hosts stop being able to hold up their end.
  */
-export const MIN_SUPPORTED_HOST_VERSION = '0.1.375';
+// 1.1.1703 is the first host that reports turn boundaries (`chat.turn_started`,
+// `chat.turn_ended`), the facts the server derives a chat's status from now that
+// a host no longer sends an activity of its own (spec/12 § Chat status).
+export const MIN_SUPPORTED_HOST_VERSION = '1.1.1703';
 
 export type HostSupport =
   | { supported: true }

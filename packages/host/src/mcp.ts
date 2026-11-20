@@ -1286,7 +1286,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_list_chats',
     {
       description:
-        "List all chats the user has, ACROSS every host on the account, identically whichever host a chat lives on. Each entry has chatId, hostId, name, folder, status, activity, pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
+        "List all chats the user has, ACROSS every host on the account, identically whichever host a chat lives on. Each entry has chatId, hostId, name, folder, status (lifecycle), chatStatus (what the chat is doing: idle, running, waiting_for_user, failed, …), pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
       inputSchema: { archived: z.enum(['only', 'include']).optional() },
     },
     async ({ archived }) => {

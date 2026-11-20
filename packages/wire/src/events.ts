@@ -1547,7 +1547,21 @@ export const ChatStateEvent = z
      * `chat.state` is the first thing it hears about a chat.
      */
     ...hostIdOptionalField,
-    activity: ChatActivity,
+    /**
+     * Legacy: the server's status said the old way, for surfaces that predate
+     * `chatStatus` (spec/12 § Chat status). The server fills it from its own
+     * status on every `chat.state` it sends; a host does not send it, and a
+     * surface reads `chatStatus`, never this. Optional so a host frame without
+     * it decodes; an older server still needs it from the host.
+     */
+    activity: ChatActivity.optional(),
+    /**
+     * How many turns the host holds queued for this chat, to run once the
+     * current one ends. A fact: the server counts them as owed work, so a
+     * chat draining its queue reads running throughout (spec/12 § Chat
+     * status). Optional: absent is an older host, read as none.
+     */
+    queuedTurns: z.number().int().nonnegative().optional(),
     lastUpdated: z.number().int(),
     /**
      * ms epoch of the user's own last activity on this chat (spec/14 §
@@ -1865,9 +1879,9 @@ export const ChatStateEvent = z
      */
     pinnedAt: z.number().int().nullable().optional(),
     /**
-     * Most recent error (group 10 polish m6). Set when activity flips to
-     * 'errored'; surfaces show this in the chat row. Cleared (null) when
-     * the chat returns to 'idle' or 'running'.
+     * Legacy: the failure behind a failed status, for surfaces that predate
+     * `chatStatus`. Set by the server from the turn's own ended fact; a host's
+     * value is not passed on. Surfaces read `chatStatus.reason`/`message`.
      */
     /**
      * The chat's status, derived by the server alone and added to every

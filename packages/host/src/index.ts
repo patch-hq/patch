@@ -4104,30 +4104,23 @@ async function startHost(
   const managerVoice = createManagerVoiceTools({
     logger: logger.child({ component: 'manager-voice' }),
     // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
-    // would read as "there is no such chat". Live state from this host where it has it.
+    // would read as "there is no such chat". The status is the server's, for every
+    // chat alike (spec/12 § Chat status); this host's own view never overrides it.
     listChats: async (): Promise<ManagerChatEntry[]> => {
-      const local = new Map(daemon.listWithFilter().map((c) => [c.chatId, c]));
       const account = await requestAccountChats(MANAGER_CHAT_ID);
       return account.map((e) => {
-        const here = local.get(e.chatId);
-        if (here) {
-          return {
-            chatId: here.chatId,
-            name: here.name,
-            folder: here.folder,
-            status: here.status,
-            activity: here.activity,
-            lastUpdated: here.lastUpdated,
-          };
-        }
-        const activity = str(e['activity']);
+        const chatStatus = e['chatStatus'];
+        const state =
+          chatStatus !== null && typeof chatStatus === 'object'
+            ? str((chatStatus as Record<string, unknown>)['state'])
+            : undefined;
         const lastUpdated = e['lastUpdated'];
         return {
           chatId: e.chatId,
           name: str(e['name']) ?? null,
           folder: str(e['folder']) ?? '',
           status: str(e['status']) ?? 'active',
-          ...(activity !== undefined ? { activity } : {}),
+          ...(state !== undefined ? { chatStatus: state } : {}),
           ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
         };
       });

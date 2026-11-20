@@ -1,74 +1,208 @@
 // A chat's status, decided by the server alone (spec/12 § Chat status).
 //
-// Hosts report facts on `chat.state` (what the chat is doing, how its last turn
-// ended, a limit it met); the server sees each host come and go, and holds the
-// messages it keeps for an offline host. From those it derives one status per
-// chat and sends it on every `chat.state` as `chatStatus`. Surfaces display it
-// and never work it out.
+// Hosts report facts: a turn started, a turn ended with its outcome, a question
+// raised or resolved, and on `chat.state` the facts only a host knows (a turn
+// cut off by its machine going down, a limit a turn met, a retry it has
+// scheduled, a question the agent declared). The server sees each host come and
+// go, and holds the messages it keeps for an offline host. This module keeps
+// those facts per chat and derives one status from them; a host never sends a
+// status or an activity of its own.
 
-import type { ChatStateEvent, ChatStatusInfo, ChatStatusState } from '@patch/wire';
+import type {
+  ChatActivity,
+  ChatStateEvent,
+  ChatStatusInfo,
+  ChatStatusState,
+  TurnOutcome,
+} from '@patch/wire';
 
-type Target = Omit<ChatStatusInfo, 'since'> & { state: ChatStatusState };
+export type StatusTarget = Omit<ChatStatusInfo, 'since'> & { state: ChatStatusState };
+
+/** The question tool: a question stays open after its turn, an approval does not. */
+const QUESTION_TOOL = 'AskUserQuestion';
 
 const SIGNED_OUT_CODES = new Set(['claude_oauth_missing', 'chatgpt_login_required']);
 const SESSION_GONE_CODES = new Set(['claude_session_missing', 'claude_session_invalid']);
 
-/** What a host's `chat.state` says the chat's status is. */
-export function statusFromHostState(event: ChatStateEvent): Target {
-  if (event.limitBlock) {
+/** What the server knows about one chat, from which its status is derived. */
+export interface ChatStatusFacts {
+  /** Turns started and not yet ended, by `turnId` (a side branch runs its own). */
+  openTurns: string[];
+  /** Requests raised and not yet resolved; `question` marks the question tool. */
+  openRequests: { id: string; question: boolean }[];
+  /** How the latest turn ended. Cleared when the next one starts. */
+  lastEnd: { outcome: TurnOutcome; error?: { code: string; message: string } } | null;
+  /** The host says the last turn was cut off and its process is gone. */
+  interrupted: boolean;
+  /** The host says a turn met a limit and is parked until it lifts. */
+  limit: { reason: string; resetsAt?: number; accountId?: string } | null;
+  /** The host has scheduled another attempt at a turn that met a transient error. */
+  retrying: boolean;
+  /** Turns the host holds queued to run once the current one ends. */
+  hostQueued: number;
+  /** The agent declared it is blocked on the user (`patch_ask_human`). */
+  declaredQuestion: boolean;
+  /** The server holds a message for this chat's offline host. */
+  held: boolean;
+  /** A held message expired undelivered: the words of the failure. */
+  heldExpired: string | null;
+  /**
+   * The chat was working when its host went: announced (`restarting`) or not
+   * (`offline`). Cleared when the host speaks for the chat again.
+   */
+  away: 'restarting' | 'offline' | null;
+}
+
+export function emptyFacts(): ChatStatusFacts {
+  return {
+    openTurns: [],
+    openRequests: [],
+    lastEnd: null,
+    interrupted: false,
+    limit: null,
+    retrying: false,
+    hostQueued: 0,
+    declaredQuestion: false,
+    held: false,
+    heldExpired: null,
+    away: null,
+  };
+}
+
+/** True when the chat has a turn in flight or a question waiting on the user. */
+export function isMidTurn(facts: ChatStatusFacts): boolean {
+  return facts.openTurns.length > 0 || facts.openRequests.some((r) => r.question);
+}
+
+/**
+ * The one status the facts give. `owed` is work the server itself holds for
+ * the chat (a queued message it is about to release), which keeps a chat
+ * running between turns rather than flickering idle.
+ */
+export function deriveStatus(facts: ChatStatusFacts, owed = false): StatusTarget {
+  if (facts.away !== null) {
+    return { state: facts.away === 'restarting' ? 'host_restarting' : 'host_offline' };
+  }
+  const turnOpen = facts.openTurns.length > 0;
+  // An approval is open only while its turn is; a question until it is answered.
+  const asking = facts.openRequests.some((r) => r.question || turnOpen);
+  if (asking) return { state: 'waiting_for_user' };
+  if (turnOpen) return { state: 'running' };
+  if (facts.heldExpired !== null) {
+    return { state: 'failed', reason: 'held_message_expired', message: facts.heldExpired };
+  }
+  if (facts.held) return { state: 'queued_offline' };
+  if (owed || facts.retrying || facts.hostQueued > 0) return { state: 'running' };
+  if (facts.limit) {
     return {
       state: 'paused',
+      reason: facts.limit.reason,
+      ...(facts.limit.resetsAt !== undefined ? { resetsAt: facts.limit.resetsAt } : {}),
+      ...(facts.limit.accountId !== undefined ? { accountId: facts.limit.accountId } : {}),
+    };
+  }
+  if (facts.interrupted || facts.lastEnd?.outcome === 'interrupted')
+    return { state: 'interrupted' };
+  if (facts.declaredQuestion) return { state: 'waiting_for_user' };
+  if (facts.lastEnd?.outcome === 'failed') {
+    const err = facts.lastEnd.error;
+    if (err && SIGNED_OUT_CODES.has(err.code)) {
+      return { state: 'waiting_for_sign_in', reason: err.code, message: err.message };
+    }
+    if (err && SESSION_GONE_CODES.has(err.code)) {
+      return { state: 'failed', reason: 'session_gone', message: err.message };
+    }
+    return {
+      state: 'failed',
+      reason: err?.code ?? 'unknown',
+      ...(err ? { message: err.message } : {}),
+    };
+  }
+  return { state: 'idle' };
+}
+
+/**
+ * The facts a host's `chat.state` carries. Each frame states them whole, so
+ * an absent field is the host saying the fact no longer holds.
+ */
+export function factsFromHostState(prev: ChatStatusFacts, event: ChatStateEvent): ChatStatusFacts {
+  let limit: ChatStatusFacts['limit'] = null;
+  if (event.limitBlock) {
+    limit = {
       reason: event.limitBlock.scope,
       ...(event.limitBlock.resetsAt !== undefined ? { resetsAt: event.limitBlock.resetsAt } : {}),
       ...(event.limitBlock.accountId !== undefined
         ? { accountId: event.limitBlock.accountId }
         : {}),
     };
+  } else if (typeof event.rateLimitResumingAt === 'number') {
+    limit = { reason: event.resumeKind ?? 'rate_limit', resetsAt: event.rateLimitResumingAt };
   }
-  switch (event.activity) {
-    case 'running':
-      return { state: 'running' };
-    case 'awaiting-permission':
-      return { state: 'waiting_for_user' };
-    case 'errored': {
-      const err = event.lastError ?? null;
-      if (err && SIGNED_OUT_CODES.has(err.code))
-        return { state: 'waiting_for_sign_in', reason: err.code };
-      // The server's own stand-in while the host's link is down.
-      if (err?.code === 'daemon_unavailable') return { state: 'host_offline' };
-      if (err && SESSION_GONE_CODES.has(err.code)) {
-        return { state: 'failed', reason: 'session_gone', message: err.message };
-      }
-      return {
-        state: 'failed',
-        reason: err?.code ?? 'unknown',
-        ...(err ? { message: err.message } : {}),
-      };
-    }
-    case 'idle':
-    default:
-      // The host is back and the turn's process died with its machine
-      // (spec/12 § Continue).
-      if (event.interrupted === true) return { state: 'interrupted' };
-      // A turn parked until a stated limit lifts.
-      if (typeof event.rateLimitResumingAt === 'number') {
-        return {
-          state: 'paused',
-          reason: event.resumeKind ?? 'rate_limit',
-          resetsAt: event.rateLimitResumingAt,
-        };
-      }
-      // A question the agent itself declared (`patch_ask_human`) blocks on the
-      // user just as a permission request does.
-      if (event.statusKind === 'question' && event.statusDeclared === true) {
-        return { state: 'waiting_for_user' };
-      }
-      return { state: 'idle' };
-  }
+  return {
+    ...prev,
+    interrupted: event.interrupted === true,
+    limit,
+    retrying: event.turnRetrying === true,
+    hostQueued: event.queuedTurns ?? 0,
+    declaredQuestion: event.statusKind === 'question' && event.statusDeclared === true,
+    // The host is speaking for the chat again: it has reattached.
+    away: null,
+  };
+}
+
+/** A turn began: what the last one left behind no longer applies. */
+export function factsOnTurnStarted(prev: ChatStatusFacts, turnId: string): ChatStatusFacts {
+  return {
+    ...prev,
+    openTurns: prev.openTurns.includes(turnId) ? prev.openTurns : [...prev.openTurns, turnId],
+    lastEnd: null,
+    interrupted: false,
+    limit: null,
+    retrying: false,
+    held: false,
+    heldExpired: null,
+    away: null,
+  };
+}
+
+export function factsOnTurnEnded(
+  prev: ChatStatusFacts,
+  turnId: string,
+  outcome: TurnOutcome,
+  error: { code: string; message: string } | undefined,
+): ChatStatusFacts {
+  const openTurns = prev.openTurns.filter((t) => t !== turnId);
+  return {
+    ...prev,
+    openTurns,
+    // An approval cannot outlive the last open turn; a question can.
+    openRequests:
+      openTurns.length > 0 ? prev.openRequests : prev.openRequests.filter((r) => r.question),
+    lastEnd: { outcome, ...(error ? { error } : {}) },
+    away: null,
+  };
+}
+
+export function factsOnRequestRaised(
+  prev: ChatStatusFacts,
+  requestId: string,
+  tool: string,
+): ChatStatusFacts {
+  if (prev.openRequests.some((r) => r.id === requestId)) return { ...prev, away: null };
+  return {
+    ...prev,
+    openRequests: [...prev.openRequests, { id: requestId, question: tool === QUESTION_TOOL }],
+    away: null,
+  };
+}
+
+export function factsOnRequestResolved(prev: ChatStatusFacts, requestId: string): ChatStatusFacts {
+  return { ...prev, openRequests: prev.openRequests.filter((r) => r.id !== requestId) };
 }
 
 /** The changes spec/12 § Allowed transitions names. A status may always stay what it is. */
 const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
+  // A question the agent declares as its turn ends can land after the end itself.
   idle: ['running', 'queued_offline', 'waiting_for_user'],
   running: [
     'waiting_for_user',
@@ -76,11 +210,12 @@ const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
     'paused',
     'waiting_for_sign_in',
     'failed',
+    'interrupted',
     'host_restarting',
     'host_offline',
   ],
   waiting_for_user: ['running', 'idle', 'host_restarting', 'host_offline'],
-  queued_offline: ['running', 'idle'],
+  queued_offline: ['running'],
   host_restarting: [
     'host_offline',
     'running',
@@ -100,10 +235,10 @@ const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
     'waiting_for_sign_in',
     'failed',
   ],
-  interrupted: ['running', 'queued_offline', 'idle'],
+  interrupted: ['running', 'queued_offline'],
   paused: ['running', 'idle'],
   waiting_for_sign_in: ['running', 'idle'],
-  failed: ['running', 'queued_offline', 'idle'],
+  failed: ['running', 'queued_offline'],
 };
 
 export function isAllowedTransition(from: string, to: ChatStatusState): boolean {
@@ -116,9 +251,30 @@ export function isAllowedTransition(from: string, to: ChatStatusState): boolean 
  */
 export function nextStatus(
   prev: ChatStatusInfo | null,
-  target: Target,
+  target: StatusTarget,
   now: number,
 ): ChatStatusInfo {
   const since = prev && prev.state === target.state ? prev.since : now;
   return { ...target, since };
+}
+
+/**
+ * The server's status said the old way, for surfaces and server readers that
+ * predate `chatStatus`. Worked out from the same facts as the status, never
+ * taken from anything a host concluded. It keeps the old meaning: `running` and
+ * `awaiting-permission` only while a turn is in flight, so a chat parked on a question after its
+ * turn ended still takes a message as an idle one did. Work the server's queue owes reads as
+ * `running`; the queue itself asks without it, to know when to release.
+ */
+export function legacyActivity(facts: ChatStatusFacts, owed = false): ChatActivity {
+  if (facts.away === 'offline') return 'errored';
+  const turnOpen = facts.openTurns.length > 0;
+  if (turnOpen) return facts.openRequests.length > 0 ? 'awaiting-permission' : 'running';
+  if (facts.held || facts.heldExpired !== null)
+    return facts.heldExpired !== null ? 'errored' : 'idle';
+  if (owed || facts.hostQueued > 0) return 'running';
+  if (facts.retrying) return 'errored';
+  if (facts.limit || facts.interrupted || facts.lastEnd?.outcome === 'interrupted') return 'idle';
+  if (facts.lastEnd?.outcome === 'failed') return 'errored';
+  return 'idle';
 }

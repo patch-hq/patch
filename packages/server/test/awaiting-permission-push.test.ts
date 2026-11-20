@@ -107,6 +107,8 @@ function blockTurn(
   request: { tool: string; args?: unknown; description?: string },
   over: Record<string, unknown> = {},
 ): void {
+  // The host reports facts: the turn started, then the request it raised.
+  link.emit({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 0 });
   link.emit(state(chatId, { activity: 'running', ...over }));
   link.emit({
     type: 'chat.permission_request',
@@ -257,8 +259,23 @@ describe('blocked-on-the-user push, end to end (spec/09 § Waiting on you)', () 
       await settle();
       push.sent.length = 0;
 
-      link.emit(state('c1', { activity: 'running', name: 'bed planner', turnOrigin: 'machine' }));
-      link.emit(state('c1', { activity: 'idle', name: 'bed planner', turnOrigin: 'machine' }));
+      // The approval is answered and the turn runs on to its end.
+      link.emit({
+        type: 'chat.permission_response',
+        chatId: 'c1',
+        requestId: 'req-c1',
+        approve: true,
+      });
+      link.emit(state('c1', { name: 'bed planner', turnOrigin: 'machine' }));
+      link.emit({
+        type: 'chat.turn_ended',
+        chatId: 'c1',
+        turnId: 't-c1',
+        seq: -1,
+        at: 0,
+        outcome: 'completed',
+      });
+      link.emit(state('c1', { name: 'bed planner', turnOrigin: 'machine' }));
       await settle();
 
       expect(push.sent).toEqual([]);

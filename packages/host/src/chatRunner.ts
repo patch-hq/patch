@@ -9521,6 +9521,7 @@ export class Daemon {
     } catch (err) {
       this.opts.logger.error({ chatId, branchId, err }, 'side branch: could not close its turn');
     }
+    this.emitState(chatId);
     try {
       this.mirrorSeqToMeta(chatId);
     } catch (err) {
@@ -15238,6 +15239,10 @@ export class Daemon {
     this.runningForks.delete(chatId);
     const usage = this.turnUsage.get(chatId);
     this.turnUsage.delete(chatId);
+    // The server decides the chat's status from the turn's end (spec/12 § Chat
+    // status). Say first what this host still holds queued for the chat, so a
+    // drain reads as one piece of work rather than idle between its turns.
+    this.emitState(chatId);
     try {
       this.chatLog.append(
         chatId,
@@ -15257,6 +15262,10 @@ export class Daemon {
     }
     this.chatLog.endTurn(chatId);
     this.turnBranches.delete(chatId);
+    // And the chat's state once more, after the end: the last frame of a turn
+    // (its closing words, whether it was stopped) is read against the status
+    // the end gave it, never against a turn the server still holds open.
+    this.emitState(chatId);
     this.opts.onTurnEnd?.(chatId, this.runningOnAccount.get(chatId));
     try {
       this.mirrorSeqToMeta(chatId);
@@ -16236,10 +16245,12 @@ export class Daemon {
       // What was said last (not the first prompt, which is `preview`), so a
       // surface not subscribed to the chat can show it and mark it unread.
       lastMessagePreview: this.lastMessagePreview(chatId),
-      // spec/04 § Branching — "Status in the sidebar reflects the chat as a
-      // whole": the active branch's own activity, raised by any OTHER branch
-      // currently running or awaiting permission (`aggregateActivity`).
-      activity: this.aggregateActivity(chatId),
+      // No activity and no error verdict: the server alone decides the chat's
+      // status, from the turn and question facts this host reports (spec/12 §
+      // Chat status).
+      // A fact the server counts as owed work: turns this host holds queued
+      // to run once the current one ends.
+      queuedTurns: this.turnQueues.get(chatId)?.length ?? 0,
       // spec/12 § Continue — a fact for the server: the last turn's process died
       // with the machine and nothing has continued it yet.
       ...(this.interruptedChats.has(chatId) ? { interrupted: true } : {}),
@@ -16300,7 +16311,6 @@ export class Daemon {
       // mirroring it onto chat_state, where it could drift.
       pendingWake: toPendingWake(this.wake.peek(chatId)),
       folder: s.folder,
-      lastError: s.lastError,
       rateLimitResumingAt,
       ...(resumeKind !== undefined ? { resumeKind } : {}),
       waitingForWakeSince: this.waitingForWakeSince.get(chatId) ?? null,

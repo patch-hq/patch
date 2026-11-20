@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { ChatInputEvent, WireEvent } from '@patch/wire';
 import type { ChatRegistry } from './chat-registry.js';
+import { legacyActivity } from './chat-status.js';
 
 /** A release the host never started on is not waited on for ever. */
 export const RELEASE_GUARD_MS = 10_000;
@@ -37,7 +38,7 @@ interface Persisted {
 }
 
 export interface ServerQueueDeps {
-  chats: Pick<ChatRegistry, 'get'>;
+  chats: Pick<ChatRegistry, 'get' | 'factsOf'>;
   /** Send a frame to one host (buffered by the link while it is offline). */
   sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
   isOnline: (hostId: string) => boolean;
@@ -45,6 +46,8 @@ export interface ServerQueueDeps {
   hostSupports: (hostId: string) => boolean;
   /** Put a frame through the same pipeline a host's own frame takes, so surfaces and observers see it. */
   inject: (event: WireEvent) => void;
+  /** The work this queue owes a chat changed outside a host frame (a message cancelled). */
+  onOwedChange?: (chatId: string) => void;
   dataDir?: string;
   logger: Pick<Logger, 'info' | 'warn'>;
   now?: () => number;
@@ -85,6 +88,17 @@ export class ServerQueue {
   }
 
   /**
+   * Work this queue owes the chat: a message waiting, or one just handed to its
+   * host that has not started yet. The server reads it as the chat still
+   * running between turns (spec/12 § Chat status).
+   */
+  owes(chatId: string): boolean {
+    if (this.hasWaiting(chatId)) return true;
+    const since = this.releasing.get(chatId);
+    return since !== undefined && this.now() - since <= RELEASE_GUARD_MS;
+  }
+
+  /**
    * A surface sent a message. Returns true when the server took it into the
    * queue (and acknowledged it); false when it should go to the host as usual.
    */
@@ -98,7 +112,12 @@ export class ServerQueue {
       this.ack(surfaceId, event);
       return true;
     }
-    if (!this.busy(event.chatId, chat.activity) && !this.hasWaiting(event.chatId)) return false;
+    if (
+      !this.busy(event.chatId, this.activityOf(event.chatId, chat.activity)) &&
+      !this.hasWaiting(event.chatId)
+    ) {
+      return false;
+    }
     const queueSeq = (this.seqs.get(event.chatId) ?? 0) + 1;
     this.seqs.set(event.chatId, queueSeq);
     const item: QueueItem = { localId: event.localId, event, queueSeq, surfaceId };
@@ -135,9 +154,12 @@ export class ServerQueue {
    * Look at a frame from a host before anything else does. Returns the frame
    * to pass on: the same one, or `null` to drop it.
    *
-   * A chat that goes idle while it still has messages waiting is not finished,
-   * so the idle report becomes `running` (surfaces, the completion push and the
-   * sweep all read idle as "done") and the next message is released.
+   * Runs after the chat registry's gate, so a `chat.state`'s `activity` is the
+   * server's own reading of the chat, never a host's. A chat that goes idle
+   * while it still has messages waiting is not finished, so the idle report
+   * becomes `running` (the completion push and the sweep read idle as "done"),
+   * and the next message is released. Its status already says running: the
+   * registry counts what this queue owes (`owes`).
    */
   gate(event: WireEvent, fromHostId: string | null): WireEvent | null {
     if (event.type === 'host.offline') {
@@ -158,18 +180,19 @@ export class ServerQueue {
     }
     if (event.type !== 'chat.state') return event;
     const chatId = event.chatId;
-    if (event.activity === 'idle' || (event.status !== undefined && event.status !== 'active')) {
+    const activity = this.activityOf(chatId, event.activity);
+    if (activity === 'idle' || (event.status !== undefined && event.status !== 'active')) {
       this.openQuestions.delete(chatId);
     }
     if (event.status !== undefined && event.status !== 'active') {
       this.clear(chatId);
       return event;
     }
-    if (event.activity === 'running') {
-      this.releasing.delete(chatId);
+    if (activity === 'running' || activity === 'awaiting-permission') {
+      if (activity === 'running') this.releasing.delete(chatId);
       return event;
     }
-    if (event.activity !== 'idle' || !this.hasWaiting(chatId)) return event;
+    if (activity !== 'idle' || !this.hasWaiting(chatId)) return event;
     // A host that cannot be reached cannot be handed the message, and nothing
     // would ever turn a `running` report back into idle: report the truth and
     // let `hostOnline` send the message when the host returns.
@@ -211,7 +234,9 @@ export class ServerQueue {
   hostOnline(hostId: string): void {
     for (const chatId of [...this.queues.keys()]) {
       const chat = this.deps.chats.get(chatId);
-      if (chat?.hostId !== hostId || this.busy(chatId, chat.activity)) continue;
+      if (chat?.hostId !== hostId || this.busy(chatId, this.activityOf(chatId, chat.activity))) {
+        continue;
+      }
       this.release(chatId, hostId);
     }
   }
@@ -234,6 +259,7 @@ export class ServerQueue {
     if (items.length === 0) this.queues.delete(chatId);
     this.save();
     this.deps.inject({ type: 'chat.dequeued', chatId, localId, reason: 'cancelled' });
+    if (items.length === 0) this.deps.onOwedChange?.(chatId);
     return true;
   }
 
@@ -262,6 +288,15 @@ export class ServerQueue {
     if (host !== undefined)
       this.deps.sendTo(host, surfaceId, { type: 'chat.stop_request', chatId });
     return true;
+  }
+
+  /**
+   * What the chat is doing apart from this queue. The registry's own reading
+   * counts what the queue owes as running, which must not hold back a release.
+   */
+  private activityOf(chatId: string, fallback: string | undefined): string | undefined {
+    const facts = this.deps.chats.factsOf(chatId);
+    return facts ? legacyActivity(facts) : fallback;
   }
 
   private busy(chatId: string, activity: string | undefined): boolean {
@@ -306,6 +341,7 @@ export class ServerQueue {
         reason: 'cancelled',
       });
     }
+    this.deps.onOwedChange?.(chatId);
   }
 
   private ack(surfaceId: string, event: ChatInputEvent): void {

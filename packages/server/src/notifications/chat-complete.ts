@@ -92,7 +92,8 @@ export class ChatCompletionNotifier {
 
   /** Observe the chat stream and notify on each completed or failed turn. */
   observe(event: WireEvent): void {
-    if (event.type !== 'chat.state') return;
+    // `activity` is the server's own reading, put on by the registry's gate.
+    if (event.type !== 'chat.state' || event.activity === undefined) return;
     const chatId = event.chatId;
     const previous = this.lastActivity.get(chatId);
     this.lastActivity.set(chatId, event.activity);

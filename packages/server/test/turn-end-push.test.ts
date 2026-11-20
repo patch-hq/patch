@@ -20,6 +20,7 @@ import { Registry } from '../src/registry.js';
 import type { PushBackend } from '../src/notifications/router.js';
 import { InProcessHostLink } from '../src/host-link.js';
 import { build } from '../src/app.js';
+import { createHostFacts } from './support/turn-facts.js';
 
 const ACCOUNT = generateUserKeypair(() => new Uint8Array(32).fill(7));
 
@@ -97,8 +98,14 @@ function state(chatId: string, over: Record<string, unknown>): WireEvent {
 
 /** Run a whole turn through the link, exactly as a host emits it. */
 function runTurn(link: InProcessHostLink, chatId: string, over: Record<string, unknown>): void {
-  link.emit(state(chatId, { activity: 'running', ...over }));
-  link.emit(state(chatId, { activity: 'idle', ...over }));
+  // The host reports facts (a turn started, a turn ended); the server decides.
+  const facts = createHostFacts();
+  for (const e of [
+    state(chatId, { activity: 'running', ...over }),
+    state(chatId, { activity: 'idle', ...over }),
+  ]) {
+    for (const f of facts(e)) link.emit(f);
+  }
 }
 
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));

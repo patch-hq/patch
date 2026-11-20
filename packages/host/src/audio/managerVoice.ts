@@ -137,7 +137,8 @@ export interface ManagerChatEntry {
   name: string | null;
   folder: string;
   status: string;
-  activity?: string;
+  /** The chat's status as the server decided it (spec/12 § Chat status). */
+  chatStatus?: string;
   lastUpdated?: number;
 }
 
@@ -172,6 +173,34 @@ export interface ManagerVoiceHostDeps {
 
 const LIST_LIMIT = 8;
 
+/** The server's status in words the voice can say. */
+function statusWords(state: string | undefined): string {
+  switch (state) {
+    case 'running':
+      return 'working';
+    case 'waiting_for_user':
+      return 'waiting for you';
+    case 'failed':
+      return 'stopped on an error';
+    case 'interrupted':
+      return 'interrupted';
+    case 'paused':
+      return 'paused on a limit';
+    case 'waiting_for_sign_in':
+      return 'waiting for sign-in';
+    case 'host_offline':
+      return 'its host is offline';
+    case 'host_restarting':
+      return 'its host is restarting';
+    case 'queued_offline':
+      return 'queued for its offline host';
+    case 'idle':
+      return 'idle';
+    default:
+      return 'status unknown';
+  }
+}
+
 function displayName(c: ManagerChatEntry): string {
   return c.name?.trim() || c.folder.split('/').filter(Boolean).pop() || c.chatId;
 }
@@ -203,15 +232,7 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
     );
 
   const line = (c: ManagerChatEntry): string => {
-    const parts = [
-      c.activity === 'running'
-        ? 'working'
-        : c.activity === 'awaiting-permission'
-          ? 'waiting for permission'
-          : c.activity === 'errored'
-            ? 'stopped on an error'
-            : 'idle',
-    ];
+    const parts = [statusWords(c.chatStatus)];
     if (c.lastUpdated !== undefined) parts.push(`last active ${ago(now() - c.lastUpdated)}`);
     return `"${displayName(c)}" (id ${c.chatId}) — ${parts.join(', ')}`;
   };

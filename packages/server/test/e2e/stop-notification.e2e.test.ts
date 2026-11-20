@@ -91,9 +91,31 @@ describe('e2e: a stopped chat is silent, the turn after it is not', () => {
     expect(raised.filter((n) => n.chatId === chatId)).toEqual([]);
 
     // ---- the user sends another turn and lets it finish. The chat is not silenced.
-    const idlesAfterStop = idles();
+    const from = states.length;
+    const since = (): typeof states => states.slice(from);
     client.sendInput({ chatId, message: 'and now finish', localId: 'L2' });
-    await until(() => idles() > idlesAfterStop, 8000, 'the second turn settled');
+    // The second turn runs, then settles: the server's status says so.
+    await until(
+      () => {
+        const later = since();
+        const ran = later.findIndex(
+          (e) =>
+            e.type === 'chat.state' && e.chatId === chatId && e.chatStatus?.state === 'running',
+        );
+        return (
+          ran >= 0 &&
+          later
+            .slice(ran)
+            .some(
+              (e) =>
+                e.type === 'chat.state' && e.chatId === chatId && e.chatStatus?.state === 'idle',
+            )
+        );
+      },
+      8000,
+      'the second turn settled',
+    );
+    await until(() => raised.some((n) => n.chatId === chatId), 3000, 'the finished turn announced');
 
     const finished = states.filter(
       (e) => e.type === 'chat.state' && e.chatId === chatId && e.activity === 'idle',

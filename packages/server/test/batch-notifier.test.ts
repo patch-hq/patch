@@ -11,6 +11,7 @@ import { ChatRegistry } from '../src/chat-registry.js';
 import { BatchStore } from '../src/batch/store.js';
 import { BatchNotifier } from '../src/notifications/batch.js';
 import type { NotificationRouter, RouteOptions } from '../src/notifications/router.js';
+import { createHostFacts } from './support/turn-facts.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -57,6 +58,7 @@ describe('BatchNotifier', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-batch-notifier-'));
     chats = new ChatRegistry({ logger });
+    hostFacts = createHostFacts();
     store = new BatchStore({ dataDir: dir, logger, nowMs: () => now });
     routed = [];
     pendingTimers = [];
@@ -87,9 +89,10 @@ describe('BatchNotifier', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /** What production does: the registry's gate, then every reader sees the frame. */
+  let hostFacts = createHostFacts();
   function feed(event: WireEvent): void {
-    chats.observe(event);
-    notifier.observe(event);
+    for (const f of hostFacts(event)) notifier.observe(chats.gate(f));
   }
 
   function seedRunning(chatId: string): void {
