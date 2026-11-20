@@ -180,6 +180,48 @@ describe('ACP accounts in the shared settings', () => {
     expect(svc.current().accountStrategy).toMatchObject({ acp: 'round-robin', claude: 'priority' });
   });
 
+  it('takes each ACP account’s state from what its agent said on a host (decision 24)', async () => {
+    const svc = make();
+    const a = await svc.addAcpAccount('gemini', KEY_A, 'A');
+    const b = await svc.addAcpAccount('gemini', KEY_B, 'B');
+    const state = (id: string) => svc.secretsSummary().acp?.find((x) => x.id === id)?.state;
+    expect(state(a.id)).toEqual({ state: 'ready' });
+    const report = (accounts: unknown[]): void =>
+      svc.handleHostEvent({
+        type: 'host.account',
+        hostId: 'h1',
+        backendId: 'acp',
+        connected: true,
+        accounts,
+      } as WireEvent);
+    report([
+      {
+        id: a.id,
+        label: 'A',
+        connected: true,
+        kind: 'apiKey',
+        refusal: { kind: 'limit', message: 'quota exceeded', at: 1_000 },
+      },
+      {
+        id: b.id,
+        label: 'B',
+        connected: true,
+        kind: 'apiKey',
+        needsSignIn: true,
+        error: 'bad key',
+      },
+    ]);
+    expect(state(a.id)).toEqual({ state: 'limited' });
+    expect(svc.accountState(a.id)).toEqual({ state: 'limited' });
+    expect(state(b.id)).toEqual({ state: 'signed_out' });
+    // A turn the agent completed on it later is credit: the limit lifts.
+    report([{ id: a.id, label: 'A', connected: true, kind: 'apiKey', usage: { at: 2_000 } }]);
+    expect(state(a.id)).toEqual({ state: 'ready' });
+    // A new key clears the sign-in refusal at once.
+    await svc.replaceAcpKey('gemini', b.id, 'AIzaFakeGeminiKeyForTestsCCCC3333');
+    expect(state(b.id)).toEqual({ state: 'ready' });
+  });
+
   it('keeps the accounts across a restart', async () => {
     const svc = make();
     await svc.addAcpAccount('gemini', KEY_A);

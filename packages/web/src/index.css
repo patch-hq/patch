@@ -13172,7 +13172,7 @@ main.empty-state p {
   color: var(--ink-3);
 }
 
-/* ==========================================================================
+/* ===================================================================}
    DESKTOP-REVIEW 2026-07-14 — appended overrides (A/B items).
    Kept in one labelled block to minimise merge conflicts with sibling work.
    ========================================================================== */
@@ -14609,6 +14609,11 @@ button.chat-usage-crumb {
 }
 button.chat-usage-crumb:hover {
   color: var(--ink-2);
+}
+.chat-usage-text {
+  margin-left: 6px;
+  font-size: var(--text-min);
+  white-space: nowrap;
 }
 .chat-usage-bar {
   display: inline-block;
@@ -18909,6 +18914,10 @@ a.drop-target,
 .welcome-footer > .welcome-back:first-child {
   margin-left: -10px;
 }
+/* Back on the left, the way forward on the right, on every step. */
+.welcome-footer > .welcome-primary {
+  margin-left: auto;
+}
 /* A footer whose only action is quiet lines its text up with the cards. */
 .welcome-footer > .welcome-skip:first-child {
   margin-left: -10px;
@@ -19444,4 +19453,11 @@ a.drop-target,
   align-self: flex-start;
   font-size: var(--text-min);
   color: var(--ink-3);
+}
+
+.set-nav-title {
+  margin: 4px 0 8px;
+  padding: 0 12px;
+  font-size: 18px;
+  font-weight: 600;
 }

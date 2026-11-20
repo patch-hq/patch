@@ -209,6 +209,9 @@ function SettingsNav({
       <div className="route-head-title">
         <NavHistoryControls />
       </div>
+      <h1 className="set-nav-title" data-testid="settings-title">
+        Settings
+      </h1>
       {pages.map((p) => {
         const isAdvanced = p.group === ADVANCED_GROUP;
         const heading =

@@ -813,12 +813,36 @@ async function startHost(
   // the server sends with every snapshot (spec/10 § Backend credentials), else
   // a shared provider key, else the agent's own sign-in on this host.
   let onAcpChange: () => void = () => undefined;
-  // Which ACP account a turn runs on: the shared order and strategy, skipping
-  // an account its agent refused as limited or signed out (spec/10 § Limits).
-  const acpAccounts = new AcpAccounts();
+  // Which ACP account a turn runs on: the shared order and strategy, a chat's
+  // lock, skipping an account its agent refused as limited or signed out
+  // (spec/10 § Limits). What the agent said about each account is reported to
+  // the server, which derives the account's state from it (decision 24), and
+  // kept across a restart like Claude's.
+  const acpAvailabilityPath = join(config.patchHome, 'acp-account-availability.json');
+  let sendAcpReport: () => void = () => undefined;
+  const acpAccounts = new AcpAccounts({
+    initial: readAccountExhaustion(acpAvailabilityPath),
+    onChange: (entries) => {
+      try {
+        writeAccountExhaustion(acpAvailabilityPath, entries);
+      } catch (err) {
+        logger.error(
+          { err: (err as Error).message },
+          'ACP account refusals could not be saved; they hold until the host restarts',
+        );
+      }
+      sendAcpReport();
+    },
+  });
   /** The shared `accountStrategy.acp`, kept here as each snapshot is applied. */
   let acpStrategy: AccountStrategy = 'priority';
-  const acpRoute = (): AcpRoute => ({ strategy: acpStrategy });
+  const acpRoute = (preferred?: string): AcpRoute => ({
+    strategy: acpStrategy,
+    ...(preferred !== undefined ? { preferred } : {}),
+    // A chat locked to one account runs elsewhere while it is refused only
+    // when the user chose to continue on another account (spec/10 § Limits).
+    resumeOnAnyAccount: limitBehaviour === 'other_account',
+  });
   const acpRegistry = new AcpRegistry({
     providerKey: (id) => providerKeys.get(id),
     accountKey: (agentId, accountId) =>
@@ -830,13 +854,16 @@ async function startHost(
     clientVersion: VERSION,
     onChange: () => onAcpChange(),
   });
-  const acpBackend = new AcpBackend(acpRegistry, VERSION, (accountId) => {
-    acpAccounts.markSignedOut(accountId);
-    logger.warn(
-      { accountId },
-      'ACP account refused as signed out — skipped until it has a new key',
-    );
-    onAcpChange();
+  const acpBackend = new AcpBackend(acpRegistry, VERSION, {
+    signedOut: (accountId, reason) => {
+      acpAccounts.markSignedOut(accountId, reason);
+      logger.warn(
+        { accountId },
+        'ACP account refused as signed out — skipped until it has a new key',
+      );
+      onAcpChange();
+    },
+    worked: (accountId) => acpAccounts.noteWorked(accountId),
   });
   const routedBackend: SdkBackend = {
     run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
@@ -1344,7 +1371,7 @@ async function startHost(
 
   /** The accounts this host holds for the backend `model` runs on, in the shared order. */
   const heldAccountsFor = (model: string | undefined): Array<{ id: string; label: string }> =>
-    adapterForModel(providerAdapters, model).heldAccounts();
+    adapterForModel(providerAdapters, model).heldAccounts(model);
 
   /**
    * This host's `host.host` self-description, rebuilt from live state each
@@ -2710,6 +2737,7 @@ async function startHost(
   // server on the link keeps the log (`serverReads`), then sent through the
   // outbox, the local file handed over once.
   const toolLogSink = new ToolLogSink(config.patchHome, (event) => link.send(event));
+  sendAcpReport = () => link.send(acpAccounts.report(selfHostId, ACP_BACKEND_ID));
   const link = createServerLink({
     url: config.serverWsUrl,
     daemonKey,
@@ -2773,6 +2801,7 @@ async function startHost(
       // so Settings can say which backend on which host needs a login.
       sender(buildAccountReport());
       sender(codexAccounts.report());
+      sender(acpAccounts.report(selfHostId, ACP_BACKEND_ID));
       for (const state of daemon.list()) announceChat(state);
       // spec/04 § Folders: publish the host-owned folder list so every
       // surface's new-chat / schedule-editor picker is populated from the same
@@ -4672,20 +4701,29 @@ async function startHost(
         // key or its own sign-in.
         const account =
           agent.apiKeyEnv !== undefined
-            ? acpAccounts.resolve(agent.id, acpRoute(), turn !== undefined)
+            ? acpAccounts.resolve(agent.id, acpRoute(turn?.preferredAccountId), turn !== undefined)
             : undefined;
         return { ok: true, accessToken: '', ...(account ? { accountId: account.id } : {}) };
       },
-      heldAccounts: () =>
-        acpRegistry
-          .agents()
-          .flatMap((a) => acpAccounts.forAgent(a.id).map((x) => ({ id: x.id, label: x.label }))),
+      // A chat on an agent runs on, and can be locked to, that agent's accounts only.
+      heldAccounts: (model) => {
+        const agentId = parseAcpModel(model)?.agentId;
+        return agentId !== undefined
+          ? acpAccounts.forAgent(agentId).map((x) => ({ id: x.id, label: x.label }))
+          : [];
+      },
       accountLabel: (accountId) => acpAccounts.get(accountId)?.label,
       accountSpent: (accountId) => ({ spent: acpAccounts.isSkipped(accountId) }),
       // The agent refused this account with a limit: the turn runs again on the
       // next of the agent's accounts that has not been refused, if any.
-      nextAccountAfterExhausted: (_chatId, id, message) =>
-        id !== undefined ? acpAccounts.markLimited(id, message, acpRoute()) : undefined,
+      nextAccountAfterExhausted: (chatId, id, message) =>
+        id !== undefined
+          ? acpAccounts.markLimited(
+              id,
+              message,
+              acpRoute(daemon.chatState.get(chatId)?.preferredAccountId),
+            )
+          : undefined,
       accountRouting: () => undefined,
     },
   };

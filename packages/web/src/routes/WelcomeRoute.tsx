@@ -154,6 +154,11 @@ function Footer({
           Back
         </button>
       ) : null}
+      {skip ? (
+        <button type="button" className="welcome-skip" data-testid="welcome-skip" onClick={onSkip}>
+          {skip}
+        </button>
+      ) : null}
       {primary ? (
         <button
           type="button"
@@ -163,11 +168,6 @@ function Footer({
           onClick={onNext}
         >
           {label}
-        </button>
-      ) : null}
-      {skip ? (
-        <button type="button" className="welcome-skip" data-testid="welcome-skip" onClick={onSkip}>
-          {skip}
         </button>
       ) : null}
     </div>
@@ -205,6 +205,21 @@ export function useConnectedCount(): number {
 }
 
 /**
+ * What a connected card says beside the provider's name: each account's email,
+ * or its own label, never the provider's name said a second time.
+ */
+export function connectedNames(
+  provider: string,
+  accounts: readonly { label: string; email?: string | undefined }[],
+): string {
+  return accounts
+    .map((a) =>
+      a.label === provider || a.label === 'ChatGPT' ? (a.email ?? 'Connected') : a.label,
+    )
+    .join(', ');
+}
+
+/**
  * One card per provider, each with its sign-in. The welcome step and the
  * Connect page (routes/ConnectRoute) draw the same cards.
  */
@@ -219,7 +234,7 @@ export function ProviderCards(): JSX.Element {
           <span className="welcome-provider-name">Claude</span>
           {claude.length > 0 ? (
             <span className="welcome-ok" data-testid="welcome-claude-connected">
-              {claude.map((a) => a.label).join(', ')}
+              {connectedNames('Claude', claude)}
             </span>
           ) : null}
         </div>
@@ -238,7 +253,7 @@ export function ProviderCards(): JSX.Element {
           <span className="welcome-provider-name">ChatGPT and OpenAI</span>
           {chatgpt.length > 0 ? (
             <span className="welcome-ok" data-testid="welcome-chatgpt-connected">
-              {chatgpt.map((a) => a.label).join(', ')}
+              {connectedNames('ChatGPT and OpenAI', chatgpt)}
             </span>
           ) : null}
         </div>
@@ -375,16 +390,16 @@ function PermissionStep({ onNext }: { onNext: () => void }): JSX.Element {
 
 /**
  * The chat models the setup's choice is written to: what new chats, jobs and
- * the Manager and Speakers start on. Each is moved only when it is the default
- * being chosen, or sits on a provider that isn't connected and so could not
- * run at all.
+ * the Manager and Speakers start on. All follow the choice made here.
  */
 const CHAT_MODEL_SETTINGS = ['jobDefaultModel', 'specialThreadModel'] as const;
 
 /** One line on what a model family is for; models outside these say nothing. */
 export function modelHint(id: string): string | undefined {
+  if (/fable/i.test(id)) return 'Our newest and most capable. Best for the hardest work.';
   if (/sonnet/i.test(id)) return 'Fast and capable. The right choice for most work.';
-  if (/opus/i.test(id)) return 'The most capable, but slower and the most expensive.';
+  if (/opus/i.test(id))
+    return 'Very capable for complex work, but slower and costlier than Sonnet.';
   if (/haiku/i.test(id)) return 'The quickest and cheapest, for simple tasks.';
   return undefined;
 }
@@ -432,9 +447,9 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
   const options = all.filter((m) => runnable(m.id));
   const { recommended, rest, def } = recommendedModels(options);
   const choose = (id: string): void => {
-    const others = Object.fromEntries(
-      CHAT_MODEL_SETTINGS.filter((k) => !runnable(preferences[k])).map((k) => [k, id]),
-    );
+    // The Manager and jobs start on the model chosen here, so what is shown
+    // chosen is what every new thing uses.
+    const others = Object.fromEntries(CHAT_MODEL_SETTINGS.map((k) => [k, id]));
     void patchShared('default model', { defaultModel: id, ...others });
   };
   // A default on a provider that isn't connected, or the untouched factory

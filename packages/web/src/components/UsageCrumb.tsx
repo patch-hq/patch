@@ -29,12 +29,15 @@ export function UsageCrumb({
         className={`chat-usage-crumb ${summary.level}`}
         data-testid="chat-usage"
         aria-label={summary.text}
-        title={summary.title}
+        title={`Account usage\n${summary.title}`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="chat-usage-bar" aria-hidden="true">
           <i style={{ width: `${Math.round(summary.fraction * 100)}%` }} />
+        </span>
+        <span className="chat-usage-text" data-testid="chat-usage-text">
+          {summary.text}
         </span>
       </button>
       {open ? (

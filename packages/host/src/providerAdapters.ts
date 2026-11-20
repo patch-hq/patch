@@ -26,7 +26,8 @@ export interface ProviderAdapter {
   /** The credential a turn on `model` runs under, or why there is none. */
   resolveCredential(model: string | undefined, turn?: TurnAccountHint): Promise<CredentialResult>;
   /** The accounts this host holds for the provider, in the shared order. */
-  heldAccounts(): Array<{ id: string; label: string }>;
+  /** The accounts a chat on `model` can run on, or be locked to. */
+  heldAccounts(model: string | undefined): Array<{ id: string; label: string }>;
   /** An account's label, if the host holds it. */
   accountLabel(accountId: string): string | undefined;
   /** Is a move off `fromAccountId` because it is out of credit, and until when. */

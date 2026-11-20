@@ -42,7 +42,7 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
     line: 'Pick a folder under New chat and send a message.',
     to: '/chats/new',
     action: 'New chat',
-    done: { title: 'Chat started', line: 'Your first chat is under way.' },
+    done: { title: 'First reply received', line: 'Your agent answered your first message.' },
   },
   {
     id: 'model',
@@ -53,6 +53,11 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
     id: 'snooze',
     title: 'Snooze and queue',
     line: 'Snooze a chat until it needs you; queue messages while the agent works.',
+  },
+  {
+    id: 'manager',
+    title: 'The Manager',
+    line: 'A pinned chat for questions about all your chats: what is running, and what needs you.',
   },
   {
     id: 'jobs',

@@ -103,6 +103,8 @@ describe('StrayProcessBar', () => {
   it('shows any other failure rather than an empty list', async () => {
     strayProcesses.mockRejectedValue(new ApiError(504, 'daemon_timeout', null));
     await mount();
-    expect(screen.getByTestId('stray-process-error').textContent).toContain('daemon_timeout');
+    expect(screen.getByTestId('stray-process-error').textContent).toContain(
+      'The host did not answer in time',
+    );
   });
 });

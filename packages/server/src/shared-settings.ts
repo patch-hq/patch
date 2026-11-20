@@ -512,8 +512,15 @@ export class SharedSettingsService {
   }
 
   /** An ACP account is an API key: it has no subscription windows to read. */
+  /**
+   * An ACP account's state, from what its agent said on each host (decision
+   * 24): a refused key or missing sign-in is signed out, a limit is limited.
+   * ACP carries no usage windows; the host reports a turn the agent completed
+   * on the account as a reading taken then, which is what shows credit again
+   * after a limit that stated no reset.
+   */
   private acpStateOf(a: SharedAcpAccount): AccountState {
-    return this.accountStates.stateFor(a.id, { hasCredential: true, apiKey: true });
+    return this.accountStates.stateFor(a.id, { hasCredential: true });
   }
 
   private stateKeys(): Map<string, string> {
@@ -528,7 +535,9 @@ export class SharedSettingsService {
   /** The state of one account, or undefined for an id the server does not hold. */
   accountState(accountId: string): AccountState | undefined {
     const account = [...this.secrets.claude, ...this.secrets.codex].find((a) => a.id === accountId);
-    return account ? this.stateOf(account) : undefined;
+    if (account) return this.stateOf(account);
+    const acp = (this.secrets.acp ?? []).find((a) => a.id === accountId);
+    return acp ? this.acpStateOf(acp) : undefined;
   }
 
   private readonly accountStateListeners = new Set<() => void>();

@@ -163,7 +163,20 @@ export function friendlyComputerName(
       : platform === 'linux'
         ? tryRun('hostnamectl', ['--pretty'])
         : '';
-  return named || host.replace(/\.local$/, '').split('.')[0] || host;
+  const chosen = named || host.replace(/\.local$/, '').split('.')[0] || host;
+  // A managed Mac is often named after its serial; its model says more.
+  if (platform === 'darwin' && looksLikeSerial(chosen)) {
+    const model = /Model Name:\s*(.+)/
+      .exec(tryRun('/usr/sbin/system_profiler', ['SPHardwareDataType']))?.[1]
+      ?.trim();
+    if (model) return model;
+  }
+  return chosen;
+}
+
+/** A machine serial (`WC-M-K0X7P0RV6C`) rather than a name someone chose. */
+export function looksLikeSerial(name: string): boolean {
+  return /^(?=.*\d)(?=.*[A-Z])[A-Z0-9][A-Z0-9-]{7,}$/.test(name);
 }
 
 /** Runs one command and says whether it succeeded; injectable so tests never touch launchd or systemd. */
