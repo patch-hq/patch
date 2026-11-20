@@ -70,7 +70,7 @@ test('a live chat’s header names the account its latest turn ran on', async ({
   await applyEvent(page, {
     type: 'chat.state',
     chatId: 'chat_bus',
-    activity: 'running',
+    chatStatus: { state: 'running', since: 0 },
     lastUpdated: Date.now(),
     permissionMode: 'auto',
     account: { id: 'a2', label: 'personal' },
@@ -95,7 +95,7 @@ test('a live chat with two accounts gets an account dropdown styled like the app
   await applyEvent(page, {
     type: 'chat.state',
     chatId: 'chat_bus',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     lastUpdated: Date.now(),
     permissionMode: 'auto',
     account: { id: 'a1', label: 'work' },
@@ -136,7 +136,7 @@ test('a live chat with two accounts gets an account dropdown styled like the app
   await applyEvent(page, {
     type: 'chat.state',
     chatId: 'chat_bus',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     lastUpdated: Date.now(),
     permissionMode: 'auto',
     preferredAccountId: 'a2',

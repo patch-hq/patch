@@ -97,7 +97,7 @@ export async function startRealStack(): Promise<RealStack> {
         type: 'chat.state',
         chatId,
         permissionMode: 'bypassPermissions',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: Date.now(),
         pinned: false,
         pinnedAt: null,

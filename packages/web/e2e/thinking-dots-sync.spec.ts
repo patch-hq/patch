@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 // can't either: caught anywhere in the old staggered cycle's flat stretch the
 // dots looked identical, so the proof has to be a run of samples taken ACROSS
 // the cycle, each of the three read on the same frame.
-const RUNNING_CHAT = '/app/dev-harness.html?chat=chat_bus'; // seeded activity: 'running'
+const RUNNING_CHAT = '/app/dev-harness.html?chat=chat_bus'; // seeded chatStatus: { state: 'running', since: 0 }
 
 // One full cycle is 1.2s; sample a little over one so no phase goes unseen.
 async function sampleDots(page: import('@playwright/test').Page) {

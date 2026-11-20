@@ -72,7 +72,7 @@ test.describe('unknown chat', () => {
           todos: [],
           hostId: 'd1',
           folder: '/home/tom/projects/old',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'auto',
           status: 'active',
           pinned: false,

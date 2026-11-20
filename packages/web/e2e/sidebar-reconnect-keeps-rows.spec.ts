@@ -28,7 +28,7 @@ test('a server restart and a host reload never drop a sidebar row', async ({ pag
       permissionMode: 'auto',
       name: chatId,
       folder: '/tmp/reconnect-e2e',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
