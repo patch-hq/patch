@@ -78,6 +78,28 @@ describe('script action', () => {
     disp.close();
   });
 
+  it('carries the trigger event to a host that takes it, and not to one that does not', () => {
+    const fire = (takes: boolean) => {
+      const link = new InProcessHostLink();
+      const disp = new JobDispatcher({
+        dataDir: dir,
+        logs: new JobLogs(dir),
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => `fire-${String(takes)}`,
+        hostTakesPayload: (hostId) => takes && hostId === 'd1',
+      });
+      disp.dispatch(scriptJob(), { payload: { action: 'opened' }, now: 'x' }, 'webhook');
+      const sent = link.sent.find((s) => s.event.type === 'job.exec_request');
+      disp.close();
+      return sent?.event.type === 'job.exec_request' ? sent.event : undefined;
+    };
+    expect(fire(true)?.payload).toEqual({ payload: { action: 'opened' }, now: 'x' });
+    // An older host's strict schema would refuse the whole request over the field.
+    expect(fire(false)).toBeDefined();
+    expect('payload' in (fire(false) ?? {})).toBe(false);
+  });
+
   it('a result event settles the run with the exit code and output, and no chatId', () => {
     const link = new InProcessHostLink();
     const disp = new JobDispatcher({

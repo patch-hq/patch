@@ -2523,6 +2523,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // After a restart the mirror is empty until each host re-announces its
     // chats, so an `ensure` miss before that is "unknown", not "missing".
     hostReported: (hostId) => chatRegistry.hasSynced(hostId),
+    // Script and gate fires carry their trigger event to hosts that take it.
+    hostTakesPayload: (hostId) => wsHub.takesScriptPayload(hostId),
     // The concurrency gate holds a slot until its chat stops working, and
     // reconciles slots that outlived a restart against this same mirror
     // (spec/08 ## Concurrency).

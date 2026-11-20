@@ -57,6 +57,8 @@ export interface HostDescriptionInput {
   runsManager: boolean;
   /** This host can take its queued messages from the server (spec/04). */
   serverQueue?: boolean | undefined;
+  /** This host hands a script fire its trigger event (`PATCH_PAYLOAD_FILE`). */
+  scriptPayload?: boolean | undefined;
   /**
    * Where the server can reach this host's own audio WSS DIRECTLY
    * (`host.host.audioRelayHost`) — an optional latency optimisation, not a
@@ -149,6 +151,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),
     runsManager: input.runsManager,
     ...(input.serverQueue !== undefined ? { serverQueue: input.serverQueue } : {}),
+    ...(input.scriptPayload !== undefined ? { scriptPayload: input.scriptPayload } : {}),
     ...(input.audioRelayHost !== undefined ? { audioRelayHost: input.audioRelayHost } : {}),
     backends: input.backends,
     components: input.components,

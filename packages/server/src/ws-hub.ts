@@ -481,6 +481,11 @@ export class WsHub {
     return this.lastHostReport.get(hostId)?.audioRelayHost;
   }
 
+  /** Has `hostId` declared it hands script fires their trigger event (spec/08)? */
+  takesScriptPayload(hostId: string): boolean {
+    return this.lastHostReport.get(hostId)?.scriptPayload === true;
+  }
+
   private hostRoster(): AuthOkHost[] {
     return this.registeredHostIds().map((hostId) => {
       const cachedRaw = this.lastHostReport.get(hostId);

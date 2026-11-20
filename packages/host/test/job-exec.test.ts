@@ -211,6 +211,33 @@ describe('script job runs', () => {
 
 // spec/02 § Host restarts: a script job is the host's work, and a host restart
 // must neither kill it nor lose its result.
+describe('the command gets the trigger event', () => {
+  it('a fire carrying a payload hands it to the command as a file, then removes it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const runDir = mkdtempSync(join(tmpdir(), 'patch-exec-runs-'));
+    const h = host(runDir);
+    const payload = { payload: { action: 'completed', n: 5 }, now: '2026-11-20T00:00:00Z' };
+    h.runs.start({
+      ...request('cat "$PATCH_PAYLOAD_FILE"; echo; echo "$PATCH_JOB_ID $PATCH_FIRE_ID"', dir),
+      payload,
+    });
+    const r = await h.next();
+    expect(r.ok).toBe(true);
+    const [json, ids] = r.stdout.trim().split('\n');
+    expect(JSON.parse(json!)).toEqual(payload);
+    expect(ids).toBe('j_1 f_1');
+    expect(readdirSync(runDir).filter((f) => f.endsWith('.payload.json'))).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a fire without one sets no PATCH_PAYLOAD_FILE', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));
+    const r = await run('echo "[${PATCH_PAYLOAD_FILE-unset}]"', dir);
+    expect(r.stdout.trim()).toBe('[unset]');
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('script job runs outlive a host restart', () => {
   it('a run the restarted host picks up mid-run completes and is reported', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'patch-exec-'));

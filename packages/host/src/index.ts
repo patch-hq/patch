@@ -1395,6 +1395,8 @@ async function startHost(
       runsManager,
       // This host can take its queued messages from the server (spec/04).
       serverQueue: true,
+      // Script and gate fires get their trigger event (spec/08).
+      scriptPayload: true,
       audioRelayHost: config.audio.relayHost,
       backends: [
         {

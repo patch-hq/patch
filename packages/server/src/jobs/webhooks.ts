@@ -274,7 +274,13 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookIngress
       // evaluate against a root model whose `payload` key holds the trigger
       // data (e.g. `payload.action = 'closed'`). Wrap the inbound body to
       // match the unified root used by all four trigger types.
-      const payload = filterContext(nowMs(), req.body as unknown);
+      const payload = {
+        ...filterContext(nowMs(), req.body as unknown),
+        // GitHub names the event in a header, not the body (a check_suite and
+        // a workflow_run share most of their shape), so it rides alongside:
+        // `github.event = 'check_suite'` in a filter, and in a script's payload.
+        ...(job.trigger.scheme === 'github' ? { github: githubEvent(req.headers) } : {}),
+      };
       let passed: boolean;
       try {
         passed = await evaluateFilter(job.filter, payload);
@@ -369,4 +375,14 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookIngress
       return reply.code(200).send({ status: result.status, fireId: result.id });
     },
   );
+}
+
+/** The event name and delivery id GitHub sends as headers. */
+function githubEvent(headers: Record<string, string | string[] | undefined>): {
+  event: string;
+  delivery: string;
+} {
+  const one = (v: string | string[] | undefined): string =>
+    Array.isArray(v) ? (v[0] ?? '') : (v ?? '');
+  return { event: one(headers['x-github-event']), delivery: one(headers['x-github-delivery']) };
 }
