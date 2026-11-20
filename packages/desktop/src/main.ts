@@ -81,6 +81,7 @@ import { parseSavedPlacement, resolvePlacement, type DisplayInfo } from './windo
 import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
+import { MOUNT_DEADLINE_MS, MOUNT_PROBE, blankWindowPage } from './blank-window';
 import { readHostLink, serverLostText, watchServerLink } from './server-watch';
 import {
   friendlyComputerName,
@@ -297,6 +298,7 @@ export interface DesktopEvent {
     | 'auto-update:downloaded'
     | 'window:hidden'
     | 'window:load-retry'
+    | 'window:blank'
     | 'window:load-failed'
     | 'window:render-process-gone'
     | 'meeting:detection-off'
@@ -1018,6 +1020,21 @@ function attachLoadRetry(win: BrowserWindow, url: string): void {
   let attempt = 0;
   win.webContents.on('did-finish-load', () => {
     attempt = 0;
+    if (win.webContents.getURL().startsWith('data:')) return;
+    // A document that loaded but never mounted the app is a white window
+    // nothing else reports. Say so instead of leaving it blank.
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      void win.webContents
+        .executeJavaScript(MOUNT_PROBE)
+        .then((mounted: boolean) => {
+          if (mounted || win.isDestroyed()) return;
+          logDesktopEvent({ type: 'window:blank', payload: { url } });
+          const page = blankWindowPage({ url, shellVersion: app.getVersion() });
+          void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
+        })
+        .catch(() => {});
+    }, MOUNT_DEADLINE_MS).unref?.();
   });
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
     if (!shouldRetryLoad(errorCode, isMainFrame)) return;
