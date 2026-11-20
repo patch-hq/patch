@@ -149,7 +149,7 @@ export interface VoiceTokenRouteOpts {
   logger: Logger;
   registry: Registry;
   /**
-   * In-process chat mirror, used to validate that the requested `chatId`
+   * The server's chat index, used to validate that the requested `chatId`
    * actually exists under this account BEFORE a token is minted (E1-d1).
    * Minting a usable token for a garbage/foreign chatId is a security hole:
    * the surface could open an audio session bound to a chat it does not own.

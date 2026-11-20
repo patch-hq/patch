@@ -214,7 +214,7 @@ export interface BuildOptions {
   ) => Promise<Array<{ chatId: string; hostId: string } & Record<string, unknown>>>;
   /**
    * `patch_search_chats`: search every chat on the account, answered by the
-   * server from its chat mirror and the transcripts it holds.
+   * server from its chat index and record.
    */
   searchAccountChats?: (
     sourceChatId: string,

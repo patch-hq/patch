@@ -382,27 +382,6 @@ export const ChatMeta = z
       )
       .optional(),
     /**
-     * Which persisted user messages are RE-SENDS, and of what (spec/12 § A turn
-     * is owed until it settles). `seq` is the re-sent copy's own canonical seq;
-     * `retryOfSeq` is the original turn's.
-     *
-     * Claude Code's transcript persists every re-sent prompt as an ordinary user
-     * turn and knows nothing about the relationship between them, so without
-     * this a reload re-expands a folded turn back into one bubble per attempt.
-     * `replayChat` reads it and re-decorates those messages by seq, the same way
-     * `permissionModeMarks` is spliced back in.
-     */
-    retryMarks: z
-      .array(
-        z
-          .object({
-            seq: z.number().int().nonnegative(),
-            retryOfSeq: z.number().int().nonnegative(),
-          })
-          .strict(),
-      )
-      .optional(),
-    /**
      * A status the AGENT declared for itself (spec/04 § Current status): the
      * chat is blocked on the user (`question` — `patch_ask_human`), or it has
      * something the user should see though nothing is blocked (`report`).
@@ -631,8 +610,12 @@ export function createMetaStore(patchHome: string): MetaStore {
    * `accountId` — a chat pinned the Claude account its turns ran on. A chat has
    * no account now: every turn resolves the host's stored keys in order and
    * takes the first with credit (spec/10-auth.md § Backend credentials).
+   *
+   * `retryMarks` — which user messages were re-sends, kept so a history rebuilt
+   * from the provider's transcript could fold them back together. History now
+   * comes only from Patch's record, whose entries carry `retryOfSeq` themselves.
    */
-  const RETIRED_META_KEYS = ['accountId'] as const;
+  const RETIRED_META_KEYS = ['accountId', 'retryMarks'] as const;
 
   function dropRetiredKeys(parsed: unknown): unknown {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;

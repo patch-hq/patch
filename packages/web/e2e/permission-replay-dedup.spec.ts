@@ -2,13 +2,12 @@ import { test, expect } from '@playwright/test';
 import type { WireEvent } from '@patch/wire';
 
 // spec/14 § Main chat panel → Permission cards, spec/12 § "No message
-// deduplication beyond seq" — the host's `replayChat` (G2-d1) deliberately
-// re-emits the canonical `chat.permission_request` for every STILL-PENDING
-// permission on a chat, so a surface that reconnected after the prompt was
-// produced gets the card. That re-emit is NOT gated on the replay's `fromSeq`
-// the way transcript events are, so every subsequent replay re-delivers it:
-// leaving a chat that is paused on a Write approval and coming back replays
-// from a further-on cursor and the permission arrives again. Without an
+// deduplication beyond seq" — a STILL-PENDING `chat.permission_request` can
+// reach a surface more than once: live, again when its deadline is re-sent,
+// and again in the history a surface reads when it comes back to the chat. It
+// is not gated on the surface's position the way other entries are, so
+// leaving a chat that is paused on a Write approval and coming back delivers
+// the permission again. Without an
 // already-held guard keyed on `requestId`, the Approve/Deny card was appended a
 // second time and the user saw two identical cards for one request.
 const HARNESS = '/app/dev-harness.html?chat=chat_replay_dupe';
@@ -66,8 +65,8 @@ test.describe('a re-delivered replay draws one permission card, not two', () => 
     await expect(stream.getByTestId('permission')).toContainText('Write');
     await expect(stream.getByRole('button', { name: /^Approve 1$/ })).toHaveCount(1);
 
-    // The host replays the chat again — the still-pending permission comes
-    // with it, exactly as `replayChat` sends it.
+    // The chat's history is delivered again — the still-pending permission
+    // comes with it.
     await deliverReplay(page);
 
     await expect(stream.getByTestId('permission')).toHaveCount(1);

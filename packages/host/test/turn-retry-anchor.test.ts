@@ -132,11 +132,9 @@ describe('a restart resume names the bubble the dead host drew', () => {
 });
 
 describe('the link survives a reload', () => {
-  it('records a retry mark so replay can put retryOfSeq back on', async () => {
-    // Claude Code persists each re-sent prompt as an ordinary user turn with no
-    // idea it repeats an earlier one, so on a reload the fold would come apart
-    // and the duplicate would be back — on refresh only, which is worse than
-    // never folding at all.
+  it('each re-send carries retryOfSeq in the record itself, and meta keeps no retry marks', async () => {
+    // History is read only from Patch's record, so the fold survives a reload
+    // only if every re-sent copy names the turn it repeats on its own entry.
     const { backend } = alwaysThrows('ECONNRESET');
     const { daemon, folder, events, metaStore } = makeHost(backend, 'marks');
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -145,9 +143,9 @@ describe('the link survives a reload', () => {
     const msgs = userMessages(events, chatId);
     const original = msgs[0]!.seq;
 
-    expect(metaStore.read(chatId)?.retryMarks).toEqual(
-      msgs.slice(1).map((m) => ({ seq: m.seq, retryOfSeq: original })),
-    );
+    expect(msgs.length).toBeGreaterThan(1);
+    for (const m of msgs.slice(1)) expect(m.retryOfSeq).toBe(original);
+    expect(metaStore.read(chatId)).not.toHaveProperty('retryMarks');
     vi.useRealTimers();
     daemon.shutdown();
   });
