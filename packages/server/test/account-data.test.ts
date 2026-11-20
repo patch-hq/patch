@@ -1,12 +1,16 @@
 // Each account's data in its own folder (spec/01 § Data folder), and the
 // one-time move of a data folder from the old flat layout. Real files on disk;
 // a "crash" is the move stopped at one of its checkpoints, followed by a fresh
-// start exactly as the server would make one.
+// start exactly as the server would make one. Each entry is moved by rename;
+// the copy that stands in for it across filesystems is driven by making the
+// rename fail with EXDEV.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
+  readlinkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -21,8 +25,8 @@ import { join } from 'node:path';
 import {
   ACCOUNTS_DIR,
   ACCOUNTS_FILE,
-  MIGRATION_BACKUP,
   MIGRATION_JOURNAL,
+  __setEntryRename,
   __setMigrationCheckpoint,
   prepareAccountData,
 } from '../src/account-data.js';
@@ -79,29 +83,48 @@ function expectMoved(dir: string, folder: string): void {
   for (const [rel, body] of Object.entries(SERVER_FILES)) {
     expect(readFileSync(join(dir, rel), 'utf8')).toBe(body);
   }
+  const name = folder.split('/').pop() as string;
   for (const [rel, body] of Object.entries(ACCOUNT_FILES)) {
     expect(readFileSync(join(folder, rel), 'utf8'), rel).toBe(body);
-    expect(existsSync(join(dir, rel)), `${rel} left at the top`).toBe(false);
+  }
+  // Each old top-level path is a link into the account folder, nothing more.
+  for (const top of ACCOUNT_ENTRIES) {
+    expect(lstatSync(join(dir, top)).isSymbolicLink(), `${top} is a link`).toBe(true);
+    expect(readlinkSync(join(dir, top))).toBe(`${ACCOUNTS_DIR}/${name}/${top}`);
   }
   expect(statSync(join(folder, 'secrets.key')).mode & 0o777).toBe(0o600);
   expect(existsSync(join(dir, MIGRATION_JOURNAL))).toBe(false);
-  expect(existsSync(join(dir, MIGRATION_BACKUP))).toBe(false);
-  expect(readdirSync(join(dir, ACCOUNTS_DIR))).toEqual([folder.split('/').pop()]);
+  expect(readdirSync(join(dir, ACCOUNTS_DIR))).toEqual([name]);
+  expect(readdirSync(folder).sort()).toEqual(ACCOUNT_ENTRIES);
   expect(readdirSync(dir).sort()).toEqual(
-    [...Object.keys(SERVER_FILES), ACCOUNTS_DIR, ACCOUNTS_FILE].sort(),
+    [...Object.keys(SERVER_FILES), ...ACCOUNT_ENTRIES, ACCOUNTS_DIR, ACCOUNTS_FILE].sort(),
   );
 }
 
+/** The account's top-level entries. */
+const ACCOUNT_ENTRIES = [
+  ...new Set(Object.keys(ACCOUNT_FILES).map((p) => p.split('/')[0]!)),
+].sort();
+
+/** Make every entry rename fail as it would across filesystems. */
+function crossFilesystem(): void {
+  __setEntryRename(() => {
+    throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' });
+  });
+}
+
 /** Every checkpoint a clean move passes, in order. */
-function checkpointsOfAMove(): string[] {
+function checkpointsOfAMove(exdev = false): string[] {
   const dir = mkdtempSync(join(tmpdir(), 'patch-acct-probe-'));
   const seen: string[] = [];
   try {
     flatLayout(dir);
+    if (exdev) crossFilesystem();
     __setMigrationCheckpoint((p) => void seen.push(p));
     prepareAccountData(dir);
   } finally {
     __setMigrationCheckpoint(null);
+    __setEntryRename(null);
     rmSync(dir, { recursive: true, force: true });
   }
   return seen;
@@ -116,6 +139,7 @@ describe('account data folders', () => {
 
   afterEach(() => {
     __setMigrationCheckpoint(null);
+    __setEntryRename(null);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -146,42 +170,57 @@ describe('account data folders', () => {
     expectMoved(dir, folder);
   });
 
-  it('passes every checkpoint of a move', () => {
+  it('moves by rename: nothing is copied, and every entry is linked from its old path', () => {
     const points = checkpointsOfAMove();
-    expect(points).toContain('copy in place');
-    expect(points).toContain('accounts written');
-    expect(points.at(-1)).toBe('backup removed');
-    expect(points.filter((p) => p.startsWith('copied ')).length).toBe(8);
-    expect(points.filter((p) => p.startsWith('backed up ')).length).toBe(8);
+    expect(points.filter((p) => p.startsWith('moved ')).length).toBe(ACCOUNT_ENTRIES.length);
+    expect(points.filter((p) => p.startsWith('linked ')).length).toBe(ACCOUNT_ENTRIES.length);
+    expect(points.some((p) => p.startsWith('copied '))).toBe(false);
+    expect(points.at(-1)).toBe('accounts written');
   });
 
-  for (const point of checkpointsOfAMove()) {
-    it(`a restart after the move stopped at "${point}" finishes it, losing nothing`, () => {
-      flatLayout(dir);
-      __setMigrationCheckpoint((p) => {
-        if (p === point) throw new Error(`crash at ${p}`);
-      });
-      expect(() => prepareAccountData(dir)).toThrow(`crash at ${point}`);
-      __setMigrationCheckpoint(null);
+  it('copies, checks and then deletes each entry when the rename fails with EXDEV', () => {
+    const points = checkpointsOfAMove(true);
+    expect(points.filter((p) => p.startsWith('copied ')).length).toBe(ACCOUNT_ENTRIES.length);
+    expect(points.filter((p) => p.startsWith('placed ')).length).toBe(ACCOUNT_ENTRIES.length);
+    flatLayout(dir);
+    crossFilesystem();
+    expectMoved(dir, prepareAccountData(dir));
+  });
 
-      const folder = prepareAccountData(dir);
-      expectMoved(dir, folder);
-    });
+  for (const exdev of [false, true]) {
+    const how = exdev ? 'across filesystems' : 'by rename';
+    for (const point of checkpointsOfAMove(exdev)) {
+      it(`moving ${how}, a restart after it stopped at "${point}" finishes, losing nothing`, () => {
+        flatLayout(dir);
+        if (exdev) crossFilesystem();
+        __setMigrationCheckpoint((p) => {
+          if (p === point) throw new Error(`crash at ${p}`);
+        });
+        expect(() => prepareAccountData(dir)).toThrow(`crash at ${point}`);
+        __setMigrationCheckpoint(null);
+
+        const folder = prepareAccountData(dir);
+        expectMoved(dir, folder);
+      });
+    }
   }
 
-  it('a copy that does not match its original stops the server and leaves the originals', () => {
+  it('a cross-filesystem copy that does not match stops the server and leaves the original', () => {
     flatLayout(dir);
+    crossFilesystem();
     __setMigrationCheckpoint((p) => {
-      if (p !== 'copied chat-logs') return;
-      const partial = readdirSync(join(dir, ACCOUNTS_DIR)).find((n) => n.endsWith('.partial'));
-      writeFileSync(join(dir, ACCOUNTS_DIR, partial!, 'chat-logs', 'c1.jsonl'), 'damaged');
+      if (p !== 'copying chat-logs') return;
+      const { folder } = JSON.parse(readFileSync(join(dir, MIGRATION_JOURNAL), 'utf8')) as {
+        folder: string;
+      };
+      writeFileSync(join(dir, ACCOUNTS_DIR, folder, 'chat-logs.partial', 'c1.jsonl'), 'damaged');
     });
     expect(() => prepareAccountData(dir)).toThrow(/does not match/);
-    for (const [rel, body] of Object.entries(ACCOUNT_FILES)) {
-      expect(readFileSync(join(dir, rel), 'utf8')).toBe(body);
-    }
+    expect(readFileSync(join(dir, 'chat-logs', 'c1.jsonl'), 'utf8')).toBe(
+      ACCOUNT_FILES['chat-logs/c1.jsonl'],
+    );
 
-    // Started again with nothing interfering, it makes a fresh copy and finishes.
+    // Started again with nothing interfering, it copies afresh and finishes.
     __setMigrationCheckpoint(null);
     expectMoved(dir, prepareAccountData(dir));
   });
@@ -189,11 +228,35 @@ describe('account data folders', () => {
   it('says so when account files turn up at the top after the move', () => {
     flatLayout(dir);
     prepareAccountData(dir);
+    // An old build replacing the link with a file of its own (a write by rename).
+    rmSync(join(dir, 'chat-index.jsonl'));
     writeFileSync(join(dir, 'chat-index.jsonl'), '{}\n');
     const errors: unknown[] = [];
     const log = { error: (o: unknown) => void errors.push(o), warn: () => {}, info: () => {} };
     prepareAccountData(dir, log as never);
+    // Only the file is flagged; the links beside it are the layout's own.
     expect(errors).toMatchObject([{ stray: ['chat-index.jsonl'] }]);
+  });
+
+  it('a build from before this layout reads and writes the moved data through the links', () => {
+    flatLayout(dir);
+    const folder = prepareAccountData(dir);
+    // Reading the old paths, as an older build does.
+    for (const [rel, body] of Object.entries(ACCOUNT_FILES)) {
+      expect(readFileSync(join(dir, rel), 'utf8'), rel).toBe(body);
+    }
+    // Writing through them lands in the account folder.
+    writeFileSync(join(dir, 'jobs', 'added-by-old-build.json'), '{"id":"x"}');
+    writeFileSync(join(dir, 'held-input.json'), '[1]');
+    expect(readFileSync(join(folder, 'jobs', 'added-by-old-build.json'), 'utf8')).toBe(
+      '{"id":"x"}',
+    );
+    expect(readFileSync(join(folder, 'held-input.json'), 'utf8')).toBe('[1]');
+    // And the new build, started again, takes no notice of the links.
+    const errors: unknown[] = [];
+    const log = { error: (o: unknown) => void errors.push(o), warn: () => {}, info: () => {} };
+    expect(prepareAccountData(dir, log as never)).toBe(folder);
+    expect(errors).toEqual([]);
   });
 
   it('refuses to start when the account folder it names is gone', () => {
@@ -253,7 +316,7 @@ describe('account data folders', () => {
     });
     try {
       expect(existsSync(join(accountFolder(dir), 'chat-index.jsonl'))).toBe(true);
-      expect(existsSync(join(dir, 'chat-index.jsonl'))).toBe(false);
+      expect(lstatSync(join(dir, 'chat-index.jsonl')).isSymbolicLink()).toBe(true);
       const get = await second.app.inject({ method: 'GET', url: `/api/chats/${CHAT}`, headers });
       expect(get.statusCode).toBe(200);
       expect(get.json()).toMatchObject({ chatId: CHAT, hostId: 'd1' });

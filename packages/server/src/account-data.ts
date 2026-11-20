@@ -13,22 +13,25 @@
 // the server is still carrying it across.
 //
 // A server that kept the old flat layout is moved over once, at start, before
-// anything opens a file. The move is safe to interrupt at any point and simply
-// runs on from where it was on the next start:
+// anything opens a file. The move is instant and safe to interrupt at any
+// point; the next start runs on from where it stopped:
 //
-//   copy     The account's entries are copied into `accounts/<folder>.partial`,
-//            flushed to disk, compared file by file with the originals, and
-//            only then renamed into place. Nothing has been touched yet, so an
-//            interrupted copy is thrown away and made again.
-//   back up  The originals are renamed, one by one, into
-//            `account-migration-backup/`. They are the backup.
-//   verify   The account folder is compared with the backup again. Only once
-//            it matches is `accounts.json` written.
-//   clean    The backup is deleted.
+//   move  Each of the account's entries is renamed into `accounts/<folder>/`.
+//         A rename within one filesystem is atomic, so an entry is always at
+//         its old path or its new one, never half of each, and nothing is
+//         copied: a large data folder moves as fast as a small one. Only when
+//         the rename fails because the account folder is on another
+//         filesystem (EXDEV) is the entry copied instead — copied, flushed,
+//         compared file by file with the original, put in place, and only
+//         then the original deleted.
+//   link  A symlink is left at each old path pointing into the account folder,
+//         so a build from before this layout run on the folder (a rollback)
+//         reads and writes the same data instead of starting empty. This
+//         build ignores the links. Then `accounts.json` is written.
 //
-// `account-migration.json` records the phase. A comparison that fails stops
-// the server with the difference named and leaves every file where it is —
-// never a server that starts on half its data.
+// `account-migration.json` records the phase. A copy that does not match its
+// original stops the server with the difference named and leaves the original
+// where it is — never a server that starts on half its data.
 
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -44,6 +47,7 @@ import {
   readlinkSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -52,7 +56,6 @@ import type { Logger } from 'pino';
 export const ACCOUNTS_DIR = 'accounts';
 export const ACCOUNTS_FILE = 'accounts.json';
 export const MIGRATION_JOURNAL = 'account-migration.json';
-export const MIGRATION_BACKUP = 'account-migration-backup';
 
 /**
  * What stays at the top of the data folder: the server's own files. A temp
@@ -72,7 +75,6 @@ export const SERVER_ENTRIES: ReadonlySet<string> = new Set([
   ACCOUNTS_DIR,
   ACCOUNTS_FILE,
   MIGRATION_JOURNAL,
-  MIGRATION_BACKUP,
 ]);
 
 interface AccountsFile {
@@ -80,7 +82,7 @@ interface AccountsFile {
   accounts: Array<{ folder: string; accountId: string | null }>;
 }
 
-type Phase = 'copy' | 'backup' | 'verify' | 'clean';
+type Phase = 'move' | 'link';
 
 interface Journal {
   folder: string;
@@ -179,23 +181,16 @@ function describeTree(path: string, rel = ''): string[] {
   return [`${rel} file ${mode} ${st.size} ${hash}`];
 }
 
-/** Throw, naming the first difference, unless every entry under `to` matches `from`. */
-function verifyCopy(fromDir: string, toDir: string, entries: string[]): void {
-  for (const name of entries) {
-    const from = join(fromDir, name);
-    const to = join(toDir, name);
-    if (!existsSync(to)) {
-      throw new Error(`account data move: ${name} is missing from ${toDir}`);
-    }
-    const a = describeTree(from, name);
-    const b = describeTree(to, name);
-    const at = a.findIndex((line, i) => line !== b[i]);
-    if (at !== -1 || a.length !== b.length) {
-      const i = at === -1 ? Math.min(a.length, b.length) : at;
-      throw new Error(
-        `account data move: ${toDir} does not match ${fromDir} at ${a[i] ?? b[i] ?? name}`,
-      );
-    }
+/** Throw, naming the first difference, unless `copy` matches `original` exactly. */
+function verifyCopy(original: string, copy: string): void {
+  const a = describeTree(original);
+  const b = describeTree(copy);
+  const at = a.findIndex((line, i) => line !== b[i]);
+  if (at !== -1 || a.length !== b.length) {
+    const i = at === -1 ? Math.min(a.length, b.length) : at;
+    throw new Error(
+      `account data move: the copy ${copy} does not match ${original} at ${a[i] ?? b[i] ?? '(end)'}`,
+    );
   }
 }
 
@@ -206,6 +201,26 @@ function verifyCopy(fromDir: string, toDir: string, entries: string[]): void {
 let checkpoint: ((point: string) => void) | null = null;
 export function __setMigrationCheckpoint(fn: ((point: string) => void) | null): void {
   checkpoint = fn;
+}
+
+/** Test seam: how an entry is renamed into the account folder (to make it fail with EXDEV). */
+let renameEntry: (from: string, to: string) => void = renameSync;
+export function __setEntryRename(fn: ((from: string, to: string) => void) | null): void {
+  renameEntry = fn ?? renameSync;
+}
+
+/** Where the link left at an entry's old path points, relative to the data folder. */
+function linkTarget(folder: string, name: string): string {
+  return `${ACCOUNTS_DIR}/${folder}/${name}`;
+}
+
+/** True when `path` is the link this layout leaves at an old path. */
+function isOldPathLink(path: string, folder: string, name: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink() && readlinkSync(path) === linkTarget(folder, name);
+  } catch {
+    return false;
+  }
 }
 
 function mintFolder(): string {
@@ -237,7 +252,7 @@ export function prepareAccountData(dataDir: string, log?: Logger): string {
       } satisfies AccountsFile);
       return join(dataDir, ACCOUNTS_DIR, folder);
     }
-    journal = { folder, entries, phase: 'copy' };
+    journal = { folder, entries, phase: 'move' };
     writeJsonDurable(join(dataDir, MIGRATION_JOURNAL), journal);
     log?.warn(
       { entries: entries.length, folder },
@@ -274,7 +289,10 @@ function openAccount(
   // Account files at the top of a data folder already moved over were written
   // there by something that predates this layout (an older build run on it).
   // Nothing reads them; say so rather than let them pass unnoticed.
-  const stray = readdirSync(dataDir).filter((name) => !isServerEntry(name));
+  // The links left at the old paths for a rollback are not stray.
+  const stray = readdirSync(dataDir).filter(
+    (name) => !isServerEntry(name) && !isOldPathLink(join(dataDir, name), entry.folder, name),
+  );
   if (stray.length > 0) {
     log?.error(
       { stray },
@@ -297,65 +315,88 @@ function runMigration(
   accountId: string | null,
   log: Logger | undefined,
 ): void {
-  const accountsRoot = join(dataDir, ACCOUNTS_DIR);
-  const target = join(accountsRoot, journal.folder);
-  const partial = `${target}.partial`;
-  const backup = join(dataDir, MIGRATION_BACKUP);
+  const target = join(dataDir, ACCOUNTS_DIR, journal.folder);
   const setPhase = (phase: Phase): void => {
     journal.phase = phase;
     writeJsonDurable(join(dataDir, MIGRATION_JOURNAL), journal);
   };
 
-  if (journal.phase === 'copy') {
-    // Nothing has moved yet: whatever an earlier attempt left is thrown away.
-    rmSync(partial, { recursive: true, force: true });
-    rmSync(target, { recursive: true, force: true });
-    mkdirSync(partial, { recursive: true, mode: 0o700 });
+  if (journal.phase === 'move') {
+    mkdirSync(target, { recursive: true, mode: 0o700 });
     for (const name of journal.entries) {
-      const from = join(dataDir, name);
-      if (!existsSync(from)) {
-        throw new Error(`account data move: ${name} was listed to move but is not in ${dataDir}`);
-      }
-      cpSync(from, join(partial, name), {
-        recursive: true,
-        preserveTimestamps: true,
-        verbatimSymlinks: true,
-        errorOnExist: true,
-      });
-      checkpoint?.(`copied ${name}`);
+      moveEntry(dataDir, target, name, log);
+      checkpoint?.(`moved ${name}`);
     }
-    fsyncTree(partial);
-    verifyCopy(dataDir, partial, journal.entries);
-    renameSync(partial, target);
-    fsyncTree(accountsRoot);
-    checkpoint?.('copy in place');
-    setPhase('backup');
+    fsyncTree(target);
+    setPhase('link');
   }
 
-  if (journal.phase === 'backup') {
-    mkdirSync(backup, { recursive: true, mode: 0o700 });
-    for (const name of journal.entries) {
-      // Moved already by an attempt that was cut off after this one.
-      if (!existsSync(join(dataDir, name))) continue;
-      renameSync(join(dataDir, name), join(backup, name));
-      checkpoint?.(`backed up ${name}`);
+  for (const name of journal.entries) {
+    const old = join(dataDir, name);
+    if (isOldPathLink(old, journal.folder, name)) continue;
+    if (existsSync(old) || isSymlink(old)) {
+      throw new Error(`account data move: ${old} should be free for its link but is not`);
     }
-    fsyncTree(backup);
-    setPhase('verify');
+    symlinkSync(linkTarget(journal.folder, name), old);
+    checkpoint?.(`linked ${name}`);
   }
-
-  if (journal.phase === 'verify') {
-    verifyCopy(backup, target, journal.entries);
-    writeJsonDurable(join(dataDir, ACCOUNTS_FILE), {
-      version: 1,
-      accounts: [{ folder: journal.folder, accountId }],
-    } satisfies AccountsFile);
-    checkpoint?.('accounts written');
-    setPhase('clean');
-  }
-
-  rmSync(backup, { recursive: true, force: true });
-  checkpoint?.('backup removed');
+  writeJsonDurable(join(dataDir, ACCOUNTS_FILE), {
+    version: 1,
+    accounts: [{ folder: journal.folder, accountId }],
+  } satisfies AccountsFile);
+  checkpoint?.('accounts written');
   rmSync(join(dataDir, MIGRATION_JOURNAL), { force: true });
   log?.info({ folder: journal.folder }, 'the account data is in its own folder');
+}
+
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Put one entry in the account folder. Rerun after an interruption, it finds
+ * the entry in exactly one place (or, after an EXDEV copy that was put in
+ * place, verified in both) and carries on.
+ */
+function moveEntry(dataDir: string, target: string, name: string, log: Logger | undefined): void {
+  const from = join(dataDir, name);
+  const to = join(target, name);
+  const partial = `${to}.partial`;
+  const atOld = existsSync(from);
+  const atNew = existsSync(to);
+  if (atNew && !atOld) return;
+  if (atNew && atOld) {
+    // Only a cross-filesystem copy is ever in both places, and it was compared
+    // with the original before it was put in place: the original can go.
+    rmSync(from, { recursive: true, force: true });
+    return;
+  }
+  if (!atOld) {
+    throw new Error(`account data move: ${name} is neither in ${dataDir} nor in ${target}`);
+  }
+  try {
+    renameEntry(from, to);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+  }
+  log?.warn({ entry: name }, 'the account folder is on another filesystem: copying this entry');
+  rmSync(partial, { recursive: true, force: true });
+  cpSync(from, partial, {
+    recursive: true,
+    preserveTimestamps: true,
+    verbatimSymlinks: true,
+    errorOnExist: true,
+  });
+  checkpoint?.(`copying ${name}`);
+  fsyncTree(partial);
+  verifyCopy(from, partial);
+  checkpoint?.(`copied ${name}`);
+  renameSync(partial, to);
+  checkpoint?.(`placed ${name}`);
+  rmSync(from, { recursive: true, force: true });
 }
