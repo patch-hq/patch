@@ -600,7 +600,7 @@ interface HeldSlot extends HeldSlotRecord {
   timer: NodeJS.Timeout | null;
   /**
    * Read back from disk at startup rather than taken by this process. Only
-   * these need reconciling against the chat mirror — a slot taken here is
+   * these need reconciling against the chat index — a slot taken here is
    * tracked live by the events that created it.
    */
   restored: boolean;
@@ -797,7 +797,7 @@ export class JobDispatcher {
     this.pruneExecFires();
     this.statusUnsub = this.hostLink.onStatus((s) => {
       if (s === 'online') {
-        // Reconcile BEFORE releasing anything: the chat mirror is only seeded
+        // Reconcile BEFORE releasing anything: the chat index is only current
         // once a host is back, so this is the first moment the server can tell
         // which of its restored slots are real.
         this.reconcileSlots();
@@ -1773,9 +1773,9 @@ export class JobDispatcher {
   }
 
   /**
-   * Check restored slots against the chat mirror. Run when a host comes back:
-   * a chat still working keeps its slot, a chat the mirror says has finished
-   * gives it back, and a chat the mirror cannot resolve keeps it too — see
+   * Check restored slots against the chat index. Run when a host comes back:
+   * a chat still working keeps its slot, a chat the index says has finished
+   * gives it back, and a chat the index cannot resolve keeps it too — see
    * below (spec/08 ## Concurrency).
    */
   private reconcileSlots(): void {

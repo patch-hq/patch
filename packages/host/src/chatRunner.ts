@@ -2174,11 +2174,9 @@ export class Daemon {
    * G2-d1: the full, still-unresolved `chat.permission_request` wire event per
    * chat (keyed by `${chatId}:${requestId}`). A permission is recorded in the
    * SDK transcript as a plain assistant `tool_use` block (Claude Code's shape),
-   * so on a `chat.replay`/reload the history reader reconstructs it as a
-   * `chat.tool_call` — losing the approve/deny affordance and stranding the
-   * user in `awaiting-permission` with no way to resolve it. We re-emit any
-   * pending permission_request at the end of `replayChat` so a surface that
-   * reconnects AFTER the turn produced the prompt still renders the permission
+   * so the request itself is kept here until it is resolved: it decides whether
+   * the chat is paused on a decision, and it is re-sent with its current
+   * deadline when one changes, so every surface still renders the permission
    * card. Covers EVERY permission tool (not just file edits, unlike
    * `pendingPermissions` which is edit-specific). Cleared on resolution.
    */
@@ -4958,9 +4956,8 @@ export class Daemon {
   /**
    * `patch_delegate_list` — every subagent `parentChatId` has created, newest first.
    *
-   * Reads the in-memory chat states, never `metaStore.list()`: `replayChat`
-   * calls this once per chat, and on reconnect every chat replays, so a disk
-   * scan here was chats × chats file reads (the second time that froze a
+   * Reads the in-memory chat states, never `metaStore.list()`: this used to
+   * run once per chat on every reconnect, so a disk scan here was chats × chats file reads (the second time that froze a
    * 9,000-chat host). `state.subagent` mirrors `meta.subagent`.
    */
   listDelegates(parentChatId: string): DelegateSummary[] {
@@ -10362,8 +10359,8 @@ export class Daemon {
 
     // The user turn is a `chat.message` like any other (spec/03 § Session
     // events: `{chatId, role, content, seq}`), so it is emitted HERE, live, at
-    // its own canonical seq — the same slot it will occupy in `chat.replay` and
-    // in `GET /api/chats/:id/history`.
+    // its own canonical seq — the same slot it occupies in the server's record
+    // and in `GET /api/chats/:id/history`.
     //
     // It has to be. Claude Code persists the prompt as a user turn, so replay
     // reconstructs it; if it never took a canonical seq live, the live and
@@ -10499,13 +10496,7 @@ export class Daemon {
       } finally {
         if (turnIds) this.envelopeRefs.delete(chatId);
       }
-      if (retryOfSeq !== undefined) {
-        // Claude Code's transcript stores this re-send as an ordinary user turn
-        // and knows nothing about the one it is repeating, so a replay would
-        // re-expand the fold into one bubble per attempt. Record the link where
-        // replay can splice it back in (`replayChat`, like permissionModeMarks).
-        this.recordRetryMark(chatId, raw.seq, retryOfSeq);
-      } else {
+      if (retryOfSeq === undefined) {
         // FIRST attempt: the turn now HAS a bubble, so from here on it can be
         // named. Re-persist the crash marker with it, or a host killed after
         // this point resumes the turn with no anchor and draws a second bubble
@@ -13006,8 +12997,8 @@ export class Daemon {
       };
       // G2-d1: remember the full request so a surface reconnecting AFTER this
       // turn (the permission lands in the transcript as a bare `tool_use`, which
-      // replays as a `chat.tool_call` with no approve/deny) still gets the
-      // permission card — re-emitted in `replayChat`. Keyed like
+      // records as a `chat.tool_call` with no approve/deny) still gets the
+      // permission card while it is pending. Keyed like
       // `pendingPermissions` so resolution clears both.
       this.pendingPermissionEvents.set(`${chatId}:${env.permission.requestId}`, ev);
       this.emit(ev);
@@ -13422,9 +13413,8 @@ export class Daemon {
       ? { at: this.opts.now() + windowMs, windowMs, paused: true }
       : { at: this.opts.now() + windowMs, windowMs };
     const denyMessage = questionExpiredMessage(windowMs / 1000, this.questionExpiry.expiredPrompt);
-    // Replayed verbatim to a surface that reconnects after the reset
-    // (`replayChat`), so it must carry the SAME deadline the live update
-    // below announces, not the stale one from when the question was asked.
+    // Kept as the pending request, so it must carry the SAME deadline the live
+    // update below announces, not the stale one from when the question was asked.
     this.pendingPermissionEvents.set(key, { ...ev, expiry });
     gate.expiry = undefined;
     if (!paused)
@@ -14070,7 +14060,7 @@ export class Daemon {
    */
   private hydrateReplayAttachments(chatId: string, events: WireEvent[]): WireEvent[] {
     const state = this.chatState.get(chatId);
-    /* v8 ignore next -- defensive only: both callers (readHistory, replayChat) already resolved and confirmed this exact chatId's state synchronously (throwing ChatNotFoundError otherwise) immediately before calling this method, with no `await` in between — state cannot go missing here via the public API. */
+    /* v8 ignore next -- defensive only: its caller (readHistory) already resolved and confirmed this exact chatId's state synchronously (throwing ChatNotFoundError otherwise) immediately before calling this method, with no `await` in between — state cannot go missing here via the public API. */
     if (!state) return events;
     let manifest: AttachmentManifest | null = null;
     return events.map((ev) => {
@@ -15830,25 +15820,6 @@ export class Daemon {
   }
 
   /**
-   * Record that the user message at `seq` is a RE-SEND of the turn at
-   * `retryOfSeq` (spec/12 § A turn is owed until it settles).
-   *
-   * Claude Code's transcript persists every re-sent prompt as an ordinary user
-   * turn and has no idea it is a repeat of an earlier one, so without this a
-   * reload re-expands the fold into one bubble per attempt — the exact
-   * duplication the fold exists to remove, reappearing on refresh. `replayChat`
-   * splices these back on by seq, the same way `permissionModeMarks` are.
-   */
-  private recordRetryMark(chatId: string, seq: number, retryOfSeq: number): void {
-    if (!this.opts.metaStore.read(chatId)) return;
-    this.opts.metaStore.update(chatId, (m) => ({
-      ...m,
-      retryMarks: [...(m.retryMarks ?? []), { seq, retryOfSeq }],
-      updatedAt: this.opts.now(),
-    }));
-  }
-
-  /**
    * Say in the chat that this turn runs on a different account because the
    * last one ran out (spec/10 § Backend credentials). Emitted as a system line,
    * so it is logged and replayed like every other message.
@@ -16087,7 +16058,7 @@ export class Daemon {
 
   /**
    * Build the current `chat.state` frame without emitting it — the pure half
-   * of `emitState`, reused by `replayFromLog` so a reconnecting surface always
+   * of `emitState`, so a caller that needs the frame (a status probe, a test)
    * gets an authoritative activity even when it missed the live running ->
    * idle edge while disconnected (patch/todo.md — "Patch showing stop after
    * message has returned").

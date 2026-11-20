@@ -1204,7 +1204,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // spec/09 § Waiting on you. The other half of the same doorbell: a turn that
   // stops on a permission decision or a question never reaches `idle`, so the
   // completion notifier above never sees it. Same subscription point, same
-  // reason — the chat mirror is already up to date when this runs.
+  // reason — the chat index is already up to date when this runs.
   const awaitingPermissionNotifier = new AwaitingPermissionNotifier({
     chats: chatRegistry,
     router: notificationRouter,
