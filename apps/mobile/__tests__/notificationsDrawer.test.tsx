@@ -68,7 +68,7 @@ beforeEach(() => {
       chatId: 'c1',
       name: 'Deploy chat',
       folder: '',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

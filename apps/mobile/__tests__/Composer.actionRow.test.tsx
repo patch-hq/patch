@@ -97,7 +97,7 @@ afterEach(() => {
 });
 
 function seed(
-  overrides: { activity?: 'idle' | 'running' | 'awaiting-permission'; model?: string | null } = {},
+  overrides: { chatStatus?: { state: string; since: number }; model?: string | null } = {},
 ): void {
   useChatStore.getState().hydrate([
     {
@@ -105,7 +105,7 @@ function seed(
       hostId: 'd1',
       name: 'Chat',
       folder: '/home/tom/work',
-      activity: overrides.activity ?? 'idle',
+      chatStatus: overrides.chatStatus ?? { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -262,7 +262,7 @@ describe('Composer action row — order', () => {
   });
 
   it('with a turn running and nothing typed, Stop takes Send’s place at the end', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     expect(rowOrder(r.root).slice(-2)).toEqual(['composer-actions-spacer', 'composer-stop']);
   });
@@ -443,7 +443,7 @@ describe('Composer model pill', () => {
   });
 
   it('says the change applies to the next message', async () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     await actAsync(async () => {
       findHost(r.root, byTestId('composer-model-pill')).props['onPress']();
@@ -523,7 +523,7 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
   });
 
   it('running with an empty composer: Stop (a square) instead of Send', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const stop = findHost(r.root, byTestId('composer-stop'));
     expect(stop.props['accessibilityLabel']).toBe('Stop turn');
@@ -536,13 +536,13 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
   });
 
   it('awaiting a permission mid-turn still offers Stop', () => {
-    seed({ activity: 'awaiting-permission' });
+    seed({ chatStatus: { state: 'waiting_for_user', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     expect(queryHost(r.root, byTestId('composer-stop'))).not.toBeNull();
   });
 
   it('parked only on an AskUserQuestion offers no Stop', () => {
-    seed({ activity: 'awaiting-permission' });
+    seed({ chatStatus: { state: 'waiting_for_user', since: 0 } });
     useChatStore.setState((st) => ({
       chats: {
         ...st.chats,
@@ -559,14 +559,14 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
   });
 
   it('tapping Stop sends chat.stop_request — the frame web’s stop button sends', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     findHost(r.root, byTestId('composer-stop')).props['onPress']();
     expect(wsMock.send).toHaveBeenCalledWith({ type: 'chat.stop_request', chatId: 'c1' });
   });
 
   it('typing while running brings Send back, and it queues the message', async () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('and then do this'));
@@ -594,7 +594,7 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
   });
 
   it('whitespace alone does not count as typed text — still Stop', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('   '));
@@ -602,12 +602,12 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
   });
 
   it('when the turn finishes, Stop goes back to Send', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     actSync(() => {
       const row = useChatStore.getState().chats['c1']!;
       useChatStore.setState({
-        chats: { ...useChatStore.getState().chats, c1: { ...row, activity: 'idle' } },
+        chats: { ...useChatStore.getState().chats, c1: { ...row, chatStatus: { state: 'idle', since: 0 } } },
       });
     });
     expect(queryHost(r.root, byTestId('composer-stop'))).toBeNull();
@@ -615,7 +615,7 @@ describe('Composer — Stop replaces Send while a turn runs', () => {
   });
 
   it('with the link down Stop is visibly unavailable rather than a dead tap', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     usePresenceStore.setState({ connection: 'offline' });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const stop = findHost(r.root, byTestId('composer-stop'));
@@ -675,7 +675,7 @@ describe('Composer — Send stays active across the send→running gap', () => {
     actSync(() => {
       const row = useChatStore.getState().chats['c1']!;
       useChatStore.setState({
-        chats: { ...useChatStore.getState().chats, c1: { ...row, activity: 'running' } },
+        chats: { ...useChatStore.getState().chats, c1: { ...row, chatStatus: { state: 'running', since: 0 } } },
       });
     });
     expect(queryHost(r.root, byTestId('composer-stop'))).not.toBeNull();
@@ -700,7 +700,7 @@ describe('Composer — Send stays active across the send→running gap', () => {
   });
 
   it('a queued send mid-turn (already running) goes straight to Stop, no gap', async () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const input = findHost(r.root, (i) => i.type === ('TextInput' as unknown as string));
     actSync(() => input.props['onChangeText']('and then this'));
@@ -719,7 +719,7 @@ describe('Composer — Send stays active across the send→running gap', () => {
   // smaller; hit slop makes up the difference so the touch target still
   // matches every other action-row control.
   it('paints Send/Stop smaller than the shared touch target, with hit slop making up the difference', () => {
-    seed({ activity: 'running' });
+    seed({ chatStatus: { state: 'running', since: 0 } });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const stop = findHost(r.root, byTestId('composer-stop'));
     const stopWidth = stop.props['style'].width as number;
@@ -731,7 +731,7 @@ describe('Composer — Send stays active across the send→running gap', () => {
     actSync(() => {
       const row = useChatStore.getState().chats['c1']!;
       useChatStore.setState({
-        chats: { ...useChatStore.getState().chats, c1: { ...row, activity: 'idle' } },
+        chats: { ...useChatStore.getState().chats, c1: { ...row, chatStatus: { state: 'idle', since: 0 } } },
       });
     });
     const send = findHost(r.root, byLabel('Send message'));

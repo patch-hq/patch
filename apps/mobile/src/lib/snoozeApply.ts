@@ -10,6 +10,7 @@ import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { api } from '../api/rest';
 import { navigateAfterSnooze } from './snoozeNav';
+import { isRunning } from '../stores/types';
 
 export function newSnoozeSetId(): string {
   return `set-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -47,7 +48,7 @@ export function applySnoozeSet(opts: {
 }): void {
   const { targets, until, name, isProject } = opts;
   const setId = newSnoozeSetId();
-  const running = targets.filter((c) => c.activity === 'running').length;
+  const running = targets.filter((c) => isRunning(c)).length;
   const previous = new Map(targets.map((c) => [c.chatId, c.snoozedUntil]));
 
   // Resolved before the flip, while the chats are still in the list.
@@ -61,7 +62,7 @@ export function applySnoozeSet(opts: {
     // A project snooze until complete waits for the whole project: chats with
     // work go first, so the host sees a busy set before an idle chat joins it.
     const ordered = [...targets].sort(
-      (a, b) => Number(b.activity === 'running') - Number(a.activity === 'running'),
+      (a, b) => Number(isRunning(b)) - Number(isRunning(a)),
     );
     void (async () => {
       for (const c of ordered) {

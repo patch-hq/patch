@@ -19,7 +19,7 @@ function row(chatId: string, over: Partial<ChatListRow> = {}): ChatListRow {
     name: chatId.toUpperCase(),
     hostId: 'd1',
     folder: '/w',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'auto',
     status: 'active',
     pinned: false,
@@ -203,14 +203,14 @@ describe('chatStore — the roster fetch genuinely replaces the cache', () => {
 describe('chatStore — the live stream supersedes the cache', () => {
   it('a cached row is updated in place by chat.state, not duplicated', async () => {
     const { saveCachedChatList } = await import('../src/lib/chatListCache');
-    saveCachedChatList([row('c1', { activity: 'running', name: 'Stale' })]);
+    saveCachedChatList([row('c1', { chatStatus: { state: 'running', since: 0 }, name: 'Stale' })]);
     vi.resetModules();
     const { useChatStore } = await import('../src/stores/chatStore');
 
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'auto',
       folder: '/w',
       name: 'Fresh',
@@ -218,7 +218,7 @@ describe('chatStore — the live stream supersedes the cache', () => {
     } as never);
 
     expect(Object.keys(useChatStore.getState().chats)).toEqual(['c1']);
-    expect(useChatStore.getState().chats['c1']!.activity).toBe('idle');
+    expect(useChatStore.getState().chats['c1']!.chatStatus?.state).toBe('idle');
     expect(useChatStore.getState().chats['c1']!.name).toBe('Fresh');
   });
 });
@@ -235,7 +235,7 @@ describe('chatListCache — not written on the live event path', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       permissionMode: 'auto',
       folder: '/w',
       name: 'Live name',

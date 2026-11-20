@@ -22,7 +22,7 @@ const row = (chatId: string, lastUpdated: number, hostId = 'h1') => ({
   hostId,
   name: chatId,
   folder: '~/x',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,
@@ -88,7 +88,7 @@ describe('syncTranscripts', () => {
         chatId: 'c1',
         hostId: 'h1',
         permissionMode: 'auto',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 9,
       }),
     );
@@ -97,7 +97,7 @@ describe('syncTranscripts', () => {
   });
 
   it('leaves a running chat alone until it settles', () => {
-    useChatStore.getState().hydrate([{ ...row('c1', 1), activity: 'running' as const }]);
+    useChatStore.getState().hydrate([{ ...row('c1', 1), chatStatus: { state: 'running', since: 0 } }]);
     const sock = open();
     getWs().syncTranscripts();
     expect(replays(sock)).toEqual([]);

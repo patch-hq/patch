@@ -193,6 +193,7 @@ import {
   type AttachmentTarget,
   type PendingAttachment,
 } from '../stores/composerAttachmentStore';
+import { isRunning, statusOf } from '../stores/types';
 
 interface Props {
   chatId: string;
@@ -716,7 +717,7 @@ export function Composer({
   const disabledReason = hostControlDisabledReason(conn, daemon);
   const linkReason = linkDown ? hostControlDisabledReason(conn, daemon) : null;
 
-  const running = row?.activity === 'running';
+  const running = isRunning(row);
   React.useEffect(() => {
     if (running) {
       clearPendingSendTimeout();
@@ -1745,7 +1746,7 @@ export function Composer({
     !edit &&
     modelHasCapability(row?.model, 'interrupt') &&
     (running ||
-      (row?.activity === 'awaiting-permission' && !onlyQuestionsPending) ||
+      (statusOf(row) === 'waiting_for_user' && !onlyQuestionsPending) ||
       pendingSend) &&
     !resolving &&
     draft.trim().length === 0 &&

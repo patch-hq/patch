@@ -20,26 +20,27 @@ interface ChatSummary {
   name?: string;
   folder?: string;
   status?: string;
-  activity?: string;
+  /** The chat's status as the server decided it (spec/12 § Chat status). */
+  chatStatus?: { state: string };
   pinned?: boolean;
   lastUpdated?: number;
 }
 
-const ACTIVE_ACTIVITIES = new Set(['running', 'awaiting-permission']);
+const ACTIVE_STATES = new Set(['running', 'waiting_for_user']);
 
 export function registerManageCommands(program: Command): void {
   // patch list [--active]
   program
     .command('list')
-    .description('List all chats (--active filters to running/awaiting-permission)')
-    .option('--active', 'Only chats that are running or awaiting permission')
+    .description('List all chats (--active filters to running/waiting for the user)')
+    .option('--active', 'Only chats that are running or waiting for the user')
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts & { active?: boolean }) => {
       await run(opts, async () => {
         const t = getTransport(opts);
         const res = await t.get<{ chats: ChatSummary[] }>(pickPath(t, '/chats', '/api/chats'));
         const chats = opts.active
-          ? res.chats.filter((c) => c.activity !== undefined && ACTIVE_ACTIVITIES.has(c.activity))
+          ? res.chats.filter((c) => c.chatStatus !== undefined && ACTIVE_STATES.has(c.chatStatus.state))
           : res.chats;
         if (opts.json) {
           emitJson({ chats });
@@ -55,7 +56,7 @@ export function registerManageCommands(program: Command): void {
           // downstream as 'chat not found' when fed to history/stop/send. The
           // id a user reads here must be the usable one.
           emitText(
-            `${c.chatId}  ${c.status ?? '?'}  ${c.activity ?? '?'}  ${c.folder ?? ''}  ${c.name ?? ''}`,
+            `${c.chatId}  ${c.status ?? '?'}  ${c.chatStatus?.state ?? '-'}  ${c.folder ?? ''}  ${c.name ?? ''}`,
           );
         }
       });

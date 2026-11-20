@@ -25,7 +25,7 @@ function makeRow(chatId: string, hostId: string, name = 'Fix login'): ChatRowT {
     hostId,
     name,
     folder: '/p',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

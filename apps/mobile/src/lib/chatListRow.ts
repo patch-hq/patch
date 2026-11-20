@@ -13,7 +13,9 @@ export function toChatListRow(c: ChatListEntry): ChatListRow {
     name: c.name,
     hostId: c.hostId,
     folder: c.folder,
-    activity: c.activity,
+    // The server's status (spec/05 § Chat status), so a cold start draws the
+    // badge the live stream does.
+    ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
     permissionMode: c.permissionMode,
     status: c.status,
     pinned: c.pinned,

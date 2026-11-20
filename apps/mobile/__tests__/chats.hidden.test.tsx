@@ -50,7 +50,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
   return {
     name: null,
     folder: '',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -85,7 +85,7 @@ const SERVER_HIDDEN = {
   name: 'Background run',
   hostId: 'd1',
   folder: '/jobs',
-  activity: 'running',
+  chatStatus: { state: 'running', since: 0 },
   permissionMode: 'default',
   status: 'active',
   pinned: false,
@@ -224,7 +224,7 @@ describe('Hidden section — rows', () => {
         useChatStore.getState().applyEvent({
           type: 'chat.state',
           chatId: 'c1',
-          activity: 'running',
+          chatStatus: { state: 'running', since: 0 },
           permissionMode: 'default',
           lastUpdated: 10,
           hidden,
@@ -244,7 +244,7 @@ describe('Hidden section — rows', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'default',
       lastUpdated: 10,
     } as never);

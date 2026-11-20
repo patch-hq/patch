@@ -37,7 +37,8 @@ interface ChatSummary {
   name?: string;
   folder?: string;
   status?: string;
-  activity?: string;
+  /** The chat's status as the server decided it (spec/12 § Chat status). */
+  chatStatus?: { state: string };
   pinned?: boolean;
   lastUpdated?: number;
 }
@@ -84,7 +85,7 @@ export function registerChatsCommands(program: Command): void {
           // H1-d4: print the FULL chatId (a truncated id is ambiguous and
           // rejected downstream as 'chat not found').
           emitText(
-            `${c.chatId}  ${c.status ?? '?'}  ${c.activity ?? '?'}  ${c.folder ?? ''}  ${c.name ?? ''}${c.hostId ? `  [${c.hostId.slice(0, 8)}]` : ''}`,
+            `${c.chatId}  ${c.status ?? '?'}  ${c.chatStatus?.state ?? '-'}  ${c.folder ?? ''}  ${c.name ?? ''}${c.hostId ? `  [${c.hostId.slice(0, 8)}]` : ''}`,
           );
         }
       });

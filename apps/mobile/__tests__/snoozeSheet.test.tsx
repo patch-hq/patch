@@ -60,7 +60,7 @@ function row(chatId: string, over: Partial<HydrateRow> = {}): HydrateRow {
     chatId,
     name: chatId,
     folder: FOLDER,
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -106,14 +106,14 @@ function seedThree(): void {
   useChatStore
     .getState()
     .hydrate([
-      row('a', { name: 'Migrate billing', activity: 'running' }),
-      row('b', { name: 'Fix checkout', activity: 'running' }),
+      row('a', { name: 'Migrate billing', chatStatus: { state: 'running', since: 0 } }),
+      row('b', { name: 'Fix checkout', chatStatus: { state: 'running', since: 0 } }),
       row('c', { name: 'Timesheet' }),
     ]);
   useChatStore.getState().applyEvent({
     type: 'chat.state',
     chatId: 'a',
-    activity: 'running',
+    chatStatus: { state: 'running', since: 0 },
     permissionMode: 'auto',
     lastUpdated: 1,
     status: 'active',
@@ -399,7 +399,7 @@ describe('the Chats tab', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId,
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         permissionMode: 'auto',
         lastUpdated: 1,
         status: 'active',

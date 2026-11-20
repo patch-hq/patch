@@ -10,7 +10,7 @@ function row(overrides: Partial<ChatRow> & { chatId: string }): ChatRow {
     name: null,
     hostId: 'd1',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'bypassPermissions',
     status: 'active',
     pinned: false,
@@ -41,10 +41,10 @@ describe('groupByStatus', () => {
   it('buckets in desktop order: Failed, Waiting on you, Ready to review, Working, Done', () => {
     const groups = groupByStatus([
       row({ chatId: 'done', lastReadSeq: 5 }),
-      row({ chatId: 'working', activity: 'running' }),
+      row({ chatId: 'working', chatStatus: { state: 'running', since: 0 } }),
       row({ chatId: 'ready', lastReadSeq: 1 }),
-      row({ chatId: 'waiting', activity: 'awaiting-permission' }),
-      row({ chatId: 'failed', status: 'errored' }),
+      row({ chatId: 'waiting', chatStatus: { state: 'waiting_for_user', since: 0 } }),
+      row({ chatId: 'failed', chatStatus: { state: 'failed', since: 0 } }),
     ]);
     expect(groups.map((g) => g.label)).toEqual([
       'Failed',
@@ -64,16 +64,18 @@ describe('groupByStatus', () => {
 
   it('drops empty buckets and keeps arrival order within one', () => {
     const groups = groupByStatus([
-      row({ chatId: 'b', activity: 'running' }),
-      row({ chatId: 'a', activity: 'running' }),
+      row({ chatId: 'b', chatStatus: { state: 'running', since: 0 } }),
+      row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }),
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0]!.rows.map((r) => r.chatId)).toEqual(['b', 'a']);
   });
 
-  it('puts a just-spawned chat under Working, never Ready to review', () => {
-    const groups = groupByStatus([row({ chatId: 'new', lastSeq: 0, lastReadSeq: 0 })]);
-    expect(groups.map((g) => g.label)).toEqual(['Working']);
+  it('puts a chat under Working only once the server says it is running', () => {
+    const fresh = row({ chatId: 'new', lastSeq: 0, lastReadSeq: 0, chatStatus: undefined });
+    expect(groupByStatus([fresh]).map((g) => g.label)).not.toContain('Working');
+    const running = { ...fresh, chatStatus: { state: 'running', since: 0 } };
+    expect(groupByStatus([running]).map((g) => g.label)).toEqual(['Working']);
   });
 
   it('offers the same two groupings as desktop', () => {

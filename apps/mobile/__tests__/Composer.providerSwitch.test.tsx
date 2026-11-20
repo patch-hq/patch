@@ -115,7 +115,7 @@ function seedChat(model = 'claude-opus-5-5', chatId = 'c1'): void {
       hostId: 'd1',
       name: 'Chat',
       folder: '/home/tom/work',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

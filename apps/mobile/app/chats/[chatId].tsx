@@ -155,7 +155,7 @@ import {
   parseSeqParam,
   rowIndexForSeq,
 } from '../../src/lib/chatJump';
-import { deriveBadge } from '../../src/stores/types';
+import { deriveBadge, isRunning } from '../../src/stores/types';
 import { UnifiedDiff, diffFromToolCall } from '../../src/components/UnifiedDiff';
 import { ChatMarkdown } from '../../src/components/ChatMarkdown';
 import {
@@ -1586,7 +1586,7 @@ function PermissionOutcome({
   const colors = useTheme();
   const running = useChatStore((s) => {
     if (resolved !== 'approve' || entry.permissionCancelled) return false;
-    if (s.chats[chatId]?.activity !== 'running') return false;
+    if (!isRunning(s.chats[chatId])) return false;
     const tl = s.timelines[chatId] ?? NO_TIMELINE;
     const idx = tl.findIndex((e) => e.kind === 'permission' && e.requestId === entry.requestId);
     return idx >= 0 && !tl.slice(idx + 1).some((e) => e.kind === 'tool_result');
@@ -1865,7 +1865,7 @@ function ToolCallItem({
   const phrase =
     labelForRun(ownLabel, [entry.callId])?.summary ?? toolCallSummary(entry.tool, entry.toolArgs);
   const summary = result ? `${phrase} →` : phrase;
-  const chatRunning = useChatStore((s) => s.chats[chatId]?.activity === 'running');
+  const chatRunning = useChatStore((s) => isRunning(s.chats[chatId]));
   const runningSince = !result && chatRunning ? entry.startedAt : undefined;
   // The whole turn's clock beside the call's own, which restarts with every call.
   const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));

@@ -15,7 +15,7 @@ const ENTRY: ChatListEntry = {
   name: 'Chat',
   hostId: 'd1',
   folder: '/f',
-  activity: 'idle',
+  chatStatus: { state: 'idle', since: 0 },
   permissionMode: 'auto',
   status: 'active',
   pinned: false,
@@ -29,7 +29,7 @@ function state(extra: Record<string, unknown>): WireEvent {
   return {
     type: 'chat.state',
     chatId: 'c1',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'auto',
     lastUpdated: 2,
     ...extra,

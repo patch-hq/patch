@@ -45,7 +45,7 @@ function seed(): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -59,7 +59,7 @@ function setLiveCount(n: number): void {
     type: 'chat.state',
     chatId: 'c1',
     permissionMode: 'bypassPermissions',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     lastUpdated: Date.now(),
     backgroundTasks: n,
   });

@@ -12,7 +12,7 @@ const ENTRY: ChatListEntry = {
   name: 'Chat',
   hostId: 'd1',
   folder: '/f',
-  activity: 'idle',
+  chatStatus: { state: 'idle', since: 0 },
   permissionMode: 'auto',
   status: 'active',
   pinned: false,
@@ -47,7 +47,7 @@ describe('stale roster after hide / snooze', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'auto',
       lastUpdated: 101,
       hidden: true,
@@ -67,7 +67,7 @@ describe('stale roster after hide / snooze', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'auto',
       lastUpdated: 101,
       hidden: false,

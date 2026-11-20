@@ -21,7 +21,7 @@ const entry = (status: 'active' | 'archived') =>
     name: 'Chat',
     hostId: 'd1',
     folder: '/f',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'auto',
     status,
     pinned: false,

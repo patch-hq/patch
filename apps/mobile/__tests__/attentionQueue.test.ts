@@ -11,7 +11,7 @@ function row(overrides: Partial<ChatRow> & { chatId: string }): ChatRow {
     name: null,
     hostId: 'd1',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'bypassPermissions',
     status: 'active',
     pinned: false,
@@ -46,12 +46,12 @@ describe('needsAttention', () => {
   });
 
   it('is true for a permission (awaiting-permission) chat', () => {
-    expect(needsAttention(row({ chatId: 'a', activity: 'awaiting-permission' }))).toBe(true);
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'waiting_for_user', since: 0 } }))).toBe(true);
   });
 
   it('is true for an errored chat', () => {
-    expect(needsAttention(row({ chatId: 'a', activity: 'errored' }))).toBe(true);
-    expect(needsAttention(row({ chatId: 'a', status: 'errored' as ChatRow['status'] }))).toBe(true);
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }))).toBe(true);
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }))).toBe(true);
   });
 
   it('is true for a declared question, even once read', () => {
@@ -61,6 +61,7 @@ describe('needsAttention', () => {
           chatId: 'a',
           statusKind: 'question',
           statusDeclared: true,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
           lastUpdated: 5,
           lastSeq: 5,
           lastReadSeq: 9,
@@ -93,7 +94,7 @@ describe('needsAttention', () => {
   });
 
   it('is false for a working (still going) chat', () => {
-    expect(needsAttention(row({ chatId: 'a', activity: 'running' }))).toBe(false);
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }))).toBe(false);
   });
 
   it('is false for an already-read chat with no declared question/report', () => {
@@ -139,7 +140,7 @@ describe('sortAttentionQueue', () => {
     const before = [r('a', { lastUserActivity: 200 }), r('b', { lastUserActivity: 100 })];
     const after = [
       r('a', { lastUserActivity: 200, lastUpdated: 999 }),
-      r('b', { lastUserActivity: 100, activity: 'awaiting-permission', lastUpdated: 999 }),
+      r('b', { lastUserActivity: 100, chatStatus: { state: 'waiting_for_user', since: 0 }, lastUpdated: 999 }),
     ];
     expect(sortAttentionQueue(before).map((x) => x.chatId)).toEqual(['a', 'b']);
     expect(sortAttentionQueue(after).map((x) => x.chatId)).toEqual(['a', 'b']);

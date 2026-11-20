@@ -59,7 +59,7 @@ function seedChat(chatId: string, permissionMode: PermissionMode, model?: string
       chatId,
       name: 'My Chat',
       folder: '~/project',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

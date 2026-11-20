@@ -70,7 +70,7 @@ beforeEach(() => {
       chatId: 'c1',
       name: 'Design chat',
       folder: '~/p',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

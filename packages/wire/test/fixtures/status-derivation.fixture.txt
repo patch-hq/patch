@@ -1,0 +1,7 @@
+const running = row.activity === 'running';
+next = { ...row, activity: 'idle' };
+const assumed = row.optimisticSend;
+const working = (row.openToolCalls ?? 0) > 0;
+if (clearsLimitPause(event.activity2)) settle();
+if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
+if (row.status === 'errored') return 'errored';

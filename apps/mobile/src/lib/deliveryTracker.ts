@@ -191,7 +191,7 @@ export class DeliveryTracker {
         if (event.role === 'assistant') this.resolveChat(event.chatId);
         return;
       case 'chat.state':
-        if (event.activity === 'running') this.resolveChat(event.chatId);
+        if (event.chatStatus?.state === 'running') this.resolveChat(event.chatId);
         return;
       default:
         return;

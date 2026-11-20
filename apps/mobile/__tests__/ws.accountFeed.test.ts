@@ -140,7 +140,7 @@ describe('phone with the account feed', () => {
           name: 'c2',
           hostId: 'h',
           folder: '/f',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'auto',
           status: 'active',
           pinned: false,

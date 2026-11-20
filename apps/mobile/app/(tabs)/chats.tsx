@@ -73,7 +73,7 @@ import { startVoiceNote, releaseVoiceNoteIfHeld } from '../../src/lib/voiceNote'
 import { startVoiceCall } from '../../src/lib/voiceCall';
 import type { ChatRow, DisplayBadge } from '../../src/stores/types';
 import { useChatBadge } from '../../src/lib/chatBadge';
-import { isHidden, isSnoozed } from '../../src/stores/types';
+import { isHidden, isRunning, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
 import {
   getSectionOpen,
@@ -998,7 +998,7 @@ export default function ChatsScreen(): React.ReactElement {
         .filter(needsAttention)
         .map((c) => c.chatId),
     );
-    const activeIsWorking = activeChatId !== null && chats[activeChatId]?.activity === 'running';
+    const activeIsWorking = activeChatId !== null && isRunning(chats[activeChatId]);
     if (
       attentionOnly &&
       activeChatId !== null &&

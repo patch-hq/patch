@@ -71,7 +71,7 @@ beforeEach(async () => {
       chatId: 'c1',
       name: 'My Chat',
       folder: '~/project',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -1102,7 +1102,7 @@ describe('permission request', () => {
         chatId: 'c1',
         name: 'My Chat',
         folder: '~/project',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1175,7 +1175,7 @@ describe('answered permission request (spec/15 § Chat detail)', () => {
   it('an approved call still running shows a spinner; it goes once the result lands', () => {
     request('r1');
     useChatStore.setState((st) => ({
-      chats: { ...st.chats, c1: { ...st.chats['c1']!, activity: 'running' } },
+      chats: { ...st.chats, c1: { ...st.chats['c1']!, chatStatus: { state: 'running', since: 0 } } },
     }));
     const r = renderRN(<ChatDetailScreen />);
     const approve = findAllHost(r.root, (i) => i.type === 'Pressable').find((p) =>
@@ -1270,7 +1270,7 @@ describe('working indicator', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     });
     useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
@@ -1286,7 +1286,7 @@ describe('working indicator', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     });
     useChatStore.getState().appendLocalUserMessage('c1', 'hi', 'L1');
@@ -1360,7 +1360,7 @@ describe('empty states', () => {
         chatId: SPECIAL_THREAD_IDS.speakers,
         name: 'Speakers',
         folder: '',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1377,7 +1377,7 @@ describe('empty states', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     });
     const r = renderRN(<ChatDetailScreen />);

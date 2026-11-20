@@ -5,7 +5,7 @@
 //   - host online/offline state (UDS /healthz when daemon-local, else the
 //     server's GET /api/daemon/healthz which mirrors the host-link state)
 //   - per-host status (GET /api/hosts)
-//   - errored-chat count (chats whose activity === 'errored')
+//   - failed-chat count (chats the server's status says failed)
 //   - the chat history log's replay comparison (daemon-local only)
 //   - pending cron/webhook backlog (buffered fires in <dataDir>/pending/, the
 //     server dispatcher's offline buffer — read on-box when PATCH_DATA_DIR is
@@ -34,7 +34,8 @@ import { buildTransport } from '../transport/index.js';
 interface ChatRow {
   chatId: string;
   name?: string | null;
-  activity?: string;
+  /** The chat's status as the server decided it (spec/12 § Chat status). */
+  chatStatus?: { state: string };
   status?: string;
   hostId?: string | null;
   lastError?: { code: string; message: string; at: number } | null;
@@ -196,11 +197,9 @@ export function registerDoctorCommand(program: Command): void {
         try {
           const t = buildTransport(config, { forceRest: true });
           const res = await t.get<{ chats: ChatRow[] }>('/api/chats');
-          // An errored chat is one whose persisted LIFECYCLE status is
-          // 'errored' (survives restart, visible in `threads list`/`chats get`),
-          // NOT the transient `activity` field (which settles back to 'idle'
-          // after the failed turn).
-          const errored = res.chats.filter((c) => c.status === 'errored');
+          // A failed chat is one the server's status says failed (spec/12 §
+          // Chat status); the server keeps it until a turn starts again.
+          const errored = res.chats.filter((c) => c.chatStatus?.state === 'failed');
           checks['erroredChats'] = errored.length;
           checks['erroredChatsScope'] = 'account-wide (all hosts)';
           // Dedicated field so the user can SEE which chats errored and why,

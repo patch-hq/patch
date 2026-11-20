@@ -12,7 +12,7 @@ function row(backgroundTasks?: number | null): ChatListRow {
     name: 'a',
     hostId: 'd1',
     folder: '/f',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'default',
     status: 'active',
     pinned: false,

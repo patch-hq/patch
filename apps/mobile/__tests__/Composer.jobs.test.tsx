@@ -55,7 +55,7 @@ beforeEach(() => {
       hostId: 'd1',
       name: 'Chat',
       folder: 'work',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

@@ -14,7 +14,7 @@ function row(overrides: Partial<ChatRow>): ChatRow {
     name: 'One',
     hostId: 'd1',
     folder: '~/x',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'auto',
     status: 'active',
     pinned: false,
@@ -107,52 +107,41 @@ describe('deriveBadge — monitoring', () => {
   });
 });
 
-describe('deriveBadge — errored', () => {
-  it('ranks above working and below permission', () => {
-    expect(deriveBadge(row({ status: 'errored' }))).toBe('errored');
-    expect(deriveBadge(row({ activity: 'errored' }))).toBe('errored');
-    expect(deriveBadge(row({ status: 'errored', activity: 'running' }))).toBe('errored');
-    expect(deriveBadge(row({ status: 'errored', activity: 'awaiting-permission' }))).toBe(
-      'permission',
-    );
+describe('deriveBadge — failed is the server saying so', () => {
+  it('a failed status is errored; the lifecycle flag alone is not', () => {
+    expect(deriveBadge(row({ chatStatus: { state: 'failed', since: 0 } }))).toBe('errored');
+    expect(deriveBadge(row({ status: 'errored' }))).toBe('read');
   });
 
   it('outranks background and monitoring', () => {
-    expect(deriveBadge(row({ status: 'errored', backgroundTasks: 1 }))).toBe('errored');
+    const failed = { chatStatus: { state: 'failed', since: 0 } };
+    expect(deriveBadge(row({ ...failed, backgroundTasks: 1 }))).toBe('errored');
     expect(
       deriveBadge(
-        row({
-          status: 'errored',
-          pendingWake: { message: 'check back', fireAt: 1, notAfter: undefined },
-        }),
+        row({ ...failed, pendingWake: { message: 'check back', fireAt: 1, notAfter: undefined } }),
       ),
     ).toBe('errored');
   });
 });
 
-describe('deriveBadge — parity with web for the permission signals', () => {
+describe('deriveBadge — the phone never derives waiting on its own', () => {
   const perm = { requestId: 'r1', tool: 'Bash', description: undefined, args: {} };
 
-  it('a pending permission outlives activity going idle', () => {
-    expect(deriveBadge(row({ activity: 'idle', pendingPermissions: [perm] }))).toBe('permission');
+  it('a pending card does not override the server status', () => {
+    expect(
+      deriveBadge(row({ chatStatus: { state: 'idle', since: 0 }, pendingPermissions: [perm] })),
+    ).toBe('read');
+    expect(
+      deriveBadge(row({ chatStatus: { state: 'failed', since: 0 }, pendingPermissions: [perm] })),
+    ).toBe('errored');
   });
 
-  it('a pending permission beats errored', () => {
-    expect(deriveBadge(row({ activity: 'errored', pendingPermissions: [perm] }))).toBe(
+  it('waiting for the user is permission, whatever kind of question it is', () => {
+    const q = { statusKind: 'question', statusDeclared: true } as const;
+    expect(deriveBadge(row({ ...q, chatStatus: { state: 'waiting_for_user', since: 0 } }))).toBe(
       'permission',
     );
-  });
-
-  it('a DECLARED question is permission, even over errored/running', () => {
-    const q = { statusKind: 'question', statusDeclared: true } as const;
-    expect(deriveBadge(row(q))).toBe('permission');
-    expect(deriveBadge(row({ ...q, activity: 'running' }))).toBe('permission');
-    expect(deriveBadge(row({ ...q, activity: 'errored' }))).toBe('permission');
-  });
-
-  it('a GENERATED question does not read as permission', () => {
-    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: false }))).toBe('read');
-    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: null }))).toBe('read');
+    expect(deriveBadge(row(q))).toBe('read');
   });
 
   it('a declared report is not permission', () => {
@@ -165,12 +154,9 @@ describe('deriveBadge — mobile read/unread and full precedence', () => {
     expect(deriveBadge(row({ lastUpdated: 5, lastSeq: 5, lastReadSeq: 5 }))).toBe('read');
     expect(deriveBadge(row({ lastUpdated: 5, lastSeq: 5, lastReadSeq: 9 }))).toBe('read');
   });
-  it('open tool calls make a quiet chat working', () => {
-    expect(deriveBadge(row({ openToolCalls: 1 }))).toBe('working');
-  });
   it('working beats unread', () => {
     expect(
-      deriveBadge(row({ activity: 'running', lastUpdated: 5, lastSeq: 5, lastReadSeq: 0 })),
+      deriveBadge(row({ chatStatus: { state: 'running', since: 0 }, lastUpdated: 5, lastSeq: 5, lastReadSeq: 0 })),
     ).toBe('working');
   });
   it('background beats monitoring beats read', () => {

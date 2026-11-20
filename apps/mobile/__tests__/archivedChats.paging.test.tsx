@@ -21,7 +21,7 @@ function entry(i: number) {
     hostId: 'h',
     permissionMode: 'default',
     folder: '/f',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'archived',
     pinned: false,
     pinnedAt: null,

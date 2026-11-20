@@ -46,7 +46,7 @@ beforeEach(async () => {
       chatId: 'c1',
       name: 'My Chat',
       folder: '~/project',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

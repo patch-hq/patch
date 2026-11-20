@@ -4,7 +4,6 @@
 // not mobile -> web).
 
 import type {
-  ChatActivity,
   ChatContextUsage,
   ChatStatus,
   EffortLevel,
@@ -27,7 +26,6 @@ export interface ChatRow {
    */
   hostId: string;
   folder: string;
-  activity: ChatActivity;
   /**
    * The EFFECTIVE permission mode this chat's next turn will use, as the host
    * resolved it on `chat.state` (spec/02 § Permission mode). Never re-derived on
@@ -66,10 +64,6 @@ export interface ChatRow {
    * is unread when `lastSeq > lastReadSeq`; -1 until first opened.
    */
   lastReadSeq: number;
-  /** Tool calls started but not yet resulted; a positive count means the chat is working. */
-  openToolCalls?: number;
-  /** Set on a send into a settled chat so the row reads `working` before the host's first state frame; cleared by that frame or a failed delivery. */
-  optimisticSend?: boolean;
   preview: string | null;
   pendingPermissions: PendingPermission[];
   lastSeq: number;
@@ -321,43 +315,34 @@ export type DisplayBadge =
  *  adapted to the fields this row carries — see spec/14-design-web.md §
  *  Status badges for the full rationale behind the ordering. */
 export function deriveBadge(row: ChatRow): DisplayBadge {
-  // The server's status decides what the chat is doing (spec/05 § Chat
+  // What the chat is doing is the server's status alone (spec/05 § Chat
   // status); the phone adds only its read mark and the quiet work reported
-  // alongside.
+  // alongside. Before the server's first word no status is shown.
   const server = row.chatStatus?.state;
-  if (server !== undefined) {
-    if (server === 'waiting_for_user') return 'permission';
-    if (server === 'failed') return 'errored';
-    if (server === 'interrupted') return 'interrupted';
-    if (server === 'waiting_for_sign_in') return 'signin';
-    if (server === 'running') return 'working';
-    if (row.lastSeq > row.lastReadSeq) return 'done';
-    if (server === 'paused') return 'paused';
-    if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
-      return 'away';
-    }
-    if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
-    if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
-    if (row.pendingWake) return 'monitoring';
-    return 'read';
-  }
-  // A pending permission outlives the transient `awaiting-permission` flag, and a
-  // DECLARED question (`patch_ask_human`) is the same "blocked on the user" fact;
-  // a generated guess (`statusDeclared` falsy) is not.
-  if (row.pendingPermissions.length > 0) return 'permission';
-  if (row.activity === 'awaiting-permission') return 'permission';
-  if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
-  if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend) {
-    return 'working';
-  }
-  // Unread beats a background job or self-wake loop.
+  if (server === 'waiting_for_user') return 'permission';
+  if (server === 'failed') return 'errored';
+  if (server === 'interrupted') return 'interrupted';
+  if (server === 'waiting_for_sign_in') return 'signin';
+  if (server === 'running') return 'working';
   if (row.lastSeq > row.lastReadSeq) return 'done';
-  // Running sub-agents get their own state and icon; they win over plain background tasks.
+  if (server === 'paused') return 'paused';
+  if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
+    return 'away';
+  }
   if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   if (row.pendingWake) return 'monitoring';
   return 'read';
+}
+
+/** The chat's status as the server sent it, or undefined before its first word. */
+export function statusOf(row: { chatStatus?: { state: string } } | undefined): string | undefined {
+  return row?.chatStatus?.state;
+}
+
+/** The server says a turn is in flight on this chat. */
+export function isRunning(row: { chatStatus?: { state: string } } | undefined): boolean {
+  return statusOf(row) === 'running';
 }
 
 /** What surrounds a goal when it is set from a surface (spec/04 § Goals). */

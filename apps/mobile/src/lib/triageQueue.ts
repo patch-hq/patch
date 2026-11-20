@@ -9,11 +9,10 @@ import type { ChatEventEntry } from '../stores/chatStore';
 /** A chat the user can answer with a line of text: finished-unread, or left on a question / report. */
 export function awaitsReply(row: ChatRow): boolean {
   if (row.status !== 'active' || row.hidden === true) return false;
-  return (
-    deriveBadge(row) === 'done' ||
-    (row.statusKind === 'question' && row.statusDeclared === true) ||
-    row.statusKind === 'report'
-  );
+  // Waiting on the user with no approval pending is the agent's own question,
+  // as the server says (spec/05 § Chat status); a reply answers it.
+  const asking = row.chatStatus?.state === 'waiting_for_user' && row.pendingPermissions.length === 0;
+  return deriveBadge(row) === 'done' || asking || row.statusKind === 'report';
 }
 
 /**
