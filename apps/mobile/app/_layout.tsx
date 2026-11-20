@@ -4,7 +4,8 @@ import { CallStrip } from '../src/components/CallStrip';
 import { RemoteCallPill } from '../src/components/RemoteCallPill';
 import React from 'react';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, useRootNavigationState, useRouter } from 'expo-router';
+import { Stack, useRootNavigationState, useRouter, type ErrorBoundaryProps } from 'expo-router';
+import { AppErrorScreen } from '../src/components/AppErrorScreen';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
@@ -53,6 +54,11 @@ import { useBatchStore } from '../src/stores/batchStore';
 // Before anything makes a request: a device paired through a relay reaches its
 // server by a placeholder address this teaches `fetch` and `WebSocket` to carry.
 installRelayTransport();
+
+/** expo-router renders this instead of a white screen when the route tree throws. */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps): React.ReactElement {
+  return <AppErrorScreen error={error} retry={retry} />;
+}
 
 /** Every in-app destination this layout can be asked to open. */
 type NavTarget =
