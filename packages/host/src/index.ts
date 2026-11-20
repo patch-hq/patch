@@ -8487,7 +8487,15 @@ export async function handleServerEvent(
     // with a real stream event at seq 0. Unknown chats get OUT_OF_BAND_SEQ
     // (-1) — a marker surfaces won't treat as a replayable stream event.
     const seq = daemon.allocErrorSeq(chatId);
-    sender({ type: 'chat.error', chatId, error: { code, message }, seq });
+    sender({
+      type: 'chat.error',
+      chatId,
+      error: { code, message },
+      seq,
+      // A message this host would not take at all: the server stops showing
+      // it as held for an offline host (spec/12 § Chat status).
+      ...(event.type === 'chat.input' ? { rejectedLocalId: event.localId } : {}),
+    });
   }
 }
 

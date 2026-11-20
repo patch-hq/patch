@@ -149,7 +149,7 @@ export interface InboundHostLinkOptions {
   /** A held message expired undelivered (after the link has told surfaces). */
   onHeldExpired?: (expired: readonly ExpiredHeldInput[]) => void;
   /** A person's message to this chat is now held for its offline host (spec/12 § Chat status). */
-  onHeld?: (chatId: string) => void;
+  onHeld?: (chatId: string, localId: string) => void;
   /**
    * Which host a chat lives on (the server's ChatRegistry mirror). A frame
    * that names no host but names a chat belongs to that chat's host —
@@ -725,7 +725,7 @@ export class InboundHostLink implements HostLink {
     buf.push(event);
     if (event.type === 'chat.input') {
       this.opts.heldInputs?.add(hostId, surfaceId, event);
-      this.opts.onHeld?.(event.chatId);
+      this.opts.onHeld?.(event.chatId, event.localId);
     }
     if (buf.length > PER_SURFACE_BUFFER_CAP) {
       const dropped = buf.shift();

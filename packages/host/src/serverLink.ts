@@ -691,6 +691,13 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
  * resent to a different server is shaped for that one.
  */
 function stateShapedFor(event: WireEvent, serverDecidesStatus: boolean): WireEvent {
+  // Which held message an error refused: a fact only such a server reads.
+  if (event.type === 'chat.error') {
+    if (serverDecidesStatus || event.rejectedLocalId === undefined) return event;
+    const { rejectedLocalId: _r, ...old } = event;
+    void _r;
+    return old as WireEvent;
+  }
   if (event.type !== 'chat.state') return event;
   if (serverDecidesStatus) {
     const { activity: _a, lastError: _e, ...facts } = event;

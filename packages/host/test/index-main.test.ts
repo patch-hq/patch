@@ -209,6 +209,9 @@ function freePort(): Promise<number> {
   });
 }
 
+/** Whether the fake server says it decides chat status itself (`serverStatus`). */
+let fakeServerDecidesStatus = false;
+
 interface FakeServer {
   port: number;
   url: string;
@@ -335,6 +338,7 @@ async function startFakeServer(): Promise<FakeServer> {
           accountId: 'acct-1',
           surfaceId: 'daemon-1',
           hostOutbox: true,
+          ...(fakeServerDecidesStatus ? { serverStatus: true } : {}),
         }),
       );
       current?.send(JSON.stringify({ type: 'host.online', hostId: 'd1' }));
@@ -677,6 +681,36 @@ describe('src/index.ts main() — full host boot', () => {
       split.mockRestore();
     } finally {
       await boot.cleanup();
+    }
+  });
+
+  // spec/12 § Chat status: a message the host will not take at all is named on
+  // its error, so a server holding it for this host stops showing it queued —
+  // but only to a server that reads the field; an older one gets the old error.
+  it('names the refused message on its chat.error, to a server that decides status and not to one that does not', async () => {
+    for (const decides of [true, false]) {
+      fakeServerDecidesStatus = decides;
+      const boot = await bootMain();
+      try {
+        await boot.fakeServer.waitForAuthed();
+        boot.fakeServer.send({
+          type: 'chat.input',
+          chatId: 'no-such-chat',
+          message: 'held while you were away',
+          localId: 'L-refused',
+        });
+        const err = await boot.fakeServer.waitForFrame(
+          (e) => e.type === 'chat.error' && e.chatId === 'no-such-chat',
+        );
+        if (decides) expect(err).toMatchObject({ rejectedLocalId: 'L-refused' });
+        else expect(err).not.toHaveProperty('rejectedLocalId');
+        const state = boot.fakeServer.received.find((e) => e.type === 'chat.state');
+        if (state && decides) expect(state).not.toHaveProperty('activity');
+        if (state && !decides) expect(state).toHaveProperty('activity');
+      } finally {
+        fakeServerDecidesStatus = false;
+        await boot.cleanup();
+      }
     }
   });
 
