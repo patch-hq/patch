@@ -13,7 +13,6 @@ import type { SharedAcpAccount, WireEvent } from '@patch/wire';
 import { AcpBackend, AcpLimitError } from '../src/acpBackend.js';
 import { AcpAccounts } from '../src/acpAccounts.js';
 import { AcpRegistry } from '../src/acpRegistry.js';
-import { CodexHistory } from '../src/codexHistory.js';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { harnessTraitsForModel } from '../src/harnesses.js';
@@ -95,11 +94,7 @@ describe('a chat on an ACP agent with two accounts', () => {
       clientVersion: '1.0.0',
     });
     registry.setConfigured([fakeAgent({ apiKeyEnv: 'FAKE_ACP_KEY' })]);
-    const backend = new AcpBackend(
-      registry,
-      new CodexHistory(join(root, 'history'), 'acp'),
-      '1.0.0',
-    );
+    const backend = new AcpBackend(registry, '1.0.0');
     const known = new Set<string>();
     const events: WireEvent[] = [];
     const ranOn: Array<string | undefined> = [];
