@@ -34,8 +34,10 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
@@ -60,6 +62,11 @@ import {
   type RecordMatch,
   type RecordMessage,
 } from './record-search.js';
+import {
+  UserMessageCollector,
+  userMessagesInFile,
+  type UserMessageRow,
+} from './record-activity.js';
 
 const MAX_EVENTS_PER_CHAT = 50_000;
 
@@ -628,6 +635,36 @@ export class ChatLogStore {
       if (m) messages.push([seq, m]);
     }
     return matchMessages(messages, terms);
+  }
+
+  /**
+   * Every user message with `since <= createdAt <= until` across every chat the
+   * record holds, oldest first (spec/06 § `patch_activity`). A chat file last
+   * written before `since` cannot hold one, so it is skipped unread.
+   */
+  userMessages(since: number, until: number): UserMessageRow[] {
+    const rows: UserMessageRow[] = [];
+    if (this.dir === null) {
+      for (const chatId of this.chats.keys()) {
+        const collector = new UserMessageCollector(since, until, rows);
+        for (const event of this.read(chatId, -1)) collector.take(event);
+      }
+    } else {
+      for (const name of readdirSync(this.dir)) {
+        if (!name.endsWith('.jsonl')) continue;
+        const path = join(this.dir, name);
+        let mtimeMs: number;
+        try {
+          mtimeMs = statSync(path).mtimeMs;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw err;
+        }
+        if (mtimeMs < since) continue;
+        userMessagesInFile(path, since, until, rows);
+      }
+    }
+    return rows.sort((a, b) => a.ts - b.ts);
   }
 
   private pathOf(chatId: string): string {

@@ -153,7 +153,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_peek',
     category: 'patch',
     description:
-      "Reads another chat's live state and recent event stream without messaging it (read-only).",
+      "Reads another chat's status and latest entries from the server, on any host, without messaging it (read-only).",
     params: 'chatId: string, limit?: number',
   },
   {

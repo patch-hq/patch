@@ -2330,27 +2330,11 @@ export class Daemon {
   /** The fork each running turn opened, so its new session is recorded as one. */
   private readonly runningForks = new Map<string, ForkRun>();
   /**
-   * Per-chat ring of the most-recent emitted wire events. Backs `patch_peek`
-   * (spec/06): peek returns the recent wire-event slice so the agent can see
-   * "what's going on right now" without paging through history. Hard cap per
-   * chat is the peek ceiling (200) — peek never needs more, and patch_history
-   * exists for deeper retrospection. Only chat-scoped stream events are kept
-   * (those carry a `chatId` and a `seq`); daemon-global events (daemon.online,
-   * etc.) are not chat-addressable and are skipped.
-   */
-  private readonly recentEvents = new Map<string, WireEvent[]>();
-  /**
    * spec/14 § Tool runs — per chat, the run of groupable tool calls currently
    * open (by the rule surfaces fold runs with, `isGroupableToolCall`) and the
    * prose it sits in, which is what its summary is written from.
    */
   private readonly toolRuns = new Map<string, ToolRunState>();
-  /**
-   * chatIds whose ring has dropped at least one event past the cap — so older
-   * events exist on disk (reachable via patch_history) even when the returned
-   * peek slice equals the whole ring. Keeps `truncated` honest.
-   */
-  private readonly recentEventsDropped = new Set<string>();
   /**
    * spec/20-hooks.md § On the agent's response — a deterministic (no model
    * call) per-chat tally of the CURRENT turn's tool calls by tool name,
@@ -2368,7 +2352,6 @@ export class Daemon {
   /** Chats whose current goal-evaluation deferral has already been logged. */
   private readonly goalDeferLogged = new Set<string>();
   private readonly goalWatchPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private static readonly RECENT_EVENTS_CAP = 200;
   /** OAuth gate run before every query. See HostOptions.resolveOAuth. */
   private readonly resolveOAuth: NonNullable<HostOptions['resolveOAuth']>;
   /**
@@ -8737,9 +8720,6 @@ export class Daemon {
       updatedAt: this.opts.now(),
     }));
     this.branchIds.delete(chatId);
-    // The ring holds the track we just left — drop it so a replay renders the
-    // newly-active transcript alone.
-    this.recentEvents.delete(chatId);
     this.emitBranches(chatId);
     this.emitState(chatId);
   }
@@ -9808,7 +9788,6 @@ export class Daemon {
     this.chatState.delete(chatId);
     this.hydratedFromDisk.delete(chatId);
     this.seenLocalIds.delete(chatId);
-    this.recentEvents.delete(chatId);
     this.movingOut.delete(chatId);
     this.opts.logger.info({ chatId, keptAt }, 'chat moved to another host; retired here');
     return keptAt;
@@ -10403,17 +10382,6 @@ export class Daemon {
       ...(jobTrigger ? { jobTrigger } : {}),
     });
     this.persistPendingTurns(chatId);
-
-    // This turn opens a NEW track (fork / side thread). The live tail in the
-    // ring belongs to the track being left — including a turn that was still
-    // running when the fork was requested and queued behind it — so a replay of
-    // the new track must not top its transcript up with those. Dropped HERE, as
-    // the new track actually starts, not when the fork was requested: between
-    // those two moments the old track can still be emitting into the ring.
-    if (fork) {
-      this.recentEvents.delete(chatId);
-      this.recentEventsDropped.delete(chatId);
-    }
 
     // The user turn is a `chat.message` like any other (spec/03 § Session
     // events: `{chatId, role, content, seq}`), so it is emitted HERE, live, at
@@ -15473,21 +15441,9 @@ export class Daemon {
         this.recordCanonicalSeq(chatId, identityHash(key), seq);
       }
     }
-    if (typeof chatId === 'string' && chatId.length > 0 && typeof seq === 'number') {
-      let ring = this.recentEvents.get(chatId);
-      if (!ring) {
-        ring = [];
-        this.recentEvents.set(chatId, ring);
-      }
-      ring.push(event);
-      if (ring.length > Daemon.RECENT_EVENTS_CAP) {
-        ring.splice(0, ring.length - Daemon.RECENT_EVENTS_CAP);
-        this.recentEventsDropped.add(chatId);
-      }
-    }
     // spec/02 § Native subagent dispatch — a `patch_delegate` subagent is
-    // invisible to the user: the local bookkeeping above (ring buffer, seq
-    // index, history below) still runs, so its own transcript is intact for
+    // invisible to the user: the local bookkeeping above (seq index, history
+    // below) still runs, so its own transcript is intact for
     // the read-only viewer and for `maybeSettleDelegate` to read back, but
     // the event never reaches the server. The server only ever creates a
     // sidebar row from `chat.spawned` (chat-registry.ts), so a subagent that
@@ -15689,31 +15645,6 @@ export class Daemon {
         stamp({ error: message });
       },
     );
-  }
-
-  /**
-   * Return the most-recent `limit` chat-scoped wire events for a chat plus a
-   * `truncated` flag indicating older events exist beyond the returned slice.
-   * Backs patch_peek (spec/06). `limit` is clamped to [1, 200].
-   */
-  getRecentEvents(chatId: string, limit: number): { events: WireEvent[]; truncated: boolean } {
-    const clamped = Math.max(1, Math.min(Daemon.RECENT_EVENTS_CAP, Math.floor(limit)));
-    const ring = this.recentEvents.get(chatId) ?? [];
-    const events = ring.slice(Math.max(0, ring.length - clamped));
-    // truncated when the returned slice is smaller than the ring (more recent
-    // events held back by `limit`), OR the ring has dropped older events past
-    // the cap, OR the ring is COLD: it only ever holds what this process has
-    // emitted, so a chat hydrated from disk and not touched since has an empty
-    // ring and a full transcript. Reporting `truncated: false` there said "this
-    // chat is empty" about a chat with 23 turns, and an agent acted on it.
-    // `nextSeq` is the number of events the chat has ever emitted, so it is the
-    // honest measure of whether anything is being held back.
-    const everEmitted = this.chatState.get(chatId)?.nextSeq ?? 0;
-    const truncated =
-      ring.length > events.length ||
-      this.recentEventsDropped.has(chatId) ||
-      everEmitted > events.length;
-    return { events, truncated };
   }
 
   /**

@@ -897,18 +897,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ],
     sessionsTruncated: false,
   },
-  'patch.activity.read.request': {
-    type: 'patch.activity.read.request',
-    requestId: 'r1',
-    since: 1_000,
-    until: 5_000,
-    limit: 200,
-  },
-  'patch.activity.read.response': {
-    type: 'patch.activity.read.response',
-    requestId: 'r1',
-    messages: [{ chatId: 'c2', text: 'is it late', ts: 2_000 }],
-  },
   'patch.browser_use.request': {
     type: 'patch.browser_use.request',
     requestId: 'r1',
@@ -935,27 +923,16 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     samples: [{ ts: 2_000, accountId: 'a1', label: 'Work', week: 0.4, weekResetsAt: 9_000 }],
     chats: [{ chatId: 'c1', name: 'A chat', tokens: 1200, costUsd: 0.5, turns: 3 }],
   },
-  'patch.tool_log.read.request': {
-    type: 'patch.tool_log.read.request',
-    requestId: 'r1',
-    since: 1_000,
-    until: 5_000,
-    limit: 200,
-  },
-  'patch.tool_log.read.response': {
-    type: 'patch.tool_log.read.response',
-    requestId: 'r1',
-    hostId: 'host-a',
-    entries: [
-      {
-        ts: 2_000,
-        tool: 'patch_send_to',
-        callerChatId: 'c1',
-        targetChatId: 'c2',
-        durationMs: 5,
-        ok: true,
-      },
-    ],
+  'patch.tool_log.entry': {
+    type: 'patch.tool_log.entry',
+    entry: {
+      ts: 2_000,
+      tool: 'patch_send_to',
+      callerChatId: 'c1',
+      targetChatId: 'c2',
+      durationMs: 5,
+      ok: true,
+    },
   },
   'patch.stop': { type: 'patch.stop', sourceChatId: 'c1', targetChatId: 'c2' },
   'patch.stop.response': {

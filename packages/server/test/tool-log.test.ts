@@ -1,18 +1,17 @@
-// Settings → Activity ("things agents did"): GET /api/tool-log fans out
-// `patch.tool_log.read.request` to every online host and merges the
-// answers, same shape as `activity.test.ts`'s `/api/activity`.
+// Settings → Activity ("things agents did"): each host sends its cross-chat
+// tool calls through its outbox (`patch.tool_log.entry`) and the server keeps
+// them, so GET /api/tool-log reads the same whether or not a host is online.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
-import type { PatchToolLogReadRequestEvent, WireEvent } from '@patch/wire';
+import type { ToolLogEntry, WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
-
-const ONLINE_HOSTS = ['d1', 'host-a', 'host-b'];
+import { ToolLog } from '../src/tool-log.js';
 
 let dir: string;
 beforeEach(() => {
@@ -34,8 +33,6 @@ async function setup() {
     label: 'web',
   });
   const hostLink = new InProcessHostLink();
-  hostLink.addOnlineHost('host-a');
-  hostLink.addOnlineHost('host-b');
   const built = await buildAll({
     logger: false as never,
     registry,
@@ -49,77 +46,54 @@ async function setup() {
       url: `/api/tool-log?${qs}`,
       headers: { authorization: `Bearer ${jwt}` },
     });
-  const readRequests = (): Array<{ hostId?: string; event: PatchToolLogReadRequestEvent }> =>
-    hostLink.sent.filter(
-      (s): s is { surfaceId: string; hostId?: string; event: PatchToolLogReadRequestEvent } =>
-        s.event.type === 'patch.tool_log.read.request',
-    );
-  const answerAll = async (
-    byHost: Record<
-      string,
-      Array<{
-        ts: number;
-        tool: string;
-        callerChatId?: string;
-        targetChatId?: string;
-        durationMs: number;
-        ok: boolean;
-        err?: string;
-      }>
-    >,
-  ) => {
-    for (let i = 0; i < 100 && readRequests().length < ONLINE_HOSTS.length; i++) {
-      await new Promise((r) => setTimeout(r, 5));
-    }
-    for (const r of readRequests()) {
-      hostLink.injectHostEvent({
-        type: 'patch.tool_log.read.response',
-        requestId: r.event.requestId,
-        hostId: r.hostId,
-        entries: byHost[r.hostId!] ?? [],
-      } as WireEvent);
-    }
+  /** A host sending one entry, as its outbox would. */
+  const send = (hostId: string, entry: ToolLogEntry) => {
+    hostLink.setHostId(hostId);
+    hostLink.injectHostEvent({ type: 'patch.tool_log.entry', entry } as WireEvent);
   };
-  return { built, hostLink, get, readRequests, answerAll };
+  return { built, hostLink, get, send };
 }
 
 describe('GET /api/tool-log', () => {
-  it('merges every online host’s tool-call log, oldest first, each entry carrying its host', async () => {
-    const { built, get, answerAll, readRequests } = await setup();
+  it('reads every host’s entries from the server’s log, oldest first, each carrying its host', async () => {
+    const { built, hostLink, get, send } = await setup();
     try {
-      const pending = get('since=1000&until=9000');
-      await answerAll({
-        'host-a': [
-          { ts: 3000, tool: 'patch_send_to', targetChatId: 'c-2', durationMs: 5, ok: true },
-        ],
-        'host-b': [
-          {
-            ts: 2000,
-            tool: 'patch_peek',
-            callerChatId: 'c-1',
-            targetChatId: 'c-2',
-            durationMs: 3,
-            ok: true,
-          },
-        ],
+      send('host-a', {
+        ts: 3000,
+        tool: 'patch_send_to',
+        callerChatId: 'c1',
+        targetChatId: 'c2',
+        durationMs: 5,
+        ok: true,
       });
-      const res = await pending;
+      send('host-b', {
+        ts: 2000,
+        tool: 'patch_peek',
+        targetChatId: 'c3',
+        durationMs: 4,
+        ok: false,
+        err: 'chat_not_found',
+      });
+      // No host is asked: the log reads the same with every host gone.
+      hostLink.setStatus('offline');
+      const res = await get('since=1000&until=9000');
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         entries: [
           {
             ts: 2000,
             tool: 'patch_peek',
-            callerChatId: 'c-1',
-            targetChatId: 'c-2',
-            durationMs: 3,
-            ok: true,
+            targetChatId: 'c3',
+            durationMs: 4,
+            ok: false,
+            err: 'chat_not_found',
             hostId: 'host-b',
           },
           {
             ts: 3000,
             tool: 'patch_send_to',
-            targetChatId: 'c-2',
+            callerChatId: 'c1',
+            targetChatId: 'c2',
             durationMs: 5,
             ok: true,
             hostId: 'host-a',
@@ -127,35 +101,27 @@ describe('GET /api/tool-log', () => {
         ],
         truncated: false,
       });
-      expect(
-        readRequests()
-          .map((r) => r.hostId)
-          .sort(),
-      ).toEqual(ONLINE_HOSTS.slice().sort());
+      expect(readFileSync(join(dir, 'tool-calls.jsonl'), 'utf8').trim().split('\n')).toHaveLength(
+        2,
+      );
     } finally {
       await built.app.close();
     }
   });
 
   it('truncates at limit and resumes from the cursor', async () => {
-    const { built, get, answerAll } = await setup();
+    const { built, get, send } = await setup();
     try {
-      const pending = get('since=0&until=9000&limit=1');
-      await answerAll({
-        'host-a': [
-          { ts: 1000, tool: 'patch_peek', durationMs: 1, ok: true },
-          { ts: 3000, tool: 'patch_send_to', durationMs: 2, ok: false, err: 'rate_limited' },
-        ],
-      });
-      const body = (await pending).json() as {
-        entries: Array<{ tool: string }>;
-        truncated: boolean;
-        nextCursor: number;
-      };
-      expect(body.entries.map((e) => e.tool)).toEqual(['patch_peek']);
-      expect(body.truncated).toBe(true);
-      // `+1`: the next page must not re-include the last entry returned.
-      expect(body.nextCursor).toBe(1001);
+      for (const ts of [1000, 2000, 3000]) {
+        send('host-a', { ts, tool: 'patch_peek', durationMs: 1, ok: true });
+      }
+      const first = (await get('since=0&until=9000&limit=2')).json();
+      expect(first.entries.map((e: { ts: number }) => e.ts)).toEqual([1000, 2000]);
+      expect(first.truncated).toBe(true);
+      expect(first.nextCursor).toBe(2001);
+      const second = (await get(`since=0&until=9000&limit=2&cursor=${first.nextCursor}`)).json();
+      expect(second.entries.map((e: { ts: number }) => e.ts)).toEqual([3000]);
+      expect(second.truncated).toBe(false);
     } finally {
       await built.app.close();
     }
@@ -170,5 +136,32 @@ describe('GET /api/tool-log', () => {
     } finally {
       await built.app.close();
     }
+  });
+});
+
+describe('ToolLog', () => {
+  it('keeps only its newest entries once the file passes its size cap', () => {
+    const log = new ToolLog({
+      dataDir: dir,
+      logger: { warn: () => undefined },
+      maxFileBytes: 200,
+      keepEntries: 2,
+      now: () => 10_000,
+    });
+    for (let i = 0; i < 10; i++) {
+      log.append({ ts: 1000 + i, tool: 'patch_peek', durationMs: 1, ok: true, hostId: 'h' });
+    }
+    const all = log.query({ since: 0, until: 10_000 });
+    expect(all.entries.length).toBeLessThanOrEqual(3);
+    expect(all.entries.at(-1)!.ts).toBe(1009);
+  });
+
+  it('ignores frames from no host', () => {
+    const log = new ToolLog({ logger: { warn: () => undefined } });
+    log.observe(
+      { type: 'patch.tool_log.entry', entry: { ts: 1, tool: 'x', durationMs: 0, ok: true } },
+      null,
+    );
+    expect(log.query({ since: 0, until: 10 }).entries).toEqual([]);
   });
 });

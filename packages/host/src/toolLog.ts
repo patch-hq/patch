@@ -1,113 +1,44 @@
 // Cross-chat tool-call log — "things agents did" (Settings → Activity).
 //
-// Every `patch_*` cross-chat tool call already reaches `control.ts`'s
-// `toolLogger` hook (tool, callerChatId, targetChatId, durationMs, ok, err).
-// Until now that hook only reached the structured process logger
-// (`daemon.log`), which nothing in the product reads back — so a chat that
-// got unhidden by a stray `patch_send_to` with no caller context had no
-// durable, queryable record of what happened or who was asking. This module
-// gives that hook a second, durable destination: one bounded, append-only
-// JSONL file per host, read the same way job runs and webhook logs are
-// (`packages/server/src/jobs/logs.ts`).
+// Every `patch_*` cross-chat tool call reaches `control.ts`'s `toolLogger`
+// hook, which sends it to the server as a `patch.tool_log.entry` through the
+// host outbox (spec/01 § Host outbox). The server keeps the account's log, so
+// it reads the same whether or not this host is online.
 //
-//   <patchHome>/logs/tool-calls.jsonl
-//
-// Not fsync'd per line — this is observability, not transactional state,
-// same reasoning as job runs.jsonl. Trimmed on write rather than left to grow
-// forever: once the file passes MAX_FILE_BYTES it is rewritten holding only
-// its newest KEEP_ENTRIES lines.
+// Hosts used to keep their own `<patchHome>/logs/tool-calls.jsonl` and answer
+// the server's reads of it. `importLegacyToolLog` hands what is left in that
+// file to the outbox once, then removes it.
 
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ToolLogEntry, WireEvent } from '@patch/wire';
 
-export interface ToolLogEntry {
-  ts: number;
-  tool: string;
-  callerChatId?: string;
-  targetChatId?: string;
-  durationMs: number;
-  ok: boolean;
-  err?: string;
+/** The tool-log entry this host sends the server for one call. */
+export function toolLogEvent(entry: ToolLogEntry): WireEvent {
+  return { type: 'patch.tool_log.entry', entry };
 }
 
-/** Trim trigger — the file is rewritten once it passes this size. */
-export const TOOL_LOG_MAX_FILE_BYTES = 2 * 1024 * 1024;
-/** How many of the newest entries survive a trim. */
-export const TOOL_LOG_KEEP_ENTRIES = 5_000;
-
-export interface ToolLogStoreOptions {
-  /** Trim trigger, overriding {@link TOOL_LOG_MAX_FILE_BYTES} — tests only. */
-  maxFileBytes?: number;
-  /** Lines kept on a trim, overriding {@link TOOL_LOG_KEEP_ENTRIES} — tests only. */
-  keepEntries?: number;
-}
-
-export class ToolLogStore {
-  private readonly path: string;
-  private readonly maxFileBytes: number;
-  private readonly keepEntries: number;
-
-  constructor(patchHome: string, opts: ToolLogStoreOptions = {}) {
-    const dir = join(patchHome, 'logs');
-    mkdirSync(dir, { recursive: true });
-    this.path = join(dir, 'tool-calls.jsonl');
-    this.maxFileBytes = opts.maxFileBytes ?? TOOL_LOG_MAX_FILE_BYTES;
-    this.keepEntries = opts.keepEntries ?? TOOL_LOG_KEEP_ENTRIES;
-  }
-
-  append(entry: ToolLogEntry): void {
-    appendFileSync(this.path, `${JSON.stringify(entry)}\n`, 'utf8');
-    this.trimIfOversized();
-  }
-
-  private trimIfOversized(): void {
-    let size: number;
+/**
+ * Send every entry of the old per-host log through `send` (the outbox, which
+ * keeps each until the server acknowledges it), then delete the file. Returns
+ * how many entries were handed over.
+ */
+export function importLegacyToolLog(patchHome: string, send: (event: WireEvent) => void): number {
+  const path = join(patchHome, 'logs', 'tool-calls.jsonl');
+  if (!existsSync(path)) return 0;
+  let sent = 0;
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (line.length === 0) continue;
+    let entry: ToolLogEntry;
     try {
-      size = statSync(this.path).size;
+      entry = JSON.parse(line) as ToolLogEntry;
     } catch {
-      return;
+      continue; // A torn line: observability, not transactional state.
     }
-    if (size <= this.maxFileBytes) return;
-    const lines = readLines(this.path);
-    const kept = lines.slice(Math.max(0, lines.length - this.keepEntries));
-    const tmp = `${this.path}.tmp.${process.pid}.${Date.now()}`;
-    writeFileSync(tmp, kept.length > 0 ? `${kept.join('\n')}\n` : '', 'utf8');
-    renameSync(tmp, this.path);
+    if (typeof entry.ts !== 'number' || typeof entry.tool !== 'string') continue;
+    send(toolLogEvent(entry));
+    sent += 1;
   }
-
-  /**
-   * Entries with `since <= ts <= until`, oldest first, capped at `limit` —
-   * same cursor-friendly shape `readUserMessages` returns for `patch_activity`
-   * (see `activity.ts`'s "oldest `limit` in the window").
-   */
-  readEntries(since: number, until: number, limit: number): ToolLogEntry[] {
-    const out: ToolLogEntry[] = [];
-    for (const line of readLines(this.path)) {
-      let entry: ToolLogEntry;
-      try {
-        entry = JSON.parse(line) as ToolLogEntry;
-      } catch {
-        continue; // Not an entry — observability log, not transactional state.
-      }
-      if (entry.ts < since || entry.ts > until) continue;
-      out.push(entry);
-      if (out.length >= limit) break;
-    }
-    return out;
-  }
-}
-
-function readLines(path: string): string[] {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((l) => l.length > 0);
+  rmSync(path, { force: true });
+  return sent;
 }

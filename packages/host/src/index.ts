@@ -105,8 +105,7 @@ import {
   describeSpawnFailure,
   type RemoteSpawnRequest,
 } from './remote-spawn.js';
-import { createRemoteRelayCoordinator } from './remote-relay.js';
-import { buildPeekResult } from './peek.js';
+import { createRemoteRelayCoordinator, RemoteRelayError } from './remote-relay.js';
 import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
@@ -130,7 +129,6 @@ import type { ChatInputEvent, GoalStringency } from '@patch/wire';
 import { DEFAULT_SMALL_JOB_MODELS } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
-import { readUserMessages } from './userMessages.js';
 import {
   bootstrapClaudeOAuth,
   makeResolveOAuth,
@@ -275,7 +273,7 @@ import { handleVoiceprintRequest } from './voiceprints.js';
 import { RecentVoices, SpeakerId, speakerModelPath } from './audio/speakerId.js';
 import { HostSearchManager } from './hostSearch.js';
 import { handleBlobRequest } from './blobFetch.js';
-import { ToolLogStore } from './toolLog.js';
+import { importLegacyToolLog, toolLogEvent } from './toolLog.js';
 import { ChatTokenReader, UsageHistoryStore } from './usageHistory.js';
 import { ProviderKeyError, ProviderKeyStore, providerKeysPath } from './providerKeys.js';
 import { createSecretsStore, InvalidSecretKeyError, type SecretsStore } from './secrets.js';
@@ -1837,13 +1835,12 @@ async function startHost(
     remoteSpawns.spawn(req);
 
   /**
-   * Cross-host `patch_peek` / `patch_history` / `patch_send_to` (spec/03
-   * § Cross-chat tools): one coordinator per tool, sharing the requestId →
-   * waiter shape `remote-spawn.ts` established. Each mints ids under its own
-   * prefix so the three can share the server's single relay-route map with no
-   * risk of collision (`cross-host.ts`).
+   * `patch_peek` / `patch_history` (spec/03 § Cross-chat tools): the server
+   * answers both from its own record, for a chat on any host. `patch_send_to`
+   * / `patch_stop` to a chat on another host are relayed to its owner. One
+   * coordinator per tool, each minting ids under its own prefix.
    */
-  const remotePeeks = createRemoteRelayCoordinator<{
+  const serverPeeks = createRemoteRelayCoordinator<{
     chat_state: unknown;
     events: unknown[];
     truncated: boolean;
@@ -1853,7 +1850,7 @@ async function startHost(
     onUnknownResponse: (requestId) =>
       logger.warn({ requestId }, 'patch.peek.response for an unknown request; dropping'),
   });
-  const remoteHistories = createRemoteRelayCoordinator<{
+  const serverHistories = createRemoteRelayCoordinator<{
     events: WireEvent[];
     nextFromSeq?: number;
   }>({
@@ -1907,12 +1904,31 @@ async function startHost(
     localAudioUrl: `ws://127.0.0.1:${config.audio.port}`,
     sender: (event) => emit(event),
   });
-  const peekRemoteChat = (req: {
+  /**
+   * Refuse a read the server cannot answer right now, at once and in words,
+   * rather than buffering the request until the call times out.
+   */
+  const assertServerReads = (tool: string): void => {
+    if (!linkOnline) {
+      throw new RemoteRelayError(
+        'host_not_registered',
+        `${tool}: the link to the Patch server is down; chats are read from the server`,
+      );
+    }
+    if (!link.answersReads()) {
+      throw new RemoteRelayError(
+        'sdk_error',
+        `${tool}: the Patch server is too old to answer this; update the server`,
+      );
+    }
+  };
+  const peekFromServer = async (req: {
     sourceChatId: string;
     targetChatId: string;
     limit?: number;
-  }): Promise<{ chat_state: unknown; events: unknown[]; truncated: boolean }> =>
-    remotePeeks.call(
+  }): Promise<{ chat_state: unknown; events: unknown[]; truncated: boolean }> => {
+    assertServerReads('patch_peek');
+    return await serverPeeks.call(
       (requestId) => ({
         type: 'patch.peek.request',
         sourceChatId: req.sourceChatId,
@@ -1920,15 +1936,17 @@ async function startHost(
         requestId,
         ...(req.limit !== undefined ? { limit: req.limit } : {}),
       }),
-      () => `patch_peek: chat ${req.targetChatId}'s host did not answer in time`,
+      () => `patch_peek: the Patch server did not answer in time`,
     );
-  const historyRemoteChat = (req: {
+  };
+  const historyFromServer = async (req: {
     sourceChatId: string;
     targetChatId: string;
     fromSeq?: number;
     limit?: number;
-  }): Promise<{ events: WireEvent[]; nextFromSeq?: number }> =>
-    remoteHistories.call(
+  }): Promise<{ events: WireEvent[]; nextFromSeq?: number }> => {
+    assertServerReads('patch_history');
+    return await serverHistories.call(
       (requestId) => ({
         type: 'patch.history.request',
         sourceChatId: req.sourceChatId,
@@ -1937,8 +1955,9 @@ async function startHost(
         ...(req.fromSeq !== undefined ? { fromSeq: req.fromSeq } : {}),
         ...(req.limit !== undefined ? { limit: req.limit } : {}),
       }),
-      () => `patch_history: chat ${req.targetChatId}'s host did not answer in time`,
+      () => `patch_history: the Patch server did not answer in time`,
     );
+  };
   const sendToRemoteChat = (req: {
     sourceChatId: string;
     targetChatId: string;
@@ -3672,21 +3691,6 @@ async function startHost(
         resolveActivity(event);
         return;
       }
-      if (event.type === 'patch.activity.read.request') {
-        // The server is assembling a `patch_activity` answer and wants this
-        // host's share: the user messages in its own chat logs.
-        sender({
-          type: 'patch.activity.read.response',
-          requestId: event.requestId,
-          messages: readUserMessages(
-            join(config.patchHome, 'chats'),
-            event.since,
-            event.until,
-            event.limit,
-          ),
-        });
-        return;
-      }
       if (event.type === 'patch.browser_use.request') {
         // Settings → Computer use: report whether this host's agent browser
         // is driving it, or (action 'stop') close its windows and cancel it.
@@ -3709,17 +3713,6 @@ async function startHost(
         });
         return;
       }
-      if (event.type === 'patch.tool_log.read.request') {
-        // The server is assembling a Settings → Activity answer and wants this
-        // host's share: its own cross-chat tool-call log.
-        sender({
-          type: 'patch.tool_log.read.response',
-          requestId: event.requestId,
-          hostId: selfHostId,
-          entries: toolLogStore.readEntries(event.since, event.until, event.limit),
-        });
-        return;
-      }
       if (event.type === 'patch.usage.read.request') {
         // Settings → Usage: this host's probe history and per-chat tokens.
         sender({
@@ -3731,81 +3724,16 @@ async function startHost(
         });
         return;
       }
-      if (event.type === 'patch.peek.request') {
-        // A cross-host `patch_peek` relayed by the server (spec/03 § Cross-chat
-        // tools): another host's agent asked about a chat that lives HERE.
-        // No requestId means the frame is a same-host audit record, which the
-        // server never relays (cross-host.ts) — unreachable in practice.
-        const requestId = event.requestId;
-        /* v8 ignore next */
-        if (requestId === undefined) return;
-        const result = buildPeekResult(daemon, event.targetChatId, event.limit ?? 50);
-        sender(
-          result
-            ? {
-                type: 'patch.peek.response',
-                requestId,
-                sourceChatId: event.sourceChatId,
-                targetChatId: event.targetChatId,
-                ok: true,
-                result,
-              }
-            : {
-                type: 'patch.peek.response',
-                requestId,
-                sourceChatId: event.sourceChatId,
-                targetChatId: event.targetChatId,
-                ok: false,
-                error: { code: 'chat_not_found', message: `chat not found: ${event.targetChatId}` },
-              },
-        );
-        return;
-      }
       if (event.type === 'patch.peek.response') {
-        // Another host answered THIS host's cross-host `patch_peek`. No
-        // requestId is a stray frame this host never sent a request for.
+        // The server answered this host's `patch_peek`. No requestId is a
+        // stray frame this host never sent a request for.
         if (event.requestId !== undefined)
-          remotePeeks.resolve({ ...event, requestId: event.requestId });
-        return;
-      }
-      if (event.type === 'patch.history.request') {
-        // Cross-host `patch_history`'s sibling to `patch.peek.request` above.
-        const requestId = event.requestId;
-        /* v8 ignore next */
-        if (requestId === undefined) return;
-        try {
-          const slice = daemon.readHistory({
-            chatId: event.targetChatId,
-            ...(event.fromSeq !== undefined ? { fromSeq: event.fromSeq } : {}),
-            ...(event.limit !== undefined ? { limit: event.limit } : {}),
-          });
-          const result: { events: WireEvent[]; nextFromSeq?: number } = { events: slice.events };
-          if (slice.nextFromSeq !== undefined) result.nextFromSeq = slice.nextFromSeq;
-          sender({
-            type: 'patch.history.response',
-            requestId,
-            sourceChatId: event.sourceChatId,
-            targetChatId: event.targetChatId,
-            ok: true,
-            result,
-          });
-        } catch (err) {
-          const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
-          sender({
-            type: 'patch.history.response',
-            requestId,
-            sourceChatId: event.sourceChatId,
-            targetChatId: event.targetChatId,
-            ok: false,
-            error: { code, message: err instanceof Error ? err.message : String(err) },
-          });
-        }
+          serverPeeks.resolve({ ...event, requestId: event.requestId });
         return;
       }
       if (event.type === 'patch.history.response') {
-        // No requestId is a stray frame this host never sent a request for.
         if (event.requestId !== undefined)
-          remoteHistories.resolve({ ...event, requestId: event.requestId });
+          serverHistories.resolve({ ...event, requestId: event.requestId });
         return;
       }
       if (event.type === 'patch.send_to') {
@@ -4319,9 +4247,16 @@ async function startHost(
     logger,
   });
   removeRetiredTelegramFolder(config.patchHome, logger);
-  // Durable record of every cross-chat tool call this host has made or
-  // served (Settings → Activity, spec/06 § Cross-chat toolset).
-  const toolLogStore = new ToolLogStore(config.patchHome);
+  // Every cross-chat tool call goes to the server's tool log (Settings →
+  // Activity, spec/06 § Cross-chat toolset) through the outbox; what this host
+  // logged itself before the server kept the log is handed over once.
+  const importedToolLog = importLegacyToolLog(config.patchHome, (event) => link.send(event));
+  if (importedToolLog > 0) {
+    logger.info(
+      { entries: importedToolLog },
+      'tool log: handed the old per-host log to the outbox',
+    );
+  }
   const usageHistory = new UsageHistoryStore(config.patchHome);
   const chatTokens = new ChatTokenReader(join(config.patchHome, 'chats'));
   /**
@@ -5154,7 +5089,7 @@ async function startHost(
     // relays it uses to read a non-local candidate's recent messages and to
     // nudge/wake one (same relays `patch_history`/`patch_send_to` use).
     decideSweep: makeSweepDecider({ sdkBackend, runOnAccountWithCredit, logger }),
-    historyRemoteChat,
+    historyRemoteChat: historyFromServer,
     sendToRemoteChat,
     emit,
     // A side branch's entries go to the server's record only: never through the
@@ -5980,12 +5915,11 @@ async function startHost(
         includeSessions,
         sessionsCursor,
       ),
-    // spec/03 § Cross-chat tools — a chat not found among THIS host's own
-    // resolves on the OWNING host's own answer, exactly like a cross-host
-    // spawn, once the server's chat mirror says where it actually lives.
+    // spec/03 § Cross-chat tools — patch_peek/patch_history read the server's
+    // record; send_to/stop to a chat on another host go to its owner.
     runsManager: () => runsManager,
-    peekRemoteChat,
-    historyRemoteChat,
+    peekFromServer,
+    historyFromServer,
     sendToRemoteChat,
     stopRemoteChat,
     // spec/07 § Agent-initiated voice — an app call already open takes the
@@ -6009,7 +5943,7 @@ async function startHost(
     onShutdown: () => shutdownHook?.(),
     toolLogger: (entry) => {
       logger.info(entry, 'cross-chat tool call');
-      toolLogStore.append({ ts: Date.now(), ...entry });
+      link.send(toolLogEvent({ ts: Date.now(), ...entry }));
     },
     onBroadcast: ({ channel, message, sourceChatId }) => {
       const threadId = threadForChannel(channel);

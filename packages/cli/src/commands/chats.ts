@@ -93,7 +93,9 @@ export function registerChatsCommands(program: Command): void {
 
   chats
     .command('peek <id>')
-    .description("A chat's live state plus its recent events, on any host (images stripped)")
+    .description(
+      "A chat's status and its latest entries, from the server, on any host (images stripped)",
+    )
     .option('--limit <n>', 'Events to return (default 50, max 200)')
     .option('--json', 'JSON output')
     .action(async (rawId: string, opts: CommonOpts & { limit?: string }) => {
@@ -112,7 +114,9 @@ export function registerChatsCommands(program: Command): void {
 
   chats
     .command('history <id>')
-    .description("Paginated read of a chat's events, on any host (images stripped)")
+    .description(
+      "Paginated read of a chat's record, from the server, on any host (images stripped)",
+    )
     .option('--from-seq <n>', 'Event sequence number to start from')
     .option('--limit <n>', 'Events to return (default 50, max 200)')
     .option('--json', 'JSON output')

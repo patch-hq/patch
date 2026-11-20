@@ -252,22 +252,29 @@ A chat whose folder no longer exists is found when the chat is loaded (`02-host.
 
 ## chat_state (live)
 
-Separate from history. Held in host memory, exposed via `patch_peek`:
+Separate from history. Built by the server from its chat index, its status and its record, and returned by `patch_peek` (`06-threads-manager-speakers.md` § Cross-chat toolset):
 
 ```typescript
 type ChatState = {
   chatId: string;
+  hostId: string;
+  hostOnline: boolean; // is the chat's host connected right now?
   name: string | null; // sidebar label
-  status: ChatStatus; // the server's status, 12-error-and-offline.md
-  lastMessages: Message[]; // last N, configurable, default 20
-  lastUpdated: ISO8601;
   folder: string;
+  chatStatus: ChatStatusInfo | null; // the server's status, 12-error-and-offline.md
+  status: 'active' | 'archived' | 'errored' | 'deleted'; // lifecycle
+  pinned: boolean;
+  pinnedAt: number | null;
+  snoozedUntil: number | null;
+  model: string | null;
+  lastUpdated: number;
+  lastMessage?: string; // latest message text in the returned slice
+  lastError: { code: string; message: string; at: number } | null;
   eventCount: number; // entries in the chat's record
-  hasProviderSession: boolean; // does the model still have the chat's session?
 };
 ```
 
-Not persisted; the host builds it when the chat is loaded. The `events` slice `patch_peek` returns alongside it is read from the server's record, so a chat its host has not loaded still returns its recent entries. `eventCount: 23, hasProviderSession: false` is the whole diagnosis of a chat whose session is gone (§ Resume).
+Not persisted, and no host is asked for it: a chat whose host is offline returns the same as any other, with `hostOnline: false`. The `events` slice `patch_peek` returns alongside it is the latest page of the server's record.
 
 A chat's status is decided by the server alone, from the facts its host reports, and surfaces display it as sent (`12-error-and-offline.md` owns the statuses and their transitions). A host going silent mid-turn makes the chat "host offline", never a stale running or a false failed; when the host reattaches it reports the turn it kept running, or the turn that was cut off, and the status follows.
 
