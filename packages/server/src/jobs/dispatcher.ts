@@ -72,6 +72,7 @@ import type {
   ChatInputEvent,
   ChatSpawnRequestEvent,
   JobExecRequestEvent,
+  JobExecResultEvent,
   WireEvent,
 } from '@patch/wire';
 import {
@@ -364,6 +365,31 @@ export interface DispatcherOptions {
 function execFireKey(fireId: string): string {
   return `exec-${fireId}`;
 }
+
+/** The fire id an `execFireKey` stands for, or null for any other key. */
+function fireIdOfExecKey(key: string): string | null {
+  return key.startsWith('exec-') ? key.slice('exec-'.length) : null;
+}
+
+/**
+ * What the server keeps about a `script` fire until its host reports the
+ * result, at `<dataDir>/exec-fires/<fireId>.json`. Outlives the wait window and
+ * a server restart, so a result that arrives late (a host that was down past
+ * the window and reports its command finished, failed or was interrupted) is
+ * still recorded against the run it belongs to (spec/08 § Action — `script`).
+ */
+interface ExecFireRecord {
+  fireId: string;
+  jobId: string;
+  trigger: RunTrigger;
+  payloadDigest: string;
+  hostId: string | null;
+  folder?: string;
+  ts: number;
+}
+
+/** A script fire record older than this is given up on and removed at startup. */
+export const EXEC_FIRE_RECORD_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * The key a GATE's command is tracked under. Separate from `execFireKey` so one
@@ -717,6 +743,7 @@ export class JobDispatcher {
   /** Each job's limit as of its most recent fire, for its views. Absent → none. */
   private readonly jobLimits = new Map<string, number>();
   private readonly appendDir: string;
+  private readonly execFiresDir: string;
   private readonly onLate: ((info: LateFireInfo) => void) | undefined;
   private readonly lateAfterMs: number;
 
@@ -725,6 +752,7 @@ export class JobDispatcher {
     this.queuedDir = join(opts.dataDir, 'queued');
     this.inflightDir = join(opts.dataDir, 'inflight');
     this.appendDir = join(opts.dataDir, 'append');
+    this.execFiresDir = join(opts.dataDir, 'exec-fires');
     this.heldDir = join(opts.dataDir, 'held');
     this.logger = opts.logger;
     this.hostLink = opts.hostLink;
@@ -757,6 +785,7 @@ export class JobDispatcher {
     // the queue so nothing queued is lost, the slots so a restart does not
     // start a second build on top of one still running.
     this.loadSlots();
+    this.pruneExecFires();
     this.statusUnsub = this.hostLink.onStatus((s) => {
       if (s === 'online') {
         // Reconcile BEFORE releasing anything: the chat mirror is only seeded
@@ -990,6 +1019,13 @@ export class JobDispatcher {
       // settles a script fire, and the only thing that frees its slot.
       const key = execFireKey(event.fireId);
       const w = this.take(key);
+      const kept = this.takeExecFire(event.fireId);
+      if (!w && kept) {
+        // Past the wait window, or after a server restart: the run was
+        // recorded as unanswered (or not at all). The host's answer is the
+        // truth about it, so it is recorded against the same fire.
+        this.recordLateExec(event, kept);
+      }
       if (w) {
         const tail = [event.stdout, event.stderr].filter((t) => t.length > 0).join('\n');
         // The chat the command started, if it said so. Read from STDOUT only:
@@ -1158,6 +1194,109 @@ export class JobDispatcher {
     }
   }
 
+  private execFirePath(fireId: string): string {
+    return join(this.execFiresDir, `${fireId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`);
+  }
+
+  private keepExecFire(record: ExecFireRecord): void {
+    try {
+      if (!existsSync(this.execFiresDir)) mkdirSync(this.execFiresDir, { recursive: true });
+      writeFileSync(this.execFirePath(record.fireId), JSON.stringify(record), 'utf8');
+    } catch (err) {
+      this.logger.error(
+        { jobId: record.jobId, fireId: record.fireId, err: (err as Error).message },
+        'jobs: could not keep a script fire for its result; a late result will not be recorded',
+      );
+    }
+  }
+
+  /** Remove and return what was kept about a script fire, if anything. */
+  private takeExecFire(fireId: string): ExecFireRecord | null {
+    const path = this.execFirePath(fireId);
+    if (!existsSync(path)) return null;
+    let record: ExecFireRecord | null = null;
+    try {
+      record = parsePersisted(readFileSync(path, 'utf8')) as ExecFireRecord;
+    } catch (err) {
+      this.logger.error(
+        { fireId, err: (err as Error).message },
+        'jobs: unreadable script fire record',
+      );
+    }
+    try {
+      rmSync(path);
+    } catch (err) {
+      this.logger.error(
+        { fireId, err: (err as Error).message },
+        'jobs: could not remove a script fire record',
+      );
+    }
+    return record;
+  }
+
+  /** Records of script fires no host has answered in a month are given up on. */
+  private pruneExecFires(): void {
+    if (!existsSync(this.execFiresDir)) return;
+    const cutoff = this.nowMs() - EXEC_FIRE_RECORD_MAX_AGE_MS;
+    for (const filename of readdirSync(this.execFiresDir)) {
+      if (!filename.endsWith('.json')) continue;
+      const path = join(this.execFiresDir, filename);
+      try {
+        const record = parsePersisted(readFileSync(path, 'utf8')) as ExecFireRecord;
+        if (record.ts >= cutoff) continue;
+        this.logger.warn(
+          { jobId: record.jobId, fireId: record.fireId },
+          'jobs: no host ever reported this script fire; its record is removed',
+        );
+      } catch {
+        this.logger.warn({ filename }, 'jobs: malformed script fire record, removing');
+      }
+      rmSync(path, { force: true });
+    }
+  }
+
+  /**
+   * A script's result that arrived after its wait window, or after a server
+   * restart lost the wait. Written as a row for the same fire (same `fireId`
+   * and fire time, `late: true`), which the run log shows in place of the
+   * "no answer from host" row it supersedes (spec/08 ## Logs).
+   */
+  private recordLateExec(event: JobExecResultEvent, kept: ExecFireRecord): void {
+    const tail = [event.stdout, event.stderr].filter((t) => t.length > 0).join('\n');
+    const announced = parseScriptChatId(event.stdout);
+    const error = event.ok
+      ? undefined
+      : (event.error ??
+        `command exited ${event.exitCode === null ? 'without a code' : String(event.exitCode)}`);
+    this.logs.appendRun({
+      ts: kept.ts,
+      jobId: kept.jobId,
+      fireId: kept.fireId,
+      late: true,
+      status: event.ok ? 'ok' : 'dispatch-error',
+      trigger: kept.trigger,
+      payloadDigest: kept.payloadDigest,
+      ...(error !== undefined ? { error } : {}),
+      action: {
+        type: 'script',
+        ...(announced !== null ? { chatId: announced } : {}),
+        exitCode: event.exitCode,
+        ...(tail.length > 0 ? { output: tail } : {}),
+        ...(kept.hostId !== null ? { hostId: kept.hostId } : {}),
+        ...(kept.folder !== undefined ? { folder: kept.folder } : {}),
+      },
+    });
+    this.logger.warn(
+      { jobId: kept.jobId, fireId: kept.fireId, ok: event.ok, err: error },
+      'jobs: a script result arrived after its wait; recorded against its fire',
+    );
+    if (!event.ok) return;
+    this.expireIfOneOff(kept.jobId);
+    // The unanswered row already fired the followers that take any outcome;
+    // only the ones waiting for success are news now.
+    this.fireFollowers(kept.jobId, 'ok', announced ?? undefined, { successOnly: true });
+  }
+
   /** Write the settled run entry for one fire. */
   private writeRun(
     w: AwaitedOutcome,
@@ -1178,9 +1317,11 @@ export class JobDispatcher {
         },
   ): void {
     const script = 'exitCode' in outcome;
+    const fireId = fireIdOfExecKey(w.chatId);
     this.logs.appendRun({
       ts: w.ts,
       jobId: w.jobId,
+      ...(fireId !== null ? { fireId } : {}),
       status: outcome.status,
       trigger: w.trigger,
       payloadDigest: w.payloadDigest,
@@ -1220,12 +1361,18 @@ export class JobDispatcher {
    * follower that fails to fire is logged on its own run row and can never
    * cost the followed job its run entry.
    */
-  private fireFollowers(jobId: string, status: 'ok' | 'dispatch-error', chatId?: string): void {
+  private fireFollowers(
+    jobId: string,
+    status: 'ok' | 'dispatch-error',
+    chatId?: string,
+    opts: { successOnly?: boolean } = {},
+  ): void {
     if (!this.jobs) return;
     for (const follower of this.jobs.list()) {
       const t = follower.trigger;
       if (t.type !== 'follows' || t.jobId !== jobId || !jobFires(follower)) continue;
       if (t.on !== 'any' && status !== 'ok') continue;
+      if (opts.successOnly === true && t.on === 'any') continue;
       const payload = filterContext(this.nowMs(), {
         followedJobId: jobId,
         status,
@@ -1814,6 +1961,17 @@ export class JobDispatcher {
       this.sessionRetried.delete(entry.chatId ?? '');
     }
     if (opts?.takeSlot !== false) this.acquireSlot(entry);
+    if (entry.event.type === 'job.exec_request') {
+      this.keepExecFire({
+        fireId: entry.event.fireId,
+        jobId: entry.jobId,
+        trigger: entry.trigger,
+        payloadDigest: entry.payloadDigest,
+        hostId: entry.hostId,
+        ...(entry.folder !== undefined ? { folder: entry.folder } : {}),
+        ts: entry.createdAt,
+      });
+    }
     this.await_(
       {
         jobId: entry.jobId,
@@ -2355,9 +2513,7 @@ export class JobDispatcher {
           // later fire is a `chat.input` into one that already has a home.
           hidden: action.startHidden === true,
           // Creation-time only, like `spawn`'s; omitted means the host default.
-          ...(action.permissionMode !== undefined
-            ? { permissionMode: action.permissionMode }
-            : {}),
+          ...(action.permissionMode !== undefined ? { permissionMode: action.permissionMode } : {}),
           // spec/04 § Goals, spec/08 ## Action — set once, when this fire
           // creates the durable chat.
           ...(action.goal !== undefined ? { goal: action.goal } : {}),

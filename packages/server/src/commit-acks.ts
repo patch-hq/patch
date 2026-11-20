@@ -43,7 +43,7 @@ export class CommitAcks {
     const batch = [...this.pending.entries()];
     this.pending.clear();
     for (const [chatId, { hostId, through }] of batch) {
-      // A host that is gone is told by `patch.log_sync` when it returns.
+      // A host that is gone hears the next time one of its chats commits.
       if (!this.deps.isOnline(hostId)) continue;
       this.deps.sendTo(hostId, SERVER_SURFACE, { type: 'chat.committed', chatId, through });
     }

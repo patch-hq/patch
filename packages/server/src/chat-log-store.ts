@@ -13,13 +13,13 @@
 // entries too, by turn id: each sits at the chat's highest seq when it happened
 // and takes no seq of its own, so it can never collide with an entry.
 //
-// While a chat's host is online the host's own log answers replays; the server's
-// copy answers them when it is not, and is what rebuilds a host's log that was
-// lost (`patch.log_restore`).
+// Hosts deliver through their outbox (spec/01 § Host outbox): the server
+// acknowledges an outbox position only after `makeDurable` has made every write
+// before it durable, so a host keeps an event until it is on the server's disk.
 //
-// One synchronous append per finished event: a process crash loses nothing, and
-// the operating system flushes it to disk shortly after. A person's own message
-// is fsynced at once, the same policy the host's log keeps.
+// One synchronous append per finished event: a process crash loses nothing. A
+// person's own message is fsynced at once, the same policy the host's log
+// keeps; everything else is fsynced by `makeDurable`, once per acknowledgement.
 
 import {
   appendFileSync,
@@ -182,8 +182,7 @@ export class ChatLogStore {
   /**
    * How far a host's log of each chat is known to reach with events the server
    * does not keep (a tool-run summary, an artifact). Without it the server's
-   * high-water mark sits one short of the host's on almost every chat, and log
-   * sync asks the host about every one of them again on each reconnect.
+   * high-water mark sits one short of the host's on almost every chat.
    */
   private readonly reach = new Map<string, number>();
   /**
@@ -199,6 +198,11 @@ export class ChatLogStore {
     string,
     Map<string, { request: WireEvent; response?: WireEvent }>
   >();
+
+  /** Chat files appended to since the last `makeDurable`, not yet fsynced. */
+  private readonly unsynced = new Set<string>();
+  /** A write failed since the last `makeDurable`. */
+  private writeFailed: Error | null = null;
 
   /** Message text of each chat's file, for search without loading the whole record. */
   private readonly text = new RecordTextIndex();
@@ -588,12 +592,47 @@ export class ChatLogStore {
     }
   }
 
+  /**
+   * Make every write since the last call durable. Throws if one failed or
+   * cannot be synced, so nothing that depends on it (an outbox
+   * acknowledgement) goes out.
+   */
+  makeDurable(): void {
+    const failed = this.writeFailed;
+    this.writeFailed = null;
+    const paths = [...this.unsynced];
+    this.unsynced.clear();
+    for (const path of paths) {
+      const fd = openSync(path, 'r');
+      try {
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+    }
+    if (failed) throw failed;
+  }
+
+  /**
+   * Drop what is held in memory for a chat, so the next read loads it from
+   * disk. After a failed write the memory holds what the disk does not, and a
+   * resend of that event would otherwise be taken as a duplicate.
+   */
+  private forget(chatId: string): void {
+    this.chats.delete(chatId);
+    this.refs.delete(chatId);
+    this.turnsByChat.delete(chatId);
+    this.questions.delete(chatId);
+    this.reach.delete(chatId);
+  }
+
   private append(chatId: string, line: string, durable: boolean): void {
     if (this.dir === null) return;
     const path = join(this.dir, `${fileName(chatId)}.jsonl`);
     try {
       if (!durable) {
         appendFileSync(path, `${line}\n`);
+        this.unsynced.add(path);
         return;
       }
       const fd = openSync(path, 'a');
@@ -605,6 +644,8 @@ export class ChatLogStore {
       }
     } catch (err) {
       this.logger.warn({ err, chatId }, 'chat-log-store: could not write the chat log');
+      this.writeFailed = err instanceof Error ? err : new Error(String(err));
+      this.forget(chatId);
     }
   }
 

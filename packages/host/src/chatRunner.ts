@@ -5857,45 +5857,6 @@ export class Daemon {
   }
 
   /**
-   * This host's logged events of the chat after `afterSeq`, oldest first, on the
-   * chat's active track. What the server asks for with `patch.log_sync.request`
-   * when its log falls behind this one.
-   */
-  eventsAfter(chatId: string, afterSeq: number): WireEvent[] {
-    if (!this.chatState.get(chatId)) throw new ChatNotFoundError(chatId);
-    const meta = this.opts.metaStore.read(chatId);
-    if (!meta) throw new ChatNotFoundError(chatId);
-    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    return readTrack(this.chatLog, chatId, meta, branchId, afterSeq).map(
-      (e) => e.event as WireEvent,
-    );
-  }
-
-  /**
-   * Rebuild this host's log of a chat from the server's (`patch.log_restore`):
-   * write each event the log does not already hold, and carry the chat's
-   * numbering on above them. Events at or below what the log records are left
-   * alone, so a restore can be sent twice. Returns how many were written.
-   */
-  restoreEvents(chatId: string, events: readonly WireEvent[]): number {
-    const state = this.chatState.get(chatId);
-    if (!state) throw new ChatNotFoundError(chatId);
-    let written = 0;
-    for (const event of [...events].sort(
-      (a, b) => ((a as { seq?: number }).seq ?? 0) - ((b as { seq?: number }).seq ?? 0),
-    )) {
-      const seq = (event as { seq?: unknown }).seq;
-      if (typeof seq !== 'number' || !isLoggedEvent(event)) continue;
-      if (seq <= this.chatLog.recordedHighWater(chatId)) continue;
-      this.logRecord(chatId, { k: 'event', event: stripSurfaceId(event) }, { seq });
-      if (seq + 1 > state.nextSeq) state.nextSeq = seq + 1;
-      written += 1;
-    }
-    if (written > 0) this.chatLog.flush();
-    return written;
-  }
-
-  /**
    * The server says its log of this chat reaches `through` (`chat.committed`).
    * The chat's numbering never falls at or below it, so a chat the server holds
    * further on than this host's own log (another host ran it, or this host's log

@@ -30,6 +30,24 @@ describe('ChatLogStore', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test('makeDurable throws after a failed write, and a resend of that event is then committed', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(message('c1', 1));
+    store.makeDurable();
+    // The chat's file cannot be written: a directory stands where it should be.
+    const file = join(dir, 'chat-logs', 'c2.jsonl');
+    mkdirSync(file);
+    expect(store.commit(message('c2', 1))).toBe('new');
+    expect(() => store.makeDurable()).toThrow();
+    // Said once: the next acknowledgement is not refused for an old failure.
+    expect(() => store.makeDurable()).not.toThrow();
+    rmSync(file, { recursive: true });
+    // Not taken as a duplicate of what only memory held.
+    expect(store.commit(message('c2', 1))).toBe('new');
+    store.makeDurable();
+    expect(new ChatLogStore({ dataDir: dir, logger }).read('c2', -1)).toHaveLength(1);
+  });
+
   test('reads back what passed through, in seq order, after the given seq', () => {
     const store = new ChatLogStore({ logger });
     for (const seq of [3, 1, 2]) store.observe(message('c1', seq));
@@ -510,7 +528,7 @@ describe('ChatLogStore', () => {
       expect(seen.join(' ')).toContain('could not store a large result');
     });
 
-    test('says so, and carries on in memory, when the log file cannot be written', () => {
+    test('says so, holds nothing it could not write, and refuses the next acknowledgement', () => {
       const { logger: l, seen } = warnings();
       mkdirSync(join(dir, 'chat-logs', 'c1.jsonl'), { recursive: true }); // a directory where the file goes
       const store = new ChatLogStore({ dataDir: dir, logger: l });
@@ -525,7 +543,9 @@ describe('ChatLogStore', () => {
         } as WireEvent),
       ).toBe('new');
       expect(seen.filter((m) => m.includes('could not write the chat log'))).toHaveLength(2);
-      expect(store.read('c1', -1)).toHaveLength(2);
+      // Memory never holds what the disk does not: the host resends it.
+      expect(store.read('c1', -1)).toHaveLength(0);
+      expect(() => store.makeDurable()).toThrow();
     });
 
     test("says so, and starts empty, when a chat's log file cannot be read", () => {

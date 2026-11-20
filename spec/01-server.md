@@ -39,7 +39,7 @@ Agent sessions, LLM calls and voice processing (Whisper + Kokoro for phone, web,
 
 ## Host outbox
 
-Each host sends what is new through one outbox, numbered host-wide (`02-host.md` § Host outbox, frames in `03-wire-protocol.md` § Host outbox). The server commits each event durably — fsynced into the chat's log, or into the index or held state it belongs to — before broadcasting it, then acknowledges the outbox position. After a reconnect the host resends everything after the last acknowledgement. There is no per-chat comparison: the server never asks a host for history, and a host never answers a surface's history request.
+Each host sends what is new through one outbox, numbered host-wide (`02-host.md` § Host outbox, frames in `03-wire-protocol.md` § Host outbox). The server commits each event durably — fsynced into the chat's log, or into the index or held state it belongs to — before broadcasting it, then acknowledges the outbox position. Writes to a chat's log are fsynced once per acknowledgement, just before it is sent; a write that failed leaves nothing in memory the disk lacks, no acknowledgement goes, and the server drops the host's link so it resends. After a reconnect the host resends everything after the last acknowledgement. A transcript event a host sends outside its outbox is refused, and a host whose `hello` lacks `outbox: true` is logged as having nothing recorded until it updates. There is no per-chat comparison: the server never asks a host for history, and a host never answers a surface's history request.
 
 ## Record import
 

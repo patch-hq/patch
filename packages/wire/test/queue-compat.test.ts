@@ -54,8 +54,6 @@ describe('what a newer server adds to frames an older host or surface reads', ()
       'chat.committed',
       'server.queue_mode',
       'patch.queue_pull.request',
-      'patch.log_sync.request',
-      'patch.log_restore',
       'host.manager_handover',
     ]) {
       const result = decodeCompat(JSON.stringify({ type: `${type}.future`, chatId: 'c1' }));

@@ -186,13 +186,81 @@ describe('server link with an outbox', () => {
     expect(resent.map((f) => f['position'])).toEqual([0, 1]);
   });
 
-  it('a server without the outbox gets bare events and nothing is kept for it', () => {
+  it('a server without the outbox is sent no transcript; it is held until a server takes it', () => {
     link.start();
     const s = connect(authOk());
     s.sent.length = 0;
     link.send(say(1));
-    expect(s.sent).toEqual([say(1)]);
-    expect(link.diagnostics().outboxOwed).toBe(0);
+    expect(s.sent).toEqual([]);
+    expect(link.diagnostics().outboxOwed).toBe(1);
+    s.close(1006);
+    link.start();
+    const again = connect();
+    expect(again.sent.filter((f) => f['type'] === 'host.outbox')).toEqual([
+      { type: 'host.outbox', position: 0, event: say(1) },
+    ]);
+  });
+
+  it('a transcript event sent from inside a link callback still goes through the outbox', () => {
+    link.close();
+    link = createServerLink({
+      url: 'ws://x/ws',
+      daemonKey: 'k',
+      clientVersion: '1',
+      logger: silent,
+      outbox,
+      backoffSchedule: [60_000],
+      heartbeatIntervalMs: 60_000,
+      onAuthed: (send) => send(say(7)),
+      wsFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+    });
+    link.start();
+    const s = connect();
+    expect(s.sent.filter((f) => f['type'] !== 'hello')).toEqual([
+      { type: 'host.outbox', position: 0, event: say(7) },
+    ]);
+    expect(outbox.pending()).toHaveLength(1);
+  });
+
+  it('keeps what was not acknowledged across a host restart, and resends it in order', async () => {
+    link.start();
+    const s = connect();
+    link.send(say(1));
+    link.send(say(2));
+    link.send(say(3));
+    s.receive({ type: 'host.outbox_ack', through: 0 });
+    await link.close();
+
+    // The restarted host: a new outbox and link over the same file.
+    const reopened = new Outbox({ path: join(dir, 'outbox.jsonl'), logger: silent });
+    expect(reopened.pending().map((p) => p.position)).toEqual([1, 2]);
+    link = createServerLink({
+      url: 'ws://x/ws',
+      daemonKey: 'k',
+      clientVersion: '1',
+      logger: silent,
+      outbox: reopened,
+      backoffSchedule: [60_000],
+      heartbeatIntervalMs: 60_000,
+      wsFactory: () => {
+        const sock = new FakeSocket();
+        sockets.push(sock);
+        return sock as unknown as WebSocket;
+      },
+    });
+    link.start();
+    const again = connect();
+    expect(again.sent.filter((f) => f['type'] === 'host.outbox')).toEqual([
+      { type: 'host.outbox', position: 1, event: say(2) },
+      { type: 'host.outbox', position: 2, event: say(3) },
+    ]);
+    // New events carry on the numbering.
+    link.send(say(4));
+    expect(again.sent.at(-1)).toEqual({ type: 'host.outbox', position: 3, event: say(4) });
   });
 
   it('an event addressed to one surface is not kept: it is a replay, not new', () => {
@@ -251,16 +319,6 @@ describe('server link with an outbox', () => {
       // The server's acknowledgement of the entry covers the boundaries before it.
       s.receive({ type: 'host.outbox_ack', through: 1 });
       expect(outbox.pending().map((e) => e.position)).toEqual([2]);
-    });
-
-    it('a server without the outbox is sent bare entries without the provider id, and nothing is owed', () => {
-      link.start();
-      const s = connect(authOk());
-      s.sent.length = 0;
-      link.send(started(-1));
-      link.send(withRef(0));
-      expect(s.sent).toEqual([say(0)]);
-      expect(link.diagnostics().outboxOwed).toBe(0);
     });
 
     it('what was kept while offline goes whole to a server that keeps the record', () => {

@@ -35,7 +35,6 @@ describe('the server as the log of record', () => {
       logger: false,
       registry,
       hostLink: link,
-      logSyncDelayMs: 30,
     });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const url = `ws://127.0.0.1:${(built.app.server.address() as AddressInfo).port}/ws`;
@@ -174,71 +173,19 @@ describe('the server as the log of record', () => {
     }
   });
 
-  it('recovers what it missed from a host whose log reaches further, and shows it to the surface', async () => {
-    const t = await start();
-    try {
-      const seen: number[] = [];
-      t.client.on('chat.message', (e) => seen.push(e.seq));
-      t.link.emit(t.say(1));
-      t.link.emit(t.say(2));
-      await wait();
-      expect(seen).toEqual([1, 2]);
-
-      // The host says its log reaches 5: the link dropped and its buffer lost 3 to 5.
-      t.link.emit(t.state(5));
-      await wait(200);
-      const asked = t.link.sent.find((s) => s.event.type === 'patch.log_sync.request');
-      expect(asked?.event).toEqual({ type: 'patch.log_sync.request', chatId: 'c1', afterSeq: 2 });
-
-      // The host answers from its own log.
-      t.link.emit({
-        type: 'patch.log_sync.batch',
-        chatId: 'c1',
-        events: [t.say(3), t.say(4), t.say(5)],
-        done: true,
-      } as WireEvent);
-      await wait();
-      expect(seen).toEqual([1, 2, 3, 4, 5]);
-      expect(t.built.chatLogStore.highWater('c1')).toBe(5);
-    } finally {
-      await t.client.close();
-      await t.built.app.close();
-    }
-  });
-
-  it('does not show a surface the sync answer as a frame of its own', async () => {
-    const t = await start();
-    try {
-      const types: string[] = [];
-      t.client.on('patch.log_sync.batch' as never, () => types.push('batch'));
-      t.link.emit(t.say(1));
-      t.link.emit({
-        type: 'patch.log_sync.batch',
-        chatId: 'c1',
-        events: [t.say(2)],
-        done: true,
-      } as WireEvent);
-      await wait();
-      expect(types).toEqual([]);
-    } finally {
-      await t.client.close();
-      await t.built.app.close();
-    }
-  });
-
-  it("rebuilds a host whose log is behind the server's", async () => {
+  it('never asks a host for history or sends it any, whatever its log reaches', async () => {
     const t = await start();
     try {
       for (let seq = 1; seq <= 4; seq++) t.link.emit(t.say(seq));
       await wait();
       t.link.sent.length = 0;
+      // Ahead of the server, then behind it: the outbox is the only delivery.
+      t.link.emit(t.state(9));
       t.link.emit(t.state(1));
-      await wait(200);
-      const restore = t.link.sent.find((s) => s.event.type === 'patch.log_restore');
-      expect(restore?.hostId).toBe('d1');
+      await wait(2_500);
       expect(
-        (restore!.event as { events: Array<{ seq: number }> }).events.map((e) => e.seq),
-      ).toEqual([2, 3, 4]);
+        t.link.sent.map((s) => s.event.type).filter((type) => type !== 'chat.committed'),
+      ).toEqual([]);
     } finally {
       await t.client.close();
       await t.built.app.close();
