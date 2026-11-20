@@ -50,7 +50,12 @@ runs:
         for m in https://mirrors.edge.kernel.org/ubuntu/ https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/; do
           # InRelease alone is not enough: a mirror has answered it while failing every
           # .deb download (kernel.org, 2026-11-15), so also fetch a real package file.
-          deb=$(curl -4 -fsS --max-time 20 "${m}dists/${codename}/main/binary-amd64/Packages.gz" 2>/dev/null | zcat 2>/dev/null | awk '/^Filename: /{print $2; exit}') || deb=
+          # Download to a file first: piping into awk-with-exit makes zcat die of
+          # SIGPIPE, and under pipefail that reads as a failed mirror.
+          deb=
+          if curl -4 -fsS --max-time 60 -o /tmp/apt-Packages.gz "${m}dists/${codename}/main/binary-amd64/Packages.gz"; then
+            deb=$(zcat /tmp/apt-Packages.gz | awk '/^Filename: /{print $2; exit}' || true)
+          fi
           if [ -n "$deb" ] && curl -4 -fsS --max-time 20 -o /dev/null "${m}${deb}"; then mirror=$m; break; fi
           echo "::warning::apt mirror unreachable: $m"
         done
