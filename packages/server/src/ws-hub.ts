@@ -1447,6 +1447,8 @@ export class WsHub {
               // patch_peek / patch_history are answered from the record, and the
               // tool log is kept here (spec/03 § Cross-chat tools).
               serverReads: true as const,
+              // patch_agent subagents' records are kept here (host.delegate_entry).
+              delegateRecord: true as const,
             }
           : {}),
         hostOutbox: true,

@@ -1212,6 +1212,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ],
     done: true,
   },
+  'host.delegate_entry': {
+    type: 'host.delegate_entry',
+    parentChatId: 'c1',
+    event: { type: 'chat.message', chatId: 'd1', role: 'assistant', content: 'done', seq: 0 },
+  },
   'host.record_import_ack': { type: 'host.record_import_ack', chatId: 'c1' },
   'host.outbox': {
     type: 'host.outbox',
@@ -1248,18 +1253,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     fromHostName: 'Laptop',
     toHostName: 'Server',
     message: 'user: hello',
-  },
-  'patch.chat_history.request': {
-    type: 'patch.chat_history.request',
-    requestId: 'ch1',
-    chatId: 'c1',
-    since: 3,
-  },
-  'patch.chat_history.response': {
-    type: 'patch.chat_history.response',
-    requestId: 'ch1',
-    ok: true,
-    events: [{ type: 'chat.message', chatId: 'c1', role: 'user', content: 'hi', seq: 3 }],
   },
   'patch.skills.request': {
     type: 'patch.skills.request',

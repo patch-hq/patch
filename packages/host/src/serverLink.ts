@@ -317,6 +317,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let serverDecidesStatus = false;
   // A server that answers agents' reads and keeps the tool log (`serverReads`).
   let serverAnswersReads = false;
+  // A server that keeps subagents' records (`delegateRecord`).
+  let serverKeepsDelegates = false;
   // Down since the host started until the first auth.ok, then since each loss.
   let offlineSince: number | null = Date.now();
   let lastDrop: LinkDrop | undefined;
@@ -358,8 +360,10 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     // An older server's reader refuses what it does not know: it is sent no
     // turn boundaries and no provider ids. The outbox keeps them either way.
     if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(outboxed.type)) return;
-    // Nor tool-log entries to a server that does not keep them.
-    if (!serverAnswersReads && HOST_OUTBOX_EVENT_TYPES.has(outboxed.type)) return;
+    // Nor tool-log entries or subagent entries to a server that does not keep them.
+    if (outboxed.type === 'host.delegate_entry') {
+      if (!serverKeepsDelegates) return;
+    } else if (!serverAnswersReads && HOST_OUTBOX_EVENT_TYPES.has(outboxed.type)) return;
     const event = forServer(outboxed);
     rawSend({ type: 'host.outbox', position, event });
   }
@@ -542,6 +546,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         serverKeepsBranches = event.recordBranches === true;
         serverDecidesStatus = event.serverStatus === true;
         serverAnswersReads = event.serverReads === true;
+        serverKeepsDelegates = event.delegateRecord === true;
         log.info('server-link: authenticated (auth.ok)');
         if (!serverTakesOutbox) {
           log.error(

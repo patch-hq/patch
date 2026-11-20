@@ -7375,21 +7375,6 @@ export const PatchWatchOutputResponseEvent = z
   .strict();
 export type PatchWatchOutputResponseEvent = z.infer<typeof PatchWatchOutputResponseEvent>;
 
-// ---------------------------------------------------------------------------
-// Chat history REST RPC (server → host → server).
-//
-// `patch.chat_history.request` is server-originated: it backs the REST
-// endpoint `GET /api/chats/:id/history?since=<seq>`. The server doesn't share
-// the host's filesystem (the host owns Claude Code's persisted JSONL), so
-// it round-trips this RPC over the host-link and collects the events into
-// the HTTP response body. Distinct from the agent-facing `patch.history.*`
-// pair (cross-chat peek, delivered via per-surface replay) — this one returns
-// the events array inline so a stateless HTTP caller can render history.
-//
-// `events` is exactly what the host's HistoryReader reconstructs from the
-// JSONL today: user/assistant `chat.message` turns. Tool calls/results are
-// surfaced via the live stream, not the replay path (see daemon/history.ts).
-
 /**
  * Server -> host: whether the server is running this host's message queues
  * (spec/04 § Message queueing). Sent when the host attaches. While `enabled`,
@@ -7486,12 +7471,36 @@ export const HostRecordImportEvent = z
   .object({
     type: z.literal('host.record_import'),
     chatId: z.string().min(1),
+    /**
+     * Set when `chatId` is a `patch_agent` subagent: the chat it belongs to.
+     * The server keeps the subagent's record against it and never lists it
+     * (spec/02 § Native subagent dispatch). Sent only to a server whose
+     * `auth.ok` carried `delegateRecord`.
+     */
+    parentChatId: z.string().min(1).optional(),
     /** Typed shallowly; the server validates each as a frame of its own. */
     events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
     done: z.boolean(),
   })
   .strict();
 export type HostRecordImportEvent = z.infer<typeof HostRecordImportEvent>;
+
+/**
+ * Host -> server, through the host outbox: one entry of a `patch_agent`
+ * subagent's record (spec/02 § Native subagent dispatch). `event` is the
+ * logged frame, addressed to the subagent's own chatId; the server keeps it in
+ * that chat's record, against `parentChatId`, and never broadcasts it or lists
+ * the subagent. Sent only to a server whose `auth.ok` carried `delegateRecord`.
+ */
+export const HostDelegateEntryEvent = z
+  .object({
+    type: z.literal('host.delegate_entry'),
+    parentChatId: z.string().min(1),
+    /** Typed shallowly; the server validates it as a frame of its own. */
+    event: z.object({ type: z.string().min(1) }).passthrough(),
+  })
+  .strict();
+export type HostDelegateEntryEvent = z.infer<typeof HostDelegateEntryEvent>;
 
 /** Server -> host: the record holds what `host.record_import` sent for this chat. */
 export const HostRecordImportAckEvent = z
@@ -7569,56 +7578,6 @@ export const PatchQueuePullResponseEvent = z
   })
   .strict();
 export type PatchQueuePullResponseEvent = z.infer<typeof PatchQueuePullResponseEvent>;
-
-export const PatchChatHistoryRequestEvent = z
-  .object({
-    type: z.literal('patch.chat_history.request'),
-    requestId: z.string().min(1),
-    chatId: z.string().min(1),
-    /** Return events with seq >= since. Defaults to 0 (full history). */
-    since: z.number().int().nonnegative().optional(),
-    limit: z.number().int().positive().max(200).optional(),
-    /**
-     * Read THIS branch's own track (spec/04 § Branching; spec/14 § Side
-     * threads panel, which pulls a side thread's content through this REST
-     * path rather than the live WS stream — see `04-chats-and-folders.md` §
-     * Parallel branches, "pull-based, not push-based"). Default: the active
-     * branch — today's behaviour, unchanged.
-     */
-    branchId: z.string().min(1).optional(),
-    /**
-     * Set only by the parent's-tool-row "open read-only transcript" route
-     * (spec/14 § Main chat panel — Delegate tool row): `chatId` is never in
-     * `chatRegistry`, so the ordinary ownership gate (`GET
-     * /api/chats/:id/history`'s `chatRegistry.get` check) can't run — this
-     * field is that gate's replacement. The host refuses with
-     * `not_a_delegate` unless `chatId`'s `meta.subagent.parentChatId` equals
-     * this value, so reading a subagent's transcript still needs its real
-     * parent id, not just the subagent's.
-     */
-    requireParent: z.string().min(1).optional(),
-  })
-  .strict();
-export type PatchChatHistoryRequestEvent = z.infer<typeof PatchChatHistoryRequestEvent>;
-
-export const PatchChatHistoryResponseEvent = z
-  .object({
-    type: z.literal('patch.chat_history.response'),
-    requestId: z.string().min(1),
-    ok: z.boolean(),
-    events: z.array(ChatMessageEvent).optional(),
-    /** Set when more events exist beyond the returned slice. */
-    nextFromSeq: z.number().int().nonnegative().optional(),
-    error: z
-      .object({
-        code: z.enum(['chat_not_found', 'internal', 'not_a_delegate']),
-        message: z.string(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export type PatchChatHistoryResponseEvent = z.infer<typeof PatchChatHistoryResponseEvent>;
 
 // `patch.skills.request` is server-originated: it backs
 // `GET /api/skills?folder=&hostId=` (the job-editor's Skill picker, the
@@ -10201,6 +10160,13 @@ export const AuthOkEvent = z
      */
     serverReads: z.literal(true).optional(),
     /**
+     * Sent to a host by a server that keeps `patch_agent` subagents' records
+     * (`host.delegate_entry`, and `host.record_import` with `parentChatId`) and
+     * serves their transcripts itself. A host sends neither to a server
+     * without it, holding the entries in its outbox until the server is updated.
+     */
+    delegateRecord: z.literal(true).optional(),
+    /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Every current
      * server sends it; surfaces read history only this way, so a surface told
@@ -10475,6 +10441,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatTurnStartedEvent,
   ChatTurnEndedEvent,
   HostRecordImportEvent,
+  HostDelegateEntryEvent,
   HostRecordImportAckEvent,
   HostOutboxEvent,
   HostOutboxAckEvent,
@@ -10487,8 +10454,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostManagerHandoverEvent,
   PatchQueuePullRequestEvent,
   PatchQueuePullResponseEvent,
-  PatchChatHistoryRequestEvent,
-  PatchChatHistoryResponseEvent,
   PatchSkillsRequestEvent,
   PatchSkillsResponseEvent,
   PatchModelsRequestEvent,
@@ -10808,6 +10773,7 @@ export const EVENT_SCHEMAS = {
   'chat.turn_started': ChatTurnStartedEvent,
   'chat.turn_ended': ChatTurnEndedEvent,
   'host.record_import': HostRecordImportEvent,
+  'host.delegate_entry': HostDelegateEntryEvent,
   'host.record_import_ack': HostRecordImportAckEvent,
   'host.outbox': HostOutboxEvent,
   'host.outbox_ack': HostOutboxAckEvent,
@@ -10820,8 +10786,6 @@ export const EVENT_SCHEMAS = {
   'host.manager_handover': HostManagerHandoverEvent,
   'patch.queue_pull.request': PatchQueuePullRequestEvent,
   'patch.queue_pull.response': PatchQueuePullResponseEvent,
-  'patch.chat_history.request': PatchChatHistoryRequestEvent,
-  'patch.chat_history.response': PatchChatHistoryResponseEvent,
   'patch.skills.request': PatchSkillsRequestEvent,
   'patch.skills.response': PatchSkillsResponseEvent,
   'patch.models.request': PatchModelsRequestEvent,

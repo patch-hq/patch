@@ -69,6 +69,7 @@ import {
   ChatErrorCode,
   heldMessageExpiredText,
   DEFAULT_LIMIT_BEHAVIOUR,
+  isOutboxEvent,
   type LimitBehaviour,
   type ReminderEvery,
 } from '@patch/wire';
@@ -15443,14 +15444,27 @@ export class Daemon {
     }
     // spec/02 § Native subagent dispatch — a `patch_delegate` subagent is
     // invisible to the user: the local bookkeeping above (seq index, history
-    // below) still runs, so its own transcript is intact for
-    // the read-only viewer and for `maybeSettleDelegate` to read back, but
-    // the event never reaches the server. The server only ever creates a
-    // sidebar row from `chat.spawned` (chat-registry.ts), so a subagent that
-    // never sends one is unreachable from every surface built on top of it —
-    // sidebar, search, notifications, badges — with nothing to filter at each
-    // of them individually.
-    if (typeof chatId === 'string' && this.chatState.get(chatId)?.subagent) {
+    // below) still runs, for `maybeSettleDelegate` to read back. Its entries
+    // reach the server's record only wrapped with their parent
+    // (`host.delegate_entry`), which keeps them against the subagent for the
+    // parent's read-only transcript and never broadcasts them. Nothing else
+    // about it is sent: the server only ever creates a sidebar row from
+    // `chat.spawned` (chat-registry.ts), so a subagent that never sends one is
+    // unreachable from every surface built on top of it — sidebar, search,
+    // notifications, badges — with nothing to filter at each of them.
+    const subagent = typeof chatId === 'string' ? this.chatState.get(chatId)?.subagent : undefined;
+    if (subagent) {
+      if (isOutboxEvent(event)) {
+        this.opts.emit({
+          type: 'host.delegate_entry',
+          parentChatId: subagent.parentChatId,
+          event: {
+            ...event,
+            ...(nativeRef !== undefined ? { nativeRef } : {}),
+            ...(branchId !== undefined ? { branchId } : {}),
+          },
+        } as WireEvent);
+      }
       if (!o.skipHistory) this.trackToolRun(event);
       return;
     }
