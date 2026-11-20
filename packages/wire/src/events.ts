@@ -2261,6 +2261,13 @@ export const ChatErrorEvent = z
      * independently.
      */
     causeSeq: z.number().int().gte(0).optional(),
+    /**
+     * The `localId` of the `chat.input` this error refused, when the host
+     * would not take a message at all (spec/12 § Chat status): a message the
+     * server held for it is then no longer queued. Sent only to a server whose
+     * `auth.ok` carried `serverStatus`.
+     */
+    rejectedLocalId: z.string().min(1).optional(),
     ...forSurfaceIdField,
   })
   .strict();

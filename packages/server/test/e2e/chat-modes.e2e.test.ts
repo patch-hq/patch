@@ -448,6 +448,49 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     await client.close();
   });
 
+  // spec/12 § Chat status: a message held for an offline host queues the chat,
+  // and the chat leaves that status as soon as the host takes the message —
+  // whether it runs a turn, or (a duplicate it had already taken) runs nothing.
+  it('mode 12b — a held message reads queued, then running, then idle; a held duplicate never leaves it queued', async () => {
+    h = await startHarness({ hostBackoffMs: [250, 250] });
+    const jwt = await h.mintSurface('srf-12b');
+    const client = await h.connectSurface('srf-12bb');
+    const chatId = await spawnChat(h, jwt, h.folder);
+    client.send({ type: 'chat.focus_change', chatId });
+    const states = record(client, ['chat.state']);
+    const statuses = (): string[] =>
+      states
+        .filter((e) => e.type === 'chat.state' && e.chatId === chatId)
+        .map((e) => (e.type === 'chat.state' ? (e.chatStatus?.state ?? '?') : '?'))
+        .filter((st, i, all) => i === 0 || all[i - 1] !== st);
+    const last = (): string | undefined => statuses().at(-1);
+
+    // A first turn runs to the end, so its message id is one the host has taken.
+    client.sendInput({ chatId, message: 'first', localId: 'D1' });
+    await expectReply(client, chatId, 'mode 12b (turn 1)');
+    await until(() => last() === 'idle', 3000, 'first turn idle');
+
+    // Held while the host is away: queued, then taken and run.
+    expect(h.dropHostLink()).toBe(true);
+    await h.waitHostOffline();
+    client.sendInput({ chatId, message: 'while away', localId: 'H1' });
+    await until(() => last() === 'queued_offline', 3000, 'queued for the offline host');
+    await expectReply(client, chatId, 'mode 12b (held turn)');
+    await until(() => last() === 'idle', 6000, 'the held turn ran and settled');
+    expect(statuses()).toEqual(
+      expect.arrayContaining(['queued_offline', 'running', 'idle']),
+    );
+
+    // A redelivery of a message the host already took: held, then re-acked
+    // without a turn. It must not stay queued.
+    expect(h.dropHostLink()).toBe(true);
+    await h.waitHostOffline();
+    client.sendInput({ chatId, message: 'first', localId: 'D1' });
+    await until(() => last() === 'queued_offline', 3000, 'duplicate queued for the offline host');
+    await until(() => last() === 'idle', 6000, 'duplicate taken without a turn: idle again');
+    await client.close();
+  });
+
   // ---- Mode 13: AI title generation ----
   it('mode 13 — chat.state carries the AI name from the first message; not regenerated on turn 2', async () => {
     h = await startHarness({ generateTitle: async () => 'Generated Title' });

@@ -45,8 +45,12 @@ export interface ChatStatusFacts {
   hostQueued: number;
   /** The agent declared it is blocked on the user (`patch_ask_human`). */
   declaredQuestion: boolean;
-  /** The server holds a message for this chat's offline host. */
-  held: boolean;
+  /**
+   * Messages the server held for this chat's offline host, by `localId`, until
+   * the host takes each (`chat.input_ack`), refuses it (`chat.error` naming
+   * it), a turn starts, or it expires.
+   */
+  held: string[];
   /** A held message expired undelivered: the words of the failure. */
   heldExpired: string | null;
   /**
@@ -66,7 +70,7 @@ export function emptyFacts(): ChatStatusFacts {
     retrying: false,
     hostQueued: 0,
     declaredQuestion: false,
-    held: false,
+    held: [],
     heldExpired: null,
     away: null,
   };
@@ -93,7 +97,7 @@ export function deriveStatus(facts: ChatStatusFacts, owed = false): StatusTarget
   if (facts.heldExpired !== null) {
     return { state: 'failed', reason: 'held_message_expired', message: facts.heldExpired };
   }
-  if (facts.held) return { state: 'queued_offline' };
+  if (facts.held.length > 0) return { state: 'queued_offline' };
   if (owed || facts.retrying || facts.hostQueued > 0) return { state: 'running' };
   if (facts.limit) {
     return {
@@ -161,10 +165,34 @@ export function factsOnTurnStarted(prev: ChatStatusFacts, turnId: string): ChatS
     interrupted: false,
     limit: null,
     retrying: false,
-    held: false,
+    held: [],
     heldExpired: null,
     away: null,
   };
+}
+
+/**
+ * The host took a held message (or refused it): it is not waiting any more.
+ * Whatever became of it is said by the facts that follow: a turn starting, the
+ * running turn it was steered into, the turns the host owes, or nothing at all
+ * for a duplicate the host had already taken.
+ */
+export function factsOnHeldResolved(prev: ChatStatusFacts, localId: string): ChatStatusFacts {
+  // `*` is a held message recorded before messages were told apart.
+  const held = prev.held.filter((id) => id !== localId && id !== '*');
+  return held.length === prev.held.length ? prev : { ...prev, held };
+}
+
+/** Facts read back from disk, a held flag from before held messages had ids included. */
+export function restoredFacts(
+  saved: Partial<Omit<ChatStatusFacts, 'held'>> & { held?: unknown },
+): ChatStatusFacts {
+  const held = Array.isArray(saved.held)
+    ? saved.held.filter((id): id is string => typeof id === 'string')
+    : saved.held === true
+      ? ['*']
+      : [];
+  return { ...emptyFacts(), ...saved, held };
 }
 
 export function factsOnTurnEnded(
@@ -213,7 +241,10 @@ const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
     'host_offline',
   ],
   waiting_for_user: ['running', 'idle', 'host_restarting', 'host_offline'],
-  queued_offline: ['running'],
+  // The host took the message: a turn starts, or (a duplicate, or one steered
+  // into a turn that already ended) the chat is as its other facts say; or it
+  // refused it.
+  queued_offline: ['running', 'idle', 'interrupted', 'failed'],
   host_restarting: [
     'host_offline',
     'running',
@@ -269,8 +300,8 @@ export function legacyActivity(facts: ChatStatusFacts, owed = false): ChatActivi
   const turnOpen = facts.openTurns.length > 0;
   if (turnOpen) return facts.openRequests.length > 0 ? 'awaiting-permission' : 'running';
   if (facts.openRequests.some((r) => !r.question)) return 'awaiting-permission';
-  if (facts.held || facts.heldExpired !== null)
-    return facts.heldExpired !== null ? 'errored' : 'idle';
+  if (facts.heldExpired !== null) return 'errored';
+  if (facts.held.length > 0) return 'idle';
   if (owed || facts.hostQueued > 0) return 'running';
   if (facts.retrying) return 'errored';
   if (facts.limit || facts.interrupted || facts.lastEnd?.outcome === 'interrupted') return 'idle';

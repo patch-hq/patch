@@ -502,18 +502,20 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       logger: log.child({ component: 'host-link' }),
       ...(heldInputs ? { heldInputs } : {}),
       resolveChatHost: (chatId: string) => chatRegistryRef?.get(chatId)?.hostId ?? null,
-      onHeld: (chatId: string) => {
-        const state = chatRegistryRef?.markQueued(chatId);
+      onHeld: (chatId: string, localId: string) => {
+        const state = chatRegistryRef?.markQueued(chatId, localId);
         if (state) wsHubRef?.broadcastChatState(state);
       },
       // A held message that expires is said in its chat, never dropped in
       // silence (spec/12 § Host-offline UX): the link puts a notice in for the
       // host and tells surfaces; here the chat's status reads failed, with why.
-      onHeldExpired: (expired) => {
-        for (const { notice } of expired) {
+      onHeldExpired: (expiredList) => {
+        for (const expired of expiredList) {
+          const { notice } = expired;
           const state = chatRegistryRef?.markHeldExpired(
             notice.event.chatId,
             heldMessageExpiredText(notice.event.hostName, notice.event.text),
+            (expired.expired.event as { localId?: string }).localId,
           );
           if (state) wsHubRef?.broadcastChatState(state);
         }
@@ -1801,6 +1803,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       throw e;
     }
     const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
+    // What the server held for it will never be delivered (spec/12 § Chat status).
+    for (const state of chatRegistry.dropHeldForHost(hostId)) wsHub.broadcastChatState(state);
     const told = wsHub.removeHost(hostId);
     log.info(
       { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told },

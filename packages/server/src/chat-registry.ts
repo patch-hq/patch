@@ -33,6 +33,7 @@ import {
   emptyFacts,
   factsFromHostState,
   factsOnRequestRaised,
+  factsOnHeldResolved,
   factsOnRequestResolved,
   factsOnTurnEnded,
   factsOnTurnStarted,
@@ -40,6 +41,7 @@ import {
   isMidTurn,
   legacyActivity,
   nextStatus,
+  restoredFacts,
   type ChatStatusFacts,
 } from './chat-status.js';
 import type {
@@ -444,7 +446,7 @@ export class ChatRegistry {
           } else if (Array.isArray(entry.w) && typeof entry.w[1] === 'number') {
             this.workedAt.set(entry.w[0], entry.w[1]);
           } else if (Array.isArray(entry.f) && typeof entry.f[1] === 'object') {
-            this.facts.set(entry.f[0], { ...emptyFacts(), ...entry.f[1] });
+            this.facts.set(entry.f[0], restoredFacts(entry.f[1]));
           }
         });
         this.indexLines = lines.length;
@@ -638,6 +640,21 @@ export class ChatRegistry {
           : factsOnTurnEnded(prev, event.turnId, event.outcome, event.error);
       if (event.type === 'chat.turn_started') this.workedAt.set(event.chatId, this.now());
       this.applyFacts(event.chatId, next, { tell: true });
+      return;
+    }
+    // The host took a message the server held for it, or refused it (spec/12 §
+    // Chat status): it is no longer queued for an offline host. An ack the
+    // server's own queue makes for one surface is not the host's.
+    if (
+      (event.type === 'chat.input_ack' &&
+        typeof (event as { forSurfaceId?: unknown }).forSurfaceId !== 'string') ||
+      (event.type === 'chat.error' && event.rejectedLocalId !== undefined)
+    ) {
+      const localId = event.type === 'chat.input_ack' ? event.localId : event.rejectedLocalId!;
+      const prev = this.facts.get(event.chatId);
+      if (!prev || !this.chats.has(event.chatId)) return;
+      const next = factsOnHeldResolved(prev, localId);
+      if (next !== prev) this.applyFacts(event.chatId, next, { tell: true, own: true });
       return;
     }
     if (event.type === 'patch.browser_handoff.state') {
@@ -948,13 +965,35 @@ export class ChatRegistry {
    * status). Returns the `chat.state` to broadcast, or null when the chat is
    * unknown or its status does not change for it (a chat mid-turn keeps its own).
    */
-  markQueued(chatId: string): ChatStateEvent | null {
+  markQueued(chatId: string, localId: string): ChatStateEvent | null {
     const existing = this.chats.get(chatId);
     if (!existing) return null;
     const facts = this.facts.get(chatId) ?? emptyFacts();
     const from = existing.chatStatus?.state ?? 'idle';
-    if (from === 'queued_offline' || !isAllowedTransition(from, 'queued_offline')) return null;
-    return this.applyFacts(chatId, { ...facts, held: true }, { tell: false, own: true });
+    if (facts.held.includes(localId)) return null;
+    const held = [...facts.held, localId];
+    // Another message behind one already held: remembered, the status unchanged.
+    if (from === 'queued_offline') {
+      this.applyFacts(chatId, { ...facts, held }, { tell: false, own: true });
+      return null;
+    }
+    if (!isAllowedTransition(from, 'queued_offline')) return null;
+    return this.applyFacts(chatId, { ...facts, held }, { tell: false, own: true });
+  }
+
+  /**
+   * A host left the account: nothing the server held for it will be
+   * delivered. Returns the `chat.state` of each chat that changed.
+   */
+  dropHeldForHost(hostId: string): ChatStateEvent[] {
+    const events: ChatStateEvent[] = [];
+    for (const [chatId, row] of this.chats) {
+      const facts = this.facts.get(chatId);
+      if (row.hostId !== hostId || !facts || facts.held.length === 0) continue;
+      const event = this.applyFacts(chatId, { ...facts, held: [] }, { tell: false, own: true });
+      if (event) events.push(event);
+    }
+    return events;
   }
 
   /**
@@ -998,14 +1037,12 @@ export class ChatRegistry {
    * the one way a chat goes from `queued_offline` to `failed`. Returns the
    * `chat.state` to broadcast, or null for a chat the registry does not know.
    */
-  markHeldExpired(chatId: string, message: string): ChatStateEvent | null {
+  markHeldExpired(chatId: string, message: string, localId?: string): ChatStateEvent | null {
     if (!this.chats.has(chatId)) return null;
     const facts = this.facts.get(chatId) ?? emptyFacts();
-    return this.applyFacts(
-      chatId,
-      { ...facts, held: false, heldExpired: message },
-      { tell: false, own: true },
-    );
+    const held =
+      localId === undefined ? [] : facts.held.filter((id) => id !== localId && id !== '*');
+    return this.applyFacts(chatId, { ...facts, held, heldExpired: message }, { tell: false, own: true });
   }
 
   /** The account feed's latest position (spec/03 § Account feed). */

@@ -15,6 +15,8 @@ import {
   isAllowedTransition,
   legacyActivity,
   nextStatus,
+  restoredFacts,
+  factsOnHeldResolved,
   type ChatStatusFacts,
 } from '../src/chat-status.js';
 import { ChatRegistry } from '../src/chat-registry.js';
@@ -242,7 +244,6 @@ describe('transitions', () => {
   });
 
   test.each([
-    ['queued_offline', 'failed'],
     ['idle', 'host_offline'],
     ['idle', 'failed'],
     ['failed', 'idle'],
@@ -478,17 +479,17 @@ describe('ChatRegistry status', () => {
   test('a held message queues an idle chat but not a running one, and a turn takes it', () => {
     const { reg } = make();
     reg.observe(spawned);
-    expect(reg.markQueued('c1')?.chatStatus?.state).toBe('queued_offline');
-    expect(reg.markQueued('c1')).toBeNull();
+    expect(reg.markQueued('c1', 'L1')?.chatStatus?.state).toBe('queued_offline');
+    expect(reg.markQueued('c1', 'L1')).toBeNull();
     reg.observe(started());
     expect(reg.get('c1')?.chatStatus?.state).toBe('running');
-    expect(reg.markQueued('c1')).toBeNull();
+    expect(reg.markQueued('c1', 'L1')).toBeNull();
   });
 
   test('a held message that expires fails the chat with why, as the server alone can', () => {
     const { reg, warnings } = make();
     reg.observe(spawned);
-    reg.markQueued('c1');
+    reg.markQueued('c1', 'L1');
     const ev = reg.markHeldExpired('c1', 'Not delivered');
     expect(ev?.chatStatus).toMatchObject({
       state: 'failed',
@@ -501,7 +502,7 @@ describe('ChatRegistry status', () => {
   test('a change no allowed transition covers is applied and logged as a fault', () => {
     const { reg, warnings } = make();
     reg.observe(spawned);
-    reg.markQueued('c1');
+    reg.markQueued('c1', 'L1');
     // Queued, then a cut-off turn reported with no turn ever started.
     reg.observe(state({ interrupted: true }));
     expect(reg.get('c1')?.chatStatus?.state).toBe('queued_offline');
@@ -529,5 +530,109 @@ describe('ChatRegistry status', () => {
     reg.recompute('c1');
     expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
     expect(told.at(-1)?.chatStatus?.state).toBe('idle');
+  });
+
+  describe('a held message the host takes without starting a turn of its own', () => {
+    const ack = (localId: string, chatId = 'c1'): WireEvent => ({
+      type: 'chat.input_ack',
+      chatId,
+      localId,
+    });
+
+    test('steered into the turn the host reattached to: running, then idle when it ends', () => {
+      const { reg, warnings } = make();
+      reg.observe(spawned);
+      reg.observe(started());
+      reg.markHostAway('h1', 'offline');
+      // While away the turn was still open, so the held message does not queue
+      // the chat; it is remembered all the same.
+      expect(reg.markQueued('c1', 'L1')).toBeNull();
+      reg.observe(state());
+      reg.observe(ack('L1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+      reg.observe(ended('completed'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+      expect(warnings).toEqual([]);
+    });
+
+    test('steered in after the reattached turn already ended: idle, not queued', () => {
+      const { reg, warnings } = make();
+      reg.observe(spawned);
+      expect(reg.markQueued('c1', 'L1')?.chatStatus?.state).toBe('queued_offline');
+      reg.observe(ack('L1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+      expect(warnings).toEqual([]);
+    });
+
+    test('two held messages merged into one turn: running, then idle, never queued again', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markQueued('c1', 'L1');
+      reg.markQueued('c1', 'L2');
+      reg.observe(ack('L1'));
+      // The second is still waiting on the host until it is taken.
+      expect(reg.get('c1')?.chatStatus?.state).toBe('queued_offline');
+      reg.observe(ack('L2'));
+      reg.observe(started());
+      expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+      reg.observe(ended('completed'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+    });
+
+    test('a duplicate the host had already taken (re-acked, nothing run): back to what it was', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.observe(started());
+      reg.observe(ended('interrupted'));
+      reg.observe(state({ interrupted: true }));
+      reg.markQueued('c1', 'L1');
+      expect(reg.get('c1')?.chatStatus?.state).toBe('queued_offline');
+      reg.observe(ack('L1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('interrupted');
+    });
+
+    test('a message the host refuses (chat.error naming it): not queued any more', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markQueued('c1', 'L1');
+      reg.observe({
+        type: 'chat.error',
+        chatId: 'c1',
+        error: { code: 'chat_not_found', message: 'gone' },
+        seq: -1,
+        rejectedLocalId: 'L1',
+      });
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+    });
+
+    test("the server queue's own ack to one surface is not the host taking the message", () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markQueued('c1', 'L1');
+      reg.observe({ ...(ack('L1') as object), forSurfaceId: 's1' } as WireEvent);
+      expect(reg.get('c1')?.chatStatus?.state).toBe('queued_offline');
+    });
+
+    test('a host removed from the account drops what was held for it', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markQueued('c1', 'L1');
+      expect(reg.dropHeldForHost('h1').map((e) => e.chatStatus?.state)).toEqual(['idle']);
+    });
+
+    test('one of two held messages expiring fails the chat with why', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markQueued('c1', 'L1');
+      reg.markQueued('c1', 'L2');
+      expect(reg.markHeldExpired('c1', 'Not delivered', 'L1')?.chatStatus?.state).toBe('failed');
+      expect(reg.factsOf('c1')?.held).toEqual(['L2']);
+    });
+
+    test('a held flag saved before held messages had ids is cleared by the next ack', () => {
+      expect(restoredFacts({ held: true }).held).toEqual(['*']);
+      expect(restoredFacts({ held: false }).held).toEqual([]);
+      expect(factsOnHeldResolved(restoredFacts({ held: true }), 'any').held).toEqual([]);
+    });
   });
 });
