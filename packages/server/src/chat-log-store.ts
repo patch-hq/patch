@@ -661,15 +661,6 @@ export class ChatLogStore {
   }
 
   /**
-   * True when the server keeps a record of the chat, without loading it: what
-   * search uses to count the chats it could answer for.
-   */
-  holds(chatId: string): boolean {
-    if ((this.chats.get(chatId)?.size ?? 0) > 0) return true;
-    return this.dir !== null && existsSync(this.pathOf(chatId));
-  }
-
-  /**
    * The chat's user and assistant messages containing every term, the newest as
    * the snippet; `null` for none (spec/03 § Chat search). Reads the record on
    * disk incrementally and never loads a chat's whole log to do it.

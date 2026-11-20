@@ -495,6 +495,7 @@ export class TerminalSessions {
 
   /** The runner never came up: report it and drop everything it left. */
   private failStart(session: Session, why: string): void {
+    const python = this.opts.python ?? 'python3';
     this.opts.logger?.warn(
       { sessionId: session.sessionId, err: why },
       'terminal runner failed to start',
@@ -506,7 +507,9 @@ export class TerminalSessions {
     this.error(
       session.sessionId,
       session.kind === 'pty' ? 'pty_unavailable' : 'internal',
-      `this host cannot open a terminal: ${this.opts.python ?? 'python3'} failed to start (${why})`,
+      `this host cannot open a terminal: ${python} failed to start (${why}). ` +
+        'Terminals need a working python3 on the host: install it ' +
+        '(macOS: run `xcode-select --install`; Debian/Ubuntu: `apt install python3`).',
       { forSurfaceId: session.forSurfaceId },
     );
   }

@@ -8861,12 +8861,10 @@ export type PatchChatAdoptResponseEvent = z.infer<typeof PatchChatAdoptResponseE
 // ---------------------------------------------------------------------------
 // Chat search (spec/03 § Chat search, spec/04 § Search)
 //
-// `GET /api/chats/search?q=` searches every chat on every host — names and the
-// full text of what was said. The transcripts live on the hosts, so the server
-// fans one `patch.chat_search.request` out to each online host, merges the
-// answers, and names every host it could not search. Correlated by
-// `requestId`; the response carries message text, so it is never relayed to
-// surfaces over the socket.
+// `GET /api/chats/search?q=` searches every chat on every host — names, the
+// stored first-message preview and the full text of what was said — from the
+// server's own chat index and record, whether or not a chat's host is online.
+// No host is asked.
 
 /** Shortest query (after trimming) a search accepts. */
 export const CHAT_SEARCH_MIN_QUERY = 2;
@@ -8875,8 +8873,7 @@ export const CHAT_SEARCH_DEFAULT_LIMIT = 20;
 /** The most results one page may ask for. */
 export const CHAT_SEARCH_MAX_LIMIT = 50;
 /**
- * The deepest a caller may page (`offset + limit`). Each host is asked for its
- * top `offset + limit` hits, so this bounds what one host sends back.
+ * The deepest a caller may page (`offset + limit`).
  */
 export const CHAT_SEARCH_MAX_DEPTH = 200;
 
@@ -8946,12 +8943,6 @@ export const ChatSearchHit = z
     messageMatches: z.number().int().nonnegative(),
     /** The most recent matching message, or `null` for a name-only match. */
     snippet: ChatSearchSnippet.nullable(),
-    /**
-     * `true` when the server answered from its own record of the chat because
-     * the chat's host is offline (spec/01 § Chat record). Absent on a hit the
-     * host itself returned. The name predates the record.
-     */
-    mirrored: z.boolean().optional(),
   })
   .strict();
 export type ChatSearchHit = z.infer<typeof ChatSearchHit>;
@@ -8964,60 +8955,18 @@ export type ChatSearchHit = z.infer<typeof ChatSearchHit>;
 // that one host; the RESPONSE carries only the host's key statuses (never a
 // value) and is still answered to the one caller over REST, never relayed.
 
-export const PatchChatSearchRequestEvent = z
-  .object({
-    type: z.literal('patch.chat_search.request'),
-    requestId: z.string().min(1),
-    ...hostIdField,
-    /** Trimmed, at least `CHAT_SEARCH_MIN_QUERY` characters. */
-    query: z.string().min(CHAT_SEARCH_MIN_QUERY),
-    /** How many of the host's top hits to send back. */
-    limit: z.number().int().positive().max(CHAT_SEARCH_MAX_DEPTH),
-    /** false = chat names only; absent or true = names and message text. */
-    fullText: z.boolean().optional(),
-    /** true = archived chats are searched too; absent or false = they are left out. */
-    includeArchived: z.boolean().optional(),
-    /** true = hidden chats are searched too; absent or false = they are left out. */
-    includeHidden: z.boolean().optional(),
-  })
-  .strict();
-export type PatchChatSearchRequestEvent = z.infer<typeof PatchChatSearchRequestEvent>;
-
-export const PatchChatSearchResponseEvent = z
-  .object({
-    type: z.literal('patch.chat_search.response'),
-    requestId: z.string().min(1),
-    ...hostIdField,
-    ok: z.boolean(),
-    /** The host's top hits, best first (name matches, then most recent). */
-    hits: z.array(ChatSearchHit).optional(),
-    /** Every hit on the host, of which `hits` is the head. */
-    total: z.number().int().nonnegative().optional(),
-    /** Chats searched (every chat on the host except deleted ones). */
-    searchedChats: z.number().int().nonnegative().optional(),
-    /**
-     * Chats whose transcript is no longer on disk, so only their name and
-     * first-message preview could be searched.
-     */
-    transcriptsMissing: z.number().int().nonnegative().optional(),
-    error: z
-      .object({ code: z.enum(['internal']), message: z.string() })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export type PatchChatSearchResponseEvent = z.infer<typeof PatchChatSearchResponseEvent>;
-
 /**
- * One host's part in a search. Every registered host is listed, so a host that
- * was not searched is always named rather than silently absent.
+ * One host's part in a search. Every registered host is listed. The server
+ * searches every chat itself, so it reports each host as `searched` with how
+ * many of its chats that covered; the other states are from servers that asked
+ * hosts, which surfaces still name if they see them.
  */
 export const ChatSearchHostResult = z
   .object({
     hostId: HostId,
     hostName: z.string().nullable(),
     /**
-     * - `searched` — the host answered.
+     * - `searched` — the host's chats were searched.
      * - `offline` — the host is not connected; nothing on it was searched.
      * - `timeout` — the host did not answer in time; nothing on it is included.
      * - `error` — the host answered with a failure (`message` says what).
@@ -9025,12 +8974,6 @@ export const ChatSearchHostResult = z
     state: z.enum(['searched', 'offline', 'timeout', 'error']),
     message: z.string().optional(),
     searchedChats: z.number().int().nonnegative().optional(),
-    transcriptsMissing: z.number().int().nonnegative().optional(),
-    /**
-     * On an `offline` host: how many of its chats the server searched from its
-     * own record instead. Absent when the host was asked directly.
-     */
-    mirroredChats: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type ChatSearchHostResult = z.infer<typeof ChatSearchHostResult>;
@@ -10647,8 +10590,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchFoldersCheckResponseEvent,
   PatchChatAdoptRequestEvent,
   PatchChatAdoptResponseEvent,
-  PatchChatSearchRequestEvent,
-  PatchChatSearchResponseEvent,
   // Terminal sessions
   PatchTerminalOpenEvent,
   PatchTerminalInputEvent,
@@ -10983,8 +10924,6 @@ export const EVENT_SCHEMAS = {
   'patch.folders_check.response': PatchFoldersCheckResponseEvent,
   'patch.chat_adopt.request': PatchChatAdoptRequestEvent,
   'patch.chat_adopt.response': PatchChatAdoptResponseEvent,
-  'patch.chat_search.request': PatchChatSearchRequestEvent,
-  'patch.chat_search.response': PatchChatSearchResponseEvent,
   'patch.terminal.open': PatchTerminalOpenEvent,
   'patch.terminal.input': PatchTerminalInputEvent,
   'patch.terminal.signal': PatchTerminalSignalEvent,

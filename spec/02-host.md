@@ -1299,9 +1299,10 @@ folder on it from a surface.
   `<patchHome>/terminals/<runner>/`, and the host talks to the runner over a
   unix socket in the same directory, so a host that is not there loses nothing
   (§ Surviving a host restart). A pipe session's log keeps stdout and stderr
-  apart, so output replayed after a restart keeps its stream. python3 is present
-  on every host the host runs on; a host where the runner cannot start answers
-  an error (`internal` for a pipe session, `pty_unavailable` for a PTY), never a
+  apart, so output replayed after a restart keeps its stream. python3 must be
+  installed on the host (macOS without the Xcode command line tools only has an
+  installer stub); a host where the runner cannot start answers an error naming
+  python3 and how to install it (`internal` for a pipe session, `pty_unavailable` for a PTY), never a
   shell started some other way.
 - A named folder is validated the same way a chat spawn is — it must exist
   on the host. A missing one is a loud `folder_not_found`, so a shell always starts where the

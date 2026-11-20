@@ -2211,7 +2211,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     hostLink,
     chatRegistry,
     chatLogStore,
-    idGenerator,
   });
 
   // ---- host files REST (spec/03 § Host files) ----

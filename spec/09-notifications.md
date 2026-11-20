@@ -16,7 +16,7 @@ A notification is a doorbell first: it exists in the moment, on whichever surfac
 - The source chat stays the canonical record: every `patch_notify` call is also a tool-call entry in the source chat's history. There is still no cross-channel timeline of OS-level toasts — the bell shows what agents sent, not how it was delivered.
 - The server's broadcast log (speakers) stores broadcast metadata for the agent's reply-context purposes. The thread's agent sees it only when interpreting a reply.
 
-Not in the bell: it is not how a chat becomes worth looking at later. That is a status (`04-chats-and-folders.md` § Chat model), persisted and set by a different tool. A notification does, however, un-archive and un-hide its source chat (`04-chats-and-folders.md` § Chat model), so the chat that rang is in the list when the user follows it.
+Not in the bell: it is not how a chat becomes worth looking at later. That is a status (`04-chats-and-folders.md` § Chat model), persisted and set by a different tool. A notification does, however, un-archive (but not un-hide) its source chat (`04-chats-and-folders.md` § Chat model), so the chat that rang is in the list when the user follows it.
 
 REST: `GET /api/notifications` → `{ items, unread }`; `POST /api/notifications/read` with `{ ids: string[] }` or `{ all: true }` → the same shape.
 

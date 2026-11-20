@@ -15,9 +15,7 @@ import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexSessions } from './codexSessions.js';
-import { branchChain } from './readTrack.js';
 import { ModelEndpointRegistry } from './modelEndpoints.js';
-import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 // Entry point for the patch-daemon process.
 //
 // Wires together: chat_state map, ChatRunner/Daemon, loopback HTTP control
@@ -805,24 +803,6 @@ async function startHost(
       link.send({ type: 'settings.account_signed_in', hostId: selfHostId, requestId, account }),
   });
   const codexSessions = new CodexSessions(join(config.patchHome, 'openai-history'));
-  // spec/02 § Chat search — an in-memory index of each chat's own log (never
-  // persisted). Built in the background once the chats are hydrated (below),
-  // then kept current by every search.
-  const chatSearch = new ChatSearchIndex(
-    {
-      logPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'events.jsonl'),
-      now: () => Date.now(),
-      onCorruptLine: ({ path, message }) =>
-        logger.warn({ path, err: message }, 'chat search: skipping unreadable log line'),
-    },
-    selfHostId,
-  );
-  // Settles once the chats are hydrated AND the index is built; a search that
-  // arrives earlier waits for it rather than answering from nothing.
-  let chatSearchBuilt: () => void = () => {};
-  const chatSearchReady = new Promise<void>((resolve) => {
-    chatSearchBuilt = resolve;
-  });
   // spec/02 § Provider adapters — local models and routers are endpoints
   // inside Codex and Claude Code, set once for the account.
   const modelEndpoints = new ModelEndpointRegistry();
@@ -3049,32 +3029,6 @@ async function startHost(
       }
       if (event.type === 'patch.skills.request') {
         void handleSkillsRequest(event, sender, logger);
-        return;
-      }
-      if (event.type === 'patch.chat_search.request') {
-        void handleChatSearchRequest(
-          event,
-          {
-            index: chatSearch,
-            ready: chatSearchReady,
-            // A patch_delegate subagent never reaches the server to be indexed
-            // any other way, but filter it out here too rather than rely on
-            // that alone (spec/02 § Native subagent dispatch).
-            listChats: () =>
-              daemon
-                .listAll()
-                .filter((c) => !c.subagent)
-                .map((c) => {
-                  const meta = metaStore.read(c.chatId);
-                  return meta?.branches && meta.activeBranchId
-                    ? { ...c, track: branchChain(meta, meta.activeBranchId) }
-                    : c;
-                }),
-            hostId: selfHostId,
-            logger,
-          },
-          sender,
-        );
         return;
       }
       if (event.type === 'patch.backends.request') {
@@ -5457,23 +5411,6 @@ async function startHost(
   // Apply persisted harness config (Task 3; spec/14 § Agent behavior) before hydrate.
   applyHarnessConfig();
   daemon.hydrate({ deferWorkUntilReconciled: true });
-  {
-    const started = Date.now();
-    // A failed build is logged and still releases waiting searches: each
-    // search refreshes every chat itself, so it reports its own failure.
-    void chatSearch
-      .warm(daemon.listAll())
-      .then(
-        () =>
-          logger.info(
-            { tookMs: Date.now() - started, transcripts: chatSearch.size() },
-            'chat search index built',
-          ),
-        (err: unknown) =>
-          logger.error({ err: (err as Error).message }, 'chat search index build failed'),
-      )
-      .then(() => chatSearchBuilt());
-  }
   // spec/04 § Folders: the host owns the folder registry. Its list is the
   // registered project roots first, then folders seen in recent chats. It
   // publishes `folders.list` on connect (onAuthed, above) and `folders.updated`

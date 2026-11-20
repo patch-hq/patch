@@ -4191,8 +4191,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         message: `chat not found: ${callerChatId}`,
       } satisfies ErrorEnvelope);
     }
-    // A notification brings its chat into the list (spec/04 § Current status):
-    // out of Archived and Hidden, one-way, with no status declared.
+    // A notification takes its chat out of Archived only (spec/04 § Current
+    // status). It never unhides: Hidden is the user's call.
     opts.daemon!.unarchiveForNotify(callerChatId);
     if (opts.emitWire) {
       const event: WireEvent = {
