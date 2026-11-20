@@ -10025,6 +10025,18 @@ button.set-row-open:focus-visible {
 .set-sub-error {
   color: var(--danger);
 }
+.set-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.set-list code {
+  overflow-wrap: anywhere;
+}
 .set-row-ctrl {
   display: flex;
   align-items: center;

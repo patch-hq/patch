@@ -1135,6 +1135,17 @@ export const api = {
     request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(hostId)}`, {
       method: 'DELETE',
     }),
+  // spec/11 § Replacing a host: what would move, which folders the new host
+  // lacks and where the session files are; then the replacement itself.
+  replaceHostPlan: (hostId: string, withHostId: string) =>
+    request<ReplaceHostPlan>(
+      `/api/hosts/${encodeURIComponent(hostId)}/replace?with=${encodeURIComponent(withHostId)}`,
+    ),
+  replaceHost: (hostId: string, withHostId: string, withoutFolders: string[]) =>
+    request<{ ok: true; moved: number; withoutFolders: string[]; hosts: AuthOkHost[] }>(
+      `/api/hosts/${encodeURIComponent(hostId)}/replace`,
+      { method: 'POST', body: { with: withHostId, withoutFolders } },
+    ),
   // Skills available in a folder's `.claude/skills` (job-editor Skill picker
   // and its Edit link, the composer's `/` menu and skill chips). `paths`
   // names the absolute file each skill is defined in, keyed by name; absent
@@ -1192,4 +1203,14 @@ export interface BatchRecord {
 export interface BatchResponse {
   batch: BatchRecord | null;
   carryover: string[];
+}
+
+/** spec/11 § Replacing a host — `GET /api/hosts/:hostId/replace?with=`. */
+export interface ReplaceHostPlan {
+  from: { hostId: string; name: string };
+  to: { hostId: string; name: string };
+  chats: number;
+  folders: Array<{ folder: string; chats: number; present: boolean }>;
+  missing: string[];
+  sessions: Array<{ provider: string; path: string; chats: number }>;
 }

@@ -1118,16 +1118,24 @@ export class ChatRegistry {
   }
 
   /**
-   * The chat has moved to another host (spec/04 § Moving a chat to another
-   * host). `hostId` is otherwise fixed at `chat.spawned` for the chat's life,
-   * and it is what routes every later frame for the chat, so a move is the one
-   * thing that changes it. No-op if unknown.
+   * The chat's host was replaced (spec/11 § Replacing a host). `hostId` is
+   * otherwise fixed at `chat.spawned` for the chat's life, and it is what
+   * routes every later frame for the chat, so a replacement is the one thing
+   * that changes it. Returns the row's new `chat.state` to broadcast; null if
+   * unknown.
    */
-  rehome(chatId: string, hostId: string, folder: string): void {
+  rehome(chatId: string, hostId: string, folder: string): ChatStateEvent | null {
     const existing = this.chats.get(chatId);
-    if (!existing) return;
-    this.chats.set(chatId, { ...existing, hostId, folder });
+    if (!existing) return null;
+    const next: ChatSummary = { ...existing, hostId, folder, feedPos: ++this.feedCounter };
+    this.chats.set(chatId, next);
     this.markDirty();
+    return this.stateEventOf(next);
+  }
+
+  /** Every chat the server holds for this host, whatever its status. */
+  chatsOnHost(hostId: string): ChatSummary[] {
+    return [...this.chats.values()].filter((c) => c.hostId === hostId);
   }
 
   /** Remove a chat row from the registry mirror. The host remains source of

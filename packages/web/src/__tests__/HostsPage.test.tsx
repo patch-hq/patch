@@ -986,3 +986,70 @@ describe('machineLabel', () => {
     expect(machineLabel('linux', 'x64')).toBe('Linux · x64');
   });
 });
+
+// spec/11 § Replacing a host: a new machine takes over this host's chats.
+describe('Settings → Hosts → Replace with…', () => {
+  const plan = (missing: string[]) => ({
+    from: { hostId: 'host-a', name: 'laptop' },
+    to: { hostId: 'host-b', name: 'beta' },
+    chats: 3,
+    folders: [
+      { folder: '/work/a', chats: 2, present: true },
+      { folder: '/work/b', chats: 1, present: !missing.includes('/work/b') },
+    ],
+    missing,
+    sessions: [{ provider: 'claude', path: '~/.patch/chats/<chat id>/claude', chats: 3 }],
+  });
+  beforeEach(() => {
+    reportHost('host-a', { hostName: 'laptop' });
+    reportHost('host-b', { hostName: 'beta', runsManager: false });
+  });
+
+  it('choosing the new host lists each folder, which are missing, and where sessions live', async () => {
+    fetchRoutes['GET /api/hosts/host-a/replace?with=host-b'] = () => json(200, plan(['/work/b']));
+    renderPage('hosts');
+    openRow('host-a');
+    fireEvent.change(screen.getByTestId('host-host-a-replace'), { target: { value: 'host-b' } });
+    const panel = await screen.findByTestId('host-host-a-replace-plan');
+    expect(panel).toHaveTextContent('beta takes over 3 chats');
+    expect(screen.getAllByTestId('replace-folder')).toHaveLength(1);
+    expect(screen.getByTestId('replace-folder-missing')).toHaveTextContent('/work/b');
+    expect(screen.getByTestId('replace-sessions')).toHaveTextContent(
+      '~/.patch/chats/<chat id>/claude',
+    );
+  });
+
+  it('with a folder missing, it asks first and sends the missing folders it was told to go without', async () => {
+    fetchRoutes['GET /api/hosts/host-a/replace?with=host-b'] = () => json(200, plan(['/work/b']));
+    const replace = vi
+      .spyOn(api, 'replaceHost')
+      .mockResolvedValue({ ok: true, moved: 3, withoutFolders: ['/work/b'], hosts: [] });
+    renderPage('hosts');
+    openRow('host-a');
+    fireEvent.change(screen.getByTestId('host-host-a-replace'), { target: { value: 'host-b' } });
+    fireEvent.click(await screen.findByTestId('replace-confirm'));
+    expect(await screen.findByTestId('confirm-modal')).toHaveTextContent('/work/b');
+    fireEvent.click(screen.getByTestId('confirm-ok'));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('host-a', 'host-b', ['/work/b']));
+    await waitFor(() => expect(usePresenceStore.getState().hosts['host-a']).toBeUndefined());
+  });
+
+  it('with every folder present it replaces without asking again; a refusal is said in the server’s words', async () => {
+    fetchRoutes['GET /api/hosts/host-a/replace?with=host-b'] = () => json(200, plan([]));
+    fetchRoutes['POST /api/hosts/host-a/replace'] = () =>
+      json(502, { error: 'chats_not_taken', message: 'beta could not take 1 of 3 chats' });
+    renderPage('hosts');
+    openRow('host-a');
+    fireEvent.change(screen.getByTestId('host-host-a-replace'), { target: { value: 'host-b' } });
+    fireEvent.click(await screen.findByTestId('replace-confirm'));
+    await waitFor(() =>
+      expect(useUiStore.getState().errors).toContainEqual(
+        expect.objectContaining({
+          message: 'Replacing the host failed. Try again.',
+          detail: 'beta could not take 1 of 3 chats',
+        }),
+      ),
+    );
+    expect(usePresenceStore.getState().hosts['host-a']).toBeDefined();
+  });
+});

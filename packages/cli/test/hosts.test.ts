@@ -39,6 +39,7 @@ test('every hosts subcommand the spec names is registered', () => {
     'claude-settings',
     'memory',
     'remove',
+    'replace',
   ]) {
     assert.ok(
       names.includes(expected),
@@ -53,6 +54,34 @@ test('hosts remove REQUIRES --host, so a revocation is never aimed by default', 
   const hostOpt = remove.options.find((o) => o.long === '--host');
   assert.ok(hostOpt, '--host option exists');
   assert.equal(hostOpt.required, true, '--host is required on remove');
+});
+
+test('hosts replace REQUIRES both hosts, so neither is aimed by default', () => {
+  const replace = hostsCmd(build()).commands.find((c) => c.name() === 'replace');
+  assert.ok(replace);
+  for (const long of ['--host', '--with']) {
+    assert.equal(replace.options.find((o) => o.long === long)?.required, true, `${long} required`);
+  }
+});
+
+test('describeReplacePlan names each folder, which are missing, and where sessions are', async () => {
+  const { describeReplacePlan } = await import('../src/commands/hosts.js');
+  const text = describeReplacePlan({
+    from: { hostId: 'd2', name: 'Old box' },
+    to: { hostId: 'd1', name: 'New box' },
+    chats: 3,
+    folders: [
+      { folder: '/work/a', chats: 2, present: true },
+      { folder: '/work/b', chats: 1, present: false },
+    ],
+    missing: ['/work/b'],
+    sessions: [{ provider: 'claude', path: '~/.patch/chats/<chat id>/claude', chats: 3 }],
+  }).join('\n');
+  assert.match(text, /New box takes over 3 chats from Old box/);
+  assert.match(text, /✓ {2}\/work\/a/);
+  assert.match(text, /✗ missing {2}\/work\/b/);
+  assert.match(text, /claude: ~\/\.patch\/chats\/<chat id>\/claude/);
+  assert.match(text, /--without-folder/);
 });
 
 test('the host-scoped commands take --host, defaulting to this host', () => {

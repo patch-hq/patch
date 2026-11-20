@@ -138,6 +138,9 @@ class WiredHostLink implements HostLink {
   forget(): boolean {
     return false;
   }
+  handOverHeld(): number {
+    return 0;
+  }
 
   onStatus(h: (s: 'online' | 'offline') => void): () => void {
     this.statusHandlers.add(h);

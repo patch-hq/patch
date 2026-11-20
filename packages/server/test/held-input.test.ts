@@ -92,6 +92,22 @@ describe('messages held for an offline host', () => {
     expect(socket.sent).toEqual([]);
   });
 
+  it('a replaced host’s held messages go to the host that replaces it, in order, and no control frame does', () => {
+    const link = makeLink();
+    link.sendTo('d1', 'srf-1', input('L1'));
+    link.sendTo('d1', 'srf-1', { type: 'chat.stop_request', chatId: 'c1' } as WireEvent);
+    link.sendTo('d1', 'srf-2', input('L2'));
+    const next = new FakeSocket();
+    link.attach(next as never, 'd2');
+    expect(link.handOverHeld('d1', 'd2')).toBe(2);
+    expect(next.sent.map((e) => (e as { localId: string }).localId)).toEqual(['L1', 'L2']);
+    // Nothing is left for the old host, in memory or across a restart.
+    link.forget('d1');
+    const old = new FakeSocket();
+    makeLink().attach(old as never, 'd1');
+    expect(old.sent).toEqual([]);
+  });
+
   it('does not deliver a message that waited longer than the limit — the host is told instead', () => {
     let now = 1_000;
     makeLink(() => now).sendTo('d1', 'srf-1', input('L1'));

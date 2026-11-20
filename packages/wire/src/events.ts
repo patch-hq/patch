@@ -8779,6 +8779,79 @@ export const PatchChatMoveResponseEvent = z
 export type PatchChatMoveResponseEvent = z.infer<typeof PatchChatMoveResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// Replacing a host (spec/11 § Replacing a host)
+//
+// A new machine takes over every chat of an old host. The server asks the new
+// host which of the old host's folders it has (`patch.folders_check`), then
+// hands it the chats (`patch.chat_adopt`). Each adopted chat continues from the
+// server's high-water mark under the same id; its provider session files are
+// carried across by the user, and Patch never edits them.
+
+export const PatchFoldersCheckRequestEvent = z
+  .object({
+    type: z.literal('patch.folders_check.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** Absolute folders, as the old host's chats name them. */
+    folders: z.array(z.string().min(1)),
+  })
+  .strict();
+export type PatchFoldersCheckRequestEvent = z.infer<typeof PatchFoldersCheckRequestEvent>;
+
+export const PatchFoldersCheckResponseEvent = z
+  .object({
+    type: z.literal('patch.folders_check.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The asked folders that are not a directory on this host. */
+    missing: z.array(z.string().min(1)),
+  })
+  .strict();
+export type PatchFoldersCheckResponseEvent = z.infer<typeof PatchFoldersCheckResponseEvent>;
+
+/** One chat a host takes over, as the server's record holds it. */
+export const AdoptedChat = z
+  .object({
+    chatId: z.string().min(1),
+    folder: z.string().min(1),
+    name: z.string().nullable(),
+    model: z.string().min(1).optional(),
+    permissionMode: PermissionMode.optional(),
+    /** The provider session the record last named; absent when it named none. */
+    sessionId: z.string().min(1).optional(),
+    /** The server's high-water mark plus one: where the chat's numbering continues. */
+    nextSeq: z.number().int().nonnegative(),
+    status: z.enum(['active', 'archived', 'errored', 'deleted']),
+    pinned: z.boolean(),
+    createdAt: z.number().int().optional(),
+  })
+  .strict();
+export type AdoptedChat = z.infer<typeof AdoptedChat>;
+
+export const PatchChatAdoptRequestEvent = z
+  .object({
+    type: z.literal('patch.chat_adopt.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    chats: z.array(AdoptedChat),
+  })
+  .strict();
+export type PatchChatAdoptRequestEvent = z.infer<typeof PatchChatAdoptRequestEvent>;
+
+export const PatchChatAdoptResponseEvent = z
+  .object({
+    type: z.literal('patch.chat_adopt.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The chats this host now holds, including any it already had. */
+    adopted: z.array(z.string().min(1)),
+    /** The chats it could not take, each saying why. */
+    refused: z.array(z.object({ chatId: z.string().min(1), message: z.string() }).strict()),
+  })
+  .strict();
+export type PatchChatAdoptResponseEvent = z.infer<typeof PatchChatAdoptResponseEvent>;
+
+// ---------------------------------------------------------------------------
 // Chat search (spec/03 § Chat search, spec/04 § Search)
 //
 // `GET /api/chats/search?q=` searches every chat on every host — names and the
@@ -10551,6 +10624,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBlobResponseEvent,
   PatchChatMoveRequestEvent,
   PatchChatMoveResponseEvent,
+  PatchFoldersCheckRequestEvent,
+  PatchFoldersCheckResponseEvent,
+  PatchChatAdoptRequestEvent,
+  PatchChatAdoptResponseEvent,
   PatchChatSearchRequestEvent,
   PatchChatSearchResponseEvent,
   // Terminal sessions
@@ -10887,6 +10964,10 @@ export const EVENT_SCHEMAS = {
   'patch.blob.response': PatchBlobResponseEvent,
   'patch.chat_move.request': PatchChatMoveRequestEvent,
   'patch.chat_move.response': PatchChatMoveResponseEvent,
+  'patch.folders_check.request': PatchFoldersCheckRequestEvent,
+  'patch.folders_check.response': PatchFoldersCheckResponseEvent,
+  'patch.chat_adopt.request': PatchChatAdoptRequestEvent,
+  'patch.chat_adopt.response': PatchChatAdoptResponseEvent,
   'patch.chat_search.request': PatchChatSearchRequestEvent,
   'patch.chat_search.response': PatchChatSearchResponseEvent,
   'patch.terminal.open': PatchTerminalOpenEvent,

@@ -6,7 +6,7 @@
 // it was last seen, Update when it is behind. Tapping a row opens that host
 // (app/hosts/[hostId]/index.tsx → HostDetail): its name, the
 // state of its agent backends with Sign in, its optional components, its Files
-// and Terminal, and Remove this host.
+// and Terminal, Replace with… and Remove this host.
 //
 // Keys — the picked host's provider keys, then the account's Secrets.
 //
@@ -29,7 +29,7 @@ import {
   type ModelEndpointApi,
   type ProviderKeyId,
 } from '@patch/wire';
-import { api, ApiError, type SharedState } from '../../api/rest';
+import { api, ApiError, type ReplaceHostPlan, type SharedState } from '../../api/rest';
 import { useExperimentalFeatures, useSettingsStore } from '../../stores/settingsStore';
 import { patchShared, writeShared } from './sharedWrite';
 import { filesRoute, formatSize, terminalRoute } from '../../lib/hostFiles';
@@ -174,6 +174,7 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
           <ClaudeSettingsRow host={host} />
         </>
       )}
+      <ReplaceHost host={host} />
       <RemoveHost host={host} />
     </SettingsPage>
   );
@@ -473,6 +474,124 @@ function HostTools({ host }: { host: HostPresence }): React.ReactElement | null 
     <SettingsSection title="Tools" testID={`host-${host.hostId}-tools`}>
       {tool('files', 'Files', () => router.push(filesRoute(host.hostId)))}
       {tool('terminal', 'Terminal', () => router.push(terminalRoute(host.hostId)))}
+    </SettingsSection>
+  );
+}
+
+/**
+ * Replace with… (spec/11 § Replacing a host): a new machine takes over every
+ * chat of this host. Choosing it asks the new host which of this host's
+ * folders it has; each folder and each provider's session store is listed to
+ * carry across unchanged. Replacing moves every chat, hands over held messages
+ * and removes this host. A missing folder is gone ahead without only when the
+ * user says so.
+ */
+function ReplaceHost({ host }: { host: HostPresence }): React.ReactElement | null {
+  const hosts = usePresenceStore((s) => s.hosts);
+  const [plan, setPlan] = React.useState<ReplaceHostPlan | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const others = sortedHosts(hosts).filter((h) => h.hostId !== host.hostId);
+  if (others.length === 0) return null;
+
+  const check = async (withHostId: string): Promise<void> => {
+    setBusy(true);
+    try {
+      setPlan(await api.replaceHostPlan(host.hostId, withHostId));
+    } catch (e) {
+      Alert.alert('Checking the new host failed', (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const choose = (): void => {
+    Alert.alert('Replace with', undefined, [
+      ...others.map((h) => ({ text: hostName(h), onPress: () => void check(h.hostId) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
+  const replace = async (p: ReplaceHostPlan): Promise<void> => {
+    setBusy(true);
+    try {
+      await api.replaceHost(host.hostId, p.to.hostId, p.missing);
+      usePresenceStore.getState().removeHost(host.hostId);
+    } catch (e) {
+      Alert.alert('Replacing the host failed', (e as Error).message);
+      setBusy(false);
+    }
+  };
+  const confirm = (p: ReplaceHostPlan): void => {
+    if (p.missing.length === 0) {
+      void replace(p);
+      return;
+    }
+    Alert.alert(
+      `Replace without ${p.missing.length === 1 ? 'a folder' : `${p.missing.length} folders`}?`,
+      `${p.to.name} does not have ${p.missing.join(', ')}. Chats in ${p.missing.length === 1 ? 'it' : 'them'} move but cannot run until the folder is there.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Replace', style: 'destructive', onPress: () => void replace(p) },
+      ],
+    );
+  };
+
+  return (
+    <SettingsSection>
+      <Row
+        title="Replace with"
+        onPress={plan || busy ? undefined : choose}
+        testID={`host-${host.hostId}-replace`}
+        right={plan ? undefined : <Chevron />}
+      />
+      {plan ? (
+        <Row
+          title={`${plan.to.name} takes over ${plan.chats} ${plan.chats === 1 ? 'chat' : 'chats'}`}
+          subtitle="Carry each folder and session store to the same path."
+          testID={`host-${host.hostId}-replace-plan`}
+          stack
+        >
+          {plan.folders.map((f) =>
+            f.present ? (
+              <Muted key={f.folder} testID="replace-folder">
+                {f.folder} · present
+              </Muted>
+            ) : (
+              <ErrorLine
+                key={f.folder}
+                testID="replace-folder-missing"
+                message={`${f.folder} · missing`}
+              />
+            ),
+          )}
+          {plan.sessions.map((s) => (
+            <Muted key={`${s.provider}:${s.path}`} testID="replace-session">
+              {s.provider} {s.path}
+            </Muted>
+          ))}
+          <ButtonRow>
+            <SettingsButton
+              testID="replace-cancel"
+              label="Cancel"
+              variant="ghost"
+              disabled={busy}
+              onPress={() => setPlan(null)}
+            />
+            <SettingsButton
+              testID="replace-recheck"
+              label="Check again"
+              variant="ghost"
+              disabled={busy}
+              onPress={() => void check(plan.to.hostId)}
+            />
+            <SettingsButton
+              testID="replace-confirm"
+              label={busy ? 'Replacing…' : 'Replace'}
+              variant="danger"
+              disabled={busy}
+              onPress={() => confirm(plan)}
+            />
+          </ButtonRow>
+        </Row>
+      ) : null}
     </SettingsSection>
   );
 }

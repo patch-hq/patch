@@ -51,6 +51,7 @@ import { removeRetiredChatMirror } from './retired-chat-mirror.js';
 import { CommitAcks } from './commit-acks.js';
 import { ManagerHome, ManagerHomeError } from './manager-home.js';
 import { HeldInputStore } from './held-input-store.js';
+import { registerHostReplaceRoutes } from './host-replace-routes.js';
 import { QueueTracker } from './queue-tracker.js';
 import { ServerQueue } from './server-queue.js';
 import { createSweepRunStore } from './sweep-run-store.js';
@@ -196,6 +197,8 @@ export interface BuildOptions {
   recurrenceTranslateTimeoutMs?: number;
   /** Wait for the host's voice-note transcript (tests). */
   voiceNoteTimeoutMs?: number;
+  /** How long a host has to answer a step of replacing a host. Tests shorten it. */
+  hostReplaceTimeoutMs?: number;
   /** Inject a jobs store (tests); otherwise constructed from dataDir. */
   jobsStore?: JobsInterface;
   /** Inject a composer-draft store (tests); otherwise constructed from dataDir. */
@@ -1779,6 +1782,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     }
   });
 
+  /** Revoke a host and forget it everywhere (removing it, or replacing it). */
+  const removeHostFromAccount = (hostId: string, by: string): void => {
+    registry.removeHost(hostId);
+    const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
+    // What the server held for it will never be delivered (spec/12 § Chat status).
+    for (const state of chatRegistry.dropHeldForHost(hostId)) wsHub.broadcastChatState(state);
+    const told = wsHub.removeHost(hostId);
+    log.info(
+      { hostId, removedBy: by, linkClosed, surfacesTold: told },
+      'host removed from the account',
+    );
+  };
+
   // Remove a host from the account (Settings → Hosts → "Remove this host").
   //
   //   DELETE /api/hosts/:hostId   → 200 {ok, hosts}   | 404 unknown_host
@@ -1811,22 +1827,27 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       });
     }
     try {
-      registry.removeHost(hostId);
+      removeHostFromAccount(hostId, auth.surfaceId);
     } catch (e) {
       if (e instanceof ManagerHomeError && e.code === 'is_home') {
         return reply.code(409).send({ error: 'manager_home', message: e.message, hostId });
       }
       throw e;
     }
-    const linkClosed = wsHub.disconnectHostNow(hostId, () => hostLink.forget(hostId));
-    // What the server held for it will never be delivered (spec/12 § Chat status).
-    for (const state of chatRegistry.dropHeldForHost(hostId)) wsHub.broadcastChatState(state);
-    const told = wsHub.removeHost(hostId);
-    log.info(
-      { hostId, removedBy: auth.surfaceId, linkClosed, surfacesTold: told },
-      'host removed from the account',
-    );
     return { ok: true, hosts: wsHub.hosts() };
+  });
+
+  registerHostReplaceRoutes(app, {
+    logger: log.child({ component: 'host-replace-routes' }),
+    registry,
+    hostLink,
+    chatRegistry,
+    chatLogStore,
+    idGenerator,
+    broadcastChatState: (state) => wsHub.broadcastChatState(state),
+    removeHost: removeHostFromAccount,
+    hosts: () => wsHub.hosts(),
+    ...(opts.hostReplaceTimeoutMs !== undefined ? { timeoutMs: opts.hostReplaceTimeoutMs } : {}),
   });
 
   // Apply a host's available update (`patch hosts update --host`).
