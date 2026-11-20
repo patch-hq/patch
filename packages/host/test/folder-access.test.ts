@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { probeFolderAccess, type FolderStatus } from '../src/folderAccess.js';
+import {
+  checkChatFolderAccess,
+  probeFolderAccess,
+  type FolderStatus,
+} from '../src/folderAccess.js';
 
 describe('probeFolderAccess', () => {
   it('is not applicable off macOS', async () => {
@@ -31,5 +35,39 @@ describe('probeFolderAccess', () => {
     // Real execFile path.
     const r = await probeFolderAccess({ platform: 'darwin', home: '/nonexistent-home-xyz' });
     expect(r.folders.every((f) => f.status === 'denied')).toBe(true);
+  });
+});
+
+describe('checkChatFolderAccess', () => {
+  const base = { platform: 'darwin' as const, home: '/h' };
+  it('ignores folders outside the protected ones and other platforms', async () => {
+    const never = async (): Promise<FolderStatus> => 'timeout';
+    expect(await checkChatFolderAccess('/h/code', { ...base, listDir: never })).toBeNull();
+    expect(
+      await checkChatFolderAccess('/h/Documents/x', {
+        platform: 'linux',
+        home: '/h',
+        listDir: never,
+      }),
+    ).toBeNull();
+  });
+  it('is quiet when the protected folder is readable', async () => {
+    expect(
+      await checkChatFolderAccess('/h/Documents/x', { ...base, listDir: async () => 'ok' }),
+    ).toBeNull();
+  });
+  it('says macOS is waiting on a prompt when the read hangs', async () => {
+    const msg = await checkChatFolderAccess('/h/Documents', {
+      ...base,
+      listDir: async () => 'timeout',
+    });
+    expect(msg).toMatch(/Documents.*waiting for an answer/);
+  });
+  it('points at Privacy settings when the read is refused', async () => {
+    const msg = await checkChatFolderAccess('/h/Desktop/a', {
+      ...base,
+      listDir: async () => 'denied',
+    });
+    expect(msg).toMatch(/Desktop.*Privacy & Security/);
   });
 });
