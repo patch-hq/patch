@@ -5,11 +5,11 @@
 // This is a thin mirror — the host remains the source of truth for a chat's
 // work, but the server OWNS what it last knew: the mirror is written to
 // `<dataDir>/chat-registry.json` as it changes and read back at startup, so a
-// restart begins from what the server knew rather than from nothing. A chat
-// restored this way is unconfirmed until its host reports it again; when a
-// host closes its re-announcement (`folders.list`), a restored chat of that
-// host that it did not report is dropped, so a chat deleted while the server
-// was down does not linger.
+// restart begins from what the server knew rather than from nothing. The
+// server's record decides that a chat exists, not a host's report of what it
+// holds: a chat a host does not mention again after a restart (its folder was
+// not carried across, its host was replaced) stays, and goes only when it is
+// deleted or removed.
 //
 // Phantom-row gating (group 8 / DX-M1): a `chat.state` event for a chatId
 // the registry has never seen `chat.spawned` for is dropped (with a warn).
@@ -315,8 +315,6 @@ export class ChatRegistry {
   /** Lines now in the index file, superseded ones included. */
   private indexLines = 0;
   private persistTimer: NodeJS.Timeout | null = null;
-  /** Chats read back from disk that no host has reported since this process started. */
-  private readonly unconfirmed = new Set<string>();
   /** When each chat was last seen working (running, or waiting on a permission). Saved with the mirror. */
   private readonly workedAt = new Map<string, number>();
   /** The account feed's latest position: one more each time a row changes. */
@@ -411,7 +409,6 @@ export class ChatRegistry {
     if (typeof chat?.chatId !== 'string' || chat.chatId === '') return;
     this.chats.set(chat.chatId, chat);
     this.spawnedSet.add(chat.chatId);
-    this.unconfirmed.add(chat.chatId);
     if ((chat.feedPos ?? 0) > this.feedCounter) this.feedCounter = chat.feedPos!;
   }
 
@@ -445,7 +442,6 @@ export class ChatRegistry {
           else if (typeof entry.x === 'string') {
             this.chats.delete(entry.x);
             this.spawnedSet.delete(entry.x);
-            this.unconfirmed.delete(entry.x);
             this.workedAt.delete(entry.x);
             this.facts.delete(entry.x);
           } else if (Array.isArray(entry.w) && typeof entry.w[1] === 'number') {
@@ -478,7 +474,6 @@ export class ChatRegistry {
       // NO FALLBACK: say so, then start empty rather than guess at a damaged file.
       this.chats.clear();
       this.spawnedSet.clear();
-      this.unconfirmed.clear();
       this.workedAt.clear();
       this.facts.clear();
       this.logger?.warn(
@@ -581,26 +576,9 @@ export class ChatRegistry {
     if (this.gated.has(event)) return;
     if (event.type === 'folders.list') {
       this.syncedHosts.add(event.hostId);
-      // The host has finished telling us what it has: a restored chat of this
-      // host that it did not mention is not on it any more.
-      let pruned = false;
-      // The host announces in full only the chats it has loaded; `chatIds` names
-      // the rest it still holds, which the server keeps as it restored them.
-      const held = event.chatIds === undefined ? undefined : new Set(event.chatIds);
-      for (const chatId of [...this.unconfirmed]) {
-        if (this.chats.get(chatId)?.hostId !== event.hostId) continue;
-        this.unconfirmed.delete(chatId);
-        if (held?.has(chatId)) continue;
-        this.chats.delete(chatId);
-        this.spawnedSet.delete(chatId);
-        this.facts.delete(chatId);
-        pruned = true;
-      }
-      if (pruned) this.markDirty();
     }
     if (event.type === 'chat.spawned') {
       this.spawnedSet.add(event.chatId);
-      this.unconfirmed.delete(event.chatId);
       const existing = this.chats.get(event.chatId);
       if (existing) return; // chat.state will keep it fresh
       this.markDirty();
@@ -845,7 +823,6 @@ export class ChatRegistry {
         feedPos: ++this.feedCounter,
       };
       this.chats.set(event.chatId, next);
-      this.unconfirmed.delete(event.chatId);
       this.turnDetails.set(event.chatId, {
         ...(event.turnOrigin !== undefined ? { turnOrigin: event.turnOrigin } : {}),
         ...(event.turnStopped !== undefined ? { turnStopped: event.turnStopped } : {}),
@@ -894,7 +871,6 @@ export class ChatRegistry {
   seed(snapshot: Iterable<ChatSummary>): void {
     for (const c of snapshot) {
       this.spawnedSet.add(c.chatId);
-      this.unconfirmed.delete(c.chatId);
       this.chats.set(c.chatId, c);
     }
     this.markDirty();
@@ -1176,17 +1152,24 @@ export class ChatRegistry {
   }
 
   /**
-   * The chat has moved to another host (spec/04 § Moving a chat to another
-   * host). `hostId` is otherwise fixed at `chat.spawned` for the chat's life,
-   * and it is what routes every later frame for the chat, so a move is the one
-   * thing that changes it. No-op if unknown.
+   * The chat's host was replaced (spec/11 § Replacing a host). `hostId` is
+   * otherwise fixed at `chat.spawned` for the chat's life, and it is what
+   * routes every later frame for the chat, so a replacement is the one thing
+   * that changes it. Returns the row's new `chat.state` to broadcast; null if
+   * unknown.
    */
-  rehome(chatId: string, hostId: string, folder: string): void {
+  rehome(chatId: string, hostId: string, folder: string): ChatStateEvent | null {
     const existing = this.chats.get(chatId);
-    if (!existing) return;
-    this.chats.set(chatId, { ...existing, hostId, folder });
-    this.unconfirmed.delete(chatId);
+    if (!existing) return null;
+    const next: ChatSummary = { ...existing, hostId, folder, feedPos: ++this.feedCounter };
+    this.chats.set(chatId, next);
     this.markDirty();
+    return this.stateEventOf(next);
+  }
+
+  /** Every chat the server holds for this host, whatever its status. */
+  chatsOnHost(hostId: string): ChatSummary[] {
+    return [...this.chats.values()].filter((c) => c.hostId === hostId);
   }
 
   /** Remove a chat row from the registry mirror. The host remains source of
@@ -1194,7 +1177,6 @@ export class ChatRegistry {
   remove(chatId: string): void {
     this.chats.delete(chatId);
     this.spawnedSet.delete(chatId);
-    this.unconfirmed.delete(chatId);
     this.workedAt.delete(chatId);
     this.facts.delete(chatId);
     this.markDirty();

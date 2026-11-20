@@ -1153,6 +1153,17 @@ export const api = {
     request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(hostId)}`, {
       method: 'DELETE',
     }),
+  // spec/11 § Replacing a host: what would move, which folders the new host
+  // lacks and where the session files are; then the replacement itself.
+  replaceHostPlan: (hostId: string, withHostId: string) =>
+    request<ReplaceHostPlan>(
+      `/api/hosts/${encodeURIComponent(hostId)}/replace?with=${encodeURIComponent(withHostId)}`,
+    ),
+  replaceHost: (hostId: string, withHostId: string, withoutFolders: string[]) =>
+    request<{ ok: true; moved: number; withoutFolders: string[]; hosts: AuthOkHost[] }>(
+      `/api/hosts/${encodeURIComponent(hostId)}/replace`,
+      { method: 'POST', body: { with: withHostId, withoutFolders } },
+    ),
   // The account's secrets (spec/15 § Settings tab — Secrets). The host owns
   // the store and injects the values into chats; the server serves its
   // published mirror and round-trips writes to the host (PUT upserts one,
@@ -1646,4 +1657,18 @@ export interface BatchRecord {
 export interface BatchResponse {
   batch: BatchRecord | null;
   carryover: string[];
+}
+
+/** spec/11 § Replacing a host — `GET /api/hosts/:hostId/replace?with=`. */
+export interface ReplaceHostPlan {
+  from: { hostId: string; name: string };
+  to: { hostId: string; name: string };
+  chats: number;
+  folders: Array<{ folder: string; chats: number; present: boolean }>;
+  missing: string[];
+  sessions: Array<{ provider: string; path: string; chats: number }>;
+  /** The old host's Patch home the session paths assume; a host does not report its own. */
+  assumedHome: string;
+  /** Jobs whose action or gate runs on the old host: they move to the new one. */
+  jobs: Array<{ jobId: string; name: string }>;
 }

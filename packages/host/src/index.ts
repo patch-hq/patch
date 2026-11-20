@@ -3143,6 +3143,18 @@ async function startHost(
         handleChatMoveRequest(event, daemon, sender, logger, selfHostId);
         return;
       }
+      if (event.type === 'patch.folders_check.request') {
+        // spec/11 § Replacing a host — which of the old host's folders are here.
+        if (!isForThisHost(event.hostId, event.type)) return;
+        sender(answerFoldersCheck(event, selfHostId));
+        return;
+      }
+      if (event.type === 'patch.chat_adopt.request') {
+        // spec/11 § Replacing a host — take over the old host's chats.
+        if (!isForThisHost(event.hostId, event.type)) return;
+        sender(answerChatAdopt(event, daemon, logger, selfHostId));
+        return;
+      }
       if (event.type === 'patch.host_files.request') {
         // spec/03 § Host files — the phone's Files screen: read / list / write
         // by absolute path on this host, with no chat in between.
@@ -7828,6 +7840,57 @@ export async function handleDocExportRequest(
  * before linked chats took over (spec/04 § Moving to another host). Every
  * outcome is answered, so a refusal comes back as a refusal, not as silence.
  */
+/** spec/11 § Replacing a host: the asked folders that are not a directory here. */
+export function answerFoldersCheck(
+  event: import('@patch/wire').PatchFoldersCheckRequestEvent,
+  hostId: string,
+): import('@patch/wire').PatchFoldersCheckResponseEvent {
+  const missing = event.folders.filter((folder) => {
+    try {
+      return !statSync(folder).isDirectory();
+    } catch {
+      return true;
+    }
+  });
+  return { type: 'patch.folders_check.response', requestId: event.requestId, hostId, missing };
+}
+
+/**
+ * spec/11 § Replacing a host: take over each chat, continuing from the server's
+ * high-water mark. One chat that cannot be taken is named with why; the rest
+ * still come.
+ */
+export function answerChatAdopt(
+  event: import('@patch/wire').PatchChatAdoptRequestEvent,
+  daemon: Daemon,
+  logger: Logger,
+  hostId: string,
+): import('@patch/wire').PatchChatAdoptResponseEvent {
+  const adopted: string[] = [];
+  const refused: Array<{ chatId: string; message: string }> = [];
+  for (const chat of event.chats) {
+    try {
+      daemon.adoptChat(chat);
+      adopted.push(chat.chatId);
+    } catch (err) {
+      const message = (err as Error).message;
+      logger.error({ chatId: chat.chatId, err: message }, 'replace host: chat not taken over');
+      refused.push({ chatId: chat.chatId, message });
+    }
+  }
+  logger.info(
+    { adopted: adopted.length, refused: refused.length },
+    'replace host: chats taken over',
+  );
+  return {
+    type: 'patch.chat_adopt.response',
+    requestId: event.requestId,
+    hostId,
+    adopted,
+    refused,
+  };
+}
+
 export function handleChatMoveRequest(
   event: import('@patch/wire').PatchChatMoveRequestEvent,
   daemon: Daemon,

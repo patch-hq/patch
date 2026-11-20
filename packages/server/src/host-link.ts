@@ -106,6 +106,13 @@ export interface HostLink {
    */
   forget(hostId: string): boolean;
   /**
+   * A host is being replaced (spec/11 § Replacing a host): the messages held
+   * for `fromHostId` (a person's `chat.input`, and the notice that replaced one
+   * that expired) go to `toHostId`, in order, and nothing else held for the old
+   * host does. Returns how many went.
+   */
+  handOverHeld(fromHostId: string, toHostId: string): number;
+  /**
    * Make what a host's outbox frames committed durable before their positions
    * are acknowledged (spec/01 § Host outbox). Throws when that cannot be
    * done; the link then acknowledges nothing more on that socket and drops it,
@@ -807,6 +814,24 @@ export class InboundHostLink implements HostLink {
     return closedAny;
   }
 
+  handOverHeld(fromHostId: string, toHostId: string): number {
+    const link = this.hosts.get(fromHostId);
+    if (!link) return 0;
+    // Expire first, so a message past its holding time goes as its notice.
+    this.opts.heldInputs?.all();
+    let moved = 0;
+    for (const [surfaceId, buf] of link.buffers.entries()) {
+      for (const event of buf) {
+        if (event.type !== 'chat.input' && event.type !== 'chat.held_input_expired') continue;
+        this.sendTo(toHostId, surfaceId, event);
+        moved++;
+      }
+    }
+    link.buffers.clear();
+    this.opts.heldInputs?.clearHost(fromHostId);
+    return moved;
+  }
+
   forget(hostId: string): boolean {
     const closed = this.terminateHostSocket(hostId);
     this.hosts.delete(hostId);
@@ -949,6 +974,13 @@ export class InProcessHostLink implements HostLink {
 
   /** Hosts `forget` was called for, in order — for tests to assert on. */
   readonly forgotten: string[] = [];
+
+  /** Held messages handed from one host to another, in the order asked. */
+  readonly handedOver: Array<{ from: string; to: string }> = [];
+  handOverHeld(fromHostId: string, toHostId: string): number {
+    this.handedOver.push({ from: fromHostId, to: toHostId });
+    return 0;
+  }
 
   forget(hostId: string): boolean {
     this.forgotten.push(hostId);

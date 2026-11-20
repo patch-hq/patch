@@ -94,6 +94,9 @@ class WiredHostLink implements HostLink {
   forget(): boolean {
     return false;
   }
+  handOverHeld(): number {
+    return 0;
+  }
   status(): 'online' | 'offline' {
     return 'online';
   }

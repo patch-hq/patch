@@ -102,6 +102,7 @@ import type {
   LoggedEvent,
   LogRecord,
   NativeRef,
+  AdoptedChat,
   PermissionDecisionBy,
   TurnOutcome,
   TurnLimit,
@@ -5849,6 +5850,45 @@ export class Daemon {
       localId: `handover-${chatId}-${at}`,
       fromUser: true,
     });
+  }
+
+  /**
+   * This host takes over a chat of a host it replaces (spec/11 § Replacing a
+   * host). The chat keeps its id and continues from the server's high-water
+   * mark. Its `meta.json` is written from what the server's record holds,
+   * naming the provider session the record last saw: the user carried the
+   * session files across, and a session that did not come is found missing at
+   * the next turn and ends the model's memory there, saying so. A chat this host
+   * already has (its directory came across too) keeps what it has and only
+   * moves its numbering forward. A folder that is not here marks the chat
+   * folder-missing when it loads, as for any chat.
+   */
+  adoptChat(chat: AdoptedChat): void {
+    if (this.opts.metaStore.read(chat.chatId) === undefined) {
+      const now = this.opts.now();
+      this.opts.metaStore.write({
+        chatId: chat.chatId,
+        folder: chat.folder,
+        name: chat.name,
+        nextSeq: chat.nextSeq,
+        pinned: chat.pinned,
+        pinnedAt: chat.pinned ? now : null,
+        disabled: false,
+        status: chat.status,
+        archivedAt: chat.status === 'archived' ? now : null,
+        ...(chat.model !== undefined ? { model: chat.model } : {}),
+        ...(chat.permissionMode !== undefined ? { permissionMode: chat.permissionMode } : {}),
+        ...(chat.sessionId !== undefined ? { claudeSessionId: chat.sessionId } : {}),
+        createdAt: chat.createdAt ?? now,
+        updatedAt: now,
+        lastUserActivity: now,
+      });
+    }
+    if (!this.chatState.get(chat.chatId)) {
+      throw new Error(`adoptChat: ${chat.chatId} could not be loaded after writing its meta.json`);
+    }
+    this.continueFrom(chat.chatId, chat.nextSeq);
+    this.emitState(chat.chatId);
   }
 
   /**

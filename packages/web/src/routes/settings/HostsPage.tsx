@@ -1,7 +1,7 @@
 // Settings → Hosts (spec/02 § Host identity, spec/11 § Host installation).
 //
 // Every host registered to the account, with its presence, and — for the
-// one selected — its name, what it runs, and removing it.
+// one selected — its name, what it runs, replacing it and removing it.
 //
 // State comes from the live host reports. A host that has not reported yet
 // is shown as awaiting its first report rather than being given a fabricated
@@ -33,6 +33,7 @@ import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
 import { ClaudeSettingsEditor } from './ProvidersPage.js';
 import { PROVIDERS, type SharedRow } from './providers.js';
 import { KeepRunningGroup } from './KeepRunningGroup.js';
+import { ReplaceHostGroup } from './ReplaceHostGroup.js';
 import { serverSays } from './ManagerHomeGroup.js';
 import { failed } from '../../lib/errorCopy.js';
 
@@ -521,6 +522,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       ) : null}
 
       {report ? <ClaudeSettingsEditor host={host} /> : null}
+
+      <ReplaceHostGroup host={host} />
 
       <Group>
         <Row title="Remove this host">

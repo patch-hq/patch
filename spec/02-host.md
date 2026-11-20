@@ -172,8 +172,9 @@ Loading a chat never blocks a surface, which reads only from the server
 (`01-server.md`).
 
 On connect the host announces the chats it has loaded in full and names every
-other chat's id (`03-wire-protocol.md`), so the server keeps the chats it holds
-for this host and drops only those the host no longer has.
+other chat's id (`03-wire-protocol.md`). The server's record, not this list,
+decides that a chat exists: a chat the host no longer lists stays on the server,
+and goes only when it is deleted or removed.
 
 ### Desktop app and the local host
 

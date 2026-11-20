@@ -367,6 +367,20 @@ export class ChatLogStore {
     return this.refs.get(chatId)?.get(seq);
   }
 
+  /** The provider id of the latest entry that has one: names the chat's current session. */
+  lastNativeRef(chatId: string): NativeRef | undefined {
+    this.load(chatId);
+    let latest = -1;
+    let ref: NativeRef | undefined;
+    for (const [seq, r] of this.refs.get(chatId) ?? []) {
+      if (seq > latest) {
+        latest = seq;
+        ref = r;
+      }
+    }
+    return ref;
+  }
+
   private turnsOf(chatId: string): Map<string, RecordedTurn> {
     this.load(chatId);
     let turns = this.turnsByChat.get(chatId);

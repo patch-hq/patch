@@ -2147,6 +2147,9 @@ export class WsHub {
       // The summary is answered over REST to the one caller that asked.
       event.type === 'patch.link_summary.response' ||
       event.type === 'patch.chat_move.response' ||
+      // Replacing a host: answered to the route that asked (spec/11 § Replacing a host).
+      event.type === 'patch.folders_check.response' ||
+      event.type === 'patch.chat_adopt.response' ||
       event.type === 'patch.chat_search.response' ||
       // A host's question to the server-run queue is answered by the server alone.
       event.type === 'patch.queue_pull.request' ||

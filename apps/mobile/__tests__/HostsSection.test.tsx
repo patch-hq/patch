@@ -62,6 +62,8 @@ vi.mock('../src/api/rest', () => {
       hostInstallCommand: vi.fn(),
       hostPairStart: vi.fn(),
       removeHost: vi.fn(),
+      replaceHostPlan: vi.fn(),
+      replaceHost: vi.fn(),
       managerHome: vi.fn(),
       addAccount: vi.fn(async () => SHARED),
       adoptAccount: vi.fn(async () => SHARED),
@@ -702,6 +704,82 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(
         findHost(linkDown.root, byTestId('host-host-a-terminal')).props.onPress,
       ).toBeUndefined();
+    });
+  });
+
+  // spec/11 § Replacing a host.
+  describe('Replace with…', () => {
+    const plan = (missing: string[]) => ({
+      from: { hostId: 'h1', name: 'laptop' },
+      to: { hostId: 'h2', name: 'other' },
+      chats: 3,
+      folders: [
+        { folder: '/work/a', chats: 2, present: true },
+        { folder: '/work/b', chats: 1, present: !missing.includes('/work/b') },
+      ],
+      missing,
+      sessions: [{ provider: 'claude', path: '~/.patch/chats/<chat id>/claude', chats: 3 }],
+      assumedHome: '~/.patch',
+      jobs: [{ jobId: 'j1', name: 'morning digest' }],
+    });
+    beforeEach(() => {
+      reportHost('h1', { hostName: 'laptop' });
+      reportHost('h2', { hostName: 'other' });
+    });
+
+    async function chooseOther(r: ReactTestRenderer): Promise<void> {
+      await actAsync(() => findHost(r.root, byTestId('host-h1-replace')).props.onPress());
+      await pressAlertButton('other');
+      await flush();
+    }
+
+    it('choosing the new host lists each folder, which are missing, and where sessions live', async () => {
+      vi.mocked(api.replaceHostPlan).mockResolvedValue(plan(['/work/b']));
+      const r = render(<HostDetail hostId="h1" />);
+      await chooseOther(r);
+      expect(api.replaceHostPlan).toHaveBeenCalledWith('h1', 'h2');
+      expect(textOf(findHost(r.root, byTestId('host-h1-replace-plan')))).toContain(
+        'other takes over 3 chats',
+      );
+      expect(textOf(findHost(r.root, byTestId('replace-folder')))).toContain('/work/a');
+      expect(textOf(findHost(r.root, byTestId('replace-folder-missing')))).toContain('/work/b');
+      expect(textOf(findHost(r.root, byTestId('replace-session')))).toContain(
+        '~/.patch/chats/<chat id>/claude',
+      );
+      expect(textOf(findHost(r.root, byTestId('replace-assumed-home')))).toContain(
+        'Assumes laptop keeps Patch in ~/.patch',
+      );
+      expect(textOf(findHost(r.root, byTestId('replace-job')))).toContain('morning digest');
+    });
+
+    it('with a folder missing it asks first, then replaces without it and drops the host', async () => {
+      vi.mocked(api.replaceHostPlan).mockResolvedValue(plan(['/work/b']));
+      vi.mocked(api.replaceHost).mockResolvedValue(undefined as never);
+      const r = render(<HostDetail hostId="h1" />);
+      await chooseOther(r);
+      await actAsync(() => findHost(r.root, byTestId('replace-confirm')).props.onPress());
+      expect(__getLastAlert()?.message).toContain('/work/b');
+      expect(api.replaceHost).not.toHaveBeenCalled();
+      await pressAlertButton('Replace');
+      await flush();
+      expect(api.replaceHost).toHaveBeenCalledWith('h1', 'h2', ['/work/b']);
+      expect(usePresenceStore.getState().hosts.h1).toBeUndefined();
+    });
+
+    it('a refusal is said in the server’s words and the host stays', async () => {
+      vi.mocked(api.replaceHostPlan).mockResolvedValue(plan([]));
+      vi.mocked(api.replaceHost).mockRejectedValue(
+        new ApiError(502, 'other could not take 1 of 3 chats', null),
+      );
+      const r = render(<HostDetail hostId="h1" />);
+      await chooseOther(r);
+      await actAsync(() => findHost(r.root, byTestId('replace-confirm')).props.onPress());
+      await flush();
+      expect(__getLastAlert()).toMatchObject({
+        title: 'Replacing the host failed',
+        message: 'other could not take 1 of 3 chats',
+      });
+      expect(usePresenceStore.getState().hosts.h1).toBeDefined();
     });
   });
 
