@@ -5848,9 +5848,7 @@ export class Daemon {
     chatId: string,
     handover: { nextSeq: number; fromHostName: string; toHostName: string; message: string },
   ): Promise<void> {
-    const state = this.chatState.get(chatId);
-    if (!state) throw new ChatNotFoundError(chatId);
-    if (handover.nextSeq > state.nextSeq) state.nextSeq = handover.nextSeq;
+    this.continueFrom(chatId, handover.nextSeq);
     const at = this.opts.now();
     this.emit({
       type: 'chat.message',
@@ -5867,6 +5865,25 @@ export class Daemon {
       localId: `handover-${chatId}-${at}`,
       fromUser: true,
     });
+  }
+
+  /**
+   * This host takes over writing a chat whose record the server holds up to
+   * `nextSeq - 1` (a change of the Manager's home, a replaced host). The chat's
+   * numbering moves forward to `nextSeq`, never back, and is saved in its
+   * `meta.json` at once, so a restart before the chat next writes still
+   * carries on from there rather than from this host's own older log.
+   */
+  continueFrom(chatId: string, nextSeq: number): void {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    if (nextSeq <= state.nextSeq) return;
+    state.nextSeq = nextSeq;
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      nextSeq: Math.max(m.nextSeq, nextSeq),
+      updatedAt: this.opts.now(),
+    }));
   }
 
   /**
