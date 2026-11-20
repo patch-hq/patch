@@ -78,7 +78,7 @@ test.describe('Settings rows — label and value are distinct, bordered fields',
 
   for (const [name, labels] of [
     ['manager', ['Quiet hours', 'Address word']],
-    ['voice', ['Voice', 'Chat title']],
+    ['voice', ['Voice', 'Provider']],
   ] as const) {
     test(`${name}: every label/value pair is separated by a real gap`, async ({ page }) => {
       await openPage(page, name);

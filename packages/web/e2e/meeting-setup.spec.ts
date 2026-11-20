@@ -151,13 +151,13 @@ test('starting without names is remembered: the next Meeting press starts withou
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
 });
 
-test('Settings → Voice toggle: off remembers a decline, on asks for Accessibility again', async ({
+test('Settings → Meetings toggle: off remembers a decline, on asks for Accessibility again', async ({
   page,
 }) => {
   await fakeShell(page, { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' });
   await page.addInitScript(() => localStorage.setItem('patch.meetingNamesDeclined', '1'));
   await stubSettingsApi(page);
-  await page.goto(settingsUrl('dictation'));
+  await page.goto(settingsUrl('meetings'));
   const toggle = page.getByTestId('meeting-names-toggle');
   await expect(toggle).not.toBeChecked();
   await page.getByTestId('meeting-names-row').locator('.toggle-track').click();
