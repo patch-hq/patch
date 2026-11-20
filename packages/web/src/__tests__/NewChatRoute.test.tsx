@@ -184,7 +184,7 @@ describe('/chats/new', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={['/chats/new']}>
+        <MemoryRouter initialEntries={['/chats/new?folder=%2Fhome%2Ftom%2FMy%20first%20project']}>
           <Routes>
             <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
           </Routes>
