@@ -636,6 +636,16 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     // ask, so the query stays idle rather than browsing a guessed host.
     enabled: pickerOpen && pickerHostId !== null,
   });
+  // A first chat on a host with no projects yet: suggest the host user's home
+  // folder as a labelled one-tap choice. The host answers a browse with no
+  // directory by listing its home. Suggested only, never preselected or created.
+  const suggestHome = pickerHostId !== null && folderOptions.length === 0 && folder === '';
+  const { data: homeBrowse } = useQuery({
+    queryKey: ['folders-home', pickerHostId],
+    queryFn: () => api.browseFolders(pickerHostId as string),
+    enabled: suggestHome,
+  });
+  const homeFolder = suggestHome ? (homeBrowse?.dir ?? null) : null;
   // A failed chat creation is reported by `pushError` alone — one surface per
   // failure (spec/12 § Principles). It used to ALSO render the identical text
   // as a paragraph at the top of the panel; two copies of one message read as
@@ -1165,6 +1175,17 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 {folderOptionLabels[folderOptions.indexOf(f)]}
               </button>
             ))}
+            {homeFolder ? (
+              <button
+                type="button"
+                className="folder-quick"
+                data-testid="folder-suggest-home"
+                disabled={signedOut}
+                onClick={() => chooseFolder(homeFolder)}
+              >
+                Home folder
+              </button>
+            ) : null}
           </div>
           {/* Folder picker pop-up (spec/14 § Sidebar §8): the pill opens the
               full list, the browse tree and the ad-hoc path field. It reads

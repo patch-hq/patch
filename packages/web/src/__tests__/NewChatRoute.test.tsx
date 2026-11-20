@@ -1384,6 +1384,26 @@ describe('/chats/new', () => {
     expect(chosenFolderLabel()).not.toBe('Patch');
   });
 
+  it('a host with no projects suggests its home folder, and one tap chooses it', async () => {
+    useChatStore.setState({ chats: {} });
+    stubPickerFetch({ folders: [] });
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (async (path: string) =>
+      path.startsWith('/api/folders/browse') && !path.includes('dir=')
+        ? new Response(
+            JSON.stringify({ hostId: 'd1', dir: '/Users/new', parent: null, entries: [] }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          )
+        : base(path)) as unknown as typeof fetch);
+    renderPicker();
+    const chip = await screen.findByTestId('folder-suggest-home');
+    expect(chip.textContent).toBe('Home folder');
+    expect(chosenFolderLabel()).not.toBe('new');
+    fireEvent.click(chip);
+    expect(chosenFolderLabel()).toBe('new');
+    expect(screen.queryByTestId('folder-suggest-home')).toBeNull();
+  });
+
   it("offers a host's own registered roots once it is chosen", async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     usePresenceStore.getState().setHostFolders('d2', ['/Users/tom/code'], []);
