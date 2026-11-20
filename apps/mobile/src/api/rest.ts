@@ -388,6 +388,20 @@ export interface NotificationsResponse {
   unread: number;
 }
 
+/** An ACP agent's sign-in on one host, as the server reports it (spec/10 § Signing in). */
+export interface AcpLoginView {
+  loginId: string;
+  hostId: string;
+  agentId: string;
+  methodId: string;
+  status: 'starting' | 'waiting' | 'complete' | 'failed' | 'cancelled';
+  url?: string;
+  userCode?: string;
+  /** The agent waits for a redirect on the host: paste the address the browser ended on. */
+  loopback?: boolean;
+  message?: string;
+}
+
 export interface ChatGPTSignInStarted {
   signInId: string;
   userCode: string;
@@ -1063,6 +1077,26 @@ export const api = {
     }),
   setAcpStrategy: (strategy: AccountStrategy) =>
     request<SharedState>('/api/accounts/acp/strategy', { method: 'PUT', body: { strategy } }),
+  // spec/10 § Signing in — an ACP agent's own sign-in, run on one host.
+  startAcpLogin: (agentId: string, hostId: string, methodId: string) =>
+    request<AcpLoginView>(`/api/accounts/acp/${encodeURIComponent(agentId)}/login`, {
+      method: 'POST',
+      body: { hostId, methodId },
+    }),
+  acpLogin: (agentId: string, loginId: string) =>
+    request<AcpLoginView>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/login/${encodeURIComponent(loginId)}`,
+    ),
+  acpLoginCallback: (agentId: string, loginId: string, url: string) =>
+    request<AcpLoginView>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/login/${encodeURIComponent(loginId)}/callback`,
+      { method: 'POST', body: { url } },
+    ),
+  cancelAcpLogin: (agentId: string, loginId: string) =>
+    request<AcpLoginView>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/login/${encodeURIComponent(loginId)}`,
+      { method: 'DELETE' },
+    ),
   removeAcpAccount: (agentId: string, accountId: string) =>
     request<SharedState>(
       `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}`,

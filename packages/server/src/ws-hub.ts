@@ -2022,6 +2022,11 @@ export class WsHub {
   }
 
   /** Does this host report a turn that met a limit as a fact on its end (`chat.turn_ended.limit`)? */
+  /** Can this host run an ACP agent's own sign-in (`host.host.acpLogin`)? */
+  hostAcpLogin(hostId: string): boolean {
+    return this.lastHostReport.get(hostId)?.acpLogin === true;
+  }
+
   hostLimitFacts(hostId: string): boolean {
     return this.lastHostReport.get(hostId)?.limitFacts === true;
   }
@@ -2166,6 +2171,8 @@ export class WsHub {
       event.type === 'settings.secret_update' ||
       event.type === 'settings.adopt.response' ||
       event.type === 'settings.account_signed_in' ||
+      // An ACP agent's sign-in on a host: surfaces read it from the server's REST.
+      event.type === 'acp.login_update' ||
       event.type === 'web_bot_auth.sign_request' ||
       event.type === 'web_bot_auth.sign_response' ||
       // Health reports are consumed by the host-health tracker, which uses them

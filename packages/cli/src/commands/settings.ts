@@ -125,6 +125,77 @@ export async function chatgptDeviceSignIn(
   }
 }
 
+/** An ACP agent's sign-in on one host, as the server reports it. */
+export interface AcpLoginView {
+  loginId: string;
+  hostId: string;
+  agentId: string;
+  status: 'starting' | 'waiting' | 'complete' | 'failed' | 'cancelled';
+  url?: string;
+  userCode?: string;
+  loopback?: boolean;
+  message?: string;
+}
+
+/**
+ * Sign an ACP agent in on one host with its own sign-in (spec/10 § Signing in):
+ * the host runs it, and the login stays in the agent's files there. Prints the
+ * address to open and any code, takes the address the browser ended on when the
+ * agent waits for a redirect on the host (`paste`), and waits for the end.
+ */
+export async function acpHostLogin(
+  t: {
+    get<T>(p: string): Promise<T>;
+    post<T>(p: string, b?: unknown): Promise<T>;
+  },
+  args: { agentId: string; hostId: string; methodId: string },
+  io: {
+    say: (line: string) => void;
+    /** Asked once the agent waits for a redirect; resolves to the pasted address, or never. */
+    paste: () => Promise<string>;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<AcpLoginView> {
+  const sleep = io.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const base = `/api/accounts/acp/${encodeURIComponent(args.agentId)}/login`;
+  let view = await t.post<AcpLoginView>(base, { hostId: args.hostId, methodId: args.methodId });
+  const path = `${base}/${encodeURIComponent(view.loginId)}`;
+  let shown = '';
+  let asking = false;
+  let lastMessage: string | undefined;
+  for (;;) {
+    if (view.status === 'complete' || view.status === 'failed' || view.status === 'cancelled')
+      return view;
+    const said = `${view.url ?? ''}|${view.userCode ?? ''}`;
+    if (view.status === 'waiting' && said !== shown && (view.url || view.userCode)) {
+      shown = said;
+      if (view.url) io.say(`Open ${view.url}`);
+      if (view.userCode) io.say(`and enter the code ${view.userCode}`);
+    }
+    if (view.message && view.message !== lastMessage) {
+      lastMessage = view.message;
+      io.say(view.message);
+    }
+    if (view.loopback && !asking) {
+      asking = true;
+      io.say(
+        'When you have signed in, the browser may end on a page that will not load. Paste its address here:',
+      );
+      void io.paste().then(
+        (url) => {
+          if (url.trim())
+            void t
+              .post(`${path}/callback`, { url: url.trim() })
+              .catch((e: Error) => io.say(e.message));
+        },
+        () => undefined,
+      );
+    }
+    await sleep(1000);
+    view = await t.get<AcpLoginView>(path);
+  }
+}
+
 const server = (opts: CommonOpts) => getTransport({ ...opts, remote: true });
 
 /** `permission-mode` → `permissionModeDefault`, and the few other CLI names. */
@@ -493,6 +564,48 @@ export function registerSettingsCommands(program: Command): void {
         const state = await server(opts).get<SharedState>('/api/settings/shared');
         if (opts.json) emitJson(state.secrets.acp ?? []);
         else for (const line of acpAccountLines(state.secrets.acp)) emitText(line);
+      });
+    });
+
+  acp
+    .command('login <agentId>')
+    .description(
+      'Sign an agent in on one host with its own sign-in (no API key). The login stays on that host only',
+    )
+    .option('--host <h>', 'host name or hostId prefix (default: the only host online)')
+    .option('--method <m>', "the agent's sign-in method (default: the first it offers)")
+    .option('--json', 'JSON output')
+    .action(async (agentId: string, opts: CommonOpts & { host?: string; method?: string }) => {
+      await run(opts, async () => {
+        const hostId = await onlineHost(opts);
+        const t = server(opts);
+        let methodId = opts.method;
+        if (methodId === undefined) {
+          const { backends } = await t.get<{
+            backends: Array<{ id: string; loginMethods?: Array<{ id: string; name: string }> }>;
+          }>(`/api/hosts/backends?hostId=${encodeURIComponent(hostId)}`);
+          const methods = backends.find((b) => b.id === `acp:${agentId}`)?.loginMethods ?? [];
+          if (methods.length === 0) {
+            throw new Error(`${agentId} offers no sign-in on that host; add an API key instead`);
+          }
+          methodId = methods[0]!.id;
+        }
+        const rl = createInterface({ input: process.stdin, output: process.stderr });
+        try {
+          const view = await acpHostLogin(
+            t,
+            { agentId, hostId, methodId },
+            { say: (line) => process.stderr.write(`${line}\n`), paste: () => rl.question('') },
+          );
+          if (opts.json) emitJson(view);
+          else if (view.status === 'complete')
+            emitText(
+              `${agentId}: signed in on that host only (the login stays in its files there)`,
+            );
+          else throw new Error(view.message ?? `the sign-in ${view.status}`);
+        } finally {
+          rl.close();
+        }
       });
     });
 

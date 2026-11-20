@@ -537,7 +537,13 @@ export class SharedSettingsService {
     const account = [...this.secrets.claude, ...this.secrets.codex].find((a) => a.id === accountId);
     if (account) return this.stateOf(account);
     const acp = (this.secrets.acp ?? []).find((a) => a.id === accountId);
-    return acp ? this.acpStateOf(acp) : undefined;
+    if (acp) return this.acpStateOf(acp);
+    // An ACP agent's own sign-in on one host: the server holds no credential
+    // for it, and its state is what that host reported (decision 24).
+    if (accountId.startsWith('acp-login:')) {
+      return this.accountStates.stateFor(accountId, { hasCredential: true });
+    }
+    return undefined;
   }
 
   private readonly accountStateListeners = new Set<() => void>();

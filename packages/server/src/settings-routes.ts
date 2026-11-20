@@ -2,8 +2,10 @@
 //
 // Every write is committed by the server and answered with the committed
 // result; none asks a host, so none waits for one or fails because one is
-// offline. Hosts learn of it from the snapshot that follows.
+// offline. Hosts learn of it from the snapshot that follows. The one exception
+// is an ACP agent's own sign-in, which runs on the host it is for.
 
+import type { AcpLogins, AcpLoginView } from './acp-logins.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -12,6 +14,7 @@ import {
   BACKEND_IDS,
   ProviderKeyId,
   providerForBackendId,
+  resolveAcpAgents,
   SharedSettingsPatch,
 } from '@patch/wire';
 import {
@@ -46,6 +49,8 @@ export interface SettingsRoutesDeps {
     exchange: typeof exchangeChatGPTDeviceCode;
   };
   now?: () => number;
+  /** ACP agents' own sign-ins on hosts (`acp-logins.ts`). */
+  acpLogins?: AcpLogins;
 }
 
 /**
@@ -566,6 +571,75 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
       await shared.addAcpAccount(acpOf(req).agentId, body.apiKey, body.label);
     }),
   );
+  // ---- An ACP agent's own sign-in on one host (spec/10 § Signing in) ----
+  // Run by the host; the login stays in the agent's own files there. Every
+  // surface polls the same answer: the address to open, a code, and whether
+  // to paste the address the browser ended on.
+  const AcpLoginStartBody = z
+    .object({ hostId: z.string().min(1), methodId: z.string().min(1) })
+    .strict();
+  const AcpLoginCallbackBody = z.object({ url: z.string().min(1) }).strict();
+  const loginRoute =
+    <B>(
+      schema: z.ZodType<B> | undefined,
+      run: (p: { agentId: string; loginId: string }, body: B) => AcpLoginView,
+    ) =>
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await requireAuth(req, deps.registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: (e as Error).message });
+      }
+      let body = undefined as B;
+      if (schema) {
+        const parsed = schema.safeParse(req.body ?? {});
+        if (!parsed.success) {
+          return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+        }
+        body = parsed.data;
+      }
+      try {
+        if (!deps.acpLogins) {
+          throw new SettingsError(
+            503,
+            'unavailable',
+            'Agent sign-in is not available on this server',
+          );
+        }
+        return reply.code(200).send(run(req.params as { agentId: string; loginId: string }, body));
+      } catch (e) {
+        if (e instanceof SettingsError) {
+          return reply.code(e.status).send({ error: e.code, message: e.message });
+        }
+        throw e;
+      }
+    };
+  app.post(
+    '/api/accounts/acp/:agentId/login',
+    loginRoute(AcpLoginStartBody, (p, body) => {
+      if (!resolveAcpAgents(shared.current().acpAgents).some((a) => a.id === p.agentId)) {
+        throw new SettingsError(404, 'unknown_agent', `No ACP agent ${p.agentId}`);
+      }
+      return deps.acpLogins!.start(body.hostId, p.agentId, body.methodId);
+    }),
+  );
+  app.get(
+    '/api/accounts/acp/:agentId/login/:loginId',
+    loginRoute(undefined, (p) => deps.acpLogins!.get(p.loginId, p.agentId)),
+  );
+  app.post(
+    '/api/accounts/acp/:agentId/login/:loginId/callback',
+    loginRoute(AcpLoginCallbackBody, (p, body) =>
+      deps.acpLogins!.callback(p.loginId, p.agentId, body.url),
+    ),
+  );
+  app.delete(
+    '/api/accounts/acp/:agentId/login/:loginId',
+    loginRoute(undefined, (p) => deps.acpLogins!.cancel(p.loginId, p.agentId)),
+  );
+
   app.put(
     '/api/accounts/acp/strategy',
     handle(StrategyBody, (_req, body) => shared.setAcpStrategy(body.strategy)),

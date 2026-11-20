@@ -82,7 +82,7 @@ export class AcpSignedOutError extends TurnFailedError {
     super(
       rejectedKey !== undefined
         ? `${label} refused its API key: ${rejectedKey}. Replace the key under Settings → AI accounts.`
-        : `${label} is not signed in on this host. Add an account for it under Settings → AI accounts, or sign in to it on this host.`,
+        : `${label} is not signed in on this host. Add an API key for it under Settings → AI accounts, or sign in to it on this host from there.`,
       undefined,
     );
   }

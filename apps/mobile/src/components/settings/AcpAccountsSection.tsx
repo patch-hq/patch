@@ -2,8 +2,8 @@
 // § Signing in). An ACP agent signs in with an API key: the server checks it,
 // stores it encrypted and sends it to every host. The key is typed into a
 // secure field and never shown back; each account shows its last four and its
-// state. An agent that takes no key runs on its own sign-in on each host and
-// has nothing to add here.
+// state. An agent that logs in instead (or as well) can be signed in on each
+// host that has it, with the agent's own sign-in; that login stays on that host.
 
 import React from 'react';
 import { Alert, View } from 'react-native';
@@ -11,7 +11,9 @@ import { describeAccountState, resolveAcpAgents, type AcpAgentConfig } from '@pa
 import { api, type SharedState } from '../../api/rest';
 import { space } from '../../lib/theme';
 import { formatReset } from '../../lib/usage';
-import { usePresenceStore } from '../../stores/presenceStore';
+import { usePresenceStore, type HostPresence } from '../../stores/presenceStore';
+import { hostName, sortedHosts } from './HostSwitcher';
+import { AcpHostLoginFlow } from './SignInFlows';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { SettingsSection } from '../SettingsSection';
 import { writeShared } from './sharedWrite';
@@ -23,18 +25,84 @@ type AcpRow = NonNullable<SharedState['secrets']['acp']>[number];
 export function AcpAccountsSections(): React.ReactElement | null {
   const configured = useSettingsStore((s) => s.data?.preferences.acpAgents);
   const rows = useSettingsStore((s) => s.data?.shared?.secrets.acp) ?? [];
-  const agents = resolveAcpAgents(configured).filter((a) => a.apiKeyEnv !== undefined);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const loginHosts = (agentId: string): HostPresence[] =>
+    sortedHosts(hosts).filter((h) =>
+      h.host?.backends.some((b) => b.id === `acp:${agentId}` && (b.loginMethods?.length ?? 0) > 0),
+    );
+  const agents = resolveAcpAgents(configured).filter(
+    (a) => a.apiKeyEnv !== undefined || loginHosts(a.id).length > 0,
+  );
   if (agents.length === 0) return null;
   return (
     <>
       {agents.map((agent) => (
-        <AgentSection
-          key={agent.id}
-          agent={agent}
-          rows={rows.filter((r) => r.agentId === agent.id)}
-        />
+        <React.Fragment key={agent.id}>
+          {agent.apiKeyEnv !== undefined ? (
+            <AgentSection agent={agent} rows={rows.filter((r) => r.agentId === agent.id)} />
+          ) : null}
+          {loginHosts(agent.id).length > 0 ? (
+            <SettingsSection
+              title={`${agent.label} · sign in on a host`}
+              testID={`acp-login-${agent.id}`}
+            >
+              {loginHosts(agent.id).map((h) => (
+                <HostLoginRow key={h.hostId} agent={agent} host={h} />
+              ))}
+            </SettingsSection>
+          ) : null}
+        </React.Fragment>
       ))}
     </>
+  );
+}
+
+/** Whether the agent is signed in on this host with its own sign-in, and a way to sign it in. */
+function HostLoginRow({
+  agent,
+  host,
+}: {
+  agent: AcpAgentConfig;
+  host: HostPresence;
+}): React.ReactElement {
+  const name = hostName(host);
+  const methods = host.host?.backends.find((b) => b.id === `acp:${agent.id}`)?.loginMethods ?? [];
+  const signedIn =
+    host.accounts['acp']?.accounts?.find((a) => a.id === `acp-login:${host.hostId}:${agent.id}`)
+      ?.connected === true;
+  const [done, setDone] = React.useState<string | null>(null);
+  return (
+    <Row
+      testID={`acp-login-${agent.id}-${host.hostId}`}
+      title={name}
+      subtitle={
+        done ??
+        (signedIn
+          ? `Signed in on ${name} only — the login stays on that host`
+          : `Not signed in on ${name}`)
+      }
+      subtitleTestID={`acp-login-${agent.id}-${host.hostId}-status`}
+      stack
+    >
+      {host.online && methods[0] ? (
+        <AcpHostLoginFlow
+          agentId={agent.id}
+          agentLabel={agent.label}
+          hostId={host.hostId}
+          hostLabel={name}
+          methodId={methods[0].id}
+          onDone={(v) =>
+            setDone(
+              v.status === 'complete'
+                ? `Signed in on ${name} only — the login stays on that host`
+                : null,
+            )
+          }
+        />
+      ) : (
+        <Muted>{`${name} is offline`}</Muted>
+      )}
+    </Row>
   );
 }
 
