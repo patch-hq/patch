@@ -83,6 +83,19 @@ vi.mock('../src/registration.js', async (importOriginal) => {
 });
 import { registerHost } from '../src/registration.js';
 
+/**
+ * The turn this test started has answered. A host sends no activity (the
+ * server derives the status from turn facts it is only sent by a server that
+ * keeps the record); the reply is what says this fake server's turn is done.
+ */
+function replied(e: { type: string }, chatId: string): boolean {
+  return (
+    e.type === 'chat.message' &&
+    (e as { chatId?: string }).chatId === chatId &&
+    (e as { role?: string }).role === 'assistant'
+  );
+}
+
 // This test runs from TypeScript source, so `version.ts`'s real BUILD_TARGET
 // (read from a bundled `build-info.json` beside the installed artifact, per
 // installPaths.ts) is undefined here — self-update's own `checkForUpdate`
@@ -780,7 +793,7 @@ describe('src/index.ts main() — full host boot', () => {
         attachments: [{ id: 'att-live-1', name: 'note.txt', mimeType: 'text/plain', kind: 'file' }],
       });
       await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'chat.state' && e.chatId === 'chat-main-1' && e.activity === 'idle',
+        (e) => replied(e, 'chat-main-1'),
         10_000,
       );
       // --- chat.input, WITH disabledTools (per-chat Tools panel OFF set) — the
@@ -794,7 +807,7 @@ describe('src/index.ts main() — full host boot', () => {
         disabledTools: ['Bash'],
       });
       await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'chat.state' && e.chatId === 'chat-main-1' && e.activity === 'idle',
+        (e) => replied(e, 'chat-main-1'),
         10_000,
       );
 
