@@ -983,7 +983,9 @@ export class JobDispatcher {
     // A held slot lasts until its chat stops working (spec/08 ## Concurrency).
     // This is the same stream the ChatRegistry mirrors, so the gate sees a
     // chat's activity at the moment the registry does.
+    // `activity` is the server's own reading, put on by the registry's gate.
     if (event.type === 'chat.state') {
+      if (event.activity === undefined) return;
       this.observeChatActivity(event.chatId, event.activity, event.rateLimitResumingAt ?? null);
       return;
     }

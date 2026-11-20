@@ -30,12 +30,12 @@
 // `audio.tts_end` once `sendInput`'s await returned. Silent, total loss of the
 // voice reply's down leg.
 //
-// The fix is to make a waiter TURN-SCOPED rather than chat-scoped: it only
-// becomes eligible to settle once it has seen the chat actually go
-// `running` (which is what `runQuery` sets immediately before it starts
-// consuming SDK envelopes). Deltas and assistant messages are likewise only
-// collected while armed, so a turn queued behind a running one can never be
-// handed the previous turn's text.
+// The fix is to make a waiter TURN-SCOPED rather than chat-scoped: it is armed
+// by the turn's own start (`chat.turn_started`, or the turn's own user message
+// when the waiter knows its `localId`) and settles on that turn's end
+// (`chat.turn_ended`). A `chat.state` never settles it. Deltas and assistant
+// messages are only collected while armed, so a turn queued behind a running
+// one can never be handed the previous turn's text.
 
 import type { WireEvent } from '@patch/wire';
 
@@ -51,7 +51,7 @@ interface Waiter {
    * turn happens to be running on the chat when it was registered.
    */
   localId?: string;
-  /** Set once the chat has been observed to enter `running` for this turn. */
+  /** Set once this turn has been seen to start. */
   armed: boolean;
   /** Assistant messages collected since arming. */
   buf: string[];
@@ -122,27 +122,34 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           w.buf.push(event.content);
           return;
         }
-        case 'chat.state': {
+        case 'chat.turn_started': {
           const w = waiters.get(event.chatId);
           if (!w) return;
-          if (event.activity === 'running') {
-            // The turn has started. Everything from here belongs to it. A waiter that
-            // knows its turn's localId waits for that turn's own message instead: the chat
-            // can already be running some other turn when a hand-off is queued behind it.
-            if (w.localId !== undefined) return;
-            // Only the first: the host re-emits `running` through a turn (summaries, status),
-            // and clearing here on each would throw away text the turn already produced.
-            if (!w.armed) {
-              w.armed = true;
-              w.buf = [];
-              w.onAccepted?.();
-            }
+          // The turn has started. Everything from here belongs to it. A waiter that
+          // knows its turn's localId waits for that turn's own message instead: the chat
+          // can already be running some other turn when a hand-off is queued behind it.
+          if (w.localId !== undefined) return;
+          if (!w.armed) {
+            w.armed = true;
+            w.buf = [];
+            w.onAccepted?.();
+          }
+          return;
+        }
+        case 'chat.turn_ended': {
+          const w = waiters.get(event.chatId);
+          if (!w?.armed) return;
+          // A failed turn is said by its `chat.error`, which rejects the waiter
+          // loudly; one that arrives without it still must not read as an answer.
+          if (event.outcome === 'failed' || event.outcome === 'interrupted') {
+            settleReject(
+              event.chatId,
+              new Error(event.error?.message ?? `the turn ended ${event.outcome}`),
+            );
             return;
           }
-          if (event.activity === 'idle' && w.armed) {
-            waiters.delete(event.chatId);
-            w.resolve(w.buf.join('\n'));
-          }
+          waiters.delete(event.chatId);
+          w.resolve(w.buf.join('\n'));
           return;
         }
         case 'chat.error': {

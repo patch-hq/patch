@@ -281,7 +281,8 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     await until(
       () =>
         states.some(
-          (e) => e.type === 'chat.state' && e.chatId === chatId && e.activity === 'running',
+          (e) =>
+            e.type === 'chat.state' && e.chatId === chatId && e.chatStatus?.state === 'running',
         ),
       3000,
       'turn running',
@@ -295,7 +296,9 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     );
     await until(
       () =>
-        states.some((e) => e.type === 'chat.state' && e.chatId === chatId && e.activity === 'idle'),
+        states.some(
+          (e) => e.type === 'chat.state' && e.chatId === chatId && e.chatStatus?.state === 'idle',
+        ),
       3000,
       'chat settled to idle after stop',
     );
@@ -370,41 +373,47 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
   });
 
   // ---- Mode 11: RELIABILITY — host drops mid-turn ----
-  it('mode 11 — host link dropped mid-turn errors the chat LOUDLY (not a silent hang)', async () => {
+  // spec/12 § Chat status: the chat reads Host offline while its host is gone —
+  // never a stale Running, never a false Failed — and the turn's own end sets
+  // it again once the host is back.
+  it('mode 11 — host link dropped mid-turn reads Host offline, then the turn finishes (no hang, no false failure)', async () => {
     h = await startHarness({ turnDelayMs: 2000 });
     const jwt = await h.mintSurface('srf-11');
     const client = await h.connectSurface('srf-11b');
     const chatId = await spawnChat(h, jwt, h.folder);
     client.send({ type: 'chat.focus_change', chatId });
 
-    const states = record(client, ['chat.state']);
+    const states = record(client, ['chat.state', 'chat.error', 'chat.message']);
+    const statusSeen = (state: string): boolean =>
+      states.some(
+        (e) => e.type === 'chat.state' && e.chatId === chatId && e.chatStatus?.state === state,
+      );
     client.sendInput({ chatId, message: 'long-running turn', localId: 'A' });
-    await until(
-      () =>
-        states.some(
-          (e) => e.type === 'chat.state' && e.chatId === chatId && e.activity === 'running',
-        ),
-      3000,
-      'turn running',
-    );
+    await until(() => statusSeen('running'), 3000, 'turn running');
 
     // Drop the host's server-link socket mid-turn.
     expect(h.dropHostLink()).toBe(true);
 
-    // The chat must resolve to a VISIBLE error + errored state — NOT hang.
-    const outcome = await waitReplyOrError(client, chatId, 'mode 11', 4000);
-    expect(outcome.kind).toBe('error');
-    if (outcome.kind === 'error') {
-      expect(outcome.event.error.code).toBe('daemon_unavailable');
-    }
+    await until(() => statusSeen('host_offline'), 3000, 'chat reads host offline');
+    // The host comes back by itself and the turn it was running finishes.
     await until(
       () =>
         states.some(
-          (e) => e.type === 'chat.state' && e.chatId === chatId && e.activity === 'errored',
+          (e) => e.type === 'chat.message' && e.chatId === chatId && e.role === 'assistant',
         ),
-      3000,
-      'chat.state flips to errored',
+      8000,
+      'the reply after the host returns',
     );
+    await until(
+      () => {
+        const last = states.filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
+        return last?.type === 'chat.state' && last.chatStatus?.state === 'idle';
+      },
+      3000,
+      'the chat settles idle',
+    );
+    expect(states.some((e) => e.type === 'chat.error' && e.chatId === chatId)).toBe(false);
+    expect(statusSeen('failed')).toBe(false);
     await client.close();
   });
 

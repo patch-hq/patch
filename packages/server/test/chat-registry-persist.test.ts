@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { ChatRegistry } from '../src/chat-registry.js';
+import { turnEnded, turnStarted } from './support/turn-facts.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -89,9 +90,9 @@ describe('ChatRegistry persistence', () => {
     const first = make();
     for (const id of ['c1', 'c2', 'c3', 'c4']) {
       first.observe(spawned(id));
-      first.observe(state(id, 'running'));
+      first.observe(turnStarted(id));
     }
-    first.markErrored('c1', { code: 'internal', message: 'x' }, 5_000);
+    first.observe(turnEnded('c1', 'failed', { code: 'internal', message: 'x' }));
     first.remove('c2');
     first.setDeleted('c3', true);
     first.rehome('c4', 'd2', '/elsewhere');
@@ -99,6 +100,7 @@ describe('ChatRegistry persistence', () => {
 
     const second = make();
     expect(second.get('c1')?.activity).toBe('errored');
+    expect(second.get('c1')?.chatStatus).toMatchObject({ state: 'failed', reason: 'internal' });
     expect(second.get('c2')).toBeUndefined();
     expect(second.get('c3')?.status).toBe('deleted');
     expect(second.get('c4')).toMatchObject({ hostId: 'd2', folder: '/elsewhere' });
@@ -183,7 +185,7 @@ describe('ChatRegistry persistence', () => {
       const r = at(5_000);
       r.observe(spawned('c1'));
       expect(r.hasWorkedSince('c1', 0)).toBe(false); // announced, not yet seen working
-      r.observe(state('c1', 'running'));
+      r.observe(turnStarted('c1'));
       expect(r.hasWorkedSince('c1', 4_000)).toBe(true);
       expect(r.hasWorkedSince('c1', 6_000)).toBe(false);
     });
@@ -191,9 +193,21 @@ describe('ChatRegistry persistence', () => {
     test('is remembered across a restart', () => {
       const first = at(5_000);
       first.observe(spawned('c1'));
-      first.observe(state('c1', 'awaiting-permission'));
+      first.observe(turnStarted('c1'));
       first.flush();
       expect(at(9_000).hasWorkedSince('c1', 4_000)).toBe(true);
+    });
+
+    test('the facts behind a status survive a restart: a turn still open goes host offline when its host stays away', () => {
+      const first = at(5_000);
+      first.observe(spawned('c1'));
+      first.observe(turnStarted('c1'));
+      first.flush();
+      const second = at(9_000);
+      expect(second.get('c1')?.chatStatus?.state).toBe('running');
+      expect(second.markHostAway('d1', 'offline').map((e) => e.chatStatus?.state)).toEqual([
+        'host_offline',
+      ]);
     });
 
     test('a chat its host reports idle with a first message and its own clock well past the start has worked', () => {

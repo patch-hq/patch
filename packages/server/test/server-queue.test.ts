@@ -10,6 +10,7 @@ import pino from 'pino';
 import type { ChatInputEvent, WireEvent } from '@patch/wire';
 import { ChatRegistry } from '../src/chat-registry.js';
 import { ServerQueue, RELEASE_GUARD_MS } from '../src/server-queue.js';
+import { createHostFacts } from './support/turn-facts.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -60,16 +61,26 @@ describe('ServerQueue', () => {
       now: () => nowMs,
     });
 
-  /** What production does: the registry and the queue both see a host frame. */
-  const hostFrame = (queue: ServerQueue, event: WireEvent, from = 'd1'): WireEvent | null => {
-    const gated = queue.gate(event, from);
-    if (gated) chats.observe(gated);
+  /**
+   * What production does: the registry's gate applies a host frame's facts,
+   * then the queue's gate sees it. A frame describing the host as running or
+   * idle is sent as the facts a host reports.
+   */
+  let hostFacts = createHostFacts();
+  const hostFrame = (
+    queue: ServerQueue,
+    event: WireEvent,
+    from: string | null = 'd1',
+  ): WireEvent | null => {
+    let gated: WireEvent | null = null;
+    for (const e of hostFacts(event)) gated = queue.gate(chats.gate(e), from);
     return gated;
   };
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-sq-'));
     chats = new ChatRegistry({ logger });
+    hostFacts = createHostFacts();
     injected = [];
     sent = [];
     online = true;
@@ -416,7 +427,7 @@ describe('ServerQueue', () => {
       const q = make();
       hostFrame(q, state('running'));
       q.enqueueIfBusy('srf-1', input('L1'));
-      const passed = q.gate(state('idle'), null);
+      const passed = hostFrame(q, state('idle'), null);
       expect((passed as { activity: string }).activity).toBe('running');
       await Promise.resolve();
       expect(sent.map((s) => s.hostId)).toEqual(['d1']);
@@ -426,7 +437,7 @@ describe('ServerQueue', () => {
       const q = make();
       hostFrame(q, state('running'));
       q.enqueueIfBusy('srf-1', input('L1'));
-      q.gate(state('idle'), 'd1'); // schedules the release
+      hostFrame(q, state('idle')); // schedules the release
       q.unqueue('c1', 'L1'); // the surface cancelled it first
       await Promise.resolve();
       expect(sent).toEqual([]);
@@ -435,7 +446,10 @@ describe('ServerQueue', () => {
     test('keeps the message when it has nowhere to send it', async () => {
       const gone = new Map<string, boolean>();
       const q = new ServerQueue({
-        chats: { get: (id) => (gone.get(id) ? undefined : chats.get(id)) },
+        chats: {
+          get: (id) => (gone.get(id) ? undefined : chats.get(id)),
+          factsOf: (id) => chats.factsOf(id),
+        },
         sendTo: (hostId, surfaceId, event) => sent.push({ hostId, surfaceId, event }),
         isOnline: () => online,
         hostSupports: () => supports,

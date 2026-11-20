@@ -672,7 +672,7 @@ describe('drift between hosts', () => {
     hostId: 'host-a',
     hostName: 'host-a',
     online: true,
-    version: '0.1.375',
+    version: '1.1.1703',
     gitSha: 'abc1234',
     builtAt: '2026-08-05T10:00:00.000Z',
     ...over,

@@ -9,8 +9,8 @@
 //     4400)
 //   - surface.foregrounded / surface.backgrounded heartbeat semantics
 //   - chat.call_response with no onCallResponse wired
-//   - resolveInFlightChatsOnHostOffline (a real in-flight chat forced to
-//     `errored` when the host link drops)
+//   - a host gone silent mid-turn (a real in-flight chat made host offline,
+//     never failed, when the host link drops)
 //   - onHostEvent: a forSurfaceId-tagged event for a no-longer-connected
 //     surface is dropped (not fanned out, no throw)
 //   - account-scoped (no chatId) host event fanout
@@ -533,7 +533,7 @@ describe('WS hub — lastClaudeSettings replay on late-joining surfaces', () => 
   });
 });
 
-describe('WS hub — resolveInFlightChatsOnHostOffline', () => {
+describe('WS hub — a host gone silent mid-turn (spec/12 § Chat status)', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-wshub-inflight-'));
@@ -542,85 +542,60 @@ describe('WS hub — resolveInFlightChatsOnHostOffline', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('forces a mid-turn chat to errored (chat.error + chat.state) when the host link drops', async () => {
+  /** A spawned chat with a turn open, as a host reports it. */
+  const runningChat = (h: { hostLink: { emit(e: WireEvent): void } }, chatId: string): void => {
+    h.hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/work' });
+    h.hostLink.emit({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 1 });
+    h.hostLink.emit({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions',
+      chatId,
+      lastUpdated: 1,
+    });
+  };
+  type State = { chatId: string; activity?: string; chatStatus?: { state: string } };
+
+  it('makes a mid-turn chat host offline when the host link drops, with no error and no failure', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(74));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     const h = await startServer({ registry });
     try {
       const c = await makeAuthedClient(h, user, 'srf-inflight');
-      // Seed a spawned + running chat into the registry mirror via the same
-      // host events the real host would emit.
-      h.hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'chat-running',
-        folder: '/work',
-      });
-      h.hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'chat-running',
-        activity: 'running',
-        lastUpdated: 1,
-      });
+      runningChat(h, 'chat-running');
       await new Promise((r) => setTimeout(r, 30));
 
       const errors: unknown[] = [];
-      const states: unknown[] = [];
+      const states: State[] = [];
       c.on('chat.error', (e) => errors.push(e));
-      c.on('chat.state', (e) => states.push(e));
+      c.on('chat.state', (e) => states.push(e as State));
 
       h.hostLink.setStatus('offline');
       await new Promise((r) => setTimeout(r, 50));
 
-      const err = errors.find((e) => (e as { chatId: string }).chatId === 'chat-running') as
-        | { error: { code: string; message: string } }
-        | undefined;
-      expect(err).toBeDefined();
-      expect(err?.error.code).toBe('daemon_unavailable');
-      // spec/04 § Activity — exact copy. The turn comes back by itself (the
-      // host re-sends an interrupted turn on restart), so the message must not
-      // ask the user to resend it.
-      expect(err?.error.message).toBe('Connection to the host was lost. Message will resend.');
-      expect(
-        states.some(
-          (e) =>
-            (e as { chatId: string; activity: string }).chatId === 'chat-running' &&
-            (e as { activity: string }).activity === 'errored',
-        ),
-      ).toBe(true);
+      // Never a false "failed": the turn may still be running on the host.
+      expect(errors).toEqual([]);
+      const mine = states.filter((e) => e.chatId === 'chat-running');
+      expect(mine.map((e) => e.chatStatus?.state)).toEqual(['host_offline']);
       await c.close();
     } finally {
       await h.close();
     }
   });
 
-  it('a host that drops and returns inside the grace never errors its chat (no running → errored → running flicker)', async () => {
+  it('a host that drops and returns inside the grace never changes its chat (no running → offline → running flicker)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(76));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     const h = await startServer({ registry, hostOfflineGraceMs: 150 });
     try {
       const c = await makeAuthedClient(h, user, 'srf-blip');
-      h.hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'chat-blip',
-        folder: '/work',
-      });
-      h.hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'chat-blip',
-        activity: 'running',
-        lastUpdated: 1,
-      });
+      runningChat(h, 'chat-blip');
       await new Promise((r) => setTimeout(r, 30));
       const errors: unknown[] = [];
-      const states: Array<{ chatId: string; activity: string }> = [];
+      const states: State[] = [];
       c.on('chat.error', (e) => errors.push(e));
-      c.on('chat.state', (e) => states.push(e as { chatId: string; activity: string }));
+      c.on('chat.state', (e) => states.push(e as State));
 
       h.hostLink.setStatus('offline');
       await new Promise((r) => setTimeout(r, 40));
@@ -628,41 +603,39 @@ describe('WS hub — resolveInFlightChatsOnHostOffline', () => {
       await new Promise((r) => setTimeout(r, 250));
 
       expect(errors).toHaveLength(0);
-      expect(states.filter((s) => s.activity === 'errored')).toHaveLength(0);
+      expect(states.filter((s) => s.chatStatus?.state !== 'running')).toHaveLength(0);
       await c.close();
     } finally {
       await h.close();
     }
   });
 
-  it('a host still offline after the grace has its chat errored', async () => {
+  it('a host still offline after the grace has its chat read host offline, and back with the turn live reads running', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(77));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     const h = await startServer({ registry, hostOfflineGraceMs: 80 });
     try {
       const c = await makeAuthedClient(h, user, 'srf-grace');
-      h.hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'chat-g',
-        folder: '/work',
-      });
+      runningChat(h, 'chat-g');
+      await new Promise((r) => setTimeout(r, 30));
+      const states: State[] = [];
+      c.on('chat.state', (e) => states.push(e as State));
+      h.hostLink.setStatus('offline');
+      await new Promise((r) => setTimeout(r, 30));
+      expect(states).toHaveLength(0);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(states.map((s) => s.chatStatus?.state)).toEqual(['host_offline']);
+      // The host comes back and speaks for the chat: its turn is still open.
+      h.hostLink.setStatus('online');
       h.hostLink.emit({
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'chat-g',
-        activity: 'running',
-        lastUpdated: 1,
+        lastUpdated: 2,
       });
       await new Promise((r) => setTimeout(r, 30));
-      const errors: unknown[] = [];
-      c.on('chat.error', (e) => errors.push(e));
-      h.hostLink.setStatus('offline');
-      await new Promise((r) => setTimeout(r, 30));
-      expect(errors).toHaveLength(0);
-      await new Promise((r) => setTimeout(r, 150));
-      expect(errors).toHaveLength(1);
+      expect(states.at(-1)?.chatStatus?.state).toBe('running');
       await c.close();
     } finally {
       await h.close();

@@ -132,21 +132,42 @@ describe('host restart statuses', () => {
     return { ws, log };
   }
 
-  const running = (chatId: string): string =>
+  /** A host reattaching to (or starting) a turn: the turn fact, then the chat's state. */
+  const running = (chatId: string): string[] => [
+    encode({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 1 }),
     encode({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId,
-      activity: 'running',
       lastUpdated: Date.now(),
-    });
+    }),
+  ];
+  /** A host back after its machine went down: the turn it left open ended interrupted. */
+  const interrupted = (chatId: string): string[] => [
+    encode({
+      type: 'chat.turn_ended',
+      chatId,
+      turnId: `t-${chatId}`,
+      seq: -1,
+      at: 2,
+      outcome: 'interrupted',
+    }),
+    encode({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions',
+      chatId,
+      interrupted: true,
+      lastUpdated: Date.now(),
+    }),
+  ];
+  const send = (ws: WebSocket, frames: string[]): void => frames.forEach((f) => ws.send(f));
 
   it('an announced restart shows Host restarting with no error, and the host reporting the turn live clears it', async () => {
     const s = await surface();
     const h = await host();
     await s.log.until(() => s.log.has('host.online'), 'host.online');
     h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'c1', folder: '/p' }));
-    h.ws.send(running('c1'));
+    send(h.ws, running('c1'));
     await s.log.until(() => s.log.statuses('c1').includes('running'), 'running');
 
     h.ws.send(encode({ type: 'host.restarting', hostId: 'daemon-1' }));
@@ -163,7 +184,7 @@ describe('host restart statuses', () => {
       () => s.log.frames.filter((f) => f.type === 'host.online').length >= 2,
       'back',
     );
-    back.ws.send(running('c1'));
+    send(back.ws, running('c1'));
     await s.log.until(() => s.log.statuses('c1').at(-1) === 'running', 'running again');
     await new Promise((r) => setTimeout(r, 600));
     // The window no longer applies once the host reattached.
@@ -176,7 +197,7 @@ describe('host restart statuses', () => {
     const h = await host();
     await s.log.until(() => s.log.has('host.online'), 'host.online');
     h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'c1', folder: '/p' }));
-    h.ws.send(running('c1'));
+    send(h.ws, running('c1'));
     await s.log.until(() => s.log.statuses('c1').includes('running'), 'running');
     h.ws.send(encode({ type: 'host.restarting', hostId: 'daemon-1' }));
     await s.log.until(() => s.log.statuses('c1').includes('host_restarting'), 'host_restarting');
@@ -189,7 +210,7 @@ describe('host restart statuses', () => {
     const h = await host();
     await s.log.until(() => s.log.has('host.online'), 'host.online');
     h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'c1', folder: '/p' }));
-    h.ws.send(running('c1'));
+    send(h.ws, running('c1'));
     await s.log.until(() => s.log.statuses('c1').includes('running'), 'running');
     h.ws.close();
     await s.log.until(() => s.log.statuses('c1').at(-1) === 'host_offline', 'host_offline');
@@ -201,7 +222,7 @@ describe('host restart statuses', () => {
     const h = await host();
     await s.log.until(() => s.log.has('host.online'), 'host.online');
     h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'c1', folder: '/p' }));
-    h.ws.send(running('c1'));
+    send(h.ws, running('c1'));
     await s.log.until(() => s.log.statuses('c1').includes('running'), 'running');
     h.ws.close();
     await s.log.until(() => s.log.statuses('c1').at(-1) === 'host_offline', 'host_offline');
@@ -211,16 +232,7 @@ describe('host restart statuses', () => {
       () => s.log.frames.filter((f) => f.type === 'host.online').length >= 2,
       'back',
     );
-    back.ws.send(
-      encode({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c1',
-        activity: 'idle',
-        interrupted: true,
-        lastUpdated: Date.now(),
-      }),
-    );
+    send(back.ws, interrupted('c1'));
     await s.log.until(() => s.log.statuses('c1').at(-1) === 'interrupted', 'interrupted');
     // Off by default: the chat waits for the user.
     await new Promise((r) => setTimeout(r, 200));
@@ -237,7 +249,7 @@ describe('host restart statuses', () => {
     const h = await host();
     await s.log.until(() => s.log.has('host.online'), 'host.online');
     h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'c1', folder: '/p' }));
-    h.ws.send(running('c1'));
+    send(h.ws, running('c1'));
     await s.log.until(() => s.log.statuses('c1').includes('running'), 'running');
     h.ws.close();
     await s.log.until(() => s.log.statuses('c1').at(-1) === 'host_offline', 'host_offline');
@@ -247,16 +259,7 @@ describe('host restart statuses', () => {
       () => s.log.frames.filter((f) => f.type === 'host.online').length >= 2,
       'back',
     );
-    back.ws.send(
-      encode({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'c1',
-        activity: 'idle',
-        interrupted: true,
-        lastUpdated: Date.now(),
-      }),
-    );
+    send(back.ws, interrupted('c1'));
     await back.log.until(() => back.log.has('chat.continue_request'), 'auto continue at host');
     back.ws.close();
   });

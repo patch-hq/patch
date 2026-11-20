@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ChatRegistry, type ChatSummary } from '../src/chat-registry.js';
+import { turnEnded, turnStarted } from './support/turn-facts.js';
 
 function silentLogger() {
   return { warn: () => undefined };
@@ -308,9 +309,10 @@ describe('ChatRegistry seed', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'seeded',
-      activity: 'running',
       lastUpdated: 5,
     });
+    reg.observe(turnStarted('seeded'));
+    expect(reg.get('seeded')?.lastUpdated).toBe(5);
     expect(reg.get('seeded')?.activity).toBe('running');
   });
 });
@@ -401,65 +403,51 @@ describe('ChatRegistry chat.stopped handling', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'live',
-      activity: 'running',
       lastUpdated: 1,
       status: 'active',
     });
+    reg.observe(turnStarted('live'));
     reg.observe({ type: 'chat.stopped', chatId: 'live', reason: 'user_stop' });
     // No-op: the row is unchanged (host separately emits chat.state).
     expect(reg.get('live')?.activity).toBe('running');
   });
 });
 
-describe('ChatRegistry inFlightChatIds', () => {
-  it('returns only chats with activity running or awaiting-permission', () => {
+describe('ChatRegistry midTurnChatIds', () => {
+  it('returns only chats on that host with a turn in flight or a question open', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'idle-one', folder: '/a' });
+    for (const chatId of ['idle-one', 'running-one', 'asking-one']) {
+      reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId, folder: '/a' });
+    }
+    reg.observe({ type: 'chat.spawned', hostId: 'd2', chatId: 'elsewhere', folder: '/a' });
+    reg.observe(turnStarted('running-one'));
+    reg.observe(turnStarted('elsewhere'));
     reg.observe({
-      type: 'chat.state',
-      permissionMode: 'bypassPermissions',
-      chatId: 'idle-one',
-      activity: 'idle',
-      lastUpdated: 1,
-      status: 'active',
-    });
-    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'running-one', folder: '/b' });
-    reg.observe({
-      type: 'chat.state',
-      permissionMode: 'bypassPermissions',
-      chatId: 'running-one',
-      activity: 'running',
-      lastUpdated: 1,
-      status: 'active',
-    });
-    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'awaiting-one', folder: '/c' });
-    reg.observe({
-      type: 'chat.state',
-      permissionMode: 'bypassPermissions',
-      chatId: 'awaiting-one',
-      activity: 'awaiting-permission',
-      lastUpdated: 1,
-      status: 'active',
-    });
-    expect(reg.inFlightChatIds().sort()).toEqual(['awaiting-one', 'running-one']);
+      type: 'chat.permission_request',
+      chatId: 'asking-one',
+      requestId: 'r1',
+      request: { tool: 'AskUserQuestion', args: {} },
+      seq: 1,
+    } as never);
+    expect(reg.midTurnChatIds('d1').sort()).toEqual(['asking-one', 'running-one']);
   });
 });
 
-describe('ChatRegistry markErrored', () => {
-  it('returns null for an unknown chatId', () => {
+describe('ChatRegistry markHostAway', () => {
+  it('is a no-op for a host with nothing working', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
-    expect(reg.markErrored('missing', { code: 'sdk_error', message: 'boom' }, 100)).toBeNull();
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/proj' });
+    expect(reg.markHostAway('d1', 'offline')).toEqual([]);
   });
 
-  it('resolves a known chat to errored and returns the chat.state event, including folder when present', () => {
+  it('makes a working chat host offline and returns its whole chat.state', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/proj' });
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'live',
-      activity: 'running',
-      lastUpdated: 1,
+      lastUpdated: 1_000,
       status: 'active',
       pinned: true,
       pinnedAt: 5,
@@ -467,52 +455,31 @@ describe('ChatRegistry markErrored', () => {
       preview: 'hello',
       folder: '/proj',
     });
-    const ev = reg.markErrored('live', { code: 'sdk_error', message: 'boom' }, 200);
-    expect(ev).not.toBeNull();
-    expect(ev?.activity).toBe('errored');
+    reg.observe(turnStarted('live'));
+    const [ev] = reg.markHostAway('d1', 'offline');
+    expect(ev?.chatStatus?.state).toBe('host_offline');
     expect(ev?.folder).toBe('/proj');
-    expect(ev?.lastError).toEqual({ code: 'sdk_error', message: 'boom', at: 200 });
     expect(ev?.pinned).toBe(true);
-    // The registry mirror itself flips to errored too.
-    expect(reg.get('live')?.activity).toBe('errored');
-  });
-
-  it("keeps the host-owned lastUpdated, so the host's next frame is not dropped as stale", () => {
-    // Clients discard a chat.state older than the row's lastUpdated. Stamping the
-    // server clock here put that ahead of every frame the host would send on
-    // recovery, so the errored triangle never cleared.
-    const reg = new ChatRegistry({ logger: silentLogger() });
-    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/proj' });
-    reg.observe({
-      type: 'chat.state',
-      permissionMode: 'bypassPermissions',
-      chatId: 'live',
-      activity: 'running',
-      lastUpdated: 1_000,
-      status: 'active',
-      folder: '/proj',
-    });
-    const ev = reg.markErrored('live', { code: 'daemon_unavailable', message: 'lost' }, 9_999);
+    // The host-owned lastUpdated is kept, so its next frame is not dropped as stale.
     expect(ev?.lastUpdated).toBe(1_000);
-    expect(reg.get('live')?.lastUpdated).toBe(1_000);
+    // Never a failure: nothing says the turn did not finish.
+    expect(ev?.lastError).toBeUndefined();
   });
 
   it('omits `folder` from the emitted event when the mirrored folder is empty', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'nofolder', folder: '/x' });
-    // A chat.state with an explicitly empty folder clears the mirrored value
-    // (folder: event.folder ?? existing?.folder ?? '').
     reg.observe({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'nofolder',
-      activity: 'idle',
       lastUpdated: 1,
       status: 'active',
       folder: '',
     });
-    const ev = reg.markErrored('nofolder', { code: 'sdk_error', message: 'x' }, 10);
-    expect(ev).not.toBeNull();
+    reg.observe(turnStarted('nofolder'));
+    const [ev] = reg.markHostAway('d1', 'offline');
+    expect(ev).toBeDefined();
     expect(Object.prototype.hasOwnProperty.call(ev ?? {}, 'folder')).toBe(false);
   });
 });
@@ -672,14 +639,13 @@ describe('ChatRegistry chat.state omitted fields fall back to the existing mirro
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'c1',
-      activity: 'running',
       lastUpdated: 2,
     });
     const c = reg.get('c1');
     expect(c?.folder).toBe('/original');
     expect(c?.status).toBe('archived');
     expect(c?.pinned).toBe(true);
-    expect(c?.activity).toBe('running');
+    expect(c?.lastUpdated).toBe(2);
   });
 });
 
@@ -726,10 +692,10 @@ describe('ChatRegistry chat.spawned is idempotent', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'c1',
-      activity: 'running',
       lastUpdated: 5,
       status: 'active',
     });
+    reg.observe(turnStarted('c1'));
     // Re-spawning must not reset the row back to its initial idle/zero state.
     reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/a' });
     const c = reg.get('c1');
@@ -1116,55 +1082,54 @@ describe('latest message mirror', () => {
 describe('ChatRegistry keeps why a chat failed', () => {
   const spawn = (reg: ChatRegistry) =>
     reg.observe({ type: 'chat.spawned', hostId: 'h1', chatId: 'c1', folder: '/x' });
-  const state = (
-    activity: 'idle' | 'errored',
-    lastError?: { code: 'sdk_error'; message: string; at: number },
-  ) =>
+  const hostState = (lastError?: { code: 'sdk_error'; message: string; at: number }) =>
     ({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
       chatId: 'c1',
-      activity,
       lastUpdated: 1,
       folder: '/x',
       ...(lastError ? { lastError } : {}),
     }) as const;
 
-  it('serves the reason a chat.state carried, so a REST cold start can explain the failure', () => {
+  it("serves the reason from the turn's own end, so a REST cold start can explain the failure", () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     spawn(reg);
-    reg.observe(state('errored', { code: 'sdk_error', message: 'Claude session expired', at: 5 }));
-    expect(reg.get('c1')?.lastError).toEqual({
+    reg.observe(turnStarted('c1'));
+    reg.observe(
+      turnEnded('c1', 'failed', { code: 'sdk_error', message: 'Claude session expired' }),
+    );
+    expect(reg.get('c1')?.lastError).toMatchObject({
       code: 'sdk_error',
       message: 'Claude session expired',
-      at: 5,
     });
   });
 
-  it('keeps the reason across a later errored chat.state that omits it', () => {
+  it('keeps the reason across later chat.state frames, and ignores one a host made up', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     spawn(reg);
-    reg.observe(state('errored', { code: 'sdk_error', message: 'boom', at: 5 }));
-    reg.observe(state('errored'));
+    reg.observe(turnStarted('c1'));
+    reg.observe(turnEnded('c1', 'failed', { code: 'sdk_error', message: 'boom' }));
+    reg.observe(hostState());
+    reg.observe(hostState({ code: 'sdk_error', message: 'something else', at: 9 }));
     expect(reg.get('c1')?.lastError?.message).toBe('boom');
   });
 
-  it('drops the reason once the chat is no longer errored', () => {
+  it('drops the reason once a turn starts again', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     spawn(reg);
-    reg.observe(state('errored', { code: 'sdk_error', message: 'boom', at: 5 }));
-    reg.observe(state('idle'));
+    reg.observe(turnStarted('c1'));
+    reg.observe(turnEnded('c1', 'failed', { code: 'sdk_error', message: 'boom' }));
+    reg.observe(turnStarted('c1'));
     expect(reg.get('c1')?.lastError).toBeNull();
   });
 
-  it('markErrored records the reason too', () => {
+  it('a host going silent is not a failure, so there is no reason to keep', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     spawn(reg);
-    reg.markErrored('c1', { code: 'daemon_unavailable', message: 'Connection lost' }, 9);
-    expect(reg.get('c1')?.lastError).toEqual({
-      code: 'daemon_unavailable',
-      message: 'Connection lost',
-      at: 9,
-    });
+    reg.observe(turnStarted('c1'));
+    reg.markHostAway('h1', 'offline');
+    expect(reg.get('c1')?.lastError).toBeNull();
+    expect(reg.get('c1')?.chatStatus?.state).toBe('host_offline');
   });
 });

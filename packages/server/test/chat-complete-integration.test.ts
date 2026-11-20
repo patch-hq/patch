@@ -19,6 +19,7 @@ import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 import { InProcessHostLink } from '../src/host-link.js';
 import type { PushBackend } from '../src/notifications/router.js';
+import { createHostFacts } from './support/turn-facts.js';
 
 class FrameLog {
   readonly frames: WireEvent[] = [];
@@ -198,8 +199,11 @@ describe('chat completion — real server, real desktop socket', () => {
       lastUpdated: 0,
       ts: 0,
     };
-    link.emit({ ...base, activity: 'running', seq: 2, name: 'bed planner' } as WireEvent);
-    link.emit({
+    // The host reports facts; the server decides the chat ran and finished.
+    const facts = createHostFacts();
+    const emit = (e: WireEvent): void => facts(e).forEach((f) => link.emit(f));
+    emit({ ...base, activity: 'running', seq: 2, name: 'bed planner' } as WireEvent);
+    emit({
       ...base,
       activity: 'idle',
       seq: 3,

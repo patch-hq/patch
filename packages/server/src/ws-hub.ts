@@ -63,7 +63,6 @@ import { hostSupport } from './version-report.js';
  * reports its own completion when the link is back. Do not reword this into an
  * instruction to resend — that describes behaviour the system does not have.
  */
-const HOST_LINK_LOST_MESSAGE = 'Connection to the host was lost. Message will resend.';
 
 const HELLO_TIMEOUT_MS = 5_000;
 const AUTH_BUFFER_LIMIT = 50;
@@ -316,6 +315,7 @@ export class WsHub {
   private readonly surfaces = new Map<string, Set<ConnectedSurface>>();
   private readonly dedupe = new InputDedupe();
   private hostStatusUnsub: (() => void) | null = null;
+  private statusUnsub: (() => void) | null = null;
   private hostEventUnsub: (() => void) | null = null;
   private composerDraftsUnsub: (() => void) | null = null;
   private viewPositionUnsub: (() => void) | null = null;
@@ -606,17 +606,13 @@ export class WsHub {
     if (status !== 'offline') return;
     // A call's audio runs on its host, so a host gone offline has no calls.
     this.endCallsOnHost(hostId);
-    // The host owns every in-flight turn. When the link drops, the
-    // turn-completion / activity event will never arrive, so a chat left in
-    // `running` / `awaiting-permission` would spin forever — a SILENT failure
-    // (the reported bug). Resolve those chats to `errored` LOUDLY so the UI
-    // unsticks and the user can retry. Only chats on the host that went
-    // away: another host's turns are unaffected. NO FALLBACK. spec/12 +
-    // spec/04.
-    // A host that announced a restart is the planned gap: its chats read Host
-    // restarting, and only the restart window running out makes them Host
-    // offline (`beginHostRestart`).
-    if (!this.restartingHosts.has(hostId)) this.resolveInFlightChatsOnHostOffline(hostId);
+    // A chat whose host went silent mid-turn reads Host offline (spec/12 §
+    // Chat status): never a stale Running, and never Failed, since the turn may
+    // still be running and its outbox catches the record up when the host
+    // returns. A host that announced a restart is the planned gap: its chats
+    // read Host restarting, and only the restart window running out makes them
+    // Host offline (`beginHostRestart`).
+    if (!this.restartingHosts.has(hostId)) this.markChatsHostOffline(hostId);
     // Every shell on that host died with it. Drop the routes so a
     // surface still holding those ids is told `unknown_session` instead of
     // having its keystrokes buffered for a shell that no longer exists.
@@ -735,9 +731,12 @@ export class WsHub {
     // restart must not read as running for ever (spec/12 § Chat status).
     setTimeout(() => {
       for (const hostId of this.registeredHostIds()) {
-        if (!deps.hostLink.isOnline(hostId)) this.resolveInFlightChatsOnHostOffline(hostId);
+        if (!deps.hostLink.isOnline(hostId)) this.markChatsHostOffline(hostId);
       }
     }, RESTORED_HOST_GRACE_MS).unref();
+    // A status change a fact made on its own (a turn boundary, a question) has
+    // no host frame to carry it: the server sends its own (spec/12 § Chat status).
+    this.statusUnsub = deps.chatRegistry.onStatusChange((event) => this.broadcastChatState(event));
     // Pipe host → surfaces.
     this.hostEventUnsub = deps.hostLink.onEvent((event, from) => this.onHostEvent(event, from));
     // Presence names the host it describes: the link tells us WHICH host
@@ -845,15 +844,6 @@ export class WsHub {
   }
 
   /**
-   * On host-link loss, force every chat that was mid-turn into a visible
-   * `errored` state for all connected surfaces. Emits the same pair the host
-   * itself emits when a turn errors (chatRunner): a `chat.error` (toast) plus a
-   * `chat.state` with `activity: 'errored'` + `lastError` (what flips the
-   * spinner off). The registry mirror is updated so REST surfaces (cold-start /
-   * pull-to-refresh) agree with the live stream. On reconnect the host
-   * remains source of truth: a retried turn drives the chat back to `running`.
-   */
-  /**
    * `host.restarting` (spec/12 § Chat status): the host's running and waiting
    * chats read Host restarting until it reattaches, or Host offline once the
    * restart window passes without it.
@@ -863,40 +853,25 @@ export class WsHub {
     if (prior) clearTimeout(prior);
     const timer = setTimeout(() => {
       this.restartingHosts.delete(hostId);
-      if (!this.deps.hostLink.isOnline(hostId)) this.resolveInFlightChatsOnHostOffline(hostId);
+      if (!this.deps.hostLink.isOnline(hostId)) this.markChatsHostOffline(hostId);
     }, this.deps.hostRestartWindowMs ?? HOST_RESTART_WINDOW_MS);
     timer.unref?.();
     this.restartingHosts.set(hostId, timer);
-    for (const event of this.deps.chatRegistry.markHostRestarting(hostId)) {
+    for (const event of this.deps.chatRegistry.markHostAway(hostId, 'restarting')) {
       this.broadcastChatState(event);
     }
   }
 
-  private resolveInFlightChatsOnHostOffline(hostId: string): void {
-    const inFlight = this.deps.chatRegistry
-      .inFlightChatIds()
-      .filter((chatId) => this.deps.chatRegistry.get(chatId)?.hostId === hostId);
-    if (inFlight.length === 0) return;
-    const at = Date.now();
-    for (const chatId of inFlight) {
-      const error = { code: 'daemon_unavailable' as const, message: HOST_LINK_LOST_MESSAGE };
-      const errorEvent: WireEvent = {
-        type: 'chat.error',
-        chatId,
-        error,
-        // Server-generated control error, not part of the host's replayable
-        // per-chat stream — surfaces must not treat it as a stream event.
-        seq: OUT_OF_BAND_SEQ,
-      };
-      const stateEvent = this.deps.chatRegistry.markErrored(chatId, error, at);
+  /** The host went silent: its working chats read Host offline until it speaks for them again. */
+  private markChatsHostOffline(hostId: string): void {
+    for (const chatId of this.deps.chatRegistry.midTurnChatIds(hostId)) {
       this.deps.onChatLinkLost?.(chatId);
-      for (const conn of this.allConns()) {
-        conn.socket.send(encode(errorEvent));
-        if (stateEvent) conn.socket.send(encode(stateEvent));
-      }
+    }
+    for (const event of this.deps.chatRegistry.markHostAway(hostId, 'offline')) {
+      this.broadcastChatState(event);
       this.deps.logger.warn(
-        { chatId },
-        'host link lost while chat in-flight; resolved chat to errored',
+        { chatId: event.chatId },
+        'host went silent mid-turn; chat reads host offline',
       );
     }
   }
@@ -921,6 +896,7 @@ export class WsHub {
     this.terminalLossTimers.clear();
     this.hostEventUnsub?.();
     this.hostStatusUnsub?.();
+    this.statusUnsub?.();
     this.composerDraftsUnsub?.();
     this.viewPositionUnsub?.();
     this.newChatDraftsUnsub?.();

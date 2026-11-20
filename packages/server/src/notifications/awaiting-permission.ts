@@ -131,7 +131,8 @@ export class AwaitingPermissionNotifier {
       else this.pendingHandoff.delete(event.chatId);
       return;
     }
-    if (event.type !== 'chat.state') return;
+    // `activity` is the server's own reading, put on by the registry's gate.
+    if (event.type !== 'chat.state' || event.activity === undefined) return;
     const chatId = event.chatId;
     const previous = this.lastActivity.get(chatId);
     this.lastActivity.set(chatId, event.activity);

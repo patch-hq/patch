@@ -28,7 +28,20 @@ import {
   writeFileSync,
 } from 'node:fs';
 import type { Logger } from 'pino';
-import { isAllowedTransition, nextStatus, statusFromHostState } from './chat-status.js';
+import {
+  deriveStatus,
+  emptyFacts,
+  factsFromHostState,
+  factsOnRequestRaised,
+  factsOnRequestResolved,
+  factsOnTurnEnded,
+  factsOnTurnStarted,
+  isAllowedTransition,
+  isMidTurn,
+  legacyActivity,
+  nextStatus,
+  type ChatStatusFacts,
+} from './chat-status.js';
 import type {
   ChatErrorCode,
   ChatStateEvent,
@@ -125,6 +138,10 @@ export interface ChatSummary {
    */
   permissionMode: PermissionMode;
   folder: string;
+  /**
+   * The server's status said the old way, for readers that predate
+   * `chatStatus` (`chat-status.ts` § legacyActivity). Never a host's word.
+   */
   activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
   status: 'active' | 'archived' | 'errored' | 'deleted';
   pinned: boolean;
@@ -274,15 +291,6 @@ export const WORK_EVIDENCE_MS = 10_000;
 /** Spawn-time error codes that should remove the chat from the registry. */
 const SPAWN_TIME_ERROR_CODES = new Set<ChatErrorCode>(['folder_not_found']);
 
-/**
- * Activities that mean a turn is in flight — the host has not yet reported
- * the chat back to `idle`/`errored`. If the host↔server link drops while a
- * chat is in one of these states, the turn-completion event will never arrive,
- * so the server must resolve the chat to `errored` itself (see
- * `WsHub.resolveInFlightChatsOnHostOffline`). spec/04 ## Activity + spec/12.
- */
-const IN_FLIGHT_ACTIVITIES = new Set<ChatSummary['activity']>(['running', 'awaiting-permission']);
-
 export class ChatRegistry {
   private readonly chats = new Map<string, ChatSummary>();
   /** chatIds we've observed `chat.spawned` for. Gates `chat.state` admission. */
@@ -311,6 +319,20 @@ export class ChatRegistry {
   private readonly workedAt = new Map<string, number>();
   /** The account feed's latest position: one more each time a row changes. */
   private feedCounter = 0;
+  /** What the server knows of each chat, from which its status is derived (`chat-status.ts`). Saved with the mirror. */
+  private readonly facts = new Map<string, ChatStatusFacts>();
+  private writtenFacts = new Map<string, ChatStatusFacts>();
+  /** Work the server itself holds for a chat (the message queue). */
+  private owed: (chatId: string) => boolean = () => false;
+  /** Told of every status change a fact made that no host `chat.state` carries. */
+  private readonly statusListeners = new Set<(event: ChatStateEvent) => void>();
+  /** The latest turn details each chat's host reported, carried on the server's own frames. */
+  private readonly turnDetails = new Map<
+    string,
+    Pick<ChatStateEvent, 'turnOrigin' | 'turnStopped' | 'turnSummary'>
+  >();
+  /** Frames the event gate has already applied, so the event tap does not apply them twice. */
+  private readonly gated = new WeakSet<object>();
 
   constructor(opts: ChatRegistryOptions = {}) {
     this.logger = opts.logger;
@@ -343,11 +365,15 @@ export class ChatRegistry {
       for (const [chatId, at] of this.workedAt) {
         if (this.writtenWorked.get(chatId) !== at) lines.push(JSON.stringify({ w: [chatId, at] }));
       }
+      for (const [chatId, f] of this.facts) {
+        if (this.writtenFacts.get(chatId) !== f) lines.push(JSON.stringify({ f: [chatId, f] }));
+      }
       if (lines.length > 0) {
         appendFileSync(this.persistPath, lines.join('\n') + '\n');
         this.indexLines += lines.length;
         this.written = new Map(this.chats);
         this.writtenWorked = new Map(this.workedAt);
+        this.writtenFacts = new Map(this.facts);
       }
       if (this.legacyPath && existsSync(this.legacyPath)) unlinkSync(this.legacyPath);
       if (this.indexLines > this.chats.size * 2 + COMPACT_SLACK_LINES) this.compact();
@@ -363,6 +389,7 @@ export class ChatRegistry {
     const lines: string[] = [];
     for (const row of this.chats.values()) lines.push(JSON.stringify({ c: row }));
     for (const [chatId, at] of this.workedAt) lines.push(JSON.stringify({ w: [chatId, at] }));
+    for (const [chatId, f] of this.facts) lines.push(JSON.stringify({ f: [chatId, f] }));
     writeFileSync(tmp, lines.length > 0 ? lines.join('\n') + '\n' : '');
     renameSync(tmp, this.persistPath);
     this.indexLines = lines.length;
@@ -389,7 +416,12 @@ export class ChatRegistry {
         const lines = readFileSync(this.persistPath, 'utf8').split('\n');
         if (lines[lines.length - 1] === '') lines.pop();
         lines.forEach((line, i) => {
-          let entry: { c?: ChatSummary; x?: string; w?: [string, number] };
+          let entry: {
+            c?: ChatSummary;
+            x?: string;
+            w?: [string, number];
+            f?: [string, ChatStatusFacts];
+          };
           try {
             entry = parsePersisted(line) as typeof entry;
           } catch (err) {
@@ -409,13 +441,18 @@ export class ChatRegistry {
             this.spawnedSet.delete(entry.x);
             this.unconfirmed.delete(entry.x);
             this.workedAt.delete(entry.x);
+            this.facts.delete(entry.x);
           } else if (Array.isArray(entry.w) && typeof entry.w[1] === 'number') {
             this.workedAt.set(entry.w[0], entry.w[1]);
+          } else if (Array.isArray(entry.f) && typeof entry.f[1] === 'object') {
+            this.facts.set(entry.f[0], { ...emptyFacts(), ...entry.f[1] });
           }
         });
         this.indexLines = lines.length;
         // Once per start, drop every superseded line.
-        if (this.indexLines > this.chats.size + this.workedAt.size) this.compact();
+        if (this.indexLines > this.chats.size + this.workedAt.size + this.facts.size) {
+          this.compact();
+        }
       } else if (this.legacyPath && existsSync(this.legacyPath)) {
         const parsed = parsePersisted(readFileSync(this.legacyPath, 'utf8')) as {
           chats?: ChatSummary[];
@@ -430,12 +467,14 @@ export class ChatRegistry {
       }
       this.written = new Map(this.chats);
       this.writtenWorked = new Map(this.workedAt);
+      this.writtenFacts = new Map(this.facts);
     } catch (err) {
       // NO FALLBACK: say so, then start empty rather than guess at a damaged file.
       this.chats.clear();
       this.spawnedSet.clear();
       this.unconfirmed.clear();
       this.workedAt.clear();
+      this.facts.clear();
       this.logger?.warn(
         { err },
         'chat-registry: could not read the saved chat index; starting empty',
@@ -443,7 +482,72 @@ export class ChatRegistry {
     }
   }
 
+  /**
+   * Look at a host frame before any other reader does (the host link's event
+   * gate). The facts it carries are applied here, and a host's `chat.state` is
+   * passed on with the server's status on it, so every reader downstream sees
+   * the status the server decided and never one a host concluded.
+   */
+  gate(event: WireEvent): WireEvent {
+    this.observe(event);
+    let out: WireEvent = event;
+    if (event.type === 'chat.state') {
+      const row = this.chats.get(event.chatId);
+      if (row) {
+        // Whatever a host put in these is not the server's word, so it goes.
+        const { activity: _activity, lastError: _lastError, chatStatus: _status, ...facts } = event;
+        void _activity;
+        void _lastError;
+        void _status;
+        out = {
+          ...facts,
+          activity: row.activity,
+          ...(row.chatStatus ? { chatStatus: row.chatStatus } : {}),
+          ...(row.feedPos !== undefined ? { feedPos: row.feedPos } : {}),
+          ...(row.lastError ? { lastError: row.lastError as ChatStateEvent['lastError'] } : {}),
+        };
+      }
+    }
+    this.gated.add(out);
+    return out;
+  }
+
+  /** A frame the gate passed on in a changed form: already applied, so the tap skips it. */
+  markGated(event: WireEvent): void {
+    this.gated.add(event);
+  }
+
+  /** Work the server itself holds for a chat keeps it running between turns. */
+  setOwedWork(owed: (chatId: string) => boolean): void {
+    this.owed = owed;
+  }
+
+  /**
+   * Hear every status change a fact made on its own (a turn boundary, a
+   * question): there is no host `chat.state` to carry those, so the caller
+   * sends this one to surfaces.
+   */
+  onStatusChange(listener: (event: ChatStateEvent) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  /** The facts the status is derived from, for tests and diagnostics. */
+  factsOf(chatId: string): ChatStatusFacts | undefined {
+    return this.facts.get(chatId);
+  }
+
+  /**
+   * Work the status out again after something outside the host's frames
+   * changed (the server's queue emptied). Tells the listeners when it moved.
+   */
+  recompute(chatId: string): void {
+    const facts = this.facts.get(chatId);
+    if (facts) this.applyFacts(chatId, facts, { tell: true, own: true });
+  }
+
   observe(event: WireEvent): void {
+    if (this.gated.has(event)) return;
     // A batched replay carries events this would otherwise have seen one by
     // one (spec/12 § Sequence-based replay). Unpack it so asking for batches
     // changes only HOW MANY FRAMES cross the link, never what the mirror is
@@ -468,6 +572,7 @@ export class ChatRegistry {
         if (held?.has(chatId)) continue;
         this.chats.delete(chatId);
         this.spawnedSet.delete(chatId);
+        this.facts.delete(chatId);
         pruned = true;
       }
       if (pruned) this.markDirty();
@@ -522,6 +627,46 @@ export class ChatRegistry {
         chatStatus: { state: 'idle', since: this.now() },
         feedPos: ++this.feedCounter,
       });
+      if (!this.facts.has(event.chatId)) this.facts.set(event.chatId, emptyFacts());
+      return;
+    }
+    if (event.type === 'chat.turn_started' || event.type === 'chat.turn_ended') {
+      if (!this.chats.has(event.chatId)) return;
+      const prev = this.facts.get(event.chatId) ?? emptyFacts();
+      const next =
+        event.type === 'chat.turn_started'
+          ? factsOnTurnStarted(prev, event.turnId)
+          : factsOnTurnEnded(prev, event.turnId, event.outcome, event.error);
+      if (event.type === 'chat.turn_started') this.workedAt.set(event.chatId, this.now());
+      this.applyFacts(event.chatId, next, { tell: true });
+      return;
+    }
+    if (event.type === 'patch.browser_handoff.state') {
+      // The agent waiting for the user to take over a tab is blocked on them as
+      // an approval is; a shared view for review blocks nothing.
+      if (event.shared === true || !this.chats.has(event.chatId)) return;
+      const prev = this.facts.get(event.chatId) ?? emptyFacts();
+      const id = `handoff:${event.handoffId}`;
+      const next =
+        event.status === 'waiting'
+          ? factsOnRequestRaised(prev, id, 'browser_handoff')
+          : factsOnRequestResolved(prev, id);
+      if (JSON.stringify(next) !== JSON.stringify(prev)) {
+        this.applyFacts(event.chatId, next, { tell: true });
+      }
+      return;
+    }
+    if (event.type === 'chat.permission_request' || event.type === 'chat.permission_response') {
+      // A request replayed to one surface is history, not a new fact.
+      if (typeof (event as { forSurfaceId?: unknown }).forSurfaceId === 'string') return;
+      const chatId = event.chatId;
+      if (chatId === undefined || !this.chats.has(chatId)) return;
+      const prev = this.facts.get(chatId) ?? emptyFacts();
+      const next =
+        event.type === 'chat.permission_request'
+          ? factsOnRequestRaised(prev, event.requestId, event.request.tool)
+          : factsOnRequestResolved(prev, event.requestId);
+      this.applyFacts(chatId, next, { tell: true });
       return;
     }
     if (event.type === 'chat.branches') {
@@ -601,7 +746,7 @@ export class ChatRegistry {
         hostId: existing?.hostId ?? event.hostId ?? '',
         permissionMode: event.permissionMode,
         folder: event.folder ?? existing?.folder ?? '',
-        activity: event.activity,
+        activity: existing?.activity ?? 'idle',
         status: event.status ?? existing?.status ?? 'active',
         pinned: event.pinned ?? existing?.pinned ?? false,
         // Unpinning sends `null`, which is meaningful — only keep the existing
@@ -657,21 +802,22 @@ export class ChatRegistry {
             ? event.runningAgents
             : (existing?.runningAgents ?? null),
         context: event.context !== undefined ? event.context : (existing?.context ?? null),
-        // Only meaningful while errored, so it never outlives the failure.
-        lastError:
-          event.activity !== 'errored'
-            ? null
-            : event.lastError !== undefined
-              ? event.lastError
-              : (existing?.lastError ?? null),
+        lastError: existing?.lastError ?? null,
         branches: existing?.branches ?? [],
         activeBranchId: existing?.activeBranchId ?? null,
-        chatStatus: this.advance(event.chatId, existing?.chatStatus, statusFromHostState(event)),
+        ...(existing?.chatStatus ? { chatStatus: existing.chatStatus } : {}),
         feedPos: ++this.feedCounter,
       };
       this.chats.set(event.chatId, next);
       this.unconfirmed.delete(event.chatId);
-      if (IN_FLIGHT_ACTIVITIES.has(next.activity)) this.workedAt.set(event.chatId, this.now());
+      this.turnDetails.set(event.chatId, {
+        ...(event.turnOrigin !== undefined ? { turnOrigin: event.turnOrigin } : {}),
+        ...(event.turnStopped !== undefined ? { turnStopped: event.turnStopped } : {}),
+        ...(event.turnSummary !== undefined ? { turnSummary: event.turnSummary } : {}),
+      });
+      const facts = factsFromHostState(this.facts.get(event.chatId) ?? emptyFacts(), event);
+      // This frame is the host's own word for the chat; it reaches surfaces itself.
+      this.applyFacts(event.chatId, facts, { tell: false });
       this.markDirty();
       return;
     }
@@ -692,6 +838,7 @@ export class ChatRegistry {
       if (SPAWN_TIME_ERROR_CODES.has(event.error.code)) {
         this.chats.delete(event.chatId);
         this.spawnedSet.delete(event.chatId);
+        this.facts.delete(event.chatId);
         this.markDirty();
       }
       return;
@@ -742,28 +889,59 @@ export class ChatRegistry {
   }
 
   /**
-   * chatIds currently mid-turn (activity `running` or `awaiting-permission`).
-   * Used on host-link loss to find the chats whose turn-completion event will
-   * never arrive, so they can be resolved to `errored` rather than left
-   * spinning forever (spec/12 — NO FALLBACK / fail loud).
+   * Store a chat's facts and derive its status from them (spec/12 § Chat
+   * status). Returns the chat's `chat.state` when anything a surface draws
+   * moved, and tells the status listeners when `tell` is set. A change outside
+   * the allowed transitions is applied and logged as a fault, unless it is the
+   * server's own (`own`), which only ever makes allowed ones.
    */
-  /**
-   * Move a chat's status on to what the latest fact says. A host's report of
-   * its own state is a fact and always wins; a change outside the allowed ones
-   * is logged as a fault so it is found, not hidden.
-   */
-  private advance(
+  private applyFacts(
     chatId: string,
-    prev: ChatStatusInfo | undefined,
-    target: Omit<ChatStatusInfo, 'since'> & { state: ChatStatusState },
-  ): ChatStatusInfo {
-    if (prev && !isAllowedTransition(prev.state, target.state)) {
+    facts: ChatStatusFacts,
+    opts: { tell: boolean; own?: boolean },
+  ): ChatStateEvent | null {
+    this.facts.set(chatId, facts);
+    this.markDirty();
+    const row = this.chats.get(chatId);
+    if (!row) return null;
+    const owed = this.owed(chatId);
+    const target = deriveStatus(facts, owed);
+    const prev = row.chatStatus;
+    if (prev && opts.own !== true && !isAllowedTransition(prev.state, target.state)) {
       this.logger?.warn(
         { chatId, from: prev.state, to: target.state },
         'chat-registry: a status change outside the allowed transitions',
       );
     }
-    return nextStatus(prev ?? null, target, this.now());
+    const chatStatus = nextStatus(prev ?? null, target, this.now());
+    const activity = legacyActivity(facts, owed);
+    const lastError = lastErrorOf(facts, row.lastError, chatStatus.since);
+    if (
+      JSON.stringify(prev) === JSON.stringify(chatStatus) &&
+      activity === row.activity &&
+      JSON.stringify(lastError) === JSON.stringify(row.lastError)
+    ) {
+      return null;
+    }
+    const next: ChatSummary = {
+      ...row,
+      chatStatus,
+      activity,
+      lastError,
+      feedPos: ++this.feedCounter,
+    };
+    this.chats.set(chatId, next);
+    const event = this.stateEventOf(next);
+    if (opts.tell) {
+      for (const listener of this.statusListeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          this.logger?.warn({ err, chatId }, 'chat-registry: a status listener threw');
+        }
+      }
+    }
+    return event;
   }
 
   /**
@@ -774,116 +952,61 @@ export class ChatRegistry {
   markQueued(chatId: string): ChatStateEvent | null {
     const existing = this.chats.get(chatId);
     if (!existing) return null;
+    const facts = this.facts.get(chatId) ?? emptyFacts();
     const from = existing.chatStatus?.state ?? 'idle';
     if (from === 'queued_offline' || !isAllowedTransition(from, 'queued_offline')) return null;
-    const next: ChatSummary = {
-      ...existing,
-      chatStatus: nextStatus(existing.chatStatus ?? null, { state: 'queued_offline' }, this.now()),
-      feedPos: ++this.feedCounter,
-    };
-    this.chats.set(chatId, next);
-    this.markDirty();
-    return this.stateEventOf(next);
+    return this.applyFacts(chatId, { ...facts, held: true }, { tell: false, own: true });
   }
 
   /**
-   * The host announced a planned restart (`host.restarting`, spec/12 § Chat
-   * status): its running and waiting chats read Host restarting until it
-   * reattaches. Returns the `chat.state` of each chat that changed, for the
-   * caller to broadcast. Chats with nothing in flight keep their status.
+   * A host went (spec/12 § Chat status): announced (`restarting`) or not
+   * (`offline`). Each of its chats with a turn in flight or a question open
+   * reads Host restarting or Host offline until the host speaks for it again;
+   * a chat with nothing running keeps its status. Returns the `chat.state` of
+   * each chat that changed, for the caller to broadcast.
    */
-  markHostRestarting(hostId: string): ChatStateEvent[] {
+  markHostAway(hostId: string, how: 'restarting' | 'offline'): ChatStateEvent[] {
     const events: ChatStateEvent[] = [];
-    for (const [chatId, existing] of this.chats) {
-      if (existing.hostId !== hostId) continue;
-      const from = existing.chatStatus?.state;
-      if (from !== 'running' && from !== 'waiting_for_user') continue;
-      const next: ChatSummary = {
-        ...existing,
-        chatStatus: nextStatus(
-          existing.chatStatus ?? null,
-          { state: 'host_restarting' },
-          this.now(),
-        ),
-      };
-      this.chats.set(chatId, next);
-      events.push(this.stateEventOf(next));
+    for (const [chatId, row] of this.chats) {
+      if (row.hostId !== hostId) continue;
+      const facts = this.facts.get(chatId);
+      if (!facts) continue;
+      const working = isMidTurn(facts) || facts.away !== null;
+      // A restart that ran out of time becomes offline; offline never goes back to restarting.
+      if (!working || facts.away === how || (how === 'restarting' && facts.away === 'offline')) {
+        continue;
+      }
+      const event = this.applyFacts(chatId, { ...facts, away: how }, { tell: false, own: true });
+      if (event) events.push(event);
     }
-    if (events.length > 0) this.markDirty();
     return events;
   }
 
-  inFlightChatIds(): string[] {
+  /** chatIds on this host with a turn in flight or a question open. */
+  midTurnChatIds(hostId: string): string[] {
     const ids: string[] = [];
-    for (const c of this.chats.values()) {
-      if (IN_FLIGHT_ACTIVITIES.has(c.activity)) ids.push(c.chatId);
+    for (const [chatId, row] of this.chats) {
+      const facts = this.facts.get(chatId);
+      if (row.hostId === hostId && facts && isMidTurn(facts)) ids.push(chatId);
     }
     return ids;
   }
 
   /**
-   * Resolve an in-flight chat to `errored` in the mirror and return the
-   * `chat.state` event reflecting the transition (for the caller to broadcast).
-   * Returns null if the chat is unknown. Mirrors the host's own SDK-error
-   * path (chatRunner: setActivity('errored') + setLastError): activity flips to
-   * `errored` and `lastError` is stamped, but `status` is left untouched (the
-   * chat is still active and can be retried once the host reconnects).
-   */
-  markErrored(
-    chatId: string,
-    error: { code: ChatErrorCode; message: string },
-    at: number,
-  ): ChatStateEvent | null {
-    const existing = this.chats.get(chatId);
-    if (!existing) return null;
-    // `lastUpdated` is host-owned and clients drop any chat.state older than the
-    // one they hold. Stamping the server clock here would outrank every frame
-    // the host sends once it recovers, leaving the errored badge stuck for good.
-    const lastError = { code: error.code, message: error.message, at };
-    const next: ChatSummary = {
-      ...existing,
-      activity: 'errored',
-      lastError,
-      chatStatus: this.advance(
-        chatId,
-        existing.chatStatus,
-        error.code === 'daemon_unavailable'
-          ? { state: 'host_offline' }
-          : { state: 'failed', reason: error.code, message: error.message },
-      ),
-      feedPos: ++this.feedCounter,
-    };
-    this.chats.set(chatId, next);
-    this.markDirty();
-    return { ...this.stateEventOf(next), activity: 'errored', lastError };
-  }
-
-  /**
    * A message the server held for this chat's offline host expired undelivered
    * (spec/12 § Host-offline UX). The chat reads failed, with the reason and the
-   * words, until its host speaks for it again. This is the server's own fact,
-   * and the one way a chat goes from `queued_offline` to `failed`: a HOST report
-   * of that change is still a fault (`advance`). Returns the `chat.state` to
-   * broadcast, or null for a chat the registry does not know.
+   * words, until a turn starts in it again. This is the server's own fact, and
+   * the one way a chat goes from `queued_offline` to `failed`. Returns the
+   * `chat.state` to broadcast, or null for a chat the registry does not know.
    */
-  markHeldExpired(chatId: string, message: string, at: number): ChatStateEvent | null {
-    const existing = this.chats.get(chatId);
-    if (!existing) return null;
-    const lastError = { code: 'held_message_expired' as const, message, at };
-    const next: ChatSummary = {
-      ...existing,
-      activity: 'errored',
-      lastError,
-      chatStatus: nextStatus(
-        existing.chatStatus ?? null,
-        { state: 'failed', reason: 'held_message_expired', message },
-        this.now(),
-      ),
-      feedPos: ++this.feedCounter,
-    };
-    this.chats.set(chatId, next);
-    this.markDirty();
-    return { ...this.stateEventOf(next), activity: 'errored', lastError };
+  markHeldExpired(chatId: string, message: string): ChatStateEvent | null {
+    if (!this.chats.has(chatId)) return null;
+    const facts = this.facts.get(chatId) ?? emptyFacts();
+    return this.applyFacts(
+      chatId,
+      { ...facts, held: false, heldExpired: message },
+      { tell: false, own: true },
+    );
   }
 
   /** The account feed's latest position (spec/03 § Account feed). */
@@ -906,7 +1029,12 @@ export class ChatRegistry {
 
   /** The `chat.state` a surface needs to draw this row as the server holds it. */
   private stateEventOf(next: ChatSummary): ChatStateEvent {
+    // The turn this state belongs to, as its host last described it: a status
+    // change a fact made (the turn ending) speaks for that turn like the host's
+    // own frame does (spec/09 § Whose turn it was, § What the message says).
+    const turn = this.turnDetails.get(next.chatId);
     return {
+      ...(turn ?? {}),
       type: 'chat.state',
       chatId: next.chatId,
       hostId: next.hostId,
@@ -1004,6 +1132,7 @@ export class ChatRegistry {
     this.spawnedSet.delete(chatId);
     this.unconfirmed.delete(chatId);
     this.workedAt.delete(chatId);
+    this.facts.delete(chatId);
     this.markDirty();
   }
 
@@ -1183,4 +1312,25 @@ export function compareChatOrder(
     return order === 'asc' ? a.lastUpdated - b.lastUpdated : b.lastUpdated - a.lastUpdated;
   }
   return a.chatId < b.chatId ? -1 : a.chatId > b.chatId ? 1 : 0;
+}
+
+/**
+ * The failure behind a status, in the shape older surfaces read (`lastError`).
+ * Taken from the turn's own ended fact, never from a host's conclusion; `at`
+ * holds while the failure is the same one.
+ */
+function lastErrorOf(
+  facts: ChatStatusFacts,
+  prev: ChatSummary['lastError'],
+  since: number,
+): ChatSummary['lastError'] {
+  let next: { code: string; message: string } | null = null;
+  if (facts.heldExpired !== null) {
+    next = { code: 'held_message_expired', message: facts.heldExpired };
+  } else if (facts.openTurns.length === 0 && facts.lastEnd?.outcome === 'failed') {
+    next = facts.lastEnd.error ?? { code: 'unknown', message: 'The turn failed.' };
+  }
+  if (next === null) return null;
+  if (prev && prev.code === next.code && prev.message === next.message) return prev;
+  return { ...next, at: since };
 }

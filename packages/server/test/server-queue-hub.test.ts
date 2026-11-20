@@ -11,6 +11,7 @@ import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
+import { createHostFacts } from './support/turn-facts.js';
 
 const wait = (ms = 50): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -63,8 +64,10 @@ describe('server-run queue through the hub', () => {
       components: [],
     } as never);
     hostLink.emit({ type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '/w' });
-    const state = (activity: string) =>
-      hostLink.emit({
+    // The host reports facts (a turn started, a turn ended); the server decides.
+    const facts = createHostFacts();
+    const state = (activity: string): void => {
+      for (const f of facts({
         type: 'chat.state',
         chatId: 'c1',
         hostId: 'd1',
@@ -72,7 +75,10 @@ describe('server-run queue through the hub', () => {
         permissionMode: 'auto',
         folder: '/w',
         lastUpdated: 1,
-      } as never);
+      } as never)) {
+        hostLink.emit(f);
+      }
+    };
     return { built, hostLink, client, state };
   }
 

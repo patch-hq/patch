@@ -514,7 +514,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
           const state = chatRegistryRef?.markHeldExpired(
             notice.event.chatId,
             heldMessageExpiredText(notice.event.hostName, notice.event.text),
-            notice.at,
           );
           if (state) wsHubRef?.broadcastChatState(state);
         }
@@ -559,6 +558,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   app.addHook('onClose', async () => chatRegistry.flush());
   chatRegistryRef = chatRegistry;
   // Tap the host link so every event the host emits keeps our cache fresh.
+  // Host frames reach it first through the event gate below; this tap catches
+  // the frames the server injects itself.
   hostLink.onEvent((event) => chatRegistry.observe(event));
   const queueTracker = new QueueTracker(chatRegistry);
   hostLink.onEvent((event) => queueTracker.observe(event));
@@ -572,10 +573,19 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     isOnline: (hostId) => hostLink.isOnline(hostId),
     hostSupports: (hostId: string): boolean => wsHub.hostServerQueue(hostId),
     inject: (event) => hostLink.injectHostEvent(event),
+    onOwedChange: (chatId) => chatRegistry.recompute(chatId),
     ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
     logger: log.child({ component: 'server-queue' }),
   });
-  hostLink.setEventGate?.((event, from) => serverQueue.gate(event, from));
+  chatRegistry.setOwedWork((chatId) => serverQueue.owes(chatId));
+  // The server alone decides a chat's status (spec/12 § Chat status): the
+  // registry applies each host frame's facts before anything else sees it, so
+  // every reader downstream gets the server's status, never a host's.
+  hostLink.setEventGate?.((event, from) => {
+    const out = serverQueue.gate(chatRegistry.gate(event), from);
+    if (out) chatRegistry.markGated(out);
+    return out;
+  });
   // Tell each host, as it attaches, that the server is running its queues.
   hostLink.onHostStatus((hostId, status) => {
     if (status === 'online') {
