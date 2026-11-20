@@ -273,7 +273,7 @@ import { handleVoiceprintRequest } from './voiceprints.js';
 import { RecentVoices, SpeakerId, speakerModelPath } from './audio/speakerId.js';
 import { HostSearchManager } from './hostSearch.js';
 import { handleBlobRequest } from './blobFetch.js';
-import { importLegacyToolLog, toolLogEvent } from './toolLog.js';
+import { ToolLogSink } from './toolLog.js';
 import { ChatTokenReader, UsageHistoryStore } from './usageHistory.js';
 import { ProviderKeyError, ProviderKeyStore, providerKeysPath } from './providerKeys.js';
 import { createSecretsStore, InvalidSecretKeyError, type SecretsStore } from './secrets.js';
@@ -2703,6 +2703,11 @@ async function startHost(
   // The one-off send of what the server's record lacks (spec/01 § Chat record).
   // Built once the chats are loaded, below; started by a server that takes it.
   let recordImport: RecordImport | undefined;
+  // Every cross-chat tool call, for the account's tool log (Settings →
+  // Activity, spec/06 § Cross-chat toolset): kept on this host until the
+  // server on the link keeps the log (`serverReads`), then sent through the
+  // outbox, the local file handed over once.
+  const toolLogSink = new ToolLogSink(config.patchHome, (event) => link.send(event));
   const link = createServerLink({
     url: config.serverWsUrl,
     daemonKey,
@@ -2805,6 +2810,10 @@ async function startHost(
       // spec/15 § Secrets: publish the host-owned secret set so every
       // surface's editor is populated from the same source on (re)connect.
       sender({ type: 'secrets.list', secrets: secretsStore.list() });
+      const handedOver = toolLogSink.onServer(greeting.serverReads === true);
+      if (handedOver > 0) {
+        logger.info({ entries: handedOver }, 'tool log: handed this host’s log to the server');
+      }
       // Only a server that keeps the whole record, each entry's branch with it,
       // takes the full import.
       if (
@@ -4256,16 +4265,6 @@ async function startHost(
     logger,
   });
   removeRetiredTelegramFolder(config.patchHome, logger);
-  // Every cross-chat tool call goes to the server's tool log (Settings →
-  // Activity, spec/06 § Cross-chat toolset) through the outbox; what this host
-  // logged itself before the server kept the log is handed over once.
-  const importedToolLog = importLegacyToolLog(config.patchHome, (event) => link.send(event));
-  if (importedToolLog > 0) {
-    logger.info(
-      { entries: importedToolLog },
-      'tool log: handed the old per-host log to the outbox',
-    );
-  }
   const usageHistory = new UsageHistoryStore(config.patchHome);
   const chatTokens = new ChatTokenReader(join(config.patchHome, 'chats'));
   /**
@@ -5952,7 +5951,7 @@ async function startHost(
     onShutdown: () => shutdownHook?.(),
     toolLogger: (entry) => {
       logger.info(entry, 'cross-chat tool call');
-      link.send(toolLogEvent({ ts: Date.now(), ...entry }));
+      toolLogSink.append({ ts: Date.now(), ...entry });
     },
     onBroadcast: ({ channel, message, sourceChatId }) => {
       const threadId = threadForChannel(channel);
