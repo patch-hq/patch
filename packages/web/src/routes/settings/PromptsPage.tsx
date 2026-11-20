@@ -8,6 +8,7 @@ import type { JSX } from 'react';
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_MANAGER_VOICE_PROMPT,
   DEFAULT_MEETING_ACTIONS_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
@@ -27,7 +28,7 @@ import type { AccountPreferences } from '../../api/rest.js';
 
 type Mode = 'default' | 'custom';
 
-function PromptRow({
+export function PromptRow({
   id,
   title,
   sub,
@@ -272,6 +273,19 @@ export function PromptsPage(): JSX.Element {
           current={p.sweepPrompt}
           onSave={(text) => patchShared('sweep prompt', { sweepPrompt: text })}
           onDefault={() => patchShared('sweep prompt', { sweepPrompt: DEFAULT_SWEEP_PROMPT })}
+        />
+        <PromptRow
+          id="manager-voice"
+          title="Manager voice"
+          sub="Who the voice is on a call to the Manager. The rules for its tools are added after this."
+          defaultText={DEFAULT_MANAGER_VOICE_PROMPT}
+          current={p.managerVoicePrompt}
+          onSave={(text) => patchShared('Manager voice prompt', { managerVoicePrompt: text })}
+          onDefault={() =>
+            patchShared('Manager voice prompt', {
+              managerVoicePrompt: DEFAULT_MANAGER_VOICE_PROMPT,
+            })
+          }
         />
         <PromptRow
           id="goal-judge"

@@ -395,7 +395,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   private instructions(): string {
     let text =
       (this.deps.manager
-        ? managerHostedInstruction(false)
+        ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
         : hostedVoiceInstruction(this.effectiveHandoff())) +
       (this.deps.lookBack !== undefined && this.historyAllowed() ? `\n\n${LOOK_BACK_RULE}` : '');
     if (this.deps.device) text += `\n\n${this.deps.device.prompt()}`;

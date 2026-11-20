@@ -18,6 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
+import { DEFAULT_MANAGER_VOICE_PROMPT } from '@patch/wire';
 
 /** The chat a call must be on to be a Manager call. */
 export const MANAGER_CHAT_ID = 'thread_manager';
@@ -142,11 +143,8 @@ export const MANAGER_TOOL_PARAMS = {
   message: 'What to tell the chat, written as the user would put it to that chat.',
 } as const;
 
-export const MANAGER_VOICE_PREAMBLE =
-  'You are the Manager: the user is talking to you out loud, on a phone-style call, about their ' +
-  'work and their chats. Answer questions yourself from what you know — the conversation so far ' +
-  'is above as prior turns — and do the common things directly with your tools, without ' +
-  'routing them anywhere. Speak the way a person would on a call: concise, warm, direct.\n\n';
+/** The built-in voice prompt; Settings → Manager can replace it (`managerVoicePrompt`). */
+export const MANAGER_VOICE_PREAMBLE = `${DEFAULT_MANAGER_VOICE_PROMPT}\n\n`;
 
 export const MANAGER_TOOLS_RULE =
   `To add a to-do call ${ADD_TASK_TOOL_NAME}; to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}; ` +
@@ -197,6 +195,8 @@ export interface ManagerSendAccepted {
 }
 
 export interface ManagerVoiceTools {
+  /** Who the voice is told it is (`host.settings` → `managerVoicePrompt`). Absent: the built-in text. */
+  voicePrompt?: () => string;
   /** Run one of {@link MANAGER_QUICK_TOOLS}; rejects when the action failed or is not set up. */
   quick(name: string, args: Record<string, string>): Promise<string>;
   findChats(query: string): Promise<string>;
@@ -258,6 +258,8 @@ export interface ManagerVoiceHostDeps {
   askAgent(request: string): Promise<void>;
   /** A quiet `[call]` line in the Manager chat. */
   recordNote(line: string): void;
+  /** The account's Manager voice prompt, read at the start of each call. */
+  voicePrompt?: () => string;
   now?: () => number;
 }
 
@@ -346,6 +348,7 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
   };
 
   return {
+    ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
     async quick(name, args) {
       const need = (k: string): string => {
         const v = (args[k] ?? '').trim();

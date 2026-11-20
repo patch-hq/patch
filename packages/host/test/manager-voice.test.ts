@@ -280,6 +280,18 @@ describe('prompts', () => {
     expect(managerHostedInstruction(false)).toContain('returns once the chat has answered');
   });
 
+  test('the account’s voice prompt replaces the built-in one; the tool rules stay', () => {
+    const custom = 'You are my assistant. Answer questions yourself when you can.';
+    for (const asyncResult of [true, false]) {
+      const text = managerHostedInstruction(asyncResult, custom);
+      expect(text.startsWith(custom)).toBe(true);
+      expect(text).not.toContain('You are the Manager');
+      expect(text).toContain(SEND_TO_CHAT_TOOL_NAME);
+    }
+    // Blank falls back to the built-in text rather than leaving the voice with no identity.
+    expect(managerHostedInstruction(false, '  ')).toContain('You are the Manager');
+  });
+
   test('the acknowledgement before a hand-off varies and is skipped when the answer is quick', () => {
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/vary/);
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/Skip it when the answer will be quick/);
