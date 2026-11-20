@@ -194,6 +194,15 @@ jobs:
             sleep 10
           done
           exit 1
+      # Maven Central rate-limits shared runner IPs (429); a warm cache means
+      # most builds never ask it for anything.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'apps/mobile/android/**/*.gradle', 'apps/mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
       - name: Fetch the Gradle distribution
         working-directory: apps/mobile/android
         run: |
