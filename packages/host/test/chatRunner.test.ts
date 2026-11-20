@@ -700,7 +700,7 @@ describe('Host ChatRunner', () => {
     // The control-token marker is stripped; the snippet is the readable text.
     expect(daemon.chatState.get(chatId)?.preview).toBe('please the sidebar ordering bug');
     expect(metaStore.read(chatId)?.preview).toBe('please the sidebar ordering bug');
-    const stateEvents = events.filter(
+    const stateEvents = asServerSees(events).filter(
       (e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state',
     );
     expect(stateEvents.some((e) => e.preview === 'please the sidebar ordering bug')).toBe(true);

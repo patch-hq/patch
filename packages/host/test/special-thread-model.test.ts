@@ -13,6 +13,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { ensureSpecialThreads } from '../src/specialThreads.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const CATALOGUE = ['claude-sonnet-5', 'claude-opus-5'];
@@ -50,7 +51,7 @@ describe('the Manager and Speakers model setting', () => {
     for (const id of ['thread_manager', 'thread_speakers']) {
       expect(daemon.chatState.get(id)?.model).toBe('claude-opus-5');
       expect(metaStore.read(id)?.model).toBe('claude-opus-5');
-      const last = events
+      const last = asServerSees(events)
         .filter((e): e is ChatStateEvent => e.type === 'chat.state' && e.chatId === id)
         .at(-1);
       expect(last?.model).toBe('claude-opus-5');

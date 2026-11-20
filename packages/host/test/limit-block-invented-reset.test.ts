@@ -19,6 +19,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
 import type { LimitFacts, SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const NOW = 1_700_000_000_000;
 const STATED_RESET = NOW + 3 * 3_600_000;
@@ -64,7 +65,7 @@ function setup(opts: { err: () => Error; accountResetsAt?: number }) {
 }
 
 const lastState = (events: WireEvent[]): ChatStateEvent | undefined =>
-  events.filter((e): e is ChatStateEvent => e.type === 'chat.state').at(-1);
+  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state').at(-1);
 
 const stated = (facts: LimitFacts) => (): TurnFailedError =>
   new TurnFailedError(NO_RESET_SENTENCE, facts);

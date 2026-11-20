@@ -158,7 +158,7 @@ describe('audio server — a hosted call to the Manager', () => {
         createdAt: 0,
         localId,
       } as WireEvent);
-      emit({ type: 'chat.state', chatId, activity: 'running' } as unknown as WireEvent);
+      emit({ type: 'chat.turn_started', chatId, turnId: localId, seq, at: 0 });
       emit({
         type: 'chat.message',
         chatId,
@@ -167,7 +167,14 @@ describe('audio server — a hosted call to the Manager', () => {
         seq: ++seq,
         createdAt: 0,
       } as WireEvent);
-      emit({ type: 'chat.state', chatId, activity: 'idle' } as unknown as WireEvent);
+      emit({
+        type: 'chat.turn_ended',
+        chatId,
+        turnId: localId,
+        seq,
+        at: 0,
+        outcome: 'completed',
+      });
     };
     const managerVoice = createManagerVoiceTools({
       logger,

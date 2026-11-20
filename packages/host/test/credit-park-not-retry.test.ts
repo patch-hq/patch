@@ -30,6 +30,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { limitError } from './limitErrors.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 // Midday, so the 9pm reset the refusal states is still ahead — a weekly limit
@@ -94,7 +95,7 @@ function setup(opts: { failWith: string; hostOutOfCredit?: boolean; autoResume?:
 
 /** The last `chat.state` frame, which is what every surface renders from. */
 function lastState(events: WireEvent[]): Extract<WireEvent, { type: 'chat.state' }> | undefined {
-  return events
+  return asServerSees(events)
     .filter((e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state')
     .at(-1);
 }

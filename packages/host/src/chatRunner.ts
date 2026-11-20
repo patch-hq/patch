@@ -9373,6 +9373,22 @@ export class Daemon {
     const identityKey = eventIdentity(userEvent);
     if (identityKey !== null) this.recordCanonicalSeq(chatId, identityHash(identityKey), userSeq);
     try {
+      // The side branch's turn opens in the log like any other, so the server
+      // sees it start as well as end (spec/12 § Chat status).
+      this.chatLog.append(
+        chatId,
+        {
+          k: 'turn.start',
+          harness: this.harnessOf(chatId),
+          model: state.model ?? null,
+          origin: 'user',
+          ...(branch0SessionId(this.opts.metaStore.read(chatId), branchId) !== undefined
+            ? { sessionId: branch0SessionId(this.opts.metaStore.read(chatId), branchId)! }
+            : {}),
+        },
+        { branchId, sync: true },
+        turnId,
+      );
       this.chatLog.append(
         chatId,
         { k: 'event', event: userEvent },
@@ -16708,4 +16724,12 @@ function nativeDedupeKey(ref: NativeRef, event: WireEvent): string {
 function mcpArgsOmitting(args: string[], model: string | undefined): string[] {
   const omitted = patchToolsOmittedFor(model);
   return omitted.length > 0 ? [...args, `--omit-tools=${omitted.join(',')}`] : args;
+}
+
+/** The provider session a side branch runs in, when it has one yet. */
+function branch0SessionId(
+  meta: { branches?: Array<{ branchId: string; sessionId?: string }> } | null | undefined,
+  branchId: string,
+): string | undefined {
+  return meta?.branches?.find((b) => b.branchId === branchId)?.sessionId;
 }

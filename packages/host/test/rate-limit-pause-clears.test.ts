@@ -18,6 +18,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const NOW = 1_700_000_000_000;
 const RESETS_AT = NOW + 3 * 3_600_000;
@@ -74,7 +75,7 @@ function setup(opts: { autoResume?: boolean } = {}) {
 }
 
 const statesIn = (events: WireEvent[]): ChatStateEvent[] =>
-  events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
 
 // These three maps are the pause, and none of them has a public setter or
 // deleter — they are only ever written by the limit path itself. The states

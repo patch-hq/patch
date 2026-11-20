@@ -216,7 +216,7 @@ describe('resuming a turn that outlived the host', () => {
     // Not re-sent under a hidden reminder: the chat is Interrupted and waits for
     // Continue (spec/12 § Continue).
     expect(seen).toHaveLength(0);
-    expect(lastState(secondEvents, chatId)).toMatchObject({ activity: 'idle', interrupted: true });
+    expect(lastState(secondEvents, chatId)).toMatchObject({ interrupted: true });
     expect(existsSync(dir)).toBe(false);
   });
 

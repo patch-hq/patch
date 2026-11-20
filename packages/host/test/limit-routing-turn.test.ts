@@ -18,6 +18,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const NOW = 1_700_000_000_000;
 const RESETS_AT = NOW + 3 * 3_600_000;
@@ -68,7 +69,7 @@ function setup(opts: { err: () => Error; autoResume?: boolean }) {
 }
 
 const statesIn = (events: WireEvent[]): ChatStateEvent[] =>
-  events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
 
 describe('a failure that states its reset in wording patch does not list', () => {
   it('parks on a structured resetsAt alone, off the retry ladder', async () => {

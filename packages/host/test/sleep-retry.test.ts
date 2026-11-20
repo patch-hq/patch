@@ -17,6 +17,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
 import { createSleepWatch, type SleepWatch } from '../src/sleepWatch.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const SLEPT =
@@ -63,7 +64,7 @@ function makeHost(backend: SdkBackend, sleepWatch: SleepWatch, tag: string) {
 }
 
 const states = (events: WireEvent[]): ChatStateEvent[] =>
-  events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
 
 describe('the wake gate', () => {
   beforeEach(() => {

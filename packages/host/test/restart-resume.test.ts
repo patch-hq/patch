@@ -17,6 +17,7 @@ import { Daemon, CONTINUE_MESSAGE } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
 import { entryText, transcriptFor } from './helpers/chatTranscript.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -282,7 +283,7 @@ describe('resuming turns a host restart interrupted', () => {
     await tick();
     expect(g3.prompts).toEqual([]);
     const states = third.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
-    expect(states.at(-1)).toMatchObject({ activity: 'idle', interrupted: true });
+    expect(states.at(-1)).toMatchObject({ interrupted: true });
     // The line in the chat is said once, not once per restart.
     const lines = (h: typeof second): number =>
       h.events.filter(
@@ -493,7 +494,7 @@ describe('resuming turns a host restart interrupted', () => {
     expect(g2.prompts).toEqual([]);
     const stateOf = () =>
       second.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
-    expect(stateOf()).toMatchObject({ activity: 'idle', interrupted: true });
+    expect(stateOf()).toMatchObject({ interrupted: true });
     expect(
       second.events.filter((e) => e.type === 'chat.message' && e.role === 'user'),
     ).toHaveLength(0);
@@ -511,7 +512,8 @@ describe('resuming turns a host restart interrupted', () => {
     expect(sent[0]!.content).toBe(CONTINUE_MESSAGE);
     expect(sent[0]!.systemContext).toBeUndefined();
     expect(sent[0]!.retryOfSeq).toBeUndefined();
-    expect(stateOf()).toMatchObject({ activity: 'running' });
+    // The Continue started a real turn: the server reads the chat as running.
+    expect(asServerSees(second.events).at(-1)).toMatchObject({ activity: 'running' });
     expect(stateOf()).not.toHaveProperty('interrupted');
     expect(second.metaStore.read(chatId)?.interrupted).toBeUndefined();
 
@@ -591,7 +593,7 @@ describe('resuming turns a host restart interrupted', () => {
 
     expect(g2.prompts).toEqual([]);
     const states = second.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
-    expect(states.at(-1)).toMatchObject({ activity: 'idle', interrupted: true });
+    expect(states.at(-1)).toMatchObject({ interrupted: true });
     expect(second.metaStore.read(chatId)?.lastError ?? null).toBeNull();
   });
 

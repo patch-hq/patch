@@ -28,6 +28,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -127,10 +128,17 @@ describe('a turn that cannot run says so IN THE CHAT', () => {
     const chatId = await daemon.spawnChat({ folder });
     events.length = 0;
     await daemon.sendInput({ chatId, message: 'hey', localId: 'x' });
-    const states = events.filter(
+    const states = asServerSees(events).filter(
       (e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state',
     );
-    expect(states.at(-1)?.activity).toBe('idle');
+    // No turn is left open, so the composer is usable; the refusal is an
+    // ended turn the server reads as waiting for sign-in.
+    expect(states.at(-1)?.activity).toBe('errored');
+    const end = events.findLast(
+      (e): e is Extract<WireEvent, { type: 'chat.turn_ended' }> => e.type === 'chat.turn_ended',
+    );
+    expect(end?.outcome).toBe('failed');
+    expect(end?.error?.code).toMatch(/login|oauth/);
   });
 
   it('produces NO assistant message — a refused turn must not look answered', async () => {
