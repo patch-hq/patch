@@ -958,8 +958,10 @@ the tab.
   remembered like any other; at most one is held per chat, and it runs once.
 - One session per chat, kept alive while the app is open — dismissing the
   terminal hides it, it does not kill the shell; reopening shows the same
-  scrollback. Switching chats switches sessions. A session that ends (shell
-  exit, idle timeout, host restart) says so inline and offers Restart.
+  scrollback. Switching chats switches sessions. A host restart does not end
+  the session: the shell keeps running and its output carries on arriving
+  (`02-host.md` § Surviving a host restart). A session that ends (shell exit,
+  idle timeout, a host that stayed away) says so inline and offers Restart.
 - Errors are shown: a folder that does not
   exist on the host, an unknown session, a host-offline send — each renders
   in the terminal as an error line.

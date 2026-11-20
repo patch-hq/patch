@@ -6661,10 +6661,9 @@ async function startHost(
     // Everything that can wait on something outside the host runs together,
     // each with its own budget (shutdownSteps.ts): one slow close must not
     // hold up the rest, nor run the whole shutdown into its hard deadline.
-    // A pipe shell dies with the host (surfaces are told via
-    // `patch.terminal.exit { reason: 'daemon_shutdown' }`); a PTY session
-    // belongs to its own runner, which keeps running for the next host to
-    // reattach (spec/02 § Host restarts). Terminals go before the server link.
+    // Every terminal session belongs to its own runner, which keeps running
+    // for the next host to reattach (spec/02 § Host restarts); the host only
+    // lets go of it. Terminals go before the server link.
     // Host searches die with the host too — a surface mid-search just gets no
     // more frames for that `searchId`.
     hostSearch.cancelAll();
