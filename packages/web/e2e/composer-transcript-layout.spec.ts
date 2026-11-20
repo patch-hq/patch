@@ -155,16 +155,19 @@ test.describe('composer action buttons — Stop or Send, never both', () => {
       setState(fn: (s: { chats: Record<string, object> }) => object): void;
     };
   };
-  const setActivity = (page: import('@playwright/test').Page, activity: string) =>
+  const setStatus = (page: import('@playwright/test').Page, state: string) =>
     page.evaluate((a) => {
       (window as unknown as Harness).__store.setState((s) => ({
-        chats: { ...s.chats, chat_bus: { ...s.chats['chat_bus'], activity: a } },
+        chats: {
+          ...s.chats,
+          chat_bus: { ...s.chats['chat_bus'], chatStatus: { state: a, since: 0 } },
+        },
       }));
-    }, activity);
+    }, state);
 
   test('Stop stays while the turn waits on a permission', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await setActivity(page, 'awaiting-permission');
+    await setStatus(page, 'waiting_for_user');
     await expect(page.getByTestId('stop-btn')).toBeVisible();
   });
 

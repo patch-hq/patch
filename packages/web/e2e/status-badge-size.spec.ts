@@ -25,7 +25,7 @@ async function seedPermission(page: import('@playwright/test').Page): Promise<vo
     w.__store.getState().applyEvent({
       type: 'chat.state',
       chatId: 'chat_scroll',
-      activity: 'awaiting-permission',
+      chatStatus: { state: 'waiting_for_user', since: 0 },
       permissionMode: 'auto',
       lastUpdated: Date.now(),
     });

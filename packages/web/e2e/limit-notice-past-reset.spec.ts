@@ -15,7 +15,7 @@ import { test, expect, type Page } from '@playwright/test';
 const HARNESS = '/app/dev-harness.html?chat=chat_limit_past_reset';
 
 /** A `chat.state` for the fixture chat that says NOTHING about the pause. */
-function chatState(page: Page, activity: string): Promise<void> {
+function chatState(page: Page, state: string): Promise<void> {
   return page.evaluate((a) => {
     const store = (
       window as unknown as {
@@ -27,10 +27,10 @@ function chatState(page: Page, activity: string): Promise<void> {
       chatId: 'chat_limit_past_reset',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: a,
+      chatStatus: { state: a, since: 0 },
       lastUpdated: Date.now(),
     });
-  }, activity);
+  }, state);
 }
 
 test.describe('the limit notice once the limit has reset', () => {
@@ -69,7 +69,7 @@ test.describe('the limit notice once the limit has reset', () => {
   test('withdraws itself when the resumed turn stops for a permission prompt', async ({ page }) => {
     await page.goto(HARNESS);
     await expect(page.getByTestId('rate-limit-bar')).toBeVisible();
-    await chatState(page, 'awaiting-permission');
+    await chatState(page, 'waiting_for_user');
     await expect(page.getByTestId('rate-limit-bar')).toHaveCount(0);
   });
 

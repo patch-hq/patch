@@ -13,7 +13,7 @@ function hiddenRow(chatId: string, lastUpdated: number) {
     name: chatId,
     preview: null,
     folder: '~/proj',
-    activity: 'running',
+    chatStatus: { state: 'running', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

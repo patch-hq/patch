@@ -23,7 +23,7 @@ function row(chatId: string, name: string, over: Row = {}): Row {
     permissionMode: 'auto',
     name,
     folder: FOLDER,
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -54,12 +54,12 @@ async function stubSnooze(page: Page): Promise<Array<{ chatId: string; body: Row
 
 const THREE = (running: Row = {}): Row[] => [
   row('chat_md', 'Migrate billing', {
-    activity: 'running',
+    chatStatus: { state: 'running', since: 0 },
     runningSince: Date.now() - 130 * 60_000,
     statusSummary: 'Shadow run, pass 1 of ~4',
     ...running,
   }),
-  row('w2', 'Fix flaky checkout', { activity: 'running', runningSince: Date.now() - 25 * 60_000 }),
+  row('w2', 'Fix flaky checkout', { chatStatus: { state: 'running', since: 0 }, runningSince: Date.now() - 25 * 60_000 }),
   row('w3', 'Tempo timesheet'),
 ];
 
@@ -165,7 +165,7 @@ test.describe('snooze sheet', () => {
   test('Until complete is greyed out, with a tooltip, when the chat has nothing running', async ({
     page,
   }) => {
-    await seed(page, THREE({ activity: 'idle' }));
+    await seed(page, THREE({ chatStatus: { state: 'idle', since: 0 } }));
     await page.getByTestId('action-more').click();
     await page.getByTestId('action-snooze').click();
     await expect(page.getByTestId('snooze-sheet-preset-1-hour')).toBeVisible();
@@ -181,7 +181,7 @@ test.describe('snooze sheet', () => {
     await seed(
       page,
       THREE({
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         pendingWake: { message: 'check', fireAt: Date.now() + 3_600_000 },
       }),
     );
@@ -247,7 +247,7 @@ test.describe('snooze sheet', () => {
   test('no box when nothing in the set is running', async ({ page }) => {
     await seed(
       page,
-      THREE({ activity: 'idle', statusSummary: null }).map((r) => ({ ...r, activity: 'idle' })),
+      THREE({ chatStatus: { state: 'idle', since: 0 }, statusSummary: null }).map((r) => ({ ...r, chatStatus: { state: 'idle', since: 0 } })),
     );
     await page.getByTestId('action-more').click();
     await page.getByTestId('action-snooze').click();
@@ -349,7 +349,7 @@ test.describe('back from a snooze', () => {
           s.applyEvent({
             type: 'chat.state',
             chatId,
-            activity: 'idle',
+            chatStatus: { state: 'idle', since: 0 },
             permissionMode: 'auto',
             lastUpdated: 10,
             status: 'active',
@@ -397,7 +397,7 @@ test.describe('back from a snooze', () => {
           w.__store.getState().applyEvent({
             type: 'chat.state',
             chatId,
-            activity: 'idle',
+            chatStatus: { state: 'idle', since: 0 },
             permissionMode: 'auto',
             lastUpdated: 10,
             status: 'active',

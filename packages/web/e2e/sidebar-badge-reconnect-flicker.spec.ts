@@ -33,7 +33,7 @@ function baseRow(activity: 'running' | 'idle'): unknown {
     permissionMode: 'auto',
     name: 'Flicker test',
     folder: '/tmp/flicker-e2e',
-    activity,
+    chatStatus: { state: activity === 'running' ? 'running' : 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

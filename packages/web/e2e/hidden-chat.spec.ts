@@ -17,7 +17,7 @@ function hiddenFixture(chatId: string, name: string, extra: Record<string, unkno
     name,
     preview: null,
     folder: '/home/tom/projects/portfolio',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -36,7 +36,7 @@ function hiddenFixture(chatId: string, name: string, extra: Record<string, unkno
 const HIDDEN_LIST = [
   hiddenFixture('chat_hidden', 'inbox triage run'),
   hiddenFixture('hid_run', 'photo triage run', {
-    activity: 'running',
+    chatStatus: { state: 'running', since: 0 },
     jobId: 'job_1',
     lastUpdated: 200,
   }),
@@ -152,7 +152,7 @@ test.describe('Hidden sidebar section', () => {
       w.__store.getState().applyEvent({
         type: 'chat.state',
         chatId: 'chat_bus',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 300,
         status: 'active',
         folder: row.folder,

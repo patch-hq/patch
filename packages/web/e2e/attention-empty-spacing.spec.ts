@@ -35,7 +35,7 @@ test.describe('needs-attention empty state spacing', () => {
         chats: Object.fromEntries(
           Object.entries(s.chats).map(([id, row]) => [
             id,
-            { ...(row as object), activity: 'idle', status: 'active', statusKind: null },
+            { ...(row as object), chatStatus: { state: 'idle', since: 0 }, status: 'active', statusKind: null },
           ]),
         ),
       }));
