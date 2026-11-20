@@ -88,7 +88,7 @@ describe('deriveStatus: every status from its facts', () => {
       'waiting_for_user',
     ],
     ['a declared question', facts({ declaredQuestion: true }), 'waiting_for_user'],
-    ['a held message', facts({ held: true }), 'queued_offline'],
+    ['a held message', facts({ held: ['L1'] }), 'queued_offline'],
     [
       'a planned restart mid-turn',
       facts({ openTurns: ['t'], away: 'restarting' }),
@@ -159,7 +159,7 @@ describe('facts', () => {
       interrupted: true,
       limit: { reason: 'x' },
       retrying: true,
-      held: true,
+      held: ['L1'],
       heldExpired: 'x',
       away: 'offline',
     });
