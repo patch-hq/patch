@@ -676,7 +676,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       return;
     }
     const chatId = (inner as { chatId?: unknown }).chatId;
-    if (typeof chatId !== 'string' || !isOutboxEvent(inner) || HOST_OUTBOX_EVENT_TYPES.has(inner.type)) {
+    if (
+      typeof chatId !== 'string' ||
+      !isOutboxEvent(inner) ||
+      HOST_OUTBOX_EVENT_TYPES.has(inner.type)
+    ) {
       log.warn(
         { parentChatId: event.parentChatId, type: inner.type },
         'delegate entry: not an entry of a chat; skipped',

@@ -806,7 +806,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       }
       const store = deps.chatLogStore;
       if (!store) {
-        deps.logger.error({ chatId: req.params.id }, 'delegate history: this server keeps no record');
+        deps.logger.error(
+          { chatId: req.params.id },
+          'delegate history: this server keeps no record',
+        );
         return reply.code(503).send({ error: 'no_record' });
       }
       if (store.parentOf(req.params.id) !== req.params.parentId) {
@@ -817,7 +820,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       }
       const messages = store
         .read(req.params.id, since - 1)
-        .filter((e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message');
+        .filter(
+          (e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message',
+        );
       const events = messages.slice(0, DELEGATE_PAGE);
       if (messages.length <= DELEGATE_PAGE) return reply.code(200).send({ events });
       return reply.code(200).send({ events, nextFromSeq: events[events.length - 1]!.seq + 1 });
