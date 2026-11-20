@@ -15386,6 +15386,7 @@ export class Daemon {
     }
   }
 
+  /**
    * Central emit wrapper. Records chat-scoped stream events into the per-chat
    * recent-events ring (backing patch_peek) before fanning out via the
    * injected emit. Every event the
