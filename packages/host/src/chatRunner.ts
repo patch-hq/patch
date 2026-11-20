@@ -16307,9 +16307,11 @@ export class Daemon {
       // What was said last (not the first prompt, which is `preview`), so a
       // surface not subscribed to the chat can show it and mark it unread.
       lastMessagePreview: this.lastMessagePreview(chatId),
-      // No activity and no error verdict: the server alone decides the chat's
-      // status, from the turn and question facts this host reports (spec/12 §
-      // Chat status).
+      // The server decides the chat's status from the turn and question facts
+      // this host reports (spec/12 § Chat status). `activity` and `lastError`
+      // are only for a server too old to (no `serverStatus` in its auth.ok):
+      // the server link strips them for any server that does.
+      activity: this.aggregateActivity(chatId),
       // A fact the server counts as owed work: turns this host holds queued
       // to run once the current one ends, and one it is already setting up.
       queuedTurns: this.turnsOwed(chatId),
@@ -16373,6 +16375,7 @@ export class Daemon {
       // mirroring it onto chat_state, where it could drift.
       pendingWake: toPendingWake(this.wake.peek(chatId)),
       folder: s.folder,
+      lastError: s.lastError,
       rateLimitResumingAt,
       ...(resumeKind !== undefined ? { resumeKind } : {}),
       waitingForWakeSince: this.waitingForWakeSince.get(chatId) ?? null,

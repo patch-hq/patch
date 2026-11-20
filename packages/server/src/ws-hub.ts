@@ -1434,6 +1434,8 @@ export class WsHub {
           ? { recordImport: true as const, recordComplete: true as const }
           : {}),
         hostOutbox: true,
+        // This server derives every chat's status itself (spec/12 § Chat status).
+        serverStatus: true,
       }),
     );
 

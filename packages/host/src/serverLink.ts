@@ -299,6 +299,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let serverTakesOutbox = false;
   // A server that keeps turn boundaries and provider ids (`recordComplete`).
   let serverKeepsRecord = false;
+  // A server that decides chat status from facts (`serverStatus`).
+  let serverDecidesStatus = false;
   // Down since the host started until the first auth.ok, then since each loss.
   let offlineSince: number | null = Date.now();
   let lastDrop: LinkDrop | undefined;
@@ -316,7 +318,9 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   function rawSend(event: WireEvent): void {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(encode(event));
+      // Shaped as the frame leaves, for the server on this socket: a frame held
+      // offline or in the outbox may reach a different one.
+      ws.send(encode(shapedForServer(event, serverDecidesStatus)));
     }
   }
 
@@ -511,6 +515,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         restartingUntil = 0;
         serverTakesOutbox = event.hostOutbox === true;
         serverKeepsRecord = event.recordComplete === true;
+        serverDecidesStatus = event.serverStatus === true;
         log.info('server-link: authenticated (auth.ok)');
         if (!serverTakesOutbox) {
           log.error(
@@ -677,6 +682,37 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 }
 
 /** The event without the provider id it may carry (spec/01 § Chat record). */
+/**
+ * A `chat.state` in the shape this connection's server takes (spec/12 § Chat
+ * status). A server that decides status itself (`serverStatus`) is sent the
+ * facts only: no `activity`, no `lastError`. An older one still reads the
+ * host's `activity` and refuses fields it does not know, so it gets the old
+ * shape, without `queuedTurns`. Decided at send time, so an outbox entry
+ * resent to a different server is shaped for that one.
+ */
+function stateShapedFor(event: WireEvent, serverDecidesStatus: boolean): WireEvent {
+  if (event.type !== 'chat.state') return event;
+  if (serverDecidesStatus) {
+    const { activity: _a, lastError: _e, ...facts } = event;
+    void _a;
+    void _e;
+    return facts as WireEvent;
+  }
+  const { queuedTurns: _q, ...old } = event;
+  void _q;
+  return old as WireEvent;
+}
+
+/** `stateShapedFor`, reaching into an outbox entry too. */
+function shapedForServer(event: WireEvent, serverDecidesStatus: boolean): WireEvent {
+  if (event.type === 'host.outbox') {
+    const inner = event.event as unknown as WireEvent;
+    const shaped = stateShapedFor(inner, serverDecidesStatus);
+    return shaped === inner ? event : { ...event, event: shaped as typeof event.event };
+  }
+  return stateShapedFor(event, serverDecidesStatus);
+}
+
 function withoutNativeRef(event: WireEvent): WireEvent {
   if ((event as { nativeRef?: unknown }).nativeRef === undefined) return event;
   const { nativeRef: _ref, ...rest } = event as WireEvent & { nativeRef?: unknown };

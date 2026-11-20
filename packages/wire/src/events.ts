@@ -10192,6 +10192,14 @@ export const AuthOkEvent = z
      */
     recordComplete: z.literal(true).optional(),
     /**
+     * Sent to a host by a server that decides every chat's status from the
+     * facts hosts report (spec/12 § Chat status). A host sends such a server no
+     * `activity`, no `lastError` and its `queuedTurns`; to a server without the
+     * flag it sends `chat.state` in the old shape, `activity` and `lastError`
+     * included and `queuedTurns` left out.
+     */
+    serverStatus: z.literal(true).optional(),
+    /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Absent: use
      * `chat.replay`.
