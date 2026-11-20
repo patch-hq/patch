@@ -59,7 +59,14 @@ export const DeviceMuteChangedFrame = z
   .strict();
 export type DeviceMuteChangedFrame = z.infer<typeof DeviceMuteChangedFrame>;
 
+/** The user stopped a ringing timer or alarm on the device (button, or "stop"). */
+export const DeviceTimerStoppedFrame = z
+  .object({ type: z.literal('timer_stopped'), timerId: z.string().min(1) })
+  .strict();
+export type DeviceTimerStoppedFrame = z.infer<typeof DeviceTimerStoppedFrame>;
+
 export const DeviceControlInbound = z.discriminatedUnion('type', [
+  DeviceTimerStoppedFrame,
   DeviceHelloFrame,
   DeviceWakeDetectedFrame,
   DeviceSessionEndFrame,
@@ -132,7 +139,36 @@ export const DeviceErrorFrame = z
   .strict();
 export type DeviceErrorFrame = z.infer<typeof DeviceErrorFrame>;
 
+/**
+ * Every live timer, sent on connect and after each change. The device draws
+ * the ring from it: `running` counts down to `endsAt` (the device converts to
+ * its own clock with `serverNow`), `ringing` plays the alarm until stopped.
+ * `ringing` timers whose `deviceId` is another device ring here too.
+ */
+export const DeviceTimersFrame = z
+  .object({
+    type: z.literal('timers'),
+    serverNow: z.number().int(),
+    timers: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          label: z.string(),
+          kind: z.enum(['timer', 'alarm']),
+          endsAt: z.number().int(),
+          totalMs: z.number().int().positive(),
+          state: z.enum(['running', 'ringing']),
+          /** True when this device set it: it counts down on the ring only here. */
+          own: z.boolean(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type DeviceTimersFrame = z.infer<typeof DeviceTimersFrame>;
+
 export const DeviceControlOutbound = z.discriminatedUnion('type', [
+  DeviceTimersFrame,
   DeviceSessionStartFrame,
   DeviceRingFrame,
   DeviceLedFrame,

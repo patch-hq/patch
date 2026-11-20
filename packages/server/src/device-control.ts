@@ -25,6 +25,7 @@ import {
 import type { Registry } from './registry.js';
 import type { ChatRegistry } from './chat-registry.js';
 import { mintVoiceToken } from './voice/token.js';
+import type { VoiceTimer } from '@patch/wire';
 
 export const DEVICE_CONTROL_PATH = '/device/control';
 
@@ -61,6 +62,8 @@ export interface DeviceControlDeps {
    * the socket is terminated, so the device sees the drop and reconnects.
    */
   keepalive?: { pingIntervalMs: number; silenceTimeoutMs: number };
+  /** Timers and alarms (spec/16 § Timers and alarms): read on connect, told when one is stopped. */
+  timers?: { list: () => VoiceTimer[]; stop: (timerId: string) => boolean };
   /** Test seam: credential verifier. */
   verifyCredential?: typeof verifySurfaceCredential;
 }
@@ -101,6 +104,8 @@ export interface DeviceControlHandle {
   list(): DevicePresence[];
   /** Speak an announcement on the right device(s). Returns how many it went to (0: none reachable). */
   announce(a: Announcement): number;
+  /** Tell every connected device the timers as they now stand. */
+  syncTimers(timers: VoiceTimer[]): void;
   /** Close a device's connection (after its token is revoked). */
   disconnect(deviceId: string): void;
 }
@@ -116,6 +121,38 @@ export function registerDeviceControlRoute(
 
   const send = (socket: Socket, frame: DeviceControlOutbound): void => {
     if (socket.readyState === WebSocket.OPEN) socket.send(encodeDeviceControl(frame));
+  };
+
+  /**
+   * What one device is told about the timers. Everything running (the ring
+   * counts down the one the device set; others are there to show). A ringing
+   * timer sounds on the device that set it, or on every device when the setter
+   * is not connected, so an alarm is never lost to an unplugged speaker.
+   */
+  const timersFor = (deviceId: string, timers: VoiceTimer[]): DeviceControlOutbound => ({
+    type: 'timers',
+    serverNow: now(),
+    timers: timers
+      .filter(
+        (t) =>
+          t.state === 'running' ||
+          t.deviceId === deviceId ||
+          t.deviceId === undefined ||
+          !live.has(t.deviceId),
+      )
+      .map((t) => ({
+        id: t.id,
+        label: t.label,
+        kind: t.kind,
+        endsAt: t.endsAt,
+        totalMs: t.totalMs,
+        state: t.state,
+        own: t.deviceId === deviceId,
+      })),
+  });
+
+  const syncTimers = (timers: VoiceTimer[]): void => {
+    for (const [deviceId, e] of live) send(e.socket, timersFor(deviceId, timers));
   };
 
   const authenticate = async (
@@ -248,6 +285,7 @@ export function registerDeviceControlRoute(
                 { deviceId, fwVersion: frame.fwVersion },
                 'device-control: device online',
               );
+              if (deps.timers) send(socket, timersFor(deviceId, deps.timers.list()));
               return;
             }
             case 'mute_changed': {
@@ -267,6 +305,11 @@ export function registerDeviceControlRoute(
             }
             case 'session_end':
               deps.logger.info({ deviceId, reason: frame.reason }, 'device-control: session ended');
+              return;
+            case 'timer_stopped':
+              if (!deps.timers?.stop(frame.timerId)) {
+                send(socket, { type: 'error', message: `no timer ${frame.timerId}` });
+              }
               return;
             case 'ring_accepted':
             case 'ring_dismissed':
@@ -363,6 +406,7 @@ export function registerDeviceControlRoute(
   return {
     list: () => [...live.values()].map((e) => ({ ...e.presence })),
     announce,
+    syncTimers,
     disconnect: (deviceId: string): void => {
       const entry = live.get(deviceId);
       if (entry) entry.socket.close(CLOSE_UNAUTHORISED, 'revoked');

@@ -1460,12 +1460,17 @@ export class GeminiLiveSession implements VoiceSessionLike {
       return;
     }
     if (MANAGER_QUICK_TOOL_NAMES.has(call.name)) {
-      manager.quick(call.name, stringArgs(call.args)).then(answer, fail);
+      manager.quick(call.name, stringArgs(call.args), this.quickContext()).then(answer, fail);
       return;
     }
     const message = `the voice called a tool a Manager call does not have: ${call.name}`;
     this.deps.logger.error({ sessionId: this.init.sessionId }, `gemini-live: ${message}`);
     answer(`There is no tool called ${call.name} on this call.`);
+  }
+
+  /** Where a quick tool is being called from: the device this conversation is on, if it is one. */
+  private quickContext(): { deviceId?: string } {
+    return this.init.deviceId !== undefined ? { deviceId: this.init.deviceId } : {};
   }
 
   private async handleSendToChat(

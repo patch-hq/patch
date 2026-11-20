@@ -2985,6 +2985,68 @@ export const NotificationsChangedEvent = z
   .strict();
 export type NotificationsChangedEvent = z.infer<typeof NotificationsChangedEvent>;
 
+/** A timer or alarm Patch is keeping (spec/16 § Timers and alarms). */
+export const VoiceTimer = z
+  .object({
+    id: z.string().min(1),
+    /** What the user called it ("pasta"); empty when they did not. */
+    label: z.string(),
+    kind: z.enum(['timer', 'alarm']),
+    /** Wall-clock ms when it goes off. */
+    endsAt: z.number().int(),
+    /** Ms the timer was set for, so a display can draw how much is left. */
+    totalMs: z.number().int().positive(),
+    /** `running` until it goes off; `ringing` until someone stops it. */
+    state: z.enum(['running', 'ringing']),
+    /** The voice device that set it; it rings there first. Absent when set from an app. */
+    deviceId: z.string().min(1).optional(),
+  })
+  .strict();
+export type VoiceTimer = z.infer<typeof VoiceTimer>;
+
+/** Host → server: a voice tool's timer action. The server owns the state. */
+export const VoiceTimersRequestEvent = z
+  .object({
+    type: z.literal('voice.timers.request'),
+    requestId: z.string().min(1),
+    action: z.enum(['set', 'cancel', 'change', 'list']),
+    /** The device the conversation is on, when it is one. */
+    deviceId: z.string().min(1).optional(),
+    label: z.string().optional(),
+    /** `set`: how long from now. */
+    seconds: z.number().positive().optional(),
+    /** `set`: an alarm for this wall-clock time, ms since epoch. */
+    at: z.number().int().optional(),
+    /** `cancel` / `change`: which timer, by id or label. Empty picks the only one. */
+    timer: z.string().optional(),
+    /** `change`: replace the time left with this many seconds from now. */
+    setSeconds: z.number().positive().optional(),
+    /** `change`: add (or, negative, take off) this many seconds. */
+    addSeconds: z.number().optional(),
+  })
+  .strict();
+export type VoiceTimersRequestEvent = z.infer<typeof VoiceTimersRequestEvent>;
+
+/** Server → host: the outcome, in words the voice can say. `ok: false` is a refusal to report. */
+export const VoiceTimersResponseEvent = z
+  .object({
+    type: z.literal('voice.timers.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    message: z.string(),
+  })
+  .strict();
+export type VoiceTimersResponseEvent = z.infer<typeof VoiceTimersResponseEvent>;
+
+/** Server → surfaces: the timers changed (one set, changed, rang, stopped). Carries every live timer. */
+export const TimersChangedEvent = z
+  .object({
+    type: z.literal('timers.changed'),
+    timers: z.array(VoiceTimer),
+  })
+  .strict();
+export type TimersChangedEvent = z.infer<typeof TimersChangedEvent>;
+
 /** Host → server: a credential this host refreshed while running a turn. */
 export const SettingsSecretUpdateEvent = z
   .object({
@@ -10345,6 +10407,9 @@ export const WireEvent = z.discriminatedUnion('type', [
   SettingsAppliedEvent,
   SettingsChangedEvent,
   NotificationsChangedEvent,
+  TimersChangedEvent,
+  VoiceTimersRequestEvent,
+  VoiceTimersResponseEvent,
   SettingsSecretUpdateEvent,
   SettingsAdoptRequestEvent,
   SettingsAdoptResponseEvent,
@@ -10682,6 +10747,9 @@ export const EVENT_SCHEMAS = {
   'settings.applied': SettingsAppliedEvent,
   'settings.changed': SettingsChangedEvent,
   'notifications.changed': NotificationsChangedEvent,
+  'timers.changed': TimersChangedEvent,
+  'voice.timers.request': VoiceTimersRequestEvent,
+  'voice.timers.response': VoiceTimersResponseEvent,
   'settings.secret_update': SettingsSecretUpdateEvent,
   'settings.adopt.request': SettingsAdoptRequestEvent,
   'settings.adopt.response': SettingsAdoptResponseEvent,
