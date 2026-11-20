@@ -23,7 +23,13 @@ import { homedir } from 'node:os';
 
 import { isJunkFolder, isReservedSpecialThread } from '@patch/wire';
 import { expandHome } from './expandHome.js';
-import { listChildDirs, listingTimeoutMessage, type ListChildDirs } from './boundedListing.js';
+import {
+  listChildDirsWithin,
+  listingDeniedMessage,
+  listingPendingMessage,
+  listingTimeoutMessage,
+  type ListingResult,
+} from './boundedListing.js';
 
 /**
  * Thrown by `FolderRegistry.browse` when a requested directory does not exist
@@ -40,9 +46,27 @@ export class FolderNotFoundError extends Error {
   }
 }
 
-/** A listing that did not finish in time — in practice a macOS privacy prompt. */
+/** The listing is still waiting on a person (a macOS permission dialog); ask again shortly. */
+export class FolderPermissionPendingError extends Error {
+  readonly code = 'permission_pending' as const;
+  constructor(dir: string) {
+    super(listingPendingMessage(dir));
+    this.name = 'FolderPermissionPendingError';
+  }
+}
+
+/** macOS refused the read. */
+export class FolderPermissionDeniedError extends Error {
+  readonly code = 'permission_denied' as const;
+  constructor(dir: string) {
+    super(listingDeniedMessage(dir));
+    this.name = 'FolderPermissionDeniedError';
+  }
+}
+
+/** No answer at all within the full wait. */
 export class FolderListingTimeoutError extends Error {
-  readonly code = 'folder_listing_timeout' as const;
+  readonly code = 'internal' as const;
   constructor(dir: string) {
     super(listingTimeoutMessage(dir));
     this.name = 'FolderListingTimeoutError';
@@ -96,7 +120,7 @@ export interface FolderRegistryOptions {
   /** Optional seed of explicit project roots (registered folders). */
   registered?: string[];
   /** Reads a directory's child directories out of process. Tests inject one. */
-  listChildDirs?: ListChildDirs;
+  listChildDirs?: (dir: string) => Promise<ListingResult>;
 }
 
 /** The registry as the wire carries it for one host. */
@@ -110,7 +134,7 @@ export class FolderRegistry {
   private readonly onChange: (registry: FolderRegistrySnapshot) => void;
   /** Explicit user-designated project roots, in registration order. */
   private readonly registered: string[];
-  private readonly listChildDirs: ListChildDirs;
+  private readonly listChildDirs: (dir: string) => Promise<ListingResult>;
   /**
    * Last snapshot handed out via `snapshot()` / `onChange` — the change
    * baseline. Held as the SPLIT, not the flattening: un-designating a root
@@ -129,7 +153,7 @@ export class FolderRegistry {
     this.source = opts.source;
     this.onChange = opts.onChange;
     this.registered = [...(opts.registered ?? [])];
-    this.listChildDirs = opts.listChildDirs ?? listChildDirs;
+    this.listChildDirs = opts.listChildDirs ?? ((d) => listChildDirsWithin(d));
   }
 
   /**
@@ -313,6 +337,8 @@ export class FolderRegistry {
     // boundedListing.ts). A missing or unreadable path is `folder_not_found`; a
     // read that does not finish says plainly what it is probably waiting for.
     const listing = await this.listChildDirs(resolved);
+    if (listing.kind === 'pending') throw new FolderPermissionPendingError(resolved);
+    if (listing.kind === 'denied') throw new FolderPermissionDeniedError(resolved);
     if (listing.kind === 'timeout') throw new FolderListingTimeoutError(resolved);
     if (listing.kind === 'error') throw new FolderNotFoundError(dir);
     const entries: FolderBrowseEntry[] = listing.names

@@ -7087,8 +7087,11 @@ export async function handleFoldersBrowseRequest(
       entries: result.entries,
     });
   } catch (err) {
+    const raw = (err as { code?: string }).code;
     const code =
-      (err as { code?: string }).code === 'folder_not_found' ? 'folder_not_found' : 'internal';
+      raw === 'folder_not_found' || raw === 'permission_pending' || raw === 'permission_denied'
+        ? raw
+        : 'internal';
     if (code === 'internal') {
       // A listing that timed out reaches the surface as `internal` carrying the
       // plain-language message (the wire code set is closed).

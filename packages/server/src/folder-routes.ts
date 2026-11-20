@@ -155,7 +155,14 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
       }
       if (!result.ok) {
         const code = result.error?.code ?? 'internal';
-        const status = code === 'folder_not_found' ? 404 : 502;
+        const status =
+          code === 'folder_not_found'
+            ? 404
+            : code === 'permission_pending'
+              ? 409
+              : code === 'permission_denied'
+                ? 403
+                : 502;
         return reply
           .code(status)
           .send({ error: code, message: result.error?.message ?? 'browse error' });
