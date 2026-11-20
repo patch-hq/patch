@@ -173,6 +173,7 @@ export function UpdatesPage(): JSX.Element {
 
   return (
     <SettingsPage
+      intro="The version you're on, and how updates arrive."
       title="Updates"
       testid="settings-version"
       actions={

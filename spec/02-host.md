@@ -490,7 +490,7 @@ real deny — the tool does not run and the agent is told so — which is what
 approving an empty answer.
 
 What the agent is told when a question expires is the shared `questionExpiredPrompt`
-setting (`{seconds}` is the window), edited under Settings → Prompts. Its default
+setting (`{seconds}` is the window), edited under Settings → Agent. Its default
 tells the agent to carry on with what does not depend on the answer rather than stop.
 
 A question asked while a person's message is already queued on the chat is not

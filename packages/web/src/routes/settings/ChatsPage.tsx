@@ -25,7 +25,11 @@ export function ChatsPage(): JSX.Element {
   const groupSort = useUiStore((s) => s.groupSort);
   const setGroupSort = useUiStore((s) => s.setGroupSort);
   return (
-    <SettingsPage title="Chats" testid="settings-chats">
+    <SettingsPage
+      intro="Chat titles and status lines, clean-up, and how the sidebar is ordered."
+      title="Chats"
+      testid="settings-chats"
+    >
       <Group>
         <Row title="Generate chat titles" testid="title-generation">
           <Toggle

@@ -47,6 +47,7 @@ import { SettingsSection } from '../SettingsSection';
 import { NoticeRow } from './HostSwitcher';
 import { ModelChoice } from './ModelChoice';
 import { writePreferences } from './PreferenceSections';
+import { CheckInInterval, TextPromptLink } from './PromptRows';
 import { SettingsPage } from './SettingsPage';
 import { patchShared } from './sharedWrite';
 import {
@@ -93,19 +94,19 @@ export type Layer =
   | 'meeting-actions';
 
 export const LAYER_TITLE: Record<Layer, string> = {
-  tools: 'Patch tools prompt',
-  system: 'System prompt override',
-  'goal-judge': 'Goal judge prompt',
+  tools: 'Patch tools guidance',
+  system: 'System prompt',
+  'goal-judge': 'Judge prompt',
   'link-summary': 'Summarise prompt',
-  'watch-check-in': 'Background task check-in',
-  sweep: 'Manager standing instructions',
-  'manager-voice': 'Manager voice',
-  'job-autonomy': 'Job autonomy',
+  'watch-check-in': 'Check-in message',
+  sweep: 'Standing instructions',
+  'manager-voice': 'Voice',
+  'job-autonomy': 'How jobs work on their own',
   'voice-device': 'Speaking aloud',
-  'question-expired': 'Question timed out',
-  'meeting-now': 'Meeting: Now',
-  'meeting-notes': 'Meeting: Notes',
-  'meeting-actions': 'Meeting: Actions',
+  'question-expired': 'When a question times out',
+  'meeting-now': 'Now',
+  'meeting-notes': 'Notes',
+  'meeting-actions': 'Actions',
 };
 
 /** What a layer's editor is titled: short enough to fit the header. */
@@ -204,6 +205,13 @@ export function AgentPage(): React.ReactElement {
                   onSelect={(v) => writePreferences({ providerContextVerbosity: v })}
                 />
               </Row>
+            </SettingsSection>
+            <SettingsSection title="Background tasks" testID="settings-background-tasks">
+              <CheckInInterval preferences={data.preferences} />
+              <TextPromptLink layer="watch-check-in" preferences={data.preferences} />
+            </SettingsSection>
+            <SettingsSection title="Jobs" testID="settings-jobs">
+              <TextPromptLink layer="job-autonomy" preferences={data.preferences} />
             </SettingsSection>
             <LinkSummary preferences={data.preferences} />
             <Layers preferences={data.preferences} />
@@ -341,6 +349,7 @@ function QuestionExpiry({ preferences }: { preferences: AccountPreferences }): R
           </>
         }
       />
+      <TextPromptLink layer="question-expired" preferences={preferences} />
     </SettingsSection>
   );
 }
@@ -372,7 +381,7 @@ function useToolsDefault(): string {
 function LinkSummary({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
   const router = useRouter();
   return (
-    <SettingsSection title="Link summary" testID="settings-link-summary">
+    <SettingsSection title="Link summaries" testID="settings-link-summary">
       <Row
         title={LAYER_TITLE['link-summary']}
         subtitle={
@@ -419,7 +428,7 @@ function Layers({ preferences }: { preferences: AccountPreferences }): React.Rea
     />
   );
   return (
-    <SettingsSection title="Layers added to Claude Code" testID="harness-config">
+    <SettingsSection title="Added to Claude Code" testID="harness-config">
       {row('tools', toolsPromptSummary(preferences.harnessToolsPrompt, toolsDefault))}
       {row('system', promptSummary(preferences.harnessSystemPrompt))}
     </SettingsSection>

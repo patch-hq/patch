@@ -13,7 +13,7 @@ import { useParams } from 'react-router-dom';
 import { PaneArea } from '../components/PaneArea.js';
 import { useRouteOpenTab } from '../lib/navigationOpen.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { SETTINGS_PAGES } from './settings/pages.js';
+import { SETTINGS_PAGES, SETTINGS_PAGE_ALIASES } from './settings/pages.js';
 import type { PatchWs } from '../api/ws.js';
 
 export function SettingsPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
@@ -22,7 +22,8 @@ export function SettingsPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const requestSettingsPage = useUiStore((s) => s.requestSettingsPage);
   useEffect(() => {
     openTab({ kind: 'page', page: 'settings' });
-    const page = SETTINGS_PAGES.find((p) => p.id === sub);
+    const id = (sub !== undefined ? SETTINGS_PAGE_ALIASES[sub] : undefined) ?? sub;
+    const page = SETTINGS_PAGES.find((p) => p.id === id);
     if (page) requestSettingsPage(page.id);
   }, [sub, openTab, requestSettingsPage]);
   return <PaneArea ws={ws} />;

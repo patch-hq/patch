@@ -101,7 +101,11 @@ export function AgentIdentityPage(): JSX.Element {
   const available = data?.ready === true;
 
   return (
-    <SettingsPage title="Agent identity" testid="settings-identity">
+    <SettingsPage
+      intro="How your agent identifies itself to the websites it visits."
+      title="Agent identity"
+      testid="settings-identity"
+    >
       <Group label="Web Bot Auth" testid="settings-identity-status">
         {error ? (
           <Row title="Identity" sub={(error as Error).message}>

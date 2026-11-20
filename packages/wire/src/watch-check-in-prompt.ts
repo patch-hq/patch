@@ -1,5 +1,5 @@
 // The periodic check-in a background task (patch_watch) sends its owning agent
-// unless Settings → Prompts supplies another. Shared so the host (which sends
+// unless Settings → Agent supplies another. Shared so the host (which sends
 // it) and the web Settings page (which shows it and offers "Back to default")
 // name the same text.
 

@@ -16,7 +16,11 @@ export function ExperimentalPage(): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
 
   return (
-    <SettingsPage title="Experimental features" testid="settings-experimental-page">
+    <SettingsPage
+      intro="Features that aren't finished yet. Turning this on shows them all."
+      title="Experimental features"
+      testid="settings-experimental-page"
+    >
       <Group testid="settings-experimental">
         <Row
           title="Show experimental features"

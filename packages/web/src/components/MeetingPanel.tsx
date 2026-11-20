@@ -69,7 +69,7 @@ import { parseMeetingNotes, type MeetingNote } from '../lib/meetingNotes.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import type { AccountPreferences } from '../api/rest.js';
 import { patchShared } from '../routes/settings/sharedWrite.js';
-import { MeetingModelRows, MeetingTimingRows } from '../routes/settings/PromptsPage.js';
+import { MeetingModelRows, MeetingTimingRows } from '../routes/settings/MeetingRows.js';
 import { Group, Pills, Row } from '../routes/settings/ui.js';
 import { Toggle } from './Toggle.js';
 import { usePresenceStore } from '../stores/presenceStore.js';

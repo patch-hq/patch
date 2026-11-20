@@ -40,6 +40,7 @@ import { patchShared } from './sharedWrite';
 import { ModelChoice } from './ModelChoice';
 import { ManagerHomeSection } from './ManagerHomeSection';
 import { SettingsPage } from './SettingsPage';
+import { MeetingControls, TextPromptLink } from './PromptRows';
 import { Chips, Field, Muted, Row, ToggleRow, WithSettings } from './ui';
 
 /** Write a preferences patch; a failure is reported, never swallowed. */
@@ -101,6 +102,10 @@ export function ManagerPage(): React.ReactElement {
         {(data) => (
           <>
             <ManagerHomeSection />
+            <SettingsSection title="Prompts" testID="settings-manager-prompts">
+              <TextPromptLink layer="manager-voice" preferences={data.preferences} />
+              <TextPromptLink layer="sweep" preferences={data.preferences} />
+            </SettingsSection>
             <SettingsSection title="Manager" testID="settings-manager">
               <ManagerControls preferences={data.preferences} />
             </SettingsSection>
@@ -297,6 +302,20 @@ export function MeetingsPage(): React.ReactElement {
       <SettingsSection testID="settings-voice-meeting">
         <MeetingEngineRow />
       </SettingsSection>
+      <WithSettings testID="meeting-settings">
+        {(data) => (
+          <>
+            <SettingsSection title="Models and timing" testID="settings-meeting-models">
+              <MeetingControls preferences={data.preferences} />
+            </SettingsSection>
+            <SettingsSection title="Prompts" testID="settings-meeting-prompts">
+              <TextPromptLink layer="meeting-now" preferences={data.preferences} />
+              <TextPromptLink layer="meeting-notes" preferences={data.preferences} />
+              <TextPromptLink layer="meeting-actions" preferences={data.preferences} />
+            </SettingsSection>
+          </>
+        )}
+      </WithSettings>
     </SettingsPage>
   );
 }
@@ -304,11 +323,18 @@ export function MeetingsPage(): React.ReactElement {
 export function VoicePage(): React.ReactElement {
   return (
     <SettingsPage title="Voice" testID="settings-page-voice">
-      <SettingsSection testID="settings-voice-config">
+      <SettingsSection title="Engine" testID="settings-voice-config">
         <VoiceEngine />
       </SettingsSection>
       <VoiceUsage />
       <VoiceDevicesSection />
+      <WithSettings testID="voice-device-prompt">
+        {(data) => (
+          <SettingsSection title="On a voice device" testID="settings-voice-device-prompt">
+            <TextPromptLink layer="voice-device" preferences={data.preferences} />
+          </SettingsSection>
+        )}
+      </WithSettings>
     </SettingsPage>
   );
 }

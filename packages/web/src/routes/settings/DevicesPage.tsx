@@ -108,7 +108,8 @@ export function DevicesPage(): JSX.Element {
 
   return (
     <SettingsPage
-      title="Devices"
+      intro="The phones, browsers and desktops signed in to this account."
+      title="Linked devices"
       testid="settings-devices"
       actions={
         <button

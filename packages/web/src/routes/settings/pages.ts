@@ -9,7 +9,6 @@ export type SettingsPageId =
   | 'memories'
   | 'manager'
   | 'goals'
-  | 'prompts'
   | 'dictation'
   | 'meetings'
   | 'voice'
@@ -33,29 +32,33 @@ export const ADVANCED_GROUP = 'Advanced';
 export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string }[] = [
   { id: 'usage', title: 'AI accounts', group: 'Setup' },
   { id: 'hosts', title: 'Hosts', group: 'Setup' },
+  { id: 'devices', title: 'Linked devices', group: 'Setup' },
+  { id: 'providers', title: 'Service keys', group: 'Setup' },
   { id: 'notifications', title: 'Notifications', group: 'Setup' },
-  { id: 'devices', title: 'Devices', group: 'Setup' },
-  { id: 'providers', title: 'Voice and other services', group: 'Setup' },
-  { id: 'chats', title: 'Chats', group: 'Agents' },
   { id: 'agent', title: 'Agent', group: 'Agents' },
-  { id: 'identity', title: 'Agent identity', group: 'Agents' },
+  { id: 'chats', title: 'Chats', group: 'Agents' },
+  { id: 'goals', title: 'Goals', group: 'Agents' },
   { id: 'memories', title: 'Memories', group: 'Agents' },
   { id: 'manager', title: 'Manager', group: 'Agents' },
-  { id: 'goals', title: 'Goals', group: 'Agents' },
-  { id: 'prompts', title: 'Prompts', group: 'Agents' },
-  { id: 'dictation', title: 'Dictation', group: 'Agents' },
-  { id: 'meetings', title: 'Meetings', group: 'Agents' },
-  { id: 'voice', title: 'Voice', group: 'Agents' },
-  { id: 'shortcuts', title: 'Shortcuts', group: 'Agents' },
-  { id: 'mcp', title: 'MCP', group: ADVANCED_GROUP },
+  { id: 'voice', title: 'Voice calls', group: 'Voice' },
+  { id: 'dictation', title: 'Dictation', group: 'Voice' },
+  { id: 'meetings', title: 'Meetings', group: 'Voice' },
+  { id: 'mcp', title: 'Tools (MCP)', group: ADVANCED_GROUP },
   { id: 'hooks', title: 'Hooks', group: ADVANCED_GROUP },
   { id: 'computer', title: 'Computer use', group: ADVANCED_GROUP },
-  { id: 'activity', title: 'Activity', group: ADVANCED_GROUP },
-  { id: 'experimental', title: 'Experimental features', group: 'System' },
-  { id: 'updates', title: 'Updates', group: 'System' },
-  { id: 'bugs', title: 'Bug reports', group: 'System' },
-  { id: 'account', title: 'Account', group: 'System' },
+  { id: 'identity', title: 'Agent identity', group: ADVANCED_GROUP },
+  { id: 'activity', title: 'Activity log', group: ADVANCED_GROUP },
+  { id: 'shortcuts', title: 'Shortcuts', group: 'App' },
+  { id: 'updates', title: 'Updates', group: 'App' },
+  { id: 'experimental', title: 'Experimental features', group: 'App' },
+  { id: 'bugs', title: 'Bug reports', group: 'App' },
+  { id: 'account', title: 'Account', group: 'App' },
 ];
+
+/** Old addresses that still land somewhere: the Prompts page's prompts now live on their own pages. */
+export const SETTINGS_PAGE_ALIASES: Readonly<Record<string, SettingsPageId>> = {
+  prompts: 'agent',
+};
 
 /** The page `/settings` itself shows beside the nav on a wide screen. */
 export const DEFAULT_SETTINGS_PAGE: SettingsPageId = 'usage';

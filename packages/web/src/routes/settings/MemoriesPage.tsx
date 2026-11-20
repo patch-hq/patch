@@ -38,7 +38,13 @@ const key = (m: ClaudeMemoryEntry): string => `${m.project}/${m.file}`;
 export function MemoriesPage(): JSX.Element {
   const { host, gate } = useHostGate();
   return (
-    <SettingsPage title="Memories" testid="settings-memories" hostSwitch fill>
+    <SettingsPage
+      intro="What Claude Code remembers between chats on each host."
+      title="Memories"
+      testid="settings-memories"
+      hostSwitch
+      fill
+    >
       {gate ?? (host ? <HostMemories host={host} /> : null)}
     </SettingsPage>
   );

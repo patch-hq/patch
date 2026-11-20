@@ -1,19 +1,20 @@
-// Settings → Prompts: every prompt Patch sends to an agent in one list, each
-// marked Default or Custom, opening the full-screen editor (LayerEditor, whose
-// Reset to default is the way back).
+// The prompt rows every Settings page uses, and the check-in and meeting
+// controls that sit beside their prompts. Every prompt lives on the page for
+// the feature it drives (spec/14 § `/settings` details).
 
 import React from 'react';
 import { useRouter } from 'expo-router';
-import { SettingsSection } from '../SettingsSection';
-import { usePresenceStore } from '../../stores/presenceStore';
-import { LAYER_TITLE, MEETING_PROMPTS, TEXT_PROMPTS, type Layer } from './AgentBehaviorSection';
-import { SettingsPage } from './SettingsPage';
+import { LAYER_TITLE, TEXT_PROMPTS, type Layer } from './AgentBehaviorSection';
 import { ModelChoice } from './ModelChoice';
 import { writePreferences } from './PreferenceSections';
-import { Field, Muted, Row, SettingsButton, WithSettings } from './ui';
+import { Field, Muted, Row, SettingsButton } from './ui';
 import type { AccountPreferences } from '../../api/rest';
 
-function CheckInInterval({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
+export function CheckInInterval({
+  preferences,
+}: {
+  preferences: AccountPreferences;
+}): React.ReactElement {
   const [minutes, setMinutes] = React.useState(String(preferences.watchCheckInMinutes));
   React.useEffect(
     () => setMinutes(String(preferences.watchCheckInMinutes)),
@@ -21,7 +22,7 @@ function CheckInInterval({ preferences }: { preferences: AccountPreferences }): 
   );
   return (
     <Row
-      title="Background task check-in every"
+      title="Check in every"
       right={
         <>
           <Field
@@ -48,16 +49,17 @@ function CheckInInterval({ preferences }: { preferences: AccountPreferences }): 
   );
 }
 
-export function PromptsPage(): React.ReactElement {
+/** One prompt: its title, whether it is the Default or a Custom version, and Edit (full screen). */
+export function PromptLink({
+  layer,
+  custom,
+}: {
+  layer: Layer;
+  custom: boolean;
+}): React.ReactElement {
   const router = useRouter();
-  const toolsDefault = usePresenceStore(
-    (s) =>
-      Object.values(s.hosts).find((h) => h.host?.harnessToolsPromptDefault !== undefined)?.host
-        ?.harnessToolsPromptDefault ?? '',
-  );
-  const row = (layer: Layer, custom: boolean): React.ReactElement => (
+  return (
     <Row
-      key={layer}
       title={LAYER_TITLE[layer]}
       subtitle={custom ? 'Custom' : 'Default'}
       subtitleTestID={`prompt-${layer}-state`}
@@ -71,42 +73,26 @@ export function PromptsPage(): React.ReactElement {
       }
     />
   );
-  return (
-    <SettingsPage title="Prompts" testID="settings-page-prompts">
-      <WithSettings testID="prompts">
-        {(data) => {
-          const p = data.preferences;
-          const toolsCustom =
-            p.harnessToolsPrompt !== null &&
-            (toolsDefault === '' || p.harnessToolsPrompt !== toolsDefault);
-          return (
-            <>
-              <SettingsSection testID="settings-prompts">
-                <CheckInInterval preferences={p} />
-                {(Object.keys(TEXT_PROMPTS) as (keyof typeof TEXT_PROMPTS)[])
-                  .filter((layer) => !(MEETING_PROMPTS as readonly string[]).includes(layer))
-                  .map((layer) =>
-                    row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
-                  )}
-                {row('tools', toolsCustom)}
-                {row('system', p.harnessSystemPrompt !== '')}
-              </SettingsSection>
-              <SettingsSection title="Meetings" testID="settings-prompts-meetings">
-                <MeetingControls preferences={p} />
-                {MEETING_PROMPTS.map((layer) =>
-                  row(layer, p[TEXT_PROMPTS[layer].key] !== TEXT_PROMPTS[layer].fallback),
-                )}
-              </SettingsSection>
-            </>
-          );
-        }}
-      </WithSettings>
-    </SettingsPage>
-  );
+}
+
+/** A plain-text prompt's row, Default or Custom against its built-in text. */
+export function TextPromptLink({
+  layer,
+  preferences,
+}: {
+  layer: keyof typeof TEXT_PROMPTS;
+  preferences: AccountPreferences;
+}): React.ReactElement {
+  const { key, fallback } = TEXT_PROMPTS[layer];
+  return <PromptLink layer={layer} custom={preferences[key] !== fallback} />;
 }
 
 /** The meeting models and how often the notes are refreshed, saved on blur like the other fields. */
-function MeetingControls({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
+export function MeetingControls({
+  preferences,
+}: {
+  preferences: AccountPreferences;
+}): React.ReactElement {
   const [seconds, setSeconds] = React.useState(String(preferences.meetingAnalyseSeconds));
   React.useEffect(
     () => setSeconds(String(preferences.meetingAnalyseSeconds)),

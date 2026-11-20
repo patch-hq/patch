@@ -104,7 +104,8 @@ export function McpPage(): JSX.Element {
   const canEdit = gate === null && servers !== undefined;
   return (
     <SettingsPage
-      title="MCP"
+      intro="Outside tools a host gives every chat it runs, beside Patch's own."
+      title="Tools (MCP)"
       testid="settings-mcp"
       hostSwitch
       actions={

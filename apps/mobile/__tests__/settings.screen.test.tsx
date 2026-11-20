@@ -116,53 +116,44 @@ describe('Settings tab — the list', () => {
       r.root,
       (i) => i.type === 'Text' && i.props.accessibilityRole === 'header',
     ).map((i) => textOf(i));
-    expect(headers).toEqual(['Settings', 'Agents', 'Setup', 'System']);
+    expect(headers).toEqual(['Settings', 'Setup', 'Agents', 'Voice', 'Advanced', 'App']);
     expect(rowTitles(r)).toEqual([
-      'Usage',
-      'Chats',
+      'AI accounts',
+      'Hosts',
+      'Linked devices',
+      'Service keys',
+      'Notifications',
       'Agent',
-      'MCP',
-      'Memories',
+      'Chats',
       'Goals',
-      'Prompts',
+      'Memories',
       'Dictation',
       'Meetings',
+      'Tools (MCP)',
       'Hooks',
       'Computer use',
-      'Hosts',
       'Agent identity',
-      'Providers',
-      'Notifications',
-      'Devices',
-      'Experimental features',
       'Updates',
+      'Experimental features',
       'Account',
     ]);
     const inGroup = (g: string): string[] =>
       findAllHost(findHost(r.root, byTestId(`settings-group-${g}`)), (i) =>
         /^settings-row-/.test(String(i.props.testID)),
       ).map((i) => String(i.props.accessibilityLabel));
-    expect(inGroup('Agents')).toEqual([
-      'Usage',
-      'Chats',
-      'Agent',
-      'MCP',
-      'Memories',
-      'Goals',
-      'Prompts',
-      'Dictation',
-      'Meetings',
-      'Hooks',
-      'Computer use',
-    ]);
     expect(inGroup('Setup')).toEqual([
+      'AI accounts',
       'Hosts',
-      'Agent identity',
-      'Providers',
+      'Linked devices',
+      'Service keys',
       'Notifications',
-      'Devices',
     ]);
-    expect(inGroup('System')).toEqual(['Experimental features', 'Updates', 'Account']);
+    expect(inGroup('Agents')).toEqual(['Agent', 'Chats', 'Goals', 'Memories']);
+    expect(inGroup('Voice')).toEqual(['Dictation', 'Meetings']);
+    expect(inGroup('Advanced')).toEqual(['Tools (MCP)', 'Hooks', 'Computer use', 'Agent identity']);
+    expect(inGroup('App')).toEqual(['Updates', 'Experimental features', 'Account']);
+    // Every row says what its page is for.
+    expect(textOf(findHost(r.root, byTestId('settings-intro-agent')))).toMatch(/new chat/);
   });
 
   it('shows the Manager page in the Agents group once experimental features are on', async () => {
@@ -175,6 +166,10 @@ describe('Settings tab — the list', () => {
     await flush();
     expect(rowTitles(r)).toContain('Manager');
     expect(rowTitles(r).indexOf('Manager')).toBe(rowTitles(r).indexOf('Memories') + 1);
+    expect(rowTitles(r)).toContain('Voice calls');
+    // Experimental pages are marked in the list.
+    expect(findHost(r.root, byTestId('settings-exp-manager'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('settings-exp-voice'))).toBeTruthy();
   });
 
   it('draws no page content on the list itself', async () => {
@@ -342,7 +337,23 @@ describe('/settings/[page]', () => {
     await flush();
     expect(findHost(r.root, byTestId('settings-page-unknown'))).toBeTruthy();
     expect(settingsPage('nope')).toBeNull();
-    expect(settingsPage('usage')?.title).toBe('Usage');
+    expect(settingsPage('usage')?.title).toBe('AI accounts');
+    // The old Prompts address lands on Agent, where the agent's prompts are.
+    expect(settingsPage('prompts')?.id).toBe('agent');
+  });
+
+  it('a page shows its registry title, one-line intro and, when experimental, the tag', async () => {
+    __setLocalSearchParams({ page: 'agent' });
+    let r = render(<SettingsPageScreen />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Agent');
+    expect(textOf(findHost(r.root, byTestId('settings-intro')))).toMatch(/new chat/);
+    expect(queryHost(r.root, byTestId('settings-experimental-tag'))).toBeNull();
+    r.unmount();
+    __setLocalSearchParams({ page: 'manager' });
+    r = render(<SettingsPageScreen />);
+    await flush();
+    expect(findHost(r.root, byTestId('settings-experimental-tag'))).toBeTruthy();
   });
 
   // A page is pushed above the tabs, so no tab bar clears the system nav bar

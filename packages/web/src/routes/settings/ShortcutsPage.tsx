@@ -85,7 +85,7 @@ export function ShortcutsPage(): JSX.Element {
   const fixed = SHORTCUT_TABLE.filter((r) => !r.ids && !r.dictate);
 
   return (
-    <SettingsPage title="Shortcuts" testid="settings-shortcuts">
+    <SettingsPage intro="Keyboard shortcuts." title="Shortcuts" testid="settings-shortcuts">
       <Group label="Customisable" testid="settings-shortcuts-bindable">
         {ACTIONS.map((a) => {
           const custom = overrides[a.id] !== undefined;

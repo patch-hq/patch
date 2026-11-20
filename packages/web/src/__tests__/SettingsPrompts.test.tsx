@@ -1,5 +1,6 @@
-// Settings → Prompts: every prompt Patch sends to an agent on one page, each
-// Default or Custom, with a way back to the default.
+// Every prompt Patch sends lives once, on the page for the feature it drives,
+// each Default or Custom, with a way back to the default. The old Prompts
+// address lands on the Agent page.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
@@ -10,6 +11,9 @@ import {
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_MANAGER_VOICE_PROMPT,
+  DEFAULT_QUESTION_EXPIRED_PROMPT,
+  DEFAULT_VOICE_DEVICE_PROMPT,
   DEFAULT_SWEEP_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
@@ -17,6 +21,7 @@ import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { setActiveWs } from '../api/ws.js';
+import { reportHost } from './presenceHelpers.js';
 import {
   makeFetch,
   preferencesServer,
@@ -40,36 +45,88 @@ const serve = () => {
   return server;
 };
 
-describe('Settings → Prompts', () => {
-  it('lists every prompt with its default text and marks each Default', async () => {
+describe('Settings prompts', () => {
+  it('every prompt sits on its own page, showing its default and marked Default', async () => {
     serve();
-    renderSettings('/settings/prompts');
     const shown = async (id: string): Promise<string | null> =>
       (await screen.findByTestId(`prompt-${id}-shown`)).textContent;
-    expect(await shown('watch-check-in')).toBe(DEFAULT_WATCH_CHECK_IN_PROMPT);
-    expect(await shown('sweep')).toBe(DEFAULT_SWEEP_PROMPT);
-    expect(await shown('goal-judge')).toBe(DEFAULT_GOAL_EVAL_PROMPT);
-    expect(await shown('link-summary')).toBe(DEFAULT_LINK_SUMMARY_PROMPT);
-    expect(await shown('job-autonomy')).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
-    for (const id of [
-      'watch-check-in',
-      'sweep',
-      'manager-voice',
-      'goal-judge',
-      'link-summary',
-      'job-autonomy',
-    ]) {
-      expect(screen.getByTestId(`prompt-${id}-mode-default`).getAttribute('aria-pressed')).toBe(
-        'true',
-      );
+    const isDefault = (id: string): string | null =>
+      screen.getByTestId(`prompt-${id}-mode-default`).getAttribute('aria-pressed');
+    const pages: Array<[string, Array<[string, string]>]> = [
+      [
+        'agent',
+        [
+          ['question-expired', DEFAULT_QUESTION_EXPIRED_PROMPT],
+          ['watch-check-in', DEFAULT_WATCH_CHECK_IN_PROMPT],
+          ['job-autonomy', DEFAULT_JOB_AUTONOMY_PROMPT],
+          ['link-summary', DEFAULT_LINK_SUMMARY_PROMPT],
+        ],
+      ],
+      ['goals', [['goal-judge', DEFAULT_GOAL_EVAL_PROMPT]]],
+      [
+        'manager',
+        [
+          ['sweep', DEFAULT_SWEEP_PROMPT],
+          ['manager-voice', DEFAULT_MANAGER_VOICE_PROMPT],
+        ],
+      ],
+      ['voice', [['voice-device', DEFAULT_VOICE_DEVICE_PROMPT]]],
+      [
+        'meetings',
+        [
+          ['meeting-now', DEFAULT_MEETING_NOW_PROMPT],
+          ['meeting-notes', DEFAULT_MEETING_NOTES_PROMPT],
+          ['meeting-actions', DEFAULT_MEETING_ACTIONS_PROMPT],
+        ],
+      ],
+    ];
+    for (const [page, prompts] of pages) {
+      const view = renderSettings(`/settings/${page}`);
+      for (const [id, text] of prompts) {
+        expect(await shown(id)).toBe(text);
+        expect(isDefault(id)).toBe('true');
+      }
+      view.unmount();
     }
-    expect(screen.getByTestId('prompt-tools')).toBeTruthy();
-    expect(screen.getByTestId('prompt-system')).toBeTruthy();
+  });
+
+  it('the agent page also holds the Claude Code layers', async () => {
+    serve();
+    renderSettings('/settings/agent');
+    expect(await screen.findByTestId('prompt-tools')).toBeTruthy();
+    expect(screen.getByTestId('prompt-system-shown').textContent).toBe(
+      "Claude Code's own system prompt.",
+    );
+  });
+
+  it('the old Prompts address opens the Agent page', async () => {
+    serve();
+    renderSettings('/settings/prompts');
+    expect(await screen.findByTestId('settings-agent')).toBeTruthy();
+  });
+
+  it('a long prompt starts folded and opens with Show all', async () => {
+    serve();
+    renderSettings('/settings/agent');
+    const pre = await screen.findByTestId('prompt-question-expired-shown');
+    expect(pre.className).toContain('folded');
+    fireEvent.click(screen.getByTestId('prompt-question-expired-more'));
+    expect(pre.className).not.toContain('folded');
+  });
+
+  it('an emptied tools guidance can be saved, and reads as Off', async () => {
+    const server = serve();
+    reportHost('d1', { harnessToolsPromptDefault: 'Use the patch tools.' });
+    renderSettings('/settings/agent');
+    fireEvent.click(await screen.findByTestId('prompt-tools-mode-custom'));
+    fireEvent.change(screen.getByTestId('prompt-tools-text'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('prompt-tools-save'));
+    await waitFor(() => expect(server.writes).toEqual([{ harnessToolsPrompt: '' }]));
   });
 
   it('writes the check-in interval, and ignores a value that is not a positive whole number', async () => {
     const server = serve();
-    renderSettings('/settings/prompts');
+    renderSettings('/settings/agent');
     const input = (await screen.findByTestId('watch-check-in-minutes')) as HTMLInputElement;
     expect(input.value).toBe('60');
     fireEvent.change(input, { target: { value: '0' } });
@@ -80,7 +137,7 @@ describe('Settings → Prompts', () => {
 
   it('switches to Custom seeded with the default, saves, then goes back to the default', async () => {
     const server = serve();
-    renderSettings('/settings/prompts');
+    renderSettings('/settings/agent');
     fireEvent.click(await screen.findByTestId('prompt-watch-check-in-mode-custom'));
     const box = screen.getByTestId('prompt-watch-check-in-text') as HTMLTextAreaElement;
     expect(box.value).toBe(DEFAULT_WATCH_CHECK_IN_PROMPT);
@@ -110,7 +167,7 @@ describe('Settings → Prompts', () => {
 
   it('cancelling a switch to Custom writes nothing', async () => {
     const server = serve();
-    renderSettings('/settings/prompts');
+    renderSettings('/settings/manager');
     fireEvent.click(await screen.findByTestId('prompt-sweep-mode-custom'));
     fireEvent.click(screen.getByTestId('prompt-sweep-cancel'));
     expect(server.writes).toEqual([]);
@@ -119,10 +176,10 @@ describe('Settings → Prompts', () => {
     );
   });
 
-  it('has a Meetings group with the now, notes and actions prompts, editable', async () => {
+  it('the Meetings page has the now, notes and actions prompts, editable', async () => {
     const server = serve();
-    renderSettings('/settings/prompts');
-    const group = await screen.findByTestId('settings-prompts-meetings');
+    renderSettings('/settings/meetings');
+    const group = await screen.findByTestId('settings-meeting-prompts');
     expect(group).toBeTruthy();
     const shown = (id: string) => screen.getByTestId(`prompt-${id}-shown`).textContent;
     expect(shown('meeting-now')).toBe(DEFAULT_MEETING_NOW_PROMPT);
@@ -138,7 +195,7 @@ describe('Settings → Prompts', () => {
 
   it('disables Save for a blank or unchanged prompt draft', async () => {
     const server = serve();
-    renderSettings('/settings/prompts');
+    renderSettings('/settings/meetings');
     fireEvent.click(await screen.findByTestId('prompt-meeting-notes-mode-custom'));
     const save = screen.getByTestId('prompt-meeting-notes-save') as HTMLButtonElement;
     const box = screen.getByTestId('prompt-meeting-notes-text');
@@ -151,9 +208,9 @@ describe('Settings → Prompts', () => {
     expect(server.writes).toEqual([]);
   });
 
-  it('shows the meeting models and interval, with no transcription model field, and writes the interval', async () => {
+  it('the Meetings page shows the models and interval, with no transcription model field, and writes the interval', async () => {
     const server = serve();
-    renderSettings('/settings/prompts');
+    renderSettings('/settings/meetings');
     const analysis = (await screen.findByTestId('meeting-analysis-model')) as HTMLSelectElement;
     expect(analysis.value).toBe(DEFAULT_MEETING_MODEL);
     expect((screen.getByTestId('meeting-cleanup-model') as HTMLSelectElement).value).toBe(

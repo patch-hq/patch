@@ -144,7 +144,11 @@ export function HooksPage(): JSX.Element {
   const hooks = data?.hooks ?? [];
 
   return (
-    <SettingsPage title="Hooks" testid="settings-hooks-page">
+    <SettingsPage
+      intro="Scripts that run when things happen in a chat."
+      title="Hooks"
+      testid="settings-hooks-page"
+    >
       <Group
         label="Message hooks"
         testid="settings-hooks"

@@ -29,6 +29,8 @@ function useSettingsBack(): () => void {
 /** A page: back arrow (phone only), title, optional host switcher and actions. */
 export function SettingsPage({
   title,
+  intro,
+  experimental = false,
   testid,
   hostSwitch = false,
   actions,
@@ -36,6 +38,10 @@ export function SettingsPage({
   children,
 }: {
   title: string;
+  /** One line under the title saying what the page is for. */
+  intro?: string;
+  /** Marks a page that only exists while Experimental features is on. */
+  experimental?: boolean;
   testid: string;
   /** Show the host switcher when more than one host has reported. */
   hostSwitch?: boolean;
@@ -61,9 +67,19 @@ export function SettingsPage({
           ←
         </button>
         <h1 className="display">{title}</h1>
+        {experimental ? (
+          <span className="set-exp" data-testid="settings-experimental-tag">
+            Experimental
+          </span>
+        ) : null}
         {hostSwitch ? <HostSwitch /> : null}
         {actions}
       </div>
+      {intro ? (
+        <p className="set-intro" data-testid="settings-intro">
+          {intro}
+        </p>
+      ) : null}
       {children}
     </div>
   );

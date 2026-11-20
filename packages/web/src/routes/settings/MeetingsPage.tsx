@@ -11,11 +11,30 @@ import { reenableSpeakerNames, setNamesDeclined, useMeetingSetup } from '../../l
 import { Toggle } from '../../components/Toggle.js';
 import { Group, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
+import {
+  DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MEETING_NOTES_PROMPT,
+  DEFAULT_MEETING_NOW_PROMPT,
+} from '@patch/wire';
+import { MeetingModelRows, MeetingTimingRows } from './MeetingRows.js';
+import { PromptRow } from './PromptRow.js';
+import { patchShared } from './sharedWrite.js';
 
 export function MeetingsPage(): JSX.Element {
   return (
-    <SettingsPage title="Meetings" testid="settings-meetings">
+    <SettingsPage
+      title="Meetings"
+      intro="Live notes, actions and research while you're in a meeting."
+      testid="settings-meetings"
+    >
       <MeetingEngineGroup />
+      <Group label="Models" testid="settings-meeting-models">
+        <MeetingModelRows />
+      </Group>
+      <Group label="Timing" testid="settings-meeting-timing">
+        <MeetingTimingRows />
+      </Group>
+      <MeetingPromptsGroup />
     </SettingsPage>
   );
 }
@@ -93,5 +112,49 @@ function MeetingNamesRow(): JSX.Element | null {
         testid="meeting-names-toggle"
       />
     </Row>
+  );
+}
+
+/** The three meeting-analysis instructions; the speaker rules and reply shape stay fixed so it parses. */
+function MeetingPromptsGroup(): JSX.Element {
+  const p = usePreferencesStore((s) => s.preferences);
+  return (
+    <Group label="Prompts" testid="settings-meeting-prompts">
+      <PromptRow
+        id="meeting-now"
+        title="Now"
+        sub="How the live Now block is written."
+        defaultText={DEFAULT_MEETING_NOW_PROMPT}
+        current={p.meetingNowPrompt}
+        onSave={(text) => patchShared('meeting: now prompt', { meetingNowPrompt: text })}
+        onDefault={() =>
+          patchShared('meeting: now prompt', { meetingNowPrompt: DEFAULT_MEETING_NOW_PROMPT })
+        }
+      />
+      <PromptRow
+        id="meeting-notes"
+        title="Notes"
+        sub="How the key points are written and condensed."
+        defaultText={DEFAULT_MEETING_NOTES_PROMPT}
+        current={p.meetingNotesPrompt}
+        onSave={(text) => patchShared('meeting: notes prompt', { meetingNotesPrompt: text })}
+        onDefault={() =>
+          patchShared('meeting: notes prompt', { meetingNotesPrompt: DEFAULT_MEETING_NOTES_PROMPT })
+        }
+      />
+      <PromptRow
+        id="meeting-actions"
+        title="Actions"
+        sub="What counts as an action."
+        defaultText={DEFAULT_MEETING_ACTIONS_PROMPT}
+        current={p.meetingActionsPrompt}
+        onSave={(text) => patchShared('meeting: actions prompt', { meetingActionsPrompt: text })}
+        onDefault={() =>
+          patchShared('meeting: actions prompt', {
+            meetingActionsPrompt: DEFAULT_MEETING_ACTIONS_PROMPT,
+          })
+        }
+      />
+    </Group>
   );
 }

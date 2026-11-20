@@ -18,6 +18,8 @@ import { DeviceRow, useDevices } from './DevicesPage.js';
 import { VoiceProfilesGroup } from './VoiceProfilesGroup.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
+import { DEFAULT_VOICE_DEVICE_PROMPT } from '@patch/wire';
+import { PromptRow } from './PromptRow.js';
 
 const PROVIDERS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
 const PROVIDER_LABELS: Record<VoiceBackend, string> = {
@@ -55,7 +57,12 @@ const calls = (n: number): string => `${n} ${n === 1 ? 'call' : 'calls'}`;
 
 export function VoicePage(): JSX.Element {
   return (
-    <SettingsPage title="Voice" testid="settings-voice">
+    <SettingsPage
+      title="Voice calls"
+      intro="Talking to a chat out loud: the voice engine, how it sounds, and who it recognises."
+      experimental
+      testid="settings-voice"
+    >
       <ConversationGroup />
       <UsageGroup />
       <VoiceDevicesGroup />
@@ -88,7 +95,7 @@ function ConversationGroup(): JSX.Element {
   const status = voiceCellStatus(backend, layer);
   const keyStatus = voiceKeyHostStatus(backend, hostReports);
   return (
-    <Group testid="settings-voice-config">
+    <Group label="Engine" testid="settings-voice-config">
       <Row
         title="Provider"
         sub={
@@ -433,6 +440,25 @@ function VoiceDevicesGroup(): JSX.Element {
           <AddVoiceDevice onClose={() => setPairing(false)} />
         </div>
       ) : null}
+      <SpeakingAloudPromptRow />
     </Group>
+  );
+}
+
+/** What a voice device's voice and agent are told about being heard in a room (spec/16 § Speaking aloud). */
+function SpeakingAloudPromptRow(): JSX.Element {
+  const current = usePreferencesStore((s) => s.preferences.voiceDevicePrompt);
+  return (
+    <PromptRow
+      id="voice-device"
+      title="Speaking aloud"
+      sub="What a device's voice and agent are told: they are heard out loud, by whoever is in the room."
+      defaultText={DEFAULT_VOICE_DEVICE_PROMPT}
+      current={current}
+      onSave={(text) => patchShared('speaking aloud prompt', { voiceDevicePrompt: text })}
+      onDefault={() =>
+        patchShared('speaking aloud prompt', { voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT })
+      }
+    />
   );
 }

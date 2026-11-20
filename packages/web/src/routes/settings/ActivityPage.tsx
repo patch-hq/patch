@@ -49,7 +49,11 @@ export function ActivityPage(): JSX.Element {
   const entries = data?.entries ?? [];
 
   return (
-    <SettingsPage title="Activity" testid="settings-activity">
+    <SettingsPage
+      intro="Every time an agent reached into another chat, on every host."
+      title="Activity log"
+      testid="settings-activity"
+    >
       <Group label="Things agents did" testid="settings-activity-list">
         {error ? (
           <Note testid="activity-error">Could not read activity: {problemText(error)}</Note>

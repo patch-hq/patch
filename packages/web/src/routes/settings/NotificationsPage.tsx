@@ -99,7 +99,11 @@ export function NotificationsPage(): JSX.Element {
   }
 
   return (
-    <SettingsPage title="Notifications" testid="settings-notifications">
+    <SettingsPage
+      intro="When Patch gets your attention, and when it sends to your phone instead."
+      title="Notifications"
+      testid="settings-notifications"
+    >
       <Group testid="notifications-master-group">
         <Row
           title="Notifications"

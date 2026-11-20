@@ -9854,6 +9854,38 @@ button.view-file-download {
 .set-back {
   display: none;
 }
+/* What the page is for, in one line: the first thing read on every page. */
+.set-intro {
+  margin: 0 0 22px;
+  max-width: 62ch;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1.5;
+}
+/* A page that only exists while Experimental features is on says so. */
+.set-exp {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--amber-tint);
+  color: var(--amber);
+  font-size: var(--text-min);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.set-head > .set-exp {
+  margin-left: 0;
+}
+.set-nav .set-exp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  margin-left: 6px;
+  flex: none;
+}
 /* With the sidebar collapsed its expand button sits over the top-left corner
    of the content (`.sidebar-expand-btn`, 8px + 28px); the titles step past it. */
 /* The same chevron sits over the first pane's first tab. */
@@ -10089,6 +10121,12 @@ button.set-row-open:focus-visible {
   overflow-wrap: anywhere;
 }
 /* The built-in prompt, read-only: greyed so a customised one stands out. */
+.set-pre.folded {
+  max-height: 6.2em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
 .set-pre.default {
   color: var(--ink-faint);
 }
@@ -19354,4 +19392,9 @@ a.drop-target,
 }
 .agent-msg-text > :last-child {
   margin-bottom: 0;
+}
+.set-row.stack > .set-link {
+  align-self: flex-start;
+  font-size: var(--text-min);
+  color: var(--ink-3);
 }
