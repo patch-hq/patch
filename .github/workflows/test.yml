@@ -28,8 +28,6 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Only while the merge queue is being retired: a queue run is a full run.
-  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -38,7 +36,7 @@ permissions:
 # A newer push to a PR makes the older run pointless, so it is cancelled. Main
 # is never cancelled mid-run (release.yml is waiting on it); pushes queue.
 concurrency:
-  group: test-${{ github.event_name == 'merge_group' && github.sha || github.ref }}
+  group: test-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
