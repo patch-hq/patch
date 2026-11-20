@@ -1,23 +1,30 @@
 // The provider keys this host uses (spec/02 § Provider keys).
 //
 // Each paid service the host itself calls — Gemini and OpenAI Realtime for
-// hosted voice, Groq for Whisper — needs an API key on this host. A key has
-// two possible sources:
+// hosted voice, Groq for Whisper, and the rest of Settings → Providers — needs
+// an API key here. The keys are held on the server, encrypted, and sent to every
+// host in each settings snapshot (spec/01 § Settings, spec/10 § Provider keys).
+// A key has two possible sources on this host:
 //
-//   ui  — set from Settings → Hosts → Keys, stored HERE, in
-//         `<patchHome>/keys.json` (mode 0600). Never on the server.
+//   ui  — the shared key from the server's latest snapshot, cached in
+//         `<patchHome>/keys.json` (mode 0600) so a host that restarts while the
+//         server is away still starts with the keys it last had. The cache is
+//         only ever replaced whole from a snapshot (`replaceAll`); nothing on the
+//         host sets or deletes a key of its own.
 //   env — the host's environment (`GEMINI_API_KEY`, `OPENAI_REALTIME_API_KEY`,
 //         `GROQ_API_KEY`), read once at boot.
 //
-// A UI-set key wins over the environment. Everything that uses a key reads it
-// through `get()` at the moment it opens a session or sends a request, so a
-// set or a revoke takes effect for the next session without a restart.
+// The shared key wins over the environment. Everything that uses a key reads it
+// through `get()` at the moment it opens a session or sends a request, so a new
+// snapshot takes effect for the next session without a restart.
 //
-// A value never leaves this module except to the provider it belongs to:
-// `describe()` reports only where each key comes from and its last four
-// characters. Crash-durable atomic write (temp + fsync + rename) as
-// secrets.ts. NO FALLBACK: a malformed file throws on load rather than
-// silently starting empty and running on a different key than the one chosen.
+// A value never leaves this module except to the provider it belongs to, and
+// once to the server when it imports a host that held keys before it first
+// connected (`settingsKeys`). `describe()` reports only where each key comes
+// from and its last four characters. Crash-durable atomic write (temp + fsync +
+// rename) as secrets.ts. NO FALLBACK: a malformed file throws on load rather
+// than silently starting empty and running on a different key than the one
+// chosen.
 
 import {
   chmodSync,
@@ -35,7 +42,6 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
   PROVIDER_KEYS,
-  PROVIDER_KEY_MIN_LENGTH,
   providerKeyInfo,
   type HostProviderKey,
   type ProviderKeyId,
@@ -58,7 +64,7 @@ const KeysFile = z
   .strict();
 type KeysFile = z.infer<typeof KeysFile>;
 
-export type ProviderKeyErrorCode = 'invalid_value' | 'env_only' | 'not_set' | 'required';
+export type ProviderKeyErrorCode = 'required';
 
 export class ProviderKeyError extends Error {
   override readonly name = 'ProviderKeyError';
@@ -77,16 +83,6 @@ export function providerKeysPath(patchHome: string): string {
   return join(patchHome, 'keys.json');
 }
 
-/** Why a value is not one this host will store, or null when it is. */
-export function invalidProviderKeyValue(value: string): string | null {
-  if (value.length === 0) return 'A key is required.';
-  if (/\s/.test(value)) return 'A key cannot contain spaces or line breaks.';
-  if (value.length < PROVIDER_KEY_MIN_LENGTH) {
-    return `That is too short to be an API key (at least ${PROVIDER_KEY_MIN_LENGTH} characters).`;
-  }
-  return null;
-}
-
 export class ProviderKeyStore {
   private readonly path: string;
   private readonly env: EnvProviderKeys;
@@ -98,8 +94,8 @@ export class ProviderKeyStore {
   /**
    * `requiredToStart` names each key this host cannot boot without, with the
    * reason (the host aborts at startup when it is missing — Groq under
-   * the speech setting naming Groq). Revoking the last value of such a key is refused:
-   * the host would not come back up to be given a new one.
+   * the speech setting naming Groq). A snapshot that drops the last value of
+   * such a key is refused: the host would not come back up to be given a new one.
    */
   constructor(opts: {
     path: string;
@@ -137,7 +133,7 @@ export class ProviderKeyStore {
     }
   }
 
-  /** The value in use for `id`: the UI-set one, else the environment's. */
+  /** The value in use for `id`: the shared one, else the environment's. */
   get(id: ProviderKeyId): string | undefined {
     return this.stored[id] ?? this.env[id];
   }
@@ -161,41 +157,8 @@ export class ProviderKeyStore {
     });
   }
 
-  /** Store (or replace) the UI-set value for `id`. */
-  set(id: ProviderKeyId, rawValue: string): void {
-    const value = rawValue.trim();
-    const problem = invalidProviderKeyValue(value);
-    if (problem !== null) throw new ProviderKeyError('invalid_value', problem);
-    this.persist({ ...this.stored, [id]: value });
-  }
-
-  /** Delete the UI-set value for `id`. The environment's, if any, applies again. */
-  revoke(id: ProviderKeyId): void {
-    if (this.stored[id] === undefined) {
-      const { label, envVar } = providerKeyInfo(id);
-      if (this.env[id] !== undefined) {
-        throw new ProviderKeyError(
-          'env_only',
-          `${label} comes from this host's environment (${envVar}); it can't be revoked from here. Remove it from the host's environment and restart it.`,
-        );
-      }
-      throw new ProviderKeyError('not_set', `${label} is not set on this host.`);
-    }
-    const reason = this.requiredToStart[id];
-    if (reason !== undefined && this.env[id] === undefined) {
-      const { label } = providerKeyInfo(id);
-      throw new ProviderKeyError(
-        'required',
-        `${reason}, and this is its only ${label} key: without it the host would not start. Replace it instead.`,
-      );
-    }
-    const next = { ...this.stored };
-    delete next[id];
-    this.persist(next);
-  }
-
   /**
-   * Replace every Settings-set key with the shared ones from a snapshot
+   * Replace the cached shared keys with the ones from a snapshot
    * (spec/01 § Settings). Refuses — and changes nothing — when the snapshot
    * drops the one key this host needs to start, with none in its environment:
    * the host would not come back up to be given another.
@@ -217,8 +180,8 @@ export class ProviderKeyStore {
   }
 
   /**
-   * Every key this host holds, Settings-set or from its environment (the
-   * Settings one wins), for its import into the account's store.
+   * Every key this host holds, shared or from its environment (the shared one
+   * wins), for its one-time import into the account's store.
    */
   settingsKeys(): Partial<Record<ProviderKeyId, string>> {
     return { ...this.env, ...this.stored };
@@ -252,10 +215,3 @@ export class ProviderKeyStore {
     for (const fn of this.listeners) fn();
   }
 }
-
-/**
- * Answer one `patch.host_keys.request` (spec/03 § Provider keys). The answer
- * names every key's status after the change — never a value — and the fresh
- * `host.host` the store's change listener publishes is what every other
- * surface sees. Logs the key id and the op, never the value.
- */

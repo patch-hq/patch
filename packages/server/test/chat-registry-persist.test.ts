@@ -106,57 +106,20 @@ describe('ChatRegistry persistence', () => {
     expect(second.get('c4')).toMatchObject({ hostId: 'd2', folder: '/elsewhere' });
   });
 
-  test('a restored chat its host does not report again is dropped when the host closes its list', () => {
+  test('the server’s record decides a chat exists: a host that no longer lists it does not remove it', () => {
     const first = make();
     first.observe(spawned('kept'));
-    first.observe(spawned('gone'));
-    first.observe(spawned('other-host', 'd2'));
+    first.observe(spawned('folder-missing'));
     first.flush();
 
     const second = make();
-    second.observe(spawned('kept')); // host d1 mentions it
-    second.observe(foldersList('d1')); // and is done telling us what it has
+    second.observe(spawned('kept'));
+    second.observe({ ...foldersList('d1'), chatIds: ['kept'] } as WireEvent);
+    second.observe(foldersList('d1'));
     expect(second.get('kept')).toBeDefined();
-    expect(second.get('gone')).toBeUndefined();
-    // Another host's chat is untouched until that host reports.
-    expect(second.get('other-host')).toBeDefined();
-    second.observe(foldersList('d2'));
-    expect(second.get('other-host')).toBeUndefined();
-  });
-
-  test('a restored chat the host names in chatIds stays though it was not announced in full', () => {
-    const first = make();
-    first.observe(spawned('loaded'));
-    first.observe(spawned('not-loaded'));
-    first.observe(spawned('deleted'));
-    first.flush();
-
-    const second = make();
-    second.observe(spawned('loaded')); // the host announces only the chats it loaded
-    second.observe({ ...foldersList('d1'), chatIds: ['loaded', 'not-loaded'] } as WireEvent);
-    expect(second.get('loaded')).toBeDefined();
-    expect(second.get('not-loaded')).toBeDefined();
-    expect(second.get('deleted')).toBeUndefined();
-  });
-
-  test('a chat confirmed by a chat.state alone also stays', () => {
-    const first = make();
-    first.observe(spawned('c1'));
-    first.flush();
-    const second = make();
-    second.observe(state('c1', 'idle'));
-    second.observe(foldersList('d1'));
-    expect(second.get('c1')).toBeDefined();
-  });
-
-  test('a pruned chat stays gone after the next restart', () => {
-    const first = make();
-    first.observe(spawned('gone'));
-    first.flush();
-    const second = make();
-    second.observe(foldersList('d1'));
+    expect(second.get('folder-missing')).toMatchObject({ hostId: 'd1' });
     second.flush();
-    expect(make().get('gone')).toBeUndefined();
+    expect(make().get('folder-missing')).toBeDefined();
   });
 
   test('starts empty, saying so, when the saved index is damaged before its last line', () => {

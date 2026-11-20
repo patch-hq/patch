@@ -244,6 +244,12 @@ export class ChatLogStore {
   /** A write failed since the last `makeDurable`. */
   private writeFailed: Error | null = null;
 
+  /**
+   * The chat each `patch_agent` subagent belongs to, by the subagent's chatId
+   * (spec/02 § Native subagent dispatch). Kept in the subagent's own file.
+   */
+  private readonly parents = new Map<string, string>();
+
   /** Message text of each chat's file, for search without loading the whole record. */
   private readonly text = new RecordTextIndex();
 
@@ -367,6 +373,20 @@ export class ChatLogStore {
     return this.refs.get(chatId)?.get(seq);
   }
 
+  /** The provider id of the latest entry that has one: names the chat's current session. */
+  lastNativeRef(chatId: string): NativeRef | undefined {
+    this.load(chatId);
+    let latest = -1;
+    let ref: NativeRef | undefined;
+    for (const [seq, r] of this.refs.get(chatId) ?? []) {
+      if (seq > latest) {
+        latest = seq;
+        ref = r;
+      }
+    }
+    return ref;
+  }
+
   private turnsOf(chatId: string): Map<string, RecordedTurn> {
     this.load(chatId);
     let turns = this.turnsByChat.get(chatId);
@@ -413,6 +433,24 @@ export class ChatLogStore {
   observe(event: WireEvent): void {
     this.notePermission(event);
     this.commit(event);
+  }
+
+  /**
+   * Record that `chatId` is a subagent of `parentChatId`. Kept on disk with the
+   * subagent's record, so its transcript stays readable through its parent
+   * after a restart. Said once: a repeat changes nothing.
+   */
+  noteParent(chatId: string, parentChatId: string): void {
+    this.load(chatId);
+    if (this.parents.get(chatId) === parentChatId) return;
+    this.parents.set(chatId, parentChatId);
+    this.append(chatId, JSON.stringify({ parent: parentChatId }), false);
+  }
+
+  /** The chat `chatId` is a subagent of, when it is one. */
+  parentOf(chatId: string): string | undefined {
+    this.load(chatId);
+    return this.parents.get(chatId);
   }
 
   /**
@@ -646,6 +684,7 @@ export class ChatLogStore {
     const rows: UserMessageRow[] = [];
     if (this.dir === null) {
       for (const chatId of this.chats.keys()) {
+        if (this.parents.has(chatId)) continue;
         const collector = new UserMessageCollector(since, until, rows);
         for (const event of this.read(chatId, -1)) collector.take(event);
       }
@@ -769,6 +808,7 @@ export class ChatLogStore {
     this.turnsByChat.delete(chatId);
     this.questions.delete(chatId);
     this.reach.delete(chatId);
+    this.parents.delete(chatId);
   }
 
   private append(chatId: string, line: string, durable: boolean): void {
@@ -824,6 +864,7 @@ export class ChatLogStore {
         const event = JSON.parse(line) as WireEvent;
         const seq = (event as { seq?: unknown }).seq;
         const reach = (event as { reach?: unknown }).reach;
+        const parent = (event as { parent?: unknown }).parent;
         const rec = event as { question?: WireEvent; answer?: WireEvent; turn?: WireEvent };
         // A torn last line from a crash, or a record that is not an event, is skipped.
         if (typeof seq === 'number') {
@@ -856,6 +897,8 @@ export class ChatLogStore {
           if (held) held.response = rec.answer;
         } else if (typeof reach === 'number' && reach > (this.reach.get(chatId) ?? -1)) {
           this.reach.set(chatId, reach);
+        } else if (typeof parent === 'string') {
+          this.parents.set(chatId, parent);
         }
       } catch {
         continue;

@@ -5,7 +5,12 @@
 
 import React from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
-import { CLAUDE_BACKEND_ID, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
+import {
+  CLAUDE_BACKEND_ID,
+  rateLimitWindowState,
+  type AccountStrategy,
+  type RateLimitWindow,
+} from '@patch/wire';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../lib/theme';
 import {
   describeDisabledReason,
@@ -366,3 +371,23 @@ export function UsageBars({
     </View>
   );
 }
+
+export const STRATEGIES: readonly AccountStrategy[] = [
+  'priority',
+  'round-robin',
+  'soonest-reset',
+  'least-used',
+];
+export const STRATEGY_LABEL: Record<AccountStrategy, string> = {
+  priority: 'Priority',
+  'round-robin': 'Round robin',
+  'soonest-reset': 'Soonest reset',
+  'least-used': 'Least used',
+};
+/** What each strategy does, in one sentence (spec/10 § Backend credentials). */
+export const STRATEGY_HINT: Record<AccountStrategy, string> = {
+  priority: 'The first account here that still has allowance',
+  'round-robin': 'Each turn takes the next account along, spent evenly',
+  'soonest-reset': 'The account whose weekly limit resets soonest',
+  'least-used': 'The account with the most allowance left right now',
+};

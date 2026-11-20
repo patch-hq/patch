@@ -52,6 +52,8 @@ import {
   handleDocActionRequest,
   handleDocConvertRequest,
   handleDocExportRequest,
+  answerChatAdopt,
+  answerFoldersCheck,
 } from '../../../host/src/index.js';
 import { buildAll, type BuiltApp } from '../../src/app.js';
 import { Registry } from '../../src/registry.js';
@@ -155,6 +157,23 @@ export interface E2EHarness {
    * the eventual delivery runs exactly once.
    */
   dropNextInput(localId: string): void;
+  /**
+   * Register and boot another REAL host against the same server (its own
+   * `~/.patch`), for scenarios that span hosts — replacing one. Resolves once
+   * the server sees it online.
+   */
+  addHost(hostId: string): Promise<E2EHost>;
+  close(): Promise<void>;
+}
+
+/** One booted host. */
+export interface E2EHost {
+  hostId: string;
+  daemon: Daemon;
+  link: ServerLink;
+  sdk: MockSdkBackend;
+  patchHome: string;
+  /** Stop it: its link closes for good (no reconnect) and its host shuts down. */
   close(): Promise<void>;
 }
 
@@ -213,100 +232,127 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
   const transcribe =
     opts.transcribe ?? (async (_audio: Buffer, _format: string) => 'transcribed voice note');
 
-  const sdk = createMockSdkBackend({
-    claudeProjectsRoot: claudeRoot,
-    ...(opts.turnDelayMs !== undefined ? { turnDelayMs: opts.turnDelayMs } : {}),
-  });
+  /**
+   * Boot one REAL host against this server: its own `~/.patch`, Claude
+   * projects root, mock SDK and serverLink, routed exactly as the primary.
+   */
+  async function bootHost(id: string): Promise<E2EHost> {
+    const hostHome = id === hostId ? patchHome : mkdtempSync(join(tmpdir(), 'patch-e2e-home-'));
+    const hostClaudeRoot =
+      id === hostId ? claudeRoot : mkdtempSync(join(tmpdir(), 'patch-e2e-claude-'));
+    const hostSdk = createMockSdkBackend({
+      claudeProjectsRoot: hostClaudeRoot,
+      ...(opts.turnDelayMs !== undefined ? { turnDelayMs: opts.turnDelayMs } : {}),
+    });
+    const metaStore = createMetaStore(hostHome);
+    // Forward-declared so `emit` (built before `hostLink`) can route through it.
+    let hostLink: ServerLink;
+    const emit = (event: WireEvent): void => {
+      hostLink.send(event);
+    };
 
-  const metaStore = createMetaStore(patchHome);
+    const hostDaemon = new Daemon({
+      hostId: id,
+      metaStore,
+      sdkBackend: hostSdk,
+      sdkBackendKind: 'mock',
+      oauthAccessToken: 'fake-oauth',
+      historyReader: createHistoryReader({ claudeProjectsRoot: hostClaudeRoot }),
+      emit,
+      logger: silent,
+      generateTitle: wrappedTitle,
+    });
+    hostDaemon.hydrate();
+
+    if (opts.specialThreads && id === hostId) {
+      ensureSpecialThreads({
+        // The special threads live under the host's `~/.patch` (spec/06 § Where
+        // special threads run), not under the project folder — same `patchHome`
+        // the MetaStore is built on, so meta and folders agree.
+        patchHome: hostHome,
+        metaStore,
+        chatState: hostDaemon.chatState,
+        now: () => Date.now(),
+        logger: silent,
+        permissionModeDefault: hostDaemon.permissionModeDefault(),
+      });
+    }
+
+    const daemonKey = await mintDaemonKey({
+      userPrivateKey: user.privateKey,
+      hostId: id,
+      label: 'e2e',
+    });
+
+    hostLink = createServerLink({
+      url: `${wsUrl}/ws`,
+      daemonKey,
+      outbox: new Outbox({ path: join(hostHome, 'outbox.jsonl'), logger: silent }),
+      clientVersion: '1',
+      logger: silent,
+      backoffSchedule: opts.hostBackoffMs ?? [25, 50, 100, 200],
+      onAuthed: (send) => {
+        // Mirror index.ts onAuthed: seed the server's ChatRegistry with every
+        // currently-known chat so its `chat.state` gate admits them after a
+        // (re)connect (Group 8 fix, DX-M1).
+        for (const state of hostDaemon.list()) {
+          send({ type: 'chat.spawned', hostId: id, chatId: state.chatId, folder: state.folder });
+          send({
+            type: 'chat.state',
+            permissionMode: 'bypassPermissions',
+            chatId: state.chatId,
+            activity: state.activity,
+            lastUpdated: state.lastUpdated,
+            pinned: state.pinned,
+            pinnedAt: state.pinnedAt,
+            status: state.status,
+            name: state.name,
+            preview: state.preview,
+            folder: state.folder,
+          });
+        }
+        // …and closes the burst with folders.list, which is what tells the
+        // server this host's chat list is complete (unknown-chat.ts).
+        send({ type: 'folders.list', hostId: id, roots: [], recent: [] });
+      },
+      onFrame: (event, send) => {
+        // Flap / server-restart loss simulation: swallow the frame before the
+        // host acts on it, so the host never records the localId nor runs the
+        // turn (see `dropNextInput`). One-shot per registered localId.
+        if (event.type === 'chat.input' && dropNextInputLocalIds.has(event.localId)) {
+          dropNextInputLocalIds.delete(event.localId);
+          return;
+        }
+        routeInboundFrame(event, hostDaemon, transcribe, send, id);
+      },
+      onDisconnected: () => {
+        /* nothing — the server resolves in-flight chats on its own onStatus */
+      },
+    });
+    hostLink.start();
+    return {
+      hostId: id,
+      daemon: hostDaemon,
+      link: hostLink,
+      sdk: hostSdk,
+      patchHome: hostHome,
+      async close(): Promise<void> {
+        await hostLink.close().catch(() => undefined);
+        hostDaemon.shutdown();
+        if (id !== hostId) {
+          rmSync(hostHome, { recursive: true, force: true });
+          rmSync(hostClaudeRoot, { recursive: true, force: true });
+        }
+      },
+    };
+  }
+
   // localIds whose next inbound `chat.input` delivery is swallowed at the
   // host's serverLink (models flap/server-restart loss — see `dropNextInput`).
   const dropNextInputLocalIds = new Set<string>();
-  // Forward-declared so `emit` (built before `link`) can route through it.
-  let link: ServerLink;
-  const emit = (event: WireEvent): void => {
-    link.send(event);
-  };
-
-  const daemon = new Daemon({
-    hostId,
-    metaStore,
-    sdkBackend: sdk,
-    sdkBackendKind: 'mock',
-    oauthAccessToken: 'fake-oauth',
-    historyReader: createHistoryReader({ claudeProjectsRoot: claudeRoot }),
-    emit,
-    logger: silent,
-    generateTitle: wrappedTitle,
-  });
-  daemon.hydrate();
-
-  if (opts.specialThreads) {
-    ensureSpecialThreads({
-      // The special threads live under the host's `~/.patch` (spec/06 § Where
-      // special threads run), not under the project folder — same `patchHome`
-      // the MetaStore is built on, so meta and folders agree.
-      patchHome,
-      metaStore,
-      chatState: daemon.chatState,
-      now: () => Date.now(),
-      logger: silent,
-      permissionModeDefault: daemon.permissionModeDefault(),
-    });
-  }
-
-  const daemonKey = await mintDaemonKey({
-    userPrivateKey: user.privateKey,
-    hostId,
-    label: 'e2e',
-  });
-
-  link = createServerLink({
-    url: `${wsUrl}/ws`,
-    daemonKey,
-    outbox: new Outbox({ path: join(patchHome, 'outbox.jsonl'), logger: silent }),
-    clientVersion: '1',
-    logger: silent,
-    backoffSchedule: opts.hostBackoffMs ?? [25, 50, 100, 200],
-    onAuthed: (send) => {
-      // Mirror index.ts onAuthed: seed the server's ChatRegistry with every
-      // currently-known chat so its `chat.state` gate admits them after a
-      // (re)connect (Group 8 fix, DX-M1).
-      for (const state of daemon.list()) {
-        send({ type: 'chat.spawned', hostId, chatId: state.chatId, folder: state.folder });
-        send({
-          type: 'chat.state',
-          permissionMode: 'bypassPermissions',
-          chatId: state.chatId,
-          activity: state.activity,
-          lastUpdated: state.lastUpdated,
-          pinned: state.pinned,
-          pinnedAt: state.pinnedAt,
-          status: state.status,
-          name: state.name,
-          preview: state.preview,
-          folder: state.folder,
-        });
-      }
-      // …and closes the burst with folders.list, which is what tells the
-      // server this host's chat list is complete (unknown-chat.ts).
-      send({ type: 'folders.list', hostId, roots: [], recent: [] });
-    },
-    onFrame: (event, send) => {
-      // Flap / server-restart loss simulation: swallow the frame before the
-      // host acts on it, so the host never records the localId nor runs the
-      // turn (see `dropNextInput`). One-shot per registered localId.
-      if (event.type === 'chat.input' && dropNextInputLocalIds.has(event.localId)) {
-        dropNextInputLocalIds.delete(event.localId);
-        return;
-      }
-      routeInboundFrame(event, daemon, transcribe, send);
-    },
-    onDisconnected: () => {
-      /* nothing — the server resolves in-flight chats on its own onStatus */
-    },
-  });
-  link.start();
+  const primary = await bootHost(hostId);
+  const { daemon, link, sdk } = primary;
+  const extraHosts: E2EHost[] = [];
 
   const harness: E2EHarness = {
     wsUrl,
@@ -360,9 +406,20 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
     dropNextInput(localId: string): void {
       dropNextInputLocalIds.add(localId);
     },
+    async addHost(id: string): Promise<E2EHost> {
+      registry.setDaemonKey({
+        hostId: id,
+        publicKey: user.publicKey,
+        issuedAt: Math.floor(Date.now() / 1000),
+      });
+      const added = await bootHost(id);
+      extraHosts.push(added);
+      await until(() => built.hostLink.isOnline(id), 5000, `${id} online`);
+      return added;
+    },
     async close(): Promise<void> {
-      await link.close().catch(() => undefined);
-      daemon.shutdown();
+      for (const extra of extraHosts) await extra.close();
+      await primary.close();
       await built.app.close().catch(() => undefined);
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(patchHome, { recursive: true, force: true });
@@ -385,8 +442,19 @@ function routeInboundFrame(
   daemon: Daemon,
   transcribe: (audio: Buffer, format: string) => Promise<string>,
   send: (e: WireEvent) => void,
+  selfHostId: string,
 ): void {
   switch (event.type) {
+    case 'patch.folders_check.request':
+      // spec/11 § Replacing a host — the REAL host handlers.
+      send(answerFoldersCheck(event, selfHostId));
+      return;
+    case 'patch.chat_adopt.request':
+      send(answerChatAdopt(event, daemon, silent, selfHostId));
+      return;
+    case 'chat.committed':
+      daemon.noteCommitted(event.chatId, event.through);
+      return;
     case 'patch.attachment.store_request':
       handleAttachmentStore(event, daemon, send);
       return;

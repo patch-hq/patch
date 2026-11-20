@@ -21,15 +21,71 @@ import { resolveHost } from './hosts.js';
 interface SharedState {
   version: number;
   settings: Record<string, unknown> & {
-    accountStrategy: { claude: string; codex: string };
+    accountStrategy: { claude: string; codex: string; acp?: string };
   };
   secrets: {
     claude: Array<{ id: string; label: string; connected: boolean; email?: string }>;
     codex: Array<{ id: string; label: string; kind: string; connected: boolean; email?: string }>;
     providerKeys: Array<{ id: string; set: boolean; last4?: string }>;
+    acp?: AcpAccountView[];
   };
   hosts: Array<{ hostId: string; appliedVersion?: number; error?: string }>;
   problem?: string;
+}
+
+/** One ACP agent's account, as the server summarises it: never the key. */
+export interface AcpAccountView {
+  id: string;
+  agentId: string;
+  label: string;
+  last4?: string;
+  state?: { state: string; message?: string; until?: number };
+}
+
+type ServerCalls = {
+  post<T>(p: string, b?: unknown): Promise<T>;
+  put<T>(p: string, b?: unknown): Promise<T>;
+};
+
+/**
+ * Sign an ACP agent in with an API key (spec/10 § Signing in): a new account,
+ * or with `accountId` a new key on that account. The server checks the key
+ * before it stores anything and answers with the summary, never the key.
+ */
+export async function acpSignIn(
+  t: ServerCalls,
+  args: { agentId: string; apiKey: string; accountId?: string; label?: string },
+): Promise<SharedState> {
+  const agent = encodeURIComponent(args.agentId);
+  if (args.accountId !== undefined) {
+    return t.put<SharedState>(
+      `/api/accounts/acp/${agent}/${encodeURIComponent(args.accountId)}/key`,
+      { apiKey: args.apiKey },
+    );
+  }
+  return t.post<SharedState>(`/api/accounts/acp/${agent}`, {
+    apiKey: args.apiKey,
+    ...(args.label ? { label: args.label } : {}),
+  });
+}
+
+/** Each ACP account on one line: agent, label, last four, state. */
+export function acpAccountLines(list: readonly AcpAccountView[] | undefined): string[] {
+  if (!list || list.length === 0) return ['  (no accounts)'];
+  return list.map(
+    (a) =>
+      `  ${a.agentId}: ${a.label}${a.last4 ? ` · ends ${a.last4}` : ''}${a.state ? `  [${a.state.state}${a.state.message ? `: ${a.state.message}` : ''}]` : ''}  ${a.id}`,
+  );
+}
+
+/** A key from `--api-key`, else read from stdin so it stays out of the shell history. */
+async function apiKeyFrom(flag: string | undefined): Promise<string> {
+  if (flag !== undefined) return flag;
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const key = (await rl.question('API key: ')).trim();
+  rl.close();
+  if (key === '') throw new Error('no API key given');
+  return key;
 }
 
 interface ChatGPTSignInStarted {
@@ -419,6 +475,94 @@ export function registerSettingsCommands(program: Command): void {
         });
         if (opts.json) emitJson(state);
         else printAccounts(viewOf(state), id);
+      });
+    });
+
+  // ACP agents' accounts (spec/10 § Signing in): an API key per account, held
+  // by the server and sent to every host.
+  const acp = accounts
+    .command('acp')
+    .description('ACP agents (Gemini CLI and others): their API-key accounts');
+
+  acp
+    .command('list', { isDefault: true })
+    .description('Every ACP account: agent, label, last four characters and state')
+    .option('--json', 'JSON output')
+    .action(async (opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).get<SharedState>('/api/settings/shared');
+        if (opts.json) emitJson(state.secrets.acp ?? []);
+        else for (const line of acpAccountLines(state.secrets.acp)) emitText(line);
+      });
+    });
+
+  acp
+    .command('sign-in <agentId>')
+    .description('Sign an ACP agent in with an API key (prompted for when --api-key is not given)')
+    .option('--api-key <k>', 'the key; omit it to type it at a prompt')
+    .option('--account <id>', 'give this account a new key instead of adding one')
+    .option('--label <l>', 'a name for it')
+    .option('--json', 'JSON output')
+    .action(
+      async (
+        agentId: string,
+        opts: CommonOpts & { apiKey?: string; account?: string; label?: string },
+      ) => {
+        await run(opts, async () => {
+          const state = await acpSignIn(server(opts), {
+            agentId,
+            apiKey: await apiKeyFrom(opts.apiKey),
+            ...(opts.account ? { accountId: opts.account } : {}),
+            ...(opts.label ? { label: opts.label } : {}),
+          });
+          if (opts.json) emitJson(state.secrets.acp ?? []);
+          else for (const line of acpAccountLines(state.secrets.acp)) emitText(line);
+        });
+      },
+    );
+
+  acp
+    .command('order <agentId> <accountIds...>')
+    .description("Set one agent's account order: every account, each once, first to last")
+    .option('--json', 'JSON output')
+    .action(async (agentId: string, accountIds: string[], opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).put<SharedState>(
+          `/api/accounts/acp/${encodeURIComponent(agentId)}/order`,
+          { accountIds },
+        );
+        if (opts.json) emitJson(state.secrets.acp ?? []);
+        else for (const line of acpAccountLines(state.secrets.acp)) emitText(line);
+      });
+    });
+
+  acp
+    .command('strategy <strategy>')
+    .description(
+      "How a turn picks among each agent's accounts: priority, round-robin, soonest-reset, least-used",
+    )
+    .option('--json', 'JSON output')
+    .action(async (strategy: string, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).put<SharedState>('/api/accounts/acp/strategy', {
+          strategy,
+        });
+        if (opts.json) emitJson(state.settings.accountStrategy);
+        else emitText(`ACP strategy: ${state.settings.accountStrategy.acp ?? 'priority'}`);
+      });
+    });
+
+  acp
+    .command('remove <agentId> <accountId>')
+    .description('Remove an ACP account from every host')
+    .option('--json', 'JSON output')
+    .action(async (agentId: string, accountId: string, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).delete<SharedState>(
+          `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}`,
+        );
+        if (opts.json) emitJson(state.secrets.acp ?? []);
+        else for (const line of acpAccountLines(state.secrets.acp)) emitText(line);
       });
     });
 

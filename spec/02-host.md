@@ -172,8 +172,9 @@ Loading a chat never blocks a surface, which reads only from the server
 (`01-server.md`).
 
 On connect the host announces the chats it has loaded in full and names every
-other chat's id (`03-wire-protocol.md`), so the server keeps the chats it holds
-for this host and drops only those the host no longer has.
+other chat's id (`03-wire-protocol.md`). The server's record, not this list,
+decides that a chat exists: a chat the host no longer lists stays on the server,
+and goes only when it is deleted or removed.
 
 ### Desktop app and the local host
 
@@ -245,10 +246,23 @@ Two providers have direct adapters because they expose more than ACP does:
 Every ACP agent runs through one provider, `acp`. An agent is configuration,
 not code: the command that starts it speaking ACP on stdio, its arguments, a
 label, which shared provider keys (§ Provider keys) it reads from which
-environment variables, and optionally which of its own session modes matches
-each Patch permission mode. Patch ships Gemini CLI (`gemini --acp`, reading the
-shared `gemini` key as `GEMINI_API_KEY`); the shared `acpAgents` setting adds
-agents or replaces one by id. Its models are `acp/<agent>/<model>`.
+environment variables, the variable an ACP account's API key is passed in
+(`apiKeyEnv`) and the provider-key check that validates such a key
+(`apiKeyCheck`), and optionally which of its own session modes matches each
+Patch permission mode. Patch ships Gemini CLI (`gemini --acp`, taking an
+account's key, else the shared `gemini` key, as `GEMINI_API_KEY`, checked with
+the Gemini key check); the shared `acpAgents` setting adds agents or replaces
+one by id. Its models are `acp/<agent>/<model>`.
+
+An agent's credential is, in order: the key of one of its ACP accounts, which
+the server holds encrypted and sends with every settings snapshot (`10-auth.md`
+§ Backend credentials), chosen per turn by the shared account order and the ACP
+account strategy and skipping an account the agent refused as limited or signed
+out (§ Choosing an account there); a shared provider key mapped to the same
+variable; or the
+agent's own sign-in on that host (Gemini CLI's Google login, for one), which
+Patch neither reads nor carries to other hosts. The host keeps the accounts it
+was last sent in memory and asks the agent again when they change.
 
 - A host offers the agents whose command it has. It asks each one, over
   `initialize` and a `session/new` in a scratch folder that never sends a
@@ -257,8 +271,8 @@ agents or replaces one by id. Its models are `acp/<agent>/<model>`.
   offers `default`). The answer is kept for ten minutes, a failed one for one,
   and asked again when the agent's entry or keys change. Each installed agent is
   a row in Settings → Hosts (`acp:<agent>`) with the state the agent gave:
-  ready, not signed in (add its key under Settings → Providers, or sign in to
-  the agent on that host; there is no sign-in button), or not working, with the
+  ready, not signed in (add an account for it under Settings → AI accounts, or
+  sign in to the agent on that host), or not working, with the
   agent's own words behind Details. A signed-out or broken agent lists no models
   and says why against the `acp` backend in the model picker.
 - A turn is one agent process: `initialize`, the chat's session (new, or the
@@ -959,12 +973,16 @@ and not Secrets (which are injected into chats, `15-design-mobile.md` §
 Settings tab).
 
 Provider keys are shared settings (`01-server.md` § Settings): set once on
-Settings → Providers and used by every host.
+Settings → Providers, held on the server and used by every host. A host never
+sets or deletes a key of its own.
 
-- A key comes from Settings → Providers, or from the host's own environment, read
-  once at boot. A key set from Settings wins over the environment; revoking it
-  lets a host's environment apply again. A key in one host's environment can
-  be adopted from Settings as the shared value.
+- A key comes from the shared settings, or from the host's own environment,
+  read once at boot. The host caches the shared keys from each snapshot in
+  `<patchHome>/keys.json` (mode 0600), replaced whole by the next snapshot, so a
+  host restarted while the server is away starts with the keys it last had. A
+  shared key wins over the environment; revoking it on the server lets a host's
+  environment apply again. A key in one host's environment can be adopted from
+  Settings as the shared value.
 - Everything that uses a key reads it when it opens a session or sends a
   request, so a new snapshot takes effect for the next session with no
   restart. After applying one, each host re-publishes `host.host`, whose
@@ -1098,7 +1116,7 @@ That one field does three things:
 - Account. The child follows the parent's account lock, else the shared account order with its usual failover (`10-auth.md` § Backend credentials). `account` (id or label, as for `patch_spawn`) locks it to one stored account instead; one the machine does not hold is refused. A waited result carries `account`, the label of the account the child's last turn ran on.
 - The parent stays alive for it. While any of its subagents has not settled, the parent counts as still working, like one with a running `patch_watch`: a hidden parent does not archive itself, and an active goal is not evaluated (it re-checks once they have delivered).
 - Durability. Because a subagent is an ordinary chat, a host restart reattaches its in-flight turn exactly as it would any other chat's, and the delivery above fires whenever that turn settles — there is no separate subagent-restart path to get wrong.
-- Invisibility. Every surface that lists, searches, or notifies about chats excludes a chat carrying `meta.subagent` — not in the sidebar, Hidden, Archived, or search, no badges, no notifications, no needs-attention, never marked unread. The ONLY way in is the parent's own transcript: the `patch_agent` call renders as a tool-call row carrying the subagent's live state (running / waiting for the user / done / failed / stopped) and a link to open its transcript read-only (`14-design-web.md` § Main chat panel — Delegate tool row).
+- Invisibility. Every surface that lists, searches, or notifies about chats excludes a chat carrying `meta.subagent` — not in the sidebar, Hidden, Archived, or search, no badges, no notifications, no needs-attention, never marked unread. The ONLY way in is the parent's own transcript: the `patch_agent` call renders as a tool-call row carrying the subagent's live state (running / waiting for the user / done / failed / stopped) and a link to open its transcript read-only (`14-design-web.md` § Main chat panel — Delegate tool row). That transcript is read from the server: the host sends each of the subagent's entries through its outbox wrapped with the parent's id (`host.delegate_entry`, `03-wire-protocol.md` § Host outbox), and the server keeps them in the subagent's own record against its parent, never broadcasting them or giving the subagent an index entry, a status or a place in search. A subagent that existed before the server kept these is sent once through the record import, naming its parent (`01-server.md` § Record import). The host never answers a request for a subagent's transcript.
 
 Permissions follow the parent, not a separate mode: a subagent is stamped with the parent's permission mode at creation, like any spawn. A subagent never raises an approval to the user: if its turn reaches a tool approval — including its own `AskUserQuestion`, which arrives through the identical `canUseTool` gate — the request is denied at once with a message telling it to carry on without the call and say in its final reply what it needed, so the parent (which reads that reply) decides. Nothing is mirrored onto the parent's transcript and no card is shown. A subagent itself has no way to reach the user directly: `patch_notify`, `patch_report`, `patch_call`, `patch_speak`, `patch_ask_human` and `patch_artifact` are disabled for its turns on top of whatever the user has toggled off — talking to the user is the parent's job.
 

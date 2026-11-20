@@ -3,7 +3,9 @@
 // Which agents exist is configuration (`@patch/wire`'s `BUILTIN_ACP_AGENTS`
 // plus the shared `acpAgents` setting). This module answers the host-side
 // questions about them: is the command on this host, what environment does
-// it run with (its credential comes from a shared provider key), and — by
+// it run with (its credential is its first ACP account's key, which the server
+// holds and sends with every settings snapshot, else a shared provider key,
+// else the agent's own sign-in on this host), and — by
 // asking the agent itself over ACP — what it can do, which models it offers
 // and whether it is signed in.
 //
@@ -167,6 +169,11 @@ export function resolveCommand(command: string, pathEnv: string): string | undef
 export interface AcpRegistryOptions {
   /** A shared provider key's value, read at the moment it is used. */
   providerKey(id: ProviderKeyId): string | undefined;
+  /**
+   * The API key of one of the agent's ACP accounts, as the server last sent
+   * them: `accountId`'s, or with none named the account a turn would run on now.
+   */
+  accountKey?(agentId: string, accountId?: string): string | undefined;
   /** The environment agents are started with. */
   baseEnv(): Record<string, string | undefined>;
   /** Where probes run; nothing of the user's is ever opened by one. */
@@ -214,19 +221,27 @@ export class AcpRegistry {
     return this.agents().filter((a) => this.command(a) !== undefined);
   }
 
-  /** The environment the agent runs with: the host's, plus its keys. */
-  env(agent: AcpAgentConfig): Record<string, string | undefined> {
+  /**
+   * The environment the agent runs with: the host's, plus its keys. The
+   * account's key (the turn's own account, else the one a turn would run on)
+   * wins over a provider key mapped to the same variable.
+   */
+  env(agent: AcpAgentConfig, accountId?: string): Record<string, string | undefined> {
     const env = { ...this.o.baseEnv() };
     for (const [name, key] of Object.entries(agent.keys ?? {})) {
       const value = this.o.providerKey(key);
       if (value !== undefined) env[name] = value;
     }
+    const account =
+      agent.apiKeyEnv !== undefined ? this.o.accountKey?.(agent.id, accountId) : undefined;
+    if (account !== undefined) env[agent.apiKeyEnv!] = account;
     return env;
   }
 
   /** Changes whenever what a probe would see changes: the entry or its keys. */
   private probeKey(agent: AcpAgentConfig): string {
     const keys = Object.values(agent.keys ?? {}).map((k) => this.o.providerKey(k) ?? '');
+    keys.push(this.o.accountKey?.(agent.id) ?? '');
     return createHash('sha256')
       .update(JSON.stringify([agent, keys, this.command(agent) ?? null]))
       .digest('hex');
@@ -459,7 +474,7 @@ function probeFailure(err: unknown, exitReason: string | undefined, stderr: stri
 export function describeProbeState(state: AccountState): string {
   switch (state.state) {
     case 'signed_out':
-      return 'not signed in. Add its key under Settings → Providers, or sign in to it on this host.';
+      return 'not signed in. Add an account for it under Settings → AI accounts, or sign in to it on this host.';
     case 'broken':
     case 'out':
       return state.message;

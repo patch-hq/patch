@@ -1212,6 +1212,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ],
     done: true,
   },
+  'host.delegate_entry': {
+    type: 'host.delegate_entry',
+    parentChatId: 'c1',
+    event: { type: 'chat.message', chatId: 'd1', role: 'assistant', content: 'done', seq: 0 },
+  },
   'host.record_import_ack': { type: 'host.record_import_ack', chatId: 'c1' },
   'host.outbox': {
     type: 'host.outbox',
@@ -1248,18 +1253,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     fromHostName: 'Laptop',
     toHostName: 'Server',
     message: 'user: hello',
-  },
-  'patch.chat_history.request': {
-    type: 'patch.chat_history.request',
-    requestId: 'ch1',
-    chatId: 'c1',
-    since: 3,
-  },
-  'patch.chat_history.response': {
-    type: 'patch.chat_history.response',
-    requestId: 'ch1',
-    ok: true,
-    events: [{ type: 'chat.message', chatId: 'c1', role: 'user', content: 'hi', seq: 3 }],
   },
   'patch.skills.request': {
     type: 'patch.skills.request',
@@ -1465,6 +1458,44 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     op: 'import',
     ok: false,
     error: { code: 'folder_not_found', message: '/home/tom/Unite is not a directory' },
+  },
+  'patch.folders_check.request': {
+    type: 'patch.folders_check.request',
+    requestId: 'fc1',
+    hostId: 'host-b',
+    folders: ['/srv/work/a', '/srv/work/b'],
+  },
+  'patch.folders_check.response': {
+    type: 'patch.folders_check.response',
+    requestId: 'fc1',
+    hostId: 'host-b',
+    missing: ['/srv/work/b'],
+  },
+  'patch.chat_adopt.request': {
+    type: 'patch.chat_adopt.request',
+    requestId: 'ca1',
+    hostId: 'host-b',
+    chats: [
+      {
+        chatId: 'c1',
+        folder: '/srv/work/a',
+        name: 'Boiler',
+        model: 'claude-sonnet-5',
+        permissionMode: 'auto',
+        sessionId: 's-1',
+        nextSeq: 42,
+        status: 'active',
+        pinned: false,
+        createdAt: 1,
+      },
+    ],
+  },
+  'patch.chat_adopt.response': {
+    type: 'patch.chat_adopt.response',
+    requestId: 'ca1',
+    hostId: 'host-b',
+    adopted: ['c1'],
+    refused: [{ chatId: 'c2', message: 'meta.json could not be written' }],
   },
   'patch.chat_search.request': {
     type: 'patch.chat_search.request',

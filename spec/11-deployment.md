@@ -265,12 +265,40 @@ Replace with…, which guides it through:
 3. Confirm. The new host checks that every listed folder is present and says
    which are missing; the user fixes them or confirms without them.
 
-On confirming, the server rebinds every chat of the old host to the new one,
-hands it the messages held for the old host, and removes the old host from the
-account. The new host continues each chat from the server's high-water mark
-(`01-server.md` § Responsibilities); a chat whose provider session
-did not come across stays readable and cannot continue with the model's memory
-(`04-chats-and-folders.md` § History).
+Where the session files are, to carry unchanged to the same path on the new
+machine: Claude Code keeps each chat's in `~/.patch/chats/<chat id>/claude`;
+Codex keeps them in the `sessions` folder of each account's home,
+`~/.patch/openai/<account>/sessions`. Patch never edits them. A host does not
+report its own home, so the guide gives these paths under the default home and
+says so; a host run with `PATCH_HOME` keeps them under that instead.
+
+On confirming, the server hands the new host every chat of the old one, each
+with its folder, model, permission mode and the provider session the record
+last named. The new host writes each chat's `meta.json` (a chat whose directory
+came across too keeps its own), and continues it from the server's high-water
+mark (`01-server.md` § Responsibilities), saved at once so a restart keeps it.
+The server then rebinds the chats to the new host, repoints every job whose
+action or gate runs on the old host to the new one (the guide lists them), hands
+it the messages held for the old host, and removes the old host from the
+account. A chat in a folder the
+user confirmed without moves too, and is marked folder-missing until the folder
+is there. A chat whose provider session did not come across stays readable and
+starts a fresh session at its next turn, saying so (`04-chats-and-folders.md` §
+Resume).
+
+The Manager's home cannot be replaced this way: its home is changed first
+(`06-threads-manager-speakers.md` § Changing home). If the new host cannot take
+a chat, the server says which and why, the chats it took stay with it, and the
+old host and its jobs stay until the rest move; asking again moves only what is
+left.
+
+`GET /api/hosts/:hostId/replace?with=<newHostId>` returns the plan (the chat
+count, each folder with whether the new host has it, the missing ones, the
+session stores with the home they assume, and the jobs that move). `POST /api/hosts/:hostId/replace` `{with, withoutFolders?}`
+replaces it, refusing `409 folders_missing` while a missing folder is not in
+`withoutFolders`, and `502 chats_not_taken` when the new host refused a chat. The
+new host must be online (`503 host_offline`). CLI: `patch hosts replace --host
+<old> --with <new> [--plan] [--without-folder <path>]...`.
 
 ## Env
 

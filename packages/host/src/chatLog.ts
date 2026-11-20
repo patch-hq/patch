@@ -715,6 +715,11 @@ export class ChatLog {
     if (failures.length > 0) throw new Error(`history flush failed — ${failures.join('; ')}`);
   }
 
+  /** Whether this log is holding anything for the chat (an index or a descriptor). */
+  isOpen(chatId: string): boolean {
+    return this.chats.has(chatId);
+  }
+
   /** Flush and release one chat's descriptor (the chat is being removed). */
   close(chatId: string): void {
     const state = this.chats.get(chatId);

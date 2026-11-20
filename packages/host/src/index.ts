@@ -8,6 +8,7 @@ import { ServerEventsClient } from './serverEventsClient.js';
 import { HARNESS_TRAITS } from './harnesses.js';
 import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
 import { ACP_BACKEND_ID, AcpRegistry } from './acpRegistry.js';
+import { AcpAccounts, type AcpRoute } from './acpAccounts.js';
 import { AcpBackend } from './acpBackend.js';
 import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
@@ -79,6 +80,7 @@ import {
   type SettingsAdoptRequestEvent,
   type SettingsAdoptResponseEvent,
   type SettingsSnapshotEvent,
+  type AccountStrategy,
   type SharedSecrets,
   type SharedSettings,
   type SharedSettingsPatch,
@@ -832,17 +834,36 @@ async function startHost(
   const localHistory = new CodexHistory(retiredLocalHistoryDir(config.patchHome), 'local');
   // ACP agents (spec/02 § Provider adapters): which agents exist is the shared
   // `acpAgents` setting over the built-in list; this host offers those whose
-  // command it has. Their credential is a shared provider key.
+  // command it has. Their credential is the agent's first ACP account, which
+  // the server sends with every snapshot (spec/10 § Backend credentials), else
+  // a shared provider key, else the agent's own sign-in on this host.
   let onAcpChange: () => void = () => undefined;
+  // Which ACP account a turn runs on: the shared order and strategy, skipping
+  // an account its agent refused as limited or signed out (spec/10 § Limits).
+  const acpAccounts = new AcpAccounts();
+  /** The shared `accountStrategy.acp`, kept here as each snapshot is applied. */
+  let acpStrategy: AccountStrategy = 'priority';
+  const acpRoute = (): AcpRoute => ({ strategy: acpStrategy });
   const acpRegistry = new AcpRegistry({
     providerKey: (id) => providerKeys.get(id),
+    accountKey: (agentId, accountId) =>
+      accountId !== undefined
+        ? acpAccounts.get(accountId)?.apiKey
+        : acpAccounts.resolve(agentId, acpRoute())?.apiKey,
     baseEnv: () => ({ ...process.env }),
     scratchDir: join(config.patchHome, 'acp-probe'),
     clientVersion: VERSION,
     onChange: () => onAcpChange(),
   });
   const acpHistory = new CodexHistory(join(config.patchHome, 'acp-history'), 'acp');
-  const acpBackend = new AcpBackend(acpRegistry, acpHistory, VERSION);
+  const acpBackend = new AcpBackend(acpRegistry, acpHistory, VERSION, (accountId) => {
+    acpAccounts.markSignedOut(accountId);
+    logger.warn(
+      { accountId },
+      'ACP account refused as signed out — skipped until it has a new key',
+    );
+    onAcpChange();
+  });
   const routedBackend: SdkBackend = {
     run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
   };
@@ -2403,6 +2424,7 @@ async function startHost(
       }
     }
     accountStrategy = shared.accountStrategy;
+    acpStrategy = shared.accountStrategy.acp ?? 'priority';
   };
 
   /** The last snapshot's Claude accounts, to tell a refresh on this host from the server's. */
@@ -2448,6 +2470,9 @@ async function startHost(
     // Before the settings, which apply the endpoints the keys belong to.
     await part('model endpoint keys', () => {
       endpointKeys = snapshot.secrets.endpointKeys;
+    });
+    await part('ACP accounts', () => {
+      if (acpAccounts.apply(snapshot.secrets.acp ?? [])) onAcpChange();
     });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
     await part('Claude accounts', () => {
@@ -2703,6 +2728,9 @@ async function startHost(
   // The one-off send of what the server's record lacks (spec/01 § Chat record).
   // Built once the chats are loaded, below; started by a server that takes it.
   let recordImport: RecordImport | undefined;
+  // The same one-off send for `patch_agent` subagents' records, each kept
+  // against its parent, to a server that keeps them (`delegateRecord`).
+  let delegateRecordImport: RecordImport | undefined;
   // Every cross-chat tool call, for the account's tool log (Settings →
   // Activity, spec/06 § Cross-chat toolset): kept on this host until the
   // server on the link keeps the log (`serverReads`), then sent through the
@@ -2823,6 +2851,7 @@ async function startHost(
       ) {
         recordImport?.start();
       }
+      if (greeting.delegateRecord === true) delegateRecordImport?.start();
     },
     onFrame: async (event, sender) => {
       // Host addressing, checked once for the whole inbound stream: ANY frame
@@ -2863,6 +2892,7 @@ async function startHost(
       }
       if (event.type === 'host.record_import_ack') {
         recordImport?.onAck(event.chatId);
+        delegateRecordImport?.onAck(event.chatId);
         return;
       }
       if (event.type === 'chat.committed') {
@@ -3023,10 +3053,6 @@ async function startHost(
         );
         return;
       }
-      if (event.type === 'patch.chat_history.request') {
-        handleChatHistoryRequest(event, daemon, sender, logger);
-        return;
-      }
       if (event.type === 'patch.skills.request') {
         void handleSkillsRequest(event, sender, logger);
         return;
@@ -3141,6 +3167,18 @@ async function startHost(
       if (event.type === 'patch.chat_move.request') {
         // spec/04 § Moving to another host — retire an old moved copy.
         handleChatMoveRequest(event, daemon, sender, logger, selfHostId);
+        return;
+      }
+      if (event.type === 'patch.folders_check.request') {
+        // spec/11 § Replacing a host — which of the old host's folders are here.
+        if (!isForThisHost(event.hostId, event.type)) return;
+        sender(answerFoldersCheck(event, selfHostId));
+        return;
+      }
+      if (event.type === 'patch.chat_adopt.request') {
+        // spec/11 § Replacing a host — take over the old host's chats.
+        if (!isForThisHost(event.hostId, event.type)) return;
+        sender(answerChatAdopt(event, daemon, logger, selfHostId));
         return;
       }
       if (event.type === 'patch.host_files.request') {
@@ -4020,6 +4058,7 @@ async function startHost(
     onDisconnected: () => {
       linkOnline = false;
       recordImport?.stop();
+      delegateRecordImport?.stop();
       serverEventsClient.endAll('host→server link dropped');
       artifactPublisher.failAll(
         'artifact publish: host→server link dropped before the server answered',
@@ -4662,7 +4701,7 @@ async function startHost(
     // is not installed, or one the agent itself last said was signed out.
     acp: {
       run: (opts) => acpBackend.run(opts),
-      resolveCredential: async (model) => {
+      resolveCredential: async (model, turn) => {
         const agentId = parseAcpModel(model)?.agentId;
         const agent = agentId !== undefined ? acpRegistry.agent(agentId) : undefined;
         if (!agent)
@@ -4672,12 +4711,24 @@ async function startHost(
           };
         if (!acpRegistry.command(agent))
           return { ok: false, reason: `${agent.label} is not installed on this host.` };
-        return { ok: true, accessToken: '' };
+        // An agent with accounts runs on one; one without runs on its provider
+        // key or its own sign-in.
+        const account =
+          agent.apiKeyEnv !== undefined
+            ? acpAccounts.resolve(agent.id, acpRoute(), turn !== undefined)
+            : undefined;
+        return { ok: true, accessToken: '', ...(account ? { accountId: account.id } : {}) };
       },
-      heldAccounts: () => [],
-      accountLabel: () => undefined,
-      accountSpent: () => ({ spent: false }),
-      nextAccountAfterExhausted: () => undefined,
+      heldAccounts: () =>
+        acpRegistry
+          .agents()
+          .flatMap((a) => acpAccounts.forAgent(a.id).map((x) => ({ id: x.id, label: x.label }))),
+      accountLabel: (accountId) => acpAccounts.get(accountId)?.label,
+      accountSpent: (accountId) => ({ spent: acpAccounts.isSkipped(accountId) }),
+      // The agent refused this account with a limit: the turn runs again on the
+      // next of the agent's accounts that has not been refused, if any.
+      nextAccountAfterExhausted: (_chatId, id, message) =>
+        id !== undefined ? acpAccounts.markLimited(id, message, acpRoute()) : undefined,
       accountRouting: () => undefined,
     },
   };
@@ -5211,6 +5262,27 @@ async function startHost(
         throw err;
       }
     },
+    send: (event) => link.send(event),
+  });
+  delegateRecordImport = new RecordImport({
+    path: join(config.patchHome, 'delegate-record-import.json'),
+    logger,
+    // Every subagent on the host, loaded or not: one that finished long ago
+    // still needs its transcript readable from the server. Read from metas,
+    // so listing them loads none.
+    listChats: () => daemon.subagentIds(),
+    // Read from disk without loading the subagent (spec/02 § Chat loading).
+    recordOf: (chatId) => {
+      try {
+        return daemon.delegateRecordForImport(chatId);
+      } catch (err) {
+        if (err instanceof ChatNotFoundError) return null;
+        throw err;
+      }
+    },
+    parentOf: (chatId) => daemon.delegateParentOf(chatId),
+    // Paced, so a few hundred old subagents do not land in one burst at startup.
+    pauseMs: 250,
     send: (event) => link.send(event),
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
@@ -7828,6 +7900,57 @@ export async function handleDocExportRequest(
  * before linked chats took over (spec/04 § Moving to another host). Every
  * outcome is answered, so a refusal comes back as a refusal, not as silence.
  */
+/** spec/11 § Replacing a host: the asked folders that are not a directory here. */
+export function answerFoldersCheck(
+  event: import('@patch/wire').PatchFoldersCheckRequestEvent,
+  hostId: string,
+): import('@patch/wire').PatchFoldersCheckResponseEvent {
+  const missing = event.folders.filter((folder) => {
+    try {
+      return !statSync(folder).isDirectory();
+    } catch {
+      return true;
+    }
+  });
+  return { type: 'patch.folders_check.response', requestId: event.requestId, hostId, missing };
+}
+
+/**
+ * spec/11 § Replacing a host: take over each chat, continuing from the server's
+ * high-water mark. One chat that cannot be taken is named with why; the rest
+ * still come.
+ */
+export function answerChatAdopt(
+  event: import('@patch/wire').PatchChatAdoptRequestEvent,
+  daemon: Daemon,
+  logger: Logger,
+  hostId: string,
+): import('@patch/wire').PatchChatAdoptResponseEvent {
+  const adopted: string[] = [];
+  const refused: Array<{ chatId: string; message: string }> = [];
+  for (const chat of event.chats) {
+    try {
+      daemon.adoptChat(chat);
+      adopted.push(chat.chatId);
+    } catch (err) {
+      const message = (err as Error).message;
+      logger.error({ chatId: chat.chatId, err: message }, 'replace host: chat not taken over');
+      refused.push({ chatId: chat.chatId, message });
+    }
+  }
+  logger.info(
+    { adopted: adopted.length, refused: refused.length },
+    'replace host: chats taken over',
+  );
+  return {
+    type: 'patch.chat_adopt.response',
+    requestId: event.requestId,
+    hostId,
+    adopted,
+    refused,
+  };
+}
+
 export function handleChatMoveRequest(
   event: import('@patch/wire').PatchChatMoveRequestEvent,
   daemon: Daemon,
@@ -7865,70 +7988,6 @@ export function handleChatMoveRequest(
     const message = (err as Error).message;
     logger.warn({ op: event.op, chatId: event.chatId, code, err: message }, 'chat move refused');
     sender({ ...base, ok: false, error: { code, message } });
-  }
-}
-
-/**
- * Server asked for a chat's persisted history (REST `GET /api/chats/:id/
- * history?since=<seq>`). The host owns Claude Code's JSONL, so it reads the
- * slice via the same HistoryReader that backs `patch_history` and replies
- * inline. `since` maps to `fromSeq` (events with seq >= since). Only
- * user/assistant `chat.message` turns are reconstructed from the JSONL — tool
- * calls/results are live-stream only (see history.ts). `branchId`, when given,
- * reads that branch's own track (spec/04 § Branching) — this is how the
- * side threads panel pulls a tab's content (spec/14), since a side branch's
- * messages are not broadcast live over the chat's WS stream.
- */
-export function handleChatHistoryRequest(
-  event: import('@patch/wire').PatchChatHistoryRequestEvent,
-  daemon: Daemon,
-  sender: (e: WireEvent) => void,
-  logger: Logger,
-): void {
-  try {
-    if (
-      event.requireParent !== undefined &&
-      daemon.delegateParentOf(event.chatId) !== event.requireParent
-    ) {
-      sender({
-        type: 'patch.chat_history.response',
-        requestId: event.requestId,
-        ok: false,
-        error: {
-          code: 'not_a_delegate',
-          message: `${event.chatId} is not a delegate of ${event.requireParent}`,
-        },
-      });
-      return;
-    }
-    const slice = daemon.readHistory({
-      chatId: event.chatId,
-      ...(event.since !== undefined ? { fromSeq: event.since } : {}),
-      ...(event.limit !== undefined ? { limit: event.limit } : {}),
-      ...(event.branchId !== undefined ? { branchId: event.branchId } : {}),
-    });
-    const events = slice.events.filter(
-      (e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message',
-    );
-    sender({
-      type: 'patch.chat_history.response',
-      requestId: event.requestId,
-      ok: true,
-      events,
-      ...(slice.nextFromSeq !== undefined ? { nextFromSeq: slice.nextFromSeq } : {}),
-    });
-  } catch (err) {
-    const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'internal';
-    logger.warn(
-      { err: (err as Error).message, chatId: event.chatId },
-      'patch.chat_history.request: read failed',
-    );
-    sender({
-      type: 'patch.chat_history.response',
-      requestId: event.requestId,
-      ok: false,
-      error: { code, message: (err as Error).message },
-    });
   }
 }
 

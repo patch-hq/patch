@@ -1,6 +1,7 @@
-// The host's provider-key store (spec/02 § Provider keys): storage on the
-// host only (0600), UI-set wins over the environment, changes apply live, and
-// no value ever leaves except through `get()`.
+// The host's provider-key store (spec/02 § Provider keys): a cache of the
+// shared keys the server sends (0600), the shared key wins over the
+// environment, changes apply live, and no value ever leaves except through
+// `get()`. Nothing on the host sets or deletes a key of its own.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -29,8 +30,8 @@ function store(
 }
 
 describe('ProviderKeyStore — storage', () => {
-  it('writes keys.json under PATCH_HOME with mode 0600', () => {
-    store().set('gemini', UI_GEMINI);
+  it('caches the shared keys in keys.json under PATCH_HOME with mode 0600', () => {
+    store().replaceAll({ gemini: UI_GEMINI });
     const path = join(home, 'keys.json');
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
@@ -39,13 +40,13 @@ describe('ProviderKeyStore — storage', () => {
     });
   });
 
-  it('survives a restart: a new store reads what the last one wrote', () => {
-    store().set('groq', UI_GROQ);
+  it('survives a restart with the server away: a new store reads what the last one cached', () => {
+    store().replaceAll({ groq: UI_GROQ });
     expect(store().get('groq')).toBe(UI_GROQ);
   });
 
   it('narrows a file someone widened back to 0600 on load', () => {
-    store().set('gemini', UI_GEMINI);
+    store().replaceAll({ gemini: UI_GEMINI });
     const path = join(home, 'keys.json');
     chmodSync(path, 0o644);
     store();
@@ -65,31 +66,21 @@ describe('ProviderKeyStore — storage', () => {
     );
     expect(() => store()).toThrow(/not a valid provider-key file/);
   });
-
-  it('trims a pasted value, and refuses empty, short or spaced ones', () => {
-    const s = store();
-    s.set('gemini', `  ${UI_GEMINI}\n`);
-    expect(s.get('gemini')).toBe(UI_GEMINI);
-    for (const bad of ['', '   ', 'short', 'has a space in the middle-000000']) {
-      expect(() => s.set('openai', bad)).toThrow(ProviderKeyError);
-    }
-    expect(s.get('openai')).toBeUndefined();
-  });
 });
 
 describe('ProviderKeyStore — precedence', () => {
-  it('a UI-set key wins over the environment, and revoking it restores the environment', () => {
+  it('a shared key wins over the environment, and one dropped from the snapshot restores it', () => {
     const s = store({ gemini: ENV_GEMINI });
     expect(s.get('gemini')).toBe(ENV_GEMINI);
-    s.set('gemini', UI_GEMINI);
+    s.replaceAll({ gemini: UI_GEMINI });
     expect(s.get('gemini')).toBe(UI_GEMINI);
-    s.revoke('gemini');
+    s.replaceAll({});
     expect(s.get('gemini')).toBe(ENV_GEMINI);
   });
 
   it('describe() states the source and last four, and nothing else', () => {
     const s = store({ gemini: ENV_GEMINI, groq: 'env-groq-fake-value-000000-G1G2' });
-    s.set('gemini', UI_GEMINI);
+    s.replaceAll({ gemini: UI_GEMINI });
     const described = s.describe();
     expect(described).toEqual([
       { id: 'gemini', source: 'ui', last4: 'WXYZ', envSet: true },
@@ -105,34 +96,6 @@ describe('ProviderKeyStore — precedence', () => {
   });
 });
 
-describe('ProviderKeyStore — revoke', () => {
-  it('an env-only key cannot be revoked', () => {
-    const s = store({ openai: 'env-openai-fake-value-00000-OAI1' });
-    expect(() => s.revoke('openai')).toThrow(expect.objectContaining({ code: 'env_only' }));
-  });
-
-  it('a key that is not set cannot be revoked', () => {
-    expect(() => store().revoke('groq')).toThrow(expect.objectContaining({ code: 'not_set' }));
-  });
-
-  it('refuses to revoke the only key the host needs to start', () => {
-    const s = store({}, { requiredToStart: { groq: 'This host transcribes with Groq' } });
-    s.set('groq', UI_GROQ);
-    expect(() => s.revoke('groq')).toThrow(expect.objectContaining({ code: 'required' }));
-    expect(s.get('groq')).toBe(UI_GROQ);
-  });
-
-  it('allows it when the environment still has one to fall back to', () => {
-    const s = store(
-      { groq: 'env-groq-fake-value-000000-G1G2' },
-      { requiredToStart: { groq: 'This host transcribes with Groq' } },
-    );
-    s.set('groq', UI_GROQ);
-    s.revoke('groq');
-    expect(s.describe().find((k) => k.id === 'groq')?.source).toBe('env');
-  });
-});
-
 describe('ProviderKeyStore — live change', () => {
   it('tells listeners after each change, once the file holds it', () => {
     const s = store();
@@ -140,17 +103,16 @@ describe('ProviderKeyStore — live change', () => {
     s.onChange(() => {
       seen.push(JSON.parse(readFileSync(join(home, 'keys.json'), 'utf8')).keys.gemini);
     });
-    s.set('gemini', UI_GEMINI);
-    s.revoke('gemini');
+    s.replaceAll({ gemini: UI_GEMINI });
+    s.replaceAll({});
     expect(seen).toEqual([UI_GEMINI, undefined]);
   });
 
   it('a refused change tells nobody', () => {
-    const s = store();
+    const s = store({}, { requiredToStart: { groq: 'This host transcribes with Groq' } });
     let calls = 0;
     s.onChange(() => calls++);
-    expect(() => s.revoke('gemini')).toThrow();
-    expect(() => s.set('gemini', 'x')).toThrow();
+    expect(() => s.replaceAll({})).toThrow();
     expect(calls).toBe(0);
   });
 });
@@ -158,7 +120,7 @@ describe('ProviderKeyStore — live change', () => {
 describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', () => {
   it('replaces every Settings-set key with the snapshot’s, and tells listeners once', () => {
     const s = store();
-    s.set('gemini', UI_GEMINI);
+    s.replaceAll({ gemini: UI_GEMINI });
     let told = 0;
     s.onChange(() => (told += 1));
     s.replaceAll({ groq: UI_GROQ });
@@ -173,7 +135,9 @@ describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', 
 
   it('refuses a snapshot without the key this host needs to start, changing nothing', () => {
     const s = store({}, { requiredToStart: { groq: 'This host transcribes with Groq' } });
-    s.set('groq', UI_GROQ);
+    s.setRequiredToStart({});
+    s.replaceAll({ groq: UI_GROQ });
+    s.setRequiredToStart({ groq: 'This host transcribes with Groq' });
     expect(() => s.replaceAll({})).toThrow(ProviderKeyError);
     expect(s.get('groq')).toBe(UI_GROQ);
   });
@@ -189,7 +153,7 @@ describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', 
 
   it('hands up every key it holds for the import, Settings-set ahead of the environment’s', () => {
     const s = store({ gemini: ENV_GEMINI });
-    s.set('groq', UI_GROQ);
+    s.replaceAll({ groq: UI_GROQ });
     expect(s.settingsKeys()).toEqual({ gemini: ENV_GEMINI, groq: UI_GROQ });
     expect(s.envValue('gemini')).toBe(ENV_GEMINI);
     expect(s.envValue('openai')).toBeUndefined();
@@ -207,11 +171,11 @@ describe('ProviderKeyStore — blank environment values', () => {
     expect(gemini).toEqual({ id: 'gemini', source: 'none', envSet: false });
   });
 
-  it('lets a UI-set key apply, and revoke report not_set, when the env var is blank', () => {
+  it('lets a shared key apply when the env var is blank', () => {
     const s = store({ gemini: '' });
-    expect(() => s.revoke('gemini')).toThrowError(expect.objectContaining({ code: 'not_set' }));
-    s.set('gemini', UI_GEMINI);
-    s.revoke('gemini');
+    s.replaceAll({ gemini: UI_GEMINI });
+    expect(s.get('gemini')).toBe(UI_GEMINI);
+    s.replaceAll({});
     expect(s.get('gemini')).toBeUndefined();
   });
 });

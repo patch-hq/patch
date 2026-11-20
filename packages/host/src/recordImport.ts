@@ -40,6 +40,11 @@ export interface RecordImportOptions {
    */
   recordOf: (chatId: string) => WireEvent[] | null;
   send: (event: WireEvent) => void;
+  /**
+   * The chat each listed chat belongs to, for an import of `patch_agent`
+   * subagents: sent as `parentChatId` so the server keeps the record against it.
+   */
+  parentOf?: (chatId: string) => string | undefined;
   fs?: Pick<
     typeof nodeFs,
     'existsSync' | 'readFileSync' | 'writeFileSync' | 'renameSync' | 'mkdirSync'
@@ -47,6 +52,11 @@ export interface RecordImportOptions {
   ackTimeoutMs?: number;
   /** Yields between chats; a test passes a synchronous one. */
   defer?: (fn: () => void) => void;
+  /**
+   * How long to wait between chats, so a pass over many chats at startup does
+   * not spike memory or the link. Ignored when `defer` is given.
+   */
+  pauseMs?: number;
 }
 
 /** Split a chat's entries into frames no bigger than `RECORD_FRAME_BYTES`. */
@@ -118,7 +128,16 @@ export class RecordImport {
   }
 
   private schedule(): void {
-    const defer = this.opts.defer ?? ((fn: () => void) => setImmediate(fn));
+    const pause = this.opts.pauseMs ?? 0;
+    const defer =
+      this.opts.defer ??
+      ((fn: () => void) => {
+        if (pause <= 0) {
+          setImmediate(fn);
+          return;
+        }
+        setTimeout(fn, pause).unref();
+      });
     defer(() => this.next());
   }
 
@@ -164,10 +183,12 @@ export class RecordImport {
     }, this.opts.ackTimeoutMs ?? RECORD_IMPORT_ACK_TIMEOUT_MS);
     timer.unref();
     this.waiting = { chatId, timer };
+    const parentChatId = this.opts.parentOf?.(chatId);
     chunks.forEach((chunk, i) =>
       this.opts.send({
         type: 'host.record_import',
         chatId,
+        ...(parentChatId !== undefined ? { parentChatId } : {}),
         events: chunk,
         done: i === chunks.length - 1,
       }),

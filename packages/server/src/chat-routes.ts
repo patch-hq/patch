@@ -707,24 +707,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // the host is never asked. Unknown chat → 404. `branchId` reads that
   // branch's own track (spec/04 § Branching) instead of the active one —
   // this is how the side threads panel (spec/14) pulls a tab's content, since
-  // a side branch's messages are not broadcast live over the chat's WS. The
-  // delegate route below still asks the host: a subagent is never on the wire.
-  const HISTORY_REQUEST_TIMEOUT_MS = 5_000;
-  const historyPending = new Map<
-    string,
-    {
-      resolve: (ev: Extract<WireEvent, { type: 'patch.chat_history.response' }>) => void;
-      timeout: NodeJS.Timeout;
-    }
-  >();
-  deps.hostLink.onEvent((event: WireEvent) => {
-    if (event.type !== 'patch.chat_history.response') return;
-    const w = historyPending.get(event.requestId);
-    if (!w) return;
-    historyPending.delete(event.requestId);
-    clearTimeout(w.timeout);
-    w.resolve(event);
-  });
+  // a side branch's messages are not broadcast live over the chat's WS.
   app.get<{
     Params: { id: string };
     Querystring: { since?: string; limit?: string; branchId?: string };
@@ -791,37 +774,27 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   });
 
   // ---- GET /api/chats/:parentId/delegates/:id/history ----
-  // The parent tool row's "open read-only transcript" (spec/14 § Main chat
-  // panel — Delegate tool row). A subagent chat is never in `chatRegistry`
-  // (spec/02 § Native subagent dispatch), so the ordinary route above can't
-  // be reused as-is: this one gates on the PARENT being a real, known chat
-  // instead, and carries `requireParent` so the host itself refuses to read
-  // back anything that isn't actually that parent's own delegate.
+  // The parent tool row's read-only transcript (spec/14 § Main chat panel —
+  // Delegate tool row). A subagent is never in `chatRegistry` (spec/02 §
+  // Native subagent dispatch), so this gates on the PARENT being a known chat
+  // and on the record naming it as the subagent's parent. Answered from the
+  // record alone, whether or not the parent's host is online. Its messages
+  // only, oldest first, `since` the first seq wanted.
+  const DELEGATE_PAGE = 50;
   app.get<{ Params: { parentId: string; id: string }; Querystring: { since?: string } }>(
     '/api/chats/:parentId/delegates/:id/history',
     async (req, reply) => {
-      let auth;
       try {
-        auth = await requireAuth(req, deps.registry);
+        await requireAuth(req, deps.registry);
       } catch (e) {
         return reply
           .code((e as Error & { statusCode?: number }).statusCode ?? 401)
           .send({ error: (e as Error).message });
       }
-      const parent = deps.chatRegistry.get(req.params.parentId);
-      if (!parent) {
+      if (!deps.chatRegistry.get(req.params.parentId)) {
         return sendUnknownChat(reply, req.params.parentId);
       }
-      // The subagent lives on the host that owns its parent; ask that host only.
-      const parentHostId = parent.hostId;
-      if (parentHostId === undefined || !deps.hostLink.isOnline(parentHostId)) {
-        deps.logger.warn(
-          { parentId: req.params.parentId, delegateId: req.params.id, hostId: parentHostId },
-          'delegate history: owning host is not online',
-        );
-        return reply.code(503).send({ error: 'host_offline', hostId: parentHostId });
-      }
-      let since: number | undefined;
+      let since = 0;
       if (req.query?.since !== undefined && req.query.since !== '') {
         const n = Number(req.query.since);
         if (!Number.isInteger(n) || n < 0) {
@@ -831,47 +804,28 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         }
         since = n;
       }
-      const requestId = deps.idGenerator();
-      const result = await new Promise<
-        Extract<WireEvent, { type: 'patch.chat_history.response' }> | 'timeout'
-      >((resolveP) => {
-        const timeout = setTimeout(() => {
-          historyPending.delete(requestId);
-          resolveP('timeout');
-        }, HISTORY_REQUEST_TIMEOUT_MS);
-        historyPending.set(requestId, { resolve: resolveP, timeout });
-        deps.hostLink.sendTo(parentHostId, auth.surfaceId, {
-          type: 'patch.chat_history.request',
-          requestId,
-          chatId: req.params.id,
-          requireParent: req.params.parentId,
-          ...(since !== undefined ? { since } : {}),
-        });
-      });
-      const logCtx = {
-        parentId: req.params.parentId,
-        delegateId: req.params.id,
-        hostId: parentHostId,
-      };
-      if (result === 'timeout') {
-        deps.logger.warn(logCtx, 'delegate history: host timed out');
-        return reply.code(504).send({ error: 'daemon_timeout' });
-      }
-      if (!result.ok) {
-        const code = result.error?.code ?? 'internal';
-        deps.logger.warn(
-          { ...logCtx, code, message: result.error?.message },
-          'delegate history: host refused',
+      const store = deps.chatLogStore;
+      if (!store) {
+        deps.logger.error(
+          { chatId: req.params.id },
+          'delegate history: this server keeps no record',
         );
-        const status = code === 'chat_not_found' || code === 'not_a_delegate' ? 404 : 502;
-        return reply
-          .code(status)
-          .send({ error: code, message: result.error?.message ?? 'history error' });
+        return reply.code(503).send({ error: 'no_record' });
       }
-      return reply.code(200).send({
-        events: result.events ?? [],
-        ...(result.nextFromSeq !== undefined ? { nextFromSeq: result.nextFromSeq } : {}),
-      });
+      if (store.parentOf(req.params.id) !== req.params.parentId) {
+        return reply.code(404).send({
+          error: 'not_a_delegate',
+          message: `${req.params.id} is not a delegate of ${req.params.parentId}`,
+        });
+      }
+      const messages = store
+        .read(req.params.id, since - 1)
+        .filter(
+          (e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message',
+        );
+      const events = messages.slice(0, DELEGATE_PAGE);
+      if (messages.length <= DELEGATE_PAGE) return reply.code(200).send({ events });
+      return reply.code(200).send({ events, nextFromSeq: events[events.length - 1]!.seq + 1 });
     },
   );
 

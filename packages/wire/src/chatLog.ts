@@ -232,10 +232,14 @@ export function isOutboxEvent(event: { type: string }): boolean {
 }
 
 /**
- * Host-wide facts the server keeps that belong to no chat, sent through the
- * outbox so a dropped link or a restart loses none of them.
+ * What the server keeps that is not an entry of a listed chat — host-wide facts,
+ * and a subagent's entries wrapped with their parent — sent through the outbox
+ * so a dropped link or a restart loses none of them.
  */
-export const HOST_OUTBOX_EVENT_TYPES: ReadonlySet<string> = new Set(['patch.tool_log.entry']);
+export const HOST_OUTBOX_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'patch.tool_log.entry',
+  'host.delegate_entry',
+]);
 
 /** The turn boundaries a host reports (spec/01 § Chat record). */
 export const TURN_BOUNDARY_TYPES: ReadonlySet<string> = new Set([

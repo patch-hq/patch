@@ -41,6 +41,7 @@ patch hosts claude-settings [--host H]                    # that host's Claude C
 patch hosts claude-settings set <file> [--host H]         # replace that host's settings.json from a file
 patch hosts memory remove <project> <file> [--host H]     # delete one Claude Code memory entry
 patch hosts remove --host H               # revoke a host (confirmed; names its chat count). The Manager's home is refused while another host remains: move the home first. Not available from a host (revocation is not relayable): it fails with a pointer to Settings → Hosts → Remove
+patch hosts replace --host OLD --with NEW # a new host takes over every chat of OLD, then OLD is removed (11-deployment.md § Replacing a host). --plan shows the folders and session stores to carry and which folders NEW lacks; --without-folder PATH (repeatable) goes ahead without one
 patch manager home                        # the Manager's home host (06-threads-manager-speakers.md § Changing home)
 patch manager home --set H [--message M | --no-message] [--yes]   # move it: shows the drafted handover message and asks y/N; --yes confirms without asking; without a terminal or --yes (or with --json) it only previews
 
@@ -58,6 +59,11 @@ patch accounts disconnect <backend> <accountId>        # confirmed; takes it out
 patch accounts order <backend> <accountId>...
 patch accounts strategy <backend> <strategy>          # priority, round-robin, soonest-reset or least-used
 patch accounts adopt <backend> [--host H]              # store that host's own login as a shared account
+patch accounts acp                                     # ACP agents' accounts: agent, label, last four, state
+patch accounts acp sign-in <agent> [--api-key K] [--account A] [--label L]  # an API key, prompted for when not given (10-auth.md § Signing in)
+patch accounts acp order <agent> <accountId>...       # one agent's accounts, first to last
+patch accounts acp strategy <strategy>                # how a turn picks among each agent's accounts
+patch accounts acp remove <agent> <accountId>
 patch keys                                # provider keys: source and last four
 patch keys set <keyId> [--host H to adopt from its environment]
 patch keys revoke <keyId>                 # confirmed
@@ -181,9 +187,9 @@ through the server rather than the local socket.
 
 A command aimed at this host reaches its host over that host's local
 socket, which carries one endpoint per host-scoped control for that reason
-(`02-host.md` § Control IPC). Three commands go to the server even when they
+(`02-host.md` § Control IPC). Four commands go to the server even when they
 name this host, because the server owns what they change rather than the
-host: `hosts add`, `hosts rename` and `hosts remove`.
+host: `hosts add`, `hosts rename`, `hosts remove` and `hosts replace`.
 
 `--host` accepts a host name or a `hostId` prefix. An ambiguous or unknown
 value is an error listing the candidates.

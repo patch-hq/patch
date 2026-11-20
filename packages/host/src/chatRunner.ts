@@ -69,6 +69,7 @@ import {
   ChatErrorCode,
   heldMessageExpiredText,
   DEFAULT_LIMIT_BEHAVIOUR,
+  isOutboxEvent,
   type LimitBehaviour,
   type ReminderEvery,
 } from '@patch/wire';
@@ -102,6 +103,7 @@ import type {
   LoggedEvent,
   LogRecord,
   NativeRef,
+  AdoptedChat,
   PermissionDecisionBy,
   TurnOutcome,
   TurnLimit,
@@ -4936,15 +4938,24 @@ export class Daemon {
   }
 
   /**
-   * `chatId`'s parent, if it is a `patch_delegate` subagent — the ownership
-   * check behind the parent's "open read-only transcript" route
-   * (`PatchChatHistoryRequestEvent.requireParent`, index.ts
-   * `handleChatHistoryRequest`), since that route can't use the ordinary
-   * `chatRegistry` gate (a subagent is never in it).
+   * `chatId`'s parent, if it is a `patch_delegate` subagent: sent with its
+   * record (`host.record_import`'s `parentChatId`) so the server keeps the
+   * transcript against the parent, the gate on the parent's read-only
+   * transcript route (a subagent is never in the chat registry).
    */
   delegateParentOf(chatId: string): string | undefined {
-    return (this.chatState.get(chatId)?.subagent ?? this.opts.metaStore.read(chatId)?.subagent)
+    // Never loads the chat: the subagent import asks this of chats the host
+    // is not holding (spec/02 § Chat loading).
+    return (this.chatState.loaded(chatId)?.subagent ?? this.opts.metaStore.read(chatId)?.subagent)
       ?.parentChatId;
+  }
+
+  /** Every `patch_agent` subagent on this host, loaded or not, read from metas. */
+  subagentIds(): string[] {
+    return this.opts.metaStore
+      .list()
+      .filter((m) => m.subagent !== undefined)
+      .map((m) => m.chatId);
   }
 
   /**
@@ -5849,6 +5860,45 @@ export class Daemon {
       localId: `handover-${chatId}-${at}`,
       fromUser: true,
     });
+  }
+
+  /**
+   * This host takes over a chat of a host it replaces (spec/11 § Replacing a
+   * host). The chat keeps its id and continues from the server's high-water
+   * mark. Its `meta.json` is written from what the server's record holds,
+   * naming the provider session the record last saw: the user carried the
+   * session files across, and a session that did not come is found missing at
+   * the next turn and ends the model's memory there, saying so. A chat this host
+   * already has (its directory came across too) keeps what it has and only
+   * moves its numbering forward. A folder that is not here marks the chat
+   * folder-missing when it loads, as for any chat.
+   */
+  adoptChat(chat: AdoptedChat): void {
+    if (this.opts.metaStore.read(chat.chatId) === undefined) {
+      const now = this.opts.now();
+      this.opts.metaStore.write({
+        chatId: chat.chatId,
+        folder: chat.folder,
+        name: chat.name,
+        nextSeq: chat.nextSeq,
+        pinned: chat.pinned,
+        pinnedAt: chat.pinned ? now : null,
+        disabled: false,
+        status: chat.status,
+        archivedAt: chat.status === 'archived' ? now : null,
+        ...(chat.model !== undefined ? { model: chat.model } : {}),
+        ...(chat.permissionMode !== undefined ? { permissionMode: chat.permissionMode } : {}),
+        ...(chat.sessionId !== undefined ? { claudeSessionId: chat.sessionId } : {}),
+        createdAt: chat.createdAt ?? now,
+        updatedAt: now,
+        lastUserActivity: now,
+      });
+    }
+    if (!this.chatState.get(chat.chatId)) {
+      throw new Error(`adoptChat: ${chat.chatId} could not be loaded after writing its meta.json`);
+    }
+    this.continueFrom(chat.chatId, chat.nextSeq);
+    this.emitState(chat.chatId);
   }
 
   /**
@@ -15359,6 +15409,39 @@ export class Daemon {
   }
 
   /**
+   * A `patch_agent` subagent's whole record for the one-time subagent import
+   * (`01-server.md` § Record import), read straight from its log on disk. A
+   * subagent the host is not holding is NOT loaded to do it (spec/02 § Chat
+   * loading: the host holds only chats with live or owed work), and its log is
+   * released again afterwards. Throws `ChatNotFoundError` for a chat that is
+   * not a subagent on this host.
+   */
+  delegateRecordForImport(chatId: string): WireEvent[] {
+    if (this.chatState.loaded(chatId)) return this.recordForImport(chatId);
+    if (!this.opts.metaStore.read(chatId)?.subagent) throw new ChatNotFoundError(chatId);
+    const logWasOpen = this.chatLog.isOpen(chatId);
+    try {
+      let unreadable = 0;
+      const restartState = { afterMarker: false };
+      const entries = recordEntries(chatId, this.chatLog.read(chatId), {
+        rehydrate: (result) => this.chatLog.rehydrate(result),
+        onUnreadable: () => {
+          unreadable += 1;
+        },
+      });
+      if (unreadable > 0) {
+        this.opts.logger.warn(
+          { chatId, unreadable },
+          'record import: tool results whose stored body is missing are sent as references',
+        );
+      }
+      return entries.map((e) => restartResendAsOwnMessage(e, restartState));
+    } finally {
+      if (!logWasOpen) this.chatLog.close(chatId);
+    }
+  }
+
+  /**
    * Absolute path of a chat's canonical-seq index sidecar. Lives beside
    * `meta.json` / `seq` in `~/.patch/chats/<chatId>/` (spec/02 § Local storage),
    * derived from the meta store so there is one owner of that layout.
@@ -15476,14 +15559,27 @@ export class Daemon {
     }
     // spec/02 § Native subagent dispatch — a `patch_delegate` subagent is
     // invisible to the user: the local bookkeeping above (seq index, history
-    // below) still runs, so its own transcript is intact for
-    // the read-only viewer and for `maybeSettleDelegate` to read back, but
-    // the event never reaches the server. The server only ever creates a
-    // sidebar row from `chat.spawned` (chat-registry.ts), so a subagent that
-    // never sends one is unreachable from every surface built on top of it —
-    // sidebar, search, notifications, badges — with nothing to filter at each
-    // of them individually.
-    if (typeof chatId === 'string' && this.chatState.get(chatId)?.subagent) {
+    // below) still runs, for `maybeSettleDelegate` to read back. Its entries
+    // reach the server's record only wrapped with their parent
+    // (`host.delegate_entry`), which keeps them against the subagent for the
+    // parent's read-only transcript and never broadcasts them. Nothing else
+    // about it is sent: the server only ever creates a sidebar row from
+    // `chat.spawned` (chat-registry.ts), so a subagent that never sends one is
+    // unreachable from every surface built on top of it — sidebar, search,
+    // notifications, badges — with nothing to filter at each of them.
+    const subagent = typeof chatId === 'string' ? this.chatState.get(chatId)?.subagent : undefined;
+    if (subagent) {
+      if (isOutboxEvent(event)) {
+        this.opts.emit({
+          type: 'host.delegate_entry',
+          parentChatId: subagent.parentChatId,
+          event: {
+            ...event,
+            ...(nativeRef !== undefined ? { nativeRef } : {}),
+            ...(branchId !== undefined ? { branchId } : {}),
+          },
+        } as WireEvent);
+      }
       if (!o.skipHistory) this.trackToolRun(event);
       return;
     }

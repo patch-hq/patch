@@ -1045,6 +1045,29 @@ export const api = {
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
     }),
+  // spec/10 § Signing in — an ACP agent's account: an API key, checked and stored by the server.
+  addAcpAccount: (agentId: string, apiKey: string, label?: string) =>
+    request<SharedState>(`/api/accounts/acp/${encodeURIComponent(agentId)}`, {
+      method: 'POST',
+      body: { apiKey, ...(label ? { label } : {}) },
+    }),
+  replaceAcpKey: (agentId: string, accountId: string, apiKey: string) =>
+    request<SharedState>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}/key`,
+      { method: 'PUT', body: { apiKey } },
+    ),
+  orderAcpAccounts: (agentId: string, accountIds: string[]) =>
+    request<SharedState>(`/api/accounts/acp/${encodeURIComponent(agentId)}/order`, {
+      method: 'PUT',
+      body: { accountIds },
+    }),
+  setAcpStrategy: (strategy: AccountStrategy) =>
+    request<SharedState>('/api/accounts/acp/strategy', { method: 'PUT', body: { strategy } }),
+  removeAcpAccount: (agentId: string, accountId: string) =>
+    request<SharedState>(
+      `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}`,
+      { method: 'DELETE' },
+    ),
   // spec/02 § Provider adapters — a model endpoint's key, write-only.
   setEndpointKey: (endpointId: string, value: string) =>
     request<SharedState>(`/api/providers/endpoints/${encodeURIComponent(endpointId)}/key`, {
@@ -1135,6 +1158,17 @@ export const api = {
     request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(hostId)}`, {
       method: 'DELETE',
     }),
+  // spec/11 § Replacing a host: what would move, which folders the new host
+  // lacks and where the session files are; then the replacement itself.
+  replaceHostPlan: (hostId: string, withHostId: string) =>
+    request<ReplaceHostPlan>(
+      `/api/hosts/${encodeURIComponent(hostId)}/replace?with=${encodeURIComponent(withHostId)}`,
+    ),
+  replaceHost: (hostId: string, withHostId: string, withoutFolders: string[]) =>
+    request<{ ok: true; moved: number; withoutFolders: string[]; hosts: AuthOkHost[] }>(
+      `/api/hosts/${encodeURIComponent(hostId)}/replace`,
+      { method: 'POST', body: { with: withHostId, withoutFolders } },
+    ),
   // Skills available in a folder's `.claude/skills` (job-editor Skill picker
   // and its Edit link, the composer's `/` menu and skill chips). `paths`
   // names the absolute file each skill is defined in, keyed by name; absent
@@ -1192,4 +1226,18 @@ export interface BatchRecord {
 export interface BatchResponse {
   batch: BatchRecord | null;
   carryover: string[];
+}
+
+/** spec/11 § Replacing a host — `GET /api/hosts/:hostId/replace?with=`. */
+export interface ReplaceHostPlan {
+  from: { hostId: string; name: string };
+  to: { hostId: string; name: string };
+  chats: number;
+  folders: Array<{ folder: string; chats: number; present: boolean }>;
+  missing: string[];
+  sessions: Array<{ provider: string; path: string; chats: number }>;
+  /** The old host's Patch home the session paths assume; a host does not report its own. */
+  assumedHome: string;
+  /** Jobs whose action or gate runs on the old host: they move to the new one. */
+  jobs: Array<{ jobId: string; name: string }>;
 }

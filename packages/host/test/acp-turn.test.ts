@@ -224,7 +224,7 @@ describe('an ACP turn', () => {
     );
     expect(signedOut).toBeInstanceOf(AcpSignedOutError);
     expect((signedOut as Error).message).toBe(
-      'Fake ACP is not signed in on this host. Add its key under Settings → Providers, or sign in to it on this host.',
+      'Fake ACP is not signed in on this host. Add an account for it under Settings → AI accounts, or sign in to it on this host.',
     );
     expect(out.registry.accountState('fake')).toEqual({ state: 'signed_out' });
   }, 30_000);

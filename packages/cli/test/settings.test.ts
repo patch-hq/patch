@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Command } from 'commander';
 import {
+  acpAccountLines,
+  acpSignIn,
   chatgptDeviceSignIn,
   parseBooleanValue,
   parseModelList,
@@ -46,6 +48,51 @@ test('accounts covers the whole account list: list, add, connect, disconnect, re
   ]) {
     assert.ok(subs.includes(name), `accounts ${name} (have: ${subs.join(', ')})`);
   }
+});
+
+test("accounts acp lists, signs in and removes ACP agents' accounts", () => {
+  const acp = group('accounts').commands.find((c) => c.name() === 'acp');
+  assert.ok(acp, 'accounts acp');
+  assert.deepEqual(
+    acp.commands.map((c) => c.name()),
+    ['list', 'sign-in', 'order', 'strategy', 'remove'],
+  );
+});
+
+test('an ACP sign-in adds an account, or gives an existing one a new key', async () => {
+  const calls: Array<[string, string, unknown]> = [];
+  const t = {
+    post: async <T>(p: string, b?: unknown): Promise<T> => {
+      calls.push(['POST', p, b]);
+      return { secrets: { acp: [] } } as T;
+    },
+    put: async <T>(p: string, b?: unknown): Promise<T> => {
+      calls.push(['PUT', p, b]);
+      return { secrets: { acp: [] } } as T;
+    },
+  };
+  await acpSignIn(t, { agentId: 'gemini', apiKey: 'k1', label: 'Work' });
+  await acpSignIn(t, { agentId: 'gemini', apiKey: 'k2', accountId: 'a/1' });
+  assert.deepEqual(calls, [
+    ['POST', '/api/accounts/acp/gemini', { apiKey: 'k1', label: 'Work' }],
+    ['PUT', '/api/accounts/acp/gemini/a%2F1/key', { apiKey: 'k2' }],
+  ]);
+});
+
+test('ACP accounts print with their last four and state, never a key', () => {
+  assert.deepEqual(acpAccountLines([]), ['  (no accounts)']);
+  assert.deepEqual(
+    acpAccountLines([
+      { id: 'a1', agentId: 'gemini', label: 'Work', last4: '1111', state: { state: 'ready' } },
+      {
+        id: 'a2',
+        agentId: 'gemini',
+        label: 'Home',
+        state: { state: 'broken', message: 'key refused' },
+      },
+    ]),
+    ['  gemini: Work · ends 1111  [ready]  a1', '  gemini: Home  [broken: key refused]  a2'],
+  );
 });
 
 test('keys has list (default), set and revoke', () => {

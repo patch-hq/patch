@@ -9,9 +9,9 @@
 //   - Controls the HOST owns reach this host over its own local socket, so
 //     they work with no round trip through the server (and while the server is
 //     unreachable).
-//   - Three commands go to the SERVER even when they name this host, because
-//     the server owns what they change rather than the host: `add`, `rename`
-//     and `remove`.
+//   - Four commands go to the SERVER even when they name this host, because
+//     the server owns what they change rather than the host: `add`, `rename`,
+//     `remove` and `replace`.
 //
 // `--host` names another host and forces the REST path, since another
 // host is not reachable over this one's socket.
@@ -388,6 +388,82 @@ export function registerHostsCommands(program: Command): void {
         }
       });
     });
+
+  hosts
+    .command('replace')
+    .description(
+      'A new host takes over every chat of an old one, then the old host is removed (spec/11 § Replacing a host)',
+    )
+    .requiredOption('--host <h>', 'the host being replaced — never defaulted')
+    .requiredOption('--with <h>', 'the host that takes over its chats')
+    .option('--plan', 'only show what would move and which folders the new host lacks')
+    .option(
+      '--without-folder <path>',
+      'go ahead though the new host lacks this folder (repeatable)',
+      (value: string, prev: string[] = []) => [...prev, value],
+    )
+    .option('--json', 'JSON output')
+    .action(
+      async (opts: HostsOpts & { with: string; plan?: boolean; withoutFolder?: string[] }) => {
+        await run(opts, async () => {
+          const t = getTransport({ ...opts, remote: true });
+          const { hosts: known } = await t.get<{ hosts: HostSummary[] }>('/api/hosts');
+          const from = pickHost(known, opts.host!);
+          const to = pickHost(known, opts.with);
+          const plan = await t.get<ReplacePlan>(
+            `/api/hosts/${encodeURIComponent(from)}/replace?with=${encodeURIComponent(to)}`,
+          );
+          if (opts.plan) {
+            if (opts.json) return emitJson(plan);
+            for (const line of describeReplacePlan(plan)) emitText(line);
+            return;
+          }
+          const result = await t.post<unknown>(`/api/hosts/${encodeURIComponent(from)}/replace`, {
+            with: to,
+            withoutFolders: opts.withoutFolder ?? [],
+          });
+          if (opts.json) return emitJson(result);
+          const { moved } = result as { moved: number };
+          emitText(`${plan.to.name} took over ${moved} chats; ${plan.from.name} is removed.`);
+        });
+      },
+    );
+}
+
+export interface ReplacePlan {
+  from: { hostId: string; name: string };
+  to: { hostId: string; name: string };
+  chats: number;
+  folders: Array<{ folder: string; chats: number; present: boolean }>;
+  missing: string[];
+  sessions: Array<{ provider: string; path: string; chats: number }>;
+  assumedHome: string;
+  jobs: Array<{ jobId: string; name: string }>;
+}
+
+/** The plan as lines a person reads: what moves, what to carry, what is missing. */
+export function describeReplacePlan(plan: ReplacePlan): string[] {
+  const lines = [`${plan.to.name} takes over ${plan.chats} chats from ${plan.from.name}.`, ''];
+  lines.push('Folders (carry each to the same path):');
+  for (const f of plan.folders) {
+    lines.push(`  ${f.present ? '✓' : '✗ missing'}  ${f.folder}  (${f.chats} chats)`);
+  }
+  if (plan.sessions.length > 0) {
+    lines.push('', 'Provider session files (carry unchanged, to the same path):');
+    for (const s of plan.sessions) lines.push(`  ${s.provider}: ${s.path}  (${s.chats} chats)`);
+    lines.push(`  These assume ${plan.from.name} keeps Patch in ${plan.assumedHome}.`);
+  }
+  if (plan.jobs.length > 0) {
+    lines.push('', `Jobs that move to ${plan.to.name}:`);
+    for (const j of plan.jobs) lines.push(`  ${j.name}`);
+  }
+  if (plan.missing.length > 0) {
+    lines.push(
+      '',
+      `To go ahead without the missing folders, add --without-folder for each of them.`,
+    );
+  }
+  return lines;
 }
 
 export function isNotRelayable(err: unknown): boolean {

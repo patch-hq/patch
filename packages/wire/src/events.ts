@@ -2714,7 +2714,14 @@ export const SharedSettings = z
      * else a Groq key, else no speech engine. The others name one engine.
      */
     speechBackend: SpeechBackendSetting,
-    accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
+    /**
+     * How a turn picks its account, per provider (spec/10 § Choosing an
+     * account). `acp` covers every ACP agent's accounts, each agent ordered on
+     * its own; absent reads as `priority` (a settings file from before it).
+     */
+    accountStrategy: z
+      .object({ claude: AccountStrategy, codex: AccountStrategy, acp: AccountStrategy.optional() })
+      .strict(),
   })
   .strict();
 export type SharedSettings = z.infer<typeof SharedSettings>;
@@ -2856,6 +2863,22 @@ export const SharedCodexAccount = z
   .strict();
 export type SharedCodexAccount = z.infer<typeof SharedCodexAccount>;
 
+/**
+ * One ACP agent's account (spec/10 § Backend credentials): an API key the
+ * server holds encrypted and hands to every host, passed to the agent in its
+ * `apiKeyEnv`. An agent's turns use the first account held for it.
+ */
+export const SharedAcpAccount = z
+  .object({
+    id: z.string().min(1),
+    /** The ACP agent (`AcpAgentConfig.id`) this account signs in. */
+    agentId: z.string().min(1),
+    label: z.string().min(1),
+    apiKey: z.string().min(1),
+  })
+  .strict();
+export type SharedAcpAccount = z.infer<typeof SharedAcpAccount>;
+
 /** Every host credential shared by the account, in order. Server-owned keys are never in this shape. */
 export const SharedSecrets = z
   .object({
@@ -2876,6 +2899,11 @@ export const SharedSecrets = z
      * when no endpoint has one, so a snapshot without keys is unchanged.
      */
     endpointKeys: z.record(z.string().regex(MODEL_ENDPOINT_ID), z.string().min(1)).optional(),
+    /**
+     * ACP agents' accounts, in order. Absent when there are none, so a
+     * snapshot without any is unchanged for an older host.
+     */
+    acp: z.array(SharedAcpAccount).optional(),
   })
   .strict();
 export type SharedSecrets = z.infer<typeof SharedSecrets>;
@@ -2923,6 +2951,21 @@ export const SharedSecretsSummary = z
         })
         .strict(),
     ),
+    /** ACP agents' accounts, never the key. Absent from an older server. */
+    acp: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            agentId: z.string().min(1),
+            label: z.string().min(1),
+            last4: z.string().min(1).max(4).optional(),
+            /** The account's one state, derived by the server (spec/10 § Account states). */
+            state: AccountState.optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     /** The model endpoints that have a key saved, never the key. */
     endpointKeys: z
       .array(
@@ -3759,11 +3802,10 @@ export const FoldersListEvent = z
     type: z.literal('folders.list'),
     ...folderRegistryFields,
     /**
-     * Every chat this host holds, loaded or not (spec/02 § Chat loading). A host
-     * announces in full only the chats it has loaded at start, so this is how the
-     * server knows the rest still exist: a chat it restored from its own store
-     * and finds here stays, one it does not find is gone. Sent on connect only;
-     * absent from a host that announced every chat in full.
+     * Every chat this host holds, loaded or not (spec/02 § Chat loading). Sent
+     * on connect only. Kept for servers from before the server's record decided
+     * that a chat exists: they dropped a restored chat this list did not name. A
+     * current server does not read it.
      */
     chatIds: z.array(z.string().min(1)).optional(),
   })
@@ -7384,21 +7426,6 @@ export const PatchWatchOutputResponseEvent = z
   .strict();
 export type PatchWatchOutputResponseEvent = z.infer<typeof PatchWatchOutputResponseEvent>;
 
-// ---------------------------------------------------------------------------
-// Chat history REST RPC (server → host → server).
-//
-// `patch.chat_history.request` is server-originated: it backs the REST
-// endpoint `GET /api/chats/:id/history?since=<seq>`. The server doesn't share
-// the host's filesystem (the host owns Claude Code's persisted JSONL), so
-// it round-trips this RPC over the host-link and collects the events into
-// the HTTP response body. Distinct from the agent-facing `patch.history.*`
-// pair (cross-chat peek, delivered via per-surface replay) — this one returns
-// the events array inline so a stateless HTTP caller can render history.
-//
-// `events` is exactly what the host's HistoryReader reconstructs from the
-// JSONL today: user/assistant `chat.message` turns. Tool calls/results are
-// surfaced via the live stream, not the replay path (see daemon/history.ts).
-
 /**
  * Server -> host: whether the server is running this host's message queues
  * (spec/04 § Message queueing). Sent when the host attaches. While `enabled`,
@@ -7518,12 +7545,36 @@ export const HostRecordImportEvent = z
   .object({
     type: z.literal('host.record_import'),
     chatId: z.string().min(1),
+    /**
+     * Set when `chatId` is a `patch_agent` subagent: the chat it belongs to.
+     * The server keeps the subagent's record against it and never lists it
+     * (spec/02 § Native subagent dispatch). Sent only to a server whose
+     * `auth.ok` carried `delegateRecord`.
+     */
+    parentChatId: z.string().min(1).optional(),
     /** Typed shallowly; the server validates each as a frame of its own. */
     events: z.array(z.object({ type: z.string().min(1) }).passthrough()),
     done: z.boolean(),
   })
   .strict();
 export type HostRecordImportEvent = z.infer<typeof HostRecordImportEvent>;
+
+/**
+ * Host -> server, through the host outbox: one entry of a `patch_agent`
+ * subagent's record (spec/02 § Native subagent dispatch). `event` is the
+ * logged frame, addressed to the subagent's own chatId; the server keeps it in
+ * that chat's record, against `parentChatId`, and never broadcasts it or lists
+ * the subagent. Sent only to a server whose `auth.ok` carried `delegateRecord`.
+ */
+export const HostDelegateEntryEvent = z
+  .object({
+    type: z.literal('host.delegate_entry'),
+    parentChatId: z.string().min(1),
+    /** Typed shallowly; the server validates it as a frame of its own. */
+    event: z.object({ type: z.string().min(1) }).passthrough(),
+  })
+  .strict();
+export type HostDelegateEntryEvent = z.infer<typeof HostDelegateEntryEvent>;
 
 /** Server -> host: the record holds what `host.record_import` sent for this chat. */
 export const HostRecordImportAckEvent = z
@@ -7605,56 +7656,6 @@ export const PatchQueuePullResponseEvent = z
   })
   .strict();
 export type PatchQueuePullResponseEvent = z.infer<typeof PatchQueuePullResponseEvent>;
-
-export const PatchChatHistoryRequestEvent = z
-  .object({
-    type: z.literal('patch.chat_history.request'),
-    requestId: z.string().min(1),
-    chatId: z.string().min(1),
-    /** Return events with seq >= since. Defaults to 0 (full history). */
-    since: z.number().int().nonnegative().optional(),
-    limit: z.number().int().positive().max(200).optional(),
-    /**
-     * Read THIS branch's own track (spec/04 § Branching; spec/14 § Side
-     * threads panel, which pulls a side thread's content through this REST
-     * path rather than the live WS stream — see `04-chats-and-folders.md` §
-     * Parallel branches, "pull-based, not push-based"). Default: the active
-     * branch — today's behaviour, unchanged.
-     */
-    branchId: z.string().min(1).optional(),
-    /**
-     * Set only by the parent's-tool-row "open read-only transcript" route
-     * (spec/14 § Main chat panel — Delegate tool row): `chatId` is never in
-     * `chatRegistry`, so the ordinary ownership gate (`GET
-     * /api/chats/:id/history`'s `chatRegistry.get` check) can't run — this
-     * field is that gate's replacement. The host refuses with
-     * `not_a_delegate` unless `chatId`'s `meta.subagent.parentChatId` equals
-     * this value, so reading a subagent's transcript still needs its real
-     * parent id, not just the subagent's.
-     */
-    requireParent: z.string().min(1).optional(),
-  })
-  .strict();
-export type PatchChatHistoryRequestEvent = z.infer<typeof PatchChatHistoryRequestEvent>;
-
-export const PatchChatHistoryResponseEvent = z
-  .object({
-    type: z.literal('patch.chat_history.response'),
-    requestId: z.string().min(1),
-    ok: z.boolean(),
-    events: z.array(ChatMessageEvent).optional(),
-    /** Set when more events exist beyond the returned slice. */
-    nextFromSeq: z.number().int().nonnegative().optional(),
-    error: z
-      .object({
-        code: z.enum(['chat_not_found', 'internal', 'not_a_delegate']),
-        message: z.string(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export type PatchChatHistoryResponseEvent = z.infer<typeof PatchChatHistoryResponseEvent>;
 
 // `patch.skills.request` is server-originated: it backs
 // `GET /api/skills?folder=&hostId=` (the job-editor's Skill picker, the
@@ -8770,6 +8771,79 @@ export const PatchChatMoveResponseEvent = z
   })
   .strict();
 export type PatchChatMoveResponseEvent = z.infer<typeof PatchChatMoveResponseEvent>;
+
+// ---------------------------------------------------------------------------
+// Replacing a host (spec/11 § Replacing a host)
+//
+// A new machine takes over every chat of an old host. The server asks the new
+// host which of the old host's folders it has (`patch.folders_check`), then
+// hands it the chats (`patch.chat_adopt`). Each adopted chat continues from the
+// server's high-water mark under the same id; its provider session files are
+// carried across by the user, and Patch never edits them.
+
+export const PatchFoldersCheckRequestEvent = z
+  .object({
+    type: z.literal('patch.folders_check.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** Absolute folders, as the old host's chats name them. */
+    folders: z.array(z.string().min(1)),
+  })
+  .strict();
+export type PatchFoldersCheckRequestEvent = z.infer<typeof PatchFoldersCheckRequestEvent>;
+
+export const PatchFoldersCheckResponseEvent = z
+  .object({
+    type: z.literal('patch.folders_check.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The asked folders that are not a directory on this host. */
+    missing: z.array(z.string().min(1)),
+  })
+  .strict();
+export type PatchFoldersCheckResponseEvent = z.infer<typeof PatchFoldersCheckResponseEvent>;
+
+/** One chat a host takes over, as the server's record holds it. */
+export const AdoptedChat = z
+  .object({
+    chatId: z.string().min(1),
+    folder: z.string().min(1),
+    name: z.string().nullable(),
+    model: z.string().min(1).optional(),
+    permissionMode: PermissionMode.optional(),
+    /** The provider session the record last named; absent when it named none. */
+    sessionId: z.string().min(1).optional(),
+    /** The server's high-water mark plus one: where the chat's numbering continues. */
+    nextSeq: z.number().int().nonnegative(),
+    status: z.enum(['active', 'archived', 'errored', 'deleted']),
+    pinned: z.boolean(),
+    createdAt: z.number().int().optional(),
+  })
+  .strict();
+export type AdoptedChat = z.infer<typeof AdoptedChat>;
+
+export const PatchChatAdoptRequestEvent = z
+  .object({
+    type: z.literal('patch.chat_adopt.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    chats: z.array(AdoptedChat),
+  })
+  .strict();
+export type PatchChatAdoptRequestEvent = z.infer<typeof PatchChatAdoptRequestEvent>;
+
+export const PatchChatAdoptResponseEvent = z
+  .object({
+    type: z.literal('patch.chat_adopt.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The chats this host now holds, including any it already had. */
+    adopted: z.array(z.string().min(1)),
+    /** The chats it could not take, each saying why. */
+    refused: z.array(z.object({ chatId: z.string().min(1), message: z.string() }).strict()),
+  })
+  .strict();
+export type PatchChatAdoptResponseEvent = z.infer<typeof PatchChatAdoptResponseEvent>;
 
 // ---------------------------------------------------------------------------
 // Chat search (spec/03 § Chat search, spec/04 § Search)
@@ -10237,6 +10311,14 @@ export const AuthOkEvent = z
      */
     serverReads: z.literal(true).optional(),
     /**
+     * Sent to a host by a server that keeps `patch_agent` subagents' records
+     * (`host.delegate_entry`, and `host.record_import` with `parentChatId`) and
+     * serves their transcripts itself. A host sends neither to a server
+     * without it; the subagent import re-sends each subagent's record once it
+     * reaches one that has it.
+     */
+    delegateRecord: z.literal(true).optional(),
+    /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Every current
      * server sends it; surfaces read history only this way, so a surface told
@@ -10511,6 +10593,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatTurnStartedEvent,
   ChatTurnEndedEvent,
   HostRecordImportEvent,
+  HostDelegateEntryEvent,
   HostRecordImportAckEvent,
   HostOutboxEvent,
   HostOutboxAckEvent,
@@ -10523,8 +10606,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostManagerHandoverEvent,
   PatchQueuePullRequestEvent,
   PatchQueuePullResponseEvent,
-  PatchChatHistoryRequestEvent,
-  PatchChatHistoryResponseEvent,
   PatchSkillsRequestEvent,
   PatchSkillsResponseEvent,
   PatchModelsRequestEvent,
@@ -10549,6 +10630,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBlobResponseEvent,
   PatchChatMoveRequestEvent,
   PatchChatMoveResponseEvent,
+  PatchFoldersCheckRequestEvent,
+  PatchFoldersCheckResponseEvent,
+  PatchChatAdoptRequestEvent,
+  PatchChatAdoptResponseEvent,
   PatchChatSearchRequestEvent,
   PatchChatSearchResponseEvent,
   // Terminal sessions
@@ -10844,6 +10929,7 @@ export const EVENT_SCHEMAS = {
   'chat.turn_started': ChatTurnStartedEvent,
   'chat.turn_ended': ChatTurnEndedEvent,
   'host.record_import': HostRecordImportEvent,
+  'host.delegate_entry': HostDelegateEntryEvent,
   'host.record_import_ack': HostRecordImportAckEvent,
   'host.outbox': HostOutboxEvent,
   'host.outbox_ack': HostOutboxAckEvent,
@@ -10856,8 +10942,6 @@ export const EVENT_SCHEMAS = {
   'host.manager_handover': HostManagerHandoverEvent,
   'patch.queue_pull.request': PatchQueuePullRequestEvent,
   'patch.queue_pull.response': PatchQueuePullResponseEvent,
-  'patch.chat_history.request': PatchChatHistoryRequestEvent,
-  'patch.chat_history.response': PatchChatHistoryResponseEvent,
   'patch.skills.request': PatchSkillsRequestEvent,
   'patch.skills.response': PatchSkillsResponseEvent,
   'patch.models.request': PatchModelsRequestEvent,
@@ -10882,6 +10966,10 @@ export const EVENT_SCHEMAS = {
   'patch.blob.response': PatchBlobResponseEvent,
   'patch.chat_move.request': PatchChatMoveRequestEvent,
   'patch.chat_move.response': PatchChatMoveResponseEvent,
+  'patch.folders_check.request': PatchFoldersCheckRequestEvent,
+  'patch.folders_check.response': PatchFoldersCheckResponseEvent,
+  'patch.chat_adopt.request': PatchChatAdoptRequestEvent,
+  'patch.chat_adopt.response': PatchChatAdoptResponseEvent,
   'patch.chat_search.request': PatchChatSearchRequestEvent,
   'patch.chat_search.response': PatchChatSearchResponseEvent,
   'patch.terminal.open': PatchTerminalOpenEvent,
