@@ -642,27 +642,9 @@ export interface HostOptions {
     lastAssistantText: string;
   }) => Promise<string>;
   /**
-   * Session-handoff digest generator (spec/06 § Session rotation, spec/04 §
-   * History — "switch and compact"; `rotationDigest.ts`). When set,
-   * `rotateThread` uses it to ask the OUTGOING session for a handoff before
-   * retiring it, and a compact provider switch uses it the same way before
-   * building the target's small starting context. OPTIONAL — both callers
-   * refuse rather than starting a fresh session/switch with nothing carried
-   * over (NO FALLBACK). `model` names the resuming session's OWN model, so a
-   * Codex `resumeSessionId` resumes on Codex rather than being sent to Claude.
-   */
-  generateDigest?: (input: {
-    chatId: string;
-    resumeSessionId: string;
-    folder: string;
-    model?: string | null;
-    /** The private config dir the provider runs under for this chat, if any. */
-    configDir?: string;
-  }) => Promise<string | null>;
-  /**
    * The Manager sweep's one decision call (spec/06 § Sweep;
    * `managerSweepGen.ts`). OPTIONAL — `runManagerSweep` refuses rather than
-   * guessing when it's unset (NO FALLBACK), same contract as `generateDigest`.
+   * guessing when it's unset (NO FALLBACK).
    */
   decideSweep?: (input: {
     digest: string;
@@ -1060,8 +1042,11 @@ export const SESSION_RESTART_TURN_REMINDER = noteBlock(
     'you cannot see.',
 );
 
-/** Longest stretch of one message a Manager handover note carries. */
+/** Longest stretch of one message a handover note carries. */
 const MANAGER_HANDOVER_MESSAGE_CHARS = 4_000;
+
+/** Messages a session rotation carries over when no `managerContextWindow` is set. */
+const ROTATION_CARRY_MESSAGES = 40;
 
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
@@ -5927,21 +5912,6 @@ export class Daemon {
   }
 
   /**
-   * Retire a special thread's underlying Claude session and start a fresh
-   * one, seeded with a handoff digest from the outgoing session (spec/06 §
-   * Session rotation, `rotationDigest.ts`). The scheduled, deliberate
-   * alternative to "wait for the SDK's own auto-compact to eventually fire" —
-   * Manager alone ran 18 days on ~750k cached tokens a turn without a single
-   * one. `chatId` never changes: only the session underneath it does, so
-   * pinning, ingress wiring and sidebar identity are untouched.
-   *
-   * NO FALLBACK: refuses to rotate a chat that's mid-turn (the caller should
-   * retry next cycle), a chat with no digest generator wired, or one whose
-   * digest generation failed — starting a fresh session with nothing carried
-   * over is not a degraded rotation, it is a different, worse operation this
-   * method does not perform silently.
-   */
-  /**
    * spec/04 § Resume — the chat's provider session is gone and Patch does not
    * rebuild it. The session id is cleared so the next turn starts a fresh
    * session, and a divider in the record says plainly that the model's memory
@@ -5989,44 +5959,85 @@ export class Daemon {
     const meta = this.opts.metaStore.read(chatId);
     if (window === undefined || window <= 0 || !state?.sessionId || !meta) return '';
     const from = meta.sessionFromSeq ?? 0;
+    if (this.recordMessages(chatId).filter((m) => m.seq >= from).length <= window) return '';
+    const handoff = this.recordHandoff(chatId, window);
+    this.retireSession(chatId);
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `New session · the last ${handoff.carried} messages carried over`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
+    this.opts.logger.info(
+      { chatId, window, carried: handoff.carried },
+      'manager: fresh session, recent conversation carried in a visible note',
+    );
+    return handoff.note;
+  }
+
+  /** The chat's user and assistant messages on its active track, from Patch's record. */
+  private recordMessages(
+    chatId: string,
+  ): Array<{ seq: number; role: 'user' | 'assistant'; content: string }> {
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta) return [];
     const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    const messages = readTrack(this.chatLog, chatId, meta, branchId, -1).flatMap(({ event }) =>
-      event.type === 'chat.message' && event.role !== 'system' && event.content.trim() !== ''
+    return readTrack(this.chatLog, chatId, meta, branchId, -1).flatMap(({ event }) =>
+      event.type === 'chat.message' &&
+      (event.role === 'user' || event.role === 'assistant') &&
+      event.content.trim() !== ''
         ? [{ seq: event.seq, role: event.role, content: event.content }]
         : [],
     );
-    if (messages.filter((m) => m.seq >= from).length <= window) return '';
-    const recent = messages.slice(-window);
+  }
+
+  /**
+   * A special thread's fresh session is handed the last `window` messages of
+   * Patch's own record, quoted, as a `Handoff` note for the front of its first
+   * turn (spec/06 § Bounded context, § Session rotation). The note is an entry
+   * like any other, so what the new session was given is in the record.
+   */
+  private recordHandoff(chatId: string, window: number): { note: string; carried: number } {
+    const name = chatId === SPECIAL_THREAD_IDS.manager ? 'Manager' : 'Speakers';
+    const recent = this.recordMessages(chatId).slice(-window);
     const lines = recent.map(
       (m) =>
-        `${m.role === 'user' ? 'User' : 'Manager'}: ${m.content.length > MANAGER_HANDOVER_MESSAGE_CHARS ? `${m.content.slice(0, MANAGER_HANDOVER_MESSAGE_CHARS)}…` : m.content}`,
+        `${m.role === 'user' ? 'User' : name}: ${m.content.length > MANAGER_HANDOVER_MESSAGE_CHARS ? `${m.content.slice(0, MANAGER_HANDOVER_MESSAGE_CHARS)}…` : m.content}`,
     );
-    state.sessionId = undefined;
-    state.sessionAccountId = undefined;
+    return {
+      carried: recent.length,
+      note: noteBlock(
+        'Handoff',
+        `This is a fresh session of the ${name} thread. The last ${recent.length} messages of its conversation follow, as Patch recorded them; older ones are in its history.\n\n${lines.join('\n\n')}`,
+      ),
+    };
+  }
+
+  /** Clear the chat's session so its next turn starts a fresh one. */
+  private retireSession(chatId: string): void {
+    const state = this.chatState.get(chatId);
+    if (state) {
+      state.sessionId = undefined;
+      state.sessionAccountId = undefined;
+    }
     this.opts.metaStore.update(chatId, (m) => {
       const { sessionId: _session, sessionAccountId: _account, ...rest } = m;
       void _session;
       void _account;
       return { ...rest, updatedAt: this.opts.now() };
     });
-    this.emit({
-      type: 'chat.message',
-      chatId,
-      role: 'system',
-      content: `New session · the last ${recent.length} messages carried over`,
-      seq: this.bumpSeq(chatId),
-      createdAt: this.opts.now(),
-    });
-    this.opts.logger.info(
-      { chatId, window, carried: recent.length },
-      'manager: fresh session, recent conversation carried in a visible note',
-    );
-    return noteBlock(
-      'Handoff',
-      `This is a fresh session of the Manager thread. The last ${recent.length} messages of its conversation follow, as Patch recorded them; older ones are in its history.\n\n${lines.join('\n\n')}`,
-    );
   }
 
+  /**
+   * Retire a special thread's provider session and start a fresh one (spec/06
+   * § Session rotation): the scheduled alternative to waiting for the
+   * provider's own compaction. The fresh session's first message carries the
+   * last messages of Patch's record as a visible `Handoff` note. `chatId` never
+   * changes: only the session underneath it does. Refuses a chat that's
+   * mid-turn (the caller retries next cycle).
+   */
   async rotateThread(chatId: string): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
@@ -6036,58 +6047,40 @@ export class Daemon {
     if (state.activity === 'running' || state.activity === 'awaiting-permission') {
       throw new Error(`rotateThread: ${chatId} is mid-turn`);
     }
-    if (!this.opts.generateDigest) {
-      throw new Error('rotateThread: no digest generator configured');
-    }
-    const outgoingSessionId = state.sessionId;
-    if (outgoingSessionId === undefined) {
+    if (state.sessionId === undefined) {
       // Nothing to rotate away from — a thread that has never run a turn (or
-      // was already rotated onto a session that has not run one yet) has no
-      // history to hand off.
+      // was already rotated onto a session that has not run one yet).
       this.opts.logger.info({ chatId }, 'rotateThread: no session yet, nothing to rotate');
       return;
     }
-    const digest = await this.opts.generateDigest({
+    // What the fresh session is given comes from Patch's own record, never
+    // from a request to the outgoing session the user would not see.
+    const handoff = this.recordHandoff(
       chatId,
-      resumeSessionId: outgoingSessionId,
-      folder: state.folder,
-      ...(await this.readySession(chatId, this.harnessOf(chatId), outgoingSessionId)),
-    });
-    if (digest === null) {
-      this.opts.logger.warn(
-        { chatId },
-        'rotateThread: digest generation failed; skipping this cycle rather than rotating blind',
-      );
-      return;
-    }
-    const at = this.opts.now();
-    // Boundary marker on the OUTGOING session's transcript, same arrangement
-    // a compaction boundary uses (compaction.ts / spec/02 § Context
-    // compression) — a system chat.message so it replays with the rest of the
-    // chat instead of vanishing on re-entry.
-    const seq = this.bumpSeq(chatId);
+      this.opts.managerContextWindow ?? ROTATION_CARRY_MESSAGES,
+    );
+    // Boundary marker, same arrangement a compaction boundary uses — a system
+    // chat.message, so it shows with the rest of the chat.
     this.emit({
       type: 'chat.message',
       chatId,
       role: 'system',
-      content: 'Session rotated · digest carried over',
-      seq,
-      createdAt: at,
+      content: `Session rotated · the last ${handoff.carried} messages carried over`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
     });
-    // Clear the session so the next turn starts fresh — the same "session
-    // lost, start clean" idiom `runQuery` already uses for an orphaned resume
-    // id (above), just deliberate here rather than a recovery from a bad state.
-    state.sessionId = undefined;
-    this.opts.metaStore.update(chatId, (m) => {
-      const { sessionId: _drop, ...rest } = m;
-      void _drop;
-      return { ...rest, updatedAt: at };
-    });
-    this.opts.logger.info({ chatId }, 'rotateThread: session rotated, seeding fresh session');
+    this.retireSession(chatId);
+    this.opts.logger.info(
+      { chatId, carried: handoff.carried },
+      'rotateThread: session rotated, fresh session gets a visible handoff from the record',
+    );
+    // The fresh session's first message: the handoff note (its own entry in
+    // the record) and a line saying why it is there. Patch started it, not a person.
     await this.sendInput({
       chatId,
-      message: `[rotation] Picking up from a rotated session. Handoff from the outgoing one:\n\n${digest}`,
-      localId: `rotation-${chatId}-${at}`,
+      message: `${handoff.note}Picking up after a scheduled session rotation.`,
+      localId: `rotation-${chatId}-${this.opts.now()}`,
+      origin: 'machine',
     });
   }
 
