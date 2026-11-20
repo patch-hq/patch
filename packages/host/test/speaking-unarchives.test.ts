@@ -81,7 +81,7 @@ describe('a chat that reaches for the user leaves Archived', () => {
     }
   });
 
-  it('patch_notify un-hides a hidden chat', async () => {
+  it('patch_notify leaves a hidden chat hidden', async () => {
     const { daemon, app, chatId } = await setup();
     try {
       await daemon.setArchived(chatId, false);
@@ -94,7 +94,7 @@ describe('a chat that reaches for the user leaves Archived', () => {
         payload: { channel: 'push', message: 'done', callerChatId: chatId },
       });
       expect(res.statusCode).toBe(200);
-      expect(daemon.chatState.get(chatId)?.hidden).toBeFalsy();
+      expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
     } finally {
       await app.close();
     }

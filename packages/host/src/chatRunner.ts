@@ -13211,10 +13211,10 @@ export class Daemon {
    */
   /** A chat that notified the user comes into the list, one-way (spec/04 § Current status). */
   unarchiveForNotify(chatId: string): void {
-    this.unarchiveForPermission(chatId, false);
+    this.unarchiveForPermission(chatId, false, false);
   }
 
-  private unarchiveForPermission(chatId: string, expires = true): void {
+  private unarchiveForPermission(chatId: string, expires = true, unhide = true): void {
     const state = this.chatState.get(chatId);
     if (!state) return;
     // `setArchived(false)` and `setHidden` are declared async but do no
@@ -13232,7 +13232,7 @@ export class Daemon {
     // A hidden run that blocks on the user comes into the list (spec/04 §
     // Hidden) — the case `startHidden` jobs need, since nobody looks in Hidden
     // for a question.
-    if (state.hidden) {
+    if (unhide && state.hidden) {
       void this.setHidden(chatId, false).catch((err: unknown) => {
         this.opts.logger.error(
           { chatId, err },
