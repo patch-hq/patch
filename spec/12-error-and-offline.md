@@ -85,9 +85,12 @@ A host reports a turn that met a limit as a fact on its end (`chat.turn_ended.li
 
 - Limited, or an account the server cannot check, with a reset known (the account's own, else the one the provider stated) → Paused until a reset, carrying the reset time and the account. The user's chosen behaviour then applies (`10-auth.md` § Limits).
 - Signed out → Waiting for sign-in, with a Sign in action on every surface (`10-auth.md` § Signing in). A turn that failed for any reason on a signed-out account reads the same.
-- Out, or a limit with no reset known anywhere → Failed with reason `out_of_credit` and the provider's message.
+- Out → Failed with reason `out_of_credit` and the provider's message. Only the account's own out state says out of credit.
+- A limit with no reset known anywhere (the account states none and neither did the provider; ACP agents report limits this way) → Failed with reason `limit_no_reset` and the provider's own words. There is no time to wait for, so the turn stays owed and the user continues it; it is a limit, not a billing problem, and surfaces say so.
 - Broken → Failed with reason `account_broken` and the provider's message under Details.
 - Ready or near limit again while the turn is still owed → Paused, with the card offering Send or Continue, until the turn runs or the host lets it go. A host that lets the owed turn go without running it (the user switched provider) leaves the chat Idle.
+
+A limit stands only while the host's latest `chat.state` says it holds the owed turn (`limitNext` set), whichever of the two facts reaches the server first. The turn's end comes through the outbox and the frame live, so a turn's end that arrives after the host has already let the turn go never pauses the chat, and one that arrives before the frame pauses it once the frame does.
 
 A host older than this (no `limitFacts` on `host.host`) is read as before: the limit is its `chat.state.limitBlock`, and the account it names still decides the status as above. None of these is retried on a timer, and out of credit is not retried at all: when credit is seen again the card reads that credit is available and offers Continue, and nothing runs until the user presses it. The card and the phone's limit bar say what happens next from the chat's `limitNext`: resumes when the limit resets, continues on the next account with usage left, waits for a provider switch, or waits for Continue. The pause is held as the chat's status on the server and as the host's owed turn, so it outlasts any restart.
 

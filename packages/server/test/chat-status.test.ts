@@ -97,7 +97,7 @@ describe('deriveStatus: every status from its facts', () => {
     ['a silent host mid-turn', facts({ openTurns: ['t'], away: 'offline' }), 'host_offline'],
     ['a cut-off turn', facts({ interrupted: true }), 'interrupted'],
     ['a turn ended interrupted', facts({ lastEnd: { outcome: 'interrupted' } }), 'interrupted'],
-    ['a limit', facts({ limit: { reason: 'session', resetsAt: 5 } }), 'paused'],
+    ['a limit', facts({ limit: { reason: 'session', resetsAt: 5 }, limitHeld: true }), 'paused'],
     [
       'a signed-out account',
       facts({
@@ -123,7 +123,9 @@ describe('deriveStatus: every status from its facts', () => {
 
   test('a pause carries its reset time and account; a failure its reason and words', () => {
     expect(
-      deriveStatus(facts({ limit: { reason: 'session', resetsAt: 5, accountId: 'a' } })),
+      deriveStatus(
+        facts({ limit: { reason: 'session', resetsAt: 5, accountId: 'a' }, limitHeld: true }),
+      ),
     ).toEqual({ state: 'paused', reason: 'session', resetsAt: 5, accountId: 'a' });
     expect(
       deriveStatus(
