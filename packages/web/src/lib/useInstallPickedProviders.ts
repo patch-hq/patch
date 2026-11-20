@@ -8,12 +8,10 @@
 // the installer's output until the user presses Retry (`requestInstall`).
 
 import { useEffect, useRef } from 'react';
+import { ACCOUNT_PROVIDERS, backendHasConnectedAccount } from '@patch/wire';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { sendToHost } from '../routes/settings/hostWrite.js';
-
-const CLAUDE = 'claude-code';
-const CODEX = 'codex';
 
 export function requestInstall(host: HostPresence, backendId: string): boolean {
   return sendToHost(host, { type: 'host.backend_install', hostId: host.hostId, backendId });
@@ -23,15 +21,16 @@ export function useInstallPickedProviders(): void {
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
   const hosts = usePresenceStore((s) => s.hosts);
   const asked = useRef(new Set<string>());
-  const picked: Record<string, boolean> = {
-    [CLAUDE]: (secrets?.claude ?? []).some((a) => a.connected),
-    [CODEX]: (secrets?.codex ?? []).some((a) => a.connected),
-  };
+  // A provider is picked once any of its accounts is connected; each provider
+  // with accounts is asked the same way, from the table.
+  const picked: Record<string, boolean> = Object.fromEntries(
+    ACCOUNT_PROVIDERS.map((p) => [p.backendId, backendHasConnectedAccount(secrets, p.backendId)]),
+  );
   const key = JSON.stringify([picked, hosts]);
   useEffect(() => {
     for (const host of Object.values(hosts)) {
       if (!host.online || !host.host) continue;
-      for (const backendId of [CLAUDE, CODEX]) {
+      for (const { backendId } of ACCOUNT_PROVIDERS) {
         if (!picked[backendId]) continue;
         const entry = host.host.backends.find((b) => b.id === backendId);
         if (entry?.state !== 'absent') continue;

@@ -14,6 +14,8 @@ import QRCode from 'qrcode';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
+  ACCOUNT_PROVIDERS,
+  accountsForBackend,
   accountsKeyForBackend,
   backendIdForModel,
   compactModelLabel,
@@ -28,8 +30,6 @@ import {
   type PermissionMode,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
-import { ClaudeSignIn } from '../components/ClaudeSignIn.js';
-import { AddClaudeApiKey } from './settings/SharedAccounts.js';
 import { ErrorDetail } from '../components/ErrorDetail.js';
 import { requestInstall } from '../lib/useInstallPickedProviders.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
@@ -40,7 +40,7 @@ import {
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { AddChatGPTAccount } from './settings/SharedAccounts.js';
+import { PROVIDERS as PROVIDER_CARDS } from './settings/providers.js';
 import { useModelOptions } from './settings/modelOptions.js';
 import { patchShared } from './settings/sharedWrite.js';
 
@@ -201,7 +201,9 @@ function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
 /** How many AI accounts are connected, of any provider. */
 export function useConnectedCount(): number {
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
-  return [...(secrets?.claude ?? []), ...(secrets?.codex ?? [])].filter((a) => a.connected).length;
+  return ACCOUNT_PROVIDERS.flatMap((p) =>
+    accountsForBackend<{ connected: boolean }>(secrets, p.backendId),
+  ).filter((a) => a.connected).length;
 }
 
 /**
@@ -225,45 +227,26 @@ export function connectedNames(
  */
 export function ProviderCards(): JSX.Element {
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
-  const claude = secrets?.claude.filter((a) => a.connected) ?? [];
-  const chatgpt = secrets?.codex.filter((a) => a.connected) ?? [];
   return (
     <>
-      <div className="welcome-provider" data-testid="welcome-claude">
-        <div className="welcome-provider-head">
-          <span className="welcome-provider-name">Claude</span>
-          {claude.length > 0 ? (
-            <span className="welcome-ok" data-testid="welcome-claude-connected">
-              {connectedNames('Claude', claude)}
-            </span>
-          ) : null}
-        </div>
-        {claude.length === 0 ? (
-          <>
-            <div className="set-inline">
-              <ClaudeSignIn primary />
-              <AddClaudeApiKey />
+      {PROVIDER_CARDS.map((p) => {
+        const connected = secrets ? p.rows(secrets).filter((a) => a.connected) : [];
+        const { name, testId, Controls, installName, installTestId } = p.welcome;
+        return (
+          <div className="welcome-provider" data-testid={`welcome-${testId}`} key={p.id}>
+            <div className="welcome-provider-head">
+              <span className="welcome-provider-name">{name}</span>
+              {connected.length > 0 ? (
+                <span className="welcome-ok" data-testid={`welcome-${testId}-connected`}>
+                  {connectedNames(name, connected)}
+                </span>
+              ) : null}
             </div>
-          </>
-        ) : null}
-        <InstallStatus backendId="claude-code" name="Claude Code" testId="claude" />
-      </div>
-      <div className="welcome-provider" data-testid="welcome-chatgpt">
-        <div className="welcome-provider-head">
-          <span className="welcome-provider-name">ChatGPT and OpenAI</span>
-          {chatgpt.length > 0 ? (
-            <span className="welcome-ok" data-testid="welcome-chatgpt-connected">
-              {connectedNames('ChatGPT and OpenAI', chatgpt)}
-            </span>
-          ) : null}
-        </div>
-        {chatgpt.length === 0 ? (
-          <>
-            <AddChatGPTAccount />
-          </>
-        ) : null}
-        <InstallStatus backendId="codex" name="Codex" testId="codex" />
-      </div>
+            {connected.length === 0 ? <Controls /> : null}
+            <InstallStatus backendId={p.id} name={installName} testId={installTestId} />
+          </div>
+        );
+      })}
     </>
   );
 }

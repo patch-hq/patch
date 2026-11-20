@@ -4,9 +4,9 @@
 // `providerDescriptor`, `modelHasCapability`) and its host behaviour from
 // HARNESS_TRAITS — never from its name, model prefix or session-id prefix.
 //
-// This scan fails on any NEW branching of that kind. The files below that still
-// have some are a ratchet: when you remove one, lower its count (delete the
-// entry at zero); never raise one to get a change through.
+// This scan fails on any branching of that kind. Account and sign-in wiring reads
+// the provider table (`accountsKey`, `accountKinds`, `ownSettingsReportedByHost`)
+// and each surface's own provider entries.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -28,23 +28,6 @@ const ADAPTERS = new Set([
   'packages/host/src/sdkBackend.ts',
   'packages/host/src/harnesses.ts',
 ]);
-
-/**
- * What still branches on a provider's name outside the adapters, by file. Each
- * is per-provider account or sign-in wiring in Settings and the host's account
- * setup, which has not moved behind the table yet.
- */
-const BASELINE: Record<string, number> = {
-  'packages/web/src/lib/useInstallPickedProviders.ts': 2,
-  'packages/web/src/routes/WelcomeRoute.tsx': 4,
-  'packages/web/src/routes/settings/ProvidersPage.tsx': 1,
-  'packages/web/src/routes/settings/SharedAccounts.tsx': 2,
-  'packages/web/src/routes/settings/providers.tsx': 2,
-  'apps/mobile/src/components/settings/CreditSourcesSection.tsx': 2,
-  'apps/mobile/src/components/settings/ProviderOwnSettings.tsx': 1,
-  'apps/mobile/src/components/settings/providers.tsx': 2,
-  'packages/host/src/index.ts': 6,
-};
 
 /** Shapes of provider-name branching. Each match is one count. */
 const PATTERNS: readonly RegExp[] = [
@@ -91,21 +74,9 @@ function branchingByFile(): Record<string, string[]> {
 describe('no provider-name branching outside the adapters', () => {
   const found = branchingByFile();
 
-  it('adds none beyond the recorded baseline', () => {
-    const over = Object.entries(found)
-      .filter(([file, hits]) => hits.length > (BASELINE[file] ?? 0))
-      .map(
-        ([file, hits]) =>
-          `${file}: ${hits.length} (baseline ${BASELINE[file] ?? 0}): ${hits.join(', ')}`,
-      );
-    expect(over).toEqual([]);
-  });
-
-  it('keeps the baseline down to what is still there', () => {
-    const stale = Object.entries(BASELINE)
-      .filter(([file, n]) => (found[file]?.length ?? 0) < n)
-      .map(([file, n]) => `${file}: baseline ${n}, now ${found[file]?.length ?? 0} — lower it`);
-    expect(stale).toEqual([]);
+  it('finds none', () => {
+    const named = Object.entries(found).map(([file, hits]) => `${file}: ${hits.join(', ')}`);
+    expect(named).toEqual([]);
   });
 
   it('catches each shape it looks for', () => {

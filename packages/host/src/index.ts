@@ -85,6 +85,10 @@ import {
   type AcpLoginUpdateEvent,
   type AccountStrategy,
   type SharedSecrets,
+  type ProviderAccountsKey,
+  ACCOUNT_PROVIDERS,
+  providerAccountKind,
+  providerForBackendId,
   type SharedSettings,
   type SharedSettingsPatch,
   DEFAULT_GOAL_EVAL_PROMPT,
@@ -2540,6 +2544,28 @@ async function startHost(
       );
     });
   };
+  /**
+   * Where each provider's shared accounts go on this host, keyed like the shared
+   * settings' lists (`accountsKey`). Adding a provider with accounts is one entry.
+   */
+  const sharedAccountStores: {
+    [K in ProviderAccountsKey]: (accounts: SharedSecrets[K]) => void | Promise<void>;
+  } = {
+    claude: (accounts) => {
+      const before = JSON.stringify(readPatchStore(oauthOpts)?.accounts ?? []);
+      writePatchStore({ accounts, activeAccountId: accounts[0]?.id ?? null }, oauthOpts);
+      sharedClaude = accounts;
+      if (JSON.stringify(accounts) !== before) {
+        // The keys changed: every out-of-credit reading is about keys that may
+        // no longer be the ones held, so it is dropped and read afresh.
+        accountRotation.clearAll();
+        void accountUsage?.refreshAll(true);
+        creditResume.credentialChanged('shared accounts changed');
+        void refreshCredentialState();
+      }
+    },
+    codex: (accounts) => codexAccounts.applyShared(accounts),
+  };
   const applySnapshot = async (snapshot: SettingsSnapshotEvent): Promise<string | undefined> => {
     const errors: string[] = [];
     const part = async (name: string, run: () => void | Promise<void>): Promise<void> => {
@@ -2571,26 +2597,13 @@ async function startHost(
       if (acpAccounts.apply(snapshot.secrets.acp ?? [])) onAcpChange();
     });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
-    await part('Claude accounts', () => {
-      const before = JSON.stringify(readPatchStore(oauthOpts)?.accounts ?? []);
-      writePatchStore(
-        {
-          accounts: snapshot.secrets.claude,
-          activeAccountId: snapshot.secrets.claude[0]?.id ?? null,
-        },
-        oauthOpts,
-      );
-      sharedClaude = snapshot.secrets.claude;
-      if (JSON.stringify(snapshot.secrets.claude) !== before) {
-        // The keys changed: every out-of-credit reading is about keys that may
-        // no longer be the ones held, so it is dropped and read afresh.
-        accountRotation.clearAll();
-        void accountUsage?.refreshAll(true);
-        creditResume.credentialChanged('shared accounts changed');
-        void refreshCredentialState();
-      }
-    });
-    await part('OpenAI accounts', () => codexAccounts.applyShared(snapshot.secrets.codex));
+    // Each provider with accounts takes its own list, through its entry in
+    // `sharedAccountStores`; the loop names no provider.
+    const applyAccounts = <K extends ProviderAccountsKey>(key: K): void | Promise<void> =>
+      sharedAccountStores[key](snapshot.secrets[key]);
+    for (const provider of ACCOUNT_PROVIDERS) {
+      await part(`${provider.label} accounts`, () => applyAccounts(provider.accountsKey));
+    }
     link.send(buildAccountReport());
     publishHost();
     if (!firstSnapshotApplied) {
@@ -4797,7 +4810,7 @@ async function startHost(
               ...(turn ? { starting: true } : {}),
             },
             true,
-            model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt',
+            providerAccountKind(providerForBackendId(CODEX_BACKEND_ID), model),
           );
           return { ok: true, accessToken: '', accountId: account.accountId };
         } catch (error) {

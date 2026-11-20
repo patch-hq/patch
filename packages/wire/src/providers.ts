@@ -121,6 +121,13 @@ export interface ProviderDescriptor {
   /** The provider's own settings Settings exposes (spec/10 § Provider settings). */
   readonly settings: readonly ProviderSettingDescriptor[];
   /**
+   * Hosts report the provider's own configuration file (Claude Code's
+   * `settings.json`, in `claude_settings.updated`), so Settings can show a value
+   * set there when Patch has none chosen. False for a provider whose own
+   * configuration no host reports.
+   */
+  readonly ownSettingsReportedByHost: boolean;
+  /**
    * What Settings says about the provider's own session settings when it
    * declares none that Patch can expose (spec/10 § Provider settings), so an
    * empty list reads as the provider's fact rather than as Patch leaving it out.
@@ -205,6 +212,7 @@ export const PROVIDERS = [
         providerDefault: 30,
       },
     ],
+    ownSettingsReportedByHost: true,
     nativeDuplicates: [
       'patch_agent',
       'patch_wake_me',
@@ -262,6 +270,7 @@ export const PROVIDERS = [
     settings: [],
     settingsNote:
       'Codex has no setting to delete old sessions. It keeps every session until you delete it with Codex itself.',
+    ownSettingsReportedByHost: false,
     nativeDuplicates: ['patch_agent'],
   },
   // Any Agent Client Protocol agent (spec/02 § Provider adapters): Gemini CLI
@@ -301,6 +310,7 @@ export const PROVIDERS = [
       steer: false,
     },
     settings: [],
+    ownSettingsReportedByHost: false,
     nativeDuplicates: [],
   },
 ] as const satisfies readonly ProviderDescriptor[];
@@ -411,6 +421,27 @@ export function accountsKeyForModel(model: string | null | undefined): ProviderA
 export function accountKindForModel(model: string | null | undefined): AccountKind | null {
   const kinds = providerDescriptor(providerForModel(model)).accountKinds;
   if (kinds === null) return null;
+  return kindIn(kinds, model);
+}
+
+/**
+ * The kind of account a chat of this provider runs on for `model` (none named
+ * is the provider's default kind). For a provider's own adapter, which knows its
+ * accounts have kinds; throws for a provider whose accounts do not.
+ */
+export function providerAccountKind(
+  providerId: string,
+  model: string | null | undefined,
+): AccountKind {
+  const kinds = providerDescriptor(providerId).accountKinds;
+  if (kinds === null) throw new Error(`${providerId} accounts have no kinds`);
+  return kindIn(kinds, model);
+}
+
+function kindIn(
+  kinds: NonNullable<ProviderDescriptor['accountKinds']>,
+  model: string | null | undefined,
+): AccountKind {
   const hit = kinds.byModelPrefix.find((k) => model?.startsWith(k.prefix) === true);
   return hit ? hit.kind : kinds.default;
 }
@@ -467,6 +498,28 @@ export function accountsKeyForBackend(backendId: string): ProviderAccountsKey {
   const key = providerDescriptor(providerForBackendId(backendId)).accountsKey;
   if (key === null) throw new Error(`${backendId} has no accounts`);
   return key as ProviderAccountsKey;
+}
+
+/**
+ * A provider's accounts out of the shared settings' lists, by its backend id
+ * (`secrets[accountsKey]`). Empty while the list is absent.
+ */
+export function accountsForBackend<T>(
+  secrets: Partial<Record<ProviderAccountsKey, readonly T[]>> | null | undefined,
+  backendId: string,
+): readonly T[] {
+  return secrets?.[accountsKeyForBackend(backendId)] ?? [];
+}
+
+/** Is any account of the provider with this backend id connected? */
+export function backendHasConnectedAccount(
+  secrets:
+    | Partial<Record<ProviderAccountsKey, ReadonlyArray<{ connected: boolean }>>>
+    | null
+    | undefined,
+  backendId: string,
+): boolean {
+  return accountsForBackend(secrets, backendId).some((a) => a.connected);
 }
 
 /** Every backend id that holds accounts, for schemas that list them. */

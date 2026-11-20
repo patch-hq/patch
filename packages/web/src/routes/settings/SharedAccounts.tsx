@@ -196,7 +196,7 @@ function AccountEntry({
         ? [
             {
               label: row.connected ? 'Sign in again' : 'Sign in',
-              detail: 'Sign in with Claude in your browser',
+              detail: provider.signInDetail,
               testid: `account-connect-${id}`,
               onSelect: () => setSigningIn(true),
             },
@@ -212,11 +212,13 @@ function AccountEntry({
             },
           ]
         : []),
-    ...(backendId === 'codex' && row.kind !== 'apiKey'
+    // A provider with no token to paste signs a row in with its own flow; an
+    // API-key row has nothing to sign in to.
+    ...(!provider.pasteToken && row.kind !== 'apiKey'
       ? [
           {
             label: row.connected ? 'Sign in again' : 'Sign in',
-            detail: 'Sign in with ChatGPT using a code you approve on any device',
+            detail: provider.signInDetail,
             testid: `account-connect-${id}`,
             onSelect: () => setSigningIn(true),
           },
@@ -299,11 +301,7 @@ function AccountEntry({
           {reading.error}
         </p>
       ) : null}
-      {signingIn && backendId === 'codex' ? (
-        <ChatGPTSignIn accountId={row.id} onDone={() => setSigningIn(false)} />
-      ) : signingIn ? (
-        <ClaudeSignIn accountId={row.id} onDone={() => setSigningIn(false)} />
-      ) : null}
+      {signingIn ? <provider.SignIn accountId={row.id} onDone={() => setSigningIn(false)} /> : null}
       <UsageBars
         usage={reading?.usage}
         windows={provider.windows}
@@ -339,6 +337,16 @@ export function AddClaudeApiKey(): JSX.Element {
     >
       Add API key
     </button>
+  );
+}
+
+/** Claude's card on the welcome step: sign in in the browser, or add an API key. */
+export function WelcomeClaudeControls(): JSX.Element {
+  return (
+    <div className="set-inline">
+      <ClaudeSignIn primary />
+      <AddClaudeApiKey />
+    </div>
   );
 }
 
