@@ -198,7 +198,11 @@ describe('the control socket is gated as a whole', () => {
 
   it('admits the caller presenting the daemon-minted key', async () => {
     const daemon = setup();
-    const app = await buildControl({ daemon, localKey: KEY });
+    const app = await buildControl({
+      daemon,
+      localKey: KEY,
+      listAccountChats: async () => [],
+    });
     try {
       await daemon.spawnChat({ folder });
       const res = await app.inject({
@@ -219,7 +223,11 @@ describe('the control socket is gated as a whole', () => {
     const patchHome = join(home, '.patch');
     mkdirSync(patchHome, { recursive: true });
     const minted = mintLocalKey(patchHome);
-    const app = await buildControl({ daemon: setup(), localKey: minted });
+    const app = await buildControl({
+      daemon: setup(),
+      localKey: minted,
+      listAccountChats: async () => [],
+    });
     try {
       const fromFile = readFileSync(localKeyPath(patchHome), 'utf8').trim();
       const res = await app.inject({

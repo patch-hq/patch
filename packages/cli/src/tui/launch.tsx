@@ -6,6 +6,7 @@ import { loadConfig } from '../config.js';
 import { bearerToken } from '../auth.js';
 import { PatchWsClient } from '../transport/ws.js';
 import { buildTransport } from '../transport/index.js';
+import { accountChatsPath } from '../commands/_common.js';
 import { App } from './App.js';
 import type { ChatBrowserChat } from './ChatBrowser.js';
 
@@ -55,8 +56,7 @@ async function spawnViaTransport(
 
 async function listChats(): Promise<ChatBrowserChat[]> {
   const t = buildTransport(loadConfig());
-  const path = t.kind === 'uds' ? '/chats' : '/api/chats';
-  const res = await t.get<{ chats: ChatBrowserChat[] }>(path);
+  const res = await t.get<{ chats: ChatBrowserChat[] }>(accountChatsPath(t));
   return res.chats;
 }
 

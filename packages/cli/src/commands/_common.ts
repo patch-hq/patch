@@ -146,3 +146,18 @@ export async function run(opts: CommonOpts, body: () => Promise<void>): Promise<
 export function pickPath(transport: Transport, udsPath: string, restPath: string): string {
   return transport.kind === 'uds' ? udsPath : restPath;
 }
+
+/**
+ * Where the account-wide chat list is read, with the server's status for each
+ * chat (spec/12 § Chat status): `/internal/chats` over the host socket (the
+ * host asks the server; nothing is answered from the host's own view) or
+ * `/api/chats` over REST. Inside a chat, the calling chat is named.
+ */
+export function accountChatsPath(transport: Transport, archived?: 'only' | 'include'): string {
+  const params = new URLSearchParams();
+  if (archived !== undefined) params.set('archived', archived);
+  const caller = process.env['PATCH_CHAT_ID'];
+  if (transport.kind === 'uds' && caller) params.set('callerChatId', caller);
+  const qs = params.size > 0 ? `?${params.toString()}` : '';
+  return `${transport.kind === 'uds' ? '/internal/chats' : '/api/chats'}${qs}`;
+}

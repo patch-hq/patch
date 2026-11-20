@@ -326,47 +326,6 @@ describe('patch_spawn records the chat that launched the new one', () => {
   });
 });
 
-describe('UDS internal endpoints — patch_list_chats', () => {
-  it('default omits archived; archived=only returns archived', async () => {
-    const { daemon, jobs, folder } = setup();
-    const a = await daemon.spawnChat({ folder });
-    const b = await daemon.spawnChat({ folder });
-    await daemon.setArchived(b, true);
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const def = await app.inject({
-        method: 'GET',
-        url: '/internal/chats',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(def.json().chats.map((c: { chatId: string }) => c.chatId)).toEqual([a]);
-
-      const only = await app.inject({
-        method: 'GET',
-        url: '/internal/chats?archived=only',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(only.json().chats.map((c: { chatId: string }) => c.chatId)).toEqual([b]);
-
-      const inc = await app.inject({
-        method: 'GET',
-        url: '/internal/chats?archived=include',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(inc.json().chats).toHaveLength(2);
-
-      const bad = await app.inject({
-        method: 'GET',
-        url: '/internal/chats?archived=true',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(bad.statusCode).toBe(400);
-    } finally {
-      await app.close();
-    }
-  });
-});
-
 describe('UDS internal endpoints — patch_stop', () => {
   it('stops a known chat; 404 on unknown', async () => {
     const { daemon, jobs, folder } = setup();

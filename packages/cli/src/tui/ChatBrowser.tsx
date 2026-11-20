@@ -6,8 +6,9 @@ import { dropLastCodePoint } from './text.js';
 
 export interface ChatBrowserChat {
   chatId: string;
-  name?: string;
-  status?: string;
+  name?: string | null;
+  /** The server's status for the chat (spec/12 § Chat status). */
+  chatStatus?: { state: string };
 }
 
 export interface ChatBrowserProps {
@@ -48,7 +49,7 @@ export function ChatBrowser(props: ChatBrowserProps): React.JSX.Element {
         ) : (
           filtered.map((c, i) => (
             <Text key={c.chatId} inverse={i === safeIndex}>
-              {c.chatId.slice(0, 8)} {c.status ?? '?'} {c.name ?? ''}
+              {c.chatId.slice(0, 8)} {c.chatStatus?.state ?? '-'} {c.name ?? ''}
             </Text>
           ))
         )}

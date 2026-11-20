@@ -213,6 +213,17 @@ describe('the cross-host bridge answers peek/history itself', () => {
     });
   });
 
+  it('lists chats with the server’s own status (patch_list_chats, the CLI lists)', () => {
+    const b = bridge();
+    b.feed({ type: 'patch.list_chats.request', sourceChatId: 'cli' } as WireEvent, 'host-a');
+    const reply = b.sent.find((x) => x.event.type === 'patch.list_chats.response')!.event as {
+      chats: Array<{ chatId: string; chatStatus?: { state: string } }>;
+    };
+    expect(reply.chats.find((c) => c.chatId === 'c1')?.chatStatus).toMatchObject({
+      state: 'idle',
+    });
+  });
+
   it('does not answer an older host’s audit record (no requestId)', () => {
     const b = bridge();
     b.feed(

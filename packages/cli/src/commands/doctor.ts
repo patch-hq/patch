@@ -218,12 +218,11 @@ export function registerDoctorCommand(program: Command): void {
         // read or parse. Only the local socket reports them (this host only).
         if (config.hostSocket !== null && config.daemonLocalKey !== null) {
           try {
-            const t = buildTransport(config);
+            const t = buildTransport(config, { forceUds: true });
             const res = await t.get<{
-              unreadable?: Array<{ chatId: string; path: string; error: string }>;
-            }>(t.kind === 'uds' ? '/chats' : '/api/chats');
-            checks['unreadableChats'] =
-              res.unreadable ?? 'unknown: only reported over the local host socket';
+              unreadable: Array<{ chatId: string; path: string; error: string }>;
+            }>('/chats/unreadable');
+            checks['unreadableChats'] = res.unreadable;
           } catch (err) {
             checks['unreadableChats'] = `error: ${(err as Error).message}`;
           }

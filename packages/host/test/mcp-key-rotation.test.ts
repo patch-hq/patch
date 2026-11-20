@@ -27,7 +27,13 @@ async function startHost(home: string, socketPath: string, localKey: string) {
     emit: () => undefined,
     logger: silent,
   });
-  const app = await buildControl({ localKey, daemon, jobs: new MemoryJobsStore() });
+  const app = await buildControl({
+    localKey,
+    daemon,
+    jobs: new MemoryJobsStore(),
+    // patch_list_chats lists the server's account-wide list; stand in for it.
+    listAccountChats: async () => [],
+  });
   await app.listen({ path: socketPath });
   return app;
 }
