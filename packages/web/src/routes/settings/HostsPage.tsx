@@ -205,6 +205,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   const shared = usePreferencesStore((s) => s.shared);
   const [openDetails, setOpenDetails] = useState<string | null>(null);
   const name = hostLabel(host);
+  const { updating, apply: applyUpdate } = useHostUpdate(host);
 
   function commitRename(): void {
     const next = draft.trim();
@@ -300,10 +301,19 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
 
   return (
     <div data-testid={`host-detail-${host.hostId}`}>
-      <Group label={name}>
+      <Group>
         {report ? (
           <>
-            <Row title="Name">
+            <Row
+              title="Name"
+              sub={
+                looksLikeSerial(report.hostName) ? (
+                  <span data-testid={`host-${host.hostId}-name-prompt`}>
+                    This looks like a serial number. Give it a name you will recognise.
+                  </span>
+                ) : undefined
+              }
+            >
               <input
                 type="text"
                 className="set-word"
@@ -335,10 +345,25 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                     {machineLabel(report.platform, report.arch)}
                   </span>
                   {' · '}
-                  <span data-testid={`host-${host.hostId}-version`}>{report.hostVersion}</span>
+                  <span data-testid={`host-${host.hostId}-version`}>
+                    {host.online ? report.hostVersion : `${report.hostVersion} (last reported)`}
+                  </span>
+                  {report.updateAvailable ? ' · Update available' : ''}
                 </>
               }
-            />
+            >
+              {report.updateAvailable ? (
+                <button
+                  type="button"
+                  className="set-btn"
+                  disabled={updating || !host.online}
+                  onClick={applyUpdate}
+                  data-testid={`host-${host.hostId}-detail-update`}
+                >
+                  {updating ? 'Updating…' : 'Update'}
+                </button>
+              ) : null}
+            </Row>
             {report.lastDisconnect ? (
               <Row
                 title="Last disconnect"
@@ -369,9 +394,18 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       {report && report.backends.length > 0 ? (
         <Group testid={`host-${host.hostId}-backends`}>
           {report.backends.map((b) => {
-            const status = isAcpBackendRow(b.id)
+            const raw = isAcpBackendRow(b.id)
               ? acpBackendStatus(b)
               : backendStatus(b, sharedRows(shared, b.id));
+            const noLogin =
+              raw.needsSignIn && b.error !== undefined && /credential|claudeAiOauth/i.test(b.error);
+            const status = noLogin
+              ? {
+                  text: `${b.label} isn’t signed in on this computer`,
+                  needsSignIn: true,
+                  details: undefined,
+                }
+              : raw;
             return (
               <Row
                 key={b.id}
@@ -379,7 +413,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 title={b.label}
                 sub={
                   <>
-                    {[b.version, status.text].filter(Boolean).join(' · ')}
+                    {[noLogin ? null : b.version, status.text].filter(Boolean).join(' · ')}
                     {status.details !== undefined ? (
                       <>
                         {' · '}
@@ -434,12 +468,12 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               <Row
                 key={c.id}
                 testid={`host-${host.hostId}-component-${c.id}`}
-                title={c.label}
+                title={COMPONENT_NAME[c.id] ?? c.label}
                 sub={[
                   c.state === 'downloading' && c.progress !== undefined
                     ? `Downloading ${Math.round(c.progress * 100)}%`
                     : componentStateLabel(c.state),
-                  c.state === 'not-installed' ? `${Math.round(c.bytes / 1_000_000)} MB` : null,
+                  c.state === 'not-installed' ? sizeLabel(c.bytes) : null,
                   c.error ?? null,
                 ]
                   .filter(Boolean)
@@ -506,6 +540,23 @@ function componentStateLabel(state: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+const COMPONENT_NAME: Record<string, string> = {
+  kokoro: 'Read aloud',
+  whisper: 'Voice typing',
+};
+
+/** `1_500_000_000` as `1.5 GB`; under a gigabyte, whole megabytes. */
+function sizeLabel(bytes: number): string {
+  return bytes >= 1_000_000_000
+    ? `${(bytes / 1_000_000_000).toFixed(1).replace(/\.0$/, '')} GB`
+    : `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+/** A machine serial (`WC-M-K0X7P0RV6C`) rather than a name someone chose. */
+export function looksLikeSerial(name: string): boolean {
+  return /^(?=.*\d)(?=.*[A-Z])[A-Z0-9][A-Z0-9-]{7,}$/.test(name);
+}
+
 /**
  * Which version of the shared settings this host runs (spec/01 § Settings):
  * behind, or refusing part of it, is said by name rather than hidden.
@@ -521,13 +572,13 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
         ? 'Not applied yet'
         : 'Gets them when it reconnects'
       : state.appliedVersion === shared.version
-        ? 'Has your latest settings'
+        ? 'Up to date'
         : host.online
           ? 'Updating'
           : 'Gets the latest when it reconnects';
   return (
     <Row
-      title="Synced settings"
+      title="Your preferences"
       testid={`host-${host.hostId}-settings-version`}
       sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />
