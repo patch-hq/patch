@@ -3242,6 +3242,14 @@ export const HostInfoEvent = z
      */
     scriptPayload: z.boolean().optional(),
     /**
+     * This host reports a turn that ended on a limit as a fact on
+     * `chat.turn_ended.limit`, and the server derives paused, waiting for
+     * sign-in and out of credit from the account's state (spec/12 § Limits and
+     * sign-in). Optional: an older host never says, and the server keeps reading
+     * its `chat.state.limitBlock` as the pause.
+     */
+    limitFacts: z.boolean().optional(),
+    /**
      * Where the SERVER can reach this host's own audio WSS (`<host>:<port>`,
      * no scheme) to relay a voice session for a chat that lives here but was
      * opened from a surface that only reaches the server (spec/07 § Voice is
@@ -7499,6 +7507,21 @@ export type ChatTurnStartedEvent = z.infer<typeof ChatTurnStartedEvent>;
  * when the turn ended. `error` is the code and the provider's own wording when
  * it failed.
  */
+/** What a turn that ended on a provider limit says about it (`chat.turn_ended.limit`). */
+export const TurnLimit = z
+  .object({
+    /** The account the turn ran on. */
+    accountId: z.string().min(1).optional(),
+    /** The pool that ran out, where the provider said (`session`, `week`), else `unknown`. */
+    scope: z.string().min(1),
+    /** ms-epoch the provider stated the limit lifts. Absent when nothing stated one. */
+    resetsAt: z.number().int().optional(),
+    /** The provider's own words. */
+    message: z.string(),
+  })
+  .strict();
+export type TurnLimit = z.infer<typeof TurnLimit>;
+
 export const ChatTurnEndedEvent = z
   .object({
     type: z.literal('chat.turn_ended'),
@@ -7508,6 +7531,14 @@ export const ChatTurnEndedEvent = z
     at: z.number().int().nonnegative(),
     outcome: TurnOutcome,
     error: z.object({ code: ChatErrorCode, message: z.string() }).strict().optional(),
+    /**
+     * The turn ended on a provider limit and the host holds it owed (spec/12 §
+     * Limits and sign-in). A fact, not a status: the server reads the account's
+     * own state (spec/10 § Account states) to decide whether the chat is paused
+     * until a reset, waiting for sign-in or out of credit. Sent only by a host
+     * that says `limitFacts` on `host.host`.
+     */
+    limit: TurnLimit.optional(),
     branchId: z.string().min(1).optional(),
   })
   .strict();

@@ -23,6 +23,7 @@ import {
   PermissionMode,
   TurnOrigin,
   TurnOutcome,
+  TurnLimit,
 } from './events.js';
 
 export const CHAT_LOG_VERSION = 1;
@@ -110,6 +111,8 @@ export const LogRecordBody = z.discriminatedUnion('k', [
       k: z.literal('turn.end'),
       outcome: TurnOutcome,
       error: z.object({ code: ChatErrorCode, message: z.string() }).strict().optional(),
+      /** The turn ended on a provider limit and is owed (`chat.turn_ended.limit`). */
+      limit: TurnLimit.optional(),
       usage: z.record(z.unknown()).optional(),
     })
     .strict(),

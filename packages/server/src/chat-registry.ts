@@ -30,6 +30,7 @@ import {
 import type { Logger } from 'pino';
 import {
   deriveStatus,
+  type AccountStateLookup,
   emptyFacts,
   factsFromHostState,
   factsOnRequestRaised,
@@ -323,6 +324,10 @@ export class ChatRegistry {
   private writtenFacts = new Map<string, ChatStatusFacts>();
   /** Work the server itself holds for a chat (the message queue). */
   private owed: (chatId: string) => boolean = () => false;
+  /** Each account's state, as the shared settings hold it (spec/10 § Account states). */
+  private accountState: AccountStateLookup = () => undefined;
+  /** Whether a host reports limits on a turn's end (`host.host.limitFacts`). */
+  private hostLimitFacts: (hostId: string) => boolean = () => false;
   /** Told of every status change a fact made that no host `chat.state` carries. */
   private readonly statusListeners = new Set<(event: ChatStateEvent) => void>();
   /** The latest turn details each chat's host reported, carried on the server's own frames. */
@@ -519,6 +524,31 @@ export class ChatRegistry {
   }
 
   /**
+   * Where account states come from, and which hosts report limits as facts on
+   * a turn's end. A chat stopped on a limit or a sign-in reads its status from
+   * the state of the account it ran on.
+   */
+  setAccounts(opts: {
+    state: AccountStateLookup;
+    hostLimitFacts: (hostId: string) => boolean;
+  }): void {
+    this.accountState = opts.state;
+    this.hostLimitFacts = opts.hostLimitFacts;
+  }
+
+  /**
+   * An account's state moved (signed out, out of credit, limited, signed in
+   * again): work out again every chat whose status rests on its account. Tells
+   * the status listeners of each that changed.
+   */
+  accountStatesChanged(): void {
+    for (const [chatId, facts] of this.facts) {
+      if (facts.limit === null && facts.lastEnd?.outcome !== 'failed') continue;
+      this.applyFacts(chatId, facts, { tell: true, own: true });
+    }
+  }
+
+  /**
    * Hear every status change a fact made on its own (a turn boundary, a
    * question): there is no host `chat.state` to carry those, so the caller
    * sends this one to surfaces.
@@ -605,7 +635,7 @@ export class ChatRegistry {
       const next =
         event.type === 'chat.turn_started'
           ? factsOnTurnStarted(prev, event.turnId)
-          : factsOnTurnEnded(prev, event.turnId, event.outcome, event.error);
+          : factsOnTurnEnded(prev, event.turnId, event.outcome, event.error, event.limit);
       if (event.type === 'chat.turn_started') this.workedAt.set(event.chatId, this.now());
       this.applyFacts(event.chatId, next, { tell: true });
       return;
@@ -798,7 +828,11 @@ export class ChatRegistry {
         ...(event.turnStopped !== undefined ? { turnStopped: event.turnStopped } : {}),
         ...(event.turnSummary !== undefined ? { turnSummary: event.turnSummary } : {}),
       });
-      const facts = factsFromHostState(this.facts.get(event.chatId) ?? emptyFacts(), event);
+      const facts = factsFromHostState(
+        this.facts.get(event.chatId) ?? emptyFacts(),
+        event,
+        this.hostLimitFacts(next.hostId),
+      );
       // This frame is the host's own word for the chat; it reaches surfaces itself.
       this.applyFacts(event.chatId, facts, { tell: false });
       this.markDirty();
@@ -887,7 +921,7 @@ export class ChatRegistry {
     const row = this.chats.get(chatId);
     if (!row) return null;
     const owed = this.owed(chatId);
-    const target = deriveStatus(facts, owed);
+    const target = deriveStatus(facts, owed, this.accountState);
     const prev = row.chatStatus;
     if (prev && opts.own !== true && !isAllowedTransition(prev.state, target.state)) {
       this.logger?.warn(

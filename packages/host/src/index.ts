@@ -1397,6 +1397,8 @@ async function startHost(
       serverQueue: true,
       // Script and gate fires get their trigger event (spec/08).
       scriptPayload: true,
+      // A turn that met a limit is said on its end; the server reads the account (spec/12).
+      limitFacts: true,
       audioRelayHost: config.audio.relayHost,
       backends: [
         {

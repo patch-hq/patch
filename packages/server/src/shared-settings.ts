@@ -505,6 +505,20 @@ export class SharedSettingsService {
     return out;
   }
 
+  /** The state of one account, or undefined for an id the server does not hold. */
+  accountState(accountId: string): AccountState | undefined {
+    const account = [...this.secrets.claude, ...this.secrets.codex].find((a) => a.id === accountId);
+    return account ? this.stateOf(account) : undefined;
+  }
+
+  private readonly accountStateListeners = new Set<() => void>();
+
+  /** Hear when a fact behind any account's state moved, so what rests on it is worked out again. */
+  onAccountStates(listener: () => void): () => void {
+    this.accountStateListeners.add(listener);
+    return () => this.accountStateListeners.delete(listener);
+  }
+
   /** A fact behind an account's state moved: tell surfaces if a state actually changed. */
   private accountStatesChanged(): void {
     const next = this.stateKeys();
@@ -513,6 +527,13 @@ export class SharedSettingsService {
       [...next].every(([id, state]) => this.sentStates.get(id) === state);
     this.sentStates = next;
     if (!same) this.opts.broadcast(this.changedEvent());
+    for (const listener of this.accountStateListeners) {
+      try {
+        listener();
+      } catch (err) {
+        this.opts.logger?.error({ err }, 'shared settings: an account state listener threw');
+      }
+    }
   }
 
   hostStates(): HostSettingsState[] {

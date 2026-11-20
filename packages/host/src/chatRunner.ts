@@ -105,6 +105,7 @@ import type {
   AdoptedChat,
   PermissionDecisionBy,
   TurnOutcome,
+  TurnLimit,
   McpServerConfig,
   EffortLevel,
 } from '@patch/wire';
@@ -6233,9 +6234,8 @@ export class Daemon {
 
   /** Quiet note on the Manager thread's own log (spec/06 § The sweep): a
    * `system` `chat.message`, same arrangement a rotation boundary uses — never
-   * a turn, so it never reaches the Manager's own model context
-   * (`nativeReconstruct` drops `role: 'system'`). Every message the sweep sends
-   * to a chat, and each digest, shows up here. */
+   * a turn, so it never reaches the Manager's own model context. Every
+   * message the sweep sends to a chat, and each digest, shows up here. */
   private noteOnManager(text: string): void {
     this.emit({
       type: 'chat.message',
@@ -10500,6 +10500,8 @@ export class Daemon {
     const turnStartedAt = this.opts.now();
     let turnOutcome: TurnOutcome = 'failed';
     let turnError: { code: ChatErrorCode; message: string } | undefined;
+    /** The turn ended on a limit and is owed: said on its end as a fact (`chat.turn_ended.limit`). */
+    let turnLimit: TurnLimit | undefined;
     this.branchIds.delete(chatId);
     // This turn opens a new track (fork/side thread): it is that track's OWN
     // inaugural turn, so it belongs to `activeBranchId` directly — `forkChat`/
@@ -11264,6 +11266,18 @@ export class Daemon {
             // The turn's end carries the same words: the server reads the
             // failure from it (spec/12 § Chat status).
             turnError = { code: detail.code, message: reportedMsg };
+            // And the limit itself, as a fact: the turn is owed, on this
+            // account, with the provider's words and stated reset. The server
+            // reads the account's state to say whether that is a pause, a
+            // sign-in or out of credit (spec/12 § Limits and sign-in).
+            if (prompt !== undefined) {
+              turnLimit = {
+                ...(block?.accountId !== undefined ? { accountId: block.accountId } : {}),
+                scope: block?.scope ?? 'unknown',
+                ...(statedResetsAt !== undefined ? { resetsAt: statedResetsAt } : {}),
+                message: errMsg,
+              };
+            }
             this.chatState.setLastError(chatId, detail);
             this.chatState.setActivity(chatId, 'errored');
             // A wait that is not coming back soon is an error to read, not a
@@ -11635,7 +11649,7 @@ export class Daemon {
       } finally {
         this.aborters.delete(chatId);
         this.runs.delete(chatId);
-        this.closeTurnInHistory(chatId, turnOutcome, turnError);
+        this.closeTurnInHistory(chatId, turnOutcome, turnError, turnLimit);
         // However the turn ended — settled, stopped, errored — it is no longer
         // in flight, so it must stop looking like a turn a restart interrupted.
         this.runningTurn.delete(chatId);
@@ -15195,6 +15209,7 @@ export class Daemon {
     chatId: string,
     outcome: TurnOutcome,
     error: { code: ChatErrorCode; message: string } | undefined,
+    limit?: TurnLimit,
   ): void {
     this.closeToolRun(chatId);
     this.historyFailures.delete(chatId);
@@ -15212,6 +15227,7 @@ export class Daemon {
           k: 'turn.end',
           outcome,
           ...(error !== undefined ? { error } : {}),
+          ...(limit !== undefined ? { limit } : {}),
           ...(usage !== undefined ? { usage } : {}),
         },
         { branchId: this.branchIdFor(chatId), sync: true },
@@ -16340,7 +16356,12 @@ export class Daemon {
       limitBlock: this.limitBlocks.get(chatId) ?? null,
       // spec/12 § A usage or rate limit — what releases the pause, and whether
       // credit has come back for a chat that stopped for it.
-      limitNext: this.limitNext.get(chatId) ?? null,
+      // Set whenever a turn is held owed on a limit, a park restored with no
+      // recorded behaviour following the current setting: the server reads it
+      // as "the host still holds the owed turn" (spec/12 § Limits and sign-in).
+      limitNext:
+        this.limitNext.get(chatId) ??
+        (this.rateLimitPendingTurns.has(chatId) ? this.limitBehaviour : null),
       creditReturned: this.creditReturned.has(chatId),
       // spec/02 § Background task completions — how many of this chat's
       // patch_watch tasks are still running after the turn that launched them
