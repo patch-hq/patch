@@ -1271,33 +1271,33 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // `:id` accepts the full chatId or a unique prefix of one (spec/17-cli.md:
   // "`<id>` accepts the full ULID or a unique prefix") — resolved via
   // `chatState.resolve` before use on every route below.
+  // `patch chats get`: the chat's entry and status as the server holds them
+  // (read like patch_peek, only the chat_state kept), for a chat on any host.
+  // A prefix of one of this host's own chats is resolved here first.
   app.get<{ Params: { id: string } }>('/chats/:id', async (req, reply) => {
     const auth = checkAuth(req);
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
-    const state = opts.daemon.chatState.resolve(req.params.id);
-    if (!state) {
-      // Not on THIS host — `patch chats get` on a chat another host owns.
-      // Read from the server like patch_peek (only the chat_state is kept).
-      if (opts.peekFromServer) {
-        try {
-          const remote = await opts.peekFromServer({
-            sourceChatId: 'cli',
-            targetChatId: req.params.id,
-            limit: 1,
-          });
-          return remote.chat_state;
-        } catch (err) {
-          const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
-          return reply.code(code === 'chat_not_found' ? 404 : 502).send({
-            error: code,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-      return reply.code(404).send({ error: 'not found' });
+    if (!opts.peekFromServer) {
+      return reply
+        .code(503)
+        .send({ error: 'unavailable', message: 'patch chats get: no Patch server to read from' });
     }
-    return state;
+    const chatId = opts.daemon.chatState.resolve(req.params.id)?.chatId ?? req.params.id;
+    try {
+      const remote = await opts.peekFromServer({
+        sourceChatId: 'cli',
+        targetChatId: chatId,
+        limit: 1,
+      });
+      return remote.chat_state;
+    } catch (err) {
+      const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
+      return reply.code(code === 'chat_not_found' ? 404 : 502).send({
+        error: code,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   app.post<{ Params: { id: string } }>('/chats/:id/stop', async (req, reply) => {

@@ -6465,7 +6465,7 @@ export type ToolLogEntry = z.infer<typeof ToolLogEntry>;
  * Host → server, through the host outbox (spec/01 § Host outbox): one
  * cross-chat tool call this host ran, for the server's account-wide tool log
  * (Settings → Activity). Sent only to a server whose `auth.ok` carried
- * `serverReads`; an older server is sent none and the outbox keeps them.
+ * `serverReads`; an older server keeps no tool log and is sent none.
  */
 export const PatchToolLogEntryEvent = z
   .object({
@@ -10155,8 +10155,8 @@ export const AuthOkEvent = z
      * Sent to a host by a server that answers `patch_peek` and `patch_history`
      * from its own record (spec/03 § Cross-chat tools) and keeps the account's
      * tool log (`patch.tool_log.entry`). A host refuses those two tools with a
-     * plain "update the server" error on a server without it, and holds its
-     * tool-log entries in the outbox until the server is updated.
+     * plain "update the server" error on a server without it, and sends it no
+     * tool-log entries (it keeps no tool log).
      */
     serverReads: z.literal(true).optional(),
     /**

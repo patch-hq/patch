@@ -268,7 +268,8 @@ type ChatState = {
   snoozedUntil: number | null;
   model: string | null;
   lastUpdated: number;
-  lastMessage?: string; // latest message text in the returned slice
+  lastMessages: { role: 'user' | 'assistant'; content: string; seq: number; ts: number | null }[]; // latest 20 messages of the track
+  lastMessage?: string; // the latest assistant message
   lastError: { code: string; message: string; at: number } | null;
   eventCount: number; // entries in the chat's record
 };

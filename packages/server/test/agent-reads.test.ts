@@ -55,13 +55,30 @@ describe('peekChat', () => {
       hostOnline: false,
       folder: '/work/c1',
       status: 'active',
-      lastMessage: 'm4',
+      lastMessage: 'm3',
       eventCount: 5,
     });
     expect(out.result.chat_state.chatStatus).toMatchObject({ state: 'idle' });
+    // The latest messages from the whole track, not just the returned slice.
+    expect(out.result.chat_state.lastMessages).toEqual([
+      { role: 'user', content: 'm0', seq: 0, ts: 1000 },
+      { role: 'assistant', content: 'm1', seq: 1, ts: 1001 },
+      { role: 'user', content: 'm2', seq: 2, ts: 1002 },
+      { role: 'assistant', content: 'm3', seq: 3, ts: 1003 },
+      { role: 'user', content: 'm4', seq: 4, ts: 1004 },
+    ]);
     expect('activity' in out.result.chat_state).toBe(false);
     expect(out.result.events.map((e) => (e as { content: string }).content)).toEqual(['m3', 'm4']);
     expect(out.result.truncated).toBe(true);
+  });
+
+  it('keeps only the latest 20 messages', () => {
+    const w = world(30);
+    const out = peekChat(w.deps, 'c1', 1);
+    const last = out.ok ? (out.result.chat_state.lastMessages as { seq: number }[]) : [];
+    expect(last).toHaveLength(20);
+    expect(last[0]!.seq).toBe(10);
+    expect(last.at(-1)!.seq).toBe(29);
   });
 
   it('says not truncated when the whole record fits', () => {

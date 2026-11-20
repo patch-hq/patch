@@ -350,18 +350,13 @@ describe('server link with an outbox', () => {
       expect(link.answersReads()).toBe(true);
     });
 
-    it('are held for a server without it, and sent once one with it connects', () => {
+    it('are not sent to a server without it', () => {
       link.start();
       const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
       s.sent.length = 0;
       link.send(entry(1));
       expect(s.sent).toEqual([]);
       expect(link.answersReads()).toBe(false);
-      s.close(1006);
-      link.start();
-      const again = connect(authOk({ hostOutbox: true, recordComplete: true, serverReads: true }));
-      const resent = again.sent.filter((f) => f['type'] === 'host.outbox');
-      expect(resent.map((f) => f['event'])).toEqual([entry(1)]);
     });
   });
 
