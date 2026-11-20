@@ -500,6 +500,58 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     });
   });
 
+  it("sends a turn's message under the id Patch records for it, and a new session under the chosen id", async () => {
+    const calls: Array<{ prompt: unknown; options: Record<string, unknown> }> = [];
+    const { createRealSdkBackend } = await loadRealBackend((args) => {
+      calls.push(args as { prompt: unknown; options: Record<string, unknown> });
+      return (async function* () {
+        yield { type: 'result', session_id: 's' };
+      })();
+    });
+    const run = (extra: Record<string, unknown>) =>
+      drain(
+        createRealSdkBackend().run({
+          prompt: 'hello',
+          cwd: '/tmp',
+          abortController: new AbortController(),
+          oauthAccessToken: 'tok',
+          permissionMode: 'bypassPermissions',
+          promptId: 'u-prompt',
+          ...extra,
+        } as never),
+      );
+    const firstMessage = async (prompt: unknown): Promise<Record<string, unknown>> => {
+      for await (const m of prompt as AsyncIterable<Record<string, unknown>>) return m;
+      throw new Error('no message');
+    };
+
+    // A fresh session takes the chosen id.
+    await run({ newSessionId: 'sess-new' });
+    expect(await firstMessage(calls[0]!.prompt)).toMatchObject({
+      type: 'user',
+      uuid: 'u-prompt',
+      message: { role: 'user', content: 'hello' },
+    });
+    expect(calls[0]!.options).toMatchObject({ sessionId: 'sess-new' });
+
+    // A fork keeps the parent's prefix through the entry and lands in the chosen session.
+    await run({
+      resumeSessionId: 'sess-parent',
+      fork: { resumeAtUuid: 'u-kept' },
+      newSessionId: 'sess-fork',
+    });
+    expect(calls[1]!.options).toMatchObject({
+      resume: 'sess-parent',
+      forkSession: true,
+      resumeSessionAt: 'u-kept',
+      sessionId: 'sess-fork',
+    });
+
+    // A plain resume continues the session it names; no new id.
+    await run({ resumeSessionId: 'sess-parent' });
+    expect(calls[2]!.options['sessionId']).toBeUndefined();
+  });
+
   it('gives research calls web search and nothing else of the coding agent', async () => {
     const calls: Array<{ options: Record<string, unknown> }> = [];
     const { createRealSdkBackend } = await loadRealBackend((args) => {

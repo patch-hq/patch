@@ -15,7 +15,6 @@ import type { HostAccountEvent, LimitBehaviour, SharedAcpAccount, WireEvent } fr
 import { AcpBackend, AcpLimitError, AcpSignedOutError } from '../src/acpBackend.js';
 import { AcpAccounts, type AcpRoute } from '../src/acpAccounts.js';
 import { AcpRegistry } from '../src/acpRegistry.js';
-import { CodexHistory } from '../src/codexHistory.js';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { harnessTraitsForModel } from '../src/harnesses.js';
@@ -179,15 +178,10 @@ function setup(
     clientVersion: '1.0.0',
   });
   registry.setConfigured([fakeAgent({ apiKeyEnv: 'FAKE_ACP_KEY' })]);
-  const backend = new AcpBackend(
-    registry,
-    new CodexHistory(join(root, 'history'), 'acp'),
-    '1.0.0',
-    {
-      signedOut: (id, reason) => accounts.markSignedOut(id, reason),
-      worked: (id) => accounts.noteWorked(id),
-    },
-  );
+  const backend = new AcpBackend(registry, '1.0.0', {
+    signedOut: (id, reason) => accounts.markSignedOut(id, reason),
+    worked: (id) => accounts.noteWorked(id),
+  });
   const known = new Set<string>();
   const events: WireEvent[] = [];
   const ranOn: Array<string | undefined> = [];
@@ -206,12 +200,7 @@ function setup(
         })();
       },
     },
-    historyReader: {
-      hasSession: (o: { sessionId: string }) => known.has(o.sessionId),
-      read: () => [],
-      forkPoint: () => null,
-      sidePoint: () => null,
-    } as any,
+    sessionProbe: { hasSession: (o: { sessionId: string }) => known.has(o.sessionId) },
     claudeProjectsRoot: join(root, 'projects'),
     resolveOAuth: async (_model, turn) => {
       const a = accounts.resolve('fake', route(turn?.preferredAccountId), turn !== undefined);

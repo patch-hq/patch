@@ -1,158 +1,61 @@
-// Read-only history pipe.
+// Helpers shared by the host's turn path, and the check that a provider session
+// still exists.
 //
-// Per spec/04: Claude Code persists session JSONL under
-// `~/.claude/projects/<encoded-folder>/<sessionId>.jsonl`. We don't duplicate.
-// The encoding Claude Code uses is "replace `/` and `.` with `-`" on the
-// absolute folder path (verified against installed Claude Code; the encoder
-// is a stable, documented part of the on-disk layout). If a future Claude
-// Code release changes the encoding we'll surface it loudly via missing-file
-// errors here, NO FALLBACKS.
-//
-// We translate JSONL entries into the same `@patch/wire` envelopes the live
-// stream emits.
-//
-// SEQ IS CANONICAL, NOT LINE-DERIVED. There is exactly ONE per-chat sequence:
-// the number the host stamped when it first emitted the event live. This
-// module never invents its own numbering — it asks the caller-supplied
-// `CanonicalSeqIndex` (implemented by `chatRunner`, backed by the per-chat
-// `~/.patch/chats/<chatId>/seqindex.jsonl` sidecar) what seq each transcript
-// event was emitted under, and stamps that. The transcript's line order is used
-// only to ORDER events and to key the lookup, never to number them.
-//
-// This is what makes the two cursors in spec/12 § "Replay vs history cursors"
-// mean anything: a surface passes `fromSeq = <highest seq it saw live>` and
-// gets strictly the events it has not seen. A line-index-derived seq drifts
-// from the live one (a persisted user turn takes a line; a control-path error
-// or artifact takes a seq with no line), which made a history read re-deliver
-// messages the surface had already rendered.
-//
-// An event with no index entry — a transcript written before this chat had a
-// sidecar, or a turn produced outside patch (`claude --resume` in a terminal) —
-// was never assigned a canonical seq. The index assigns one THEN, once, and
-// records it, so from that read onward the number is stable. NO FALLBACK to a
-// line-derived number: every event returned here carries a real canonical seq.
+// Patch never reads a provider's session for display (spec/04 § History): what
+// a chat shows comes from Patch's own record. What is left here is the folder
+// encoding Claude Code uses for its session store, the user-message
+// normalisation the live stream applies, the translation of Claude Code's own
+// provider-level context, and `SessionProbe`, which answers only whether a
+// session can still be resumed.
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { WireEvent } from '@patch/wire';
 import { splitLeadingNotes, type NoteItem } from './notes.js';
-import {
-  compactionFromTranscriptMetadata,
-  compactionSummaryLine,
-  TRANSCRIPT_METADATA_KEY,
-} from './compaction.js';
-import { isModelOutput } from './sdkBackend.js';
 import { findTranscript } from './claudeSessionStore.js';
 
-export interface HistoryReaderOptions {
-  /** Override ~/.claude/projects — used by tests. */
-  claudeProjectsRoot?: string;
+/** Whether a chat's provider session can still be resumed. */
+export interface SessionProbe {
   /**
-   * Called for every transcript line that is not valid JSON. Wired to the
-   * host logger so a damaged transcript is reported the moment it is read
-   * (see `walk()` — the line is skipped, never silently).
-   */
-  onCorruptLine?: (info: { path: string; lineNumber: number; message: string }) => void;
-}
-
-/**
- * Resolves a transcript's ordered event identities to the canonical per-chat
- * `seq` the host stamped when it emitted each of them live. Implemented by
- * `chatRunner` over the per-chat `seqindex.jsonl` sidecar; supplied per call
- * because the index is per chat while the reader is per host.
- */
-export interface CanonicalSeqIndex {
-  /**
-   * One canonical seq per key, in the same order. A key with no recorded seq
-   * (a transcript entry the host never emitted) is ASSIGNED one and recorded,
-   * so the answer is stable for every later read.
-   */
-  resolve(keys: string[]): number[];
-}
-
-export interface ReadHistoryOptions {
-  chatId: string;
-  folder: string;
-  sessionId: string;
-  fromSeq: number;
-  seqIndex: CanonicalSeqIndex;
-}
-
-export interface ForkPointOptions {
-  folder: string;
-  sessionId: string;
-  /** Canonical seq of the turn being forked from / hung off. */
-  seq: number;
-  seqIndex: CanonicalSeqIndex;
-  /**
-   * The chat's own dir (`~/.patch/chats/<id>`). A chat's Claude runs under
-   * `<chatDir>/claude`, so its conversation file lives there; the fork point is
-   * resolved against the same file the chat resumes (`findTranscript`: the
-   * chat's own file, then the shared store).
-   */
-  chatDir?: string;
-}
-
-export interface ForkPoint {
-  /**
-   * The Claude Code `uuid` of the last transcript entry BEFORE the forked turn
-   * — i.e. the end of the prefix the new track shares with its parent. `null`
-   * means the forked turn is the very first entry, so the new track starts from
-   * an empty context.
-   */
-  resumeAtUuid: string | null;
-}
-
-export interface HistoryReader {
-  read(opts: ReadHistoryOptions): WireEvent[];
-  /**
-   * Resolve the fork point for `seq` (spec/04 § Branching). Returns `null` when
-   * `seq` is not a USER `chat.message` in this transcript — there is nothing to
-   * fork from, and the caller must fail loudly rather than fork from the end
-   * (NO FALLBACK).
-   */
-  forkPoint(opts: ForkPointOptions): ForkPoint | null;
-  /**
-   * Resolve the SIDE point for `seq` (spec/04 § Side threads): the uuid of the
-   * entry that produced `seq` ITSELF, so the side track shares the prefix up to
-   * and including that message. Any role qualifies — a side question about an
-   * assistant answer is the common case. Returns `null` when `seq` is not in
-   * this transcript (or its entry carries no uuid to resume at), so the caller
-   * fails loudly instead of hanging the side thread off the end (NO FALLBACK).
-   */
-  sidePoint(opts: ForkPointOptions): ForkPoint | null;
-  /**
-   * True when Claude Code has persisted a JSONL transcript for this session.
-   * A freshly-started session emits its `session_id` in the first `result`
-   * message before (or, in tests, without) the JSONL landing on disk — for
-   * those, there is simply no persisted history to page through yet. Callers
-   * use this to return an empty slice instead of treating a not-yet-written
-   * transcript as an error. NOT a fallback: a genuinely corrupt/partial JSONL
-   * still surfaces loudly — `read()` logs each damaged line and replays a
-   * system message in its place (see `walk()`).
-   */
-  /**
-   * Whether the session can be resumed. Pass `chatDir` for a Claude session:
-   * each chat's transcript lives in its own config dir, not the shared one.
+   * Pass `chatDir` for a Claude session: each chat's session lives in its own
+   * config dir, not the shared one.
    */
   hasSession(opts: { folder: string; sessionId: string; chatDir?: string }): boolean;
 }
 
+export interface ClaudeSessionProbeOptions {
+  /** Override ~/.claude/projects — used by tests. */
+  claudeProjectsRoot?: string;
+}
+
 /**
- * The reader for a provider whose agent keeps its session where Patch does not
- * read it (an ACP agent such as Gemini CLI). Patch shows such a chat from its own
- * record and never reads the agent's files (spec/02 § Provider adapters), so
- * there is nothing to page, fork or side from here. A session the chat names is
- * the agent's to resume: if it is gone, the agent's own refusal says so on the
- * next turn. Answering "no transcript" here instead would make every turn after
- * the first drop the session and start over, and host cleanup treat the chat as
- * lost.
+ * Claude Code sessions: one exists when Claude Code has written its file. A
+ * freshly started session reports its id before the file lands, so "no file"
+ * there means nothing to resume yet. Only existence is checked; the file is
+ * never read.
  */
-export const agentHeldHistory: HistoryReader = {
-  read: () => [],
-  forkPoint: () => null,
-  sidePoint: () => null,
+export function createClaudeSessionProbe(opts: ClaudeSessionProbeOptions = {}): SessionProbe {
+  const root = opts.claudeProjectsRoot ?? defaultClaudeProjectsRoot();
+  return {
+    hasSession({ folder, sessionId, chatDir }) {
+      if (chatDir !== undefined) {
+        return findTranscript({ chatDir, folder, sessionId, claudeProjectsRoot: root }) !== null;
+      }
+      return existsSync(join(root, encodeFolder(folder), `${sessionId}.jsonl`));
+    },
+  };
+}
+
+/**
+ * A provider whose agent keeps its session where Patch does not look (an ACP
+ * agent such as Gemini CLI). A session the chat names is the agent's to resume:
+ * if it is gone, the agent's own refusal says so on the next turn. Answering
+ * "no session" here would make every turn after the first drop the session and
+ * start over, and host cleanup treat the chat as lost.
+ */
+export const agentHeldSession: SessionProbe = {
   hasSession: ({ sessionId }) => sessionId.length > 0,
 };
 
@@ -173,213 +76,9 @@ export function encodeFolder(folder: string): string {
 }
 
 /**
- * Every Claude Code session id (JSONL basename, no extension) persisted for
- * `folder`, in no particular order. Used by the history importer (spec/04 §
- * History) to find sessions a chat's own meta never recorded — a special
- * thread's rotating sessions, or an orphan a crash lost the `result` envelope
- * for. An absent/unreadable directory yields no sessions rather than an error:
- * a chat whose folder predates any Claude Code run has genuinely persisted
- * nothing yet.
- */
-export function listSessionIds(root: string, folder: string): string[] {
-  const dir = join(root, encodeFolder(folder));
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  return entries.filter((f) => f.endsWith('.jsonl')).map((f) => f.slice(0, -'.jsonl'.length));
-}
-
-export function createHistoryReader(opts: HistoryReaderOptions = {}): HistoryReader {
-  const root = opts.claudeProjectsRoot ?? defaultClaudeProjectsRoot();
-
-  function jsonlPath(folder: string, sessionId: string): string {
-    return join(root, encodeFolder(folder), `${sessionId}.jsonl`);
-  }
-
-  /**
-   * Walk the transcript in order, pairing each wire event with the `uuid` of
-   * the JSONL entry that produced it. One JSONL line can expand to MORE than
-   * one wire event — a single assistant message may carry a `text` block AND
-   * one or more `tool_use` blocks, each a distinct chat-scoped event — so the
-   * ordinal handed to `jsonlLineToWire` advances per EVENT, not per line. The
-   * ordinal is a position, not a seq: canonical seqs are stamped by `stamp()`.
-   */
-  function walk(path: string, chatId: string): { event: WireEvent; uuid: string | null }[] {
-    const lines = readFileSync(path, 'utf8')
-      .split('\n')
-      .filter((l) => l.length > 0);
-    const out: { event: WireEvent; uuid: string | null }[] = [];
-    let ordinal = 0;
-    // A tool_use's name lives on the assistant line that made the call; its
-    // matching tool_result (a later, separate line) carries only the call id.
-    // Threaded across every line in this transcript so a result can be named
-    // after the call it belongs to — see jsonlLineToWire's `toolNames` param.
-    const toolNames = new Map<string, string>();
-    let lineNumber = 0;
-    for (const line of lines) {
-      lineNumber += 1;
-      // The transcript is written by Claude Code, NOT by patch. A crashed or
-      // interleaved write leaves one damaged record in the middle of an
-      // otherwise intact file (seen in the wild: a tool_result truncated
-      // mid-string with the next record appended without a newline). Failing
-      // the whole read on it bricked the chat permanently — every history read
-      // returned `sdk_error` and the surface could never open it again.
-      //
-      // So the damaged LINE is skipped and reported — loudly, never silently:
-      // the host logs it via `onCorruptLine`, and replay carries a system
-      // message in its place so the gap is visible exactly where it happened.
-      // Every other line still parses strictly; nothing else is fallen back on.
-      let events: WireEvent[];
-      let uuid: string | null;
-      try {
-        uuid = lineUuid(line);
-        events = jsonlLineToWire(line, chatId, ordinal, toolNames);
-      } catch (err) {
-        const message = (err as Error).message;
-        opts.onCorruptLine?.({ path, lineNumber, message });
-        out.push({
-          event: {
-            type: 'chat.message',
-            chatId,
-            role: 'system',
-            content: `Unreadable transcript line ${lineNumber} skipped: ${message}`,
-            error: true,
-            seq: ordinal,
-          },
-          uuid: null,
-        });
-        ordinal += 1;
-        continue;
-      }
-      for (const event of events) {
-        out.push({ event, uuid });
-        ordinal += 1;
-      }
-    }
-    return out;
-  }
-
-  /** Replace each event's positional ordinal with its canonical per-chat seq. */
-  function stamp(events: WireEvent[], seqIndex: CanonicalSeqIndex): WireEvent[] {
-    const keys = events.map((ev) => {
-      const key = eventIdentity(ev);
-      // Unreachable via jsonlLineToWire, which only ever emits chat.message /
-      // chat.tool_call / chat.tool_result / chat.provider_context — all of
-      // which have an identity. NO FALLBACK: an unkeyable transcript event
-      // could not be given a stable canonical seq, so it fails loudly rather
-      // than replaying at a made-up one.
-      if (key === null) throw new Error(`history: transcript event ${ev.type} has no identity`);
-      return key;
-    });
-    const seqs = seqIndex.resolve(keys);
-    if (seqs.length !== events.length) {
-      throw new Error(
-        `history: seq index returned ${seqs.length} seqs for ${events.length} events`,
-      );
-    }
-    return events.map((ev, i) => ({ ...ev, seq: seqs[i] }) as WireEvent);
-  }
-
-  function read(req: ReadHistoryOptions): WireEvent[] {
-    const path = jsonlPath(req.folder, req.sessionId);
-    if (!existsSync(path)) {
-      throw new Error(
-        `history: JSONL not found at ${path} for chat ${req.chatId}; expected Claude Code to have persisted it.`,
-      );
-    }
-    const events = stamp(
-      walk(path, req.chatId).map((e) => e.event),
-      req.seqIndex,
-    );
-    return events.filter((ev) => (ev as { seq: number }).seq > req.fromSeq);
-  }
-
-  function hasSession(opts: { folder: string; sessionId: string; chatDir?: string }): boolean {
-    return forkTranscriptPath(opts) !== null;
-  }
-
-  /** The transcript a session resumes from: the chat's own file, else the shared store. */
-  function forkTranscriptPath(
-    opts: Pick<ForkPointOptions, 'folder' | 'sessionId' | 'chatDir'>,
-  ): string | null {
-    if (opts.chatDir !== undefined) {
-      return (
-        findTranscript({
-          chatDir: opts.chatDir,
-          folder: opts.folder,
-          sessionId: opts.sessionId,
-          claudeProjectsRoot: root,
-        })?.path ?? null
-      );
-    }
-    const path = jsonlPath(opts.folder, opts.sessionId);
-    return existsSync(path) ? path : null;
-  }
-
-  /**
-   * Walk the transcript stamping the SAME canonical seqs `read()` does, and
-   * return the uuid of the entry immediately preceding the one that produced
-   * `seq` — the end of the prefix a fork shares with its parent (spec/04 §
-   * Branching).
-   */
-  function forkPoint(opts: ForkPointOptions): ForkPoint | null {
-    const path = forkTranscriptPath(opts);
-    if (path === null) return null;
-    const entries = walk(path, 'fork-probe');
-    const stamped = stamp(
-      entries.map((e) => e.event),
-      opts.seqIndex,
-    );
-    const idx = stamped.findIndex((ev) => (ev as { seq: number }).seq === opts.seq);
-    if (idx < 0) return null;
-    const target = stamped[idx] as WireEvent;
-    if (!(target.type === 'chat.message' && target.role === 'user')) return null;
-    // uuid of the last PRECEDING line that produced at least one event.
-    const ownUuid = entries[idx]?.uuid ?? null;
-    let previousUuid: string | null = null;
-    for (let i = idx - 1; i >= 0; i -= 1) {
-      const u = entries[i]?.uuid ?? null;
-      if (u !== null && u !== ownUuid) {
-        previousUuid = u;
-        break;
-      }
-    }
-    return { resumeAtUuid: previousUuid };
-  }
-
-  /**
-   * Walk the transcript stamping the SAME canonical seqs `read()` does, and
-   * return the uuid of the entry that produced `seq` itself — the end of the
-   * prefix a side thread shares with the track it hangs off (spec/04 § Side
-   * threads).
-   */
-  function sidePoint(opts: ForkPointOptions): ForkPoint | null {
-    const path = forkTranscriptPath(opts);
-    if (path === null) return null;
-    const entries = walk(path, 'side-probe');
-    const stamped = stamp(
-      entries.map((e) => e.event),
-      opts.seqIndex,
-    );
-    const idx = stamped.findIndex((ev) => (ev as { seq: number }).seq === opts.seq);
-    if (idx < 0) return null;
-    const uuid = entries[idx]?.uuid ?? null;
-    return uuid === null ? null : { resumeAtUuid: uuid };
-  }
-
-  return { read, hasSession, forkPoint, sidePoint };
-}
-
-/**
- * Payload identity of a persisted event — the key that says "this is the same
- * event" across the live stream and Claude Code's transcript. It is what the
- * canonical seq index is keyed on (hashed, so the sidecar stores no transcript
- * text), and what `replayChat` merges the in-memory ring against. `null` for
- * events that only ever exist live and are never in the transcript (errors,
- * artifacts, permission requests), so they are always kept and never indexed.
+ * Payload identity of a logged event — the key that says "this is the same
+ * event" when a provider sends it again (a resumed turn replaying what it
+ * already said). `null` for events with no stable payload of their own.
  */
 export function eventIdentity(ev: WireEvent): string | null {
   switch (ev.type) {
@@ -407,6 +106,14 @@ export function eventIdentity(ev: WireEvent): string | null {
 }
 
 /**
+ * Hash of a payload identity (`eventIdentity`), so a key built from one stores
+ * no message text.
+ */
+export function identityHash(key: string): string {
+  return createHash('sha256').update(key).digest('base64url').slice(0, 22);
+}
+
+/**
  * A slash-command / skill invocation, as Claude Code will have rewritten it by
  * the time this module reads it back. The host's outgoing prompt is the plain
  * text a user typed (`/plant nettle`) or the text the server rendered for a job
@@ -431,26 +138,11 @@ function normaliseCommandInvocation(text: string): string | null {
 }
 
 /**
- * The content a user turn will carry once Claude Code has persisted it and this
- * module has read it back — i.e. the host's outgoing prompt with the internal
- * wrappers `read()` strips and a slash-command invocation reduced to the same
- * normalised form `read()` will reconstruct from Claude Code's <command-*>
- * wrapper. The live user `chat.message` is emitted with this exact text so the
- * live event and its persisted twin share one identity (and therefore one
- * canonical seq). `null` mirrors `read()` dropping the turn.
- *
- * The command normalisation is not cosmetic. Without it every skill-backed job
- * chat mis-numbers its own first turn: the server sends `/<skill>\n\n<body>`,
- * the transcript yields `/<skill> <body>`, the two hash to different payload
- * identities, and `chatRunner`'s canonical-seq sidecar therefore has no entry
- * for the transcript's FIRST event. `canonicalSeqIndex.resolve()` reads that as
- * a turn this host never emitted and allocates it a fresh seq off the TAIL,
- * which is then recorded permanently. Surfaces order the transcript by seq, so
- * the job's own prompt re-renders below the final answer — Todoist: "Chat
- * transcript re-renders the triggering job prompt below the final answer (looks
- * like the job ran twice)". The same mismatch defeats `replayChat`'s
- * identity-based ring/transcript merge, so while the chat is still in the ring
- * the turn genuinely replays twice.
+ * The user turn as the record shows it: the host's outgoing prompt with Patch's
+ * leading notes and any command wrapper taken off, and a slash-command
+ * invocation reduced to its normalised `/name args` form (the form Claude Code
+ * stores it in, so the record and the provider agree on what was asked).
+ * `null` for a turn that is only a command's output.
  */
 export function persistedUserContent(prompt: string): string | null {
   const cleaned = sanitizeCommandText(prompt);
@@ -521,44 +213,6 @@ function extractLeadingNotes(text: string): { cleaned: string; items: NoteItem[]
     rest = rest.slice(legacy[0].length);
   }
   return { cleaned: rest, items };
-}
-
-/** The `chat.note` events for a turn's notes, numbered from `seq`. */
-function noteEvents(
-  chatId: string,
-  items: NoteItem[],
-  seq: number,
-  createdAt: number | undefined,
-): WireEvent[] {
-  return items.map((n, i) => ({
-    type: 'chat.note' as const,
-    chatId,
-    label: n.label,
-    text: n.text,
-    seq: seq + i,
-    ...(createdAt !== undefined ? { createdAt } : {}),
-  }));
-}
-
-/** The Claude Code `uuid` of a JSONL entry, or null when it carries none. */
-function lineUuid(line: string): string | null {
-  const parsed: unknown = JSON.parse(line);
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const uuid = (parsed as Record<string, unknown>)['uuid'];
-  return typeof uuid === 'string' && uuid.length > 0 ? uuid : null;
-}
-
-/**
- * A JSONL entry's own `timestamp` (ISO 8601, written by Claude Code when it
- * persisted the line), as ms epoch — or `undefined` when the line carries
- * none/an unparseable one, so the caller omits `createdAt` rather than
- * inventing a time (spec/14 § Messages — no time beats a wrong time).
- */
-function entryTimestamp(obj: Record<string, unknown>): number | undefined {
-  const raw = obj['timestamp'];
-  if (typeof raw !== 'string') return undefined;
-  const ms = Date.parse(raw);
-  return Number.isNaN(ms) ? undefined : ms;
 }
 
 /**
@@ -666,268 +320,6 @@ export function translateAttachment(
   }
   if (text === null || text.length === 0) text = fallbackProviderContextText(a);
   return { providerType, label: providerContextLabel(providerType), text };
-}
-
-/**
- * Translate one Claude Code JSONL line into zero or more wire events.
- *
- * A single line may expand to multiple events: real Claude Code packs a
- * message's blocks into one `content` array, so an assistant turn can carry
- * narration text AND one or more `tool_use` blocks, and a follow-up user
- * message carries the `tool_result` blocks. We surface each block as its own
- * wire event (`chat.message` / `chat.tool_call` / `chat.tool_result`) so an
- * attach/resume replay reconstructs the FULL stream — tool-call lines and tool
- * results included — exactly as the live stream emitted them (G1-15). Seqs are
- * assigned by the caller in emission order; `seq` here is the seq of the FIRST
- * event this line produces, and each subsequent event gets `seq + i`.
- *
- * `toolNames` correlates a `tool_result` block back to the tool it belongs
- * to: a JSONL `tool_result` block carries only `tool_use_id`, never the tool's
- * name, so a result's name has to come from the `tool_use` block seen
- * earlier in the transcript. Callers walking a whole transcript in order
- * (`walk()`) pass ONE map threaded across every line so a result line can see
- * a call line from an earlier line; a caller translating a single line in
- * isolation (tests, or a line with no transcript context) gets a fresh map
- * per call, so a result with no matching call in scope falls back to the
- * literal `'tool'` placeholder rather than throwing — the far rarer case of a
- * truly missing call (a corrupt/truncated transcript) still needs *some*
- * non-empty name to render.
- */
-export function jsonlLineToWire(
-  line: string,
-  chatId: string,
-  seq: number,
-  toolNames: Map<string, string> = new Map(),
-): WireEvent[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch (err) {
-    throw new Error(`history: invalid JSONL line: ${(err as Error).message}`);
-  }
-  if (typeof parsed !== 'object' || parsed === null) return [];
-  const obj = parsed as Record<string, unknown>;
-  // Claude Code stamps every transcript line with the moment it actually
-  // wrote it (ISO 8601). This is the real creation time a replayed message
-  // carries — as opposed to whatever moment a surface happens to be reading
-  // this line at, which is "now" on every reopen and is exactly the wrong
-  // fact the per-message meta strip refused to show (spec/14 § Messages).
-  const createdAt = entryTimestamp(obj);
-
-  const type = obj['type'];
-  // spec/02 § Context compression — a compaction boundary is a top-level
-  // `system` entry with no message block, so it is read before the
-  // assistant/user gate that drops every other system line.
-  if (type === 'system' && obj['subtype'] === 'compact_boundary') {
-    const compaction = compactionFromTranscriptMetadata(obj[TRANSCRIPT_METADATA_KEY]);
-    return [
-      {
-        type: 'chat.message',
-        chatId,
-        role: 'system',
-        content: compactionSummaryLine(compaction),
-        seq,
-        compaction,
-        ...(createdAt !== undefined ? { createdAt } : {}),
-      },
-    ];
-  }
-  // spec/02 § Provider-level context — Claude Code's OWN attachment-shaped
-  // entries (environment, model identity, token counts, ...), structurally
-  // unrelated to the assistant/user gate below: read before it, not folded
-  // into it.
-  if (type === 'attachment') {
-    const item = translateAttachment(obj);
-    if (item === null) return [];
-    return [
-      {
-        type: 'chat.provider_context',
-        chatId,
-        seq,
-        providerType: item.providerType,
-        label: item.label,
-        text: item.text,
-      },
-    ];
-  }
-  if (type !== 'assistant' && type !== 'user') return [];
-
-  // patch/todo.md — "Continue from where you left off. = where did this come
-  // from? its causing problems". Nobody types that: the Claude Code CLI injects
-  // it as a user turn flagged `isMeta` when it auto-resumes a transcript whose
-  // last turn was interrupted (or that has a deferred tool), and persists it to
-  // the JSONL like any other turn. Replaying it put a message in the chat the
-  // user never sent — and, because it has no counterpart in the host's live
-  // ring, no payload-identity merge could ever drop it. `isMeta` is Claude
-  // Code's own marker for CLI-injected plumbing (its UI hides these too), so
-  // every such entry is dropped from replay. NOT a fallback: an ordinary user
-  // turn carrying the same words is unflagged and still replays.
-  if (obj['isMeta'] === true) return [];
-
-  // The same plumbing, on the assistant side. Claude Code answers its own
-  // injected turns — most often `No response requested.` after a turn died —
-  // and stamps those replies `model: "<synthetic>"` with zero input tokens.
-  // `isMeta` is not set on them, so that marker is the only one there is. The
-  // live stream already drops them (`02-host.md` § Per-turn process / warm
-  // sessions); replaying them put the agent's name on words it never said,
-  // every time a long chat was reopened. `isModelOutput` is the one predicate
-  // for this, shared with the live path so the two can't drift, and structural
-  // rather than textual: an agent quoting the wording still replays. A
-  // compaction notice arrives the same way and is read above, before this gate.
-  // `isModelOutput` answers false for anything that is not an assistant entry,
-  // so the role is checked here: a user turn is never gated by it.
-  if (type === 'assistant' && !isModelOutput(obj)) return [];
-
-  const blocks = contentBlocks(obj);
-  // Pre-`tool_use`/`tool_result` transcripts (and string-content messages) have
-  // no structured blocks — fall back to the flattened text as a single message.
-  if (blocks === null) {
-    const content = extractContent(obj);
-    if (type === 'user') {
-      const { text: cleaned, notes } = sanitizeCommandTextWithContext(content);
-      // patch/todo.md — "Don't show skill content in history": a command-output
-      // turn sanitises to null and is dropped from the replayed transcript.
-      if (cleaned === null) return noteEvents(chatId, notes, seq, createdAt);
-      return [
-        ...noteEvents(chatId, notes, seq, createdAt),
-        {
-          type: 'chat.message',
-          chatId,
-          role: type,
-          content: cleaned,
-          seq: seq + notes.length,
-          ...(createdAt !== undefined ? { createdAt } : {}),
-        },
-      ];
-    }
-    return [
-      {
-        type: 'chat.message',
-        chatId,
-        role: type,
-        content,
-        seq,
-        ...(createdAt !== undefined ? { createdAt } : {}),
-      },
-    ];
-  }
-
-  const out: WireEvent[] = [];
-  let nextSeq = seq;
-  let textBuf = '';
-  const flushText = (): void => {
-    if (textBuf.length === 0) return;
-    let content = textBuf;
-    textBuf = '';
-    // patch/todo.md — a slash-command / skill invocation is persisted as a user
-    // turn wrapped in <command-*> tags (its expansion + output are "skill
-    // content"). Reconstruct the clean `/command args` the user typed, and drop
-    // the internal command-output turns, rather than dumping wrapper XML into
-    // the transcript. Only user turns carry these wrappers.
-    if (type === 'user') {
-      const sanitized = sanitizeCommandTextWithContext(content);
-      for (const note of noteEvents(chatId, sanitized.notes, nextSeq, createdAt)) {
-        out.push(note);
-        nextSeq += 1;
-      }
-      if (sanitized.text === null) return;
-      content = sanitized.text;
-    }
-    out.push({
-      type: 'chat.message',
-      chatId,
-      role: type,
-      content,
-      seq: nextSeq++,
-      ...(createdAt !== undefined ? { createdAt } : {}),
-    });
-  };
-
-  for (const block of blocks) {
-    const b = block as Record<string, unknown>;
-    const bt = b['type'];
-    if (bt === 'text' && typeof b['text'] === 'string') {
-      textBuf += b['text'];
-    } else if (bt === 'tool_use') {
-      flushText();
-      const name = typeof b['name'] === 'string' ? b['name'] : '';
-      const callId = typeof b['id'] === 'string' ? b['id'] : '';
-      if (name.length === 0 || callId.length === 0) continue;
-      toolNames.set(callId, name);
-      out.push({
-        type: 'chat.tool_call',
-        chatId,
-        tool: name,
-        args: b['input'],
-        callId,
-        seq: nextSeq++,
-        ...(createdAt !== undefined ? { startedAt: createdAt } : {}),
-      });
-    } else if (bt === 'tool_result') {
-      flushText();
-      const callId = typeof b['tool_use_id'] === 'string' ? b['tool_use_id'] : '';
-      if (callId.length === 0) continue;
-      out.push({
-        type: 'chat.tool_result',
-        chatId,
-        // Named after the matching tool_use seen earlier in this transcript
-        // (see the `toolNames` doc above). 'tool' is a last-resort, non-empty
-        // placeholder for the rare case no matching call is in scope.
-        tool: toolNames.get(callId) ?? 'tool',
-        callId,
-        result: b['content'],
-        ...(b['is_error'] === true ? { isError: true } : {}),
-        seq: nextSeq++,
-      });
-    }
-  }
-  flushText();
-  return out;
-}
-
-/**
- * Return the message's structured content blocks, or `null` when the message
- * has no block array (string content, or a pre-blocks transcript shape) so the
- * caller can fall back to flattened text.
- */
-function contentBlocks(obj: Record<string, unknown>): unknown[] | null {
-  const message = obj['message'];
-  if (typeof message === 'object' && message !== null) {
-    const content = (message as Record<string, unknown>)['content'];
-    if (Array.isArray(content)) return content;
-  }
-  const content = obj['content'];
-  if (Array.isArray(content)) return content;
-  return null;
-}
-
-function extractContent(obj: Record<string, unknown>): string {
-  const message = obj['message'];
-  if (typeof message === 'string') return message;
-  if (typeof message === 'object' && message !== null) {
-    const content = (message as Record<string, unknown>)['content'];
-    if (typeof content === 'string') return content;
-    /* v8 ignore start -- unreachable: extractContent() is only ever called by
-     * jsonlLineToWire() when contentBlocks(obj) returned null, and
-     * contentBlocks() returns null only when message.content is NOT an array
-     * (among other conditions). So by the time we get here, `content` above
-     * can never be an array — this branch is defensive symmetry with
-     * contentBlocks(), not a reachable path. */
-    if (Array.isArray(content)) {
-      let text = '';
-      for (const block of content) {
-        if (typeof block === 'object' && block !== null) {
-          const b = block as Record<string, unknown>;
-          if (b['type'] === 'text' && typeof b['text'] === 'string') text += b['text'];
-        }
-      }
-      return text;
-    }
-    /* v8 ignore stop */
-  }
-  const content = obj['content'];
-  if (typeof content === 'string') return content;
-  return '';
 }
 
 /**

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { CodexAccounts } from '../src/codexAccounts.js';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import { CodexBackend } from '../src/codexBackend.js';
 import type { SdkEnvelope } from '../src/sdkBackend.js';
 
@@ -19,7 +19,7 @@ describe('real OpenAI backend', () => {
         executable: process.env['PATCH_CODEX_EXECUTABLE'] ?? 'codex',
         onChange: () => {},
       });
-      const history = new CodexHistory(join(root, 'history'));
+      const history = new CodexSessions(join(root, 'history'));
       try {
         // This host's own Codex login, as the server would send it back (spec/01 § Settings).
         await accounts.applyShared([await accounts.exportHostLogin()]);
@@ -79,23 +79,7 @@ describe('real OpenAI backend', () => {
             .map((e) => e.content)
             .join(''),
         ).toContain('PATCH_CODEX_OK');
-        const keys = new Map<string, number>();
-        const replay = history.read({
-          chatId: 'test-chat',
-          folder: root,
-          sessionId: session,
-          fromSeq: -1,
-          seqIndex: {
-            resolve: (items) =>
-              items.map((key) => {
-                if (!keys.has(key)) keys.set(key, keys.size);
-                return keys.get(key)!;
-              }),
-          },
-        });
-        expect(replay.filter((e) => e.type === 'chat.message' && e.role === 'user')).toHaveLength(
-          2,
-        );
+        expect(history.hasSession({ sessionId: session })).toBe(true);
       } finally {
         await accounts.close();
         rmSync(root, { recursive: true, force: true });
@@ -122,7 +106,7 @@ it.skipIf(process.env['PATCH_REAL_CODEX'] !== '1')(
       await accounts.applyShared([await accounts.exportHostLogin()]);
       const models = await accounts.models();
       const model = models.find((m) => /mini|luna/.test(m.id)) ?? models[0]!;
-      const backend = new CodexBackend(accounts, new CodexHistory(join(root, 'history')));
+      const backend = new CodexBackend(accounts, new CodexSessions(join(root, 'history')));
       let toolSeen = false;
       let failure = '';
       try {

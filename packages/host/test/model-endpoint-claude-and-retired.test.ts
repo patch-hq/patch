@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import {
   ENDPOINT_NO_KEY,
@@ -80,7 +80,7 @@ describe('a chat on the retired local-model loop', () => {
           return mock.run(opts);
         },
       },
-      historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+      sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
       oauthAccessToken: 'tok',
       emit: (e) => events.push(e),
       logger: pino({ level: 'silent' }),

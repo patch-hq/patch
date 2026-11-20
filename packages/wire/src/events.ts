@@ -163,6 +163,13 @@ export type NativeRef = z.infer<typeof NativeRef>;
 const nativeRefField = { nativeRef: NativeRef.optional() };
 
 /**
+ * On a logged entry a surface is sent: the entry carries a provider id, so an
+ * edit or side thread can fork at it (`forkPointIndex`). Set by the server in
+ * place of the id itself, which it never relays.
+ */
+const branchableField = { branchable: z.literal(true).optional() };
+
+/**
  * On a logged entry a host sends the server: the branch (track) the entry is on
  * (spec/04 § Branching). The server keeps it beside the entry, builds each
  * branch's track from it, and never relays it to surfaces. A host sends it only
@@ -1025,6 +1032,7 @@ export const ChatMessageEvent = z
      */
     midTurn: z.literal(true).optional(),
     ...nativeRefField,
+    ...branchableField,
     ...recordBranchField,
     ...forSurfaceIdField,
   })
@@ -1098,6 +1106,7 @@ export const ChatToolCallEvent = z
     // event. Absent only when a replayed line carries no usable timestamp.
     startedAt: z.number().int().nonnegative().optional(),
     ...nativeRefField,
+    ...branchableField,
     ...recordBranchField,
     ...forSurfaceIdField,
   })
@@ -1129,6 +1138,7 @@ export const ChatToolResultEvent = z
     isError: z.boolean().optional(),
     seq: z.number().int().nonnegative(),
     ...nativeRefField,
+    ...branchableField,
     ...recordBranchField,
     ...forSurfaceIdField,
   })
@@ -1183,6 +1193,7 @@ export const ChatNoteEvent = z
     seq: z.number().int().nonnegative(),
     createdAt: z.number().optional(),
     ...nativeRefField,
+    ...branchableField,
     ...recordBranchField,
     ...forSurfaceIdField,
   })
@@ -1248,6 +1259,7 @@ export const ChatArtifactEvent = z
     updatedAt: z.number().int().nonnegative(),
     seq: z.number().int().nonnegative(),
     ...nativeRefField,
+    ...branchableField,
     ...recordBranchField,
     ...forSurfaceIdField,
   })
@@ -7529,6 +7541,7 @@ export const ChatTurnStartedEvent = z
     /** The provider's own session the turn ran in. */
     sessionId: z.string().min(1).optional(),
     ...nativeRefField,
+    ...branchableField,
   })
   .strict();
 export type ChatTurnStartedEvent = z.infer<typeof ChatTurnStartedEvent>;

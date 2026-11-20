@@ -243,6 +243,8 @@ export type TimelineRow =
       handoffPending?: boolean;
       /** The agent's answer to a voice hand-off (the matching "From" card). */
       handoffAnswer?: boolean;
+      /** spec/04 § Forking — whether an edit or a side thread here would fork. */
+      branchPoint?: { edit: boolean; side: boolean };
     }
   | { kind: 'group'; key: string; entries: ChatEventEntry[] }
   /** Where a snooze began (spec/04 § Snooze → Back): a permanent divider, not a message. */

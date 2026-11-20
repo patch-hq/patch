@@ -13,7 +13,7 @@ import { SNOOZE_UNTIL_COMPLETE, type WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 const T0 = 1_700_000_000_000;
@@ -35,7 +35,7 @@ function setup(now: () => number, home?: string) {
     logger: silent,
     now,
     generateChatId: () => `chat-${++id}`,
-    historyReader: createHistoryReader({
+    sessionProbe: createClaudeSessionProbe({
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-snooze-early-claude-')),
     }),
   });

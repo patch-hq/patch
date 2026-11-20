@@ -14,7 +14,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, translateSdkMessage } from '../src/sdkBackend.js';
-import { jsonlLineToWire, translateAttachment } from '../src/history.js';
+import { translateAttachment } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -142,36 +142,6 @@ describe('Host — provider-level context on the wire', () => {
   });
 });
 
-describe('history replay — a persisted provider-level attachment', () => {
-  it('reconstructs it from the JSONL Claude Code writes, at the supplied canonical seq', () => {
-    const line = JSON.stringify({
-      parentUuid: 'p1',
-      type: 'attachment',
-      attachment: {
-        type: 'environment',
-        snapshot: { workingDirectory: '/home/tom/project', platform: 'linux' },
-      },
-      rendered: [
-        {
-          content:
-            '<system-reminder>\n# Environment\n - Primary working directory: /home/tom/project\n</system-reminder>',
-        },
-      ],
-      uuid: 'u1',
-    });
-    expect(jsonlLineToWire(line, 'c1', 5)).toEqual([
-      {
-        type: 'chat.provider_context',
-        chatId: 'c1',
-        seq: 5,
-        providerType: 'environment',
-        label: 'Environment',
-        text: expect.stringContaining('/home/tom/project'),
-      },
-    ]);
-  });
-});
-
 // "File changed externally": a file the agent had read changed on disk outside
 // it. Claude Code tells the agent with its own `edited_text_file` /
 // `edited_image_file` attachment (never a Patch-built reminder), so it reaches
@@ -205,19 +175,6 @@ describe('a file changed outside the agent', () => {
         text: expect.stringContaining('NOTES.md changed on disk'),
       },
     });
-  });
-
-  it('replays identically from the persisted transcript line', () => {
-    expect(jsonlLineToWire(JSON.stringify(editedText), 'c1', 9)).toEqual([
-      {
-        type: 'chat.provider_context',
-        chatId: 'c1',
-        seq: 9,
-        providerType: 'edited_text_file',
-        label: 'File changed externally',
-        text: 'Note: /home/tom/project/NOTES.md changed on disk since you last read it.\n3\tbuy compost',
-      },
-    ]);
   });
 
   it('an edited image names the file and never dumps its base64 bytes', () => {

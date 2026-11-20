@@ -54,7 +54,10 @@ function seedChat(chatId: string, timeline: ChatEventEntry[]): void {
       lastUpdated: 0,
     },
   ]);
-  useChatStore.setState((s) => ({ timelines: { ...s.timelines, [chatId]: timeline } }));
+  // Every settled entry here came from a provider that gave it an id, as a
+  // current server marks it (`branchable`).
+  const marked = timeline.map((e) => (e.localId === undefined ? { ...e, branchable: true } : e));
+  useChatStore.setState((s) => ({ timelines: { ...s.timelines, [chatId]: marked } }));
 }
 
 function renderChat(chatId: string, ws: Parameters<typeof ChatRoute>[0]['ws'] = null) {
@@ -420,6 +423,25 @@ describe('spec/14 § Side threads panel — trigger', () => {
     ]);
     renderChat('c-fork');
     expect(screen.getAllByTestId('msg-side-thread-trigger')).toHaveLength(2);
+  });
+
+  it('offers no edit or side thread on older entries recorded without a provider id', () => {
+    seedChat('c-fork', []);
+    // As a server sends entries recorded before provider ids were kept: no
+    // `branchable`. The first turn can still be edited (an empty context).
+    useChatStore.setState((st) => ({
+      timelines: {
+        ...st.timelines,
+        'c-fork': [
+          { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+          { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+          { seq: 6, kind: 'message', role: 'user', content: 'ask two', at: 0 },
+        ],
+      },
+    }));
+    renderChat('c-fork');
+    expect(screen.queryAllByTestId('msg-side-thread-trigger')).toHaveLength(0);
+    expect(screen.getAllByTestId('msg-edit')).toHaveLength(1);
   });
 
   it('clicking it opens the panel on a draft, "Off <quoted message>", cursor in its composer', () => {

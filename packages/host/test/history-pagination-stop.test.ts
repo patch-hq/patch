@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatActivity, WireEvent } from '@patch/wire';
 import { Daemon, HISTORY_PAGE_HARD_CAP } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { asServerSees } from './serverView.js';
@@ -41,7 +41,7 @@ function setup(opts: { turnDelayMs?: number } = {}) {
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: sdk,
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: silent,

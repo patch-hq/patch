@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CodexAccounts } from '../src/codexAccounts.js';
 import { CodexBackend } from '../src/codexBackend.js';
-import { CodexHistory } from '../src/codexHistory.js';
+import { CodexSessions } from '../src/codexSessions.js';
 import { ModelEndpointRegistry } from '../src/modelEndpoints.js';
 import {
   detachDurableTurns,
@@ -52,7 +52,7 @@ function setup(executable: string, baseUrl = 'http://127.0.0.1:11434/v1') {
     ],
     { ollama: 'sk-endpoint-key-1234' },
   );
-  const history = new CodexHistory(join(root, 'history'));
+  const history = new CodexSessions(join(root, 'history'));
   const backend = new CodexBackend(accounts, history, endpoints);
   const collect = async (
     over: Partial<SdkRunOptions> & { model: string; prompt: string },

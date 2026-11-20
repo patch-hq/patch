@@ -355,12 +355,12 @@ Editing and side threads are offered only for a provider whose adapter declares 
 
 `chat.fork_request {chatId, seq, message, localId}` — `seq` is the seq of the user message being edited, `message` its replacement text.
 
-1. The host resolves the fork point from the record: the `nativeRef` of the last entry strictly before `seq` (§ History). Everything up to and including that entry is the shared prefix; the edited turn replaces what came after.
+1. The host resolves the fork point from the record: the `nativeRef` of the last entry strictly before `seq` that carries one (§ History). Everything up to and including that entry is the shared prefix; the edited turn replaces what came after. A user turn the provider never answered carries no `nativeRef` and is passed over. With no provider output before `seq` at all, the new track starts from an empty context. A provider that forks only at whole turns (Codex) keeps the whole turn holding that entry, which it finds through its own interface.
 2. It creates a new branch (`parentBranchId` = the currently active branch, `forkFromSeq` = `seq`) and makes it active.
 3. It runs `message` as that branch's first turn, with the adapter forking the parent session at that `nativeRef` through the provider's own interface, so the new track starts with the shared prefix as its context and gets its own session id. The parent session is left as it was, so the original track stays intact and re-openable.
 4. It emits `chat.branches` (the whole graph + the new active branch), then the turn streams normally.
 
-Forking a `seq` that is not a user message in the chat's record is an error (`fork_point_not_found`) . Forking from the end instead would silently run the edit as an ordinary new message.
+Forking a `seq` that is not a user message in the chat's record is an error (`fork_point_not_found`), as is one whose earlier entries were recorded before Patch kept provider ids. Forking from the end instead would silently run the edit as an ordinary new message.
 
 ### Side threads (side message)
 
@@ -374,7 +374,11 @@ An edit replaces a turn; a side message asks something off to the side of a turn
 4. It runs `message` as that branch's first turn with the adapter forking the FROM branch's session at the side point, exactly as a fork does, so the side thread carries the full context up to that message and gets its own session id. The FROM session is left as it was.
 5. It emits `chat.branches`, then the turn runs on the branch's own independent pump (§ Parallel branches).
 
-A `seq` with no entry on the FROM branch is an error (`fork_point_not_found`). Hanging the side thread off the end instead would silently make it an ordinary message on the main track.
+A `seq` with no entry on the FROM branch, or whose entry carries no `nativeRef`, is an error (`fork_point_not_found`). Hanging the side thread off the end instead would silently make it an ordinary message on the main track.
+
+**A user's own message as a fork point.** Where the provider keeps an id the caller gives a message (Claude Code: `branching.userTurnIds`), the host sends each user turn under an id it chooses, gives a new session (fresh or forked) an id it chooses, and records the pair as that message's `nativeRef`, so a side thread keeps the user's message itself. A provider that forks only at whole turns (Codex: `branching.wholeTurns`) hangs a side thread off a user message the way an edit forks: through the turns before it. A fork resumes the session the kept entry's `nativeRef` names, which for an entry a branch inherited is its parent's: a provider may give a forked session's messages new ids.
+
+**Where surfaces offer it.** Edit and side thread are offered on an entry only where the fork would succeed: the provider declares the capability and the entry (for an edit, an earlier entry, or none before it at all) carries a `nativeRef`. Surfaces never see the id; the server marks such an entry `branchable` (`03-wire-protocol.md` § Event categories). Web, mobile and the host share one rule (`forkPointIndex` in `@patch/wire`), so an entry recorded before Patch kept provider ids shows no action rather than failing after the click.
 
 **Branching off a side thread.** Naming an existing side branch as `branchId` hangs a NEW side thread off a message that lives only on THAT branch's own track — the Side threads panel's "branching again from inside the panel" (`14-design-web.md`, `15-design-mobile.md`). Every entry on a side branch carries its own `nativeRef` like any other, so its messages are fork points exactly as the main track's are.
 

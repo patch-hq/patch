@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatBranchesEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createHistoryReader } from '../src/history.js';
+import { createClaudeSessionProbe } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type SdkBackend, type SdkRunOptions } from '../src/sdkBackend.js';
 import { readBack } from './helpers/readBack.js';
@@ -42,7 +42,7 @@ function setup() {
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: sdk,
-    historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+    sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: projectsRoot }),
     oauthAccessToken: 'tok',
     emit: (e) => events.push(e),
     logger: silent,

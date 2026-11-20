@@ -22,6 +22,7 @@ const SCANNED = ['packages/web/src', 'apps/mobile/src', 'apps/mobile/app', 'pack
 const ADAPTERS = new Set([
   'packages/host/src/codexBackend.ts',
   'packages/host/src/codexAccounts.ts',
+  'packages/host/src/codexSessions.ts',
   'packages/host/src/localModels.ts',
   'packages/host/src/openaiCompatBackend.ts',
   'packages/host/src/sdkBackend.ts',

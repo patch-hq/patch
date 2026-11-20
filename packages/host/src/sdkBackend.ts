@@ -173,6 +173,18 @@ export interface SdkRunOptions {
    * transcript untouched so the original track stays re-openable.
    */
   fork?: { resumeAtUuid: string | null } | undefined;
+  /**
+   * The id the provider records this turn's user message under, for a provider
+   * that takes one (`branching.userTurnIds`): Patch records it as the message's
+   * `nativeRef`, so a side thread can keep the user's own turn.
+   */
+  promptId?: string | undefined;
+  /**
+   * The id a NEW session this turn starts (fresh or forked) is to have, for a
+   * provider that lets the caller choose, so the user message's `nativeRef`
+   * can name its session before the provider reports it.
+   */
+  newSessionId?: string | undefined;
   abortController: AbortController;
   /** Caller-provided OAuth access token, baked into env. */
   oauthAccessToken: string;
@@ -322,12 +334,10 @@ export interface MockSdkBackend extends SdkBackend {
 export interface MockSdkBackendOptions {
   /**
    * Root that mirrors Claude Code's `~/.claude/projects` layout. When set, the
-   * mock writes a real JSONL transcript here per turn, so the host's
-   * `HistoryReader` (which backs `patch_history` / `chat.replay`) has genuine
-   * persisted older events to paginate — the SAME on-disk contract the real
-   * SDK provides. WHEN UNSET (the unit-test default) the mock persists nothing
-   * and stays a pure in-memory echo, so tests that inject their own reader are
-   * untouched. The live host passes its configured root (see index.ts).
+   * mock writes a real JSONL session file here per turn, as Claude Code does,
+   * so a session can be found, resumed and forked like a real one. WHEN UNSET
+   * (the unit-test default) the mock persists nothing and stays a pure
+   * in-memory echo. The live host passes its configured root (see index.ts).
    */
   claudeProjectsRoot?: string;
   /**
@@ -351,11 +361,8 @@ export interface MockSdkBackendOptions {
  * transcript (a prompt of `/ha-update\n\n<body> ` was persisted with args
  * carrying neither the leading newlines nor the trailing space).
  *
- * The mock reproduces that rewrite so the round trip the canonical seq index
- * depends on — live `chat.message` identity == replayed identity — is
- * exercisable off the real SDK. Without it the mock's transcript is
- * byte-identical to the prompt, which is the ONE shape that can never catch a
- * normalisation mismatch (spec/04 § History).
+ * The mock reproduces that rewrite so its session file matches what Claude
+ * Code would have written for the same prompt.
  *
  * A command NAME is required, not a bare leading slash, so an absolute path
  * (`/tmp/x`) stays a plain user turn exactly as real Claude Code leaves it.
@@ -372,11 +379,17 @@ export function claudeCodePersistedUserTurn(prompt: string): string {
 }
 
 /** Append one Claude-Code-shaped JSONL line (role + text) to the transcript. */
-function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: string): void {
-  appendTranscriptEntry(path, {
-    type: role,
-    message: { role, content: [{ type: 'text', text }] },
-  });
+function appendTranscriptLine(
+  path: string,
+  role: 'user' | 'assistant',
+  text: string,
+  uuid?: string,
+): string {
+  return appendTranscriptEntry(
+    path,
+    { type: role, message: { role, content: [{ type: 'text', text }] } },
+    uuid,
+  );
 }
 
 /**
@@ -388,8 +401,13 @@ function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: st
  * transcript would be un-forkable and the fork path un-exercisable off the real
  * SDK.
  */
-function appendTranscriptEntry(path: string, entry: Record<string, unknown>): void {
-  appendFileSync(path, JSON.stringify({ uuid: randomUUID(), ...entry }) + '\n', 'utf8');
+function appendTranscriptEntry(
+  path: string,
+  entry: Record<string, unknown>,
+  uuid: string = randomUUID(),
+): string {
+  appendFileSync(path, JSON.stringify({ uuid, ...entry }) + '\n', 'utf8');
+  return uuid;
 }
 
 /**
@@ -431,12 +449,8 @@ function forkTranscript(
 }
 
 /**
- * Persist a single SDK envelope to the on-disk transcript in the SAME shape
- * Claude Code writes — so the host's HistoryReader reconstructs the FULL
- * wire-event stream (tool calls, tool results, permission prompts) on
- * `chat.replay` / `patch_history`, not just plain assistant text. Without this
- * an attach/resume to an already-produced chat would replay messages only and
- * the event pane would render no tool lines (G1-15).
+ * Persist a single SDK envelope to the mock's session file in the SAME shape
+ * Claude Code writes, and return the entry's uuid (the envelope's `nativeId`).
  *
  * Block shapes mirror real Claude Code JSONL:
  *   - assistant text   → assistant message, content `[{type:'text', text}]`
@@ -446,13 +460,12 @@ function forkTranscript(
  *                        (Claude Code records the proposed call; the surface
  *                        re-derives the approve/deny affordance on replay).
  */
-function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
+function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): string | undefined {
   if ((ev.type === 'assistant' || ev.type === 'user') && ev.content) {
-    appendTranscriptLine(path, ev.type, ev.content);
-    return;
+    return appendTranscriptLine(path, ev.type, ev.content);
   }
   if (ev.type === 'tool_use' && ev.tool) {
-    appendTranscriptEntry(path, {
+    return appendTranscriptEntry(path, {
       type: 'assistant',
       message: {
         role: 'assistant',
@@ -461,10 +474,9 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ],
       },
     });
-    return;
   }
   if (ev.type === 'tool_result' && ev.toolResult) {
-    appendTranscriptEntry(path, {
+    return appendTranscriptEntry(path, {
       type: 'user',
       message: {
         role: 'user',
@@ -478,10 +490,9 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ],
       },
     });
-    return;
   }
   if (ev.type === 'permission' && ev.permission) {
-    appendTranscriptEntry(path, {
+    return appendTranscriptEntry(path, {
       type: 'assistant',
       message: {
         role: 'assistant',
@@ -498,14 +509,12 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ],
       },
     });
-    return;
   }
   if (ev.type === 'system' && ev.compaction) {
     // Claude Code's own on-disk shape for a boundary (spec/02 § Context
     // compression): a top-level `system` entry, camelCase metadata, no message
-    // block. Written exactly so the HistoryReader parses this and a real
-    // transcript with the same branch.
-    appendTranscriptEntry(path, {
+    // block.
+    return appendTranscriptEntry(path, {
       type: 'system',
       subtype: 'compact_boundary',
       content: 'Conversation compacted',
@@ -516,9 +525,9 @@ function appendEnvelopeToTranscript(path: string, ev: SdkEnvelope): void {
         ...(ev.compaction.durationMs !== undefined ? { durationMs: ev.compaction.durationMs } : {}),
       },
     });
-    return;
   }
   // `result` / other `system` envelopes carry no chat-visible content — skip.
+  return undefined;
 }
 
 /** Wait `ms`, resolving early (without throwing) if the abort signal fires. */
@@ -591,7 +600,7 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
       const sessionId =
         !isFork && runOpts.resumeSessionId && runOpts.resumeSessionId.length > 0
           ? runOpts.resumeSessionId
-          : freshSessionId();
+          : (runOpts.newSessionId ?? freshSessionId());
       if (isFork && projectsRoot !== undefined) {
         forkTranscript(
           projectsRoot,
@@ -921,18 +930,26 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
               },
             ];
 
-      // Persist this turn to the on-disk transcript BEFORE streaming, so a
-      // mid-turn `patch_history` (and post-turn pagination) see real older
-      // events. We log the user prompt then each assistant text envelope.
-      // Only when a projects root is configured (live host); unit tests skip.
+      // Persist this turn to the session file BEFORE streaming, as Claude Code
+      // does. Only when a projects root is configured (live host); unit tests
+      // skip.
+      // Each entry's id rides on the envelope as `nativeId`, as the real SDK's
+      // message uuid does.
+      const entryIds = new Map<SdkEnvelope, string>();
       if (projectsRoot !== undefined) {
         const dir = join(projectsRoot, encodeFolder(runOpts.cwd));
         try {
           mkdirSync(dir, { recursive: true });
           const transcript = join(dir, `${sessionId}.jsonl`);
-          appendTranscriptLine(transcript, 'user', claudeCodePersistedUserTurn(runOpts.prompt));
+          appendTranscriptLine(
+            transcript,
+            'user',
+            claudeCodePersistedUserTurn(runOpts.prompt),
+            runOpts.promptId,
+          );
           for (const ev of script) {
-            appendEnvelopeToTranscript(transcript, ev);
+            const uuid = appendEnvelopeToTranscript(transcript, ev);
+            if (uuid !== undefined && ev.nativeId === undefined) entryIds.set(ev, uuid);
           }
         } catch (err) {
           // NO FALLBACK silencing: a transcript write failure is surfaced so
@@ -949,10 +966,14 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
         await Promise.resolve();
         // Stamp the (stable) sessionId onto the result so the host captures
         // it and resumes into the SAME transcript next turn.
+        const nativeId = entryIds.get(ev);
         if (ev.type === 'result' && !ev.sessionId) {
           yield { ...ev, sessionId };
         } else {
-          yield ev;
+          // Like the real SDK, an entry says which session it is in.
+          yield nativeId !== undefined
+            ? { ...ev, nativeId, sessionId: ev.sessionId ?? sessionId }
+            : ev;
         }
       }
 
@@ -1382,10 +1403,16 @@ function disallowedToolsFor(opts: SdkRunOptions): string[] {
  * rather than appending to the parent. Empty when this is an ordinary turn.
  */
 function forkOptsFor(opts: SdkRunOptions): Record<string, unknown> {
+  // A new session (fresh, or forked) takes the id the caller chose for it.
+  const chosen =
+    opts.newSessionId !== undefined && (opts.fork || opts.resumeSessionId === undefined)
+      ? { sessionId: opts.newSessionId }
+      : {};
   // Nothing to fork from when nothing is resumed (an edit of the first message).
-  if (!opts.fork || opts.resumeSessionId === undefined) return {};
+  if (!opts.fork || opts.resumeSessionId === undefined) return chosen;
   return {
     forkSession: true,
+    ...chosen,
     ...(opts.fork.resumeAtUuid !== null ? { resumeSessionAt: opts.fork.resumeAtUuid } : {}),
   };
 }
@@ -1923,24 +1950,33 @@ function withMcpSupervisor(
   };
 }
 
-/** A bare string, or — when images ride along — one user turn of image + text blocks. */
+/**
+ * A bare string, or one user turn: when images ride along (image + text
+ * blocks), or when the turn's message has a chosen id (`promptId`).
+ */
 function oneShotPrompt(opts: SdkRunOptions): string | AsyncIterable<SDKUserMessage> {
   const images = opts.images ?? [];
-  if (images.length === 0) return opts.prompt;
+  if (images.length === 0 && opts.promptId === undefined) return opts.prompt;
   const turn = {
     type: 'user',
     message: {
       role: 'user',
-      content: [
-        ...images.map((i) => ({
-          type: 'image',
-          source: { type: 'base64', media_type: i.mediaType, data: i.data },
-        })),
-        { type: 'text', text: opts.prompt },
-      ],
+      content:
+        images.length === 0
+          ? opts.prompt
+          : [
+              ...images.map((i) => ({
+                type: 'image',
+                source: { type: 'base64', media_type: i.mediaType, data: i.data },
+              })),
+              { type: 'text', text: opts.prompt },
+            ],
     },
     parent_tool_use_id: null,
     session_id: '',
+    // Claude Code keeps a caller's uuid as the message's own id in its session,
+    // which is what `resumeSessionAt` addresses.
+    ...(opts.promptId !== undefined ? { uuid: opts.promptId } : {}),
   } as SDKUserMessage;
   return (async function* () {
     yield turn;
@@ -2245,7 +2281,7 @@ async function returnFromPlanMode(
 // next turn re-opens fresh).
 interface PersistSession {
   query: Query;
-  push: (prompt: string) => void;
+  push: (prompt: string, uuid?: string) => void;
   end: () => void;
   cwd: string;
   idle?: ReturnType<typeof setTimeout> | undefined;
@@ -2259,12 +2295,13 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
   const inbox: SDKUserMessage[] = [];
   let notify: (() => void) | null = null;
   let ended = false;
-  const push = (prompt: string): void => {
+  const push = (prompt: string, uuid?: string): void => {
     inbox.push({
       type: 'user',
       message: { role: 'user', content: prompt },
       parent_tool_use_id: null,
       session_id: '',
+      ...(uuid !== undefined ? { uuid } : {}),
     } as SDKUserMessage);
     notify?.();
     notify = null;
@@ -2368,7 +2405,7 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
   const limitEvents = createLimitEventMemory();
   let lastStopReason: string | undefined;
   try {
-    s.push(opts.prompt);
+    s.push(opts.prompt, opts.promptId);
     for (;;) {
       const next = await s.query.next();
       if (next.done === true) {
