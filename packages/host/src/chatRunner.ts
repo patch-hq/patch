@@ -6176,9 +6176,8 @@ export class Daemon {
 
   /** Quiet note on the Manager thread's own log (spec/06 § The sweep): a
    * `system` `chat.message`, same arrangement a rotation boundary uses — never
-   * a turn, so it never reaches the Manager's own model context
-   * (`nativeReconstruct` drops `role: 'system'`). Every message the sweep sends
-   * to a chat, and each digest, shows up here. */
+   * a turn, so it never reaches the Manager's own model context. Every
+   * message the sweep sends to a chat, and each digest, shows up here. */
   private noteOnManager(text: string): void {
     this.emit({
       type: 'chat.message',
