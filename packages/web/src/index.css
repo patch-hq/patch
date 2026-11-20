@@ -12116,8 +12116,43 @@ main.empty-state p {
   /* The pop-up scrolls INSIDE its measured space rather than running past the
      composer (todo — "folder picker gets cut off by the composer"). `max-height`
      is set inline by usePopupPlacement; this is what makes the cap mean
-     "scroll", not "clip". */
-  overflow-y: auto;
+     "scroll", not "clip". The scrolling is done by .folder-popup-body so the
+     search field above and the Use / New folder footer below stay put. */
+  overflow: hidden;
+}
+/* The one scroll region: Recent + Browse lists. The scrollbar is styled so it
+   is always drawn — macOS hides overlay scrollbars until you scroll, which left
+   a fresh-Mac user with no hint that Desktop / Documents were below the fold. */
+.folder-popup-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: scroll;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.folder-popup-body::-webkit-scrollbar {
+  width: 10px;
+}
+.folder-popup-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.folder-popup-body::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 5px;
+  border: 2px solid var(--bg-elevated);
+}
+/* Pinned action row: New folder / Use this folder are always visible. */
+.folder-popup-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.folder-popup-footer .folder-browser-use {
+  margin-top: 0;
 }
 /* Which side the pop-up opens toward is decided by measurement, not by a fixed
    guess — see lib/popupPlacement.ts. */
