@@ -30,20 +30,12 @@ const ADAPTERS = new Set([
 ]);
 
 /**
- * What still branches on a provider's name outside the adapters, by file. Each
- * is per-provider account or sign-in wiring in Settings and the host's account
- * setup, which has not moved behind the table yet.
+ * What still branches on a provider's name outside the adapters, by file. The
+ * account and sign-in wiring now reads the provider table (`accountsKey`,
+ * `accountKinds`, `ownSettingsReportedByHost`) and each surface's own provider
+ * entries; what is left is session rotation, which is being reworked on its own.
  */
 const BASELINE: Record<string, number> = {
-  'packages/web/src/lib/useInstallPickedProviders.ts': 2,
-  'packages/web/src/routes/WelcomeRoute.tsx': 4,
-  'packages/web/src/routes/settings/ProvidersPage.tsx': 1,
-  'packages/web/src/routes/settings/SharedAccounts.tsx': 2,
-  'packages/web/src/routes/settings/providers.tsx': 2,
-  'apps/mobile/src/components/settings/CreditSourcesSection.tsx': 2,
-  'apps/mobile/src/components/settings/ProviderOwnSettings.tsx': 1,
-  'apps/mobile/src/components/settings/providers.tsx': 2,
-  'packages/host/src/index.ts': 6,
   'packages/host/src/rotationDigest.ts': 1,
 };
 

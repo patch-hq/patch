@@ -33,7 +33,6 @@ import {
 } from './accountRows';
 import { NoticeRow } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
-import { ChatGPTSignInFlow, ClaudeSignInFlow } from './SignInFlows';
 import { UsageHistorySection } from './UsageHistorySection';
 import { AcpAccountsSections } from './AcpAccountsSection';
 import { PROVIDERS, type ProviderSpec, type SharedRow } from './providers';
@@ -191,12 +190,14 @@ function AccountRow({
       detail: 'Change the name shown in the list',
       testID: `account-${id}-rename`,
     },
-    ...(backendId === 'codex' && !('kind' in row && row.kind === 'apiKey')
+    // A provider with no token to paste signs a row in with its own flow; an
+    // API-key row has nothing to sign in to.
+    ...(!provider.pasteToken && !('kind' in row && row.kind === 'apiKey')
       ? [
           {
             id: 'connect',
             label: row.connected ? 'Sign in again' : 'Sign in',
-            detail: 'Sign in with ChatGPT using a code you approve on any device',
+            detail: provider.signInDetail,
             testID: `account-${id}-connect`,
           },
         ]
@@ -306,11 +307,8 @@ function AccountRow({
           }}
         />
       ) : null}
-      {connecting && backendId === 'codex' ? (
-        <ChatGPTSignInFlow accountId={row.id} onDone={() => setConnecting(false)} />
-      ) : null}
-      {connecting && provider.pasteToken ? (
-        <ClaudeSignInFlow accountId={row.id} onDone={() => setConnecting(false)} />
+      {connecting ? (
+        <provider.SignInFlow accountId={row.id} onDone={() => setConnecting(false)} />
       ) : null}
       {connecting && provider.pasteToken ? (
         <TokenEntry

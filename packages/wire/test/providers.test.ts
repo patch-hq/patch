@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   PROVIDERS,
+  ACCOUNT_PROVIDERS,
+  accountsForBackend,
+  backendHasConnectedAccount,
+  providerAccountKind,
+  accountKindForModel,
   DEFAULT_PROVIDER_ID,
   HarnessId,
   PermissionMode,
@@ -180,5 +185,48 @@ describe('provider capabilities', () => {
     expect(modelHasCapability('openai/gpt-5', 'steer')).toBe(true);
     expect(modelHasCapability('openai/gpt-5', 'rewind')).toBe(false);
     expect(providerCapabilities('openai/endpoint/ollama/x').branchAtTurn).toBe(true);
+  });
+});
+
+// Account wiring reads the table, never a provider's name (decision 16).
+describe('account wiring from the table', () => {
+  const secrets = {
+    claude: [{ id: 'a', connected: false }],
+    codex: [{ id: 'b', connected: true }],
+  };
+
+  it('picks a provider’s accounts by its backend id, empty while absent', () => {
+    for (const p of ACCOUNT_PROVIDERS) {
+      expect(accountsForBackend(secrets, p.backendId)).toBe(
+        secrets[p.accountsKey as keyof typeof secrets],
+      );
+      expect(accountsForBackend({}, p.backendId)).toEqual([]);
+      expect(accountsForBackend(null, p.backendId)).toEqual([]);
+    }
+  });
+
+  it('says whether any of a provider’s accounts is connected', () => {
+    const connected = ACCOUNT_PROVIDERS.filter((p) =>
+      backendHasConnectedAccount(secrets, p.backendId),
+    ).map((p) => p.accountsKey);
+    expect(connected).toEqual(['codex']);
+  });
+
+  it('a provider’s adapter reads its account kind for a model from accountKinds', () => {
+    for (const p of PROVIDERS) {
+      if (p.accountKinds === null) {
+        expect(() => providerAccountKind(p.id, undefined)).toThrow(/no kinds/);
+        continue;
+      }
+      expect(providerAccountKind(p.id, undefined)).toBe(p.accountKinds.default);
+      for (const { prefix, kind } of p.accountKinds.byModelPrefix) {
+        expect(providerAccountKind(p.id, `${prefix}model`)).toBe(kind);
+        expect(accountKindForModel(`${prefix}model`)).toBe(kind);
+      }
+    }
+  });
+
+  it('exactly the providers whose own configuration hosts report say so', () => {
+    for (const p of PROVIDERS) expect(typeof p.ownSettingsReportedByHost).toBe('boolean');
   });
 });

@@ -91,8 +91,8 @@ function ProviderSettingRow({
   if (chosen !== undefined) {
     value = chosen;
     source = 'Chosen here';
-  } else if (providerId === 'claude') {
-    // Claude Code's own file is the one configuration a host reports.
+  } else if (providerDescriptor(providerId).ownSettingsReportedByHost) {
+    // The provider's own configuration file, as the hosts report it.
     for (const h of sortHosts(Object.values(hosts))) {
       const text = h.claudeSettings?.settingsJson ?? '';
       if (text.trim() === '') continue;

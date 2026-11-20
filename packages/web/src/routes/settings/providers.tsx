@@ -1,17 +1,26 @@
-// The providers Settings → Usage draws (spec/10 § Backend credentials).
+// The providers Settings → Usage and the welcome step draw (spec/10 § Backend
+// credentials).
 //
 // Every provider is one entry here and nothing else on the page: what it is
-// called, which shared setting ranks its accounts, which limit windows it
-// reports and in what order, where its extra-usage add-on is managed, and the
-// control that adds an account. The page walks this list and draws each entry
-// the same way, so a twentieth provider is a twentieth entry — not a twentieth
-// branch in the page.
+// called, which limit windows it reports and in what order, where its
+// extra-usage add-on is managed, how an account is signed in, and the controls
+// that add one. Where its accounts sit in the shared settings, and which
+// strategy setting ranks them, come from the provider table in @patch/wire
+// (`accountsKey`). The pages walk this list and draw each entry the same way,
+// so a twentieth provider is a twentieth entry — not a twentieth branch.
 
 import type { JSX } from 'react';
-import type { AccountState } from '@patch/wire';
+import {
+  accountsForBackend,
+  accountsKeyForBackend,
+  type AccountState,
+  type ProviderAccountsKey,
+} from '@patch/wire';
 import type { SharedBackendId, SharedState } from '../../api/rest.js';
 import { EXTRA_USAGE_URL, type UsageScope } from '../../lib/usage.js';
-import { AddChatGPTAccount, AddClaudeAccount } from './SharedAccounts.js';
+import { ChatGPTSignIn } from '../../components/ChatGPTSignIn.js';
+import { ClaudeSignIn } from '../../components/ClaudeSignIn.js';
+import { AddChatGPTAccount, AddClaudeAccount, WelcomeClaudeControls } from './SharedAccounts.js';
 
 /** One account as the server stores it, whichever provider it is for. */
 export interface SharedRow {
@@ -25,41 +34,81 @@ export interface SharedRow {
   state?: AccountState;
 }
 
-export interface ProviderSpec {
+/** What a provider entry says; the rest is derived from the wire table. */
+interface ProviderEntry {
   id: SharedBackendId;
   name: string;
-  /** Which key of the shared `accountStrategy` setting ranks this provider's accounts. */
-  strategyKey: 'claude' | 'codex';
   /** The limit windows the provider reports, in the order they are drawn. */
   windows: readonly UsageScope[];
   /** Where the extra-usage add-on is turned on, when the provider has one. */
   extraUsageUrl?: string;
   /** Whether an account's login can be replaced by pasting a token here. */
   pasteToken: boolean;
-  /** This provider's accounts in the shared secrets. */
-  rows: (secrets: SharedState['secrets']) => SharedRow[];
+  /** What the account menu's Sign in item says it does. */
+  signInDetail: string;
+  /** The sign-in drawn under an account row being signed in again. */
+  SignIn: (props: { accountId: string; onDone: () => void }) => JSX.Element;
   /** The control(s) that add an account, drawn under the provider's card. */
   AddAccount: () => JSX.Element;
+  /** The provider's card on the welcome step and the Connect page. */
+  welcome: {
+    name: string;
+    testId: string;
+    /** The sign-in controls on the card before any account is connected. */
+    Controls: () => JSX.Element;
+    /** How the provider's CLI is named while it installs on a host. */
+    installName: string;
+    installTestId: string;
+  };
+}
+
+export interface ProviderSpec extends ProviderEntry {
+  /** Which key of the shared `accountStrategy` setting ranks this provider's accounts. */
+  strategyKey: ProviderAccountsKey;
+  /** This provider's accounts in the shared secrets. */
+  rows: (secrets: SharedState['secrets']) => SharedRow[];
+}
+
+function spec(entry: ProviderEntry): ProviderSpec {
+  return {
+    ...entry,
+    strategyKey: accountsKeyForBackend(entry.id),
+    rows: (secrets) => accountsForBackend<SharedRow>(secrets, entry.id) as SharedRow[],
+  };
 }
 
 export const PROVIDERS: readonly ProviderSpec[] = [
-  {
+  spec({
     id: 'claude-code',
     name: 'Claude',
-    strategyKey: 'claude',
     windows: ['session', 'week', 'overage'],
     extraUsageUrl: EXTRA_USAGE_URL,
     pasteToken: true,
-    rows: (secrets) => secrets.claude,
+    signInDetail: 'Sign in with Claude in your browser',
+    SignIn: ClaudeSignIn,
     AddAccount: AddClaudeAccount,
-  },
-  {
+    welcome: {
+      name: 'Claude',
+      testId: 'claude',
+      Controls: WelcomeClaudeControls,
+      installName: 'Claude Code',
+      installTestId: 'claude',
+    },
+  }),
+  spec({
     id: 'codex',
     name: 'Codex',
-    strategyKey: 'codex',
     windows: ['session', 'week'],
     pasteToken: false,
-    rows: (secrets) => secrets.codex,
+    signInDetail: 'Sign in with ChatGPT using a code you approve on any device',
+    SignIn: ChatGPTSignIn,
     AddAccount: AddChatGPTAccount,
-  },
+    welcome: {
+      name: 'ChatGPT and OpenAI',
+      testId: 'chatgpt',
+      Controls: AddChatGPTAccount,
+      installName: 'Codex',
+      installTestId: 'codex',
+    },
+  }),
 ];
