@@ -14612,7 +14612,7 @@ button.chat-usage-crumb:hover {
 }
 .chat-usage-text {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: var(--text-min);
   white-space: nowrap;
 }
 .chat-usage-bar {

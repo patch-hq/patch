@@ -22,7 +22,7 @@ describe('recommendedModels', () => {
   });
 
   it('describes each Claude family in a line', () => {
-    expect(modelHint('claude-opus-5')).toMatch(/expensive/);
+    expect(modelHint('claude-opus-5')).toMatch(/costlier/);
     expect(modelHint('claude-haiku-5')).toMatch(/cheapest/);
     expect(modelHint('openai/gpt-5.2')).toBeUndefined();
   });
