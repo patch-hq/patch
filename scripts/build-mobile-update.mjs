@@ -207,7 +207,7 @@ function main() {
     const runtimeVersion = runtimeVersionOf();
     if (expoClient.runtimeVersion !== runtimeVersion) {
       throw new Error(
-        `app.config says runtime ${expoClient.runtimeVersion} but android/ says ${runtimeVersion}: run \`pnpm prebuild\` in apps/mobile`,
+        `app.config says runtime ${expoClient.runtimeVersion} but android/ says ${runtimeVersion}: run \`pnpm native:prebuild\` in apps/mobile`,
       );
     }
     const metadata = JSON.parse(readFileSync(join(exportDir, 'metadata.json'), 'utf8'));
