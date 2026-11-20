@@ -14,6 +14,7 @@ const LAYERS: readonly Layer[] = [
   'link-summary',
   'watch-check-in',
   'sweep',
+  'manager-voice',
   'job-autonomy',
   'question-expired',
   'meeting-now',

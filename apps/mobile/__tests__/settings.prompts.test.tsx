@@ -71,6 +71,7 @@ describe('Settings → Prompts', () => {
     for (const layer of [
       'watch-check-in',
       'sweep',
+      'manager-voice',
       'goal-judge',
       'link-summary',
       'job-autonomy',
