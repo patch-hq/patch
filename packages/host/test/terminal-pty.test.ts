@@ -222,6 +222,7 @@ describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
     open();
     const err = await sink.waitFor((e) => e.type === 'patch.terminal.error', 'error');
     expect(err).toMatchObject({ sessionId: 'p1', code: 'pty_unavailable', forSurfaceId: 'phone' });
+    expect((err as { message: string }).message).toContain('xcode-select --install');
     expect(sink.frames.some((f) => f.type === 'patch.terminal.ready')).toBe(false);
     expect(sessions.count()).toBe(0);
   });
