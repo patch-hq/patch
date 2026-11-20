@@ -66,7 +66,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     chatId: 'c1',
     name: null,
     folder: 'work',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

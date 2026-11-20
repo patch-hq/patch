@@ -31,7 +31,7 @@ function row(pendingWake: ChatRow['pendingWake']): ChatRow {
     name: 'bus watch',
     hostId: 'd1',
     folder: '~/f',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'bypassPermissions',
     status: 'active',
     pinned: false,

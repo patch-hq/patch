@@ -488,9 +488,6 @@ function rowWithPermissionResolved(row: ChatRow, requestId: string): ChatRow {
     ...row,
     pendingPermissions: remaining,
     awaitingPermission: remaining.length > 0,
-    ...(remaining.length === 0 && row.activity === 'awaiting-permission'
-      ? { activity: 'running' as const }
-      : {}),
   };
 }
 
@@ -509,7 +506,6 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     // Unknown until `chat.spawned` names it.
     hostId: '',
     folder,
-    activity: 'idle',
     // The floor of the resolution chain (spec/02 § Permission mode) — replaced
     // by the host's resolved value on the first `chat.state`.
     permissionMode: 'auto',
@@ -520,7 +516,6 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     lastUserActivity: 0,
     awaitingPermission: false,
     lastReadSeq: visited[chatId] ?? -1,
-    openToolCalls: 0,
     preview: null,
     pendingPermissions: [],
     lastSeq: 0,
@@ -631,7 +626,7 @@ function rowsToRecord(
     const answered =
       prior !== undefined &&
       r.lastUpdated > prior.lastUpdated &&
-      r.activity !== 'awaiting-permission';
+      r.chatStatus?.state !== 'waiting_for_user';
     next[r.chatId] = mergeListRow(
       prior
         ? {
@@ -653,15 +648,6 @@ function rowsToRecord(
             backgroundTasks: prior.backgroundTasks,
             preview: prior.preview,
             lastReadSeq: Math.max(fresh.lastReadSeq, prior.lastReadSeq),
-            // A snapshot that settles the chat means no call is in flight.
-            openToolCalls:
-              !live && (r.activity === 'idle' || r.activity === 'errored')
-                ? 0
-                : prior.openToolCalls,
-            // A send the host has not yet answered with a state frame: a roster
-            // that still reads the chat settled must not flip it back to idle
-            // (every foreground refreshes the roster).
-            optimisticSend: prior.optimisticSend,
             // A newer roster that no longer says awaiting-permission means the
             // request was answered (maybe elsewhere): holding the old flag
             // leaves "waiting on you" up on a running turn.
@@ -673,7 +659,8 @@ function rowsToRecord(
       live
         ? {
             ...r,
-            activity: prior.activity,
+            // An older roster must not roll the server's status back.
+            ...(prior.chatStatus ? { chatStatus: prior.chatStatus } : {}),
             permissionMode: prior.permissionMode,
             lastUpdated: prior.lastUpdated,
             lastUserActivity: prior.lastUserActivity,
@@ -696,7 +683,6 @@ function toListRow(row: ChatRow): ChatListRow {
     name: row.name,
     hostId: row.hostId,
     folder: row.folder,
-    activity: row.activity,
     permissionMode: row.permissionMode,
     status: row.status,
     pinned: row.pinned,
@@ -900,17 +886,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // older one is a replay/race, not news: applying it rolls `activity`
           // back (a tick on a working chat, orange on a finished one). As web.
           if (event.lastUpdated < row.lastUpdated) break;
+          // The chat's status is the server's (spec/05 § Chat status): stored
+          // as sent, never worked out or overridden here.
+          const state = event.chatStatus?.state ?? row.chatStatus?.state;
           chats[event.chatId] = {
             ...row,
-            activity: event.activity,
-            optimisticSend: false,
             awaitingState: false,
-            // The turn is over, so no tool call is in flight; a lost result would
-            // otherwise pin the row on `working` for good (as web).
-            openToolCalls:
-              event.activity === 'idle' || event.activity === 'errored'
-                ? 0
-                : (row.openToolCalls ?? 0),
             // The mode the host RESOLVED for the next turn (spec/02 § Permission
             // mode) — this is the only place a surface learns it, so a change made
             // on another surface lands here too.
@@ -944,7 +925,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...((event.continuedIn ?? row.continuedIn) !== undefined
               ? { continuedIn: event.continuedIn ?? row.continuedIn }
               : {}),
-            awaitingPermission: event.activity === 'awaiting-permission',
+            awaitingPermission: state === 'waiting_for_user',
             // Incoming value wins whenever the host sends one (including an
             // explicit `null` clearing a fired/cancelled wake); an omitted field
             // (older host, or a `chat.state` not about the wake) preserves
@@ -1029,11 +1010,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // activity, so the server's host-link-lost notice has resolved —
           // the turn carried on or was re-sent, as its message promised. Only
           // this clears it: no timer, and not `host.online` on its own.
-          if (event.activity !== 'errored') clearTransientErrors(event.chatId);
+          if (state !== 'host_offline' && state !== 'host_restarting') {
+            clearTransientErrors(event.chatId);
+          }
           // A chat that is not running cannot be holding anything behind a turn
           // (the server's QueueTracker applies the same rule). `chat.dequeued`
           // is live-only, so a missed one would leave the message QUEUED for good.
-          if (event.activity === 'idle') {
+          if (state === 'idle') {
             const held = timelines[event.chatId];
             if (held?.some((e) => e.queued === true)) {
               timelines[event.chatId] = held.map((e) =>
@@ -1147,10 +1130,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // time: a `chat.replay` re-delivers the whole history, and stamping
             // "now" on each message would turn every read chat unread (as web).
             lastSeq: Math.max(row.lastSeq, event.seq),
-            // A user message after a call means that call is over.
-            ...(event.role === 'user' && event.retryOfSeq === undefined
-              ? { openToolCalls: 0 }
-              : {}),
           };
           // Reconcile an optimistic outgoing user echo (rendered locally on send —
           // typed or voice) with its persisted copy when it re-arrives (e.g. on a
@@ -1445,16 +1424,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             )
           )
             break;
-          // A row the host has already settled is not working: this is a replayed
-          // call whose result never came. A live call re-arms the count via the
-          // `chat.state{running}` that accompanies it (as web).
-          chats[event.chatId] = {
-            ...chats[event.chatId]!,
-            openToolCalls:
-              (row.activity === 'idle' || row.activity === 'errored') && row.lastUpdated > 0
-                ? (row.openToolCalls ?? 0)
-                : (row.openToolCalls ?? 0) + 1,
-          };
           pushTimeline(event.chatId, {
             seq: event.seq,
             kind: 'tool_call',
@@ -1475,10 +1444,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             )
           )
             break;
-          chats[event.chatId] = {
-            ...chats[event.chatId]!,
-            openToolCalls: Math.max(0, (row.openToolCalls ?? 0) - 1),
-          };
           pushTimeline(event.chatId, {
             seq: event.seq,
             kind: 'tool_result',
@@ -1576,7 +1541,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chats[event.chatId] = {
             ...row,
             awaitingPermission: true,
-            activity: 'awaiting-permission',
             pendingPermissions: [...row.pendingPermissions, perm],
             lastSeq: Math.max(row.lastSeq, event.seq),
           };
@@ -2058,12 +2022,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // top of its folder the instant the user sends, not once the
           // host's `chat.state` round-trips back.
           lastUserActivity: Date.now(),
-          // Working at once; only a settled chat flips (as web).
-          ...(!opts?.dedupeAgainstPersisted &&
-          local.length === 0 &&
-          (row.activity === 'idle' || row.activity === 'errored')
-            ? { optimisticSend: true }
-            : {}),
         },
       },
     });
@@ -2157,10 +2115,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   failDelivery(chatId, localId) {
-    const row = get().chats[chatId];
-    if (row?.optimisticSend) {
-      set({ chats: { ...get().chats, [chatId]: { ...row, optimisticSend: false } } });
-    }
     const next = patchDelivery(get().timelines, chatId, localId, {
       deliveryPending: false,
       deliveryFailed: true,

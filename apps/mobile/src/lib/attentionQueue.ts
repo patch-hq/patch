@@ -24,7 +24,6 @@ export function needsAttention(row: ChatRow): boolean {
     badge === 'done' ||
     badge === 'permission' ||
     badge === 'errored' ||
-    (row.statusKind === 'question' && row.statusDeclared === true) ||
     row.statusKind === 'report'
   );
 }

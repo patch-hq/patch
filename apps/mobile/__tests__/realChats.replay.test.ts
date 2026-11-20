@@ -87,7 +87,7 @@ describe.skipIf(!dir || !existsSync(dir))('real chat render', () => {
           chatId: id,
           name: 'x',
           folder: '~/p',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,

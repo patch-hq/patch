@@ -133,7 +133,7 @@ describe('connect() / openOnce()', () => {
         chatId: 'c1',
         name: 'One',
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -165,7 +165,7 @@ describe('connect() / openOnce()', () => {
         chatId: 'c1',
         name: 'One',
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -175,7 +175,7 @@ describe('connect() / openOnce()', () => {
         chatId: 'c2',
         name: 'Two',
         folder: '~/y',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -198,7 +198,7 @@ describe('connect() / openOnce()', () => {
         chatId: 'c1',
         name: 'One',
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -208,7 +208,7 @@ describe('connect() / openOnce()', () => {
         chatId: 'c2',
         name: 'Two',
         folder: '~/y',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -313,7 +313,7 @@ describe('connect() / openOnce()', () => {
         chatId: 'c1',
         name: 'One',
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -677,14 +677,14 @@ describe('message dispatch', () => {
       JSON.stringify({
         type: 'chat.state',
         chatId: 'c1',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         permissionMode: 'bypassPermissions',
         lastUpdated: 1700000000,
         limitResetsAt: 1789000000000, // whatever the next host adds
       }),
     );
     vi.advanceTimersByTime(STORE_BATCH_MS);
-    expect(useChatStore.getState().chats['c1']?.activity).toBe('running');
+    expect(useChatStore.getState().chats['c1']?.chatStatus?.state).toBe('running');
     expect(useUiStore.getState().errors).toHaveLength(0);
   });
 

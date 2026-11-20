@@ -65,7 +65,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
   const merged: HydrateRow = {
     name: null,
     folder: '',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -253,8 +253,8 @@ describe('items memo — group by status (desktop parity)', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'w', name: 'Busy one', folder: 'alpha', activity: 'running' }),
-        row({ chatId: 'f', name: 'Broke one', folder: 'beta', status: 'errored' }),
+        row({ chatId: 'w', name: 'Busy one', folder: 'alpha', chatStatus: { state: 'running', since: 0 } }),
+        row({ chatId: 'f', name: 'Broke one', folder: 'beta', chatStatus: { state: 'failed', since: 0 } }),
         row({ chatId: 'p', name: 'Pinned one', folder: 'alpha', pinned: true, pinnedAt: 1 }),
       ]);
     const r = renderRN(<ChatsScreen />);
@@ -359,7 +359,7 @@ describe('Archived — rows fetched on open', () => {
           name: 'From the server',
           hostId: 'd1',
           folder: '/old',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'default',
           status: 'archived',
           pinned: false,

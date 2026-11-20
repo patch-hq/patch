@@ -43,7 +43,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
   return {
     name: null,
     folder: '',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

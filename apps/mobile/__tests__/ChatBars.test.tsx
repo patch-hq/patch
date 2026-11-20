@@ -48,7 +48,7 @@ function seed(extra: Record<string, unknown> = {}): void {
       name: 'Chat',
       hostId: 'd1',
       folder: '/home/tom/p',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'auto',
       status: 'active',
       pinned: false,

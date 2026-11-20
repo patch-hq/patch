@@ -17,7 +17,7 @@ const row = {
   chatId: 'c1',
   name: 'x',
   folder: 'work',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,
@@ -67,7 +67,7 @@ describe('context ring', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         context: { usedTokens: 95_000, windowTokens: 100_000, at: 2 },
       } as never),
     );
@@ -87,9 +87,9 @@ describe('context ring', () => {
       .hydrate([{ ...row, context: { usedTokens: 10, windowTokens: 100, at: 1 } }]);
     const apply = (e: object) =>
       useChatStore.getState().applyEvent({ type: 'chat.state', chatId: 'c1', ...e } as never);
-    apply({ activity: 'running' });
+    apply({ chatStatus: { state: 'running', since: 0 } });
     expect(useChatStore.getState().chats['c1']!.context).not.toBeNull();
-    apply({ activity: 'idle', context: null });
+    apply({ chatStatus: { state: 'idle', since: 0 }, context: null });
     expect(useChatStore.getState().chats['c1']!.context).toBeNull();
   });
 });

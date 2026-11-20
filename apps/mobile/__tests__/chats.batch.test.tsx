@@ -94,7 +94,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
   return {
     name: overrides.chatId,
     folder: 'work',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -258,7 +258,7 @@ describe('Batch view', () => {
   });
 
   it('after check-in, shows no "waiting" label and a Check in now control is absent', () => {
-    useChatStore.getState().hydrate([row({ chatId: 'a', activity: 'running' })]);
+    useChatStore.getState().hydrate([row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } })]);
     useBatchStore.setState({
       batch: batchRecord({ members: ['a'], checkedIn: true }),
       loaded: true,
@@ -326,7 +326,7 @@ describe('Unread option (spec/15 § Needs attention)', () => {
         folder: 'work',
         lastUpdated: 999,
         lastUserActivity: 200,
-        activity: 'awaiting-permission',
+        chatStatus: { state: 'waiting_for_user', since: 0 },
       }),
     ]);
     const r = renderRN(<ChatsScreen />);
@@ -371,7 +371,7 @@ describe('State filter options (Working / Waiting on you / Failed)', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'working-row', folder: 'work', activity: 'running' }),
+        row({ chatId: 'working-row', folder: 'work', chatStatus: { state: 'running', since: 0 } }),
         row({ chatId: 'idle-row', folder: 'work', lastUpdated: 1 }),
       ]);
     const r = renderRN(<ChatsScreen />);
@@ -386,7 +386,7 @@ describe('State filter options (Working / Waiting on you / Failed)', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'waiting-row', folder: 'work', activity: 'awaiting-permission' }),
+        row({ chatId: 'waiting-row', folder: 'work', chatStatus: { state: 'waiting_for_user', since: 0 } }),
         row({ chatId: 'idle-row', folder: 'work' }),
       ]);
     const r = renderRN(<ChatsScreen />);
@@ -399,7 +399,7 @@ describe('State filter options (Working / Waiting on you / Failed)', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'failed-row', folder: 'work', status: 'errored' }),
+        row({ chatId: 'failed-row', folder: 'work', chatStatus: { state: 'failed', since: 0 } }),
         row({ chatId: 'idle-row', folder: 'work' }),
       ]);
     const r = renderRN(<ChatsScreen />);

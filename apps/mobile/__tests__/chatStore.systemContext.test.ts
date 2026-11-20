@@ -140,7 +140,7 @@ describe('chat.provider_context', () => {
         name: null,
         hostId: 'd1',
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         permissionMode: 'auto',
         status: 'active',
         pinned: false,

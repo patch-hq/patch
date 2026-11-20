@@ -14,7 +14,7 @@ const ENTRY: ChatListEntry = {
   name: 'Chat',
   hostId: 'd1',
   folder: '/f',
-  activity: 'idle',
+  chatStatus: { state: 'idle', since: 0 },
   permissionMode: 'auto',
   status: 'active',
   pinned: false,
@@ -53,7 +53,7 @@ describe('hydrate after live frames', () => {
     expect(chat().preview).toBe('typed while loading');
     expect(chat().lastReadSeq).toBe(visited);
     expect(chat().pendingPermissions).toHaveLength(1);
-    expect(deriveBadge(chat())).toBe('permission');
+    expect(chat().awaitingPermission).toBe(true);
   });
 
   it('does not roll a newer live state back to an older roster snapshot', () => {
@@ -61,14 +61,14 @@ describe('hydrate after live frames', () => {
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       permissionMode: 'auto',
       lastUpdated: 20,
     } as never);
 
-    s.hydrate([toChatListRow({ ...ENTRY, activity: 'idle', lastUpdated: 10 })]);
+    s.hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 10 })]);
 
-    expect(chat().activity).toBe('running');
+    expect(chat().chatStatus?.state).toBe('running');
     expect(chat().lastUpdated).toBe(20);
   });
 
@@ -83,31 +83,31 @@ describe('hydrate after live frames', () => {
     });
     expect(chat().awaitingPermission).toBe(true);
 
-    s.hydrate([toChatListRow({ ...ENTRY, activity: 'running', lastUpdated: 40 })]);
+    s.hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 40 })]);
 
-    expect(chat().activity).toBe('running');
+    expect(chat().chatStatus?.state).toBe('running');
     expect(chat().awaitingPermission).toBe(false);
   });
 
   it('still lets a NEWER roster answer win over the stored state', () => {
     useChatStore
       .getState()
-      .hydrate([toChatListRow({ ...ENTRY, activity: 'running', lastUpdated: 30 })]);
-    expect(chat().activity).toBe('running');
+      .hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 30 })]);
+    expect(chat().chatStatus?.state).toBe('running');
     expect(chat().lastUpdated).toBe(30);
   });
 
-  it('keeps a just-sent chat working when a roster still reads it settled', () => {
+  it('a send assumes no status: the roster and the live stream decide it', () => {
     const s = useChatStore.getState();
     s.appendLocalUserMessage('c1', 'go', 'l1');
-    expect(deriveBadge(chat())).toBe('working');
-    s.hydrate([toChatListRow(ENTRY)]);
+    expect(deriveBadge(chat())).not.toBe('working');
+    s.hydrate([toChatListRow({ ...ENTRY, chatStatus: { state: 'running', since: 0 }, lastUpdated: 15 })]);
     expect(deriveBadge(chat())).toBe('working');
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
       folder: '/f',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'auto',
       lastUpdated: 20,
     } as never);

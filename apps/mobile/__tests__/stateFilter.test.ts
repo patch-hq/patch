@@ -11,7 +11,7 @@ function row(overrides: Partial<ChatRow> & { chatId: string }): ChatRow {
     name: null,
     hostId: 'd1',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'bypassPermissions',
     status: 'active',
     pinned: false,
@@ -40,20 +40,20 @@ function row(overrides: Partial<ChatRow> & { chatId: string }): ChatRow {
 
 describe('matchesStateFilter', () => {
   it('`all` filters nothing', () => {
-    for (const r of [row({ chatId: 'a' }), row({ chatId: 'a', status: 'errored' })]) {
+    for (const r of [row({ chatId: 'a' }), row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } })]) {
       expect(matchesStateFilter(r, 'all')).toBe(true);
     }
   });
 
   it('`failed` shows only failures', () => {
-    expect(matchesStateFilter(row({ chatId: 'a', status: 'errored' }), 'failed')).toBe(true);
-    expect(matchesStateFilter(row({ chatId: 'a', activity: 'errored' }), 'failed')).toBe(true);
-    expect(matchesStateFilter(row({ chatId: 'a', activity: 'running' }), 'failed')).toBe(false);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }), 'failed')).toBe(true);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }), 'failed')).toBe(true);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }), 'failed')).toBe(false);
     expect(matchesStateFilter(row({ chatId: 'a' }), 'failed')).toBe(false);
   });
 
   it('`working` includes background and monitoring, not just a live turn', () => {
-    expect(matchesStateFilter(row({ chatId: 'a', activity: 'running' }), 'working')).toBe(true);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }), 'working')).toBe(true);
     expect(matchesStateFilter(row({ chatId: 'a', backgroundTasks: 1 }), 'working')).toBe(true);
     expect(
       matchesStateFilter(
@@ -61,20 +61,29 @@ describe('matchesStateFilter', () => {
         'working',
       ),
     ).toBe(true);
-    expect(matchesStateFilter(row({ chatId: 'a', status: 'errored' }), 'working')).toBe(false);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }), 'working')).toBe(false);
   });
 
   it('`waiting` covers a permission prompt AND a declared question', () => {
     expect(
-      matchesStateFilter(row({ chatId: 'a', activity: 'awaiting-permission' }), 'waiting'),
+      matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'waiting_for_user', since: 0 } }), 'waiting'),
     ).toBe(true);
     expect(
       matchesStateFilter(
-        row({ chatId: 'a', statusKind: 'question', statusDeclared: true }),
+        row({
+          chatId: 'a',
+          statusKind: 'question',
+          statusDeclared: true,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
         'waiting',
       ),
     ).toBe(true);
-    expect(matchesStateFilter(row({ chatId: 'a', activity: 'running' }), 'waiting')).toBe(false);
+    // Never from the row's own statusKind: only the server's status says waiting.
+    expect(
+      matchesStateFilter(row({ chatId: 'a', statusKind: 'question', statusDeclared: true }), 'waiting'),
+    ).toBe(false);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }), 'waiting')).toBe(false);
   });
 
   it('`waiting` excludes a GENERATED question guess — only a declared one counts', () => {
@@ -87,7 +96,7 @@ describe('matchesStateFilter', () => {
   });
 
   it('`done` (Ready) includes chats waiting on the user', () => {
-    expect(matchesStateFilter(row({ chatId: 'a', activity: 'awaiting-permission' }), 'done')).toBe(
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'waiting_for_user', since: 0 } }), 'done')).toBe(
       true,
     );
     expect(
@@ -106,14 +115,14 @@ describe('matchesStateFilter', () => {
       ),
     ).toBe(true);
     expect(matchesStateFilter(row({ chatId: 'a' }), 'done')).toBe(true);
-    expect(matchesStateFilter(row({ chatId: 'a', status: 'errored' }), 'done')).toBe(false);
+    expect(matchesStateFilter(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }), 'done')).toBe(false);
   });
 });
 
-describe('a freshly spawned chat is pending, not Ready', () => {
-  it('keeps a chat with no events yet out of Ready and in Working', () => {
-    const fresh = row({ chatId: 'n', lastSeq: 0, lastReadSeq: 0, lastUpdated: 0 });
+describe('a chat the server has not given a status yet', () => {
+  it('is in no state filter: the phone assumes nothing', () => {
+    const fresh = row({ chatId: 'n', chatStatus: undefined, lastSeq: 0, lastReadSeq: 0, lastUpdated: 0 });
     expect(matchesStateFilter(fresh, 'done')).toBe(false);
-    expect(matchesStateFilter(fresh, 'working')).toBe(true);
+    expect(matchesStateFilter(fresh, 'working')).toBe(false);
   });
 });

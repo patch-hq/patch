@@ -159,7 +159,7 @@ describe('chat.state idle', () => {
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'default',
       lastUpdated: Date.now() + 1000,
     } as never);

@@ -12,10 +12,9 @@ export type ChatStateFilter = 'all' | 'failed' | 'working' | 'waiting' | 'done';
 export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boolean {
   if (filter === 'all') return true;
   const badge = deriveBadge(row);
-  // A chat the host has said nothing about yet (no events, no state frame) has
-  // just been spawned and is waiting on its first turn: pending, so Working —
-  // never Ready, which its idle `read` badge would otherwise put it in.
-  const pending = row.lastSeq === 0 && row.lastUpdated === 0;
+  // A chat the server has not given a status yet is in no state filter: the
+  // phone does not assume one (spec/05 § Chat status).
+  const pending = row.chatStatus === undefined;
   switch (filter) {
     case 'failed':
       return badge === 'errored';
@@ -24,18 +23,15 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // flight, but a command/sub-agent is still running, or a self-wake is
       // armed and will check back on its own.
       return (
-        pending ||
         badge === 'working' ||
         badge === 'agents' ||
         badge === 'background' ||
         badge === 'monitoring'
       );
     case 'waiting':
-      // Anything paused ON THE USER: a permission prompt, or an agent that
-      // stopped on a declared question.
-      return (
-        badge === 'permission' || (row.statusKind === 'question' && row.statusDeclared === true)
-      );
+      // Anything paused ON THE USER, as the server says: a permission prompt or
+      // an agent that stopped on a question (both `waiting_for_user`).
+      return badge === 'permission';
     case 'done':
       // Waiting-on-you chats are ready too: they have responded and the next
       // move is the user's, so Ready is the whole queue of things to look at.
@@ -43,8 +39,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         !pending &&
         (badge === 'done' ||
           badge === 'read' ||
-          badge === 'permission' ||
-          (row.statusKind === 'question' && row.statusDeclared === true))
+          badge === 'permission')
       );
   }
 }

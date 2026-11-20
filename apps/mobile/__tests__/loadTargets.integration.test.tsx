@@ -41,7 +41,7 @@ const row = (chatId: string, name: string, lastUpdated: number) => ({
   name,
   hostId: 'h1',
   folder: '/w',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   permissionMode: 'auto' as const,
   status: 'active' as const,
   pinned: false,

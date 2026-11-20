@@ -51,7 +51,7 @@ beforeEach(async () => {
       chatId: 'c1',
       name: 'My Chat',
       folder: '~/p',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -84,7 +84,7 @@ describe('queued messages on the chat screen', () => {
     apply({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       permissionMode: 'bypassPermissions',
       lastUpdated: 1,
       limitBlock: { scope: 'session' },

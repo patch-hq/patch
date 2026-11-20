@@ -11,7 +11,7 @@ import { __resetRouterMock, routerMock } from './stubs/expo-router';
 
 const base = {
   folder: '/w',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,

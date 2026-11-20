@@ -30,6 +30,7 @@ import {
 import { applySnoozeSet, chatsInFolder } from '../lib/snoozeApply';
 import { deriveChatTitle } from '../lib/labels';
 import { fonts, radii, space, textMin, typography, useTheme } from '../lib/theme';
+import { isRunning } from '../stores/types';
 
 export type SnoozeSheetTarget =
   | { kind: 'chat'; chatId: string }
@@ -112,13 +113,13 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
     : chats[target.chatId]
       ? [chats[target.chatId]!]
       : [];
-  const running = targets.filter((c) => c.activity === 'running');
+  const running = targets.filter((c) => isRunning(c));
   const notRunning = targets.length - running.length;
   const name = isProject ? target.name : deriveChatTitle(targets[0] ?? ({ name: null } as ChatRow));
   // A chat needs work to wait for; a project waits for the whole project, so
   // one busy chat is enough. The host refuses the rest.
   const hasWork = (c: ChatRow): boolean =>
-    c.activity === 'running' ||
+    isRunning(c) ||
     c.goal !== null ||
     (c.pendingWake != null && c.pendingWake.every === undefined);
   const canUntilComplete =

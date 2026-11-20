@@ -43,7 +43,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
   return {
     name: null,
     folder: 'work',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -154,7 +154,7 @@ describe('unarchiving from the Archived section', () => {
           name: 'Old project',
           hostId: 'd1',
           folder: 'work',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'default',
           status: 'archived',
           pinned: false,
@@ -195,7 +195,7 @@ describe('archiving on another surface', () => {
         useChatStore.getState().applyEvent({
           type: 'chat.state',
           chatId: 'c1',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'default',
           status,
           lastUpdated,

@@ -9,7 +9,7 @@ function row(overrides: Partial<ChatRow>): ChatRow {
     chatId: 'c1',
     name: 'One',
     folder: '~/x',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -42,17 +42,17 @@ describe('badgeColor', () => {
 
 describe('previewLine', () => {
   it('prefers an explicit preview over activity-derived text', () => {
-    expect(previewLine(row({ preview: 'hello', activity: 'running' }))).toBe('hello');
+    expect(previewLine(row({ preview: 'hello', chatStatus: { state: 'running', since: 0 } }))).toBe('hello');
   });
   it('shows "waiting on you" while awaiting permission with no preview', () => {
-    expect(previewLine(row({ preview: '', activity: 'awaiting-permission' }))).toBe(
+    expect(previewLine(row({ preview: '', chatStatus: { state: 'waiting_for_user', since: 0 } }))).toBe(
       'waiting on you',
     );
   });
   it('shows an ellipsis while running with no preview', () => {
-    expect(previewLine(row({ preview: '', activity: 'running' }))).toBe('…');
+    expect(previewLine(row({ preview: '', chatStatus: { state: 'running', since: 0 } }))).toBe('…');
   });
   it('is empty when idle with no preview', () => {
-    expect(previewLine(row({ preview: '', activity: 'idle' }))).toBe('');
+    expect(previewLine(row({ preview: '', chatStatus: { state: 'idle', since: 0 } }))).toBe('');
   });
 });

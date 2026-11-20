@@ -110,7 +110,7 @@ describe('bootstrap()', () => {
           chatId: 'c1',
           name: 'One',
           folder: '~/x',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,

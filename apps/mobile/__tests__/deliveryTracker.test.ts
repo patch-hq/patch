@@ -96,7 +96,7 @@ describe('mobile DeliveryTracker (spec/12 § Guaranteed input delivery)', () => 
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: 0,
       },
     ],

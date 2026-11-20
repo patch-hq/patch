@@ -429,37 +429,6 @@ export function isTransientChatError(code: string | undefined): boolean {
   return code !== undefined && (TRANSIENT_CHAT_ERROR_CODES as readonly string[]).includes(code);
 }
 
-/**
- * The activities that say a chat's turn is IN FLIGHT — and therefore that the
- * chat is not parked on a usage limit.
- *
- * A limit pause and a running turn are mutually exclusive states of one chat:
- * the host clears the pause as the next turn starts. So a `chat.state`
- * carrying one of these is proof the pause is over, whatever the frame's own
- * `limitBlock` / `rateLimitResumingAt` fields happen to say (spec/12 § A usage
- * or rate limit). A surface holding the notice past that point is showing a
- * limit that is not blocking anything, with a `Try now` button that has nothing
- * to run.
- *
- * `idle` is deliberately NOT here: a pause with auto-resume armed IS an idle
- * chat, and `errored` is the shape of a limit nobody parked. Neither says the
- * pause has lifted, so neither may clear it.
- */
-export const IN_FLIGHT_CHAT_ACTIVITIES: readonly ChatActivity[] = [
-  'running',
-  'awaiting-permission',
-];
-
-/**
- * True when `activity` says the chat's turn is in flight, so any limit pause a
- * surface is still holding for it has ended (see above).
- */
-export function clearsLimitPause(activity: string | undefined): boolean {
-  return (
-    activity !== undefined && (IN_FLIGHT_CHAT_ACTIVITIES as readonly string[]).includes(activity)
-  );
-}
-
 export const NotifyChannel = z.enum(['push', 'desktop', 'speakers']);
 export type NotifyChannel = z.infer<typeof NotifyChannel>;
 

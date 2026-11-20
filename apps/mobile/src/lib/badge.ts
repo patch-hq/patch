@@ -34,7 +34,7 @@ export function badgeColor(b: DisplayBadge, colors: ThemeColors): string {
 
 export function previewLine(row: ChatRow): string {
   if (row.preview) return row.preview;
-  if (row.activity === 'awaiting-permission') return 'waiting on you';
-  if (row.activity === 'running') return '…';
+  if (row.chatStatus?.state === 'waiting_for_user') return 'waiting on you';
+  if (row.chatStatus?.state === 'running') return '…';
   return '';
 }

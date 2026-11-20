@@ -13,7 +13,7 @@ const base: ChatListRow = {
   name: 'n',
   hostId: 'd1',
   folder: '~/f',
-  activity: 'idle',
+  chatStatus: { state: 'idle', since: 0 },
   permissionMode: 'default',
   status: 'active',
   pinned: false,
@@ -25,7 +25,7 @@ const state = {
   type: 'chat.state' as const,
   permissionMode: 'default' as const,
   chatId: 'c1',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   lastUpdated: 2,
 };
 

@@ -48,6 +48,7 @@ import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { mobileBuildInfo } from '../lib/buildInfo';
 import { refreshRoster } from '../lib/rosterRefresh';
 import { wsUrl } from '../config';
+import { isRunning } from '../stores/types';
 
 /**
  * Say ONCE, per distinct thing, that we ignored something from a newer sender
@@ -479,7 +480,7 @@ export class PatchWs {
       if (this.prefetching?.chatId === row.chatId) continue;
       // A running chat is still moving; it settles with a fresh `lastUpdated`,
       // which triggers the sweep again.
-      if (row.activity === 'running') continue;
+      if (isRunning(row)) continue;
       // A host that is down cannot answer; its chats are picked up on the
       // next roster refresh after it returns.
       if (hosts[row.hostId]?.online === false) continue;

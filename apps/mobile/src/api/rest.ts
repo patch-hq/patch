@@ -161,7 +161,8 @@ export interface ChatListEntry {
   /** The host the chat runs on (spec/04 § Spawn) — paths are scoped to it. */
   hostId: string;
   folder: string;
-  activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
+  /** The chat's status as the server decided it (spec/05 § Chat status). */
+  chatStatus?: import('@patch/wire').ChatStatusInfo;
   /** The effective mode the chat's next turn will use (spec/02 § Permission mode). */
   permissionMode: PermissionMode;
   status: 'active' | 'archived' | 'errored';

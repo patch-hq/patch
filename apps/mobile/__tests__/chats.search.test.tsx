@@ -63,7 +63,7 @@ function row(overrides: Partial<HydrateRow> & { chatId: string }): HydrateRow {
   return {
     name: null,
     folder: '',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -568,7 +568,7 @@ describe('search — archived rows', () => {
           name: 'Old pancakes',
           hostId: 'd1',
           folder: '/old',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'default',
           status: 'archived',
           pinned: false,

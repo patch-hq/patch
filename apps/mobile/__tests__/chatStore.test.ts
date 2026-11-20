@@ -17,7 +17,7 @@ describe('mobile chatStore', () => {
         chatId: 'c1',
         name: 'one',
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -51,7 +51,7 @@ describe('mobile chatStore', () => {
       type: 'chat.state',
       chatId: 'c1',
       folder: '~/x',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 1000,
     } as never);
     s.applyEvent({ type: 'chat.message', chatId: 'c1', seq: 1, role: 'user', content: 'hi' });
@@ -76,7 +76,7 @@ describe('mobile chatStore', () => {
       type: 'chat.state',
       chatId: 'c1',
       folder: '~/x',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     } as never);
     s.applyEvent({
@@ -91,10 +91,11 @@ describe('mobile chatStore', () => {
       type: 'chat.state',
       chatId: 'c1',
       folder: '~/x',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 2,
     } as never);
-    expect(useChatStore.getState().chats['c1']!.openToolCalls).toBe(0);
+    // The open call is not a status: the server's idle is what the row shows.
+    expect(deriveBadge(useChatStore.getState().chats['c1']!)).not.toBe('working');
   });
 
   it('ignores a chat.state older than the row (a replay or race must not roll activity back)', () => {
@@ -104,14 +105,14 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         chatId: 'c1',
         folder: '~/x',
-        activity,
+        chatStatus: { state: activity, since: lastUpdated },
         lastUpdated,
         permissionMode: 'default',
       } as never);
     state('idle', 200);
     state('running', 100);
     const row = useChatStore.getState().chats['c1']!;
-    expect(row.activity).toBe('idle');
+    expect(row.chatStatus?.state).toBe('idle');
     expect(row.lastUpdated).toBe(200);
   });
 
@@ -121,7 +122,7 @@ describe('mobile chatStore', () => {
       type: 'chat.state',
       chatId: 'c1',
       folder: '~/x',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 1000,
       permissionMode: 'default',
     } as never);
@@ -129,16 +130,17 @@ describe('mobile chatStore', () => {
     await new Promise((r) => setTimeout(r, 5));
     s.appendLocalUserMessage('c1', 'hi', 'l1');
     const row = () => useChatStore.getState().chats['c1']!;
-    expect(deriveBadge(row())).toBe('working');
+    // No assumed status: the badge waits for the server's.
+    expect(deriveBadge(row())).not.toBe('working');
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
       folder: '~/x',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1500,
       permissionMode: 'default',
     } as never);
-    expect(row().activity).toBe('running');
+    expect(row().chatStatus?.state).toBe('running');
   });
 
   it('applyEvent: a preview cut at 140 never ends on half of an emoji', () => {
@@ -264,7 +266,7 @@ describe('mobile chatStore', () => {
     expect(useChatStore.getState().timelines['c1']![0]!.deliveryPending).toBe(true);
   });
 
-  it('chat.permission_request flips badge to permission', () => {
+  it('chat.permission_request holds the card; the badge follows the server status', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.permission_request',
       chatId: 'c1',
@@ -274,8 +276,9 @@ describe('mobile chatStore', () => {
     });
     const row = useChatStore.getState().chats['c1'];
     if (!row) throw new Error('row missing');
-    expect(deriveBadge(row)).toBe('permission');
     expect(row.pendingPermissions).toHaveLength(1);
+    expect(row.awaitingPermission).toBe(true);
+    expect(row.chatStatus).toBeUndefined();
   });
 
   it('chat.permission_request carries the tool args onto the timeline entry', () => {
@@ -463,7 +466,6 @@ describe('mobile chatStore', () => {
     const row = useChatStore.getState().chats['c1'];
     if (!row) throw new Error('row missing');
     expect(row.pendingPermissions).toHaveLength(1);
-    expect(deriveBadge(row)).toBe('permission');
 
     // Dedup is per requestId, not per chat: a turn can pause on more than one
     // approval at once, which is why `pendingPermissions` is a list.
@@ -491,7 +493,8 @@ describe('mobile chatStore', () => {
     if (!row) throw new Error('row missing');
     expect(row.pendingPermissions).toHaveLength(0);
     expect(row.awaitingPermission).toBe(false);
-    expect(row.activity).toBe('running');
+    // The status is the server's next word, never flipped here.
+    expect(row.chatStatus).toBeUndefined();
     expect(deriveBadge(row)).not.toBe('permission');
     const card = (useChatStore.getState().timelines['c1'] ?? []).find(
       (e) => e.kind === 'permission',
@@ -536,7 +539,6 @@ describe('mobile chatStore', () => {
     if (!row) throw new Error('row missing');
     expect(row.pendingPermissions.map((p) => p.requestId)).toEqual(['r2']);
     expect(row.awaitingPermission).toBe(true);
-    expect(row.activity).toBe('awaiting-permission');
     const cards = (useChatStore.getState().timelines['c1'] ?? []).filter(
       (e) => e.kind === 'permission',
     );
@@ -766,7 +768,7 @@ describe('mobile chatStore', () => {
         chatId: 'c1',
         name: null,
         folder: '',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -776,7 +778,7 @@ describe('mobile chatStore', () => {
         chatId: 'c2',
         name: null,
         folder: '',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -829,7 +831,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: null,
           folder: '',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,
@@ -881,7 +883,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'awaiting-permission',
+        chatStatus: { state: 'waiting_for_user', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 5,
@@ -890,7 +892,7 @@ describe('mobile chatStore', () => {
         lastUpdated: 42,
       });
       const row = useChatStore.getState().chats['c1']!;
-      expect(row.activity).toBe('awaiting-permission');
+      expect(row.chatStatus?.state).toBe('waiting_for_user');
       expect(row.awaitingPermission).toBe(true);
       expect(row.pinned).toBe(true);
       expect(row.pinnedAt).toBe(5);
@@ -905,7 +907,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: 'Existing',
           folder: '~/orig',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'archived',
           pinned: true,
           pinnedAt: 9,
@@ -916,7 +918,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 2,
       });
       const row = useChatStore.getState().chats['c1']!;
@@ -935,7 +937,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 1,
         pendingWake: { message: 'check the bus', fireAt: 1_000 },
       });
@@ -951,7 +953,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: null,
           folder: '~/f',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,
@@ -963,7 +965,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 2,
       });
       expect(useChatStore.getState().chats['c1']!.pendingWake).toEqual({
@@ -978,7 +980,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: null,
           folder: '~/f',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,
@@ -990,7 +992,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 3,
         pendingWake: null,
       });
@@ -1002,7 +1004,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 1,
         snoozedUntil: 9_000,
       });
@@ -1015,7 +1017,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: null,
           folder: '~/f',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,
@@ -1027,7 +1029,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 2,
       });
       expect(useChatStore.getState().chats['c1']!.snoozedUntil).toBe(9_000);
@@ -1039,7 +1041,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: null,
           folder: '~/f',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,
@@ -1051,7 +1053,7 @@ describe('mobile chatStore', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 3,
         snoozedUntil: null,
       });
@@ -1064,7 +1066,7 @@ describe('mobile chatStore', () => {
           chatId: 'c1',
           name: null,
           folder: '~/f',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'active',
           pinned: false,
           pinnedAt: null,
@@ -1366,7 +1368,8 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
       type: 'chat.state',
       chatId: 'c-blip',
       permissionMode: 'auto',
-      activity: 'errored',
+      // What a server says while the host is gone: never a failure.
+      chatStatus: { state: 'host_offline', since: 0 },
       lastUpdated: 1,
     } as never);
   }
@@ -1378,7 +1381,7 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
   it('holds the notice while the chat is still errored', () => {
     blip();
     expect(errorRows()).toHaveLength(1);
-    expect(useChatStore.getState().chats['c-blip']?.activity).toBe('errored');
+    expect(useChatStore.getState().chats['c-blip']?.chatStatus?.state).toBe('host_offline');
   });
 
   it('drops the notice and the errored state once the resumed turn reports running', () => {
@@ -1387,11 +1390,11 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
       type: 'chat.state',
       chatId: 'c-blip',
       permissionMode: 'auto',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 2,
     } as never);
     expect(errorRows()).toHaveLength(0);
-    expect(useChatStore.getState().chats['c-blip']?.activity).toBe('running');
+    expect(useChatStore.getState().chats['c-blip']?.chatStatus?.state).toBe('running');
     // The user's own message survives — only the control-plane notice goes.
     expect(
       (useChatStore.getState().timelines['c-blip'] ?? []).filter((e) => e.kind === 'message'),
@@ -1416,7 +1419,7 @@ describe('a resolved daemon_unavailable notice clears itself', () => {
       type: 'chat.state',
       chatId: 'c-blip',
       permissionMode: 'auto',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 2,
     } as never);
     expect(errorRows()).toHaveLength(1);

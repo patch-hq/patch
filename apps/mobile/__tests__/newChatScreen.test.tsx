@@ -103,7 +103,7 @@ function chat(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
     preview: null,
     hostId: HOST,
     folder: '',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

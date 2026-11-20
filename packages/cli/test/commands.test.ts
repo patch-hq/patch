@@ -532,8 +532,8 @@ test('list --json (flat): REST round-trips /api/chats', async () => {
           status: 200,
           body: {
             chats: [
-              { chatId: '01M3N32N9T7V75JCV7XHY9NRHM', activity: 'running' },
-              { chatId: 'c2', activity: 'idle' },
+              { chatId: '01M3N32N9T7V75JCV7XHY9NRHM', chatStatus: { state: 'running' } },
+              { chatId: 'c2', chatStatus: { state: 'idle' } },
             ],
           },
         };
@@ -554,9 +554,9 @@ test('list --active --json (flat): filters to running/awaiting-permission', asyn
       status: 200,
       body: {
         chats: [
-          { chatId: '01M3N32N9T7V75JCV7XHY9NRHM', activity: 'running' },
-          { chatId: 'c2', activity: 'idle' },
-          { chatId: 'c3', activity: 'awaiting-permission' },
+          { chatId: '01M3N32N9T7V75JCV7XHY9NRHM', chatStatus: { state: 'running' } },
+          { chatId: 'c2', chatStatus: { state: 'idle' } },
+          { chatId: 'c3', chatStatus: { state: 'waiting_for_user' } },
         ],
       },
     }),
@@ -836,8 +836,8 @@ test('doctor --json: erroredChats counts errored chats on every host (account-wi
           status: 200,
           body: {
             chats: [
-              { chatId: 'a', status: 'errored', hostId: 'remote-host' },
-              { chatId: 'b', status: 'errored', hostId: 'remote-host' },
+              { chatId: 'a', chatStatus: { state: 'failed' }, hostId: 'remote-host' },
+              { chatId: 'b', chatStatus: { state: 'failed' }, hostId: 'remote-host' },
               { chatId: 'c', status: 'idle', hostId: 'local-host' },
             ],
           },

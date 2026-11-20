@@ -41,7 +41,7 @@ describe('chatStore.ensureChat', () => {
       type: 'chat.state',
       chatId: 'c_new',
       hostId: 'd1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       permissionMode: 'bypassPermissions',
       lastUpdated: 500,
     });
@@ -49,7 +49,7 @@ describe('chatStore.ensureChat', () => {
     useChatStore.getState().ensureChat('c_new', '/somewhere/else');
     const row = useChatStore.getState().chats['c_new'];
     expect(row?.folder).toBe('/home/tom/work');
-    expect(row?.activity).toBe('running');
+    expect(row?.chatStatus?.state).toBe('running');
     expect(row?.permissionMode).toBe('bypassPermissions');
   });
 

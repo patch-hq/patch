@@ -29,7 +29,7 @@ const chat = (chatId: string, name: string, lastUpdated: number, status = 'activ
   chatId,
   name,
   folder: '~/p',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: status as 'active',
   pinned: false,
   pinnedAt: null,

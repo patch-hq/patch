@@ -38,7 +38,7 @@ function seed(chatId: string): void {
       name: 'Chat',
       hostId: 'd1',
       folder: '~/p',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'default',
       status: 'active',
       pinned: false,
