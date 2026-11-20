@@ -11,6 +11,8 @@ import type { ChatRegistry } from './chat-registry.js';
 export const PEEK_DEFAULT_LIMIT = 50;
 export const READ_HARD_CAP = 200;
 export const HISTORY_DEFAULT_LIMIT = 50;
+/** How many of a chat's latest messages `chat_state.lastMessages` carries. */
+export const LAST_MESSAGES = 20;
 
 export interface AgentReadDeps {
   chatRegistry: ChatRegistry;
@@ -49,14 +51,24 @@ export function peekChat(
     limit: clamp(limit, PEEK_DEFAULT_LIMIT),
     ...trackOf(row),
   });
-  let lastMessage: string | undefined;
-  for (let i = page.entries.length - 1; i >= 0; i--) {
-    const e = page.entries[i]!;
-    if (e.type === 'chat.message' && typeof e.content === 'string' && e.content !== '') {
-      lastMessage = e.content;
-      break;
-    }
+  // The chat's latest user and assistant messages, from the whole track rather
+  // than the slice returned, so an agent sees at a glance what it has been
+  // saying even when `events` is a page of tool calls.
+  const lastMessages: { role: string; content: string; seq: number; ts: number | null }[] = [];
+  const track = deps.chatLogStore.entries(chatId, -1, trackOf(row).track);
+  for (let i = track.length - 1; i >= 0 && lastMessages.length < LAST_MESSAGES; i--) {
+    const e = track[i]!;
+    if (e.type !== 'chat.message' || typeof e.content !== 'string' || e.content === '') continue;
+    if (e.role !== 'user' && e.role !== 'assistant') continue;
+    lastMessages.push({
+      role: e.role,
+      content: e.content,
+      seq: e.seq,
+      ts: typeof e.createdAt === 'number' ? e.createdAt : null,
+    });
   }
+  lastMessages.reverse();
+  const lastMessage = [...lastMessages].reverse().find((m) => m.role === 'assistant')?.content;
   const chat_state: Record<string, unknown> = {
     chatId: row.chatId,
     hostId: row.hostId,
@@ -70,6 +82,8 @@ export function peekChat(
     snoozedUntil: row.snoozedUntil,
     model: row.model,
     lastUpdated: row.lastUpdated,
+    lastMessages,
+    // The latest thing the chat's agent said.
     lastMessage,
     lastError: row.lastError,
     // How much the chat has ever said: true whether or not any of it is in `events`.
