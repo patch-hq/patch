@@ -1,6 +1,5 @@
-// The canonical-seq sidecar's two pure halves, shared by `chatRunner` (which
-// writes and resolves it) and `chatSearch` (which only ever reads it — a search
-// must never allocate a seq as a side effect).
+// The canonical-seq sidecar's two pure halves, used by `chatRunner`, which
+// writes and resolves it.
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';

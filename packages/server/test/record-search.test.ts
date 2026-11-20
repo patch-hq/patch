@@ -1,5 +1,5 @@
 // Searching the server's record of each chat (spec/03 § Chat search): what
-// answers for a chat whose host is offline.
+// answers every chat search, whichever host the chat is on.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -32,6 +32,14 @@ describe('ChatLogStore.searchMessages', () => {
     expect(found?.messageMatches).toBe(2);
     expect(found?.snippet).toMatchObject({ role: 'assistant', seq: 1, createdAt: null });
     expect(found?.snippet.highlights.length).toBeGreaterThan(0);
+    expect(fresh.searchMessages('nope', terms('boiler'))).toBeNull();
+  });
+
+  it('dates each snippet with the message’s own createdAt', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit({ ...msg('c1', 0, 'user', 'boiler'), createdAt: 1_700_000_000_123 } as WireEvent);
+    const fresh = new ChatLogStore({ dataDir: dir, logger });
+    expect(fresh.searchMessages('c1', terms('boiler'))?.snippet.createdAt).toBe(1_700_000_000_123);
     expect(fresh.searchMessages('c1', terms('kettle'))).toBeNull();
     expect(fresh.searchMessages('nope', terms('boiler'))).toBeNull();
   });
@@ -97,16 +105,6 @@ describe('ChatLogStore.searchMessages', () => {
     const store = new ChatLogStore({ logger });
     store.commit(msg('c1', 0, 'user', 'boiler'));
     expect(store.searchMessages('c1', terms('boiler'))?.messageMatches).toBe(1);
-    expect(store.holds('c1')).toBe(true);
-    expect(store.holds('c2')).toBe(false);
-  });
-
-  it('says whether it holds a chat without loading it', () => {
-    new ChatLogStore({ dataDir: dir, logger }).commit(msg('c1', 0, 'user', 'hi'));
-    const fresh = new ChatLogStore({ dataDir: dir, logger });
-    expect(fresh.holds('c1')).toBe(true);
-    expect(fresh.holds('c2')).toBe(false);
-    expect((fresh as unknown as { chats: Map<string, unknown> }).chats.size).toBe(0);
   });
 
   it('searches a chat of many messages quickly, and a repeat costs almost nothing', () => {

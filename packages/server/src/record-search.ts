@@ -1,8 +1,8 @@
 // Searching the text of the server's chat record (spec/03 § Chat search).
 //
-// A chat whose host is offline is searched here, from the record the server
-// already keeps for every chat (`chat-log-store.ts`), so nothing else has to
-// hold a second copy of what was said.
+// Every chat is searched here, from the record the server already keeps for
+// every chat (`chat-log-store.ts`), whether or not its host is online; no host
+// is asked and nothing else holds a second copy of what was said.
 //
 // Only user and assistant message text is kept in memory, never the rest of a
 // record (tool calls, results). A chat's file is read once, then only the bytes
@@ -14,6 +14,8 @@ import { makeSnippet, type ChatSearchSnippet, type WireEvent } from '@patch/wire
 export interface RecordMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** When it was written (ms epoch), from the entry's own `createdAt`; null when unrecorded. */
+  createdAt: number | null;
   /** Lowercased, whitespace collapsed, so a phrase matches across a line break. */
   lower: string;
 }
@@ -31,7 +33,13 @@ export function searchableMessage(event: WireEvent): RecordMessage | null {
   if (event.type !== 'chat.message') return null;
   if (event.role !== 'user' && event.role !== 'assistant') return null;
   if (typeof event.content !== 'string' || event.content.length === 0) return null;
-  return { role: event.role, content: event.content, lower: matchForm(event.content) };
+  const createdAt = (event as { createdAt?: unknown }).createdAt;
+  return {
+    role: event.role,
+    content: event.content,
+    createdAt: typeof createdAt === 'number' && Number.isInteger(createdAt) ? createdAt : null,
+    lower: matchForm(event.content),
+  };
 }
 
 /** Messages containing every term; the newest is the snippet. `null` for none. */
@@ -53,10 +61,9 @@ export function matchMessages(
   }
   if (latest === null) return null;
   const { text, highlights } = makeSnippet(latest.content, terms);
-  // The record keeps no time per message; a surface shows the chat's own time.
   return {
     messageMatches: matches,
-    snippet: { text, highlights, role: latest.role, seq: latestSeq, createdAt: null },
+    snippet: { text, highlights, role: latest.role, seq: latestSeq, createdAt: latest.createdAt },
   };
 }
 

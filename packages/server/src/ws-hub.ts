@@ -2126,9 +2126,8 @@ export class WsHub {
     // surface (spec/03 § Artifacts: "Never fanned out to surfaces").
     // `patch.host_files.response` is answered over REST to the one caller that
     // asked (spec/03 § Host files); relaying it would put a file's whole
-    // content on every connected surface. `patch.chat_search.response` is the
-    // same: answered over REST, and it carries message text. So is
-    // `patch.chat_move.response`, which can carry a whole chat.
+    // content on every connected surface. So is `patch.chat_move.response`,
+    // which can carry a whole chat.
     // `patch.host_keys.response` carries no key value, but it is one caller's
     // answer (spec/02 § Provider keys); everyone else learns from `host.host`.
     if (
@@ -2152,7 +2151,6 @@ export class WsHub {
       // Replacing a host: answered to the route that asked (spec/11 § Replacing a host).
       event.type === 'patch.folders_check.response' ||
       event.type === 'patch.chat_adopt.response' ||
-      event.type === 'patch.chat_search.response' ||
       // A host's question to the server-run queue is answered by the server alone.
       event.type === 'patch.queue_pull.request' ||
       // History the record lacked, sent once: kept, never shown as new.

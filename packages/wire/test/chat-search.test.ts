@@ -2,12 +2,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  CHAT_SEARCH_MAX_DEPTH,
   ChatSearchResponse,
   compareChatSearchHits,
-  decode,
   parseSearchQuery,
-  encode,
   makeSnippet,
   type ChatSearchHit,
 } from '../src/index.js';
@@ -40,33 +37,17 @@ function hit(over: Partial<ChatSearchHit> = {}): ChatSearchHit {
 }
 
 describe('chat search wire', () => {
-  it('round-trips a request and a response through the codec', () => {
-    const req = {
-      type: 'patch.chat_search.request' as const,
-      requestId: 'r1',
-      hostId: 'd1',
-      query: 'boiler',
-      limit: 20,
-    };
-    expect(decode(encode(req))).toEqual(req);
+  it('round-trips a response through its schema', () => {
     const res = {
-      type: 'patch.chat_search.response' as const,
-      requestId: 'r1',
-      hostId: 'd1',
-      ok: true,
+      query: 'boiler',
       hits: [hit()],
       total: 1,
-      searchedChats: 40,
-      transcriptsMissing: 3,
+      nextOffset: null,
+      hosts: [{ hostId: 'd1', hostName: null, state: 'searched' as const, searchedChats: 40 }],
     };
-    expect(decode(encode(res))).toEqual(res);
-  });
-
-  it('refuses a one-character query and a limit past the paging depth', () => {
-    const base = { type: 'patch.chat_search.request', requestId: 'r', hostId: 'd1' };
-    expect(() => decode(JSON.stringify({ ...base, query: 'a', limit: 5 }))).toThrow();
+    expect(ChatSearchResponse.parse(res)).toEqual(res);
     expect(() =>
-      decode(JSON.stringify({ ...base, query: 'ab', limit: CHAT_SEARCH_MAX_DEPTH + 1 })),
+      ChatSearchResponse.parse({ ...res, hits: [{ ...hit(), mirrored: true }] }),
     ).toThrow();
   });
 
@@ -75,18 +56,6 @@ describe('chat search wire', () => {
     expect(parseSearchQuery('"Expansion  Vessel" fails')).toEqual(['expansion vessel', 'fails']);
     expect(parseSearchQuery('a "b c')).toEqual(['a', 'b c']);
     expect(parseSearchQuery('x "" x')).toEqual(['x']);
-  });
-
-  it('a request may say fullText false, and must say it as a boolean', () => {
-    const base = {
-      type: 'patch.chat_search.request',
-      requestId: 'r',
-      hostId: 'd1',
-      query: 'ab',
-      limit: 5,
-    };
-    expect(decode(JSON.stringify({ ...base, fullText: false }))).toMatchObject({ fullText: false });
-    expect(() => decode(JSON.stringify({ ...base, fullText: 'no' }))).toThrow();
   });
 
   it('a snippet may carry no seq (the chat opens at its latest message)', () => {
