@@ -19,7 +19,7 @@
  * depending on what the user was doing, so the copy table carries the
  * exception rather than the call sites diverging.
  */
-export type ErrorSite = 'models' | 'spawn';
+export type ErrorSite = 'models' | 'spawn' | 'browse';
 
 export interface HumanError {
   /** One plain sentence saying what to do next. Never contains a raw code. */
@@ -74,6 +74,7 @@ const CODES: ReadonlyArray<readonly [string, Copy]> = [
 const GENERIC: Record<ErrorSite, string> = {
   models: 'Couldn’t load the model list for that host. Try again in a moment.',
   spawn: 'Couldn’t start the chat. Try again in a moment.',
+  browse: 'Couldn’t open that folder. Try again in a moment.',
 };
 
 /**

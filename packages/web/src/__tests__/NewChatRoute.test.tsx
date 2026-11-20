@@ -1384,6 +1384,26 @@ describe('/chats/new', () => {
     expect(chosenFolderLabel()).not.toBe('Patch');
   });
 
+  it('a host with no projects suggests its home folder, and one tap chooses it', async () => {
+    useChatStore.setState({ chats: {} });
+    stubPickerFetch({ folders: [] });
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (async (path: string) =>
+      path.startsWith('/api/folders/browse') && !path.includes('dir=')
+        ? new Response(
+            JSON.stringify({ hostId: 'd1', dir: '/Users/new', parent: null, entries: [] }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          )
+        : base(path)) as unknown as typeof fetch);
+    renderPicker();
+    const chip = await screen.findByTestId('folder-suggest-home');
+    expect(chip.textContent).toBe('Home folder');
+    expect(chosenFolderLabel()).not.toBe('new');
+    fireEvent.click(chip);
+    expect(chosenFolderLabel()).toBe('new');
+    expect(screen.queryByTestId('folder-suggest-home')).toBeNull();
+  });
+
   it("offers a host's own registered roots once it is chosen", async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     usePresenceStore.getState().setHostFolders('d2', ['/Users/tom/code'], []);
@@ -2289,7 +2309,11 @@ describe('/chats/new', () => {
     // The sentence appears in exactly one place in the whole rendered tree.
     const carriers = Array.from(container.querySelectorAll('*')).filter(
       (el) =>
-        Array.from(el.childNodes).some((n) => n.nodeType === 3) && el.textContent === SENTENCE,
+        Array.from(el.childNodes).some((n) => n.nodeType === 3) &&
+        el.textContent === SENTENCE &&
+        // This mock refuses every request, so the open folder listing says it
+        // too — that is the picker's own error, not the spawn failure.
+        !el.closest('[data-testid="folder-browser-error"]'),
     );
     // The toast announces it; the failed chat kept for the message holds it
     // (spec/04 § Spawn). The old unstyled panel paragraph stays gone.
@@ -2499,6 +2523,40 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('error-toast-detail-text')).toHaveTextContent('folder_not_found');
     expect(document.querySelector('.error-toast .msg')?.textContent).not.toContain(
       'folder_not_found',
+    );
+  });
+
+  it('says a failed folder listing in a sentence, with the code behind Details', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const u = String(input);
+      if (u.startsWith('/api/folders/browse')) {
+        return new Response(JSON.stringify({ error: 'daemon_timeout' }), {
+          status: 504,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
+    const err = await screen.findByTestId('folder-browser-error');
+    expect(err).toHaveTextContent('That host isn’t answering');
+    expect(err.querySelector('p')?.textContent).not.toContain('daemon_timeout');
+    expect(screen.getByTestId('folder-browser-error-detail-text')).toHaveTextContent(
+      'daemon_timeout',
     );
   });
 

@@ -96,16 +96,18 @@ export function PadsPage(): JSX.Element {
         <div className="route-head-title">
           <NavHistoryControls />
         </div>
-        <input
-          type="search"
-          className="jobs-search"
-          data-testid="pads-search"
-          data-search-input
-          placeholder="Search pads"
-          aria-label="Search pads"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        {pads !== null && pads.length > 0 ? (
+          <input
+            type="search"
+            className="jobs-search"
+            data-testid="pads-search"
+            data-search-input
+            placeholder="Search pads"
+            aria-label="Search pads"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        ) : null}
         <button
           type="button"
           className="primary-btn pads-new"
@@ -116,11 +118,19 @@ export function PadsPage(): JSX.Element {
         </button>
       </header>
       {pads === null ? null : groups.length === 0 ? (
-        <p className="jobs-no-matches" data-testid="pads-empty">
-          {query
-            ? 'No pads match.'
-            : 'No pads yet. A Pad is a design you can edit and send back to a chat; ask an agent to make one, or use New Pad.'}
-        </p>
+        query ? (
+          <p className="jobs-no-matches" data-testid="pads-empty">
+            No pads match.
+          </p>
+        ) : (
+          <div className="empty-chat" data-testid="pads-empty">
+            <h2 className="empty-chat-title">No pads yet</h2>
+            <p className="empty-chat-line">
+              A Pad is a design you can edit and send back to a chat. Ask an agent to make one, or
+              use New Pad.
+            </p>
+          </div>
+        )
       ) : (
         groups.map(([app, pads]) => (
           <section key={app} data-testid={`pads-group-${app}`}>

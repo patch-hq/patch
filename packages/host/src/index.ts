@@ -1135,9 +1135,15 @@ async function startHost(
   // A build staged ahead of the server's restart (spec/11 § Updates in
   // lockstep). Anything left from an older run that is no longer ahead goes.
   pruneStaged(config.patchHome, VERSION);
-  const sweptWork = sweepUpdateWorkDirs();
-  if (sweptWork.length)
-    logger.info({ removed: sweptWork }, 'self-update: swept leftover update folders');
+  try {
+    const sweptWork = sweepUpdateWorkDirs(undefined, undefined, undefined, (name, err) =>
+      logger.warn({ err, folder: name }, 'self-update: could not sweep update folder, skipped'),
+    );
+    if (sweptWork.length)
+      logger.info({ removed: sweptWork }, 'self-update: swept leftover update folders');
+  } catch (err) {
+    logger.error({ err }, 'self-update: sweeping leftover update folders failed');
+  }
   let staging: Promise<void> | null = null;
   const stageAhead = (version: string): void => {
     if (!autoUpdateHosts) {

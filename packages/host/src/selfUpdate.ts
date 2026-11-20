@@ -562,14 +562,21 @@ export function sweepUpdateWorkDirs(
   root: string = tmpdir(),
   now: number = Date.now(),
   maxAgeMs: number = UPDATE_WORK_MAX_AGE_MS,
+  onError: (name: string, err: unknown) => void = () => {},
 ): string[] {
   const removed: string[] = [];
   for (const name of readdirSync(root)) {
     if (!name.startsWith('patch-update-')) continue;
     const dir = join(root, name);
-    if (now - statSync(dir).mtimeMs < maxAgeMs) continue;
-    rmSync(dir, { recursive: true, force: true });
-    removed.push(name);
+    // Housekeeping: one folder we cannot stat or remove (another user's, in
+    // use, vanished) is reported and skipped, never allowed to block startup.
+    try {
+      if (now - statSync(dir).mtimeMs < maxAgeMs) continue;
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(name);
+    } catch (err) {
+      onError(name, err);
+    }
   }
   return removed;
 }

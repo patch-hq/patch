@@ -4,7 +4,8 @@
 
 import type { JSX } from 'react';
 import { useState } from 'react';
-import { GUIDE_ITEMS, GUIDE_PURPOSE } from '../lib/guide.js';
+import { GUIDE_ITEMS, GUIDE_PURPOSE, isGuideItemDone } from '../lib/guide.js';
+import { useGuideProgress } from '../lib/useGuideProgress.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
@@ -15,6 +16,7 @@ export function FirstRunIntro(): JSX.Element | null {
   const dismissed = usePreferencesStore((s) => s.preferences.introDismissed);
   const update = usePreferencesStore((s) => s.update);
   const setGuideOpen = useUiStore((s) => s.setGuideOpen);
+  const progress = useGuideProgress();
   const [error, setError] = useState<string | null>(null);
 
   if (!loaded || dismissed) return null;
@@ -22,9 +24,14 @@ export function FirstRunIntro(): JSX.Element | null {
     <div className="first-run-intro" data-testid="first-run-intro">
       <p>{GUIDE_PURPOSE}</p>
       <ul>
-        {SHOWN.map((i) => (
-          <li key={i.id}>{i.title}</li>
-        ))}
+        {SHOWN.map((i) => {
+          const done = isGuideItemDone(i.id, progress) && i.done !== undefined;
+          return (
+            <li key={i.id} data-done={done ? 'true' : undefined}>
+              {done && i.done ? `✓ ${i.done.title}` : i.title}
+            </li>
+          );
+        })}
       </ul>
       <div className="first-run-actions">
         <button

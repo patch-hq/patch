@@ -9,6 +9,20 @@ export interface GuideItem {
   /** Where the feature lives; absent when it is something you do in the composer. */
   to?: string;
   action?: string;
+  /** Shown instead of title/line/action once the step is done. */
+  done?: { title: string; line: string };
+}
+
+/** What the user has already done, from live state. */
+export interface GuideProgress {
+  connected: boolean;
+  hasChat: boolean;
+}
+
+export function isGuideItemDone(id: string, progress: GuideProgress): boolean {
+  if (id === 'connect') return progress.connected;
+  if (id === 'chat') return progress.hasChat;
+  return false;
 }
 
 export const GUIDE_PURPOSE = 'Patch runs your coding agents, on this machine or any other.';
@@ -20,6 +34,7 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
     line: 'Sign in to Claude or ChatGPT. Nothing can be sent until you do.',
     to: '/connect',
     action: 'Sign in',
+    done: { title: 'AI connected', line: 'You can send messages. Add another account any time.' },
   },
   {
     id: 'chat',
@@ -27,6 +42,7 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
     line: 'Pick a folder under New chat and send a message.',
     to: '/chats/new',
     action: 'New chat',
+    done: { title: 'Chat started', line: 'Your first chat is under way.' },
   },
   {
     id: 'model',

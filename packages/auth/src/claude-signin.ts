@@ -180,8 +180,11 @@ export interface ClaudeLoopbackListener {
 }
 
 const LOOPBACK_PAGE = (title: string, line: string): string =>
-  `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
-  `<body style="font-family:system-ui;margin:3rem"><h1>${title}</h1><p>${line}</p>`;
+  `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+  `<meta name="color-scheme" content="light dark"><title>${title}</title>` +
+  `<body style="font:16px/1.45 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:Canvas;color:CanvasText">` +
+  `<main style="width:min(420px,88vw)"><h1 style="font:500 28px/1.15 Georgia,serif;margin:0 0 12px">${title}</h1>` +
+  `<p style="margin:0;opacity:.7">${line}</p></main>`;
 
 /**
  * Listen on this machine for claude.ai's redirect, the way Claude Code's own

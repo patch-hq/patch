@@ -50,6 +50,25 @@ describe('first-run intro', () => {
   });
 });
 
+describe('progress', () => {
+  it('ticks off a connected AI and drops the sign-in prompt', () => {
+    usePreferencesStore.setState({
+      shared: { secrets: { claude: [{ connected: true }], codex: [] } },
+    } as never);
+    useUiStore.setState({ guideOpen: true });
+    render(
+      <MemoryRouter>
+        <GettingStarted />
+        <FirstRunIntro />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('guide-connect')).toHaveAttribute('data-done', 'true');
+    expect(screen.getByTestId('guide-connect')).not.toHaveTextContent('Nothing can be sent');
+    expect(screen.queryByTestId('guide-go-connect')).toBeNull();
+    expect(screen.getByTestId('first-run-intro')).toHaveTextContent('✓ AI connected');
+  });
+});
+
 describe('getting started guide', () => {
   it('lists the features and closes', () => {
     useUiStore.setState({ guideOpen: true });

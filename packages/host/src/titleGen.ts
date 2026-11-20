@@ -91,7 +91,7 @@ function buildPrompt(input: GenerateTitleInput): string {
       'the message. If the message asks for help with something ("help me respond", ' +
       '"fix", "plan"), the title names that action and its object, e.g. ' +
       '"Reply To Workday Form", "Fix Login Redirect Bug".',
-    'Reply with ONLY a concise title of 2-6 words in Title Case. No ' +
+    'Reply with ONLY a concise title of 2-6 words in sentence case (only the first word and proper nouns capitalised). No ' +
       'surrounding quotes, no trailing punctuation, no file paths or URLs, no markdown.',
   ].join('\n');
 }

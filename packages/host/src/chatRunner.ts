@@ -22,6 +22,7 @@ import { escapesFolder } from './pathEscape.js';
 import { invalidateGitDirtyCache } from './git-dirty.js';
 import { invalidateFilesRecursiveCache } from './files-recursive.js';
 import { discoverClaudeMcpServers } from './claudeConfigMcp.js';
+import { checkChatFolderAccess } from './folderAccess.js';
 import { SharedMcpPool } from './sharedMcp.js';
 // Host's session manager.
 //
@@ -10190,6 +10191,18 @@ export class Daemon {
     // NO FALLBACK). Mark errored and surface `folder_missing`.
     if (!existsSync(state.folder) || !statSync(state.folder).isDirectory()) {
       this.failPreflight(chatId, 'folder_missing', `chat folder no longer exists: ${state.folder}`);
+      return false;
+    }
+
+    // macOS holds the first read of ~/Documents, ~/Desktop and ~/Downloads until
+    // the user answers a privacy prompt. Say so now rather than leave the chat
+    // on its typing dots; the next message re-checks.
+    // Only macOS can hold the read; skipping the await elsewhere keeps the
+    // preflight's timing unchanged.
+    const folderAdvice =
+      process.platform === 'darwin' ? await checkChatFolderAccess(state.folder) : null;
+    if (folderAdvice !== null) {
+      this.failPreflight(chatId, 'sdk_error', folderAdvice);
       return false;
     }
 
