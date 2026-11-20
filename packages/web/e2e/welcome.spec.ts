@@ -115,7 +115,11 @@ test('this computer: every step, each choice written where Settings writes it', 
   // The recommended model is already selected, not the dearest; Continue saves it.
   await expect(page.getByTestId('welcome-model-claude-sonnet-5').locator('input')).toBeChecked();
   await page.getByTestId('welcome-next').click();
-  await expect.poll(() => server.patches).toContainEqual({ defaultModel: 'claude-sonnet-5' });
+  await expect.poll(() => server.patches).toContainEqual({
+    defaultModel: 'claude-sonnet-5',
+    jobDefaultModel: 'claude-sonnet-5',
+    specialThreadModel: 'claude-sonnet-5',
+  });
 
   // 4. Keep running — on by default; turning one off reaches the shell.
   await expect(page.getByTestId('welcome-keep-running')).toBeVisible();
