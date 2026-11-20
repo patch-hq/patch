@@ -826,10 +826,7 @@ describe('src/index.ts main() — full host boot', () => {
         localId: 'input-1',
         attachments: [{ id: 'att-live-1', name: 'note.txt', mimeType: 'text/plain', kind: 'file' }],
       });
-      await boot.fakeServer.waitForFrame(
-        (e) => replied(e, 'chat-main-1'),
-        10_000,
-      );
+      await boot.fakeServer.waitForFrame((e) => replied(e, 'chat-main-1'), 10_000);
       // --- chat.input, WITH disabledTools (per-chat Tools panel OFF set) — the
       //     TRUE side of the disabledTools spread; other chat.input sends here
       //     omit it, covering the FALSE side. patch/todo.md — "turn them on/off".
@@ -840,10 +837,7 @@ describe('src/index.ts main() — full host boot', () => {
         localId: 'input-tools-off',
         disabledTools: ['Bash'],
       });
-      await boot.fakeServer.waitForFrame(
-        (e) => replied(e, 'chat-main-1'),
-        10_000,
-      );
+      await boot.fakeServer.waitForFrame((e) => replied(e, 'chat-main-1'), 10_000);
 
       // --- chat.focus_change (intercepted before handleServerEvent) ---
       boot.fakeServer.send({
