@@ -7089,7 +7089,7 @@ export async function handleFoldersBrowseRequest(
   } catch (err) {
     const raw = (err as { code?: string }).code;
     const code =
-      raw === 'folder_not_found' || raw === 'permission_pending' || raw === 'permission_denied'
+      raw === 'folder_not_found' || raw === 'still_opening' || raw === 'permission_denied'
         ? raw
         : 'internal';
     if (code === 'internal') {

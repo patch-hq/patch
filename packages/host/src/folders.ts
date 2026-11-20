@@ -47,11 +47,11 @@ export class FolderNotFoundError extends Error {
 }
 
 /** The listing is still waiting on a person (a macOS permission dialog); ask again shortly. */
-export class FolderPermissionPendingError extends Error {
-  readonly code = 'permission_pending' as const;
+export class FolderStillOpeningError extends Error {
+  readonly code = 'still_opening' as const;
   constructor(dir: string) {
     super(listingPendingMessage(dir));
-    this.name = 'FolderPermissionPendingError';
+    this.name = 'FolderStillOpeningError';
   }
 }
 
@@ -337,7 +337,7 @@ export class FolderRegistry {
     // boundedListing.ts). A missing or unreadable path is `folder_not_found`; a
     // read that does not finish says plainly what it is probably waiting for.
     const listing = await this.listChildDirs(resolved);
-    if (listing.kind === 'pending') throw new FolderPermissionPendingError(resolved);
+    if (listing.kind === 'pending') throw new FolderStillOpeningError(resolved);
     if (listing.kind === 'denied') throw new FolderPermissionDeniedError(resolved);
     if (listing.kind === 'timeout') throw new FolderListingTimeoutError(resolved);
     if (listing.kind === 'error') throw new FolderNotFoundError(dir);

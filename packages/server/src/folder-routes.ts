@@ -158,7 +158,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
         const status =
           code === 'folder_not_found'
             ? 404
-            : code === 'permission_pending'
+            : code === 'still_opening'
               ? 409
               : code === 'permission_denied'
                 ? 403

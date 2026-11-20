@@ -32,16 +32,11 @@ describe('FolderRegistry.browse while a folder waits on macOS', () => {
       onChange: () => {},
       listChildDirs: async () => ({ kind }),
     });
-  it('says it is waiting for the dialog, for a protected folder', async () => {
+  it('says it is still opening, without guessing why', async () => {
     await expect(mk('pending').browse('/Users/x/Documents')).rejects.toMatchObject({
-      code: 'permission_pending',
-      message: expect.stringMatching(
-        /Waiting for you to allow access to Documents in the macOS dialog/,
-      ),
+      code: 'still_opening',
+      message: 'Still opening Documents…',
     });
-  });
-  it('does not blame a dialog for an ordinary slow folder', async () => {
-    await expect(mk('pending').browse('/srv/data')).rejects.toThrow(/slow to open/);
   });
   it("says so plainly when the user clicked Don't Allow", async () => {
     await expect(mk('denied').browse('/Users/x/Documents')).rejects.toMatchObject({

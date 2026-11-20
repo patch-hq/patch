@@ -19,7 +19,7 @@ export const LISTING_WINDOW_MS = 1_200;
 export type ListingResult =
   | { kind: 'ok'; names: string[] }
   | { kind: 'timeout' }
-  /** Still running past the caller's window — almost certainly a permission dialog. */
+  /** Still running past the caller's window — it may be waiting on a person or just be slow. */
   | { kind: 'pending' }
   /** macOS refused the read ("Don't Allow", or no grant). */
   | { kind: 'denied' }
@@ -113,20 +113,9 @@ export async function listChildDirsWithin(
 
 const folderName = (dir: string): string => dir.split('/').filter(Boolean).pop() ?? dir;
 
-/** Folders macOS guards behind a permission dialog: the user's own, iCloud, and other volumes. */
-export function isProtectedFolder(dir: string): boolean {
-  return (
-    /^\/Users\/[^/]+\/(Desktop|Documents|Downloads)(\/|$)/.test(dir) ||
-    /^\/Users\/[^/]+\/Library\/(Mobile Documents|CloudStorage)(\/|$)/.test(dir) ||
-    /^\/Volumes\//.test(dir)
-  );
-}
-
-/** What to tell the person while a read has not come back. */
+/** What to tell the person while a read has not come back. Says nothing about why: a slow read has many causes. */
 export function listingPendingMessage(dir: string): string {
-  return isProtectedFolder(dir)
-    ? `Waiting for you to allow access to ${folderName(dir)} in the macOS dialog`
-    : `${folderName(dir)} is slow to open — still trying`;
+  return `Still opening ${folderName(dir)}…`;
 }
 
 /** What to tell the person when macOS refused. */
