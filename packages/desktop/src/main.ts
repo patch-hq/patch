@@ -2364,10 +2364,14 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
     console.log(`[patch] start: ${launched.mode} server at ${new URL(launched.appUrl).origin}`);
     if (launched.mode === 'local') {
       startKeepRunning(userData);
-      const url = new URL(launched.appUrl);
-      const credential = new URLSearchParams(url.hash.slice(1)).get('credential');
-      if (credential === null) throw new Error('The local server launch carried no credential.');
-      ensureLocalHost(credential, url.origin);
+      // A first run has only just installed and started the host; restarting it
+      // while it connects would be the very hang this exists to cure.
+      if (!launched.firstRun) {
+        const url = new URL(launched.appUrl);
+        const credential = new URLSearchParams(url.hash.slice(1)).get('credential');
+        if (credential === null) throw new Error('The local server launch carried no credential.');
+        ensureLocalHost(credential, url.origin);
+      }
     }
     // A first run goes on to the welcome steps: AI sign-in, defaults, phone.
     initialUrl = launched.firstRun
