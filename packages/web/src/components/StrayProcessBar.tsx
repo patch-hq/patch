@@ -17,6 +17,14 @@ import { StatusRow } from './StatusRow.js';
 
 const POLL_MS = 5_000;
 
+/** Server error codes in words; anything unrecognised is shown as it came. */
+export function strayErrorText(error: string): string {
+  if (error === 'daemon_timeout') {
+    return 'The host did not answer in time. Trying again every few seconds.';
+  }
+  return error;
+}
+
 export function StrayProcessBar({ chatId }: { chatId: string }): JSX.Element | null {
   const [rows, setRows] = useState<StrayProcessRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +89,7 @@ export function StrayProcessBar({ chatId }: { chatId: string }): JSX.Element | n
     <div data-testid="stray-process-bar" role="status">
       {error !== null ? (
         <StatusRow label="Processes" testId="stray-process-error">
-          <span className="status-grow">{`Can't list background processes: ${error}`}</span>
+          <span className="status-grow">{`Can't list background processes. ${strayErrorText(error)}`}</span>
         </StatusRow>
       ) : null}
       {shown.map((r) => (

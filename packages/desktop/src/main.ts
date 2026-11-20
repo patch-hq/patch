@@ -2261,7 +2261,7 @@ function showSetupWindow(offerMove = false): {
 } {
   const window = new BrowserWindow({
     width: 560,
-    height: 460,
+    height: 680,
     title: 'Patch',
     // A quiet instance (a test run beside a real Patch) puts nothing on screen.
     show: !QUIET,

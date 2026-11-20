@@ -49,6 +49,7 @@ import {
   firstLeaf,
   isTabDirty,
   lastClosedChatId,
+  showsOnlyChatlessPages,
   takeEmptiedByClose,
   useLayoutStore,
   type Group,
@@ -460,8 +461,11 @@ function GroupCard({
   const colour = groupColourClass(index);
   const chatDrag = useDragKind() === 'chat';
   const [chatHot, setChatHot] = useState(false);
+  // Settings, Jobs and Pads belong to no chat: their tab must not sit under
+  // the chat's name.
+  const chatless = showsOnlyChatlessPages(group.root);
   const header =
-    group.chatId !== null && chat ? (
+    group.chatId !== null && chat && !chatless ? (
       <ChatHeader
         row={chat}
         group={{
@@ -471,7 +475,7 @@ function GroupCard({
           onClose: cards ? () => closeGroup(group.id) : null,
         }}
       />
-    ) : group.chatId === null && !cards ? null : (
+    ) : (group.chatId === null || chatless) && !cards ? null : (
       <header className="group-head" data-testid="group-head">
         <span className="group-name">
           {cards ? (
@@ -479,7 +483,7 @@ function GroupCard({
               {index + 1}
             </span>
           ) : null}
-          {group.chatId === null ? null : (
+          {group.chatId === null || chatless ? null : (
             <span className="group-title" data-testid="group-title">
               {chatTitle(group.chatId, undefined)}
             </span>

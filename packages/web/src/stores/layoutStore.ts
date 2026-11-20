@@ -257,6 +257,19 @@ export function activeChatOf(pane: LeafPane): string | null {
   return tab && tab.descriptor.kind === 'chat' ? tab.descriptor.chatId : null;
 }
 
+/**
+ * True when every pane in the tree is showing a page that belongs to no chat
+ * (Settings, Jobs, Pads, …). The group's chat header then has nothing to be
+ * the header of.
+ */
+export function showsOnlyChatlessPages(node: PaneNode): boolean {
+  if (node.type === 'split') return node.children.every((c) => showsOnlyChatlessPages(c.pane));
+  const tab = node.tabs.find((t) => t.id === node.activeTabId);
+  if (!tab || tab.descriptor.kind !== 'page') return false;
+  const d = tab.descriptor;
+  return !('chatId' in d && d.chatId !== undefined);
+}
+
 /** The chat showing in the FOCUSED pane's active tab, or null — "the selected
  *  chat" follows pane focus, not the address bar (which only tracks URL
  *  navigations, see ChatPaneRoute). */
