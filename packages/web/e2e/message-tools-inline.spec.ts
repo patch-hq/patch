@@ -27,6 +27,7 @@ for (const [label, width] of [
           role: 'assistant',
           content: 'tools inline answer',
           seq: 9400,
+          branchable: true,
           createdAt,
         });
     }, CREATED_AT);

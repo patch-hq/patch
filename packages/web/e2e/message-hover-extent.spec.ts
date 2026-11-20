@@ -26,6 +26,7 @@ test.describe('message hover extent', () => {
         role: 'assistant',
         content: 'short question',
         seq: 9300,
+        branchable: true,
         createdAt,
       } as unknown as WireEvent);
     }, CREATED_AT);
