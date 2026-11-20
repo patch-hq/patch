@@ -421,6 +421,8 @@ export function validateChange(input: unknown): NewChange {
     out['fromHeight'] = num(inp['fromHeight'], 'fromHeight');
     out['width'] = num(inp['width'], 'width');
     out['height'] = num(inp['height'], 'height');
+    if (inp['fontSize'] !== undefined && inp['fontSize'] !== null)
+      out['fontSize'] = num(inp['fontSize'], 'fontSize');
   } else if (kind === 'text') {
     if (typeof inp['before'] !== 'string' || typeof inp['after'] !== 'string') {
       throw new PadError(400, 'text changes need before and after');

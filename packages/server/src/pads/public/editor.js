@@ -18,6 +18,7 @@
   var screen = null;       // the screen the frame is showing; null = somewhere that isn't one
   var tool = 'select';
   var sel = null;          // selected element inside the frame
+  var selGroup = false;    // the selection was boxed in as a group of elements, not picked as one
   var hoverEl = null;
   var drag = null;
   var lastTap = null;
@@ -142,7 +143,7 @@
         return;
       }
       if (c.kind === 'move') { var v = c.dx + 'px ' + c.dy + 'px'; if (n.style.translate !== v) n.style.translate = v; }
-      else if (c.kind === 'resize') { n.style.width = c.width + 'px'; n.style.height = c.height + 'px'; }
+      else if (c.kind === 'resize') { n.style.width = c.width + 'px'; n.style.height = c.height + 'px'; if (c.fontSize) n.style.fontSize = c.fontSize + 'px'; }
       else if (c.kind === 'text') { if (editing && editing.el === n) return; if (n.textContent !== c.after) n.textContent = c.after; }
       else if (c.kind === 'delete') { if (n.style.display !== 'none') n.style.display = 'none'; }
     });
@@ -538,7 +539,8 @@
     if (tool === 'draw') { e.preventDefault(); startStroke(e, pt); return; }
     if (SHAPE_TOOLS.indexOf(tool) >= 0) { e.preventDefault(); startStroke(e, pt, tool); return; }
     var t = hit(pt);
-    var onSel = sel && t && (t === sel || sel.contains(t));
+    // A box-dragged group moves as one; a single element only moves when the pointer is on it, so a neighbour never rides along.
+    var onSel = sel && t && (t === sel || (selGroup && sel.contains(t)));
     drag = {
       mode: onSel ? 'press-sel' : 'press', el: onSel ? sel : t, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY,
       id: e.pointerId, base: onSel ? currentTranslate(sel) : null, scroller: scrollerFor(t),
@@ -574,7 +576,8 @@
     if (d.mode === 'marquee') {
       marquee.style.display = 'none';
       var a = local({ clientX: d.x0, clientY: d.y0 }), b = local(e);
-      sel = enclosed({ l: Math.min(a.x, b.x), t: Math.min(a.y, b.y), r: Math.max(a.x, b.x), b: Math.max(a.y, b.y) }) || d.el || null;
+      var grp = enclosed({ l: Math.min(a.x, b.x), t: Math.min(a.y, b.y), r: Math.max(a.x, b.x), b: Math.max(a.y, b.y) });
+      sel = grp || d.el || null; selGroup = !!grp;
       draw();
       return;
     }
@@ -585,7 +588,7 @@
       var t = d.el, now = Date.now();
       if (t && lastTap && lastTap.el === t && now - lastTap.t < 380) { lastTap = null; openAt(t, local(e)); return; }
       lastTap = { el: t, t: now };
-      sel = t || null;
+      sel = t || null; selGroup = false;
       draw();
     }
     draw();
@@ -696,7 +699,8 @@
     e.preventDefault(); e.stopPropagation();
     if (!sel) return;
     var r = sel.getBoundingClientRect();
-    drag = { resize: true, el: sel, pos: pos, x0: e.clientX, y0: e.clientY, w: r.width, h: r.height };
+    var fs = parseFloat(win().getComputedStyle(sel).fontSize) || 0;
+    drag = { resize: true, el: sel, pos: pos, x0: e.clientX, y0: e.clientY, w: r.width, h: r.height, fs: ownsText(sel) ? fs : 0 };
     e.target.setPointerCapture(e.pointerId);
     var moved = false;
     var move = function (ev) {
@@ -707,6 +711,8 @@
       drag.nw = Math.max(4, drag.w + (ev.clientX - drag.x0) / scale * sx);
       drag.nh = Math.max(4, drag.h + (ev.clientY - drag.y0) / scale * sy);
       drag.el.style.width = Math.round(drag.nw) + 'px'; drag.el.style.height = Math.round(drag.nh) + 'px';
+      // Text scales with its box.
+      if (drag.fs) { drag.nfs = Math.max(1, Math.round(drag.fs * Math.sqrt((drag.nw / drag.w) * (drag.nh / drag.h)) * 10) / 10); drag.el.style.fontSize = drag.nfs + 'px'; }
       draw();
     };
     var up = function () {
@@ -720,7 +726,7 @@
         draw();
         return;
       }
-      if (d.nw) post({ kind: 'resize', target: target(d.el), fromWidth: Math.round(d.w), fromHeight: Math.round(d.h), width: Math.round(d.nw), height: Math.round(d.nh) });
+      if (d.nw) post({ kind: 'resize', target: target(d.el), fromWidth: Math.round(d.w), fromHeight: Math.round(d.h), width: Math.round(d.nw), height: Math.round(d.nh), fontSize: d.nfs });
       draw();
     };
     e.target.addEventListener('pointermove', move);

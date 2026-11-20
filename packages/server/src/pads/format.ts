@@ -24,7 +24,7 @@ export function describeChange(c: Change): string {
     case 'move':
       return `Moved ${on} ${phrase(a['dx'], a['dy'])}`;
     case 'resize':
-      return `Resized ${on} from ${a['fromWidth']}×${a['fromHeight']} to ${a['width']}×${a['height']}px`;
+      return `Resized ${on} from ${a['fromWidth']}×${a['fromHeight']} to ${a['width']}×${a['height']}px${a['fontSize'] ? `, text size ${a['fontSize']}px` : ''}`;
     case 'text':
       return `Changed the text of ${on} from "${clip(a['before'])}" to "${clip(a['after'])}"`;
     case 'delete':
