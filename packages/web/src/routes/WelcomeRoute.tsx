@@ -23,6 +23,7 @@ import {
   permissionModeHint,
   permissionModesForProviders,
   PROVIDERS,
+  providerForModel,
   isEndpointModel,
   type PermissionMode,
 } from '@patch/wire';
