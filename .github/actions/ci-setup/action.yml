@@ -1,0 +1,103 @@
+# The machine setup every test job shares: Node, swap, dependencies, and the
+# built workspace (some suites run against built output, and the server serves
+# the web build). With system-deps, also Chromium, Xvfb and the keyring the
+# browser layer and the host's suites need, from an apt mirror that answers.
+# The caller checks the repository out first (with fetch-depth: 0).
+
+name: ci-setup
+description: Node, dependencies, optional browser system packages, workspace build
+
+inputs:
+  system-deps:
+    description: install Chromium, Xvfb and the keyring
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+    # Headroom against the OOM killer (exit 137): the host suite's sidecars,
+    # then headed Chromium, outgrow the runner's RAM. Swap turns a spike into
+    # a slow moment instead of a killed shard.
+    - name: Add swap
+      shell: bash
+      run: |
+        sudo fallocate -l 6G /mnt/ci-extra.swap
+        sudo chmod 600 /mnt/ci-extra.swap
+        sudo mkswap /mnt/ci-extra.swap
+        sudo swapon /mnt/ci-extra.swap
+    - run: corepack enable
+      shell: bash
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+    # Runners have been failing to resolve every *.ubuntu.com name (azure.archive,
+    # archive, security) while other hosts such as packages.microsoft.com resolve,
+    # so apt -- and with it `playwright install --with-deps` -- failed every shard
+    # before a test ran. Point apt at a mirror outside ubuntu.com instead: the
+    # deb822 sources read /etc/apt/apt-mirrors.txt through their mirror+file: URIs,
+    # and any source naming an ubuntu.com host directly is rewritten too. The
+    # retry and timeout settings apply to every apt call, including Playwright's.
+    - name: Use a non-ubuntu.com apt mirror
+      if: inputs.system-deps == 'true'
+      shell: bash
+      run: |
+        # Probe: one mirror is sometimes unreachable from a runner (kernel.org timed
+        # out on every connection on 2026-11-12), so use the first that answers.
+        codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+        mirror=
+        for m in https://mirrors.edge.kernel.org/ubuntu/ https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/; do
+          # InRelease alone is not enough: a mirror has answered it while failing every
+          # .deb download (kernel.org, 2026-11-15), so also fetch a real package file.
+          deb=$(curl -4 -fsS --max-time 20 "${m}dists/${codename}/main/binary-amd64/Packages.gz" 2>/dev/null | zcat 2>/dev/null | awk '/^Filename: /{print $2; exit}') || deb=
+          if [ -n "$deb" ] && curl -4 -fsS --max-time 20 -o /dev/null "${m}${deb}"; then mirror=$m; break; fi
+          echo "::warning::apt mirror unreachable: $m"
+        done
+        [ -n "$mirror" ] || { echo "::error::no apt mirror reachable"; exit 1; }
+        echo "using apt mirror $mirror"
+        echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+        sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
+          -exec sed -E -i "s#https?://([a-z0-9-]+\.)*(archive|security)\.ubuntu\.com/ubuntu/?#$mirror#g" {} +
+        # IPv4 only: runners have also failed to connect to the mirror over IPv6.
+        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::ForceIPv4 "true";\n' \
+          | sudo tee /etc/apt/apt.conf.d/99ci-mirror >/dev/null
+        grep -rhE '^(URIs|deb) ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
+    # Three attempts, matching the Xvfb install below.
+    - name: Install Chromium and its system packages
+      if: inputs.system-deps == 'true'
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          pnpm --filter @patch/web exec playwright install --with-deps chromium && exit 0
+          [ "$attempt" = 3 ] && break
+          wait=$((30 + RANDOM % 31))
+          echo "::warning::playwright install: attempt $attempt failed; retrying in ${wait}s"
+          sleep "$wait"
+          # A 404 means the runner package index is stale: refresh it.
+          sudo apt-get update -qq || true
+        done
+        echo "::error::playwright install: failed after 3 attempts"
+        exit 1
+    # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
+    # tests keep credentials in the native keyring (Secret Service over D-Bus).
+    - name: Install Xvfb and the keyring
+      if: inputs.system-deps == 'true'
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 \
+            xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
+          [ "$attempt" = 3 ] && break
+          wait=$((30 + RANDOM % 31))
+          echo "::warning::apt-get install: attempt $attempt failed; retrying in ${wait}s"
+          sleep "$wait"
+          # A 404 means the runner package index is stale: refresh it.
+          sudo apt-get update -qq || true
+        done
+        echo "::error::apt-get install: failed after 3 attempts"
+        exit 1
+    # Some suites run against built output (the server serves the web build).
+    # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
+    - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
+      shell: bash
