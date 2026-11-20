@@ -91,7 +91,7 @@ test.describe('job editor — opened from a chat', () => {
     // The job tab is a page of no chat, so it shows no chat header; the chat
     // is still open in its own tab beside it.
     await expect(page.getByTestId('chat-head')).toHaveCount(0);
-    await expect(page.getByRole('tab')).toHaveCount(2);
+    await expect(page.getByText(CHAT_FIXTURE_MESSAGE)).toHaveCount(1);
     await expect(page.getByTestId('jobs-route')).toHaveCount(0);
   });
 
