@@ -309,7 +309,8 @@ export interface DesktopEvent {
     | 'meeting:detection-unsupported'
     | 'meeting:prompt-shown'
     | 'meeting:auto-ended'
-    | 'server-watch:error';
+    | 'server-watch:error'
+    | 'host-watchdog:restart';
   ts: number;
   payload?: Record<string, unknown>;
 }
