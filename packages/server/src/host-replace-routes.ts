@@ -36,6 +36,7 @@ import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry, ChatSummary } from './chat-registry.js';
 import type { ChatLogStore } from './chat-log-store.js';
+import type { Job, JobsInterface } from './jobs/types.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from './host-addressing.js';
 import { requireAuth } from './folder-routes.js';
 
@@ -50,6 +51,8 @@ export interface HostReplaceRoutesDeps {
   /** Revoke the host and forget it everywhere, as `DELETE /api/hosts/:hostId` does. */
   removeHost: (hostId: string, by: string) => void;
   hosts: () => AuthOkHost[];
+  /** The account's jobs; read when asked, since the store is built after the routes. */
+  jobs: () => JobsInterface;
   /** How long a host has to answer. Injectable for tests. */
   timeoutMs?: number;
 }
@@ -57,10 +60,17 @@ export interface HostReplaceRoutesDeps {
 export const HOST_REPLACE_TIMEOUT_MS = 60_000;
 const SERVER_SURFACE = '_server';
 
-/** Where each provider keeps a chat's session files on a host (spec/11 § Replacing a host). */
-export function sessionFilesPath(harness: string, chatId: string): string {
-  if (harness === 'claude') return `~/.patch/chats/${chatId}/claude`;
-  if (harness === 'codex') return '~/.patch/openai/<account>/sessions';
+/**
+ * The home a host keeps Patch's state in, by default. A host does not report
+ * its own (a `PATCH_HOME` set for it moves everything under it), so the plan
+ * names the paths under this and says it assumes it.
+ */
+export const DEFAULT_PATCH_HOME = '~/.patch';
+
+/** Where each provider keeps its session files on a host (spec/11 § Replacing a host). */
+export function sessionFilesPath(harness: string): string {
+  if (harness === 'claude') return `${DEFAULT_PATCH_HOME}/chats/<chat id>/claude`;
+  if (harness === 'codex') return `${DEFAULT_PATCH_HOME}/openai/<account>/sessions`;
   return `wherever ${harness} keeps its sessions`;
 }
 
@@ -72,7 +82,17 @@ type Plan = {
   folders: Array<{ folder: string; chats: number; present: boolean }>;
   missing: string[];
   sessions: Array<{ provider: string; path: string; chats: number }>;
+  /** The old host's Patch home the session paths are under: assumed, since a host does not report it. */
+  assumedHome: string;
+  /** Jobs whose action or gate runs on the old host: they move to the new one. */
+  jobs: Array<{ jobId: string; name: string }>;
 };
+
+/** Does this job run anything on `hostId` (its action or its gate)? */
+function jobOnHost(job: Job, hostId: string): boolean {
+  const action = job.action as { hostId?: string };
+  return action.hostId === hostId || job.gate?.hostId === hostId;
+}
 
 export function registerHostReplaceRoutes(app: FastifyInstance, deps: HostReplaceRoutesDeps): void {
   const timeoutMs = deps.timeoutMs ?? HOST_REPLACE_TIMEOUT_MS;
@@ -159,14 +179,12 @@ export function registerHostReplaceRoutes(app: FastifyInstance, deps: HostReplac
     for (const c of chats) {
       const ref = deps.chatLogStore.lastNativeRef(c.chatId);
       if (!ref) continue;
-      const path = sessionFilesPath(ref.harness, c.chatId);
-      const key = ref.harness === 'claude' ? 'claude' : `${ref.harness}:${path}`;
-      const held = sessions.get(key);
+      const held = sessions.get(ref.harness);
       if (held) held.chats++;
       else
-        sessions.set(key, {
+        sessions.set(ref.harness, {
           provider: ref.harness,
-          path: ref.harness === 'claude' ? '~/.patch/chats/<chat id>/claude' : path,
+          path: sessionFilesPath(ref.harness),
           chats: 1,
         });
     }
@@ -181,6 +199,12 @@ export function registerHostReplaceRoutes(app: FastifyInstance, deps: HostReplac
       })),
       missing: [...missing].sort(),
       sessions: [...sessions.values()],
+      assumedHome: DEFAULT_PATCH_HOME,
+      jobs: deps
+        .jobs()
+        .list()
+        .filter((j) => jobOnHost(j, fromHostId))
+        .map((j) => ({ jobId: j.id, name: j.name })),
     };
   }
 
@@ -290,15 +314,31 @@ export function registerHostReplaceRoutes(app: FastifyInstance, deps: HostReplac
       });
     }
 
+    // The new host takes over the old one's work: every job that ran there now runs here.
+    const jobs = deps.jobs();
+    const movedJobs: string[] = [];
+    for (const job of jobs.list()) {
+      if (!jobOnHost(job, fromHostId)) continue;
+      const action = job.action as { hostId?: string };
+      jobs.patch(job.id, {
+        ...(action.hostId === fromHostId
+          ? { action: { ...job.action, hostId: to } as Job['action'] }
+          : {}),
+        ...(job.gate?.hostId === fromHostId ? { gate: { ...job.gate, hostId: to } } : {}),
+      });
+      movedJobs.push(job.id);
+    }
+
     const held = deps.hostLink.handOverHeld(fromHostId, to);
     deps.removeHost(fromHostId, by);
     deps.logger.info(
-      { fromHostId, toHostId: to, moved: answer.adopted.length, held, without },
+      { fromHostId, toHostId: to, moved: answer.adopted.length, jobs: movedJobs, held, without },
       'host replaced',
     );
     return {
       ok: true,
       moved: answer.adopted.length,
+      jobs: movedJobs,
       withoutFolders: checked.missing,
       hosts: deps.hosts(),
     };

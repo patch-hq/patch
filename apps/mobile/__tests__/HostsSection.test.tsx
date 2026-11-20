@@ -719,6 +719,8 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       ],
       missing,
       sessions: [{ provider: 'claude', path: '~/.patch/chats/<chat id>/claude', chats: 3 }],
+      assumedHome: '~/.patch',
+      jobs: [{ jobId: 'j1', name: 'morning digest' }],
     });
     beforeEach(() => {
       reportHost('h1', { hostName: 'laptop' });
@@ -744,6 +746,10 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(textOf(findHost(r.root, byTestId('replace-session')))).toContain(
         '~/.patch/chats/<chat id>/claude',
       );
+      expect(textOf(findHost(r.root, byTestId('replace-assumed-home')))).toContain(
+        'Assumes laptop keeps Patch in ~/.patch',
+      );
+      expect(textOf(findHost(r.root, byTestId('replace-job')))).toContain('morning digest');
     });
 
     it('with a folder missing it asks first, then replaces without it and drops the host', async () => {

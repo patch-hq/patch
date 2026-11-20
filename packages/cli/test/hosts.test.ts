@@ -76,12 +76,16 @@ test('describeReplacePlan names each folder, which are missing, and where sessio
     ],
     missing: ['/work/b'],
     sessions: [{ provider: 'claude', path: '~/.patch/chats/<chat id>/claude', chats: 3 }],
+    assumedHome: '~/.patch',
+    jobs: [{ jobId: 'j1', name: 'morning digest' }],
   }).join('\n');
   assert.match(text, /New box takes over 3 chats from Old box/);
   assert.match(text, /✓ {2}\/work\/a/);
   assert.match(text, /✗ missing {2}\/work\/b/);
   assert.match(text, /claude: ~\/\.patch\/chats\/<chat id>\/claude/);
   assert.match(text, /--without-folder/);
+  assert.match(text, /assume Old box keeps Patch in ~\/\.patch/);
+  assert.match(text, /Jobs that move to New box:\n {2}morning digest/);
 });
 
 test('the host-scoped commands take --host, defaulting to this host', () => {

@@ -1854,6 +1854,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     broadcastChatState: (state) => wsHub.broadcastChatState(state),
     removeHost: removeHostFromAccount,
     hosts: () => wsHub.hosts(),
+    jobs: () => jobs,
     ...(opts.hostReplaceTimeoutMs !== undefined ? { timeoutMs: opts.hostReplaceTimeoutMs } : {}),
   });
 

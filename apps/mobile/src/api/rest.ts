@@ -1213,4 +1213,8 @@ export interface ReplaceHostPlan {
   folders: Array<{ folder: string; chats: number; present: boolean }>;
   missing: string[];
   sessions: Array<{ provider: string; path: string; chats: number }>;
+  /** The old host's Patch home the session paths assume; a host does not report its own. */
+  assumedHome: string;
+  /** Jobs whose action or gate runs on the old host: they move to the new one. */
+  jobs: Array<{ jobId: string; name: string }>;
 }

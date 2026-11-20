@@ -567,6 +567,16 @@ function ReplaceHost({ host }: { host: HostPresence }): React.ReactElement | nul
               {s.provider} {s.path}
             </Muted>
           ))}
+          {plan.sessions.length > 0 ? (
+            <Muted testID="replace-assumed-home">
+              Assumes {plan.from.name} keeps Patch in {plan.assumedHome}
+            </Muted>
+          ) : null}
+          {plan.jobs.map((j) => (
+            <Muted key={j.jobId} testID="replace-job">
+              Job moves: {j.name}
+            </Muted>
+          ))}
           <ButtonRow>
             <SettingsButton
               testID="replace-cancel"

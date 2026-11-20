@@ -437,6 +437,8 @@ export interface ReplacePlan {
   folders: Array<{ folder: string; chats: number; present: boolean }>;
   missing: string[];
   sessions: Array<{ provider: string; path: string; chats: number }>;
+  assumedHome: string;
+  jobs: Array<{ jobId: string; name: string }>;
 }
 
 /** The plan as lines a person reads: what moves, what to carry, what is missing. */
@@ -449,6 +451,11 @@ export function describeReplacePlan(plan: ReplacePlan): string[] {
   if (plan.sessions.length > 0) {
     lines.push('', 'Provider session files (carry unchanged, to the same path):');
     for (const s of plan.sessions) lines.push(`  ${s.provider}: ${s.path}  (${s.chats} chats)`);
+    lines.push(`  These assume ${plan.from.name} keeps Patch in ${plan.assumedHome}.`);
+  }
+  if (plan.jobs.length > 0) {
+    lines.push('', `Jobs that move to ${plan.to.name}:`);
+    for (const j of plan.jobs) lines.push(`  ${j.name}`);
   }
   if (plan.missing.length > 0) {
     lines.push(

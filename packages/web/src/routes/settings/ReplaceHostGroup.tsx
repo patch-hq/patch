@@ -106,6 +106,17 @@ export function ReplaceHostGroup({ host }: { host: HostPresence }): JSX.Element 
                   {s.provider} <code>{s.path}</code>
                 </li>
               ))}
+              <li className="set-sub" data-testid="replace-assumed-home">
+                Assumes {plan.from.name} keeps Patch in <code>{plan.assumedHome}</code>
+              </li>
+            </ul>
+          ) : null}
+          {plan.jobs.length > 0 ? (
+            <ul className="set-list" data-testid="replace-jobs">
+              <li className="set-sub">Jobs that move</li>
+              {plan.jobs.map((j) => (
+                <li key={j.jobId}>{j.name}</li>
+              ))}
             </ul>
           ) : null}
           <div className="set-actions">

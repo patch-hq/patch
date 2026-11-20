@@ -125,7 +125,66 @@ describe('replacing a host', () => {
         ],
         missing: ['/work/b'],
         sessions: [{ provider: 'claude', path: '~/.patch/chats/<chat id>/claude', chats: 1 }],
+        // A host does not report its home, so the plan says what it assumed.
+        assumedHome: '~/.patch',
       });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('every job that runs on the old host is listed in the plan and moves with its chats', async () => {
+    const link = new FakeHosts();
+    link.present.add('/work/a').add('/work/b');
+    const { built, get, post } = await boot(link);
+    try {
+      const cron = { type: 'cron' as const, expression: '0 9 * * *' };
+      const spawn = built.jobs.create({
+        name: 'morning',
+        trigger: cron,
+        action: { type: 'spawn', hostId: 'd2', folder: '/work/a', prompt: 'go' },
+      });
+      const gated = built.jobs.create({
+        name: 'gated',
+        trigger: cron,
+        gate: { hostId: 'd2', folder: '/work/b', command: 'true' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/elsewhere', prompt: 'go' },
+      });
+      const other = built.jobs.create({
+        name: 'stays',
+        trigger: cron,
+        action: { type: 'script', hostId: 'd1', folder: '/elsewhere', command: 'true' },
+      });
+
+      const planned = (await get('/api/hosts/d2/replace?with=d1')).json() as {
+        jobs: Array<{ jobId: string; name: string }>;
+      };
+      expect(planned.jobs.map((j) => j.name).sort()).toEqual(['gated', 'morning']);
+
+      const res = await post('/api/hosts/d2/replace', { with: 'd1' });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { jobs: string[] }).jobs.sort()).toEqual([gated.id, spawn.id].sort());
+      expect(built.jobs.get(spawn.id)?.action).toMatchObject({ hostId: 'd1', folder: '/work/a' });
+      expect(built.jobs.get(gated.id)?.gate).toMatchObject({ hostId: 'd1', folder: '/work/b' });
+      expect(built.jobs.get(other.id)?.action).toMatchObject({ hostId: 'd1' });
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('a refused chat keeps the old host, and its jobs stay with it until everything moves', async () => {
+    const link = new FakeHosts();
+    link.present.add('/work/a').add('/work/b');
+    link.refuse.add('c2');
+    const { built, post } = await boot(link);
+    try {
+      const job = built.jobs.create({
+        name: 'morning',
+        trigger: { type: 'cron', expression: '0 9 * * *' },
+        action: { type: 'spawn', hostId: 'd2', folder: '/work/a', prompt: 'go' },
+      });
+      expect((await post('/api/hosts/d2/replace', { with: 'd1' })).statusCode).toBe(502);
+      expect(built.jobs.get(job.id)?.action).toMatchObject({ hostId: 'd2' });
     } finally {
       await built.app.close();
     }
