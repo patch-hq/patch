@@ -7,7 +7,7 @@
 // lifetime. Nothing here talks to the host afterwards; once it is running it
 // is a host like any other, and Settings → Hosts shows it from the server.
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -164,4 +164,126 @@ export function friendlyComputerName(
         ? tryRun('hostnamectl', ['--pretty'])
         : '';
   return named || host.replace(/\.local$/, '').split('.')[0] || host;
+}
+
+/** Runs one command and says whether it succeeded; injectable so tests never touch launchd or systemd. */
+export type RunCommand = (cmd: string, args: string[]) => Promise<{ ok: boolean; output: string }>;
+
+export const realRunCommand: RunCommand = (cmd, args) =>
+  new Promise((resolve) => {
+    execFile(cmd, args, (err, stdout, stderr) =>
+      resolve({ ok: err === null, output: `${stdout}${stderr}`.trim() }),
+    );
+  });
+
+/**
+ * The host process on this computer, as its service manager sees it. Stopping
+ * it really ends the process (the service has KeepAlive, so killing the
+ * process alone would only bring it back); starting it brings up a fresh one.
+ */
+export interface HostProcess {
+  /** End the host process. `keepOff` also keeps it from starting at login until `start`. */
+  stop(opts?: { keepOff?: boolean }): Promise<void>;
+  /** Start the host if it is not running. A running host is left alone. */
+  start(): Promise<void>;
+  /** Kill the host process and start a fresh one, whatever state it is in. */
+  restart(): Promise<void>;
+}
+
+export function hostProcess(opts: {
+  home: string;
+  uid: number;
+  platform?: NodeJS.Platform;
+  run?: RunCommand;
+}): HostProcess {
+  const run = opts.run ?? realRunCommand;
+  const platform = opts.platform ?? process.platform;
+  const must = async (cmd: string, args: string[]): Promise<void> => {
+    const r = await run(cmd, args);
+    if (!r.ok) throw new Error(`${cmd} ${args.join(' ')} failed: ${r.output}`);
+  };
+
+  if (platform === 'linux') {
+    const unit = HOST_SYSTEMD_UNITS[0];
+    const sc = (verb: string): Promise<void> => must('systemctl', ['--user', verb, unit]);
+    return {
+      async stop(o) {
+        if (o?.keepOff) await sc('disable');
+        await sc('stop');
+      },
+      async start() {
+        await sc('enable');
+        await sc('start');
+      },
+      restart: () => sc('restart'),
+    };
+  }
+
+  const domain = `gui/${opts.uid}`;
+  const target = `${domain}/${HOST_SERVICE_LABEL}`;
+  const plist = join(opts.home, 'Library', 'LaunchAgents', `${HOST_SERVICE_LABEL}.plist`);
+  const loaded = async (): Promise<boolean> => (await run('/bin/launchctl', ['print', target])).ok;
+  const lc = (args: string[]): Promise<void> => must('/bin/launchctl', args);
+  const requirePlist = (): void => {
+    if (!existsSync(plist)) {
+      throw new Error(`There is no host service for this user on this computer (${plist}).`);
+    }
+  };
+  const bringUp = async (kill: boolean): Promise<void> => {
+    requirePlist();
+    // A turn-off disabled the label; starting turns it back on.
+    await lc(['enable', target]);
+    if (!(await loaded())) {
+      // RunAtLoad starts it as it is bootstrapped.
+      await lc(['bootstrap', domain, plist]);
+      return;
+    }
+    await lc(['kickstart', ...(kill ? ['-k'] : []), target]);
+  };
+  return {
+    async stop(o) {
+      if (o?.keepOff) await lc(['disable', target]);
+      if (!(await loaded())) return;
+      await lc(['bootout', target]);
+      // bootout returns before launchd has finished removing the job.
+      const deadline = Date.now() + 15_000;
+      while (await loaded()) {
+        if (Date.now() > deadline)
+          throw new Error(`The host was still running 15s after stopping it.`);
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    },
+    start: () => bringUp(false),
+    restart: () => bringUp(true),
+  };
+}
+
+/**
+ * Make sure the host on this computer is up and answering: start it, and if it
+ * does not answer within `waitMs`, kill it and start a fresh one. Throws when
+ * even that does not bring it back, so the caller can say so.
+ */
+export async function ensureHostAnswering(opts: {
+  process: HostProcess;
+  /** Whether the host is connected to the server right now. */
+  answering: () => Promise<boolean>;
+  waitMs?: number;
+  pollMs?: number;
+}): Promise<'already-up' | 'started' | 'restarted'> {
+  const waitMs = opts.waitMs ?? 5000;
+  const pollMs = opts.pollMs ?? 250;
+  const waitFor = async (): Promise<boolean> => {
+    const deadline = Date.now() + waitMs;
+    for (;;) {
+      if (await opts.answering()) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+  };
+  if (await opts.answering()) return 'already-up';
+  await opts.process.start();
+  if (await waitFor()) return 'started';
+  await opts.process.restart();
+  if (await waitFor()) return 'restarted';
+  throw new Error(`The host on this computer did not answer ${waitMs / 1000}s after a restart.`);
 }

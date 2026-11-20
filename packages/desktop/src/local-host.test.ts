@@ -9,7 +9,9 @@ import { join } from 'node:path';
 import {
   HOST_SERVICE_LABEL,
   HOST_SYSTEMD_UNITS,
+  ensureHostAnswering,
   friendlyComputerName,
+  hostProcess,
   installLocalHost,
   isPairingCode,
   localHostStatus,
@@ -150,5 +152,139 @@ test('the suggested name is the computer name, not the network hostname', () => 
       'box.example.com',
     ),
     'box',
+  );
+});
+
+function recorder(loadedAfter: (calls: string[][]) => boolean) {
+  const calls: string[][] = [];
+  const run = async (cmd: string, args: string[]) => {
+    calls.push([cmd, ...args]);
+    if (args[0] === 'print') return { ok: loadedAfter(calls), output: '' };
+    return { ok: true, output: '' };
+  };
+  return { calls, run };
+}
+
+function macHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'patch-home-'));
+  mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
+  writeFileSync(join(home, 'Library', 'LaunchAgents', `${HOST_SERVICE_LABEL}.plist`), '');
+  return home;
+}
+
+test('stopping a loaded host boots it out of launchd and waits for it to be gone', async () => {
+  const r = recorder((c) => !c.some((x) => x[1] === 'bootout'));
+  const h = hostProcess({ home: macHome(), uid: 501, platform: 'darwin', run: r.run });
+  await h.stop();
+  assert.ok(r.calls.some((c) => c.join(' ').endsWith(`bootout gui/501/${HOST_SERVICE_LABEL}`)));
+  assert.ok(!r.calls.some((c) => c[1] === 'disable'));
+});
+
+test('turn off also disables the job so it stays off', async () => {
+  const r = recorder((c) => !c.some((x) => x[1] === 'bootout'));
+  await hostProcess({ home: macHome(), uid: 501, platform: 'darwin', run: r.run }).stop({
+    keepOff: true,
+  });
+  assert.ok(r.calls.some((c) => c[1] === 'disable'));
+});
+
+test('stopping a host that is not loaded does nothing', async () => {
+  const r = recorder(() => false);
+  await hostProcess({ home: macHome(), uid: 501, platform: 'darwin', run: r.run }).stop();
+  assert.ok(!r.calls.some((c) => c[1] === 'bootout'));
+});
+
+test('starting an unloaded host bootstraps it; restarting a loaded one kills it with kickstart -k', async () => {
+  const home = macHome();
+  const unloaded = recorder(() => false);
+  await hostProcess({ home, uid: 501, platform: 'darwin', run: unloaded.run }).start();
+  assert.ok(unloaded.calls.some((c) => c[1] === 'bootstrap'));
+  const loaded = recorder(() => true);
+  await hostProcess({ home, uid: 501, platform: 'darwin', run: loaded.run }).restart();
+  assert.ok(loaded.calls.some((c) => c[1] === 'kickstart' && c[2] === '-k'));
+  await hostProcess({ home, uid: 501, platform: 'darwin', run: loaded.run }).start();
+  assert.ok(loaded.calls.some((c) => c[1] === 'kickstart' && c[2] !== '-k'));
+});
+
+test('a failing launchctl is an error, not silence', async () => {
+  const run = async () => ({ ok: false, output: 'boom' });
+  await assert.rejects(
+    hostProcess({ home: macHome(), uid: 501, platform: 'darwin', run }).restart(),
+    /boom/,
+  );
+});
+
+test('restarting with no host service installed says so', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'patch-home-'));
+  const run = async () => ({ ok: true, output: '' });
+  await assert.rejects(
+    hostProcess({ home, uid: 501, platform: 'darwin', run }).restart(),
+    /no host service/,
+  );
+});
+
+test('on Linux the host is controlled through its systemd user unit', async () => {
+  const calls: string[][] = [];
+  const run = async (cmd: string, args: string[]) => {
+    calls.push([cmd, ...args]);
+    return { ok: true, output: '' };
+  };
+  const h = hostProcess({ home: '/h', uid: 1000, platform: 'linux', run });
+  await h.stop({ keepOff: true });
+  await h.restart();
+  assert.deepEqual(calls, [
+    ['systemctl', '--user', 'disable', 'patch-host.service'],
+    ['systemctl', '--user', 'stop', 'patch-host.service'],
+    ['systemctl', '--user', 'restart', 'patch-host.service'],
+  ]);
+});
+
+function fakeProcess() {
+  const log: string[] = [];
+  return {
+    log,
+    p: {
+      stop: async () => void log.push('stop'),
+      start: async () => void log.push('start'),
+      restart: async () => void log.push('restart'),
+    },
+  };
+}
+
+test('a host that already answers is left alone', async () => {
+  const f = fakeProcess();
+  const how = await ensureHostAnswering({ process: f.p, answering: async () => true });
+  assert.equal(how, 'already-up');
+  assert.deepEqual(f.log, []);
+});
+
+test('a stopped host is started, and a start that answers is enough', async () => {
+  const f = fakeProcess();
+  const how = await ensureHostAnswering({
+    process: f.p,
+    answering: async () => f.log.includes('start'),
+    pollMs: 1,
+  });
+  assert.equal(how, 'started');
+  assert.deepEqual(f.log, ['start']);
+});
+
+test('a host that does not answer in time is killed and restarted', async () => {
+  const f = fakeProcess();
+  const how = await ensureHostAnswering({
+    process: f.p,
+    answering: async () => f.log.includes('restart'),
+    waitMs: 20,
+    pollMs: 1,
+  });
+  assert.equal(how, 'restarted');
+  assert.deepEqual(f.log, ['start', 'restart']);
+});
+
+test('a host that never answers is an error', async () => {
+  const f = fakeProcess();
+  await assert.rejects(
+    ensureHostAnswering({ process: f.p, answering: async () => false, waitMs: 10, pollMs: 1 }),
+    /did not answer/,
   );
 });
