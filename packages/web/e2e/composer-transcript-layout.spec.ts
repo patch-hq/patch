@@ -160,7 +160,14 @@ test.describe('composer action buttons — Stop or Send, never both', () => {
       (window as unknown as Harness).__store.setState((s) => ({
         chats: {
           ...s.chats,
-          chat_bus: { ...s.chats['chat_bus'], chatStatus: { state: a, since: 0 } },
+          chat_bus: {
+            ...s.chats['chat_bus'],
+            chatStatus: { state: a, since: 0 },
+            pendingPermissions:
+              a === 'waiting_for_user'
+                ? [{ requestId: 'r1', tool: 'Bash', description: undefined, args: {} }]
+                : [],
+          },
         },
       }));
     }, state);
