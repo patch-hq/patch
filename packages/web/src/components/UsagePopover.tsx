@@ -34,6 +34,8 @@ export interface AccountUsageRow {
   label: string;
   /** The backend's name in words — `Claude`, `Codex`. */
   backend: string;
+  /** The account's email, when the sign-in reported one. */
+  email?: string;
   title: string;
   usage: HostAccount['usage'];
 }
@@ -66,6 +68,7 @@ export function accountRows(
         accountId: account.id,
         label: account.label,
         backend,
+        ...(account.email ? { email: account.email } : {}),
         title: account.label,
         usage,
       });

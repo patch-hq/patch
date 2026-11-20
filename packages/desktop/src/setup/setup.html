@@ -180,6 +180,12 @@
         line-height: 1.45;
         color: var(--ink-3);
       }
+      form .row .primary {
+        margin-left: auto;
+      }
+      form .row .ghost:first-child {
+        margin-left: -10px;
+      }
       .primary {
         font-size: 16px;
         font-weight: 600;
@@ -301,7 +307,7 @@
       <div id="choose">
         <h1>Where should your agents run?</h1>
         <p class="intro" data-testid="choose-intro">
-          Patch runs your AI agents on a server, and you chat with them from here or your phone.
+          Patch runs your AI agents on a computer, and you chat with them from here or your phone.
           Pick the machine that does the work.
         </p>
         <div class="choices" style="margin-top: 20px">
@@ -337,8 +343,8 @@
           autocomplete="off"
         />
         <div class="row">
-          <button type="submit" class="primary" id="start" data-testid="start">Continue</button>
           <button type="button" class="ghost" id="name-back" data-testid="name-back">Back</button>
+          <button type="submit" class="primary" id="start" data-testid="start">Continue</button>
         </div>
       </form>
       <form id="join" hidden data-testid="join-form">
@@ -366,8 +372,8 @@
           />
         </div>
         <div class="row">
-          <button type="submit" class="primary" id="connect" data-testid="connect">Connect</button>
           <button type="button" class="ghost" id="back" data-testid="back">Back</button>
+          <button type="submit" class="primary" id="connect" data-testid="connect">Connect</button>
         </div>
       </form>
       <ol id="steps" hidden data-testid="steps" aria-live="polite"></ol>

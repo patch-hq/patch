@@ -136,6 +136,14 @@ test('the name the person chose travels to the installer as environment', async 
   assert.equal(calls[0]!.env['PATCH_HOST_NAME'], "Tom's MacBook Pro");
 });
 
+test('a serial-number computer name is replaced by the Mac model', () => {
+  const run = (cmd: string): string =>
+    cmd.endsWith('scutil')
+      ? 'WC-M-K0X7P0RV6C\n'
+      : 'Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Pro\n';
+  assert.equal(friendlyComputerName(run, 'darwin', 'WC-M-K0X7P0RV6C'), 'MacBook Pro');
+});
+
 test('the suggested name is the computer name, not the network hostname', () => {
   const run = (cmd: string): string => (cmd.endsWith('scutil') ? "Tom's MacBook Pro\n" : '');
   assert.equal(friendlyComputerName(run, 'darwin', 'WC-M-K0X7P0RV6C'), "Tom's MacBook Pro");

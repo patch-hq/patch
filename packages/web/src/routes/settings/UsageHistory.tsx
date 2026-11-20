@@ -89,6 +89,20 @@ function Burndown({
           d={burndownPath(s.points, x, y)}
         />
       ))}
+      {/* The latest reading is a dot: with one reading there is no line to draw. */}
+      {series.map((s, i) => {
+        const last = s.points[s.points.length - 1];
+        return last === undefined ? null : (
+          <circle
+            key={`${s.key}-latest`}
+            data-testid={`usage-latest-${s.key}`}
+            cx={x(last.ts)}
+            cy={y(last.remaining)}
+            r={3.5}
+            fill={COLOURS[i % COLOURS.length]}
+          />
+        );
+      })}
     </svg>
   );
 }

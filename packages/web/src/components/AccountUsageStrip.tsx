@@ -106,6 +106,12 @@ export function AccountUsageStrip({
   );
 }
 
+/** What sits beside the account name: its email, or the backend when that adds something. */
+export function usageCardSubtitle(row: AccountUsageRow): string | undefined {
+  if (row.email && row.email !== row.label) return row.email;
+  return row.label === row.backend ? undefined : row.backend;
+}
+
 function UsageCard({
   row,
   used,
@@ -143,7 +149,9 @@ function UsageCard({
     >
       <div className="new-chat-usage-name">
         <span>{row.label}</span>
-        <span className="new-chat-usage-backend">{row.backend}</span>
+        {usageCardSubtitle(row) ? (
+          <span className="new-chat-usage-backend">{usageCardSubtitle(row)}</span>
+        ) : null}
       </div>
       {row.usage === undefined ? (
         <p className="new-chat-usage-empty">not read yet</p>
