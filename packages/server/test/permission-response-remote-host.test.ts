@@ -20,6 +20,7 @@ import { Daemon } from '../../host/src/chatRunner.js';
 import { createMetaStore } from '../../host/src/meta.js';
 import { createMockSdkBackend } from '../../host/src/sdkBackend.js';
 import { createServerLink, type ServerLink } from '../../host/src/serverLink.js';
+import { Outbox } from '../../host/src/outbox.js';
 import { handleServerEvent } from '../../host/src/index.js';
 
 const silent = pino({ level: 'silent' });
@@ -80,6 +81,7 @@ async function twoHosts() {
     link = createServerLink({
       url: wsUrl,
       daemonKey,
+      outbox: new Outbox({ path: join(home, 'outbox.jsonl'), logger: silent }),
       clientVersion: '0.0.0-test',
       logger: silent,
       backoffSchedule: [20, 20, 20],

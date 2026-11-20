@@ -14,14 +14,14 @@ class FakeSocket extends EventEmitter {
   }
 }
 
+// A transcript event reaches the server only inside an outbox frame.
+let position = 0;
 const frame = (chatId: string): Buffer =>
   Buffer.from(
     encode({
-      type: 'chat.message',
-      chatId,
-      role: 'assistant',
-      content: 'hi',
-      seq: 1,
+      type: 'host.outbox',
+      position: position++,
+      event: { type: 'chat.message', chatId, role: 'assistant', content: 'hi', seq: 1 },
     } as WireEvent),
   );
 

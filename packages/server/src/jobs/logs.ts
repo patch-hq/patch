@@ -98,6 +98,18 @@ export interface RunLogEntry {
    * the gate's reason as that row's output, so one fire stays one row.
    */
   status: JobRunStatus;
+  /**
+   * The fire this row is about, on a `script` action's rows: what ties a late
+   * result to the "no answer from host" row it supersedes.
+   */
+  fireId?: string;
+  /**
+   * The host's result for a `script` fire that arrived after the server
+   * stopped waiting for it (spec/08 § Action — `script`). Stamped with the
+   * fire's own time; readers show it in place of the earlier row for the same
+   * `fireId`.
+   */
+  late?: true;
   trigger: 'cron' | 'webhook' | 'todoist' | 'recurrence' | 'follows' | 'manual';
   payloadDigest?: string;
   error?: string;
@@ -174,7 +186,7 @@ export class JobLogs {
    */
   readRuns(jobId: string, limit = 50): RunLogEntry[] {
     assertValidJobId(jobId);
-    return readJsonlTail<RunLogEntry>(join(this.runsDir, `${jobId}.jsonl`), limit);
+    return supersede(readJsonlTail<RunLogEntry>(join(this.runsDir, `${jobId}.jsonl`), limit));
   }
 
   /**
@@ -186,13 +198,43 @@ export class JobLogs {
    */
   readLatestRun(jobId: string): RunLogEntry | null {
     assertValidJobId(jobId);
-    return readJsonlLastEntry<RunLogEntry>(join(this.runsDir, `${jobId}.jsonl`));
+    const path = join(this.runsDir, `${jobId}.jsonl`);
+    const last = readJsonlLastEntry<RunLogEntry>(path);
+    if (last?.late !== true) return last;
+    // A late result is about an older fire: it is the latest run only if
+    // nothing fired after it.
+    let newer: RunLogEntry | null = null;
+    try {
+      newer = readJsonlLastEntry<RunLogEntry>(path, (e) => e.late !== true && e.ts > last.ts);
+    } catch (err) {
+      // Nothing newer within the window: the late row is the latest there is.
+      if (!(err instanceof JsonlTailWindowError)) throw err;
+    }
+    return newer ?? last;
   }
 
   readWebhooks(jobId: string, limit = 50): WebhookLogEntry[] {
     assertValidJobId(jobId);
     return readJsonlTail<WebhookLogEntry>(join(this.webhooksDir, `${jobId}.jsonl`), limit);
   }
+}
+
+/**
+ * Newest-first rows with each fire shown once: a later row for the same
+ * `fireId` (a late result) takes the place of the earlier one.
+ */
+function supersede(rows: RunLogEntry[]): RunLogEntry[] {
+  const newest = new Map<string, RunLogEntry>();
+  const oldestIndex = new Map<string, number>();
+  rows.forEach((row, i) => {
+    if (row.fireId === undefined) return;
+    if (!newest.has(row.fireId)) newest.set(row.fireId, row);
+    oldestIndex.set(row.fireId, i);
+  });
+  return rows.flatMap((row, i) => {
+    if (row.fireId === undefined) return [row];
+    return oldestIndex.get(row.fireId) === i ? [newest.get(row.fireId)!] : [];
+  });
 }
 
 export function digestPayload(payload: unknown): string {
@@ -234,7 +276,7 @@ function readJsonlTail<T>(path: string, limit: number): T[] {
  * window itself coming up empty: that means the last entry is longer than the
  * window and the true answer is unknown, so it throws rather than under-report.
  */
-function readJsonlLastEntry<T>(path: string): T | null {
+function readJsonlLastEntry<T>(path: string, accept: (entry: T) => boolean = () => true): T | null {
   if (!existsSync(path)) return null;
   const tail = readTailWindow(path);
   if (tail === null) return null;
@@ -248,11 +290,14 @@ function readJsonlLastEntry<T>(path: string): T | null {
     if (line === undefined) continue;
     // The trailing newline every append writes leaves a final empty element.
     if (line.length === 0) continue;
+    let entry: T;
     try {
-      return parsePersisted(line) as T;
+      entry = parsePersisted(line) as T;
     } catch {
       // Not an entry. Keep walking back, same as readJsonlTail.
+      continue;
     }
+    if (accept(entry)) return entry;
   }
   if (tail.windowed) throw new JsonlTailWindowError(path, JSONL_TAIL_WINDOW_BYTES);
   return null;

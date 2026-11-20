@@ -16,6 +16,7 @@ import {
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   type ServerLink,
 } from '../src/serverLink.js';
+import { memoryOutbox } from './helpers/memoryOutbox.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -161,6 +162,7 @@ describe('serverLink', () => {
     servers.push(server);
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'the-daemon-jwt',
         clientVersion: '9.9.9',
@@ -182,6 +184,7 @@ describe('serverLink', () => {
     let authedCount = 0;
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -203,6 +206,7 @@ describe('serverLink', () => {
     let slept: { endedAt: number; ms: number } | undefined;
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -245,6 +249,7 @@ describe('serverLink', () => {
     const dialTimes: number[] = [];
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -269,6 +274,7 @@ describe('serverLink', () => {
     const dialTimes: number[] = [];
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -296,6 +302,7 @@ describe('serverLink', () => {
     const seen: (string | null)[] = [];
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -319,6 +326,7 @@ describe('serverLink', () => {
     const sockets: FakeSocket[] = [];
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -342,6 +350,7 @@ describe('serverLink', () => {
     servers.push(server);
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -366,6 +375,7 @@ describe('serverLink', () => {
     servers.push(server);
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -389,6 +399,7 @@ describe('serverLink', () => {
     servers.push(server);
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -397,20 +408,15 @@ describe('serverLink', () => {
         bufferMaxPerChat: 3,
       }),
     );
-    // 5 events for the same chat, cap 3 -> oldest 2 dropped.
+    // 5 live-only events for the same chat, cap 3 -> oldest 2 dropped. (A
+    // transcript event goes to the outbox, which drops nothing.)
     for (let i = 0; i < 5; i += 1) {
-      link.send({
-        type: 'chat.message',
-        chatId: 'cap',
-        role: 'assistant',
-        content: `m${i}`,
-        seq: i,
-      });
+      link.send({ type: 'chat.message_delta', chatId: 'cap', messageSeq: i, delta: `m${i}` });
     }
     link.start();
     await server.nextHello();
     await waitFor(() => server.received.length >= 3);
-    const contents = server.received.map((e) => e['content']);
+    const contents = server.received.map((e) => e['delta']);
     expect(contents).toEqual(['m2', 'm3', 'm4']);
   });
 
@@ -419,6 +425,7 @@ describe('serverLink', () => {
     servers.push(server);
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: server.url,
         daemonKey: 'jwt',
         clientVersion: '1.0.0',
@@ -436,6 +443,7 @@ describe('serverLink', () => {
   it('diagnostics() reports bufferMaxPerChat default when unset, and the override when set', async () => {
     const linkDefault = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'k',
         clientVersion: '1',
@@ -445,6 +453,7 @@ describe('serverLink', () => {
     expect(linkDefault.diagnostics().bufferMaxPerChat).toBe(10_000);
     const linkOverride = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'k',
         clientVersion: '1',
@@ -462,6 +471,7 @@ describe('serverLink', () => {
     } as never);
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'k',
         clientVersion: '1',
@@ -485,6 +495,7 @@ describe('serverLink', () => {
       const before = Date.now();
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: server.url,
           daemonKey: 'k',
           clientVersion: '1',
@@ -506,6 +517,7 @@ describe('serverLink', () => {
     it('returns false when nothing has ever connected', () => {
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -520,6 +532,7 @@ describe('serverLink', () => {
       const socket = new FakeSocket();
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -539,6 +552,7 @@ describe('serverLink', () => {
       let disconnected = 0;
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -562,6 +576,7 @@ describe('serverLink', () => {
       let disconnected = 0;
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -597,6 +612,7 @@ describe('serverLink', () => {
     it('throw when enableTestHooks is not set', () => {
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -612,6 +628,7 @@ describe('serverLink', () => {
       const socket = new FakeSocket();
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -646,6 +663,7 @@ describe('serverLink', () => {
     ) {
       return track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -911,6 +929,7 @@ describe('serverLink', () => {
       let idx = 0;
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -941,6 +960,7 @@ describe('serverLink', () => {
   it('accepts an explicit bufferMaxGlobal override', () => {
     const link = track(
       createServerLink({
+        outbox: memoryOutbox(),
         url: 'ws://127.0.0.1:1/ws',
         daemonKey: 'k',
         clientVersion: '1',
@@ -971,6 +991,7 @@ describe('serverLink', () => {
       const unreadable: unknown[] = [];
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -1002,6 +1023,7 @@ describe('serverLink', () => {
       const unreadable: unknown[] = [];
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -1054,6 +1076,7 @@ describe('serverLink', () => {
       const socket = new FakeSocket();
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -1080,6 +1103,7 @@ describe('serverLink', () => {
       let disconnected = 0;
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -1130,6 +1154,7 @@ describe('serverLink', () => {
       const socket = new FakeSocket();
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',
@@ -1162,6 +1187,7 @@ describe('serverLink', () => {
       let idx = 0;
       const link = track(
         createServerLink({
+          outbox: memoryOutbox(),
           url: 'ws://x',
           daemonKey: 'k',
           clientVersion: '1',

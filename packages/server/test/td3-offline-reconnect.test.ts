@@ -35,6 +35,7 @@ import { createMetaStore } from '../../host/src/meta.js';
 import { transcriptTexts } from '../../host/test/helpers/chatTranscript.js';
 import { createMockSdkBackend, type MockSdkBackend } from '../../host/src/sdkBackend.js';
 import { createServerLink, type ServerLink } from '../../host/src/serverLink.js';
+import { Outbox } from '../../host/src/outbox.js';
 
 const silent = pino({ level: 'silent' });
 const HOST_ID = 'td3-daemon';
@@ -103,6 +104,8 @@ async function startStack(): Promise<Stack> {
   const wsUrl = `ws://127.0.0.1:${addr.port}/ws`;
 
   const metaStore = createMetaStore(patchHome);
+  // One outbox file for the host's life; each restarted instance reads it back.
+  const outboxPath = join(patchHome, 'outbox.jsonl');
 
   // Factory: a Host instance wired to a fresh ServerLink that dials the live
   // server. Returns the live-link `emit` and the host. The first invocation
@@ -114,6 +117,7 @@ async function startStack(): Promise<Stack> {
     link: ServerLink;
   } {
     const sdk = createMockSdkBackend();
+    const outbox = new Outbox({ path: outboxPath, logger: silent });
     let link!: ServerLink;
     const emit = (event: WireEvent): void => {
       link.send(event);
@@ -130,6 +134,7 @@ async function startStack(): Promise<Stack> {
     link = createServerLink({
       url: wsUrl,
       daemonKey,
+      outbox,
       clientVersion: '0.0.0-test',
       logger: silent,
       enableTestHooks: true,
@@ -498,6 +503,7 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     const link = createServerLink({
       url: stack.wsUrl,
       daemonKey: stack.daemonKey,
+      outbox: new Outbox({ path: join(stack.patchHome, 'cap-outbox.jsonl'), logger: silent }),
       clientVersion: '0.0.0-test',
       logger: capturing,
       enableTestHooks: true,
@@ -506,12 +512,12 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     });
     // Never start() → permanently offline → every send buffers.
     for (let i = 0; i < cap + 250; i++) {
+      // Live-only: a transcript event would go to the outbox, not this buffer.
       link.send({
-        type: 'chat.message',
+        type: 'chat.message_delta',
         chatId: 'cap-chat',
-        role: 'assistant',
-        content: `m${i}`,
-        seq: i,
+        messageSeq: i,
+        delta: `m${i}`,
       });
     }
     // Buffer never exceeds the cap.

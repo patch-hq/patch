@@ -49,7 +49,6 @@ import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
 import { ChatLogStore } from './chat-log-store.js';
 import { removeRetiredChatMirror } from './retired-chat-mirror.js';
 import { CommitAcks } from './commit-acks.js';
-import { LogSync } from './log-sync.js';
 import { ManagerHome, ManagerHomeError } from './manager-home.js';
 import { HeldInputStore } from './held-input-store.js';
 import { QueueTracker } from './queue-tracker.js';
@@ -160,8 +159,6 @@ export interface BuildOptions {
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
   hostOfflineGraceMs?: number;
   terminalLossWindowMs?: number;
-  /** How long a mismatch between a host's log and the server's must last before it is acted on (tests shorten it). */
-  logSyncDelayMs?: number;
   /** Inject a registry directly (tests); otherwise loaded from dataDir. */
   registry?: Registry;
   /** Inject the host link (tests). Production uses InboundHostLink. */
@@ -609,6 +606,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'chat-log-store' }),
   });
 
+  // A host's outbox positions are acknowledged only once the record is on disk.
+  hostLink.setOutboxCommit?.(() => chatLogStore.makeDurable());
+
   // How far the server's log of each chat reaches, sent back to the chat's host.
   const commitAcks = new CommitAcks({
     sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
@@ -616,18 +616,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   app.addHook('onClose', async () => commitAcks.stop());
 
-  // Keeps the server's log of each chat and its host's log in step.
-  const logSync = new LogSync({
-    usesOutbox: (hostId) => hostLink.usesOutbox?.(hostId) ?? false,
-    store: chatLogStore,
-    chats: chatRegistry,
-    sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
-    isOnline: (hostId) => hostLink.isOnline(hostId),
-    inject: (event) => hostLink.injectHostEvent(event),
-    logger: log.child({ component: 'log-sync' }),
-    ...(opts.logSyncDelayMs !== undefined ? { delayMs: opts.logSyncDelayMs } : {}),
-  });
-  hostLink.onEvent((event) => logSync.observe(event));
   // History the record did not keep before it kept everything, sent once per
   // chat by each host (spec/01 § Chat record): taken in, never broadcast.
   hostLink.onEvent((event, fromHostId) => {
@@ -652,7 +640,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       });
     }
   });
-  app.addHook('onClose', async () => logSync.stop());
 
   // The Manager's home host: the user's choice, changed only by them (spec/06 § Changing home).
   const managerHome = new ManagerHome({

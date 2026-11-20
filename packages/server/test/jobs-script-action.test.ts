@@ -174,6 +174,132 @@ describe('script action', () => {
     disp.close();
   });
 
+  // #817: a host that was down past the wait window reports the command's
+  // result when it comes back — finished, failed or interrupted. The run must
+  // say what happened, not stay "no answer from host".
+  describe('a result that arrives after the server stopped waiting', () => {
+    const late = (ok: boolean, extra: Record<string, unknown> = {}) =>
+      ({
+        type: 'job.exec_result',
+        jobId: JOB_ID,
+        fireId: 'fire1',
+        ok,
+        exitCode: ok ? 0 : null,
+        durationMs: 5,
+        stdout: ok ? 'done\n' : '',
+        stderr: '',
+        ...extra,
+      }) as const;
+
+    async function timedOut(): Promise<{
+      link: InProcessHostLink;
+      logs: JobLogs;
+      disp: JobDispatcher;
+    }> {
+      const link = new InProcessHostLink();
+      const logs = new JobLogs(dir);
+      const disp = new JobDispatcher({
+        dataDir: dir,
+        logs,
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => 'fire1',
+        ackTimeoutMs: 10,
+      });
+      const job = scriptJob();
+      disp.dispatch(
+        { ...job, action: { ...(job.action as object), timeoutMs: 10 } as Job['action'] },
+        {},
+        'cron',
+      );
+      await new Promise((r) => setTimeout(r, 80));
+      expect(runs(dir).map((r) => r['status'])).toEqual(['dispatch-error']);
+      expect(String(runs(dir)[0]!['error'])).toContain('no answer from host');
+      return { link, logs, disp };
+    }
+
+    it('is recorded against the same fire and shown in place of "no answer from host"', async () => {
+      const { link, logs, disp } = await timedOut();
+      link.emit(late(true));
+      const raw = runs(dir);
+      expect(raw).toHaveLength(2);
+      expect(raw[1]).toMatchObject({
+        status: 'ok',
+        fireId: 'fire1',
+        late: true,
+        ts: raw[0]!['ts'],
+        trigger: 'cron',
+        action: { type: 'script', exitCode: 0, output: 'done\n', hostId: 'd1', folder: '/work' },
+      });
+      expect(raw[0]!['fireId']).toBe('fire1');
+      // One fire, one row, saying what really happened.
+      const shown = logs.readRuns(JOB_ID);
+      expect(shown).toHaveLength(1);
+      expect(shown[0]).toMatchObject({ status: 'ok', late: true });
+      expect(logs.readLatestRun(JOB_ID)).toMatchObject({ status: 'ok', late: true });
+      // A second copy of the same result changes nothing.
+      link.emit(late(true));
+      expect(runs(dir)).toHaveLength(2);
+      disp.close();
+    });
+
+    it("records an interrupted command as failed, with the host's reason", async () => {
+      const { link, logs, disp } = await timedOut();
+      link.emit(late(false, { error: 'interrupted: the machine restarted while it ran' }));
+      const shown = logs.readRuns(JOB_ID);
+      expect(shown).toHaveLength(1);
+      expect(shown[0]).toMatchObject({
+        status: 'dispatch-error',
+        late: true,
+        error: 'interrupted: the machine restarted while it ran',
+        action: { exitCode: null },
+      });
+      disp.close();
+    });
+
+    it('is still recorded after a server restart lost the wait', () => {
+      const link = new InProcessHostLink();
+      const first = new JobDispatcher({
+        dataDir: dir,
+        logs: new JobLogs(dir),
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => 'fire1',
+      });
+      first.dispatch(scriptJob(), {}, 'cron');
+      first.close();
+
+      const again = new InProcessHostLink();
+      const logs = new JobLogs(dir);
+      const second = new JobDispatcher({
+        dataDir: dir,
+        logs,
+        hostLink: again,
+        logger: silentLogger,
+      });
+      again.emit(late(true));
+      expect(logs.readRuns(JOB_ID)).toEqual([
+        expect.objectContaining({ status: 'ok', fireId: 'fire1', late: true, trigger: 'cron' }),
+      ]);
+      second.close();
+    });
+
+    it('a newer fire stays the latest run when an older one reports late', async () => {
+      const { link, logs, disp } = await timedOut();
+      const newer = {
+        ts: Date.now() + 1_000,
+        jobId: JOB_ID,
+        status: 'ok' as const,
+        trigger: 'cron' as const,
+      };
+      logs.appendRun(newer);
+      link.emit(late(true));
+      expect(logs.readLatestRun(JOB_ID)).toMatchObject({ ts: newer.ts, status: 'ok' });
+      expect(logs.readLatestRun(JOB_ID)?.late).toBeUndefined();
+      disp.close();
+    });
+  });
+
   // A gate that finds work spawns the chat itself through the CLI, so no
   // `chat.spawned` ever reaches the server and the job's own history had no
   // record of the fires that SPENT money — the expensive half of the job was

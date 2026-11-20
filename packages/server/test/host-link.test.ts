@@ -205,7 +205,6 @@ describe('InboundHostLink', () => {
     const acks: unknown[] = [];
     client.on('message', (raw) => acks.push(JSON.parse(String(raw))));
     link.attach(server, 'd1', { outbox: true });
-    expect(link.usesOutbox('d1')).toBe(true);
 
     const say = (seq: number) =>
       ({
@@ -240,10 +239,51 @@ describe('InboundHostLink', () => {
     expect(acks).toEqual([]);
   });
 
-  it('a host that did not say it has an outbox is not taken to use one', () => {
+  it('refuses a transcript event a host sends outside its outbox', async () => {
     link = new InboundHostLink({ logger: silentLogger });
-    link.attach(fakeSocket() as unknown as WebSocket, 'd1');
-    expect(link.usesOutbox('d1')).toBe(false);
+    const received: WireEvent[] = [];
+    link.onEvent((e) => received.push(e));
+    const { server, client } = await makePair(wss, url);
+    sockets.push(client);
+    link.attach(server, 'd1', { outbox: true });
+    client.send(
+      JSON.stringify({
+        type: 'chat.message',
+        chatId: 'c1',
+        role: 'assistant',
+        content: 'x',
+        seq: 1,
+      }),
+    );
+    // Live-only frames still pass.
+    client.send(
+      JSON.stringify({ type: 'chat.message_delta', chatId: 'c1', messageSeq: 2, delta: 'y' }),
+    );
+    await waitFor(() => received.length === 1, 1000);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(received.map((e) => e.type)).toEqual(['chat.message_delta']);
+  });
+
+  it('acknowledges nothing and drops the link when the record cannot be made durable', async () => {
+    link = new InboundHostLink({ logger: silentLogger });
+    link.setOutboxCommit(() => {
+      throw new Error('disk full');
+    });
+    const { server, client } = await makePair(wss, url);
+    sockets.push(client);
+    const acks: unknown[] = [];
+    client.on('message', (raw) => acks.push(JSON.parse(String(raw))));
+    const closed = new Promise<number>((resolve) => client.once('close', (code) => resolve(code)));
+    link.attach(server, 'd1', { outbox: true });
+    client.send(
+      JSON.stringify({
+        type: 'host.outbox',
+        position: 0,
+        event: { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'x', seq: 1 },
+      }),
+    );
+    expect(await closed).toBe(1011);
+    expect(acks).toEqual([]);
   });
 
   it('sends surface→host events directly when online', async () => {

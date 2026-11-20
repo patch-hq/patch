@@ -18,6 +18,7 @@ import { createMetaStore } from '../src/meta.js';
 import { RateLimiter } from '../src/rate-limit.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { ChatStateMap } from '../src/chatState.js';
+import { memoryOutbox } from './helpers/memoryOutbox.js';
 
 /**
  * A minimal Daemon-shaped test double for exercising control.ts's own
@@ -587,6 +588,7 @@ describe('C1 Control IPC: link + resume diagnostics (spec/12 ## Observability)',
       write: (s: string) => warnings.push(JSON.parse(s)),
     } as never);
     const link = createServerLink({
+      outbox: memoryOutbox(),
       url: 'ws://127.0.0.1:1/ws',
       daemonKey: 'k',
       clientVersion: '0.0.0-test',
