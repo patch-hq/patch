@@ -140,7 +140,7 @@ interface ChatLogState {
   /** Highest seq any record in the file carries. */
   recordedHw: number;
   /**
-   * Head of the latest user/assistant message in the file (`LAST_MESSAGE_HEAD`
+   * Head of the latest assistant message in the file (`LAST_MESSAGE_HEAD`
    * characters), or null when it has none. Kept so a `chat.state` can say what
    * was said last without reading the log.
    */
@@ -1071,11 +1071,11 @@ export class ChatLog {
 /** How much of a message `ChatLog.lastMessage` keeps. */
 const LAST_MESSAGE_HEAD = 2000;
 
-/** The head of a user/assistant message record's text, or null for any other record. */
+/** The head of an assistant message record's text, or null for any other record. */
 function messageHead(record: LogRecord): string | null {
   const r = record.rec;
   if (r.k !== 'event' || r.event.type !== 'chat.message') return null;
-  if (r.event.role === 'system' || r.event.content.trim() === '') return null;
+  if (r.event.role !== 'assistant' || r.event.content.trim() === '') return null;
   return r.event.content.slice(0, LAST_MESSAGE_HEAD);
 }
 
