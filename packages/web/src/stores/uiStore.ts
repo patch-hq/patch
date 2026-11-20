@@ -132,15 +132,16 @@ function loadStateFilter(): ChatStateFilter {
 const CHAT_SORT_KEY = 'patch.sidebar.chatSort';
 const GROUP_SORT_KEY = 'patch.sidebar.groupSort';
 const MANUAL_ORDER_KEY = 'patch.sidebar.manualOrder';
+const FOLDER_ORDER_KEY = 'patch.sidebar.folderOrder';
 
-function loadManualOrder(): string[] {
+function loadManualOrder(key: string = MANUAL_ORDER_KEY): string[] {
   /* v8 ignore next -- jsdom always defines localStorage. */
   if (typeof localStorage === 'undefined') return [];
-  const raw = localStorage.getItem(MANUAL_ORDER_KEY);
+  const raw = localStorage.getItem(key);
   if (raw === null) return [];
   const v: unknown = JSON.parse(raw);
   if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) {
-    throw new Error(`${MANUAL_ORDER_KEY} is not a string array`);
+    throw new Error(`${key} is not a string array`);
   }
   return v as string[];
 }
@@ -974,7 +975,9 @@ interface UiState {
   setStateFilter(v: ChatStateFilter): void;
   setChatSort(v: ChatSort): void;
   manualOrder: string[];
+  folderOrder: string[];
   moveChatManual(siblings: string[], dragId: string, beforeId: string): void;
+  moveFolderManual(siblings: string[], dragKey: string, beforeKey: string): void;
   setGrouping(v: SidebarGrouping): void;
   setGroupSort(v: GroupSort): void;
   /** Forget a recent folder — removes it from the Recent folders list. */
@@ -1122,6 +1125,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   stateFilter: loadStateFilter(),
   chatSort: loadChatSort(CHAT_SORT_KEY),
   manualOrder: loadManualOrder(),
+  folderOrder: loadManualOrder(FOLDER_ORDER_KEY),
   groupSort: loadGroupSort(),
   grouping: loadGrouping(),
   forgottenFolders: loadForgottenFolders(),
@@ -1211,6 +1215,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = reorderManual(get().manualOrder, siblings, dragId, beforeId);
     localStorage.setItem(MANUAL_ORDER_KEY, JSON.stringify(next));
     set({ manualOrder: next });
+  },
+  moveFolderManual(siblings, dragKey, beforeKey) {
+    const next = reorderManual(get().folderOrder, siblings, dragKey, beforeKey);
+    localStorage.setItem(FOLDER_ORDER_KEY, JSON.stringify(next));
+    set({ folderOrder: next });
   },
   setGrouping(v) {
     /* v8 ignore next -- jsdom always defines localStorage. */

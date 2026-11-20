@@ -1229,7 +1229,7 @@ nothing with no explanation.
 
 #### Prompts
 
-Its own page, right after Goals in the Agents group, listing every prompt Patch sends to an agent: the background-task check-in (`watchCheckInPrompt`, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in per task), and above the list the minutes between check-ins (`watchCheckInMinutes`, default 60; a task that sets its own interval keeps it), the Manager sweep, the goal judge, link summary, speaking aloud (`voiceDevicePrompt`, what a voice device's voice and agent are told, `16-voice-device.md` § Speaking aloud), job autonomy, the Patch tools guidance and the system prompt override, then a **Meetings** group with the three meeting-analysis instruction blocks (`meetingNowPrompt`, `meetingNotesPrompt`, `meetingActionsPrompt`; the speaker rules and JSON shape stay fixed so the reply parses). The same group opens with the meeting's models and timing: the analysis model (`meetingAnalysisModel`) and clean-up model (`meetingCleanupModel`), both picked from the default host's catalogue and read fresh each pass; the transcription model (`meetingTranscriptionModel`, a faster-whisper model directory for a local host or a Groq model name; empty is the host's configured model, and a path that does not exist fails the transcription loudly); and the analysis interval (`meetingAnalyseSeconds`, 5–300, the Normal speed's interval). Each row says whether the text in force is the Default or a Custom version and shows it. Custom opens an editor seeded with the text in force; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The existing per-feature editors remain as shortcuts to the same settings. Mobile has the same page, opening the shared full-screen layer editor.
+Its own page, right after Goals in the Agents group, listing every prompt Patch sends to an agent: the background-task check-in (`watchCheckInPrompt`, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in per task), and above the list the minutes between check-ins (`watchCheckInMinutes`, default 60; a task that sets its own interval keeps it), the Manager sweep, the goal judge, link summary, the Manager voice (`managerVoicePrompt`, § Special threads), speaking aloud (`voiceDevicePrompt`, what a voice device's voice and agent are told, `16-voice-device.md` § Speaking aloud), job autonomy, the Patch tools guidance and the system prompt override, then a **Meetings** group with the three meeting-analysis instruction blocks (`meetingNowPrompt`, `meetingNotesPrompt`, `meetingActionsPrompt`; the speaker rules and JSON shape stay fixed so the reply parses). The same group opens with the meeting's models and timing: the analysis model (`meetingAnalysisModel`) and clean-up model (`meetingCleanupModel`), both picked from the default host's catalogue and read fresh each pass; the transcription model (`meetingTranscriptionModel`, a faster-whisper model directory for a local host or a Groq model name; empty is the host's configured model, and a path that does not exist fails the transcription loudly); and the analysis interval (`meetingAnalyseSeconds`, 5–300, the Normal speed's interval). Each row says whether the text in force is the Default or a Custom version and shows it. Custom opens an editor seeded with the text in force; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The existing per-feature editors remain as shortcuts to the same settings. Mobile has the same page, opening the shared full-screen layer editor.
 
 #### Goals
 
@@ -1350,11 +1350,20 @@ reports the key, which Settings → Providers sets without a restart.
   switch (off by default; the one switch that stops everything); the delivery slider
   (Instant, then 5 minutes up to a day; default 30 minutes — how soon a question the
   Manager could not answer reaches the user); messages per chat (how many of each idle chat's recent
-  messages the sweep reads, default 1); the model the sweep's one decision
-  call runs on (default a mid-size model); and the standing instructions — a text
-  field showing the full default, editable, with a Reset to default (same
-  pattern as the Patch tools prompt, § Agent behavior above). Account-wide, not
-  per-surface: the sweep runs on the server and the Manager host.
+  messages the sweep reads, default 1); and the model the sweep's one decision
+  call runs on (default a mid-size model). Account-wide, not per-surface: the
+  sweep runs on the server and the Manager host.
+- Prompts — every prompt the Manager runs on, in one group under Home:
+  Instructions, the Manager chat's `CLAUDE.md` on its home host
+  (`06-threads-manager-speakers.md` § Where special threads run), read and saved
+  through host files over the version it was opened at, so a file changed on the
+  host since is refused with a Reload rather than overwritten; with no home host,
+  or the home host offline, the row says so instead of an editor. Voice
+  (`managerVoicePrompt`), who the voice is on a call to the Manager
+  (`07-voice-app.md` § A call to the Manager), Default or Custom like a row on
+  the Prompts page; the rules for the call's tools are added after it and are
+  not part of the text. And the sweep's standing instructions, a text field
+  showing the full default, editable, with a Reset to default.
 - Manager — the home host (`06-threads-manager-speakers.md` § Where special
   threads run), a picker of every registered host; choosing another opens the
   handover under it, the server's drafted message in an editable box with

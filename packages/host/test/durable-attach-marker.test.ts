@@ -49,3 +49,16 @@ describe('takeDurableAttach', () => {
     expect(daemon([]).takeDurableAttach('c1', 'L1')).toBeUndefined();
   });
 });
+
+describe('stampTurnLocalId', () => {
+  it('writes the resend id into turn.json so a second restart still matches', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const { inspectTurnDir, stampTurnLocalId } = await import('../src/durableTurn.js');
+    const dir = mkdtempSync(join(tmpdir(), 'stamp-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'c1', ownerId: 'o' }));
+    expect(inspectTurnDir(dir)?.localId).toBeUndefined();
+    stampTurnLocalId(dir, 'L9');
+    expect(inspectTurnDir(dir)?.localId).toBe('L9');
+  });
+});

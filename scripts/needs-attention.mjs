@@ -1,28 +1,36 @@
 // One "needs attention" event -> one webhook to Patch, which spawns a fresh chat
-// for the PR or issue. Every failure path (failed PR check, failed merge-queue
-// run, conflict after main moves, new issue) ends here. Nothing is handed back
+// for the PR, issue or commit. Every failure path (failed PR check, failed run
+// on main, conflict after main moves, new issue) ends here. Nothing is handed back
 // to the chat that opened the PR.
 //
 //   PATCH_ATTENTION_URL=... PATCH_ATTENTION_SECRET=... \
 //     node scripts/needs-attention.mjs --kind pr-check-failed --number 99 --repo patch-hq/patch --detail "<url>"
+//     node scripts/needs-attention.mjs --kind main-failed --sha <commit> --repo patch-hq/patch --detail "<url, commits>"
 //
-// kind: pr-check-failed | merge-queue-failed | pr-conflict | issue-opened
+// kind: pr-check-failed | main-failed | pr-conflict | issue-opened
+//
+// main-failed is a red test run on main. Its PRs are already merged and their
+// branches gone, so it names the commit, not a PR: the fix is a new PR.
 
 import { createHmac } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-export const KINDS = ['pr-check-failed', 'merge-queue-failed', 'pr-conflict', 'issue-opened'];
+export const KINDS = ['pr-check-failed', 'main-failed', 'pr-conflict', 'issue-opened'];
 
-/** A merge-queue branch is `gh-readonly-queue/<base>/pr-<n>-<sha>`. */
-export function prFromQueueBranch(branch) {
-  const m = /^gh-readonly-queue\/.+\/pr-(\d+)-[0-9a-f]+$/.exec(String(branch ?? ''));
-  if (!m) throw new Error(`not a merge-queue branch: ${branch}`);
-  return Number(m[1]);
-}
-
-export function buildPayload({ kind, repo, number, detail }) {
+export function buildPayload({ kind, repo, number, sha, detail }) {
   if (!KINDS.includes(kind)) throw new Error(`unknown kind: ${kind}`);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) throw new Error(`bad repo: ${repo}`);
+  if (kind === 'main-failed') {
+    if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error(`bad sha: ${sha}`);
+    return {
+      kind,
+      repo,
+      sha,
+      type: 'commit',
+      url: `https://github.com/${repo}/commit/${sha}`,
+      detail: detail ?? '',
+    };
+  }
   const n = Number(number);
   if (!Number.isInteger(n) || n <= 0) throw new Error(`bad number: ${number}`);
   const isIssue = kind === 'issue-opened';
@@ -60,12 +68,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const argv = process.argv.slice(2);
   const url = process.env.PATCH_ATTENTION_URL;
   const secret = process.env.PATCH_ATTENTION_SECRET;
-  if (!url || !secret) throw new Error('PATCH_ATTENTION_URL and PATCH_ATTENTION_SECRET are required');
-  const kind = arg(argv, 'kind');
-  const number = kind === 'merge-queue-failed' && arg(argv, 'branch')
-    ? prFromQueueBranch(arg(argv, 'branch'))
-    : arg(argv, 'number');
-  const payload = buildPayload({ kind, repo: arg(argv, 'repo'), number, detail: arg(argv, 'detail') });
+  if (!url || !secret)
+    throw new Error('PATCH_ATTENTION_URL and PATCH_ATTENTION_SECRET are required');
+  const payload = buildPayload({
+    kind: arg(argv, 'kind'),
+    repo: arg(argv, 'repo'),
+    number: arg(argv, 'number'),
+    sha: arg(argv, 'sha'),
+    detail: arg(argv, 'detail'),
+  });
   await send({ url, secret, payload });
   console.log(JSON.stringify({ sent: payload }));
 }

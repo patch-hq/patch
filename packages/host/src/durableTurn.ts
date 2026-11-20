@@ -212,6 +212,20 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
   };
 }
 
+/**
+ * Record `localId` as the id of the turn in `dir`. A turn started without one
+ * (a spawn prompt) is re-sent under a fresh id at a restart; the next restart
+ * compares that id with this file, so the file must carry it or the live turn
+ * reads as a different one and is killed.
+ */
+export function stampTurnLocalId(dir: string, localId: string): void {
+  const path = join(dir, TURN_META);
+  const meta = readJson<Record<string, unknown>>(path);
+  if (!meta) return;
+  if (meta.localId === localId) return;
+  writeJsonAtomic(path, { ...meta, localId });
+}
+
 /** Every chat that has a turn directory. */
 export function listTurnDirs(config: DurableTurnConfig): string[] {
   if (!existsSync(config.turnsDir)) return [];

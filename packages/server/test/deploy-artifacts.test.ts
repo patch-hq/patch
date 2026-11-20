@@ -108,35 +108,31 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(workflow).not.toMatch(/merge-multiple: true/);
     expect(workflow).toMatch(/mac-first-run\) echo "not published/);
     const tests = read('.github/workflows/test.yml');
-    // ...the cheap layers on every PR and the full gate, four shards, in the merge
-    // queue, behind one required check. Nothing re-runs on main: the queue moves
-    // it to the commit it tested.
+    // ...the cheap layers and the reachable unit suites on every PR, and the full
+    // gate on every push to main, behind one required check. There is no merge
+    // queue: PRs merge on their own check, and main's run gates the release.
     expect(tests).toMatch(/pull_request:/);
-    expect(tests).toMatch(/merge_group:/);
-    expect(tests).not.toMatch(/^\s*push:/m);
-    expect(tests).toMatch(
-      /github\.event_name == 'merge_group' && '\["1\/4", "2\/4", "3\/4", "4\/4"\]' \|\| '\["1\/1"\]'/,
-    );
-    expect(tests).toMatch(
-      /PATCH_RUN_BROWSER_GATE: \$\{\{ github\.event_name == 'merge_group' && '1' \|\| '0' \}\}/,
-    );
-    expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[verify\]/);
-    // PR runs take only two runners each, so a pile of open PRs leaves the shared
-    // pool headroom for a release's publish job instead of queueing it.
-    expect(tests).toMatch(
-      /max-parallel: \$\{\{ github\.event_name == 'pull_request' && 2 \|\| 4 \}\}/,
-    );
+    expect(tests).toMatch(/^\s*push:\n\s*branches: \[main\]/m);
+    expect(tests).toMatch(/node scripts\/ci-plan\.mjs --all/);
+    expect(tests).toMatch(/node scripts\/ci-plan\.mjs --base/);
+    expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[plan, verify\]/);
+    // Main's runs queue rather than cancel: release.yml is waiting on the one running.
+    expect(tests).toMatch(/cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/);
+    // A commit whose run was replaced by a newer push's is superseded, and neither
+    // publishes nor deploys the relay.
+    expect(workflow).toMatch(/publish: \$\{\{ steps\.wait\.outputs\.publish \}\}/);
+    expect(workflow).toMatch(/publish:\n\s*if: [^\n]*needs\.tests\.outputs\.publish == 'true'/);
+    expect(workflow).toMatch(/relay:\n\s*if: [^\n]*needs\.tests\.outputs\.publish == 'true'/);
     // with PRs merged by themselves once green, and conflicts handed back.
-    expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto/);
-    // It acts as Tom: the bot's own token never gets a PR into the merge queue.
+    expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto --rebase/);
+    // It acts as Tom: a merge made with the bot's own token triggers no workflows,
+    // so main would never be tested or released.
     expect(read('.github/workflows/pr-automerge.yml')).toMatch(
       /GH_TOKEN: \$\{\{ secrets\.AUTOMERGE_TOKEN \}\}/,
     );
     expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/github\.token/);
-    // The merge queue sets the method and refuses -d/--delete-branch.
-    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(
-      /--delete-branch|--rebase|\s-d\s/,
-    );
+    // The repo's "delete branch on merge" setting tidies branches.
+    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/--delete-branch|\s-d\s/);
     // Failures and conflicts go to Patch as a webhook, never a label or a sweep.
     expect(read('.github/workflows/pr-conflicts.yml')).toMatch(
       /needs-attention\.mjs --kind pr-conflict/,
@@ -148,7 +144,7 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
     expect(read('scripts/needs-attention.mjs')).not.toMatch(/enqueuePullRequest/);
     expect(existsSync(join(repoRoot, '.github/workflows/test-retry.yml'))).toBe(false);
-    expect(read('.github/workflows/needs-attention.yml')).toMatch(/merge-queue-failed/);
+    expect(read('.github/workflows/needs-attention.yml')).toMatch(/--kind main-failed/);
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
     // (spec/11 § Mobile updates).

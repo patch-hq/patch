@@ -53,17 +53,21 @@ On `local`/`direct` there is no fast voice: every utterance is a turn for the ch
 
 ### A call to the Manager
 
-A hosted call (`gemini`, `openai` or `elevenlabs`) opened on the Manager chat works differently: the fast voice is the manager itself, and the Manager's own agent is not in the loop. The Manager's work is talking to other chats, so handing each request to the Manager's agent, which then sends it on with `patch_send_to`, put two agent hops between the user and the chat they meant. Instead the voice has no `dispatch_to_patch`; it has three tools of its own, answered by the host:
+A hosted call (`gemini`, `openai` or `elevenlabs`) opened on the Manager chat works differently: the fast voice is the manager itself, and the Manager's own agent is not in the loop. The Manager's work is talking to other chats, so handing each request to the Manager's agent, which then sends it on with `patch_send_to`, put two agent hops between the user and the chat they meant. Instead the voice has no `dispatch_to_patch`; it has tools of its own, answered by the host. The voice answers questions itself from the conversation (the Manager chat's briefing) and acts directly on common requests; it hands real work to the Manager's agent only through `ask_agent`. Three of the tools concern chats:
 
 - `find_chats` — the account's chats (every host, as `patch_list_chats` lists them), or those whose name or folder matches a few words, each with its name, id, whether it is working and when it was last active. The Manager itself and archived chats are left out. A list the host cannot get (the server link is down) is an error, never a shorter list.
 - `chat_status` — where one chat stands: its status line, goal, open to-dos and last few messages. For a chat on another host only what the listing knows is available, and the answer says so.
 - `send_to_chat` — delivers a message to a chat as `patch_send_to` does (a machine turn the recipient's agent processes as if the user had typed it; a visible sender, so the recipient comes into view).
+
+Four more are quick actions, answered at once and never a search for a chat: `add_task` (a to-do, filed in Todoist through the `td` command on the host), `calendar_agenda` and `add_event` (read and write the calendar through the script named by `PATCH_CALENDAR_SCRIPT`; unset, the tool says the calendar is not set up), and `ask_agent` (passes a request to the Manager chat's own agent and returns at once; the result lands in the Manager chat, not in the call). A failed action is reported as failed, never as done.
 
 A chat is named by its id or by what the user called it. An exact name wins; otherwise the words must pick out one chat. A name that fits none or several is handed back to the voice to ask the user, naming the choices, and nothing is sent; that is not an error. A message that was not delivered is an error the call shows.
 
 A chat's reply comes back into the call the way an agent's hand-off result does: on Gemini the send is answered once the chat has the message and the reply arrives later as a message naming the chat, held until neither the user nor the model is talking; on OpenAI Realtime and ElevenLabs the send's tool call returns with the reply. The reply is caught by the delivered message's own id, so a reply belongs to the message that asked for it even when the chat was busy and took it later. One message per chat is awaited at a time: a second message to a chat still answering the first is handed back to the voice to say so. A chat on another host is sent to, but its reply stays in that chat and does not come back into the call; the voice is told so.
 
 The Manager chat records the call as any call is recorded — the user's words and the voice's replies — plus one quiet line for each message sent (`-> "<chat>": <message>`) and one for each reply or failure (`<- "<chat>": <reply>`). The `handoff` setting does not apply to a Manager call. Whether a call is a Manager call is fixed when it opens. A host that cannot provide the tools refuses a hosted call to the Manager rather than opening it with the usual hand-off.
+
+Who the voice is told it is comes from the account's `managerVoicePrompt` (Settings → Manager → Prompts → Voice), read at the start of each call; the host adds the rules for these three tools and for replies after it, so an edit cannot remove them. A blank prompt uses the built-in one.
 
 Calls on any other chat are unchanged.
 

@@ -131,6 +131,8 @@ export interface ChatOrdering {
   groupSort: GroupSort;
   /** Chat ids in the order the user dragged them into; read only by `manual`. */
   manualOrder?: readonly string[];
+  /** Folder group keys in the order the user dragged them into; read only by `manual`. */
+  folderOrder?: readonly string[];
 }
 
 export const DEFAULT_CHAT_ORDERING: ChatOrdering = {
@@ -174,14 +176,30 @@ function cmpChats(
 }
 
 /** Comparator for two projects: by the newest row (or, for name, the folder's basename). */
-function cmpFolders(sort: ChatSort): (a: FolderGroup, b: FolderGroup) => number {
+function cmpFolders(
+  sort: ChatSort,
+  folderOrder: readonly string[] = [],
+): (a: FolderGroup, b: FolderGroup) => number {
   const newest = (rows: ChatRow[], key: 'lastUserActivity' | 'createdAt'): number =>
     Math.max(...rows.map((r) => r[key] ?? 0), 0);
   const base = (f: string): string => f.split('/').filter(Boolean).pop() ?? f;
+  const pos = new Map(folderOrder.map((k, i) => [k, i] as const));
+  const byRecent = (a: FolderGroup, b: FolderGroup): number =>
+    newest(b.rows, 'lastUserActivity') - newest(a.rows, 'lastUserActivity') ||
+    a.folder.localeCompare(b.folder) ||
+    a.hostId.localeCompare(b.hostId);
   return (a, b) => {
     switch (sort) {
-      // Projects have no manual order: they follow recency.
-      case 'manual':
+      // Projects the user has never placed (new ones) sit above the placed
+      // ones, most recent first, so a new project is never lost at the bottom.
+      case 'manual': {
+        const pa = pos.get(a.key);
+        const pb = pos.get(b.key);
+        if (pa === undefined && pb === undefined) return byRecent(a, b);
+        if (pa === undefined) return -1;
+        if (pb === undefined) return 1;
+        return pa - pb;
+      }
       case 'recent':
         return (
           newest(b.rows, 'lastUserActivity') - newest(a.rows, 'lastUserActivity') ||
@@ -320,6 +338,7 @@ export function groupChats(
   // not by position, so there is no separate floating rank here any more.
   const folderCmp = cmpFolders(
     ordering.groupSort === 'same-as-chats' ? ordering.chatSort : ordering.groupSort,
+    ordering.folderOrder,
   );
   const folders = Array.from(byFolder.values())
     .map((group) => {

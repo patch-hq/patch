@@ -16,6 +16,7 @@ import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
   DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_MANAGER_VOICE_PROMPT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
@@ -83,6 +84,7 @@ export type Layer =
   | 'link-summary'
   | 'watch-check-in'
   | 'sweep'
+  | 'manager-voice'
   | 'job-autonomy'
   | 'voice-device'
   | 'question-expired'
@@ -97,6 +99,7 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'link-summary': 'Summarise prompt',
   'watch-check-in': 'Background task check-in',
   sweep: 'Manager standing instructions',
+  'manager-voice': 'Manager voice',
   'job-autonomy': 'Job autonomy',
   'voice-device': 'Speaking aloud',
   'question-expired': 'Question timed out',
@@ -113,6 +116,7 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'link-summary': 'Summarise prompt',
   'watch-check-in': 'Check-in prompt',
   sweep: 'Standing instructions',
+  'manager-voice': 'Manager voice prompt',
   'job-autonomy': 'Autonomy prompt',
   'voice-device': 'Speaking aloud prompt',
   'question-expired': 'Question timeout prompt',
@@ -127,6 +131,7 @@ export const TEXT_PROMPTS = {
   'link-summary': { key: 'linkSummaryPrompt', fallback: DEFAULT_LINK_SUMMARY_PROMPT },
   'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
   sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
+  'manager-voice': { key: 'managerVoicePrompt', fallback: DEFAULT_MANAGER_VOICE_PROMPT },
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
   'voice-device': { key: 'voiceDevicePrompt', fallback: DEFAULT_VOICE_DEVICE_PROMPT },
   'question-expired': {

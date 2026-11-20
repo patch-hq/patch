@@ -633,3 +633,27 @@ describe('goal paused by a user stop', () => {
     expect(daemon.chatState.get(chatId)?.goalProgress?.pausedByStop).toBeFalsy();
   });
 });
+
+describe('maybeEvaluateGoal — a judge that cannot answer', () => {
+  it('tells the user once it has failed two turns running, and keeps the goal set', async () => {
+    let n = 0;
+    const evaluateGoal: EvaluateGoal = async () => {
+      n += 1;
+      return null;
+    };
+    const { daemon, folder } = setup(evaluateGoal);
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Ship it');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+    expect(daemon.chatState.get(chatId)?.declaredStatus?.text ?? '').not.toContain('not being checked');
+
+    await daemon.sendInput({ chatId, message: 'again', localId: 'u2' });
+    await tick(300);
+    expect(n).toBe(2);
+    const state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBe('Ship it');
+    expect(state?.declaredStatus?.text).toContain('Goal is not being checked');
+  });
+});

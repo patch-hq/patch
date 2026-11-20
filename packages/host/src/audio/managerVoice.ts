@@ -18,6 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
+import { DEFAULT_MANAGER_VOICE_PROMPT } from '@patch/wire';
 
 /** The chat a call must be on to be a Manager call. */
 export const MANAGER_CHAT_ID = 'thread_manager';
@@ -30,11 +31,92 @@ export const SEND_TO_CHAT_TOOL_NAME = 'send_to_chat';
 export const FIND_CHATS_TOOL_NAME = 'find_chats';
 export const CHAT_STATUS_TOOL_NAME = 'chat_status';
 
+/**
+ * Tools the voice runs itself on the host, answered at once: the common
+ * actions a user asks of a Manager that need no agent (a task, the diary).
+ * `ask_agent` is the hand-off for real work: it passes the request to the
+ * Manager chat's own agent and returns straight away.
+ */
+export interface ManagerQuickTool {
+  name: string;
+  description: string;
+  params: Record<string, string>;
+  required: string[];
+}
+
+export const ADD_TASK_TOOL_NAME = 'add_task';
+export const CALENDAR_AGENDA_TOOL_NAME = 'calendar_agenda';
+export const ADD_EVENT_TOOL_NAME = 'add_event';
+export const ASK_AGENT_TOOL_NAME = 'ask_agent';
+
+export const MANAGER_QUICK_TOOLS: readonly ManagerQuickTool[] = [
+  {
+    name: ADD_TASK_TOOL_NAME,
+    description:
+      "Add a task to the user's to-do list (Todoist). Answers at once. Use it for anything like " +
+      '"log a task", "remind me to", "add to my list".',
+    params: {
+      content: 'The task, as a short phrase.',
+      due: 'When it is due, in plain words ("tomorrow", "friday", "2026-12-01"); empty for none.',
+    },
+    required: ['content'],
+  },
+  {
+    name: CALENDAR_AGENDA_TOOL_NAME,
+    description:
+      "Read the user's calendar for a day or a range. Answers at once with each event's title and " +
+      'time. Dates are YYYY-MM-DD; with no dates it is today.',
+    params: {
+      from: 'First day, YYYY-MM-DD; empty for today.',
+      to: 'Last day, YYYY-MM-DD; empty for the same day as from.',
+      query: 'A few words to search event titles for; empty for all.',
+    },
+    required: [],
+  },
+  {
+    name: ADD_EVENT_TOOL_NAME,
+    description:
+      "Put an event in the user's calendar. Answers at once. Times are London local, ISO " +
+      '(2026-12-01T14:00:00); for an all-day event pass a plain date as start and set all_day.',
+    params: {
+      title: 'The event title.',
+      start: 'Start, ISO datetime or a date for all-day.',
+      end: 'End, ISO datetime; required unless the event is all day.',
+      all_day: 'The word "true" for an all-day event, otherwise empty.',
+    },
+    required: ['title', 'start'],
+  },
+  {
+    name: ASK_AGENT_TOOL_NAME,
+    description:
+      "Hand real work to the Manager's own agent: research, changes to code or files, anything that " +
+      'needs more than a lookup or the tools above. Returns at once to say it was passed on; the ' +
+      'result is written in the Manager chat, not read out here.',
+    params: { request: 'What the agent should do, in plain language, with the detail it needs.' },
+    required: ['request'],
+  },
+];
+
+export const MANAGER_QUICK_TOOL_NAMES: ReadonlySet<string> = new Set(
+  MANAGER_QUICK_TOOLS.map((t) => t.name),
+);
+
 export const MANAGER_TOOL_NAMES: ReadonlySet<string> = new Set([
   SEND_TO_CHAT_TOOL_NAME,
   FIND_CHATS_TOOL_NAME,
   CHAT_STATUS_TOOL_NAME,
+  ...MANAGER_QUICK_TOOL_NAMES,
 ]);
+
+/** The string arguments of a tool call, whatever shape the engine gave them. */
+export function stringArgs(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).filter(
+      (e): e is [string, string] => typeof e[1] === 'string',
+    ),
+  );
+}
 
 export const FIND_CHATS_DESCRIPTION =
   "List the user's chats, or find the ones matching a few words of a name or folder. Answers at " +
@@ -61,22 +143,21 @@ export const MANAGER_TOOL_PARAMS = {
   message: 'What to tell the chat, written as the user would put it to that chat.',
 } as const;
 
-export const MANAGER_VOICE_PREAMBLE =
-  'You are the Manager: the user is talking to you out loud, on a phone-style call, about all of ' +
-  'their chats. Each chat has its own agent working in it. You do not do the work yourself and ' +
-  'there is no agent behind you: you find chats, say where they stand, and pass messages to them. ' +
-  'What has been said in the Manager chat so far is above as prior turns. Speak the way a person ' +
-  'would on a call: concise, warm, direct.\n\n';
+/** The built-in voice prompt; Settings → Manager can replace it (`managerVoicePrompt`). */
+export const MANAGER_VOICE_PREAMBLE = `${DEFAULT_MANAGER_VOICE_PROMPT}\n\n`;
 
 export const MANAGER_TOOLS_RULE =
-  `To find a chat, call ${FIND_CHATS_TOOL_NAME}; to say how one is getting on, call ` +
-  `${CHAT_STATUS_TOOL_NAME}; to tell or ask a chat something, call ${SEND_TO_CHAT_TOOL_NAME} with ` +
-  'the chat and the message, phrased for that chat. If a name could mean more than one chat, the ' +
-  'tool says so: ask the user which one, naming the choices. Never guess a chat or invent what one ' +
-  'is doing — say only what the tools returned. Never say you have sent, asked or told a chat ' +
-  `anything unless ${SEND_TO_CHAT_TOOL_NAME} returned that it was sent. Something no chat can do, ` +
-  'or that needs a new chat, you cannot do from this call: say so plainly. Keep every spoken answer ' +
-  'to one or two short sentences.\n\n';
+  `To add a to-do call ${ADD_TASK_TOOL_NAME}; to read the diary call ${CALENDAR_AGENDA_TOOL_NAME}; ` +
+  `to book something call ${ADD_EVENT_TOOL_NAME}. A request to log, add or remind is one of these ` +
+  `— never go looking for a chat for it. To find a chat call ${FIND_CHATS_TOOL_NAME}; to say how ` +
+  `one is getting on call ${CHAT_STATUS_TOOL_NAME}; to tell or ask an existing chat something call ` +
+  `${SEND_TO_CHAT_TOOL_NAME} with the chat and the message, phrased for that chat. Only when the ` +
+  `user names a chat does it go there. Real work that none of these covers — research, changes, ` +
+  `anything needing more than a lookup — call ${ASK_AGENT_TOOL_NAME}. If a chat name could mean ` +
+  'more than one chat, the tool says so: ask the user which one, naming the choices. Never guess ' +
+  'a chat or invent what one is doing, and never say a task or event was added, or a chat or ' +
+  'agent told something, unless the tool returned that it was done. If a tool reports it failed ' +
+  'or is not set up, say so plainly. Keep every spoken answer to one or two short sentences.\n\n';
 
 /** The async variant (Gemini): the send is answered at once and the reply arrives later. */
 export const MANAGER_ASYNC_REPLY_RULE =
@@ -114,6 +195,10 @@ export interface ManagerSendAccepted {
 }
 
 export interface ManagerVoiceTools {
+  /** Who the voice is told it is (`host.settings` → `managerVoicePrompt`). Absent: the built-in text. */
+  voicePrompt?: () => string;
+  /** Run one of {@link MANAGER_QUICK_TOOLS}; rejects when the action failed or is not set up. */
+  quick(name: string, args: Record<string, string>): Promise<string>;
   findChats(query: string): Promise<string>;
   chatStatus(chat: string): Promise<string>;
   /**
@@ -166,8 +251,16 @@ export interface ManagerVoiceHostDeps {
   abandonReply(chatId: string, err: Error): void;
   /** Deliver a message to a chat on another host. */
   sendRemote(req: { chatId: string; message: string }): Promise<void>;
+  /** Add a to-do; resolves with the task as it was filed. Rejects when Todoist is unreachable. */
+  addTask(req: { content: string; due: string }): Promise<string>;
+  /** Run the calendar tool with these arguments; resolves with its output. */
+  calendar(args: string[]): Promise<string>;
+  /** Hand a request to the Manager chat's own agent; resolves once it has it. */
+  askAgent(request: string): Promise<void>;
   /** A quiet `[call]` line in the Manager chat. */
   recordNote(line: string): void;
+  /** The account's Manager voice prompt, read at the start of each call. */
+  voicePrompt?: () => string;
   now?: () => number;
 }
 
@@ -212,6 +305,14 @@ function ago(ms: number): string {
   const h = Math.round(min / 60);
   if (h < 48) return `${h} h ago`;
   return `${Math.round(h / 24)} days ago`;
+}
+
+/** The day after a YYYY-MM-DD date: Google's all-day end is exclusive. */
+function nextDay(date: string): string {
+  const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) throw new ManagerChatLookupError(`"${date}" is not a date.`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function words(s: string): string[] {
@@ -268,6 +369,61 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
   };
 
   return {
+    ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
+    async quick(name, args) {
+      const need = (k: string): string => {
+        const v = (args[k] ?? '').trim();
+        if (v === '') throw new ManagerChatLookupError(`Say the ${k.replace('_', ' ')}.`);
+        return v;
+      };
+      if (name === ADD_TASK_TOOL_NAME) {
+        const content = need('content');
+        const out = await deps.addTask({ content, due: (args['due'] ?? '').trim() });
+        deps.recordNote(`task added: ${content}`);
+        return out;
+      }
+      if (name === CALENDAR_AGENDA_TOOL_NAME) {
+        const from = (args['from'] ?? '').trim();
+        const to = (args['to'] ?? '').trim();
+        const q = (args['query'] ?? '').trim();
+        const out = await deps.calendar([
+          'list',
+          ...(from ? ['--from', from] : []),
+          ...(to ? ['--to', to] : []),
+          ...(q ? ['--q', q] : []),
+        ]);
+        return out.trim() === '' || out.trim() === '[]' ? 'Nothing in the calendar.' : out;
+      }
+      if (name === ADD_EVENT_TOOL_NAME) {
+        const title = need('title');
+        const start = need('start');
+        const allDay = (args['all_day'] ?? '').trim().toLowerCase() === 'true';
+        const end = (args['end'] ?? '').trim();
+        if (!allDay && end === '') {
+          throw new ManagerChatLookupError('Say when the event ends, or make it all day.');
+        }
+        const out = await deps.calendar([
+          'create',
+          '--title',
+          title,
+          '--start',
+          start,
+          '--end',
+          end || nextDay(start),
+          ...(allDay ? ['--all-day'] : []),
+        ]);
+        deps.recordNote(`event added: ${title} (${start})`);
+        return `Added. ${out}`;
+      }
+      if (name === ASK_AGENT_TOOL_NAME) {
+        const request = need('request');
+        await deps.askAgent(request);
+        deps.recordNote(`-> agent: ${request}`);
+        return 'Passed to the agent. Its result will be in the Manager chat, not read out here.';
+      }
+      throw new Error(`There is no tool called ${name} on this call.`);
+    },
+
     async findChats(query) {
       const all = await candidates();
       const terms = words(query);

@@ -74,6 +74,9 @@ import {
   FIND_CHATS_DESCRIPTION,
   FIND_CHATS_TOOL_NAME,
   MANAGER_ASYNC_REPLY_RULE,
+  MANAGER_QUICK_TOOLS,
+  MANAGER_QUICK_TOOL_NAMES,
+  stringArgs,
   MANAGER_BLOCKING_REPLY_RULE,
   MANAGER_TOOL_PARAMS,
   MANAGER_TOOLS_RULE,
@@ -408,9 +411,10 @@ export const HOSTED_VOICE_INSTRUCTION = hostedVoiceInstruction('auto');
  * Manager). `asyncResult`: a chat's reply arrives later as a message (Gemini)
  * rather than as the send tool's own return (OpenAI Realtime, ElevenLabs).
  */
-export function managerHostedInstruction(asyncResult: boolean): string {
+export function managerHostedInstruction(asyncResult: boolean, voicePrompt?: string): string {
+  const preamble = voicePrompt?.trim() ? `${voicePrompt.trim()}\n\n` : MANAGER_VOICE_PREAMBLE;
   return (
-    MANAGER_VOICE_PREAMBLE +
+    preamble +
     FRAGMENT_RULE +
     MANAGER_TOOLS_RULE +
     ACKNOWLEDGEMENT_RULE +
@@ -469,6 +473,7 @@ function managerDeclarations(): GeminiFunctionDeclaration[] {
       chat: MANAGER_TOOL_PARAMS.chat,
       message: MANAGER_TOOL_PARAMS.message,
     }),
+    ...MANAGER_QUICK_TOOLS.map((t) => stringTool(t.name, t.description, t.params, t.required)),
   ];
 }
 
@@ -481,6 +486,7 @@ function buildSetupMessage(
   manager = false,
   spokenAloud = '',
   voiceName?: string,
+  managerPrompt?: string,
 ): GeminiSetupMessage {
   const declarations: GeminiFunctionDeclaration[] = [
     // A Manager call has its own tools and no agent behind it; `never` has no agent either.
@@ -538,7 +544,9 @@ function buildSetupMessage(
         parts: [
           {
             text: withBriefing(
-              (manager ? managerHostedInstruction(true) : hostedVoiceInstruction(handoff, true)) +
+              (manager
+                ? managerHostedInstruction(true, managerPrompt)
+                : hostedVoiceInstruction(handoff, true)) +
                 (lookBack ? `\n\n${LOOK_BACK_RULE}` : '') +
                 (spokenAloud ? `\n\n${spokenAloud}` : ''),
               briefing,
@@ -853,6 +861,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           this.deps.manager !== undefined,
           this.deps.spokenAloud,
           this.deps.voice,
+          this.deps.manager?.voicePrompt?.(),
         ),
       ),
     );
@@ -1448,6 +1457,10 @@ export class GeminiLiveSession implements VoiceSessionLike {
     }
     if (call.name === CHAT_STATUS_TOOL_NAME) {
       manager.chatStatus(arg('chat')).then(answer, fail);
+      return;
+    }
+    if (MANAGER_QUICK_TOOL_NAMES.has(call.name)) {
+      manager.quick(call.name, stringArgs(call.args)).then(answer, fail);
       return;
     }
     const message = `the voice called a tool a Manager call does not have: ${call.name}`;

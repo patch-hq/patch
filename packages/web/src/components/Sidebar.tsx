@@ -240,11 +240,18 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   const sectionCounts = useChatStore((s) => s.sectionCounts);
   const chatSort = useUiStore((s) => s.chatSort);
   const manualOrder = useUiStore((s) => s.manualOrder);
+  const folderOrder = useUiStore((s) => s.folderOrder);
   const grouping = useUiStore((s) => s.grouping);
   const groupSort = useUiStore((s) => s.groupSort);
   const fresh = useMemo(
-    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort, manualOrder }),
-    [chats, folderRoster, chatSort, groupSort, manualOrder],
+    () =>
+      groupChats(Object.values(chats), folderRoster, {
+        chatSort,
+        groupSort,
+        manualOrder,
+        folderOrder,
+      }),
+    [chats, folderRoster, chatSort, groupSort, manualOrder, folderOrder],
   );
   // Nothing reorders while the pointer is over the list: the order is captured
   // as the pointer enters and held until it leaves, whatever the sort. Row data
@@ -261,11 +268,13 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // the new one. Without this the drop persisted but the rows stayed put until the
   // pointer left the list, which read as "manual sort does nothing".
   const manualOrderSeen = useRef(manualOrder);
+  const folderOrderSeen = useRef(folderOrder);
   useEffect(() => {
-    if (manualOrderSeen.current === manualOrder) return;
+    if (manualOrderSeen.current === manualOrder && folderOrderSeen.current === folderOrder) return;
     manualOrderSeen.current = manualOrder;
+    folderOrderSeen.current = folderOrder;
     setFrozenOrder((held) => (held === null ? null : captureOrder(freshRef.current)));
-  }, [manualOrder]);
+  }, [manualOrder, folderOrder]);
 
   // Opening a row in needs-attention mode marks it read, which would
   // otherwise drop it out of the filter the instant you click it — the row
@@ -606,6 +615,10 @@ function RegularSidebar({
   const channelsGlyphs = useActionGlyphs('toggleChannels');
   const archivedGlyphs = useActionGlyphs('toggleArchived');
   const navigate = useNavigate();
+  const chatSort = useUiStore((s) => s.chatSort);
+  const groupSort = useUiStore((s) => s.groupSort);
+  const projectsManual = (groupSort === 'same-as-chats' ? chatSort : groupSort) === 'manual';
+  const [folderDropOver, setFolderDropOver] = useState<string | null>(null);
   const bumpLifecycleScrollTick = useUiStore((s) => s.bumpLifecycleScrollTick);
   const presenceHosts = usePresenceStore((s) => s.hosts);
   const hostNames = useMemo(
@@ -937,7 +950,39 @@ function RegularSidebar({
               clock (ProjectSnoozeMenu), reaches that same "all in project" set —
               there's no "as listed" snooze, since "whole workspace" is the whole
               point (Todoist: "patch ability to snooze a whole workspace"). */}
-                    <div className="folder-head" title={folder}>
+                    <div
+                      className={folderDropOver === key ? 'folder-head drop-target' : 'folder-head'}
+                      title={folder}
+                      data-folder-key={key}
+                      data-testid={`folder-head-${key}`}
+                      {...(projectsManual
+                        ? {
+                            draggable: true,
+                            onDragStart: (e: DragEvent) => {
+                              e.dataTransfer.setData('application/x-patch-folder', key);
+                              e.dataTransfer.effectAllowed = 'move';
+                            },
+                            onDragOver: (e: DragEvent) => {
+                              if (!e.dataTransfer.types.includes('application/x-patch-folder'))
+                                return;
+                              e.preventDefault();
+                              setFolderDropOver(key);
+                            },
+                            onDragLeave: () => setFolderDropOver(null),
+                            onDrop: (e: DragEvent) => {
+                              e.preventDefault();
+                              setFolderDropOver(null);
+                              const dragKey = e.dataTransfer.getData('application/x-patch-folder');
+                              if (dragKey === '' || dragKey === key) return;
+                              const siblings = view.folders
+                                .filter((f) => folderBasename(f.folder) !== '')
+                                .map((f) => f.key);
+                              if (!siblings.includes(dragKey)) return;
+                              useUiStore.getState().moveFolderManual(siblings, dragKey, key);
+                            },
+                          }
+                        : {})}
+                    >
                       {/* The project name IS the disclosure control (spec/14 §4) —
                   a chevron plus the label, so the whole name is the hit area
                   rather than a 13px glyph beside it. A button, not the head
