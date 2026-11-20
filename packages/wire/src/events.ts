@@ -8308,7 +8308,9 @@ export const PatchFoldersBrowseResponseEvent = z
         // `folder_not_found` — the dir does not exist OR escaped every project
         // root (the confinement rejection; NO FALLBACK). `internal` — an
         // unexpected host-side failure reading the directory.
-        code: z.enum(['folder_not_found', 'internal']),
+        // `still_opening` — the read has not returned yet; ask again shortly.
+        // `permission_denied` — macOS refused.
+        code: z.enum(['folder_not_found', 'internal', 'still_opening', 'permission_denied']),
         message: z.string(),
       })
       .strict()

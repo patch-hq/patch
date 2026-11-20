@@ -192,12 +192,32 @@ function waitForSpawnRejection(chatId: string, timeoutMs = 800): Promise<SpawnRe
  * switching drafts still remounts because the id itself changed.
  */
 /** A failed folder listing, said in a sentence with the code behind Details. */
+/** The host is still reading the folder: the picker asks again until it answers. */
+const isStillOpening = (err: unknown): boolean =>
+  err instanceof ApiError && err.message === 'still_opening';
+
 function BrowseError({ err }: { err: unknown }): JSX.Element {
   const code = err instanceof ApiError ? err.message : '';
   const message =
     err instanceof ApiError
       ? ((err.body as { message?: string } | null)?.message ?? '')
       : ((err as Error).message ?? '');
+  // The host's own sentence is already plain ("Still opening Documents…",
+  // "macOS didn't allow Patch to open Documents…").
+  if (code === 'still_opening') {
+    return (
+      <p className="folder-popup-empty muted" data-testid="folder-browser-waiting">
+        {message}
+      </p>
+    );
+  }
+  if (code === 'permission_denied') {
+    return (
+      <div className="error" data-testid="folder-browser-error">
+        <p>{message}</p>
+      </div>
+    );
+  }
   const human = humaniseError({ code, message }, 'browse');
   return (
     <div className="error" data-testid="folder-browser-error">
@@ -658,6 +678,9 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     // Browsing is addressed to ONE host; with none resolved there is nothing to
     // ask, so the query stays idle rather than browsing a guessed host.
     enabled: pickerOpen && pickerHostId !== null,
+    // A folder still opening is asked again until it answers.
+    retry: (n, err) => !isStillOpening(err) && n < 1,
+    refetchInterval: (q) => (isStillOpening(q.state.error) ? 1_500 : false),
   });
   // A first chat on a host with no projects yet: suggest the host user's home
   // folder as a labelled one-tap choice. The host answers a browse with no

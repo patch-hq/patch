@@ -11,11 +11,18 @@
 
 import { spawn } from 'node:child_process';
 
-export const LISTING_TIMEOUT_MS = 4_000;
+/** How long a read may wait on a person (a macOS permission dialog) before it is abandoned. */
+export const LISTING_TIMEOUT_MS = 5 * 60_000;
+/** How long a caller waits for a read before telling the person it is waiting on them. */
+export const LISTING_WINDOW_MS = 1_200;
 
 export type ListingResult =
   | { kind: 'ok'; names: string[] }
   | { kind: 'timeout' }
+  /** Still running past the caller's window — it may be waiting on a person or just be slow. */
+  | { kind: 'pending' }
+  /** macOS refused the read ("Don't Allow", or no grant). */
+  | { kind: 'denied' }
   | { kind: 'error'; message: string };
 
 export type ListChildDirs = (dir: string, timeoutMs?: number) => Promise<ListingResult>;
@@ -57,7 +64,9 @@ export const listChildDirs: ListChildDirs = (dir, timeoutMs = LISTING_TIMEOUT_MS
       // `find -L` exits 1 for an unreadable or dangling entry it skipped but
       // still lists the rest. It only fails outright when `dir` itself cannot
       // be read, which leaves nothing on stdout and a message on stderr.
-      if (out === '' && code !== 0)
+      if (out === '' && code !== 0 && /operation not permitted/i.test(err))
+        settle({ kind: 'denied' });
+      else if (out === '' && code !== 0)
         settle({ kind: 'error', message: err.trim() || `exit ${code}` });
       else
         settle({
@@ -70,8 +79,51 @@ export const listChildDirs: ListChildDirs = (dir, timeoutMs = LISTING_TIMEOUT_MS
     });
   });
 
-/** Plain-language reason a listing timed out, for the person looking at the picker. */
+const inFlight = new Map<string, Promise<ListingResult>>();
+
+/**
+ * One read per directory at a time. A second caller (the picker retrying while
+ * the dialog is open) joins the read already waiting rather than starting
+ * another, and the read carries on after any one caller has stopped waiting.
+ */
+function listShared(dir: string): Promise<ListingResult> {
+  let p = inFlight.get(dir);
+  if (!p) {
+    p = listChildDirs(dir).finally(() => inFlight.delete(dir));
+    inFlight.set(dir, p);
+  }
+  return p;
+}
+
+/** The listing, or `pending` if it has not come back within `windowMs`. */
+export async function listChildDirsWithin(
+  dir: string,
+  windowMs = LISTING_WINDOW_MS,
+): Promise<ListingResult> {
+  let timer: NodeJS.Timeout | undefined;
+  const pending = new Promise<ListingResult>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'pending' }), windowMs);
+  });
+  try {
+    return await Promise.race([listShared(dir), pending]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const folderName = (dir: string): string => dir.split('/').filter(Boolean).pop() ?? dir;
+
+/** What to tell the person while a read has not come back. Says nothing about why: a slow read has many causes. */
+export function listingPendingMessage(dir: string): string {
+  return `Still opening ${folderName(dir)}…`;
+}
+
+/** What to tell the person when macOS refused. */
+export function listingDeniedMessage(dir: string): string {
+  return `macOS didn't allow Patch to open ${folderName(dir)}. Allow it in System Settings > Privacy & Security > Files & Folders, or choose another folder.`;
+}
+
+/** Timed out after the full wait with no answer at all. */
 export function listingTimeoutMessage(dir: string): string {
-  const name = dir.split('/').filter(Boolean).pop() ?? dir;
-  return `macOS is asking for permission to open ${name} — look for a dialog on the Mac, or choose another folder`;
+  return `${folderName(dir)} did not open, and macOS never answered. Choose another folder.`;
 }

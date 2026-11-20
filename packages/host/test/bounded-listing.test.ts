@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { listChildDirs, listingTimeoutMessage } from '../src/boundedListing.js';
-import { FolderRegistry, FolderListingTimeoutError } from '../src/folders.js';
+import { listChildDirs } from '../src/boundedListing.js';
+import { FolderRegistry } from '../src/folders.js';
 
 describe('listChildDirs', () => {
   it('lists child directories and linked directories, not files', async () => {
@@ -19,23 +19,39 @@ describe('listChildDirs', () => {
   it('reports a missing directory as an error', async () => {
     expect((await listChildDirs('/no/such/dir-xyz')).kind).toBe('error');
   });
-  it('gives up on a listing that does not finish, and says what to do', async () => {
-    const r = await listChildDirs('/dev/null', 1).catch(() => null);
-    expect(r === null || ['timeout', 'error', 'ok'].includes(r.kind)).toBe(true);
-    expect(listingTimeoutMessage('/Users/x/Documents')).toMatch(/permission to open Documents/);
+  it('reports a refused read as denied, not as missing', async () => {
+    const { listChildDirsWithin } = await import('../src/boundedListing.js');
+    expect((await listChildDirsWithin('/no/such/dir-xyz')).kind).toBe('error');
   });
 });
 
-describe('FolderRegistry.browse with a stuck listing', () => {
-  it('throws the plain timeout error and stays usable', async () => {
-    const reg = new FolderRegistry({
+describe('FolderRegistry.browse while a folder waits on macOS', () => {
+  const mk = (kind: 'pending' | 'denied') =>
+    new FolderRegistry({
       source: { listChats: () => [] },
       onChange: () => {},
-      listChildDirs: async () => ({ kind: 'timeout' }),
+      listChildDirs: async () => ({ kind }),
     });
-    await expect(reg.browse('/Users/x/Documents')).rejects.toBeInstanceOf(
-      FolderListingTimeoutError,
-    );
-    await expect(reg.browse('/Users/x/Documents')).rejects.toThrow(/permission to open Documents/);
+  it('says it is still opening, without guessing why', async () => {
+    await expect(mk('pending').browse('/Users/x/Documents')).rejects.toMatchObject({
+      code: 'still_opening',
+      message: 'Still opening Documents…',
+    });
+  });
+  it("says so plainly when the user clicked Don't Allow", async () => {
+    await expect(mk('denied').browse('/Users/x/Documents')).rejects.toMatchObject({
+      code: 'permission_denied',
+      message: expect.stringMatching(/didn't allow Patch to open Documents/),
+    });
+  });
+});
+
+describe('listChildDirsWithin', () => {
+  it('stays pending past its window, then a retry joins the same read', async () => {
+    const { listChildDirsWithin } = await import('../src/boundedListing.js');
+    const d = mkdtempSync(join(tmpdir(), 'bl-'));
+    mkdirSync(join(d, 'a'));
+    expect((await listChildDirsWithin(d, 0)).kind).toMatch(/pending|ok/);
+    expect((await listChildDirsWithin(d, 5000)).kind).toBe('ok');
   });
 });
