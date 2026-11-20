@@ -6,11 +6,7 @@
 
 import type { JSX } from 'react';
 import { useState } from 'react';
-import {
-  GEMINI_VOICES,
-  OPENAI_VOICES,
-  voiceKeyHostStatus,
-} from '@patch/wire/audio';
+import { GEMINI_VOICES, OPENAI_VOICES, voiceKeyHostStatus } from '@patch/wire/audio';
 import { type VoiceBackend, type VoiceLayer, type VoiceSurfaceConfig } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
