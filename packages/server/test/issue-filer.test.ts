@@ -174,6 +174,18 @@ describe('hostTurnFailureReport', () => {
     expect(hostTurnFailureReport(err('sdk_error', 'Usage limit reached'), 'host-1')).toBeNull();
     expect(
       hostTurnFailureReport(
+        err('sdk_error', 'Claude Code process terminated by signal SIGTERM'),
+        'host-1',
+      ),
+    ).toBeNull();
+    expect(
+      hostTurnFailureReport(
+        err('sdk_error', 'Claude Code process terminated by signal SIGSEGV'),
+        'host-1',
+      ),
+    ).not.toBeNull();
+    expect(
+      hostTurnFailureReport(
         { type: 'chat.stopped', chatId: 'c' } as unknown as WireEvent,
         'host-1',
       ),

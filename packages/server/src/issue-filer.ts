@@ -107,13 +107,16 @@ export interface IssueFilerOptions {
  * null when it is not a bug in Patch. Host errors are logged on the host's own
  * logger, which the server's error hook never sees, so without this a failed
  * turn ("process ended mid-turn", a crashed session) was never filed. A usage
- * or rate limit is the account's state, not a defect, so it is left out.
+ * or rate limit is the account's state, not a defect, so it is left out. So is a
+ process stopped by SIGTERM/SIGINT/SIGHUP: something outside Patch asked it to
+ exit (a host restart or update, a service stop), which carries no defect.
  */
 export function hostTurnFailureReport(event: WireEvent, from: string | null): IssueReport | null {
   if (event.type !== 'chat.error' || from === null) return null;
   const { code, message } = event.error;
   if (code !== 'sdk_error' || !message) return null;
   if (/usage limit|rate limit|out of credit/i.test(message)) return null;
+  if (/terminated by signal SIG(TERM|INT|HUP)\b/.test(message)) return null;
   return { kind: 'server-error', message, surface: 'host' };
 }
 
