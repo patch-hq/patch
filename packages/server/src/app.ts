@@ -36,7 +36,7 @@ import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
 import { ActivityLog } from './activity-log.js';
 import { createBrowserUseReader, HostOfflineError } from './browser-use.js';
-import { createToolLogReader } from './tool-log.js';
+import { ToolLog } from './tool-log.js';
 import { createUsageReader, isUsagePeriod } from './usage-report.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SharedSettingsService } from './shared-settings.js';
@@ -717,12 +717,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // The user's own messages (`patch_activity`, spec/06 § Cross-chat toolset),
-  // read through every host's chat logs.
-  // Chat dwell sessions are the one part no host keeps: the server records every
-  // surface's focus/visibility frames itself (ws-hub.ts) into this log.
+  // read from the server's chat record. Chat dwell sessions come from every
+  // surface's focus/visibility frames, recorded by the server (ws-hub.ts).
   const activityLog = new ActivityLog(opts.dataDir ?? registry.dataDir);
-  const activity = createActivityReader({ hostLink, chatRegistry, log: activityLog });
-  app.addHook('onClose', async () => activity.close());
+  const activity = createActivityReader({ chatLogStore, chatRegistry, log: activityLog });
 
   // Settings → Computer use: is an agent driving a host's browser, and Stop.
   const browserUse = createBrowserUseReader({
@@ -730,10 +728,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     hostName: (id) => registry.hostName(id),
   });
   app.addHook('onClose', async () => browserUse.close());
-  // Every cross-chat tool call, account-wide (Settings → Activity), read
-  // through each host's own bounded tool-calls.jsonl the same way.
-  const toolLog = createToolLogReader({ hostLink });
-  app.addHook('onClose', async () => toolLog.close());
+  // Every cross-chat tool call, account-wide (Settings → Activity): each host
+  // sends its calls through its outbox and the server keeps them.
+  const toolLog = new ToolLog({
+    ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
+    logger: log.child({ component: 'tool-log' }),
+  });
+  hostLink.onEvent((event, fromHostId) => toolLog.observe(event, fromHostId));
   const usageReader = createUsageReader({
     hostLink,
     onRefreshError: (period, err) =>
@@ -822,7 +823,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   updateControl.setAutoUpdate(
     () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
   );
+  // A chat stopped on a limit or a sign-in takes its status from the state of
+  // the account it ran on (spec/12 § Limits and sign-in).
+  chatRegistry.setAccounts({
+    state: (accountId) => accountSettings?.accountState(accountId),
+    hostLimitFacts: (hostId) => wsHub.hostLimitFacts(hostId),
+  });
   if (accountSettings) {
+    accountSettings.onAccountStates(() => chatRegistry.accountStatesChanged());
     accountSettings.startCredentialRefresh();
     app.addHook('onClose', async () => accountSettings.close());
     hostLink.onEvent((event: WireEvent) => accountSettings.handleHostEvent(event));
@@ -1699,8 +1707,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // Every cross-chat tool call, account-wide (Settings → Activity — "things
-  // agents did"). Same shape as `/api/activity` just above: a read-through
-  // across every online host's own log, merged and paged the same way.
+  // agents did"), from the log the server keeps. Paged like `/api/activity`.
   app.get('/api/tool-log', async (req, reply) => {
     if (!(await authSurfaceOrHost(req.headers.authorization))) {
       return reply.code(401).send({ error: 'unauthenticated' });
@@ -1722,19 +1729,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         message: 'since/until/cursor/limit must be numbers',
       });
     }
-    try {
-      return await toolLog.query({
-        since,
-        until,
-        ...(cursor !== undefined ? { cursor } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-      });
-    } catch (err) {
-      return reply.code(502).send({
-        error: 'tool_log_unavailable',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+    return toolLog.query({
+      since,
+      until,
+      ...(cursor !== undefined ? { cursor } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
   });
 
   // Settings → Usage: account limit history (for the burndown) and per-chat

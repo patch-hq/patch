@@ -314,15 +314,17 @@ maybe(
       expect(sendToEvent, 'host emitted patch.send_to into the target chat').toBeDefined();
       expect((sendToEvent as { sourceChatId: string }).sourceChatId).toBe(callerChatId);
 
-      // The target chat actually processed the delivered user-turn: its recent
-      // events include an assistant chat.message (its CLAUDE.md replies "OK").
+      // The target chat actually processed the delivered user-turn: it emitted
+      // an assistant chat.message (its CLAUDE.md replies "OK").
       // Allow a brief settle for the recursive target turn to finish.
       const deadline = Date.now() + 60_000;
       let targetHasAssistant = false;
       while (Date.now() < deadline) {
-        const { events: targetEvents } = daemon.getRecentEvents(targetChatId, 50);
-        targetHasAssistant = targetEvents.some(
-          (e) => e.type === 'chat.message' && (e as { role?: string }).role === 'assistant',
+        targetHasAssistant = events.some(
+          (e) =>
+            e.type === 'chat.message' &&
+            (e as { chatId?: string }).chatId === targetChatId &&
+            (e as { role?: string }).role === 'assistant',
         );
         if (targetHasAssistant) break;
         await new Promise((r) => setTimeout(r, 500));

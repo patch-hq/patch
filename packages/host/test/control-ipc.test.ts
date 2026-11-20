@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon, ChatNotFoundError } from '../src/chatRunner.js';
+import { RemoteRelayError } from '../src/remote-relay.js';
 import { buildControl } from '../src/control.js';
 import { MemoryJobsStore, JobNotFoundError, JobsLinkOfflineError } from '../src/jobs-interface.js';
 import type { AsyncJobsInterface, Job } from '../src/jobs-interface.js';
@@ -1197,10 +1198,31 @@ describe('C1 Control IPC: GET /chats/folders', () => {
 });
 
 describe('C1 Control IPC: GET /chats/:id', () => {
-  it('401s, 503s with no host, 404s unknown, 200s on hit', async () => {
+  /** Stands in for the server: answers for the chats it knows, by full id only. */
+  const serverKnowing = (ids: () => string[], asked: string[] = []) => ({
+    peekFromServer: async (req: { targetChatId: string }) => {
+      asked.push(req.targetChatId);
+      if (!ids().includes(req.targetChatId)) {
+        throw new RemoteRelayError('chat_not_found', `no such chat: ${req.targetChatId}`);
+      }
+      return {
+        chat_state: { chatId: req.targetChatId, chatStatus: { state: 'idle' } },
+        events: [],
+        truncated: false,
+      };
+    },
+  });
+
+  it('401s, 503s with no host or no server, 404s unknown, and reads even a local chat from the server', async () => {
     const { daemon, jobs, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    const asked: string[] = [];
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      ...serverKnowing(() => [chatId], asked),
+    });
     try {
       const unauth = await app.inject({ method: 'GET', url: `/chats/${chatId}` });
       expect(unauth.statusCode).toBe(401);
@@ -1210,7 +1232,8 @@ describe('C1 Control IPC: GET /chats/:id', () => {
 
       const ok = await app.inject({ method: 'GET', url: `/chats/${chatId}`, headers: AUTH });
       expect(ok.statusCode).toBe(200);
-      expect(ok.json().chatId).toBe(chatId);
+      expect(ok.json()).toEqual({ chatId, chatStatus: { state: 'idle' } });
+      expect(asked).toEqual(['nope', chatId]);
     } finally {
       await app.close();
     }
@@ -1221,12 +1244,24 @@ describe('C1 Control IPC: GET /chats/:id', () => {
     } finally {
       await noHost.close();
     }
+    const noServer = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    try {
+      const res = await noServer.inject({ method: 'GET', url: `/chats/${chatId}`, headers: AUTH });
+      expect(res.statusCode).toBe(503);
+    } finally {
+      await noServer.close();
+    }
   });
 
-  it('resolves a unique id prefix (spec/17-cli.md: "<id> accepts the full ULID or a unique prefix")', async () => {
+  it('resolves a unique prefix of a local chat before asking (spec/17-cli.md: "<id> accepts the full ULID or a unique prefix")', async () => {
     const { daemon, jobs, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      ...serverKnowing(() => [chatId]),
+    });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -1245,7 +1280,12 @@ describe('C1 Control IPC: GET /chats/:id', () => {
     const a = await daemon.spawnChat({ folder });
     const b = await daemon.spawnChat({ folder });
     const sharedPrefixLen = [...a].findIndex((c, i) => c !== b[i]);
-    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      ...serverKnowing(() => [a, b]),
+    });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -1551,67 +1591,35 @@ describe('C1 Control IPC: GET /internal/peek/:id', () => {
     }
   });
 
-  it('404s unknown chat; rejects a non-positive/NaN limit with 400; clamps >200 to 200', async () => {
-    const { daemon, jobs, folder, sdk } = setup();
-    sdk.enqueue([{ type: 'assistant', content: 'hello', sessionId: 'S' }]);
-    const chatId = await daemon.spawnChat({ folder, prompt: 'hi' });
-    await new Promise((r) => setTimeout(r, 30));
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+  it('rejects a non-positive/NaN limit with 400; clamps >200 to 200 on the server read', async () => {
+    const { daemon, jobs } = setup();
+    const limits: (number | undefined)[] = [];
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      peekFromServer: async (req) => {
+        limits.push(req.limit);
+        return { chat_state: {}, events: [], truncated: false };
+      },
+    });
     try {
-      const miss = await app.inject({ method: 'GET', url: '/internal/peek/nope', headers: AUTH });
-      expect(miss.statusCode).toBe(404);
-      expect(miss.json().error).toBe('chat_not_found');
-
-      const badLimit = await app.inject({
-        method: 'GET',
-        url: `/internal/peek/${chatId}?limit=0`,
-
-        headers: AUTH,
-      });
-      expect(badLimit.statusCode).toBe(400);
-      expect(badLimit.json().error).toBe('invalid_input');
-
-      const nanLimit = await app.inject({
-        method: 'GET',
-        url: `/internal/peek/${chatId}?limit=abc`,
-
-        headers: AUTH,
-      });
-      expect(nanLimit.statusCode).toBe(400);
-
+      for (const bad of ['0', 'abc', '0.5']) {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/internal/peek/c?limit=${bad}`,
+          headers: AUTH,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toBe('invalid_input');
+      }
       const clamped = await app.inject({
         method: 'GET',
-        url: `/internal/peek/${chatId}?limit=9999`,
-
+        url: `/internal/peek/c?limit=9999`,
         headers: AUTH,
       });
       expect(clamped.statusCode).toBe(200);
-
-      const ok = await app.inject({
-        method: 'GET',
-        url: `/internal/peek/${chatId}`,
-        headers: AUTH,
-      });
-      expect(ok.statusCode).toBe(200);
-      const body = ok.json() as { chat_state: { lastMessage?: string } };
-      expect(body.chat_state.lastMessage).toBe('hello');
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('lastMessage is undefined for a chat with no messages yet', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/peek/${chatId}`,
-        headers: AUTH,
-      });
-      const body = res.json() as { chat_state: { lastMessage?: string } };
-      expect(body.chat_state.lastMessage).toBeUndefined();
+      expect(limits).toEqual([200]);
     } finally {
       await app.close();
     }
@@ -2236,137 +2244,6 @@ describe('C1 Control IPC: POST /internal/spawn — remaining branches', () => {
       });
       expect(res.statusCode).toBe(404);
       expect(res.json().error).toBe('folder_not_found');
-    } finally {
-      await app.close();
-    }
-  });
-});
-
-describe('C1 Control IPC: GET /internal/history/:id', () => {
-  it('503s with no host; 404s an unknown chat', async () => {
-    const app = await buildControl({ localKey: LOCAL_KEY });
-    try {
-      expect(
-        (await app.inject({ method: 'GET', url: '/internal/history/x', headers: AUTH })).statusCode,
-      ).toBe(503);
-    } finally {
-      await app.close();
-    }
-    const { daemon, jobs } = setup();
-    const app2 = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app2.inject({
-        method: 'GET',
-        url: '/internal/history/nope',
-        headers: AUTH,
-      });
-      expect(res.statusCode).toBe(404);
-    } finally {
-      await app2.close();
-    }
-  });
-
-  it('400s a bad HistoryQuery (fromSeq/limit not coercible)', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}?fromSeq=abc`,
-
-        headers: AUTH,
-      });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error).toBe('invalid_input');
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('empty events for a chat with no claudeSessionId yet', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}`,
-        headers: AUTH,
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ events: [] });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('includes nextFromSeq when more events remain past the requested limit', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'patch-ctl-hist-'));
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-ctl-hist-folder-')));
-    const metaStore = createMetaStore(home);
-    const chatId = 'paged-chat';
-    const branchId = `${chatId}-b0`;
-    metaStore.write({
-      chatId,
-      folder,
-      name: null,
-      claudeSessionId: 'sess-paged',
-      nextSeq: 4,
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    // Written straight to the log — pagination itself doesn't care how the
-    // events got there, only that more than `limit` exist.
-    const logDir = join(home, 'chats', chatId);
-    mkdirSync(logDir, { recursive: true });
-    const records = [1, 2, 3].map((n) => ({
-      v: 1,
-      seq: n,
-      at: 1,
-      branchId,
-      rec: {
-        k: 'event',
-        event: { type: 'chat.message', chatId, role: 'assistant', content: `m${n}`, seq: n },
-      },
-    }));
-    writeFileSync(
-      join(logDir, 'events.jsonl'),
-      records.map((r) => JSON.stringify(r)).join('\n') + '\n',
-    );
-    const daemon = new Daemon({
-      hostId: 'd1',
-      metaStore,
-      sdkBackend: createMockSdkBackend(),
-      oauthAccessToken: 'tok',
-      emit: () => undefined,
-      logger: silent,
-      now: () => 1_700_000_000_000,
-    });
-    daemon.hydrate();
-    const jobs = new MemoryJobsStore({ now: () => 1_700_000_000_000 });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const paged = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}?limit=1`,
-
-        headers: AUTH,
-      });
-      expect(paged.statusCode).toBe(200);
-      const body = paged.json() as { events: unknown[]; nextFromSeq?: number };
-      expect(body.events).toHaveLength(1);
-      expect(body.nextFromSeq).toBeDefined();
-
-      const full = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}?limit=10`,
-
-        headers: AUTH,
-      });
-      const fullBody = full.json() as { events: unknown[]; nextFromSeq?: number };
-      expect(fullBody.events).toHaveLength(3);
-      expect(fullBody.nextFromSeq).toBeUndefined();
     } finally {
       await app.close();
     }
@@ -3843,26 +3720,6 @@ describe('POST /internal/spawn — remaining spread branches (name/model/permiss
       expect(res.statusCode).toBe(200);
       const ev = upstream.find((e) => e.type === 'patch.spawn');
       expect(ev).toMatchObject({ type: 'patch.spawn', hostId: 'd1', prompt: '' });
-    } finally {
-      await app.close();
-    }
-  });
-});
-
-describe('GET /internal/history/:id — fromSeq spread branch', () => {
-  it('passes an explicit fromSeq through to readHistory', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/internal/history/${chatId}?fromSeq=5`,
-
-        headers: AUTH,
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ events: [] });
     } finally {
       await app.close();
     }

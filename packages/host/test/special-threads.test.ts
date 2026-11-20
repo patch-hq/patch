@@ -247,6 +247,30 @@ describe('D1 thread bootstrap over a running host', () => {
     }
   });
 
+  it('a handed-over position survives a restart before the thread writes again', async () => {
+    const home = mkTmp('d1-home-');
+    const cwd = mkTmp('d1-cwd-');
+    const s1 = await startHost({ home, cwd });
+    // A change of the Manager's home: the server holds Speakers up to 39.
+    s1.daemon.continueFrom('thread_speakers', 40);
+    s1.daemon.continueFrom('thread_speakers', 12); // never back
+    await s1.close();
+
+    // The host restarts (a self-update) before Speakers says anything.
+    const s2 = await startHost({ home, cwd });
+    try {
+      await s2.deliver('thread_speakers', 'after the restart', 'after-restart-1');
+      const seqs = s2.events
+        .filter((e) => (e as { chatId?: string }).chatId === 'thread_speakers')
+        .map((e) => (e as { seq?: number }).seq)
+        .filter((seq): seq is number => typeof seq === 'number' && seq >= 0);
+      expect(seqs.length).toBeGreaterThan(0);
+      expect(Math.min(...seqs)).toBe(40);
+    } finally {
+      await s2.close();
+    }
+  });
+
   it('CLAUDE.md is mode 0644 and a real file (not a dir)', async () => {
     const s = await startHost();
     try {

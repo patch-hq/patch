@@ -3278,6 +3278,14 @@ export const HostInfoEvent = z
      */
     scriptPayload: z.boolean().optional(),
     /**
+     * This host reports a turn that ended on a limit as a fact on
+     * `chat.turn_ended.limit`, and the server derives paused, waiting for
+     * sign-in and out of credit from the account's state (spec/12 § Limits and
+     * sign-in). Optional: an older host never says, and the server keeps reading
+     * its `chat.state.limitBlock` as the pause.
+     */
+    limitFacts: z.boolean().optional(),
+    /**
      * Where the SERVER can reach this host's own audio WSS (`<host>:<port>`,
      * no scheme) to relay a voice session for a chat that lives here but was
      * opened from a surface that only reaches the server (spec/07 § Voice is
@@ -6067,25 +6075,28 @@ export type SurfaceInputEvent = z.infer<typeof SurfaceInputEvent>;
 // Cross-chat tool events
 //
 // Spec models cross-chat tools as request/response pairs in the audit log.
-// `patch.peek` has both; `patch.send_to` and `patch.spawn` are fire-and-forget
-// from the source's POV but recorded as events for audit (mirrored on the
-// `chat.tool_call` / `chat.tool_result` envelope when the tool fires).
+// `patch.send_to` and `patch.spawn` are fire-and-forget from the source's POV
+// but recorded as events for audit (mirrored on the `chat.tool_call` /
+// `chat.tool_result` envelope when the tool fires).
 //
-// A call whose target chat lives on the calling host's own host is
-// short-circuited in-process and never reaches the wire at all. `requestId`
-// is present ONLY on the wire frame for a target on ANOTHER host — that is
-// what tells the server (spec/03 § Cross-chat tools) this is a relay to
-// perform and answer, rather than an audit record of a call already handled
-// locally (`patch.send_to` in particular is emitted for audit on every call,
-// local or not; `requestId`'s presence is the only signal that distinguishes
-// a relay in flight from an audit record of one already finished).
+// `patch.peek.request` and `patch.history.request` are answered by the server
+// from its own record of the chat and its own chat status (spec/03 § Cross-chat
+// tools), whichever host the chat lives on and whether or not it is online. A
+// host never answers one. `requestId` is what the answer is matched by; a frame
+// without one (sent by a host that predates server-answered reads, as the
+// audit record of a read it did itself) is not answered.
+//
+// On `patch.send_to` and `patch.stop`, `requestId` is present ONLY on the wire
+// frame for a target on ANOTHER host — that is what tells the server this is a
+// relay to perform and answer, rather than an audit record of a call already
+// handled locally.
 
 export const PatchPeekRequestEvent = z
   .object({
     type: z.literal('patch.peek.request'),
     sourceChatId: z.string().min(1),
     targetChatId: z.string().min(1),
-    /** Present iff this is a cross-host relay the caller is waiting on. */
+    /** What the server's answer is matched by; absent only from an older host's audit record. */
     requestId: z.string().min(1).optional(),
     /** Mirrors `patch_peek`'s own `limit` (default 50, hard cap 200). */
     limit: z.number().int().positive().max(200).optional(),
@@ -6094,11 +6105,10 @@ export const PatchPeekRequestEvent = z
 export type PatchPeekRequestEvent = z.infer<typeof PatchPeekRequestEvent>;
 
 /**
- * The owning host's answer to a cross-host `patch_peek` (spec/03 § Cross-chat
- * tools). `result`, present iff `ok`, is the same `{ chat_state, events,
- * truncated }` shape `/internal/peek/:id` already returns for a local chat —
- * carried opaquely (`unknown`) rather than re-declared here, since re-typing
- * it would just be a second place for that shape to drift from the first.
+ * The server's answer to `patch_peek` (spec/03 § Cross-chat tools). `result`,
+ * present iff `ok`, is the `{ chat_state, events, truncated }` the host's
+ * `/internal/peek/:id` returns to the agent, carried opaquely (`unknown`):
+ * the host passes it through and the server alone builds it.
  */
 export const PatchPeekResponseEvent = z
   .object({
@@ -6238,17 +6248,16 @@ export const PatchHistoryRequestEvent = z
     targetChatId: z.string().min(1),
     fromSeq: z.number().int().nonnegative().optional(),
     limit: z.number().int().positive().max(200).optional(),
-    /** Present iff this is a cross-host relay the caller is waiting on. */
+    /** What the server's answer is matched by; absent only from an older host's audit record. */
     requestId: z.string().min(1).optional(),
   })
   .strict();
 export type PatchHistoryRequestEvent = z.infer<typeof PatchHistoryRequestEvent>;
 
 /**
- * The owning host's answer to a cross-host `patch_history`. `result`, present
- * iff `ok`, is the same `{ events, nextFromSeq }` shape `/internal/history/:id`
- * already returns locally — carried opaquely for the same reason as
- * `patch.peek.response.result`.
+ * The server's answer to `patch_history`. `result`, present iff `ok`, is the
+ * `{ events, nextFromSeq }` the host's `/internal/history/:id` returns —
+ * carried opaquely for the same reason as `patch.peek.response.result`.
  */
 export const PatchHistoryResponseEvent = z
   .object({
@@ -6444,38 +6453,6 @@ export const PatchActivityResponseEvent = z
   .strict();
 export type PatchActivityResponseEvent = z.infer<typeof PatchActivityResponseEvent>;
 
-/** Server → host: read the user messages in this host's own chat logs for a window. */
-export const PatchActivityReadRequestEvent = z
-  .object({
-    type: z.literal('patch.activity.read.request'),
-    requestId: z.string().min(1),
-    since: z.number().int().nonnegative(),
-    until: z.number().int().nonnegative(),
-    /** Most rows the host may return — the oldest `limit` in the window. */
-    limit: z.number().int().positive(),
-  })
-  .strict();
-export type PatchActivityReadRequestEvent = z.infer<typeof PatchActivityReadRequestEvent>;
-
-export const PatchActivityReadResponseEvent = z
-  .object({
-    type: z.literal('patch.activity.read.response'),
-    requestId: z.string().min(1),
-    messages: z.array(
-      z
-        .object({
-          chatId: z.string().min(1),
-          text: z.string(),
-          ts: z.number().int().nonnegative(),
-          /** See {@link ActivityMessageKind}. Absent means a person typed this. */
-          kind: ActivityMessageKind.optional(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
-export type PatchActivityReadResponseEvent = z.infer<typeof PatchActivityReadResponseEvent>;
-
 /**
  * Settings → Computer use (spec/06 § Browser tools). Server → host: report
  * whether this host's agent browser is driving it, or stop it.
@@ -6528,28 +6505,20 @@ export const ToolLogEntry = z
   .strict();
 export type ToolLogEntry = z.infer<typeof ToolLogEntry>;
 
-/** Server → host: read this host's own cross-chat tool-call log for a window. */
-export const PatchToolLogReadRequestEvent = z
+/**
+ * Host → server, through the host outbox (spec/01 § Host outbox): one
+ * cross-chat tool call this host ran, for the server's account-wide tool log
+ * (Settings → Activity). Sent only to a server whose `auth.ok` carried
+ * `serverReads`; until then a host keeps its calls in its own file and hands it
+ * over once.
+ */
+export const PatchToolLogEntryEvent = z
   .object({
-    type: z.literal('patch.tool_log.read.request'),
-    requestId: z.string().min(1),
-    since: z.number().int().nonnegative(),
-    until: z.number().int().nonnegative(),
-    /** Most rows the host may return — the oldest `limit` in the window. */
-    limit: z.number().int().positive(),
+    type: z.literal('patch.tool_log.entry'),
+    entry: ToolLogEntry,
   })
   .strict();
-export type PatchToolLogReadRequestEvent = z.infer<typeof PatchToolLogReadRequestEvent>;
-
-export const PatchToolLogReadResponseEvent = z
-  .object({
-    type: z.literal('patch.tool_log.read.response'),
-    requestId: z.string().min(1),
-    ...hostIdField,
-    entries: z.array(ToolLogEntry),
-  })
-  .strict();
-export type PatchToolLogReadResponseEvent = z.infer<typeof PatchToolLogReadResponseEvent>;
+export type PatchToolLogEntryEvent = z.infer<typeof PatchToolLogEntryEvent>;
 
 /** One reading of an account's limit windows, kept so Usage can chart how it went down. */
 export const UsageSample = z
@@ -7536,6 +7505,21 @@ export type ChatTurnStartedEvent = z.infer<typeof ChatTurnStartedEvent>;
  * when the turn ended. `error` is the code and the provider's own wording when
  * it failed.
  */
+/** What a turn that ended on a provider limit says about it (`chat.turn_ended.limit`). */
+export const TurnLimit = z
+  .object({
+    /** The account the turn ran on. */
+    accountId: z.string().min(1).optional(),
+    /** The pool that ran out, where the provider said (`session`, `week`), else `unknown`. */
+    scope: z.string().min(1),
+    /** ms-epoch the provider stated the limit lifts. Absent when nothing stated one. */
+    resetsAt: z.number().int().optional(),
+    /** The provider's own words. */
+    message: z.string(),
+  })
+  .strict();
+export type TurnLimit = z.infer<typeof TurnLimit>;
+
 export const ChatTurnEndedEvent = z
   .object({
     type: z.literal('chat.turn_ended'),
@@ -7545,6 +7529,14 @@ export const ChatTurnEndedEvent = z
     at: z.number().int().nonnegative(),
     outcome: TurnOutcome,
     error: z.object({ code: ChatErrorCode, message: z.string() }).strict().optional(),
+    /**
+     * The turn ended on a provider limit and the host holds it owed (spec/12 §
+     * Limits and sign-in). A fact, not a status: the server reads the account's
+     * own state (spec/10 § Account states) to decide whether the chat is paused
+     * until a reset, waiting for sign-in or out of credit. Sent only by a host
+     * that says `limitFacts` on `host.host`.
+     */
+    limit: TurnLimit.optional(),
     branchId: z.string().min(1).optional(),
   })
   .strict();
@@ -7604,11 +7596,13 @@ export type HostOutboxAckEvent = z.infer<typeof HostOutboxAckEvent>;
 
 /**
  * Server -> host: the user made this host the Manager's home (spec/06 § Changing
- * home). The host continues the thread's record from `nextSeq` under the same
- * chat id, marks the handover in the transcript naming both hosts, and sends
- * `message` (the summary the user approved; empty when they cleared it) as an
- * ordinary message. `epoch` counts changes, so a host told the same one twice
- * acts on it once.
+ * home). The host continues each special thread's record from the server's
+ * high-water mark under the same chat id: `nextSeqs` names the next seq of every
+ * special thread, Speakers as well as the Manager. `nextSeq` is the Manager's,
+ * kept for hosts from before `nextSeqs`. The host marks the handover in the
+ * Manager's transcript naming both hosts, and sends `message` (the summary the
+ * user approved; empty when they cleared it) as an ordinary message. `epoch`
+ * counts changes, so a host told the same one twice acts on it once.
  */
 export const HostManagerHandoverEvent = z
   .object({
@@ -7616,6 +7610,8 @@ export const HostManagerHandoverEvent = z
     hostId: z.string().min(1),
     epoch: z.number().int().positive(),
     nextSeq: z.number().int().nonnegative(),
+    /** Absent only from a server that predates it, which hands over the Manager alone. */
+    nextSeqs: z.record(z.string().min(1), z.number().int().nonnegative()).optional(),
     fromHostName: z.string().min(1),
     toHostName: z.string().min(1),
     message: z.string(),
@@ -10269,6 +10265,14 @@ export const AuthOkEvent = z
      */
     serverStatus: z.literal(true).optional(),
     /**
+     * Sent to a host by a server that answers `patch_peek` and `patch_history`
+     * from its own record (spec/03 § Cross-chat tools) and keeps the account's
+     * tool log (`patch.tool_log.entry`). A host refuses those two tools with a
+     * plain "update the server" error on a server without it, and keeps its
+     * tool-log entries in its own file until it reaches a server with it.
+     */
+    serverReads: z.literal(true).optional(),
+    /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Every current
      * server sends it; surfaces read history only this way, so a surface told
@@ -10499,12 +10503,9 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchSearchChatsResponseEvent,
   PatchActivityRequestEvent,
   PatchActivityResponseEvent,
-  PatchActivityReadRequestEvent,
-  PatchActivityReadResponseEvent,
   PatchBrowserUseRequestEvent,
   PatchBrowserUseResponseEvent,
-  PatchToolLogReadRequestEvent,
-  PatchToolLogReadResponseEvent,
+  PatchToolLogEntryEvent,
   PatchUsageReadRequestEvent,
   PatchUsageReadResponseEvent,
   PatchStopEvent,
@@ -10835,12 +10836,9 @@ export const EVENT_SCHEMAS = {
   'patch.search_chats.response': PatchSearchChatsResponseEvent,
   'patch.activity.request': PatchActivityRequestEvent,
   'patch.activity.response': PatchActivityResponseEvent,
-  'patch.activity.read.request': PatchActivityReadRequestEvent,
-  'patch.activity.read.response': PatchActivityReadResponseEvent,
   'patch.browser_use.request': PatchBrowserUseRequestEvent,
   'patch.browser_use.response': PatchBrowserUseResponseEvent,
-  'patch.tool_log.read.request': PatchToolLogReadRequestEvent,
-  'patch.tool_log.read.response': PatchToolLogReadResponseEvent,
+  'patch.tool_log.entry': PatchToolLogEntryEvent,
   'patch.usage.read.request': PatchUsageReadRequestEvent,
   'patch.usage.read.response': PatchUsageReadResponseEvent,
   'patch.stop': PatchStopEvent,

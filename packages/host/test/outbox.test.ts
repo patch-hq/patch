@@ -5,12 +5,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import pino from 'pino';
 import WS, { type WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, appendFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  appendFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decode, encode, type WireEvent } from '@patch/wire';
 import { Outbox } from '../src/outbox.js';
 import { createServerLink, type ServerLink } from '../src/serverLink.js';
+import { ToolLogSink } from '../src/toolLog.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -332,6 +340,66 @@ describe('server link with an outbox', () => {
       const resent = again.sent.filter((f) => f['type'] === 'host.outbox');
       expect(resent.map((f) => f['event'])).toEqual([started(-1), withRef(0)]);
     });
+  });
+
+  describe('tool-log entries: kept by a server that answers reads', () => {
+    const entry = (ts: number): WireEvent =>
+      ({
+        type: 'patch.tool_log.entry',
+        entry: { ts, tool: 'patch_peek', durationMs: 1, ok: true },
+      }) as WireEvent;
+
+    it('go through the outbox to a server with `serverReads`', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true, serverReads: true }));
+      s.sent.length = 0;
+      link.send(entry(1));
+      expect(s.sent).toEqual([{ type: 'host.outbox', position: 0, event: entry(1) }]);
+      expect(link.answersReads()).toBe(true);
+    });
+
+    it('are not sent to a server without it', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
+      s.sent.length = 0;
+      link.send(entry(1));
+      expect(s.sent).toEqual([]);
+      expect(link.answersReads()).toBe(false);
+    });
+  });
+
+  it('a host that updates before its server loses no tool call: old and new reach the server once it keeps the log', () => {
+    // The old per-host file, as an older host left it.
+    mkdirSync(join(dir, 'logs'), { recursive: true });
+    writeFileSync(
+      join(dir, 'logs', 'tool-calls.jsonl'),
+      `${JSON.stringify({ ts: 1, tool: 'patch_send_to', durationMs: 1, ok: true })}\n`,
+    );
+    const sink = new ToolLogSink(dir, (e) => link.send(e));
+
+    link.start();
+    const old = connect(authOk({ hostOutbox: true, recordComplete: true }));
+    sink.onServer(false); // what the host's onAuthed does with the greeting
+    sink.append({ ts: 2, tool: 'patch_peek', durationMs: 1, ok: true });
+    // The old server keeps no tool log and is sent none; its acknowledgements
+    // of other frames must not take the entries with them.
+    link.send(say(1));
+    old.receive({ type: 'host.outbox_ack', through: 0 });
+    expect(
+      old.sent.filter((f) => (f['event'] as { type?: string })?.type === 'patch.tool_log.entry'),
+    ).toEqual([]);
+    old.close(1006);
+
+    link.start();
+    const updated = connect(authOk({ hostOutbox: true, recordComplete: true, serverReads: true }));
+    sink.onServer(true);
+    sink.append({ ts: 3, tool: 'patch_history', durationMs: 1, ok: true });
+    const kept = updated.sent
+      .filter((f) => f['type'] === 'host.outbox')
+      .map((f) => f['event'] as { type: string; entry?: { ts: number } })
+      .filter((e) => e.type === 'patch.tool_log.entry')
+      .map((e) => e.entry!.ts);
+    expect(kept).toEqual([1, 2, 3]);
   });
 
   // spec/12 § Chat status: a server that decides status itself says

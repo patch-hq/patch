@@ -1444,6 +1444,9 @@ export class WsHub {
               recordImport: true as const,
               recordComplete: true as const,
               recordBranches: true as const,
+              // patch_peek / patch_history are answered from the record, and the
+              // tool log is kept here (spec/03 § Cross-chat tools).
+              serverReads: true as const,
             }
           : {}),
         hostOutbox: true,
@@ -2031,6 +2034,11 @@ export class WsHub {
         return;
       }
     }
+  }
+
+  /** Does this host report a turn that met a limit as a fact on its end (`chat.turn_ended.limit`)? */
+  hostLimitFacts(hostId: string): boolean {
+    return this.lastHostReport.get(hostId)?.limitFacts === true;
   }
 
   /** Does this host say it takes queued messages from the server? */

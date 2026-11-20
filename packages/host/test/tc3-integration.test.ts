@@ -457,63 +457,8 @@ describe('TC3 [test-runner] special-thread first turn after a host RESTART (real
         | { content: string }
         | undefined;
       expect(reply?.content).toBe('got it');
-
-      // patch_peek over the real UDS returns the spec'd shape and now carries
-      // the just-emitted wire events for the thread.
-      const peek = await udsRequest<{
-        chat_state: { chatId: string; activity: string };
-        events: unknown[];
-        truncated: boolean;
-      }>(socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'GET',
-        path: '/internal/peek/thread_speakers',
-      });
-      expect(peek.chat_state.chatId).toBe('thread_speakers');
-      expect(peek.chat_state.activity).toBe('idle');
-      expect(Array.isArray(peek.events)).toBe(true);
-      expect(peek.events.length).toBeGreaterThan(0);
-      expect(peek.truncated).toBe(false);
     } finally {
       await app.close();
-    }
-  });
-
-  it('B19 patch_peek respects opts.limit and reports truncated when more events exist', async () => {
-    const s = await startHost();
-    const folder = mkTmp('tc3d-folder-');
-    const chatId = await s.spawnChat(folder);
-    // Drive several turns to accumulate wire events on the chat.
-    for (let i = 0; i < 4; i++) {
-      await s.daemon.sendInput({ chatId, message: `turn ${i}`, localId: `t-${i}` });
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    try {
-      const full = await udsRequest<{ events: unknown[]; truncated: boolean }>(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'GET',
-        path: `/internal/peek/${chatId}`,
-      });
-      expect(full.events.length).toBeGreaterThan(1);
-
-      // Ask for just 1 event — must return 1 and flag truncated.
-      const limited = await udsRequest<{ events: unknown[]; truncated: boolean }>(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'GET',
-        path: `/internal/peek/${chatId}?limit=1`,
-      });
-      expect(limited.events).toHaveLength(1);
-      expect(limited.truncated).toBe(true);
-
-      // limit is clamped to the 200 hard cap (no error for over-cap).
-      const capped = await udsRequest<{ events: unknown[] }>(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'GET',
-        path: `/internal/peek/${chatId}?limit=9999`,
-      });
-      expect(capped.events.length).toBe(full.events.length);
-    } finally {
-      await s.close();
     }
   });
 });

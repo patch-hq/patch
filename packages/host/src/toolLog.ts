@@ -1,113 +1,75 @@
 // Cross-chat tool-call log — "things agents did" (Settings → Activity).
 //
-// Every `patch_*` cross-chat tool call already reaches `control.ts`'s
-// `toolLogger` hook (tool, callerChatId, targetChatId, durationMs, ok, err).
-// Until now that hook only reached the structured process logger
-// (`daemon.log`), which nothing in the product reads back — so a chat that
-// got unhidden by a stray `patch_send_to` with no caller context had no
-// durable, queryable record of what happened or who was asking. This module
-// gives that hook a second, durable destination: one bounded, append-only
-// JSONL file per host, read the same way job runs and webhook logs are
-// (`packages/server/src/jobs/logs.ts`).
-//
-//   <patchHome>/logs/tool-calls.jsonl
-//
-// Not fsync'd per line — this is observability, not transactional state,
-// same reasoning as job runs.jsonl. Trimmed on write rather than left to grow
-// forever: once the file passes MAX_FILE_BYTES it is rewritten holding only
-// its newest KEEP_ENTRIES lines.
+// Every `patch_*` cross-chat tool call reaches `control.ts`'s `toolLogger`
+// hook. The server keeps the account's log (`patch.tool_log.entry`, sent
+// through the host outbox, spec/01 § Host outbox), but only a server whose
+// `auth.ok` says `serverReads` keeps one: an older server would have the
+// entries acknowledged and dropped. So until the server on the link says it
+// keeps the log, entries go to this host's own `<patchHome>/logs/tool-calls.jsonl`
+// (which hosts have always kept), and the first time one does, that file is
+// handed to the outbox and deleted. From then on entries go to the outbox.
 
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ToolLogEntry, WireEvent } from '@patch/wire';
 
-export interface ToolLogEntry {
-  ts: number;
-  tool: string;
-  callerChatId?: string;
-  targetChatId?: string;
-  durationMs: number;
-  ok: boolean;
-  err?: string;
+/** The tool-log entry this host sends the server for one call. */
+export function toolLogEvent(entry: ToolLogEntry): WireEvent {
+  return { type: 'patch.tool_log.entry', entry };
 }
 
-/** Trim trigger — the file is rewritten once it passes this size. */
-export const TOOL_LOG_MAX_FILE_BYTES = 2 * 1024 * 1024;
-/** How many of the newest entries survive a trim. */
-export const TOOL_LOG_KEEP_ENTRIES = 5_000;
-
-export interface ToolLogStoreOptions {
-  /** Trim trigger, overriding {@link TOOL_LOG_MAX_FILE_BYTES} — tests only. */
-  maxFileBytes?: number;
-  /** Lines kept on a trim, overriding {@link TOOL_LOG_KEEP_ENTRIES} — tests only. */
-  keepEntries?: number;
-}
-
-export class ToolLogStore {
+export class ToolLogSink {
+  private readonly dir: string;
   private readonly path: string;
-  private readonly maxFileBytes: number;
-  private readonly keepEntries: number;
+  /** Whether the server on the link keeps the tool log. */
+  private serverKeeps = false;
 
-  constructor(patchHome: string, opts: ToolLogStoreOptions = {}) {
-    const dir = join(patchHome, 'logs');
-    mkdirSync(dir, { recursive: true });
-    this.path = join(dir, 'tool-calls.jsonl');
-    this.maxFileBytes = opts.maxFileBytes ?? TOOL_LOG_MAX_FILE_BYTES;
-    this.keepEntries = opts.keepEntries ?? TOOL_LOG_KEEP_ENTRIES;
-  }
-
-  append(entry: ToolLogEntry): void {
-    appendFileSync(this.path, `${JSON.stringify(entry)}\n`, 'utf8');
-    this.trimIfOversized();
-  }
-
-  private trimIfOversized(): void {
-    let size: number;
-    try {
-      size = statSync(this.path).size;
-    } catch {
-      return;
-    }
-    if (size <= this.maxFileBytes) return;
-    const lines = readLines(this.path);
-    const kept = lines.slice(Math.max(0, lines.length - this.keepEntries));
-    const tmp = `${this.path}.tmp.${process.pid}.${Date.now()}`;
-    writeFileSync(tmp, kept.length > 0 ? `${kept.join('\n')}\n` : '', 'utf8');
-    renameSync(tmp, this.path);
+  constructor(
+    patchHome: string,
+    /** Into the outbox: kept until the server acknowledges it. */
+    private readonly send: (event: WireEvent) => void,
+  ) {
+    this.dir = join(patchHome, 'logs');
+    this.path = join(this.dir, 'tool-calls.jsonl');
   }
 
   /**
-   * Entries with `since <= ts <= until`, oldest first, capped at `limit` —
-   * same cursor-friendly shape `readUserMessages` returns for `patch_activity`
-   * (see `activity.ts`'s "oldest `limit` in the window").
+   * On every `auth.ok`: whether this server keeps the tool log. The first one
+   * that does is handed whatever the local file holds. Returns how many
+   * entries were handed over.
    */
-  readEntries(since: number, until: number, limit: number): ToolLogEntry[] {
-    const out: ToolLogEntry[] = [];
-    for (const line of readLines(this.path)) {
+  onServer(keepsToolLog: boolean): number {
+    this.serverKeeps = keepsToolLog;
+    return keepsToolLog ? this.handOver() : 0;
+  }
+
+  append(entry: ToolLogEntry): void {
+    if (this.serverKeeps) {
+      this.send(toolLogEvent(entry));
+      return;
+    }
+    mkdirSync(this.dir, { recursive: true });
+    appendFileSync(this.path, `${JSON.stringify(entry)}\n`, 'utf8');
+  }
+
+  /** Send every entry of the local file through the outbox, then delete it. */
+  private handOver(): number {
+    if (!existsSync(this.path)) return 0;
+    let sent = 0;
+    for (const line of readFileSync(this.path, 'utf8').split('\n')) {
+      if (line.length === 0) continue;
       let entry: ToolLogEntry;
       try {
         entry = JSON.parse(line) as ToolLogEntry;
       } catch {
-        continue; // Not an entry — observability log, not transactional state.
+        continue; // A torn line: observability, not transactional state.
       }
-      if (entry.ts < since || entry.ts > until) continue;
-      out.push(entry);
-      if (out.length >= limit) break;
+      if (typeof entry.ts !== 'number' || typeof entry.tool !== 'string') continue;
+      this.send(toolLogEvent(entry));
+      sent += 1;
     }
-    return out;
+    // The outbox has every entry on disk now, so the file can go.
+    rmSync(this.path, { force: true });
+    return sent;
   }
-}
-
-function readLines(path: string): string[] {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((l) => l.length > 0);
 }

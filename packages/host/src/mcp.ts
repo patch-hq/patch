@@ -172,7 +172,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_peek',
     {
       description:
-        "Read another chat's live state plus the most-recent slice of its wire-event stream — on ANY registered host, not just this one. Returns { chat_state, events, truncated }: chat_state is the snapshot (activity, name, folder, last update); events is the recent wire-event window (default 50, up to 200 via limit); truncated:true means older events exist — call patch_history to paginate. Use to check what a sibling chat is doing right now without sending a message. Read-only, no summary pass.",
+        "Read another chat's status and the latest entries of its record, from the Patch server — for a chat on ANY host, including one whose host is offline. Returns { chat_state, events, truncated }: chat_state has chatId, hostId, hostOnline, name, folder, chatStatus (the server's status: state such as idle, running, waiting_for_user, host_offline, failed, with any reason), status (lifecycle), pinned, model, lastUpdated, lastMessages (its latest 20 user and assistant messages: role, content, seq, ts), lastMessage (the latest assistant message), lastError and eventCount (how many entries the chat has ever had); events is the latest slice of the record (default 50, up to 200 via limit); truncated:true means older entries exist — call patch_history to paginate. Use to check what a sibling chat is doing without sending a message. Read-only, no summary pass.",
       inputSchema: {
         chatId: z.string().min(1).describe(CHAT_ID_PARAM),
         limit: z.number().int().positive().max(200).optional(),
@@ -1267,7 +1267,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_history',
     {
       description:
-        "Paginated read of another chat's history — on ANY registered host, not just this one. limit defaults to 50; values above the 200 hard cap are clamped to 200 (not rejected). Use after patch_peek when you need older events.",
+        "Paginated read of another chat's record, from the Patch server — for a chat on ANY host, including one whose host is offline. Returns { events, nextFromSeq? }: entries with seq >= fromSeq (default 0), oldest first; pass nextFromSeq as fromSeq for the next page. limit defaults to 50; values above the 200 hard cap are clamped to 200 (not rejected). Use after patch_peek when you need older entries.",
       inputSchema: {
         chatId: z.string().min(1).describe(CHAT_ID_PARAM),
         fromSeq: z
@@ -1349,7 +1349,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_activity',
     {
       description:
-        "Read the USER'S OWN messages for a window — not agent output, which is already reachable via patch_peek/patch_history. Returns { messages, messagesTruncated, nextMessagesCursor? }. messages are role='user' turns, oldest first, across every host (chatId, chatName, hostId, folder, text, ts — ms-epoch, kind?). `kind` is absent when a person actually typed the message (composer, voice, a fork/side message); otherwise it names what the host fired on its own behalf instead: 'job' (a job's fire into an existing chat), 'hook' (an agent-response hook's resubmit), 'goal' (a goal evaluator's not-met resubmit), or 'machine' (a self-wake, a Manager-sweep answer, a patch_delegate relay, a `patch chats send-to` from the CLI, or the todo list advancing). Filter on `kind` being absent to see only what a person wrote. `since`/`until` are ms-epoch and the window is capped server-side (30 days) regardless of what you ask for. If `messagesTruncated` is true, re-call with `nextMessagesCursor` as `messagesCursor` (same since/until) to continue. Pass includeSessions:true to ALSO get the user's chat dwell time: `chatSessions` (chatId, chatName, hostId, folder, start, end, durationMs — ms-epoch) are periods a chat was open on a FOCUSED, VISIBLE surface, with `sessionsTruncated` and `nextSessionsCursor?`; page it with `sessionsCursor` (independent of messagesCursor — a list that was not truncated is re-read from `since`). Without includeSessions the result has no session fields. Read-only.",
+        "Read the USER'S OWN messages for a window — not agent output, which is already reachable via patch_peek/patch_history. Returns { messages, messagesTruncated, nextMessagesCursor? }. messages are role='user' turns, oldest first, across every host (chatId, chatName, hostId, folder, text, ts — ms-epoch, kind?). `kind` is absent when a person actually typed the message (composer, voice, a fork/side message); otherwise it names what the host fired on its own behalf instead: 'job' (a job's fire into an existing chat), 'hook' (an agent-response hook's resubmit), 'goal' (a goal evaluator's not-met resubmit), or 'machine' (a self-wake, a Manager-sweep answer, a patch_delegate relay, a `patch chats send-to` from the CLI, or the todo list advancing). Filter on `kind` being absent to see only what a person wrote. Read from the server's record, so chats on offline hosts are included. `since`/`until` are ms-epoch and the window is capped server-side (30 days) regardless of what you ask for. If `messagesTruncated` is true, re-call with `nextMessagesCursor` as `messagesCursor` (same since/until) to continue. Pass includeSessions:true to ALSO get the user's chat dwell time: `chatSessions` (chatId, chatName, hostId, folder, start, end, durationMs — ms-epoch) are periods a chat was open on a FOCUSED, VISIBLE surface, with `sessionsTruncated` and `nextSessionsCursor?`; page it with `sessionsCursor` (independent of messagesCursor — a list that was not truncated is re-read from `since`). Without includeSessions the result has no session fields. Read-only.",
       inputSchema: {
         since: z.number().int().nonnegative(),
         until: z.number().int().nonnegative(),
@@ -1662,43 +1662,6 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   );
 
   return server;
-}
-
-// patch_peek response shape (spec/06): chat_state snapshot + recent wire-event
-// slice + truncated flag.
-export interface PeekChatState {
-  chatId: string;
-  name: string | null;
-  folder: string;
-  activity: string;
-  status: string;
-  pinned: boolean;
-  pinnedAt: number | null;
-  lastMessages: unknown[];
-  lastUpdated: number;
-  lastMessage?: string;
-  lastError: unknown;
-}
-
-export interface PeekResponse {
-  chat_state: PeekChatState;
-  events: unknown[];
-  truncated: boolean;
-}
-
-export function peekViaUds(
-  socketPath: string,
-  chatId: string,
-  opts?: { limit?: number; localKey?: string },
-): Promise<PeekResponse> {
-  const params = new URLSearchParams();
-  if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return udsRequest<PeekResponse>(socketPath, {
-    method: 'GET',
-    path: `/internal/peek/${encodeURIComponent(chatId)}${qs ? `?${qs}` : ''}`,
-    ...(opts?.localKey !== undefined ? { localKey: opts.localKey } : {}),
-  });
 }
 
 /** Internal: HTTP request via UDS, JSON in / JSON out. NO FALLBACK on errors. */

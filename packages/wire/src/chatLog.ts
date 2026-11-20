@@ -23,6 +23,7 @@ import {
   PermissionMode,
   TurnOrigin,
   TurnOutcome,
+  TurnLimit,
 } from './events.js';
 
 export const CHAT_LOG_VERSION = 1;
@@ -110,6 +111,8 @@ export const LogRecordBody = z.discriminatedUnion('k', [
       k: z.literal('turn.end'),
       outcome: TurnOutcome,
       error: z.object({ code: ChatErrorCode, message: z.string() }).strict().optional(),
+      /** The turn ended on a provider limit and is owed (`chat.turn_ended.limit`). */
+      limit: TurnLimit.optional(),
       usage: z.record(z.unknown()).optional(),
     })
     .strict(),
@@ -208,9 +211,11 @@ export type LogRecord = z.infer<typeof LogRecord>;
  * The events a host sends through its outbox (spec/01 § Host outbox): what the
  * chat's record keeps, numbered in the chat (`seq` 0 or above) and not addressed
  * to one surface, and the chat's turn boundaries (placed at the chat's highest
- * seq, -1 before its first entry). Everything else is live-only and is not resent.
+ * seq, -1 before its first entry), and the host-wide facts in
+ * `HOST_OUTBOX_EVENT_TYPES`. Everything else is live-only and is not resent.
  */
 export function isOutboxEvent(event: { type: string }): boolean {
+  if (HOST_OUTBOX_EVENT_TYPES.has(event.type)) return true;
   if (!OUTBOX_EVENT_TYPES.has(event.type)) return false;
   const { chatId, seq, forSurfaceId } = event as {
     chatId?: unknown;
@@ -225,6 +230,12 @@ export function isOutboxEvent(event: { type: string }): boolean {
     forSurfaceId === undefined
   );
 }
+
+/**
+ * Host-wide facts the server keeps that belong to no chat, sent through the
+ * outbox so a dropped link or a restart loses none of them.
+ */
+export const HOST_OUTBOX_EVENT_TYPES: ReadonlySet<string> = new Set(['patch.tool_log.entry']);
 
 /** The turn boundaries a host reports (spec/01 § Chat record). */
 export const TURN_BOUNDARY_TYPES: ReadonlySet<string> = new Set([

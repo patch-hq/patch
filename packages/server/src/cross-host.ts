@@ -18,15 +18,18 @@
 //      host it lives on, so the calling agent can address it afterwards.
 //   2b. `patch.search_chats.request` is answered by `chat-search.ts` from the
 //      chat mirror and the transcripts the server holds.
-//   3. `patch.peek.request` / `patch.history.request` / `patch.send_to` / `patch.stop` carrying
-//      a `requestId` are relayed to whichever host the chat mirror says OWNS
-//      `targetChatId` — resolved here rather than by the caller naming a host,
-//      because `patch_peek`/`patch_history`/`patch_send_to` take only a chatId
-//      (an agent learns which chat lives where from `patch_list_chats`, not the
-//      other way round). The owning host's `.response` is relayed back the
-//      same way a spawn's is. A request with no `requestId` is a same-host call
-//      already resolved in-process, kept on the wire only as an audit record,
-//      and is never relayed (mirrors `patch.spawn`'s own-host case).
+//   2c. `patch.peek.request` / `patch.history.request` are answered here from
+//      the server's record and chat status (`agent-reads.ts`); no host is
+//      asked, so a chat on an offline host reads like any other.
+//   3. `patch.send_to` / `patch.stop` carrying a `requestId` are relayed to
+//      whichever host the chat mirror says OWNS `targetChatId` — resolved here
+//      rather than by the caller naming a host, because `patch_send_to` takes
+//      only a chatId (an agent learns which chat lives where from
+//      `patch_list_chats`, not the other way round). The owning host's
+//      `.response` is relayed back the same way a spawn's is. A request with no
+//      `requestId` is a same-host call already resolved in-process, kept on the
+//      wire only as an audit record, and is never relayed (mirrors
+//      `patch.spawn`'s own-host case).
 //
 // NO FALLBACK: a call naming an unregistered or offline host, or a chatId no
 // host has ever reported, is refused with an error naming the problem,
@@ -41,6 +44,7 @@ import type { Registry } from './registry.js';
 import type { ActivityReader } from './activity.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import { searchChats } from './chat-search.js';
+import { chatHistory, peekChat } from './agent-reads.js';
 import type { TimerService } from './timers.js';
 
 /** Surface id used for server-originated frames on the host link. */
@@ -75,8 +79,8 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
   const spawnRoutes = new Map<string, { fromHostId: string; timer: NodeJS.Timeout }>();
 
   /**
-   * requestId → the host that raised a relayed `patch.peek.request` /
-   * `patch.history.request` / `patch.send_to`. One map for all three: their
+   * requestId → the host that raised a relayed `patch.send_to` /
+   * `patch.stop`. One map for both: their
    * requestIds come from independent generators on the host side, so
    * collision would need two coordinators to mint the same random string.
    */
@@ -98,8 +102,8 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
 
   /**
    * Where does `targetChatId` actually live, and can it be reached right now?
-   * The only place that knows is the chat mirror — `patch_peek`/`patch_history`/
-   * `patch_send_to` are handed a bare chatId, never a host.
+   * The only place that knows is the chat mirror — `patch_send_to`/`patch_stop`
+   * are handed a bare chatId, never a host.
    */
   const resolveTargetHost = (
     targetChatId: string,
@@ -309,50 +313,34 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
     }
 
     if (event.type === 'patch.peek.request' || event.type === 'patch.history.request') {
-      // No requestId: a same-host call, already resolved in-process by the
-      // calling host — this frame is only its audit record (see file header
-      // § 3), and relaying it would perform the read a second time.
+      // Answered here, from the server's record and status (spec/03 §
+      // Cross-chat tools), whichever host owns the chat and whether or not it
+      // is online. No requestId: an older host's audit record of a read it did
+      // itself, with nobody waiting on an answer.
       if (fromHostId === null || event.requestId === undefined) return;
-      const requestId = event.requestId;
-      const responseType =
-        event.type === 'patch.peek.request' ? 'patch.peek.response' : 'patch.history.response';
-      const resolved = resolveTargetHost(event.targetChatId);
-      if (!resolved.ok) {
+      const reads = {
+        chatRegistry,
+        chatLogStore,
+        isHostOnline: (hostId: string) => hostLink.isOnline(hostId),
+      };
+      const outcome =
+        event.type === 'patch.peek.request'
+          ? peekChat(reads, event.targetChatId, event.limit)
+          : chatHistory(reads, event.targetChatId, event.fromSeq, event.limit);
+      if (!outcome.ok) {
         logger.warn(
-          { from: fromHostId, target: event.targetChatId, code: resolved.code },
-          `${event.type} named a chat this server cannot reach`,
+          { from: fromHostId, target: event.targetChatId, code: outcome.error.code },
+          `${event.type} named a chat this server does not know`,
         );
-        refuse(fromHostId, event.sourceChatId, resolved.code, resolved.message);
-        hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
-          type: responseType,
-          requestId,
-          sourceChatId: event.sourceChatId,
-          targetChatId: event.targetChatId,
-          ok: false,
-          error: { code: resolved.code, message: resolved.message },
-        });
-        return;
       }
-      logger.info(
-        { from: fromHostId, target: resolved.hostId, targetChatId: event.targetChatId },
-        `relaying ${event.type} to the host that owns the chat`,
-      );
-      trackRelay(requestId, fromHostId);
-      hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);
-      return;
-    }
-
-    if (event.type === 'patch.peek.response' || event.type === 'patch.history.response') {
-      if (event.requestId === undefined) return;
-      const route = takeRelay(event.requestId);
-      if (!route) {
-        logger.warn(
-          { requestId: event.requestId, from: fromHostId },
-          `${event.type} for a request this server did not relay; dropping`,
-        );
-        return;
-      }
-      hostLink.sendTo(route.fromHostId, BRIDGE_SURFACE_ID, event);
+      hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
+        type:
+          event.type === 'patch.peek.request' ? 'patch.peek.response' : 'patch.history.response',
+        requestId: event.requestId,
+        sourceChatId: event.sourceChatId,
+        targetChatId: event.targetChatId,
+        ...outcome,
+      });
       return;
     }
 

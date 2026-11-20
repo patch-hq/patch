@@ -1,7 +1,8 @@
 // A host that does not run the Manager may still carry a stale local
-// `thread_manager` (from before the Manager moved). patch_send_to / peek /
-// history addressed to it must go to the host that runs the Manager, never
-// to that stale copy (spec/06 § Where special threads run).
+// `thread_manager` (from before the Manager moved). patch_send_to addressed
+// to it must go to the host that runs the Manager, never to that stale copy
+// (spec/06 § Where special threads run); peek and history read the server's
+// record, never the local copy.
 
 import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
@@ -34,18 +35,18 @@ async function setup(runsManager: boolean) {
   const submitInput = vi.spyOn(daemon, 'submitInput').mockResolvedValue(undefined as never);
   const readHistory = vi.spyOn(daemon, 'readHistory').mockReturnValue({ events: [] } as never);
   const sendToRemoteChat = vi.fn(async () => {});
-  const peekRemoteChat = vi.fn(async () => ({ chat_state: {}, events: [], truncated: false }));
-  const historyRemoteChat = vi.fn(async () => ({ events: [] }));
+  const peekFromServer = vi.fn(async () => ({ chat_state: {}, events: [], truncated: false }));
+  const historyFromServer = vi.fn(async () => ({ events: [] }));
   const app = await buildControl({
     localKey: KEY,
     daemon,
     jobs: new MemoryJobsStore({ now: () => 1_700_000_000_000 }),
     runsManager: () => runsManager,
     sendToRemoteChat,
-    peekRemoteChat: peekRemoteChat as never,
-    historyRemoteChat: historyRemoteChat as never,
+    peekFromServer: peekFromServer as never,
+    historyFromServer: historyFromServer as never,
   });
-  return { app, submitInput, readHistory, sendToRemoteChat, peekRemoteChat, historyRemoteChat };
+  return { app, submitInput, readHistory, sendToRemoteChat, peekFromServer, historyFromServer };
 }
 
 describe('thread_manager addressed from a host that does not run the Manager', () => {
@@ -63,7 +64,7 @@ describe('thread_manager addressed from a host that does not run the Manager', (
     await s.app.close();
   });
 
-  it('peek relays', async () => {
+  it('peek reads the server', async () => {
     const s = await setup(false);
     const res = await s.app.inject({
       method: 'GET',
@@ -71,11 +72,11 @@ describe('thread_manager addressed from a host that does not run the Manager', (
       headers: auth,
     });
     expect(res.statusCode).toBe(200);
-    expect(s.peekRemoteChat).toHaveBeenCalledTimes(1);
+    expect(s.peekFromServer).toHaveBeenCalledTimes(1);
     await s.app.close();
   });
 
-  it('history relays and never reads the local copy', async () => {
+  it('history reads the server and never the local copy', async () => {
     const s = await setup(false);
     const res = await s.app.inject({
       method: 'GET',
@@ -83,7 +84,7 @@ describe('thread_manager addressed from a host that does not run the Manager', (
       headers: auth,
     });
     expect(res.statusCode).toBe(200);
-    expect(s.historyRemoteChat).toHaveBeenCalledTimes(1);
+    expect(s.historyFromServer).toHaveBeenCalledTimes(1);
     expect(s.readHistory).not.toHaveBeenCalled();
     await s.app.close();
   });
