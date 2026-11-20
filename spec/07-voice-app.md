@@ -195,6 +195,12 @@ A `call` session is on one device at a time. When an app surface (phone, web, de
 
 Switch here opens a normal call on that chat with `takeOver: true` on `audio.session_start`. Once the new session is established, the host closes every other `call` session on the same chat with the close reason `transferred` and announces them ended before announcing the new one. A session that is refused (missing key, unreachable host) never takes anything over. The surface that was closed with `transferred` ends its call quietly — no "call dropped" error — and its strip then shows where the call went. Sessions on other chats are untouched, and a session opened without `takeOver` never closes another.
 
+## A dropped call comes back
+
+A call that drops after it was live is redialled by the surface itself: a closed audio connection, or the host going away mid-call (`host_unreachable`), during a server or host restart or a network change. The host only ends a call on its own when it moves to another device (`transferred`) or after an error it has already reported, so every other close is treated as a drop. Redials back off over about two minutes (1, 2, 4, 8, 15, 20, 30 and 30 seconds), long enough to ride out a release restarting the server and the host; only after the last one fails does the call end, saying why. The call bar shows Connecting while it waits, and the surface plays its usual pick-up sound when the line is back.
+
+A redial's `audio.session_start` carries `resumed: true`, and the host writes one line into the chat: `The call was interrupted, so Patch started a new one`. A call that was cut and picked up again is never silently a different call.
+
 ## Turn semantics
 
 | Event                 | Direction            | Handling                                                                                            |

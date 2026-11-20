@@ -339,6 +339,54 @@ export async function startVoiceCall(
   }
   store.endNote();
   store.startCall(chatId, mode);
+  clearRedial();
+  await openCallSession(chatId, mode, deps, opts);
+}
+
+/**
+ * A call that drops after it was live (a server or host restart, a network
+ * change) is redialled by itself on this backoff, about two minutes in all,
+ * before it gives up and says so (spec/07 § A dropped call comes back).
+ */
+export const CALL_REDIAL_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000, 30_000];
+let redialAttempt = 0;
+let redialTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearRedial(): void {
+  if (redialTimer !== null) clearTimeout(redialTimer);
+  redialTimer = null;
+  redialAttempt = 0;
+}
+
+/** The line dropped under a live call: redial after a delay, or give up loudly. */
+function redialOrGiveUp(chatId: string, deps: AudioSessionDeps | undefined, reason: string): void {
+  const store = useVoiceStore.getState();
+  if (store.call === null || redialTimer !== null) return;
+  const delay = CALL_REDIAL_DELAYS_MS[redialAttempt];
+  store.setSession(null);
+  if (delay === undefined) {
+    clearRedial();
+    useUiStore.getState().pushError(describeCallError(reason));
+    playCallSound('hangup');
+    store.endCall();
+    return;
+  }
+  redialAttempt += 1;
+  store.setCallPhase('connecting');
+  const mode = store.call.mode;
+  redialTimer = setTimeout(() => {
+    redialTimer = null;
+    if (useVoiceStore.getState().call === null) return; // hung up while waiting
+    void openCallSession(chatId, mode, deps, { resumed: true });
+  }, delay);
+}
+
+async function openCallSession(
+  chatId: string,
+  mode: AudioSessionMode,
+  deps: AudioSessionDeps | undefined,
+  opts: { takeOver?: boolean; resumed?: boolean },
+): Promise<void> {
   const addressWord = addressWordOrNull();
   try {
     const session = await openImpl({
@@ -347,6 +395,7 @@ export async function startVoiceCall(
       mode,
       ...(addressWord !== null ? { addressWord } : {}),
       ...(opts.takeOver === true ? { takeOver: true } : {}),
+      ...(opts.resumed === true ? { resumed: true } : {}),
       deps: deps ?? {},
       callbacks: {
         onTranscriptPartial: (t) => {
@@ -402,10 +451,16 @@ export async function startVoiceCall(
         },
         onLevel: (l) => useVoiceStore.getState().setCallLevel(l),
         onError: (m) => {
+          // The host went away under the call (it restarted, or the server
+          // lost it): redial rather than hang up.
+          if (m.startsWith('host_unreachable')) {
+            redialOrGiveUp(chatId, deps, m);
+            return;
+          }
           useUiStore.getState().pushError(describeCallError(m));
           endVoiceCall();
         },
-        onClose: () => {
+        onClose: (reason) => {
           // The audio socket closed — the host dropped the session, the
           // network went, or the call was ended from the other end. Clear the
           // call state here rather than only in `endVoiceCall`, which is the
@@ -417,11 +472,19 @@ export async function startVoiceCall(
           // Clear the store directly instead of calling `endVoiceCall`: the
           // socket is already gone, so there is nothing to send `session_end`
           // to, and re-entering the teardown would just close it again.
+          // The host only ends a call itself when it moves to another device
+          // ('transferred'); any other close the user did not ask for is a
+          // dropped call (a restart, the network), so redial it.
           const store = useVoiceStore.getState();
           if (store.call === null) return;
-          playCallSound('hangup');
-          store.setSession(null);
-          store.endCall();
+          if (reason === 'transferred') {
+            clearRedial();
+            playCallSound('hangup');
+            store.setSession(null);
+            store.endCall();
+            return;
+          }
+          redialOrGiveUp(chatId, deps, 'Call dropped — the audio connection closed');
         },
       },
     });
@@ -430,8 +493,14 @@ export async function startVoiceCall(
       return;
     }
     useVoiceStore.getState().setSession(session);
+    redialAttempt = 0;
     playCallSound('pickup');
   } catch (err) {
+    // A redial that cannot connect yet tries again; a first dial fails loudly.
+    if (opts.resumed === true) {
+      redialOrGiveUp(chatId, deps, (err as Error).message);
+      return;
+    }
     useUiStore.getState().pushError(failed('voice call'), undefined, (err as Error).message);
     useVoiceStore.getState().endCall();
   }
@@ -467,6 +536,7 @@ export function toggleCallMute(): void {
 }
 
 export function endVoiceCall(): void {
+  clearRedial();
   const store = useVoiceStore.getState();
   if (store.call !== null) playCallSound('hangup');
   store.session?.end('ended');

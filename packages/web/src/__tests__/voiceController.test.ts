@@ -27,6 +27,7 @@ import {
   toggleCallMute,
   endVoiceCall,
   describeCallError,
+  CALL_REDIAL_DELAYS_MS,
 } from '../lib/voiceController.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -489,12 +490,63 @@ describe('voiceController', () => {
     expect(sound.mock.calls).toEqual([['pickup']]);
     endVoiceCall();
     expect(sound.mock.calls).toEqual([['pickup'], ['hangup']]);
-    // The other end hanging up sounds too, and a call that is not live makes no sound.
+    // The call moving to another device sounds too, and a call that is not live makes no sound.
     await startVoiceCall('c1');
-    lastCallbacks?.onClose();
+    lastCallbacks?.onClose('transferred');
     expect(sound.mock.calls.map((c) => c[0])).toEqual(['pickup', 'hangup', 'pickup', 'hangup']);
     endVoiceCall();
     expect(sound).toHaveBeenCalledTimes(4);
+  });
+
+  it('a call that drops redials by itself, telling the host it is picking the call back up', async () => {
+    vi.useFakeTimers();
+    try {
+      const opened: Array<{ resumed?: boolean }> = [];
+      __setAudioOpenerForTests(async (o) => {
+        opened.push({ ...(o.resumed !== undefined ? { resumed: o.resumed } : {}) });
+        return stubOpener(o);
+      });
+      await startVoiceCall('c1');
+      lastCallbacks?.onClose();
+      expect(useVoiceStore.getState().call).not.toBeNull();
+      expect(useVoiceStore.getState().call?.phase).toBe('connecting');
+      await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS[0] ?? 0);
+      expect(opened).toEqual([{}, { resumed: true }]);
+      expect(useVoiceStore.getState().call).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+      endVoiceCall();
+    }
+  });
+
+  it('the host going away mid-call redials rather than hanging up', async () => {
+    vi.useFakeTimers();
+    try {
+      await startVoiceCall('c1');
+      lastCallbacks?.onError('host_unreachable: h1 went offline mid-session');
+      lastCallbacks?.onClose();
+      expect(useVoiceStore.getState().call?.phase).toBe('connecting');
+    } finally {
+      vi.useRealTimers();
+      endVoiceCall();
+    }
+  });
+
+  it('gives up and says so once every redial has failed', async () => {
+    vi.useFakeTimers();
+    try {
+      useUiStore.getState().clearToasts();
+      await startVoiceCall('c1');
+      __setAudioOpenerForTests(async () => {
+        throw new Error('host unreachable');
+      });
+      lastCallbacks?.onClose();
+      for (const d of CALL_REDIAL_DELAYS_MS) await vi.advanceTimersByTimeAsync(d);
+      expect(useVoiceStore.getState().call).toBeNull();
+      expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('barge-in: while the agent speaks, a user utterance flips the call back to listening', async () => {

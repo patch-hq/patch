@@ -199,6 +199,7 @@ import {
 } from './updateProbation.js';
 import { countUpdateAttempt, recordShutdown, recordStart, signalContext } from './runDiag.js';
 import {
+  waitForCallsToEnd,
   applyUpdate,
   checkForUpdate,
   createArtifactWait,
@@ -293,7 +294,7 @@ import {
   writeClaudeSettingsJson,
 } from './claudeSettings.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { startAudioServer, type AudioServerHandle } from './audio/server.js';
+import { CALL_RESUMED_NOTE, startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
 import {
   createManagerVoiceTools,
@@ -1105,7 +1106,16 @@ async function startHost(
       emit(describeHost());
     },
   });
-  const applyNow = (stagedVersion?: string): ReturnType<typeof applyUpdate> =>
+  // spec/02 § Self-update holds for calls — an update restarts the host, which
+  // would cut a live call. Wait for calls to end (bounded), then install.
+  const applyNow = async (stagedVersion?: string): ReturnType<typeof applyUpdate> => {
+    await waitForCallsToEnd({
+      activeCount: () => audioServer?.activeCount() ?? 0,
+      logger,
+    });
+    return applyNowUnheld(stagedVersion);
+  };
+  const applyNowUnheld = (stagedVersion?: string): ReturnType<typeof applyUpdate> =>
     applyUpdateGated({
       serverUrl: config.serverUrl,
       ...(stagedVersion ? { stagedVersion } : {}),
@@ -6457,8 +6467,18 @@ async function startHost(
     },
     // spec/07 § A call can move between devices — account-scoped, so every
     // surface learns a call is live on this chat and can offer to take it.
-    onCallSession: (info) =>
-      emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) }),
+    onCallSession: ({ resumed, ...info }) => {
+      emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) });
+      // spec/07 § A dropped call comes back — said in the chat, so a call that
+      // was cut and redialled is never silently a different call.
+      if (info.active && resumed === true) {
+        try {
+          daemon.recordCallNote(info.chatId, CALL_RESUMED_NOTE);
+        } catch (err) {
+          logger.error({ err: (err as Error).message }, 'voice: could not note the redialled call');
+        }
+      }
+    },
     submitUserTurn: async ({ chatId, message, source, onReplyText, handoff, onAccepted }) => {
       // Tag the turn by its ingress. Physical voice devices get
       // `[voice • device:<deviceId>]` (spec/06 ## Speakers thread) so the

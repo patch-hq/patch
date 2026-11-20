@@ -480,6 +480,12 @@ export const AudioSessionStartEvent = z
      * device at a time (`07-voice-app.md` § A call can move between devices).
      */
     takeOver: z.boolean().optional(),
+    /**
+     * A surface redialling a call that dropped (a server or host restart, a
+     * network change). The host writes a line into the chat saying the call was
+     * picked back up (`07-voice-app.md` § A dropped call comes back).
+     */
+    resumed: z.boolean().optional(),
   })
   .strict();
 export type AudioSessionStartEvent = z.infer<typeof AudioSessionStartEvent>;

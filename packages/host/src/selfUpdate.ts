@@ -807,3 +807,43 @@ export function describeUpdateRefusal(reason: string): string {
   }
   return `Update failed: ${reason}`;
 }
+
+/** Longest an update waits for calls to end before installing anyway. */
+export const CALL_HOLD_MAX_MS = 30 * 60_000;
+
+/**
+ * Hold an update while a voice session is open (spec/02 § Self-update holds
+ * for calls): installing restarts the host and cuts the call. Polls until no
+ * session is open or `maxMs` has passed, whichever is first, and says which.
+ */
+export async function waitForCallsToEnd(opts: {
+  activeCount: () => number;
+  logger: Logger;
+  maxMs?: number;
+  pollMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}): Promise<'clear' | 'timed-out'> {
+  const maxMs = opts.maxMs ?? CALL_HOLD_MAX_MS;
+  const pollMs = opts.pollMs ?? 10_000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.now ?? Date.now;
+  if (opts.activeCount() === 0) return 'clear';
+  const started = now();
+  opts.logger.info(
+    { sessions: opts.activeCount(), maxMs },
+    'self-update: a call is open; holding the update until it ends',
+  );
+  while (opts.activeCount() > 0) {
+    if (now() - started >= maxMs) {
+      opts.logger.warn(
+        { sessions: opts.activeCount(), heldMs: now() - started },
+        'self-update: call still open after the longest hold; installing anyway',
+      );
+      return 'timed-out';
+    }
+    await sleep(pollMs);
+  }
+  opts.logger.info({ heldMs: now() - started }, 'self-update: calls ended; installing');
+  return 'clear';
+}
