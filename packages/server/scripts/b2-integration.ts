@@ -134,10 +134,13 @@ async function main(): Promise<void> {
     `id=${jobId}`,
   );
 
-  // Atomic file on disk at /data/jobs/<id>.json (host bind mount /tmp/patch-data)
+  // Atomic file on disk at /data/jobs/<id>.json, inside the account's folder
+  // (spec/01 § Data folder; host bind mount /tmp/patch-data)
   let onDisk = false;
   try {
-    const out = execFileSync('cat', [`/tmp/patch-data/jobs/${jobId}.json`], { encoding: 'utf8' });
+    const out = execFileSync('sh', ['-c', `cat /tmp/patch-data/accounts/*/jobs/${jobId}.json`], {
+      encoding: 'utf8',
+    });
     onDisk = JSON.parse(out).id === jobId;
   } catch (e) {
     onDisk = false;
@@ -376,7 +379,9 @@ async function main(): Promise<void> {
   );
   let stillThere = true;
   try {
-    execFileSync('cat', [`/tmp/patch-data/jobs/${jobId}.json`], { encoding: 'utf8' });
+    execFileSync('sh', ['-c', `cat /tmp/patch-data/accounts/*/jobs/${jobId}.json`], {
+      encoding: 'utf8',
+    });
   } catch {
     stillThere = false;
   }
