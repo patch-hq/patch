@@ -277,6 +277,11 @@ export const ChatErrorCode = z.enum([
   'chatgpt_login_required',
   // No longer sent (the local-model loop is retired); kept so older hosts' errors still parse.
   'local_endpoint_missing',
+  // An ACP agent refused to start a session for want of a sign-in or key.
+  'acp_agent_signed_out',
+  // A turn sent to a chat whose model is retired (`retiredModelNotice`): its
+  // history stays readable, and a surface offers a new chat on the successor model.
+  'model_retired',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.

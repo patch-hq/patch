@@ -168,8 +168,12 @@ export interface DurableCodexHandlers {
   onExit(reason: string): void;
 }
 
-/** Which process a runner holds: `codex app-server`. */
-interface DurableProcessKind {
+/**
+ * Which process a runner holds. The class carries any JSON-RPC-over-lines
+ * process, not only `codex app-server`: a local-model turn's agent process
+ * (`localAgent.ts`) speaks the same shape and rides the same runner.
+ */
+export interface DurableProcessKind {
   /** Shown in errors: "Codex process exited". */
   name: string;
   /** Written to `turn.json` and used in log lines. */
@@ -177,7 +181,7 @@ interface DurableProcessKind {
 }
 const CODEX_KIND: DurableProcessKind = { name: 'Codex', harness: 'codex' };
 
-/** The host's end of one Codex turn's runner. */
+/** The host's end of one Codex (or local-model) turn's runner. */
 export class DurableCodexProcess implements LiveTurn {
   readonly chatId: string;
   readonly dir: string;
@@ -195,8 +199,10 @@ export class DurableCodexProcess implements LiveTurn {
   /** Recovered state, set when this process carries on a previous host's turn. */
   readonly recovered: RecoveredCodexTurn | undefined;
 
-  private readonly kind: DurableProcessKind = CODEX_KIND;
-  constructor(private readonly req: DurableTurnRequest) {
+  constructor(
+    private readonly req: DurableTurnRequest,
+    private readonly kind: DurableProcessKind = CODEX_KIND,
+  ) {
     this.chatId = req.chatId;
     this.dir = turnDirFor(req.config, req.chatId);
     this.consumed = req.attach?.consumed ?? null;
