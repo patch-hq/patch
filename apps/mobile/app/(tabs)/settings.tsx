@@ -1,5 +1,5 @@
 // Settings tab (design/settings-redesign, phone layout): the title, then the
-// pages as a grouped list — Agents, Setup, System — each a full-width row with
+// pages as a grouped list — Setup, Agents, Voice, Advanced, App — each a full-width row with
 // a › that opens the page as its own screen (app/settings/[page].tsx). An
 // orange pip on Updates says something is behind.
 //
@@ -15,14 +15,16 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { fonts, radii, space, textMin, useTheme } from '../../src/lib/theme';
 import { useExperimentalFeatures, useSettingsStore } from '../../src/stores/settingsStore';
-import { visibleSettingsPages, type SettingsGroup } from '../../src/components/settings/pages';
+import {
+  EXPERIMENTAL_PAGE_IDS,
+  SETTINGS_GROUPS,
+  visibleSettingsPages,
+} from '../../src/components/settings/pages';
 import { GroupLabel } from '../../src/components/settings/ui';
 import { useUpdatesBehind } from '../../src/components/settings/VersionSection';
 
 /** How often the shared `/api/settings` read is refreshed — web's interval. */
 const SETTINGS_REFRESH_MS = 15_000;
-
-const GROUPS: readonly SettingsGroup[] = ['Agents', 'Setup', 'System'];
 
 export default function SettingsScreen(): React.ReactElement {
   const colors = useTheme();
@@ -82,7 +84,7 @@ export default function SettingsScreen(): React.ReactElement {
           {problem}
         </Text>
       ) : null}
-      {GROUPS.map((group) => (
+      {SETTINGS_GROUPS.map((group) => (
         <View key={group} testID={`settings-group-${group}`} style={{ marginTop: space.md }}>
           <View style={{ marginHorizontal: space.xs, marginBottom: -2 }}>
             <GroupLabel>{group}</GroupLabel>
@@ -109,17 +111,45 @@ export default function SettingsScreen(): React.ReactElement {
                   backgroundColor: pressed ? colors.bgSoft : colors.paperRaised,
                 })}
               >
-                <Text
-                  style={{
-                    flex: 1,
-                    fontFamily: fonts.bodyMedium,
-                    fontSize: 15,
-                    lineHeight: 21,
-                    color: colors.ink2,
-                  }}
-                >
-                  {p.title}
-                </Text>
+                <View style={{ flex: 1, paddingRight: space.sm }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
+                    <Text
+                      style={{
+                        fontFamily: fonts.bodyMedium,
+                        fontSize: 15,
+                        lineHeight: 21,
+                        color: colors.ink2,
+                      }}
+                    >
+                      {p.title}
+                    </Text>
+                    {EXPERIMENTAL_PAGE_IDS.includes(p.id) ? (
+                      <View
+                        testID={`settings-exp-${p.id}`}
+                        accessibilityLabel="Experimental"
+                        style={{
+                          width: 7,
+                          height: 7,
+                          borderRadius: 4,
+                          backgroundColor: colors.amber,
+                        }}
+                      />
+                    ) : null}
+                  </View>
+                  <Text
+                    testID={`settings-intro-${p.id}`}
+                    numberOfLines={2}
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: textMin,
+                      lineHeight: 19,
+                      color: colors.ink3,
+                      marginTop: 2,
+                    }}
+                  >
+                    {p.intro}
+                  </Text>
+                </View>
                 {p.id === 'updates' && behind ? (
                   <View
                     testID="settings-updates-pip"

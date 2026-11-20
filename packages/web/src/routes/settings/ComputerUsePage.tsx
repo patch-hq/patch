@@ -109,7 +109,11 @@ export function ComputerUsePage(): JSX.Element {
   });
 
   return (
-    <SettingsPage title="Computer use" testid="settings-computer-use">
+    <SettingsPage
+      intro="Whether an agent is driving a host's browser right now, with a button to stop it."
+      title="Computer use"
+      testid="settings-computer-use"
+    >
       {error ? (
         <Note testid="computer-use-error">Couldn’t check: {(error as Error).message}</Note>
       ) : data === undefined ? (

@@ -12,14 +12,13 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { Toggle } from '../../components/Toggle.js';
 import { useModelOptions } from './modelOptions.js';
 import { Group, Row, SettingsPage } from './ui.js';
-import { LayerEditor } from './AgentPage.js';
 import { patchShared } from './sharedWrite.js';
 import { failed } from '../../lib/errorCopy.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
 import { DeliverySlider } from './DeliverySlider.js';
 import { ManagerHomeGroup } from './ManagerHomeGroup.js';
 import { ManagerInstructionsRow } from './ManagerInstructionsRow.js';
-import { PromptRow } from './PromptsPage.js';
+import { PromptRow } from './PromptRow.js';
 
 export function ManagerPage(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -41,7 +40,12 @@ export function ManagerPage(): JSX.Element {
   };
 
   return (
-    <SettingsPage title="Manager" testid="settings-manager-page">
+    <SettingsPage
+      title="Manager"
+      intro="The chat that keeps an eye on all the others: where it runs, what it's told, and its voice."
+      experimental
+      testid="settings-manager-page"
+    >
       <ManagerHomeGroup />
 
       <Group label="Prompts" testid="settings-manager-prompts">
@@ -59,14 +63,14 @@ export function ManagerPage(): JSX.Element {
             })
           }
         />
-        <LayerEditor
+        <PromptRow
+          id="sweep"
           title="Standing instructions"
-          sub={preferences.sweepPrompt.split('\n')[0] ?? ''}
-          initial={preferences.sweepPrompt}
-          testid="sweep-prompt"
-          placeholder={DEFAULT_SWEEP_PROMPT}
+          sub="Which questions the Manager may answer for you when a chat goes idle."
+          defaultText={DEFAULT_SWEEP_PROMPT}
+          current={preferences.sweepPrompt}
           onSave={(text) => patchShared('sweep prompt', { sweepPrompt: text })}
-          onReset={() => patchShared('sweep prompt', { sweepPrompt: DEFAULT_SWEEP_PROMPT })}
+          onDefault={() => patchShared('sweep prompt', { sweepPrompt: DEFAULT_SWEEP_PROMPT })}
         />
       </Group>
 

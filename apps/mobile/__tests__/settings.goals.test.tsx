@@ -67,13 +67,10 @@ afterEach(() => {
 });
 
 describe('Settings → Goals', () => {
-  it('is a page of its own, between Manager and Dictation', () => {
+  it('is a page of its own in Agents, after Chats', () => {
     const ids = SETTINGS_PAGES.map((p) => p.id);
-    expect(ids.indexOf('goals')).toBe(ids.indexOf('manager') + 1);
-    expect(ids.indexOf('prompts')).toBe(ids.indexOf('goals') + 1);
-    expect(ids.indexOf('dictation')).toBe(ids.indexOf('prompts') + 1);
-    expect(ids.indexOf('meetings')).toBe(ids.indexOf('dictation') + 1);
-    expect(ids.indexOf('voice')).toBe(ids.indexOf('meetings') + 1);
+    expect(ids.indexOf('goals')).toBe(ids.indexOf('chats') + 1);
+    expect(settingsPage('goals')?.group).toBe('Agents');
     expect(settingsPage('goals')?.title).toBe('Goals');
   });
 

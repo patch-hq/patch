@@ -114,9 +114,10 @@ afterEach(() => {
 });
 
 describe('Settings → Hooks page', () => {
-  it('is a page of its own after Voice', () => {
+  it('is a page of its own in Advanced, after Tools (MCP)', () => {
     const ids = SETTINGS_PAGES.map((p) => p.id);
-    expect(ids.indexOf('hooks')).toBe(ids.indexOf('voice') + 1);
+    expect(ids.indexOf('hooks')).toBe(ids.indexOf('mcp') + 1);
+    expect(settingsPage('hooks')?.group).toBe('Advanced');
     expect(settingsPage('hooks')?.title).toBe('Hooks');
   });
 

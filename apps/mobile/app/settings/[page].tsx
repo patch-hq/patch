@@ -6,7 +6,8 @@
 import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { SettingsSection } from '../../src/components/SettingsSection';
-import { settingsPage } from '../../src/components/settings/pages';
+import { EXPERIMENTAL_PAGE_IDS, settingsPage } from '../../src/components/settings/pages';
+import { SettingsPageContext } from '../../src/components/settings/pageContext';
 import { NoticeRow } from '../../src/components/settings/HostSwitcher';
 import { SettingsPage } from '../../src/components/settings/SettingsPage';
 
@@ -22,5 +23,16 @@ export default function SettingsPageScreen(): React.ReactElement {
       </SettingsPage>
     );
   }
-  return <entry.Page />;
+  return (
+    <SettingsPageContext.Provider
+      value={{
+        id: entry.id,
+        title: entry.title,
+        intro: entry.intro,
+        experimental: EXPERIMENTAL_PAGE_IDS.includes(entry.id),
+      }}
+    >
+      <entry.Page />
+    </SettingsPageContext.Provider>
+  );
 }

@@ -11,6 +11,8 @@ import {
   QUESTION_EXPIRY_SECONDS_MIN,
   DEFAULT_PROVIDER_ID,
   DEFAULT_LINK_SUMMARY_PROMPT,
+  DEFAULT_QUESTION_EXPIRED_PROMPT,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
   HARNESS_PERMISSION_MODES,
   LIMIT_BEHAVIOUR_LABELS,
   LimitBehaviour,
@@ -30,13 +32,20 @@ import { patchShared } from './sharedWrite.js';
 import { useModelOptions } from './modelOptions.js';
 import { Group, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
+import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
+import { PromptRow } from './PromptRow.js';
+import { PositiveNumberInput } from './PositiveNumberInput.js';
 
 type Verbosity = 'off' | 'summary' | 'full';
 const VERBOSITY: readonly Verbosity[] = ['off', 'summary', 'full'];
 
 export function AgentPage(): JSX.Element {
   return (
-    <SettingsPage title="Agent" testid="settings-agent">
+    <SettingsPage
+      title="Agent"
+      intro="What every new chat starts with, and how agents ask, wait and carry on."
+      testid="settings-agent"
+    >
       <Group label="Defaults" testid="settings-default-model">
         <DefaultModelRow />
         <PermissionModeRow />
@@ -46,6 +55,8 @@ export function AgentPage(): JSX.Element {
       </Group>
       <QuestionsGroup />
       <ChatsGroup />
+      <BackgroundTasksGroup />
+      <JobsGroup />
       <LinkSummaryGroup />
       <LayersGroup />
     </SettingsPage>
@@ -237,6 +248,76 @@ function QuestionsGroup(): JSX.Element {
         />
         <span className="set-unit">s</span>
       </Row>
+      <QuestionExpiredPromptRow />
+    </Group>
+  );
+}
+
+function QuestionExpiredPromptRow(): JSX.Element {
+  const current = usePreferencesStore((s) => s.preferences.questionExpiredPrompt);
+  return (
+    <PromptRow
+      id="question-expired"
+      title="When a question times out"
+      sub="What the agent is told when nobody answers. {seconds} is the wait."
+      defaultText={DEFAULT_QUESTION_EXPIRED_PROMPT}
+      current={current}
+      onSave={(text) => patchShared('question timeout prompt', { questionExpiredPrompt: text })}
+      onDefault={() =>
+        patchShared('question timeout prompt', {
+          questionExpiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
+        })
+      }
+    />
+  );
+}
+
+/** How an agent is nudged while its background task runs (spec/02 § Background tasks). */
+function BackgroundTasksGroup(): JSX.Element {
+  const p = usePreferencesStore((s) => s.preferences);
+  return (
+    <Group label="Background tasks" testid="settings-background-tasks">
+      <Row title="Check in every">
+        <PositiveNumberInput
+          integer
+          ariaLabel="Minutes between background task check-ins"
+          value={p.watchCheckInMinutes}
+          testid="watch-check-in-minutes"
+          onCommit={(next) => void patchShared('check-in interval', { watchCheckInMinutes: next })}
+        />
+        <span className="set-unit">minutes</span>
+      </Row>
+      <PromptRow
+        id="watch-check-in"
+        title="Check-in message"
+        sub="Sent to the agent while its task runs. {description}, {running}, {lastOutput} and {taskId} are filled in."
+        defaultText={DEFAULT_WATCH_CHECK_IN_PROMPT}
+        current={p.watchCheckInPrompt}
+        onSave={(text) => patchShared('check-in prompt', { watchCheckInPrompt: text })}
+        onDefault={() =>
+          patchShared('check-in prompt', { watchCheckInPrompt: DEFAULT_WATCH_CHECK_IN_PROMPT })
+        }
+      />
+    </Group>
+  );
+}
+
+/** What starts every job's first message (spec/08 § Autonomy prompt). */
+function JobsGroup(): JSX.Element {
+  const current = usePreferencesStore((s) => s.preferences.jobAutonomyPrompt);
+  return (
+    <Group label="Jobs" testid="settings-jobs">
+      <PromptRow
+        id="job-autonomy"
+        title="How jobs work on their own"
+        sub="Starts every job's first message, unless the job has its own."
+        defaultText={DEFAULT_JOB_AUTONOMY_PROMPT}
+        current={current}
+        onSave={(text) => patchShared('autonomy prompt', { jobAutonomyPrompt: text })}
+        onDefault={() =>
+          patchShared('autonomy prompt', { jobAutonomyPrompt: DEFAULT_JOB_AUTONOMY_PROMPT })
+        }
+      />
     </Group>
   );
 }
@@ -245,25 +326,16 @@ function QuestionsGroup(): JSX.Element {
 function LinkSummaryGroup(): JSX.Element {
   const prompt = usePreferencesStore((s) => s.preferences.linkSummaryPrompt);
   return (
-    <Group label="Link summary" testid="settings-link-summary">
-      <LayerEditor
+    <Group label="Link summaries" testid="settings-link-summary">
+      <PromptRow
+        id="link-summary"
         title="Summarise prompt"
-        sub={
-          prompt === DEFAULT_LINK_SUMMARY_PROMPT
-            ? 'Built-in default'
-            : (prompt.split('\n')[0] ?? '')
-        }
-        initial={prompt}
-        testid="link-summary-prompt"
-        placeholder={DEFAULT_LINK_SUMMARY_PROMPT}
+        sub="What the Summarise button beside a link in a message runs with."
+        defaultText={DEFAULT_LINK_SUMMARY_PROMPT}
+        current={prompt}
         onSave={(text) => patchShared('link summary prompt', { linkSummaryPrompt: text })}
-        onReset={
-          prompt === DEFAULT_LINK_SUMMARY_PROMPT
-            ? undefined
-            : () =>
-                patchShared('link summary prompt', {
-                  linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
-                })
+        onDefault={() =>
+          patchShared('link summary prompt', { linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT })
         }
       />
     </Group>
@@ -332,48 +404,35 @@ function ChatsGroup(): JSX.Element {
 function LayersGroup(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
   // The built-in tools guidance is the host's own text; any host that has
-  // reported can show it. Absent override means that text is in force, so the
-  // editor shows it rather than sitting empty — a default nobody can read is a
-  // hidden directive (`principles.md § No system-prompt injection`).
+  // reported can show it. A default nobody can read is a hidden directive
+  // (`principles.md § No system-prompt injection`), so the row shows it.
   const toolsDefault = usePresenceStore(
     (s) =>
       Object.values(s.hosts).find((h) => h.host?.harnessToolsPromptDefault !== undefined)?.host
         ?.harnessToolsPromptDefault ?? '',
   );
-  const tools = preferences.harnessToolsPrompt;
-  const toolsState =
-    tools === null || (toolsDefault !== '' && tools === toolsDefault)
-      ? 'Built-in default'
-      : tools === ''
-        ? 'Off'
-        : 'Edited';
-  const system = preferences.harnessSystemPrompt;
-  const systemFirstLine = system.trim().split('\n')[0] ?? '';
-
   return (
-    <Group label="Layers added to Claude Code" testid="harness-config">
-      <LayerEditor
-        title="Patch tools prompt"
-        sub={toolsState}
-        initial={tools ?? toolsDefault}
-        testid="harness-tools-prompt"
-        placeholder="Empty: patch adds no tool guidance"
+    <Group label="Added to Claude Code" testid="harness-config">
+      <PromptRow
+        id="tools"
+        title="Patch tools guidance"
+        sub="How agents are told to use Patch's own tools. Empty turns it off."
+        defaultText={toolsDefault}
+        current={preferences.harnessToolsPrompt ?? toolsDefault}
         onSave={(text) => patchShared('tools prompt', { harnessToolsPrompt: text })}
-        // null restores the built-in default; '' turns the guidance off.
-        onReset={
-          tools === null
-            ? undefined
-            : () => patchShared('tools prompt', { harnessToolsPrompt: null })
-        }
+        onDefault={() => patchShared('tools prompt', { harnessToolsPrompt: null })}
+        allowEmpty
+        emptyLabel="Off: agents get no guidance on Patch's tools."
       />
-      <LayerEditor
-        title="System prompt override"
-        sub={systemFirstLine === '' ? 'None' : systemFirstLine}
-        initial={system}
-        testid="harness-system-prompt"
-        placeholder="Empty: the SDK default"
-        // Empty string clears the override (reverts to SDK default).
+      <PromptRow
+        id="system"
+        title="System prompt"
+        sub="Replaces Claude Code's own system prompt in every chat. Default leaves it alone."
+        defaultText=""
+        current={preferences.harnessSystemPrompt}
         onSave={(text) => patchShared('system prompt', { harnessSystemPrompt: text })}
+        onDefault={() => patchShared('system prompt', { harnessSystemPrompt: '' })}
+        emptyLabel="Claude Code's own system prompt."
       />
     </Group>
   );

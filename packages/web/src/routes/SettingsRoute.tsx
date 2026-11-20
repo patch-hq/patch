@@ -30,6 +30,7 @@ import {
   ADVANCED_GROUP,
   DEFAULT_SETTINGS_PAGE,
   visibleSettingsPages,
+  EXPERIMENTAL_SETTINGS_PAGES,
   type SettingsPageId,
 } from './settings/pages.js';
 import { SettingsBackContext } from './settings/ui.js';
@@ -42,7 +43,6 @@ import { MemoriesPage } from './settings/MemoriesPage.js';
 import { ManagerPage } from './settings/ManagerPage.js';
 import { ExperimentalPage } from './settings/ExperimentalPage.js';
 import { GoalsPage } from './settings/GoalsPage.js';
-import { PromptsPage } from './settings/PromptsPage.js';
 import { VoicePage } from './settings/VoicePage.js';
 import { DictationPage } from './settings/DictationPage.js';
 import { MeetingsPage } from './settings/MeetingsPage.js';
@@ -67,7 +67,6 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   memories: MemoriesPage,
   manager: ManagerPage,
   goals: GoalsPage,
-  prompts: PromptsPage,
   dictation: DictationPage,
   meetings: MeetingsPage,
   voice: VoicePage,
@@ -245,6 +244,9 @@ function SettingsNav({
             data-testid={`settings-nav-${p.id}`}
           >
             <span>{p.title}</span>
+            {EXPERIMENTAL_SETTINGS_PAGES.includes(p.id) ? (
+              <i className="set-exp-dot" title="Experimental" aria-label="Experimental" />
+            ) : null}
             {p.id === 'updates' && behind.length > 0 ? (
               <i className="set-pip" data-testid="settings-nav-updates-pip" aria-label="Behind" />
             ) : null}

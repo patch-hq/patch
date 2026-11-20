@@ -956,7 +956,7 @@ async function startHost(
   let meetingTranscriptionModel = '';
   let goalStringency: GoalStringency = persistedHostState.goalStringency ?? DEFAULT_GOAL_STRINGENCY;
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
-  // Settings → Prompts: the check-in a running background task sends its agent.
+  // Settings → Agent: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
     persistedHostState.watchCheckInPrompt ?? DEFAULT_WATCH_CHECK_IN_PROMPT;
   let cleanupRan = false;

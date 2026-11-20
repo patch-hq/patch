@@ -74,7 +74,7 @@ A hosted engine (OpenAI, Gemini, ElevenLabs) answers the device itself and hands
 
 ## Speaking aloud
 
-A device is heard out loud in a room, by whoever is there. Every device conversation, on any engine, carries the account's `voiceDevicePrompt`: the hosted voice has it in its instructions, and a turn that reaches the Manager from a device (a direct turn or a hand-off) carries it as a note. Patch's default asks for short spoken replies and nothing private said aloud unless the speaker may hear it. It is edited in Settings → Prompts → Speaking aloud, and with `patch settings set voice-device-prompt`, so the Manager can change it when asked.
+A device is heard out loud in a room, by whoever is there. Every device conversation, on any engine, carries the account's `voiceDevicePrompt`: the hosted voice has it in its instructions, and a turn that reaches the Manager from a device (a direct turn or a hand-off) carries it as a note. Patch's default asks for short spoken replies and nothing private said aloud unless the speaker may hear it. It is edited in Settings → Voice calls → Speaking aloud, and with `patch settings set voice-device-prompt`, so the Manager can change it when asked.
 
 ## Who is speaking
 

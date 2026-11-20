@@ -95,7 +95,11 @@ export function BugReportsPage(): JSX.Element {
   }
 
   return (
-    <SettingsPage title="Bug reports" testid="settings-bugs">
+    <SettingsPage
+      intro="Errors Patch has found, and the reports it has sent."
+      title="Bug reports"
+      testid="settings-bugs"
+    >
       <Group>
         <Row
           title="File errors automatically"

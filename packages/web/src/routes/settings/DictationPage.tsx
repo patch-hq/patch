@@ -28,7 +28,11 @@ import { failed } from '../../lib/errorCopy.js';
 
 export function DictationPage(): JSX.Element {
   return (
-    <SettingsPage title="Dictation" testid="settings-dictation">
+    <SettingsPage
+      intro="Speaking instead of typing in the message box."
+      title="Dictation"
+      testid="settings-dictation"
+    >
       <SpeechToTextGroup />
       <DictationEnginesGroup />
       <DictationGroup />

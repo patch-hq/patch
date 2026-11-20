@@ -49,7 +49,11 @@ export function AccountPage(): JSX.Element {
   }
 
   return (
-    <SettingsPage title="Account" testid="settings-account">
+    <SettingsPage
+      intro="This device, your account and the server it talks to."
+      title="Account"
+      testid="settings-account"
+    >
       <Group testid="settings-build">
         <Row title="This device" sub={me?.surface?.label ?? '—'} testid="device-name" />
         <details className="set-details" data-testid="account-details">

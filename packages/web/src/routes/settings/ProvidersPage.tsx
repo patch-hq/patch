@@ -28,7 +28,11 @@ import { ModelEndpoints } from './ModelEndpoints.js';
 
 export function ProvidersPage(): JSX.Element {
   return (
-    <SettingsPage title="Voice and other services" testid="settings-providers">
+    <SettingsPage
+      intro="Keys for voice, speech and the other outside services Patch uses. Shared by every host."
+      title="Service keys"
+      testid="settings-providers"
+    >
       <section className="set-group">
         <div className="set-group-head">
           <h2 className="set-label">Provider keys</h2>

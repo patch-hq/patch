@@ -10,7 +10,7 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { failed } from '../../lib/errorCopy.js';
 import { useModelOptions } from './modelOptions.js';
 import { Group, Row, SettingsPage } from './ui.js';
-import { LayerEditor } from './AgentPage.js';
+import { PromptRow } from './PromptRow.js';
 import { patchShared } from './sharedWrite.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
 
@@ -26,7 +26,11 @@ export function GoalsPage(): JSX.Element {
   };
 
   return (
-    <SettingsPage title="Goals" testid="settings-goals-page">
+    <SettingsPage
+      title="Goals"
+      intro="How a chat's goal is judged, and when it stops pushing."
+      testid="settings-goals-page"
+    >
       <Group label="Goals" testid="settings-goals-group">
         <Row title="Judge model">
           <select
@@ -70,17 +74,15 @@ export function GoalsPage(): JSX.Element {
           />
           <span className="set-unit">refusals in a row</span>
         </Row>
-        <LayerEditor
+        <PromptRow
+          id="goal-judge"
           title="Judge prompt"
-          sub={preferences.goalEvalPrompt.split('\n')[0] ?? ''}
-          initial={preferences.goalEvalPrompt}
-          testid="goal-eval-prompt"
-          placeholder={DEFAULT_GOAL_EVAL_PROMPT}
+          sub="The judge's instructions. Patch adds the goal, the conversation and the answer format around them."
+          defaultText={DEFAULT_GOAL_EVAL_PROMPT}
+          current={preferences.goalEvalPrompt}
           onSave={(text) => patchShared('goal judge prompt', { goalEvalPrompt: text })}
-          onReset={
-            preferences.goalEvalPrompt === DEFAULT_GOAL_EVAL_PROMPT
-              ? undefined
-              : () => patchShared('goal judge prompt', { goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT })
+          onDefault={() =>
+            patchShared('goal judge prompt', { goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT })
           }
         />
       </Group>

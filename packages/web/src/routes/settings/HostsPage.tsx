@@ -92,6 +92,7 @@ export function HostsPage(): JSX.Element {
 
   return (
     <SettingsPage
+      intro="The computers that run your chats."
       title="Hosts"
       testid="settings-hosts"
       actions={

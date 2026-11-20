@@ -13,8 +13,9 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft } from 'lucide-react-native';
 import { useGoBack } from '../../lib/goBack';
-import { fonts, space, useTheme } from '../../lib/theme';
+import { fonts, space, textMin, useTheme } from '../../lib/theme';
 import { HostSwitcher } from './HostSwitcher';
+import { SettingsPageContext } from './pageContext';
 
 export function SettingsPage({
   title,
@@ -30,6 +31,7 @@ export function SettingsPage({
   children: React.ReactNode;
 }): React.ReactElement {
   const colors = useTheme();
+  const meta = React.useContext(SettingsPageContext);
   const goBack = useGoBack('/(tabs)/settings');
   const insets = useSafeAreaInsets();
   return (
@@ -67,10 +69,42 @@ export function SettingsPage({
             color: colors.ink,
           }}
         >
-          {title}
+          {meta?.title ?? title}
         </Text>
+        {meta?.experimental ? (
+          <Text
+            testID="settings-experimental-tag"
+            style={{
+              fontFamily: fonts.bodyMedium,
+              fontSize: textMin,
+              color: colors.amber,
+              backgroundColor: colors.waitingTint,
+              borderRadius: 12,
+              overflow: 'hidden',
+              paddingHorizontal: space.sm,
+              paddingVertical: 2,
+            }}
+          >
+            Experimental
+          </Text>
+        ) : null}
         {right}
       </View>
+      {meta?.intro ? (
+        <Text
+          testID="settings-intro"
+          style={{
+            fontFamily: fonts.body,
+            fontSize: 15,
+            lineHeight: 21,
+            color: colors.ink3,
+            paddingHorizontal: space.md,
+            paddingBottom: space.sm,
+          }}
+        >
+          {meta.intro}
+        </Text>
+      ) : null}
       {hostSwitcher ? (
         <View style={{ paddingHorizontal: space.md, paddingBottom: space.sm }}>
           <HostSwitcher />

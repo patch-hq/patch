@@ -37,7 +37,7 @@ test.describe('Settings → Manager sweep', () => {
     await expect(page.getByTestId('sweep-delivery-label')).toHaveText('Digest every 30 min');
     await expect(page.getByTestId('sweep-messages-per-chat')).toBeVisible();
     await expect(page.getByTestId('sweep-model')).toBeVisible();
-    await expect(page.getByTestId('sweep-prompt-edit')).toBeVisible();
+    await expect(page.getByTestId('prompt-sweep')).toBeVisible();
     await expect(page.getByTestId('sweep-stalled-threshold')).toHaveCount(0);
     await expect(page.getByText('Stalled after')).toHaveCount(0);
   });

@@ -25,16 +25,16 @@ const PAGES = [
   { id: 'usage', title: 'AI accounts', testid: 'settings-usage' },
   { id: 'chats', title: 'Chats', testid: 'settings-chats' },
   { id: 'agent', title: 'Agent', testid: 'settings-agent' },
-  { id: 'mcp', title: 'MCP', testid: 'settings-mcp' },
+  { id: 'mcp', title: 'Tools (MCP)', testid: 'settings-mcp' },
   { id: 'memories', title: 'Memories', testid: 'settings-memories' },
   { id: 'manager', title: 'Manager', testid: 'settings-manager-page' },
   { id: 'dictation', title: 'Dictation', testid: 'settings-dictation' },
   { id: 'meetings', title: 'Meetings', testid: 'settings-meetings' },
-  { id: 'voice', title: 'Voice', testid: 'settings-voice' },
+  { id: 'voice', title: 'Voice calls', testid: 'settings-voice' },
   { id: 'hooks', title: 'Hooks', testid: 'settings-hooks-page' },
   { id: 'hosts', title: 'Hosts', testid: 'settings-hosts' },
-  { id: 'providers', title: 'Voice and other services', testid: 'settings-providers' },
-  { id: 'devices', title: 'Devices', testid: 'settings-devices' },
+  { id: 'providers', title: 'Service keys', testid: 'settings-providers' },
+  { id: 'devices', title: 'Linked devices', testid: 'settings-devices' },
   { id: 'updates', title: 'Updates', testid: 'settings-version' },
   { id: 'account', title: 'Account', testid: 'settings-account' },
 ] as const;
@@ -144,30 +144,29 @@ test.describe('Settings — desktop', () => {
     await expect(page.getByTestId('settings-nav').locator('h2')).toHaveText([
       'Setup',
       'Agents',
-      'System',
+      'Voice',
+      'App',
     ]);
     await expect(
       page.getByTestId('settings-nav').locator('button[data-testid^="settings-nav-"]'),
     ).toHaveText([
       'AI accounts',
       'Hosts',
+      'Linked devices',
+      'Service keys',
       'Notifications',
-      'Devices',
-      'Voice and other services',
-      'Chats',
       'Agent',
-      'Agent identity',
+      'Chats',
+      'Goals',
       'Memories',
       'Manager',
-      'Goals',
-      'Prompts',
+      'Voice calls',
       'Dictation',
       'Meetings',
-      'Voice',
-      'Shortcuts',
       'Advanced ▸',
-      'Experimental features',
+      'Shortcuts',
       'Updates',
+      'Experimental features',
       'Bug reports',
       'Account',
     ]);
@@ -194,6 +193,8 @@ test.describe('Settings — desktop', () => {
   });
 
   test('every address opens its page directly', async ({ page }) => {
+    // Walks every settings page; on a CPU-starved runner that outgrows the 60s default.
+    test.setTimeout(180_000);
     for (const p of PAGES) {
       await page.goto(settingsUrl(p.id));
       await expectOnPage(page, p);

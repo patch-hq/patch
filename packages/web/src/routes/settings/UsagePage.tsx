@@ -12,7 +12,11 @@ import { SharedAccounts } from './SharedAccounts.js';
 
 export function UsagePage(): JSX.Element {
   return (
-    <SettingsPage title="AI accounts" testid="settings-usage">
+    <SettingsPage
+      intro="The Claude and ChatGPT accounts your agents run on, and how much of each you've used."
+      title="AI accounts"
+      testid="settings-usage"
+    >
       <UsageHistory />
       {PROVIDERS.map((p) => (
         <Group

@@ -44,7 +44,6 @@ const PAGE_TESTID: Record<string, string> = {
   manager: 'settings-manager-page',
   experimental: 'settings-experimental-page',
   goals: 'settings-goals-page',
-  prompts: 'settings-prompts-page',
   dictation: 'settings-dictation',
   meetings: 'settings-meetings',
   voice: 'settings-voice',
@@ -76,36 +75,33 @@ afterEach(() => {
 });
 
 describe('Settings shell — one pane tab, pages as internal state', () => {
-  it('lists every page in the nav, in order, under Agents / Setup / System', async () => {
+  it('lists every page in the nav, in order, under Setup / Agents / Voice / App', async () => {
     vi.stubGlobal('fetch', makeFetch());
     renderSettings('/settings');
     const nav = await screen.findByTestId('settings-nav');
-    // Scoped to the page links themselves — `within(nav)` now also catches
-    // the Back/Forward history buttons sharing this nav's head (App Updates:
-    // "back/forward buttons should be on all pages including jobs").
+    // Scoped to the page links themselves — `within(nav)` also catches the
+    // Back/Forward history buttons sharing this nav's head.
     const buttons = within(nav)
       .getAllByRole('button')
       .filter((b) => b.getAttribute('data-testid')?.startsWith('settings-nav-'));
     const collapsed = [
       'AI accounts',
       'Hosts',
+      'Linked devices',
+      'Service keys',
       'Notifications',
-      'Devices',
-      'Voice and other services',
-      'Chats',
       'Agent',
-      'Agent identity',
+      'Chats',
+      'Goals',
       'Memories',
       'Manager',
-      'Goals',
-      'Prompts',
+      'Voice calls',
       'Dictation',
       'Meetings',
-      'Voice',
-      'Shortcuts',
       'Advanced ▸',
-      'Experimental features',
+      'Shortcuts',
       'Updates',
+      'Experimental features',
       'Bug reports',
       'Account',
     ];
@@ -114,7 +110,11 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       within(nav)
         .getAllByRole('heading', { level: 2 })
         .map((h) => h.textContent),
-    ).toEqual(['Setup', 'Agents', 'System']);
+    ).toEqual(['Setup', 'Agents', 'Voice', 'App']);
+    // Experimental pages are marked in the nav.
+    expect(
+      within(within(nav).getByTestId('settings-nav-manager')).getByLabelText('Experimental'),
+    ).toBeTruthy();
     // Expert pages stay folded away until asked for.
     fireEvent.click(within(nav).getByTestId('settings-nav-advanced'));
     const open = within(nav)
@@ -122,8 +122,24 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       .filter((b) => b.getAttribute('data-testid')?.startsWith('settings-nav-'))
       .filter((b) => b.getAttribute('data-testid') !== 'settings-nav-advanced');
     expect(open.map((a) => a.textContent)).toEqual(
-      expect.arrayContaining(['MCP', 'Hooks', 'Computer use', 'Activity']),
+      expect.arrayContaining([
+        'Tools (MCP)',
+        'Hooks',
+        'Computer use',
+        'Agent identity',
+        'Activity log',
+      ]),
     );
+  });
+
+  it('every page says what it is for in one line', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+    for (const p of SETTINGS_PAGES) {
+      const view = renderSettings(`/settings/${p.id}`);
+      await waitFor(() => expect(screen.getByTestId(PAGE_TESTID[p.id]!)).toBeInTheDocument());
+      expect(screen.getByTestId('settings-intro').textContent?.length).toBeGreaterThan(10);
+      view.unmount();
+    }
   });
 
   it.each(SETTINGS_PAGES.map((p) => p.id))('the %s link opens that page', async (id) => {
@@ -1253,52 +1269,46 @@ describe('Settings → Agent', () => {
     });
   });
 
-  describe('Layers added to Claude Code (shared)', () => {
-    const TOOLS = 'harness-tools-prompt';
-    const SYSTEM = 'harness-system-prompt';
-
-    it('shows each layer as a row with its state, and no editor until Edit', async () => {
-      vi.stubGlobal('fetch', makeFetch());
-      loadShared();
-      reportHost('d1', { harnessToolsPromptDefault: '# Patch tools' });
-      renderSettings('/settings/agent');
-      await waitFor(() => expect(screen.getByTestId('harness-config')).toBeInTheDocument());
-      expect(screen.getByTestId(`${TOOLS}-state`)).toHaveTextContent('Built-in default');
-      expect(screen.getByTestId(`${SYSTEM}-state`)).toHaveTextContent('None');
-      expect(screen.queryByTestId(TOOLS)).toBeNull();
-    });
-
-    // principles.md § No system-prompt injection — the editor shows the
-    // built-in default rather than sitting empty while it is silently in force.
-    it('opens the built-in tools prompt when there is no override, with nothing to reset', async () => {
+  describe('Added to Claude Code (shared)', () => {
+    // principles.md § No system-prompt injection — the built-in tools
+    // guidance is shown, not hidden, while it is in force.
+    it('shows the built-in tools guidance when there is no override, marked Default', async () => {
       vi.stubGlobal('fetch', makeFetch());
       loadShared();
       reportHost('d1', {
         harnessToolsPromptDefault: '# Patch tools\n\nUse view_file to show a file.',
       });
       renderSettings('/settings/agent');
-      fireEvent.click(await screen.findByTestId(`${TOOLS}-edit`));
-      expect((screen.getByTestId(TOOLS) as HTMLTextAreaElement).value).toContain('Use view_file');
-      expect(screen.queryByTestId(`${TOOLS}-reset`)).toBeNull();
+      await waitFor(() =>
+        expect(screen.getByTestId('prompt-tools-shown')).toHaveTextContent('Use view_file'),
+      );
+      expect(screen.getByTestId('prompt-tools-mode-default')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
     });
 
-    it('an edited tools prompt shows the edit, and Reset restores the default', async () => {
+    it('an edited tools guidance shows the edit, and Default restores the built-in one', async () => {
       const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       loadShared({ settings: { harnessToolsPrompt: 'my own guidance' } });
       reportHost('d1', { harnessToolsPromptDefault: '# Patch tools' });
       renderSettings('/settings/agent');
-      await waitFor(() => expect(screen.getByTestId(`${TOOLS}-state`)).toHaveTextContent('Edited'));
-      fireEvent.click(screen.getByTestId(`${TOOLS}-edit`));
-      fireEvent.click(screen.getByTestId(`${TOOLS}-reset`));
+      await waitFor(() =>
+        expect(screen.getByTestId('prompt-tools-shown')).toHaveTextContent('my own guidance'),
+      );
+      fireEvent.click(screen.getByTestId('prompt-tools-mode-default'));
       await waitFor(() => expect(server.writes).toContainEqual({ harnessToolsPrompt: null }));
     });
 
-    it('an emptied tools prompt reads as Off', async () => {
+    it('an emptied tools guidance reads as Off', async () => {
       vi.stubGlobal('fetch', makeFetch());
       loadShared({ settings: { harnessToolsPrompt: '' } });
+      reportHost('d1', { harnessToolsPromptDefault: '# Patch tools' });
       renderSettings('/settings/agent');
-      await waitFor(() => expect(screen.getByTestId(`${TOOLS}-state`)).toHaveTextContent('Off'));
+      await waitFor(() =>
+        expect(screen.getByTestId('prompt-tools-shown')).toHaveTextContent(/^Off/),
+      );
     });
 
     it('Save writes the system prompt and closes the editor', async () => {
@@ -1307,16 +1317,17 @@ describe('Settings → Agent', () => {
       loadShared({ settings: { harnessSystemPrompt: 'Be terse.\nAlways.' } });
       renderSettings('/settings/agent');
       await waitFor(() =>
-        expect(screen.getByTestId(`${SYSTEM}-state`)).toHaveTextContent('Be terse.'),
+        expect(screen.getByTestId('prompt-system-shown')).toHaveTextContent('Be terse.'),
       );
-      fireEvent.click(screen.getByTestId(`${SYSTEM}-edit`));
-      expect((screen.getByTestId(SYSTEM) as HTMLTextAreaElement).value).toBe('Be terse.\nAlways.');
-      fireEvent.change(screen.getByTestId(SYSTEM), { target: { value: 'Be kind.' } });
-      fireEvent.click(screen.getByTestId(`${SYSTEM}-save`));
+      fireEvent.click(screen.getByTestId('prompt-system-edit'));
+      const box = screen.getByTestId('prompt-system-text') as HTMLTextAreaElement;
+      expect(box.value).toBe('Be terse.\nAlways.');
+      fireEvent.change(box, { target: { value: 'Be kind.' } });
+      fireEvent.click(screen.getByTestId('prompt-system-save'));
       await waitFor(() =>
         expect(server.writes).toContainEqual({ harnessSystemPrompt: 'Be kind.' }),
       );
-      await waitFor(() => expect(screen.queryByTestId(SYSTEM)).toBeNull());
+      await waitFor(() => expect(screen.queryByTestId('prompt-system-text')).toBeNull());
     });
   });
 
@@ -1480,21 +1491,23 @@ describe('Settings → Agent', () => {
 });
 
 describe('Settings → Goals (account-wide)', () => {
-  it('shows the built-in judge prompt, saves an edit, and Reset restores the default', async () => {
+  it('shows the built-in judge prompt, saves an edit, edits it again, and Default restores it', async () => {
     const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     renderSettings('/settings/goals');
-    fireEvent.click(await screen.findByTestId('goal-eval-prompt-edit'));
-    const box = screen.getByTestId('goal-eval-prompt') as HTMLTextAreaElement;
+    fireEvent.click(await screen.findByTestId('prompt-goal-judge-mode-custom'));
+    const box = screen.getByTestId('prompt-goal-judge-text') as HTMLTextAreaElement;
     expect(box.value).toBe(DEFAULT_GOAL_EVAL_PROMPT);
     fireEvent.change(box, { target: { value: 'Judge harshly.' } });
-    fireEvent.click(screen.getByTestId('goal-eval-prompt-save'));
+    fireEvent.click(screen.getByTestId('prompt-goal-judge-save'));
     await waitFor(() => expect(server.writes).toEqual([{ goalEvalPrompt: 'Judge harshly.' }]));
-    fireEvent.click(screen.getByTestId('goal-eval-prompt-edit'));
-    expect((screen.getByTestId('goal-eval-prompt') as HTMLTextAreaElement).value).toBe(
+    // A custom prompt can be opened again.
+    fireEvent.click(await screen.findByTestId('prompt-goal-judge-edit'));
+    expect((screen.getByTestId('prompt-goal-judge-text') as HTMLTextAreaElement).value).toBe(
       'Judge harshly.',
     );
-    fireEvent.click(screen.getByTestId('goal-eval-prompt-reset'));
+    fireEvent.click(screen.getByTestId('prompt-goal-judge-cancel'));
+    fireEvent.click(screen.getByTestId('prompt-goal-judge-mode-default'));
     await waitFor(() =>
       expect(server.writes[1]).toEqual({ goalEvalPrompt: DEFAULT_GOAL_EVAL_PROMPT }),
     );
@@ -1570,37 +1583,31 @@ describe('Settings → Manager (account-wide)', () => {
     await waitFor(() => expect(server.writes).toEqual([{ addressWord: 'jeeves' }]));
   });
 
-  it('sweep prompt: opens the saved override, edits it, and Reset restores the built-in default', async () => {
+  it('sweep prompt: edits it, and Default restores the built-in one', async () => {
     const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     renderSettings('/settings/manager');
-    fireEvent.click(await screen.findByTestId('sweep-prompt-edit'));
-    const box = screen.getByTestId('sweep-prompt') as HTMLTextAreaElement;
+    fireEvent.click(await screen.findByTestId('prompt-sweep-mode-custom'));
+    const box = screen.getByTestId('prompt-sweep-text') as HTMLTextAreaElement;
     expect(box.value).toBe(DEFAULT_SWEEP_PROMPT); // nothing has overridden it yet
     fireEvent.change(box, { target: { value: 'Be extra terse.' } });
-    fireEvent.click(screen.getByTestId('sweep-prompt-save'));
+    fireEvent.click(screen.getByTestId('prompt-sweep-save'));
     await waitFor(() => expect(server.writes).toEqual([{ sweepPrompt: 'Be extra terse.' }]));
-    fireEvent.click(screen.getByTestId('sweep-prompt-edit'));
-    expect((screen.getByTestId('sweep-prompt') as HTMLTextAreaElement).value).toBe(
-      'Be extra terse.',
-    );
-    fireEvent.click(screen.getByTestId('sweep-prompt-reset'));
+    fireEvent.click(await screen.findByTestId('prompt-sweep-mode-default'));
     await waitFor(() => expect(server.writes[1]).toEqual({ sweepPrompt: DEFAULT_SWEEP_PROMPT }));
-    expect(screen.queryByTestId('sweep-prompt')).toBeNull(); // editor closes on a successful reset
   });
 
-  it('link summary prompt: edits it on the Agent page, and Reset restores the built-in default', async () => {
+  it('link summary prompt: edits it on the Agent page, and Default restores the built-in one', async () => {
     const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     renderSettings('/settings/agent');
-    fireEvent.click(await screen.findByTestId('link-summary-prompt-edit'));
-    const box = screen.getByTestId('link-summary-prompt') as HTMLTextAreaElement;
+    fireEvent.click(await screen.findByTestId('prompt-link-summary-mode-custom'));
+    const box = screen.getByTestId('prompt-link-summary-text') as HTMLTextAreaElement;
     expect(box.value).toBe(DEFAULT_LINK_SUMMARY_PROMPT);
     fireEvent.change(box, { target: { value: 'One line only.' } });
-    fireEvent.click(screen.getByTestId('link-summary-prompt-save'));
+    fireEvent.click(screen.getByTestId('prompt-link-summary-save'));
     await waitFor(() => expect(server.writes).toEqual([{ linkSummaryPrompt: 'One line only.' }]));
-    fireEvent.click(screen.getByTestId('link-summary-prompt-edit'));
-    fireEvent.click(screen.getByTestId('link-summary-prompt-reset'));
+    fireEvent.click(await screen.findByTestId('prompt-link-summary-mode-default'));
     await waitFor(() =>
       expect(server.writes[1]).toEqual({ linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT }),
     );

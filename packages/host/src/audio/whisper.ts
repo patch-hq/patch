@@ -168,7 +168,7 @@ export interface WhisperBackend {
    */
   readonly costModel?: string;
   /**
-   * Switch the speech-to-text model (Settings → Prompts → Meetings). Empty
+   * Switch the speech-to-text model (Settings → Meetings). Empty
    * restores the model this host was configured with. Backends with one fixed
    * model omit it.
    */
