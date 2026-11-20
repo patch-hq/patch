@@ -1,13 +1,13 @@
 # Turns on auto-merge for every PR into main from the repository owner's chats
-# (a PR stacked on another branch merges into that branch by hand). The merge
-# queue then merges it, with the method the queue sets, the moment the required
-# `tests` check is green; until then it waits. Branches are tidied by the
-# repo's "delete branch on merge" setting.
+# (a PR stacked on another branch merges into that branch by hand). GitHub then
+# rebases it onto main the moment the required `tests` check is green; until
+# then it waits. There is no merge queue: main itself is tested after the merge
+# and gates the release (test.yml). Branches are tidied by the repo's "delete
+# branch on merge" setting.
 #
 # Switching it on when it is already on does no harm, so every push re-arms the
 # PR: a fix pushed by the agent chat that needs-attention.yml spawns merges
-# without anyone touching it. A PR the queue drops is not re-armed until it is
-# pushed to, or it would fail and re-queue in a loop.
+# without anyone touching it.
 
 name: pr-automerge
 
@@ -26,11 +26,12 @@ jobs:
     steps:
       # No checkout: pull_request_target runs with write access, so it never
       # touches the PR's code.
-      # GitHub never queues a PR whose auto-merge was switched on by the
-      # Actions bot, so this acts as Tom with a fine-grained PAT (this repo,
+      # A merge made with the Actions bot's token triggers no workflows, so
+      # main's tests and the release would never run: this acts as Tom with a
+      # fine-grained PAT (this repo,
       # pull requests + contents write). It expires: the run then fails on
       # each new PR, visibly. Renew it in 1Password (Agents, patch-automerge-token)
       # and the AUTOMERGE_TOKEN repo secret.
       - env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-        run: gh pr merge --auto "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY"
+        run: gh pr merge --auto --rebase "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY"

@@ -28,6 +28,7 @@ import {
   FIND_CHATS_TOOL_NAME,
   ManagerChatLookupError,
   MANAGER_CHAT_ID,
+  MANAGER_QUICK_TOOLS,
   SEND_TO_CHAT_TOOL_NAME,
   type ManagerSendAccepted,
   type ManagerVoiceTools,
@@ -161,7 +162,12 @@ describe('Gemini Live on a Manager call', () => {
     const { ws } = await openGemini(manager);
     const setup = ws.json()[0]!['setup'];
     const names = setup.tools[0].functionDeclarations.map((d: { name: string }) => d.name);
-    expect(names).toEqual([FIND_CHATS_TOOL_NAME, CHAT_STATUS_TOOL_NAME, SEND_TO_CHAT_TOOL_NAME]);
+    expect(names).toEqual([
+      FIND_CHATS_TOOL_NAME,
+      CHAT_STATUS_TOOL_NAME,
+      SEND_TO_CHAT_TOOL_NAME,
+      ...MANAGER_QUICK_TOOLS.map((t) => t.name),
+    ]);
     const text = setup.systemInstruction.parts[0].text as string;
     expect(text).toContain('You are the Manager');
     expect(text).not.toContain(DISPATCH_TOOL_NAME);
@@ -345,6 +351,7 @@ describe('OpenAI Realtime on a Manager call', () => {
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
+      ...MANAGER_QUICK_TOOLS.map((t) => t.name),
     ]);
     expect(session.instructions).toContain('You are the Manager');
     ws.serverSend({
@@ -454,6 +461,7 @@ describe('ElevenLabs Agents on a Manager call', () => {
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
+      ...MANAGER_QUICK_TOOLS.map((t) => t.name),
     ]);
     expect(Object.keys(tools[2]!.body.tool_config.parameters.properties)).toEqual([
       'chat',

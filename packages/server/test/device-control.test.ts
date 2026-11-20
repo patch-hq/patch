@@ -297,3 +297,56 @@ describe('voice device control on the server', () => {
     b.ws.close();
   }, 30_000);
 });
+
+describe('voice device control keepalive', () => {
+  it('drops a device that stops answering pings so it can reconnect', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { default: websocketPlugin } = await import('@fastify/websocket');
+    const { registerDeviceControlRoute } = await import('../src/device-control.js');
+    const dir = mkdtempSync(join(tmpdir(), 'patch-device-keepalive-'));
+    const user = generateUserKeypair();
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const app = Fastify({ logger: false });
+    await app.register(websocketPlugin);
+    registerDeviceControlRoute(app, {
+      logger: { info: () => undefined, warn: () => undefined } as never,
+      registry,
+      chatRegistry: { get: () => undefined } as never,
+      internalToken: SECRET,
+      isHostOnline: () => true,
+      recordSessionHost: () => undefined,
+      keepalive: { pingIntervalMs: 20, silenceTimeoutMs: 100 },
+    });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (app.server.address() as AddressInfo).port;
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'dev-silent',
+      surfaceKind: 'voice-device',
+      label: 'kitchen',
+    });
+    const connectTo = (autoPong: boolean): { ws: WebSocket; log: Log } => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/device/control`, {
+        headers: { authorization: `Bearer ${jwt}` },
+        autoPong,
+      });
+      return { ws, log: new Log(ws) };
+    };
+    try {
+      const silent = connectTo(false);
+      await new Promise<void>((r) => silent.ws.once('open', () => r()));
+      await silent.log.waitFor(() => silent.ws.readyState === WebSocket.CLOSED);
+
+      // A device that answers pings stays connected well past the timeout.
+      const live = connectTo(true);
+      await new Promise<void>((r) => live.ws.once('open', () => r()));
+      await new Promise((r) => setTimeout(r, 400));
+      expect(live.ws.readyState).toBe(WebSocket.OPEN);
+      live.ws.close();
+    } finally {
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

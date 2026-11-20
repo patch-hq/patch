@@ -12069,8 +12069,30 @@ export class Daemon {
         this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
       } catch (err) {
         this.opts.logger.warn({ chatId, err }, 'goal evaluation failed');
+        this.noteGoalEvalFailure(chatId, err instanceof Error ? err.message : String(err));
       }
     })();
+  }
+
+  /** Consecutive goal-judge failures per chat; reset by any real verdict. */
+  private readonly goalEvalFailures = new Map<string, number>();
+
+  /**
+   * A judge that cannot answer must not leave the goal silently unchecked: the
+   * chat could stop with the goal unmet and nobody would know. Tell the user
+   * once the judge has failed twice running (NO FALLBACK — the goal stays set).
+   */
+  private noteGoalEvalFailure(chatId: string, why: string): void {
+    const n = (this.goalEvalFailures.get(chatId) ?? 0) + 1;
+    this.goalEvalFailures.set(chatId, n);
+    if (n !== 2) return;
+    void this.declareStatus(
+      chatId,
+      'report',
+      `Goal is not being checked: the goal judge failed ${n} turns running (${why}). The chat may stop without meeting its goal.`,
+    ).catch((err) => {
+      this.opts.logger.warn({ chatId, err }, 'goal judge failure: declareStatus failed');
+    });
   }
 
   /**
@@ -12140,8 +12162,10 @@ export class Daemon {
     }
     if (result === null) {
       this.opts.logger.warn({ chatId }, 'goal evaluation produced nothing; trying again next turn');
+      this.noteGoalEvalFailure(chatId, 'the judge gave no answer');
       return;
     }
+    this.goalEvalFailures.delete(chatId);
     const now = this.opts.now();
     const progress = state.goalProgress;
     state.goalProgress = {

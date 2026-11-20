@@ -41,7 +41,7 @@ import {
   readlinkSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import pino from 'pino';
@@ -4058,6 +4058,19 @@ async function startHost(
   // hand-off waiting on the same chat.
   const managerVoiceReplies = createVoiceReplyBridge();
   const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  /** Run a command-line tool for a Manager-call action; its failure is the action's failure. */
+  const runTool = (cmd: string, args: string[], what: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      execFile(cmd, args, { timeout: 30_000, maxBuffer: 1_000_000 }, (err, stdout, stderr) => {
+        if (err) {
+          const why = (stderr || err.message).trim().split('\n').slice(-3).join(' ');
+          logger.error({ cmd, err: why }, 'manager voice: tool failed');
+          reject(new Error(`The ${what} did not answer: ${why}`));
+          return;
+        }
+        resolve(stdout);
+      });
+    });
   const managerVoice = createManagerVoiceTools({
     logger: logger.child({ component: 'manager-voice' }),
     // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
@@ -4111,6 +4124,27 @@ async function startHost(
         message,
         revealTarget: true,
       }),
+    addTask: async ({ content, due }) =>
+      (
+        await runTool('td', ['task', 'add', content, ...(due ? ['--due', due] : [])], 'to-do list')
+      ).trim() || `Added "${content}".`,
+    calendar: (args) => {
+      const script = process.env['PATCH_CALENDAR_SCRIPT'];
+      if (!script) {
+        return Promise.reject(
+          new Error('The calendar is not set up on this host (PATCH_CALENDAR_SCRIPT is not set).'),
+        );
+      }
+      return runTool('node', [script, ...args], 'calendar');
+    },
+    askAgent: async (request) => {
+      await daemon.submitInput({
+        chatId: MANAGER_CHAT_ID,
+        message: request,
+        localId: `manager-voice-agent-${Date.now()}`,
+        origin: 'machine',
+      });
+    },
     recordNote: (line) => {
       try {
         daemon.recordCallNote(MANAGER_CHAT_ID, line);
