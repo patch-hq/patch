@@ -69,11 +69,13 @@ describe('host wiring reads provider adapters', () => {
   it('adapterForModel picks the adapter by the model’s provider', async () => {
     const { adapterForModel } = await import('../src/providerAdapters.js');
     const mk = (name: string) => ({ name }) as never;
-    const adapters = { claude: mk('c'), codex: mk('x'), gemini: mk('g') };
+    const adapters = { claude: mk('c'), codex: mk('x'), acp: mk('g') };
     expect((adapterForModel(adapters, 'openai/gpt-5') as unknown as { name: string }).name).toBe(
       'x',
     );
-    expect((adapterForModel(adapters, 'gemini/g') as unknown as { name: string }).name).toBe('g');
+    expect((adapterForModel(adapters, 'acp/gemini/g') as unknown as { name: string }).name).toBe(
+      'g',
+    );
     // A model endpoint is a model inside a harness, never an adapter of its own.
     expect(
       (adapterForModel(adapters, 'openai/endpoint/ollama/q') as unknown as { name: string }).name,
