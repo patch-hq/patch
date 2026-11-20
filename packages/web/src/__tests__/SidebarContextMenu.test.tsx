@@ -227,6 +227,29 @@ describe('sidebar row context menu', () => {
     expect(screen.queryByTestId(`${MENU}-snooze-until-done`)).toBeNull();
   });
 
+  it('Mark as unread is offered on a read chat and flips it unread, persisted', async () => {
+    useChatStore.getState().hydrate([rowFixture()]);
+    useChatStore.setState((st) => ({
+      chats: { ...st.chats, c1: { ...st.chats.c1!, lastSeq: 5, lastReadSeq: 5 } },
+    }));
+    renderSidebar();
+    rightClick(screen.getByTestId('chat-row-c1'));
+    fireEvent.click(await screen.findByText('Mark as unread'));
+    const row = useChatStore.getState().chats.c1!;
+    expect(row.lastReadSeq).toBeLessThan(row.lastSeq);
+    expect(JSON.parse(window.localStorage.getItem('patch.readState.v1')!).c1).toBe(4);
+  });
+
+  it('Mark as unread is not offered on a chat that is already unread', () => {
+    useChatStore.getState().hydrate([rowFixture()]);
+    useChatStore.setState((st) => ({
+      chats: { ...st.chats, c1: { ...st.chats.c1!, lastSeq: 5, lastReadSeq: 2 } },
+    }));
+    renderSidebar();
+    rightClick(screen.getByTestId('chat-row-c1'));
+    expect(screen.queryByText('Mark as unread')).toBeNull();
+  });
+
   it('pins through the row’s own pin action', async () => {
     useChatStore.getState().hydrate([rowFixture()]);
     const pin = vi.spyOn(api, 'pinChat').mockResolvedValue(undefined as never);
@@ -512,6 +535,7 @@ describe('sidebar row context menu over a multi-selection', () => {
     rightClick(screen.getByTestId(`chat-row-${a}`));
     const menu = screen.getByTestId(`chat-context-menu-${a}`);
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent)).toEqual([
+      'Mark as unread',
       'Pin',
       'Snooze',
       'Hide',

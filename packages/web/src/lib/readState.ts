@@ -50,3 +50,18 @@ export function saveReadWatermark(chatId: string, lastReadSeq: number): void {
     // not persist this session. The in-memory watermark still works.
   }
 }
+
+/**
+ * Lower a chat's persisted watermark on purpose — "Mark as unread". The only
+ * writer allowed to go backwards; `saveReadWatermark` never does.
+ */
+export function resetReadWatermark(chatId: string, lastReadSeq: number): void {
+  if (new URLSearchParams(window.location.search).has('capture')) return;
+  try {
+    const current = loadReadState();
+    current[chatId] = lastReadSeq;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+  } catch {
+    // localStorage unavailable — the in-memory watermark still applies.
+  }
+}
