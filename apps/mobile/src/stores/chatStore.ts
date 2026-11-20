@@ -26,7 +26,7 @@ import {
 import { apiUrl } from '../config';
 import { formatReset } from '../lib/usage';
 import { refreshArtifactViewer } from '../components/ArtifactViewer';
-import { saveResolution } from '../lib/transcriptCache';
+import { pruneTranscripts, saveResolution } from '../lib/transcriptCache';
 import { loadCachedChatList, saveCachedChatList } from '../lib/chatListCache';
 import { loadVisited, saveVisited } from '../lib/visitedChats';
 
@@ -757,6 +757,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     rosterLanded = true;
     rosteredChatIds.clear();
     for (const r of rows) rosteredChatIds.add(r.chatId);
+    // The device copy holds the chats in this list (spec/05 § Loading): drop
+    // the transcripts of the rest, keeping any chat the phone has open.
+    const keep = new Set(rosteredChatIds);
+    const { timelines, activeChatId } = get();
+    for (const chatId of Object.keys(timelines)) {
+      if ((timelines[chatId]?.length ?? 0) > 0) keep.add(chatId);
+    }
+    if (activeChatId !== null) keep.add(activeChatId);
+    pruneTranscripts(keep);
     set({
       chats: rowsToRecord(rows, get().chats),
       rosterGeneration: get().rosterGeneration + 1,
