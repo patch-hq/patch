@@ -47,6 +47,7 @@ The server keeps to these. A host's report of its own state is a fact and always
 | From                                                   | To                            | On                                                                                         |
 | ------------------------------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------ |
 | Idle, Interrupted, Paused, Waiting for sign-in, Failed | Running                       | a turn started                                                                             |
+| Idle                                                   | Waiting for the user          | the agent's declared question lands just after its turn ended                              |
 | Running                                                | Waiting for the user          | a question raised                                                                          |
 | Waiting for the user                                   | Running                       | the question resolved                                                                      |
 | Running, Waiting for the user                          | Idle                          | the turn ended done or stopped                                                             |
@@ -57,6 +58,7 @@ The server keeps to these. A host's report of its own state is a fact and always
 | Running, Waiting for the user, Host restarting         | Host offline                  | the host's link went unannounced, or two minutes passed since it announced a restart       |
 | Host restarting, Host offline                          | Running, Waiting for the user | the host reattached and the turn is live                                                   |
 | Host restarting, Host offline                          | Interrupted                   | the host returned and the turn's process is gone                                           |
+| Running                                                | Interrupted                   | the host came back inside the offline grace and its turn's process is gone                |
 | Host restarting, Host offline                          | as the turn's outcome gives   | the host returned and its outbox reports the turn ended while it was away                  |
 | Idle, Interrupted, Failed                              | Queued for an offline host    | a message was held for the chat's offline host                                             |
 | Queued for an offline host                             | Running                       | the host returned and took the message                                                     |
@@ -64,6 +66,8 @@ The server keeps to these. A host's report of its own state is a fact and always
 | Paused, Waiting for sign-in                            | Idle                          | nothing is owed any more, or the user switched provider and the new linked chat carries on |
 
 Nothing becomes Failed because a connection dropped, and nothing stays Running once its host has gone silent: the server's heartbeat check (§ Host → server disconnect) makes it Host offline within 15 seconds.
+
+The facts the server keeps per chat, and derives the status from alone: the turns started and not yet ended (a side branch's turn is one of them), the requests raised and not yet resolved (approvals, questions and a blocking browser hand-off; each stays open until its host says it was answered, cancelled or expired, a stopped turn's included), how the last turn ended and with what error, and from the host's `chat.state` whether the last turn was cut off, a limit it is parked on, a retry it has scheduled, the turns it still owes (`queuedTurns`) and a question the agent declared. Work the server's own message queue owes the chat counts as running too, so a chat draining its queue never reads Idle between turns. A turn refused before it could start (signed out, folder gone, provider session gone) is recorded by its host as a turn that started and ended failed with the reason, so it reads Waiting for sign-in or Failed rather than Idle. The facts are kept with the chat index and survive a server restart.
 
 ### Restarting, offline, interrupted and failed
 

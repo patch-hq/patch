@@ -56,6 +56,7 @@ The status rules in `12-error-and-offline.md` are required checks:
 - Unit: for every status, every allowed transition is accepted and every other one is refused by the server.
 - Integration, back end: each fact that moves a status, produced for real. A host killed mid-turn makes the chat host offline, never running and never failed. A server restarted mid-turn leaves nothing failed. A host restarted while a turn's process lives on shows host restarting and then the turn's own status. A message to an offline host is queued and runs when the host returns. A turn whose process dies shows interrupted. A limit pauses the chat until its reset; a sign-out makes it wait for sign-in.
 - Integration, front end: the rendered status is the one the server sent, including when the transcript's own events would suggest another.
+- Source scan: a test reads every surface's source (web, mobile, CLI) and fails if one derives a status itself — reading the retired `activity`, holding an optimistic or tool-call status, or treating a pending permission, a declared question or the lifecycle `errored` flag as a status (`packages/wire/test/surface-status-scan.test.ts`).
 
 ## Browser
 
