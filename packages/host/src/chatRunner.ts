@@ -4936,11 +4936,10 @@ export class Daemon {
   }
 
   /**
-   * `chatId`'s parent, if it is a `patch_delegate` subagent — the ownership
-   * check behind the parent's "open read-only transcript" route
-   * (`PatchChatHistoryRequestEvent.requireParent`, index.ts
-   * `handleChatHistoryRequest`), since that route can't use the ordinary
-   * `chatRegistry` gate (a subagent is never in it).
+   * `chatId`'s parent, if it is a `patch_delegate` subagent: sent with its
+   * record (`host.record_import`'s `parentChatId`) so the server keeps the
+   * transcript against the parent, the gate on the parent's read-only
+   * transcript route (a subagent is never in the chat registry).
    */
   delegateParentOf(chatId: string): string | undefined {
     return (this.chatState.get(chatId)?.subagent ?? this.opts.metaStore.read(chatId)?.subagent)

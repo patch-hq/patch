@@ -402,6 +402,27 @@ describe('server link with an outbox', () => {
     expect(kept).toEqual([1, 2, 3]);
   });
 
+  describe('subagent entries: kept by a server that keeps subagent records', () => {
+    const wrapped = (seq: number): WireEvent =>
+      ({ type: 'host.delegate_entry', parentChatId: 'p1', event: say(seq, 'sub-1') }) as WireEvent;
+
+    it('go through the outbox to a server with `delegateRecord`', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true, delegateRecord: true }));
+      s.sent.length = 0;
+      link.send(wrapped(0));
+      expect(s.sent).toEqual([{ type: 'host.outbox', position: 0, event: wrapped(0) }]);
+    });
+
+    it('are not sent to a server without it', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true, serverReads: true }));
+      s.sent.length = 0;
+      link.send(wrapped(0));
+      expect(s.sent).toEqual([]);
+    });
+  });
+
   // spec/12 § Chat status: a server that decides status itself says
   // `serverStatus`; until a host sees it, it sends chat.state exactly as before,
   // so a host that updates first still works with the server it finds.

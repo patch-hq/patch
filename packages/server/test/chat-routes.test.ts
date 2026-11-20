@@ -818,114 +818,129 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('GET /api/chats/:parentId/delegates/:id/history round-trips with requireParent, for a subagent chat never in the registry', async () => {
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    const built = await makeApp({ registry, hostLink });
-    try {
-      // The PARENT is a real, known chat — the subagent `sub-1` is deliberately
-      // NEVER spawned into the registry (spec/02 § Native subagent dispatch:
-      // a delegate is never in it), which is exactly the case the ordinary
-      // /api/chats/:id/history route can't serve.
-      hostLink.emit({
-        type: 'chat.spawned',
-        hostId: 'd1',
-        chatId: 'parent-1',
-        folder: '/work/p',
-      });
-      hostLink.emit({
-        type: 'chat.state',
-        permissionMode: 'bypassPermissions',
-        chatId: 'parent-1',
-        activity: 'idle',
-        lastUpdated: 1,
-        status: 'active',
-        pinned: false,
-        folder: '/work/p',
-      });
+  describe('GET /api/chats/:parentId/delegates/:id/history — from the record', () => {
+    const msg = (seq: number, role: 'user' | 'assistant' = 'assistant') => ({
+      type: 'chat.message' as const,
+      chatId: 'sub-1',
+      role,
+      content: `m${seq}`,
+      seq,
+    });
+    async function world() {
+      const { registry, jwt } = await bootstrap();
+      const hostLink = new InProcessHostLink();
+      const built = await makeApp({ registry, hostLink });
+      // The PARENT is a real, known chat; the subagent is never in the
+      // registry (spec/02 § Native subagent dispatch).
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'parent-1', folder: '/work/p' });
+      const get = (url: string) =>
+        built.app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${jwt}` } });
+      return { built, hostLink, get };
+    }
 
-      const originalSend = hostLink.sendTo.bind(hostLink);
-      let seenRequest: { chatId?: string; requireParent?: string } | undefined;
-      hostLink.sendTo = (hostId, surfaceId, event) => {
-        originalSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          seenRequest = { chatId: event.chatId, requireParent: event.requireParent };
-          setImmediate(() => {
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: true,
-              events: [
-                { type: 'chat.message', chatId: 'sub-1', role: 'user', content: 'go', seq: 0 },
-                {
-                  type: 'chat.message',
-                  chatId: 'sub-1',
-                  role: 'assistant',
-                  content: 'done',
-                  seq: 1,
-                },
-              ],
-            });
-          });
+    it('serves a subagent’s messages from the record, with its parent’s host offline, never asking a host', async () => {
+      const { built, hostLink, get } = await world();
+      try {
+        hostLink.emit({
+          type: 'host.delegate_entry',
+          parentChatId: 'parent-1',
+          event: msg(0, 'user'),
+        });
+        hostLink.emit({
+          type: 'host.delegate_entry',
+          parentChatId: 'parent-1',
+          event: {
+            type: 'chat.tool_call',
+            chatId: 'sub-1',
+            toolCallId: 't',
+            tool: 'Bash',
+            args: {},
+            seq: 1,
+          },
+        });
+        hostLink.emit({ type: 'host.delegate_entry', parentChatId: 'parent-1', event: msg(2) });
+        hostLink.setStatus('offline');
+        const res = await get('/api/chats/parent-1/delegates/sub-1/history');
+        expect(res.statusCode).toBe(200);
+        expect(
+          (res.json() as { events: { content: string }[] }).events.map((e) => e.content),
+        ).toEqual(['m0', 'm2']);
+        const since = await get('/api/chats/parent-1/delegates/sub-1/history?since=1');
+        expect((since.json() as { events: { seq: number }[] }).events.map((e) => e.seq)).toEqual([
+          2,
+        ]);
+        // Never listed, never broadcast as a chat of its own.
+        expect(built.chatRegistry.get('sub-1')).toBeUndefined();
+        expect(hostLink.sent.filter((x) => x.event.type.startsWith('patch.chat_history'))).toEqual(
+          [],
+        );
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('refuses a subagent of another chat, and an unknown parent', async () => {
+      const { built, hostLink, get } = await world();
+      try {
+        hostLink.emit({
+          type: 'chat.spawned',
+          hostId: 'd1',
+          chatId: 'parent-2',
+          folder: '/work/p',
+        });
+        hostLink.emit({ type: 'host.delegate_entry', parentChatId: 'parent-1', event: msg(0) });
+        const wrong = await get('/api/chats/parent-2/delegates/sub-1/history');
+        expect(wrong.statusCode).toBe(404);
+        expect((wrong.json() as { error: string }).error).toBe('not_a_delegate');
+        const unknown = await get('/api/chats/nope/delegates/sub-1/history');
+        expect(unknown.statusCode).toBe(404);
+        const bad = await get('/api/chats/parent-1/delegates/sub-1/history?since=-1');
+        expect(bad.statusCode).toBe(400);
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('reads an existing subagent backfilled through the record import', async () => {
+      const { built, hostLink, get } = await world();
+      try {
+        hostLink.emit({
+          type: 'host.record_import',
+          chatId: 'sub-1',
+          parentChatId: 'parent-1',
+          events: [msg(0, 'user'), msg(1)],
+          done: true,
+        });
+        const res = await get('/api/chats/parent-1/delegates/sub-1/history');
+        expect(
+          (res.json() as { events: { content: string }[] }).events.map((e) => e.content),
+        ).toEqual(['m0', 'm1']);
+      } finally {
+        await built.app.close();
+      }
+    });
+
+    it('pages 50 messages at a time with nextFromSeq', async () => {
+      const { built, hostLink, get } = await world();
+      try {
+        for (let seq = 0; seq < 60; seq++) {
+          hostLink.emit({ type: 'host.delegate_entry', parentChatId: 'parent-1', event: msg(seq) });
         }
-      };
-
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/parent-1/delegates/sub-1/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(seenRequest).toEqual({ chatId: 'sub-1', requireParent: 'parent-1' });
-      const body = res.json() as { events: Array<{ content: string }> };
-      expect(body.events.map((e) => e.content)).toEqual(['go', 'done']);
-    } finally {
-      await built.app.close();
-    }
-  });
-
-  it('GET /api/chats/:parentId/delegates/:id/history asks only the host that owns the parent', async () => {
-    const { registry, jwt } = await bootstrap();
-    registry.setDaemonKey({ hostId: 'd2', publicKey: 'pk-d2', issuedAt: 1 });
-    const hostLink = new InProcessHostLink();
-    hostLink.setHostId('d2');
-    hostLink.addOnlineHost('d1');
-    const built = await makeApp({ registry, hostLink });
-    try {
-      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'parent-r', folder: '/work/p' });
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/parent-r/delegates/sub-r/history?since=4',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      // Nobody answers, so it times out; what matters is who was asked.
-      expect(res.statusCode).toBe(504);
-      const reqs = hostLink.sent.filter((x) => x.event.type === 'patch.chat_history.request');
-      expect(reqs).toHaveLength(1);
-      expect(reqs[0]?.hostId).toBe('d1');
-    } finally {
-      await built.app.close();
-    }
-  }, 15_000);
-
-  it('GET /api/chats/:parentId/delegates/:id/history says host_offline, without asking anyone, when the parent host is down', async () => {
-    const { registry, jwt } = await bootstrap();
-    const hostLink = new InProcessHostLink();
-    hostLink.setHostId('d2');
-    const built = await makeApp({ registry, hostLink });
-    try {
-      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'parent-o', folder: '/work/p' });
-      const res = await built.app.inject({
-        method: 'GET',
-        url: '/api/chats/parent-o/delegates/sub-o/history',
-        headers: { authorization: `Bearer ${jwt}` },
-      });
-      expect(res.statusCode).toBe(503);
-      expect((res.json() as { error: string }).error).toBe('host_offline');
-      expect(hostLink.sent.some((x) => x.event.type === 'patch.chat_history.request')).toBe(false);
-    } finally {
-      await built.app.close();
-    }
+        const first = (await get('/api/chats/parent-1/delegates/sub-1/history')).json() as {
+          events: unknown[];
+          nextFromSeq?: number;
+        };
+        expect(first.events).toHaveLength(50);
+        expect(first.nextFromSeq).toBe(50);
+        const rest = (
+          await get(`/api/chats/parent-1/delegates/sub-1/history?since=${first.nextFromSeq}`)
+        ).json() as { events: unknown[]; nextFromSeq?: number };
+        expect(rest.events).toHaveLength(10);
+        expect(rest.nextFromSeq).toBeUndefined();
+      } finally {
+        await built.app.close();
+      }
+    });
   });
 
   it('GET /api/chats/:parentId/delegates/:id/history 404s when the PARENT is unknown, without ever asking the host', async () => {

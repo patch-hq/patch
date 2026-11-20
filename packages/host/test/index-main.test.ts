@@ -45,11 +45,10 @@ import {
   handleVoiceNoteTranscribe,
   handleSecretsMutation,
   handleFilesRequest,
-  handleChatHistoryRequest,
   handleServerEvent,
   type MainTestHooks,
 } from '../src/index.js';
-import { Daemon, ChatNotFoundError, type HostOptions } from '../src/chatRunner.js';
+import { Daemon, type HostOptions } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { FolderRegistry } from '../src/folders.js';
@@ -877,18 +876,6 @@ describe('src/index.ts main() — full host boot', () => {
         path: '',
       });
       await boot.fakeServer.waitForFrame((e) => e.type === 'patch.files.response');
-
-      // --- patch.chat_history.request (dispatch line), WITH since+limit
-      //     (the earlier direct handleChatHistoryRequest unit tests never
-      //     set these, covering their FALSE side) ---
-      boot.fakeServer.send({
-        type: 'patch.chat_history.request',
-        requestId: 'hreq-1',
-        chatId: 'chat-main-1',
-        since: 0,
-        limit: 10,
-      });
-      await boot.fakeServer.waitForFrame((e) => e.type === 'patch.chat_history.response');
 
       // --- patch.skills.request (dispatch line) ---
       boot.fakeServer.send({
@@ -4988,70 +4975,6 @@ describe('handleFilesRequest', () => {
     expect(res.ok).toBe(true);
     expect(Buffer.from(res.content, 'base64').equals(bytes)).toBe(true);
     expect(res.size).toBe(bytes.length);
-  });
-});
-
-describe('handleChatHistoryRequest', () => {
-  it('success -> events + optional nextFromSeq', () => {
-    const { daemon } = makeHost();
-    vi.spyOn(daemon, 'readHistory').mockReturnValue({
-      events: [{ type: 'chat.message', chatId: 'c1', role: 'user', content: 'hi', seq: 0 }],
-      nextFromSeq: 5,
-    } as ReturnType<Daemon['readHistory']>);
-    const { sender, sent } = captureSender();
-    handleChatHistoryRequest(
-      { type: 'patch.chat_history.request', requestId: 'h1', chatId: 'c1' },
-      daemon,
-      sender,
-      silent,
-    );
-    expect(sent[0]).toMatchObject({ ok: true, nextFromSeq: 5 });
-  });
-
-  it('ChatNotFoundError -> chat_not_found', () => {
-    const { daemon } = makeHost();
-    vi.spyOn(daemon, 'readHistory').mockImplementation(() => {
-      throw new ChatNotFoundError('no-such-chat');
-    });
-    const { sender, sent } = captureSender();
-    handleChatHistoryRequest(
-      { type: 'patch.chat_history.request', requestId: 'h2', chatId: 'no-such-chat' },
-      daemon,
-      sender,
-      silent,
-    );
-    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'chat_not_found' } });
-  });
-
-  it('a generic failure -> internal', () => {
-    const { daemon } = makeHost();
-    vi.spyOn(daemon, 'readHistory').mockImplementation(() => {
-      throw new Error('disk error');
-    });
-    const { sender, sent } = captureSender();
-    handleChatHistoryRequest(
-      { type: 'patch.chat_history.request', requestId: 'h3', chatId: 'c1' },
-      daemon,
-      sender,
-      silent,
-    );
-    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'internal' } });
-  });
-
-  // spec/14 § Side threads panel — pulls a side thread's content through this
-  // REST-backed RPC rather than the live WS stream (a side branch's content
-  // is not broadcast live — spec/04 § Parallel branches).
-  it("passes branchId through to readHistory, reading that branch's own track", () => {
-    const { daemon } = makeHost();
-    const spy = vi.spyOn(daemon, 'readHistory').mockReturnValue({ events: [] });
-    const { sender } = captureSender();
-    handleChatHistoryRequest(
-      { type: 'patch.chat_history.request', requestId: 'h4', chatId: 'c1', branchId: 'c1-b1' },
-      daemon,
-      sender,
-      silent,
-    );
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'c1', branchId: 'c1-b1' }));
   });
 });
 

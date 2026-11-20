@@ -149,10 +149,29 @@ describe('patch_delegate', () => {
     const delivered = messagesOn(events, parentChatId).find((m) => m.content.includes(fullReply))!;
     expect(delivered.content).toBe(`[from ${label}; agent ${id}] ${fullReply}`);
 
-    // Invisible to the user: NOTHING for the subagent's own chatId ever
-    // reached the outbound relay — no chat.spawned, no chat.state, no
-    // chat.message, nothing (spec/02 § Native subagent dispatch).
+    // Invisible to the user: NOTHING addressed to the subagent's own chatId
+    // ever reached the outbound relay — no chat.spawned, no chat.state, no
+    // chat.message (spec/02 § Native subagent dispatch).
     expect(events.some((e) => (e as { chatId?: string }).chatId === id)).toBe(false);
+    // Its entries go to the server's record only wrapped with their parent,
+    // for the parent's read-only transcript.
+    const wrapped = events.filter(
+      (e): e is Extract<WireEvent, { type: 'host.delegate_entry' }> =>
+        e.type === 'host.delegate_entry',
+    );
+    expect(wrapped.length).toBeGreaterThan(0);
+    for (const w of wrapped) {
+      expect(w.parentChatId).toBe(parentChatId);
+      expect((w.event as { chatId?: string }).chatId).toBe(id);
+    }
+    expect(
+      wrapped.some(
+        (w) =>
+          w.event.type === 'chat.message' &&
+          (w.event as { role?: string; content?: string }).role === 'assistant' &&
+          (w.event as { content?: string }).content === fullReply,
+      ),
+    ).toBe(true);
 
     const delegates = daemon.listDelegates(parentChatId);
     expect(delegates).toHaveLength(1);

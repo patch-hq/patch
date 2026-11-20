@@ -88,6 +88,28 @@ describe('RecordImport', () => {
     });
   });
 
+  it('names each subagent’s parent, so the server keeps its record against it', () => {
+    const imp = new RecordImport({
+      path,
+      logger: silent,
+      listChats: () => ['sub-1'],
+      recordOf: () => [say('sub-1', 0)],
+      parentOf: (chatId) => (chatId === 'sub-1' ? 'parent-1' : undefined),
+      send: (e) => sent.push(e),
+      defer: (fn) => fn(),
+    });
+    imp.start();
+    expect(sent).toEqual([
+      {
+        type: 'host.record_import',
+        chatId: 'sub-1',
+        parentChatId: 'parent-1',
+        events: [say('sub-1', 0)],
+        done: true,
+      },
+    ]);
+  });
+
   it('sends a long chat as several frames, and only the last says it is done', () => {
     const imp = make({ c1: Array.from({ length: 250 }, (_, i) => say('c1', i)) });
     imp.start();
