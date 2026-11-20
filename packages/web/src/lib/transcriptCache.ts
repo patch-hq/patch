@@ -4,9 +4,9 @@
 // arrives as a few frames instead of thousands. This is the last piece: a
 // chat you have already opened should not be downloaded again just because
 // you restarted the app. Opening one paints from here immediately, then asks
-// the host only for what is newer than the last seq we hold.
+// the server only for what is newer than the last seq we hold.
 //
-// The HOST stays the record. This is a cache, never a source of truth:
+// The SERVER stays the record. This is a cache, never a source of truth:
 //   - It holds only DURABLE events — the ones carrying a seq, exactly what a
 //     replay would re-send. Live-only frames (deltas, state) are never kept.
 //   - It is keyed by branch. A fork, an edit or a branch switch makes the
@@ -14,7 +14,7 @@
 //     refetched rather than merged into something plausible.
 //   - Every read is tolerant of a broken store: a cache that cannot be read
 //     is NO cache (the chat loads from the host, a little slower), never a
-//     chat that fails to open. It is re-derivable; the host's log is not.
+//     chat that fails to open. It is re-derivable; the server's log is not.
 //
 // One exception to "only events with a seq": a question's ANSWER. The host
 // sends `chat.permission_response` without a seq, so it can never be an
@@ -25,7 +25,9 @@
 // in their own store, keyed by request, and re-applied after the events.
 //
 // Bounded by chat count, trimmed oldest-opened-first, so a year of chats
-// cannot fill a browser's quota.
+// cannot fill a browser's quota. And pruned to the chat list each time it is
+// loaded (`pruneTranscripts`), so a chat deleted, archived or hidden elsewhere
+// does not stay in the browser until it ages out.
 
 const DB_NAME = 'patch-transcripts';
 const DB_VERSION = 2;
@@ -282,6 +284,25 @@ export async function trimCache(): Promise<void> {
     for (const chatId of doomed) await dropTranscript(chatId);
   } catch (err) {
     console.warn('[patch] transcript cache trim failed:', (err as Error).message);
+  }
+}
+
+/**
+ * Drop every cached chat not in `keep`: the chats the sidebar has just loaded
+ * from the server, plus whatever this window has open.
+ */
+export async function pruneTranscripts(keep: Set<string>): Promise<void> {
+  try {
+    const db = await openDb();
+    if (!db) return;
+    const metas = (await promisify(
+      db.transaction(CHATS, 'readonly').objectStore(CHATS).getAll(),
+    )) as CachedChatMeta[];
+    for (const { chatId } of metas) {
+      if (!keep.has(chatId)) await dropTranscript(chatId);
+    }
+  } catch (err) {
+    console.warn('[patch] transcript cache prune failed:', (err as Error).message);
   }
 }
 

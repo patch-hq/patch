@@ -16,6 +16,7 @@ import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { Sidebar } from './components/Sidebar.js';
 import { SnoozeSheet } from './components/SnoozeSheet.js';
 import { loadSnoozedChats } from './lib/snoozedRows.js';
+import { pruneDeviceCopy } from './lib/pruneDeviceCopy.js';
 import { MiniSidebar } from './components/MiniSidebar.js';
 import { SidebarExpandButton } from './components/SidebarExpandButton.js';
 import { SidebarBackdrop } from './components/SidebarBackdrop.js';
@@ -229,10 +230,12 @@ export function AppShell(): JSX.Element {
 
   // The snapshot above leaves snoozed chats out; the sidebar folds them into
   // their project, so they follow it in (after it, because hydrate replaces).
+  // With both in, the device copy is pruned to them.
   const { error: snoozedError } = useQuery({
     queryKey: ['chats-snoozed'],
     queryFn: async () => {
       await loadSnoozedChats();
+      await pruneDeviceCopy();
       return true;
     },
     enabled: chatsLoaded,

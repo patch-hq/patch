@@ -2,13 +2,13 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { __clearAllMmkv } from './stubs/mmkv';
+import { store } from '../src/lib/credential';
 import {
   MAX_CACHED_CHATS,
   __resetPendingForTests,
   heldCursor,
+  heldChatIds,
   loadTranscript,
-  markSynced,
-  needsOfflineSync,
   pruneTranscripts,
   saveEvents,
   saveResolution,
@@ -107,22 +107,26 @@ describe('transcriptCache', () => {
     expect(heldCursor('h')).toBe(4);
   });
 
-  it('needs a sync until marked at the roster lastUpdated, then again when it moves', () => {
-    expect(needsOfflineSync('s', 10)).toBe(true);
-    save('s', 0, 1);
-    expect(needsOfflineSync('s', 10)).toBe(true);
-    markSynced('s', 10);
-    expect(needsOfflineSync('s', 10)).toBe(false);
-    expect(needsOfflineSync('s', 11)).toBe(true);
-  });
-
   it('prunes chats the roster no longer lists', () => {
     save('keep', 0);
     save('drop', 0);
-    markSynced('drop', 1);
     pruneTranscripts(new Set(['keep']));
     expect(loadTranscript('drop')).toBeNull();
     expect(loadTranscript('keep')).not.toBeNull();
-    expect(needsOfflineSync('drop', 1)).toBe(true);
+    expect([...heldChatIds()]).toEqual(['keep']);
+  });
+
+  it('a prune also drops events still waiting to be written for a pruned chat', () => {
+    save('drop', 0);
+    saveEvents('drop', [ev('drop', 1)]);
+    pruneTranscripts(new Set());
+    vi.advanceTimersByTime(1000);
+    expect(loadTranscript('drop')).toBeNull();
+  });
+
+  it('a prune clears the sync marks an earlier build kept', () => {
+    store().set('patch.transcript.synced.v1', JSON.stringify({ old: 1 }));
+    pruneTranscripts(new Set());
+    expect(store().getString('patch.transcript.synced.v1')).toBeUndefined();
   });
 });

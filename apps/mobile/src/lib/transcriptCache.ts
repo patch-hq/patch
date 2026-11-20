@@ -8,7 +8,7 @@
 // frame is drawn, let alone before the socket answers — and the ask that
 // follows is only for what is newer than the last seq held.
 //
-// The HOST stays the record. This is a cache, never a source of truth:
+// The SERVER stays the record. This is a cache, never a source of truth:
 //   - Only DURABLE events are kept — the ones carrying a seq, exactly what a
 //     replay would re-send. Deltas and state frames are never stored.
 //   - Keyed by branch. A fork, an edit or a branch switch makes the cached
@@ -27,7 +27,9 @@
 // re-applied after them.
 //
 // Bounded twice — events per chat, and chats — so a year of use cannot grow
-// without limit on a phone.
+// without limit on a phone. And pruned to the chat list each time it is
+// refreshed (`pruneTranscripts`), so a chat deleted, archived or hidden
+// elsewhere does not stay on the phone until the bound pushes it out.
 
 import { store } from './credential';
 import { useUiStore } from '../stores/uiStore';
@@ -43,7 +45,8 @@ export const MAX_CACHED_EVENTS = 3000;
  * set.
  */
 export const MAX_CACHED_CHATS = 500;
-const SYNCED_KEY = 'patch.transcript.synced.v1';
+/** Per-chat sync marks an earlier build kept; nothing reads them now. */
+const LEGACY_SYNCED_KEY = 'patch.transcript.synced.v1';
 /** Live events trickle in; coalesce before rewriting a chat's blob. */
 const FLUSH_MS = 750;
 
@@ -261,23 +264,6 @@ export function __resetPendingForTests(): void {
   flushTimer = null;
 }
 
-/** chatId -> the roster `lastUpdated` the held transcript was last brought level with. */
-function readSynced(): Record<string, number> {
-  const raw = store().getString(SYNCED_KEY);
-  if (raw === undefined) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error('synced marks are not an object');
-    }
-    return parsed as Record<string, number>;
-  } catch (e) {
-    store().delete(SYNCED_KEY);
-    useUiStore.getState().pushError(`transcript sync marks unreadable: ${(e as Error).message}`);
-    return {};
-  }
-}
-
 /** The chats this phone holds a transcript for. Reads only the index, never a transcript. */
 export function heldChatIds(): Set<string> {
   return new Set(Object.keys(readIndex()));
@@ -296,31 +282,25 @@ export function heldCursor(chatId: string): number {
   }, -1);
 }
 
-/** True when the chat's held transcript has not been brought level with `lastUpdated`. */
-export function needsOfflineSync(chatId: string, lastUpdated: number): boolean {
-  return readSynced()[chatId] !== lastUpdated || heldCursor(chatId) < 0;
-}
-
-/** Record that the transcript now covers everything up to `lastUpdated`. */
-export function markSynced(chatId: string, lastUpdated: number): void {
-  // Land anything still coalescing so the marker never runs ahead of the blob.
-  if (pending.has(chatId)) flush();
-  const synced = readSynced();
-  synced[chatId] = lastUpdated;
-  store().set(SYNCED_KEY, JSON.stringify(synced));
-}
-
-/** Forget transcripts of chats the roster no longer lists (deleted elsewhere). */
-export function pruneTranscripts(liveChatIds: Set<string>): void {
-  const index = readIndex();
-  const synced = readSynced();
-  for (const chatId of Object.keys(index)) {
-    if (liveChatIds.has(chatId)) continue;
-    pending.delete(chatId);
-    store().delete(key(chatId));
-    delete index[chatId];
-    delete synced[chatId];
+/**
+ * Forget the transcripts of chats that are not in `keep`: the chat list the
+ * server has just sent, plus whatever the phone has open. The roster lists the
+ * account's active chats, so a chat deleted, archived or hidden elsewhere
+ * leaves the phone at the next refresh; opening it again fetches it from the
+ * server.
+ */
+export function pruneTranscripts(keep: Set<string>): void {
+  try {
+    const index = readIndex();
+    for (const chatId of Object.keys(index)) {
+      if (keep.has(chatId)) continue;
+      pending.delete(chatId);
+      store().delete(key(chatId));
+      delete index[chatId];
+    }
+    store().set(INDEX_KEY, JSON.stringify(index));
+    store().delete(LEGACY_SYNCED_KEY);
+  } catch (e) {
+    useUiStore.getState().pushError(`transcript cache prune failed: ${(e as Error).message}`);
   }
-  store().set(INDEX_KEY, JSON.stringify(index));
-  store().set(SYNCED_KEY, JSON.stringify(synced));
 }
