@@ -204,6 +204,7 @@ export * from './snooze.js';
 export * from './tool-runs.js';
 export * from './chat-move.js';
 export * from './sweep-prompt.js';
+export * from './manager-voice-prompt.js';
 export * from './link-summary-prompt.js';
 export * from './voice-profiles.js';
 export * from './question-expired-prompt.js';

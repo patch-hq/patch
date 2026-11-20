@@ -411,9 +411,10 @@ export const HOSTED_VOICE_INSTRUCTION = hostedVoiceInstruction('auto');
  * Manager). `asyncResult`: a chat's reply arrives later as a message (Gemini)
  * rather than as the send tool's own return (OpenAI Realtime, ElevenLabs).
  */
-export function managerHostedInstruction(asyncResult: boolean): string {
+export function managerHostedInstruction(asyncResult: boolean, voicePrompt?: string): string {
+  const preamble = voicePrompt?.trim() ? `${voicePrompt.trim()}\n\n` : MANAGER_VOICE_PREAMBLE;
   return (
-    MANAGER_VOICE_PREAMBLE +
+    preamble +
     FRAGMENT_RULE +
     MANAGER_TOOLS_RULE +
     ACKNOWLEDGEMENT_RULE +
@@ -485,6 +486,7 @@ function buildSetupMessage(
   manager = false,
   spokenAloud = '',
   voiceName?: string,
+  managerPrompt?: string,
 ): GeminiSetupMessage {
   const declarations: GeminiFunctionDeclaration[] = [
     // A Manager call has its own tools and no agent behind it; `never` has no agent either.
@@ -542,7 +544,9 @@ function buildSetupMessage(
         parts: [
           {
             text: withBriefing(
-              (manager ? managerHostedInstruction(true) : hostedVoiceInstruction(handoff, true)) +
+              (manager
+                ? managerHostedInstruction(true, managerPrompt)
+                : hostedVoiceInstruction(handoff, true)) +
                 (lookBack ? `\n\n${LOOK_BACK_RULE}` : '') +
                 (spokenAloud ? `\n\n${spokenAloud}` : ''),
               briefing,
@@ -857,6 +861,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           this.deps.manager !== undefined,
           this.deps.spokenAloud,
           this.deps.voice,
+          this.deps.manager?.voicePrompt?.(),
         ),
       ),
     );

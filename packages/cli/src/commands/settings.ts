@@ -97,6 +97,7 @@ const SETTING_KEYS: Record<string, string> = {
   'small-job-models': 'smallJobModels',
   'speech-backend': 'speechBackend',
   'voice-device-prompt': 'voiceDevicePrompt',
+  'manager-voice-prompt': 'managerVoicePrompt',
   'voice-match-threshold': 'voiceMatchThreshold',
 };
 

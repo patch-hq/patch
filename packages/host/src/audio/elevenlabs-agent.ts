@@ -395,7 +395,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
           prompt: {
             prompt: withBriefing(
               (this.deps.manager
-                ? managerHostedInstruction(false)
+                ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
                 : hostedVoiceInstruction(handoff)) +
                 (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : '') +
                 (this.deps.spokenAloud ? `\n\n${this.deps.spokenAloud}` : ''),

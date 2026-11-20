@@ -931,6 +931,8 @@ async function startHost(
   let managerContextWindow: number = persistedHostState.managerContextWindow ?? 200;
   /** spec/16 § Speaking aloud — `host.settings` → `voiceDevicePrompt`. */
   let voiceDevicePrompt: string = DEFAULT_SHARED_SETTINGS.voiceDevicePrompt;
+  /** spec/07 § A call to the Manager — `host.settings` → `managerVoicePrompt`. */
+  let managerVoicePrompt: string = DEFAULT_SHARED_SETTINGS.managerVoicePrompt;
   /** spec/16 § Who is speaking — `host.settings` → `voiceProfiles`. */
   let voiceProfiles: SharedSettings['voiceProfiles'] = [];
   let voiceMatchThreshold: number = DEFAULT_SHARED_SETTINGS.voiceMatchThreshold;
@@ -2131,6 +2133,10 @@ async function startHost(
     if (shared.voiceDevicePrompt !== voiceDevicePrompt) {
       voiceDevicePrompt = shared.voiceDevicePrompt;
       logger.info('voice device prompt changed');
+    }
+    if (shared.managerVoicePrompt !== managerVoicePrompt) {
+      managerVoicePrompt = shared.managerVoicePrompt;
+      logger.info('manager voice prompt changed');
     }
     if (JSON.stringify(shared.voiceProfiles) !== JSON.stringify(voiceProfiles)) {
       voiceProfiles = shared.voiceProfiles;
@@ -4073,6 +4079,7 @@ async function startHost(
     });
   const managerVoice = createManagerVoiceTools({
     logger: logger.child({ component: 'manager-voice' }),
+    voicePrompt: () => managerVoicePrompt,
     // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
     // would read as "there is no such chat". Live state from this host where it has it.
     listChats: async (): Promise<ManagerChatEntry[]> => {
