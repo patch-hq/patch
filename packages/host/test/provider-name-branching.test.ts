@@ -127,3 +127,85 @@ describe('no provider-name branching outside the adapters', () => {
     }
   });
 });
+
+/**
+ * The chat core (decision 16): the files that run every chat whatever its
+ * provider. They reach a provider only through its traits (`harnesses.ts`) and
+ * its adapter, and speak of sessions by generic id, so a name of a provider —
+ * an identifier such as `isClaudeSessionInvalidError` or `claudeSessionId`, or
+ * an import of a provider's own module — has no place in them. Comments do not
+ * count; string literals do.
+ */
+const CORE = [
+  'packages/host/src/chatRunner.ts',
+  'packages/host/src/chatState.ts',
+  'packages/host/src/meta.ts',
+  'packages/host/src/chatLog.ts',
+  'packages/host/src/readTrack.ts',
+  'packages/host/src/recordEntries.ts',
+];
+
+/**
+ * What the core still names, by file — only the old field names meta keeps on
+ * disk for a host rolled back to an older build (`claudeSessionId`,
+ * `claudeSessionAccountId`; spec/02 § Session capture). Lower it when disk
+ * moves to the new names; never raise it.
+ */
+const CORE_BASELINE: Record<string, number> = {
+  'packages/host/src/meta.ts': 2,
+};
+
+const CORE_PATTERNS: readonly RegExp[] = [
+  /\b\w*(?:Claude|Codex|Acp|Gemini)\w*\b/g,
+  /\b(?:claude|codex|acp|gemini)[A-Z]\w*\b/g,
+  /from '\.\/(?:claude|codex|acp)\w*\.js'/g,
+];
+
+function withoutComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+}
+
+describe('the chat core names no provider', () => {
+  const found: Record<string, string[]> = {};
+  for (const rel of CORE) {
+    const src = withoutComments(readFileSync(join(ROOT, rel), 'utf8'));
+    const hits = CORE_PATTERNS.flatMap((re) => [...src.matchAll(re)].map((m) => m[0]));
+    if (hits.length > 0) found[rel] = hits;
+  }
+
+  it('adds none beyond the recorded baseline', () => {
+    const over = Object.entries(found)
+      .filter(([file, hits]) => hits.length > (CORE_BASELINE[file] ?? 0))
+      .map(
+        ([file, hits]) =>
+          `${file}: ${hits.length} (baseline ${CORE_BASELINE[file] ?? 0}): ${hits.join(', ')}`,
+      );
+    expect(over).toEqual([]);
+  });
+
+  it('keeps the baseline down to what is still there', () => {
+    const stale = Object.entries(CORE_BASELINE)
+      .filter(([file, n]) => (found[file]?.length ?? 0) < n)
+      .map(([file, n]) => `${file}: baseline ${n}, now ${found[file]?.length ?? 0} — lower it`);
+    expect(stale).toEqual([]);
+  });
+
+  it('catches each shape it looks for, and ignores comments', () => {
+    const samples = [
+      'if (isClaudeSessionInvalidError(err)) {}',
+      'state.claudeSessionId = id;',
+      'await createClaudeSessionStore(opts);',
+      "import { CodexHistory } from './codexHistory.js';",
+      "import { x } from './acpBackend.js';",
+    ];
+    for (const s of samples) {
+      expect(
+        CORE_PATTERNS.some((re) => new RegExp(re.source).test(withoutComments(s))),
+        s,
+      ).toBe(true);
+    }
+    expect(
+      CORE_PATTERNS.some((re) => new RegExp(re.source).test(withoutComments('// Claude says'))),
+    ).toBe(false);
+  });
+});

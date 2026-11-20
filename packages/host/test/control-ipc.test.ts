@@ -493,7 +493,7 @@ describe('C1 Control IPC: POST /clean (patch host clean)', () => {
     const lost = await daemon.spawnChat({ folder });
     const lostState = daemon.chatState.get(lost);
     expect(lostState).toBeDefined();
-    lostState!.claudeSessionId = 'session-that-has-no-transcript-xyz';
+    lostState!.sessionId = 'session-that-has-no-transcript-xyz';
 
     // Fresh chat: no session id yet — NOT lost, must be kept.
     const fresh = await daemon.spawnChat({ folder });
@@ -2386,7 +2386,7 @@ describe('C1 Control IPC: POST /internal/stop/:id', () => {
       activity: 'idle',
       lastMessages: [],
       lastUpdated: 1,
-      claudeSessionId: undefined,
+      sessionId: undefined,
       model: undefined,
       permissionMode: undefined,
       nextSeq: 0,
@@ -3644,7 +3644,7 @@ describe('non-Error throw handling (err instanceof Error ? err.message : String(
       activity: 'idle',
       lastMessages: [],
       lastUpdated: 1,
-      claudeSessionId: undefined,
+      sessionId: undefined,
       model: undefined,
       permissionMode: undefined,
       nextSeq: 0,

@@ -218,6 +218,16 @@ the host reports the providers it has to surfaces.
 The provider's session stays on the host, in the provider's own format, where the
 provider keeps it. Patch never reads it for display and never writes it.
 
+The chat core speaks to an adapter only through what the adapter declares, and
+of sessions only by their generic id. Besides its capabilities, each adapter
+declares how it makes a chat's session ready before a turn resumes it (Claude
+Code moves the chat's conversation file into the chat's own config dir), which
+private config dir, if any, it runs a chat under, how it recognises its own
+words for a session it cannot resume and for a credential it refused mid-turn,
+and the error each of those ends a turn with. A provider with no such signal
+declares none, and its errors are never read as another provider's. A source
+scan fails the build on any new provider name in the chat core.
+
 The Agent Client Protocol (ACP) adapter is the default: any ACP agent is added as
 a provider through it, and its capabilities are those the agent advertises over
 ACP.
@@ -1086,6 +1096,8 @@ Modelled on `happy host`.
 ## Session ID capture
 
 The SDK emits a `result` message containing `session_id` on every query. Host captures it from the message stream and persists to `meta.json`.
+
+`meta.json` keeps a chat's session under the field names older builds read (`claudeSessionId`, `claudeSessionAccountId`, and a queued fork turn's `fork.resumeAtUuid`), while the host's code calls them `sessionId`, `sessionAccountId` and `fork.throughNativeId`. A host rolled back to its previous build by self-update parses meta strictly, so a renamed field on disk would make the chat unreadable to it. Reading accepts either name, the new one first. Disk switches to the new names once the minimum supported host version is past the build that introduced them.
 
 If a chat does `/clear` or `/compact` mid-session, the SDK rotates `session_id` in the next `result` message; host updates `meta.json` accordingly.
 

@@ -44,7 +44,7 @@ function setup() {
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
     sessionProbe: createClaudeSessionProbe({
-      claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-docdiff-claude-')),
+      sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-docdiff-claude-')),
     }),
   });
   return { daemon, events, folder, capturedPrompts };
@@ -177,7 +177,7 @@ describe('document editor — diff-since-last-seen (spec/14 § Document editor)'
       now: () => 1_700_000_000_000,
       generateChatId: () => `chat-${++id}`,
       sessionProbe: createClaudeSessionProbe({
-        claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-docdiff-claude-')),
+        sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-docdiff-claude-')),
       }),
       preprocessInput: () => 'a wholly different prompt',
     });

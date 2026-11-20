@@ -95,7 +95,7 @@ describe('spec/04 § Branching — editing a stopped turn Claude never persisted
     // Resumes the parent session at the previous reply, not from empty.
     const fork = ctl.runs[0]?.fork;
     expect(fork).toBeDefined();
-    expect(fork?.resumeAtUuid).not.toBeNull();
+    expect(fork?.throughNativeId).not.toBeNull();
     expect(userTurns(daemon, chatId).map((t) => t.content)).toEqual([
       'first question',
       'second, fixed',
@@ -126,7 +126,7 @@ describe('spec/04 § Branching — editing a stopped turn Claude never persisted
 
     expect(errors(events)).toEqual([]);
     expect(branchCount(events)).toBe(2);
-    expect(ctl.runs[0]?.fork?.resumeAtUuid).not.toBeNull();
+    expect(ctl.runs[0]?.fork?.throughNativeId).not.toBeNull();
   });
 
   it('still refuses a seq that is not a user turn', async () => {

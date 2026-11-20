@@ -227,9 +227,9 @@ describe('an ACP turn', () => {
 
   it('refuses what ACP cannot do rather than pretending', async () => {
     const { backend, cwd } = setup();
-    await expect(collect(backend.run(opts({ cwd, fork: { resumeAtUuid: null } })))).rejects.toThrow(
-      /cannot branch/,
-    );
+    await expect(
+      collect(backend.run(opts({ cwd, fork: { throughNativeId: null } }))),
+    ).rejects.toThrow(/cannot branch/);
     await expect(collect(backend.run(opts({ cwd, resumeSessionId: 'codex-abc' })))).rejects.toThrow(
       /Another provider's session/,
     );
@@ -314,7 +314,7 @@ describe('a chat on an ACP model', () => {
       sessionProbe: {
         hasSession: (o: { sessionId: string }) => known.has(o.sessionId),
       },
-      claudeProjectsRoot: join(root, 'projects'),
+      sessionStoreRoot: join(root, 'projects'),
       oauthAccessToken: 'tok',
       emit: (e) => events.push(e),
       logger: pino({ level: 'silent' }),
@@ -334,7 +334,7 @@ describe('a chat on an ACP model', () => {
           : [],
       );
     expect(messages()).toEqual(['Hello there', 'done:yes:fake-pro:yolo']);
-    const session = metaStore.read(chatId)!.claudeSessionId!;
+    const session = metaStore.read(chatId)!.sessionId!;
     expect(session).toMatch(/^acp-fake-r-/);
     expect(events.some((e) => e.type === 'chat.tool_call' && (e as any).callId === 'tool-1')).toBe(
       true,
@@ -342,6 +342,6 @@ describe('a chat on an ACP model', () => {
 
     await daemon.sendInput({ chatId, message: 'echo', localId: 'l2' });
     expect(messages().at(-1)).toBe('heard:hello');
-    expect(metaStore.read(chatId)!.claudeSessionId).toBe(session);
+    expect(metaStore.read(chatId)!.sessionId).toBe(session);
   }, 60_000);
 });

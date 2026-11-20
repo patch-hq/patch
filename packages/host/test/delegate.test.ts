@@ -39,7 +39,7 @@ function setup() {
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
-    discoverClaudeMcpServers: () => [],
+    discoverMcpServers: () => [],
   });
   return { daemon, sdk, events, home, folder, metaStore };
 }
@@ -254,7 +254,7 @@ describe('patch_delegate', () => {
       logger: silent,
       now: () => 1_700_000_000_000,
       generateChatId: () => `chat-${++id}`,
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder });
     const { id: childId } = await daemon.createDelegate({ parentChatId, prompt: 'long run' });
@@ -303,7 +303,7 @@ describe('patch_delegate', () => {
         let n = 0;
         return () => `fail-${++n}`;
       })(),
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder });
 
@@ -453,7 +453,7 @@ describe('patch_delegate', () => {
         let n = 0;
         return () => `hang-${++n}`;
       })(),
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     return { daemon, events, folder };
   }
@@ -631,7 +631,7 @@ describe('patch_delegate', () => {
       logger: silent,
       now: () => 1_700_000_000_000,
       generateChatId: () => `scan-${++n}`,
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder });
     await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
@@ -681,7 +681,7 @@ describe('patch_delegate', () => {
       logger: silent,
       now: () => 1_700_000_000_000,
       generateChatId: () => `hang-${++n}`,
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder });
     void daemon.sendInput({ chatId: parentChatId, message: 'go', localId: 'L1' });
@@ -770,7 +770,7 @@ describe('patch_delegate', () => {
         let n = 0;
         return () => `tools-${++n}`;
       })(),
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder });
     const { id } = await daemon.createDelegate({ parentChatId, prompt: 'task' });
@@ -827,7 +827,7 @@ describe('patch_delegate', () => {
         let n = 0;
         return () => `ask-${++n}`;
       })(),
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder, permissionMode: 'bypassPermissions' });
     const { id } = await daemon.createDelegate({ parentChatId, prompt: 'pick an approach' });
@@ -875,7 +875,7 @@ describe('patch_delegate', () => {
         logger: silent,
         now: () => 1_700_000_000_000,
         generateChatId: () => `wf-${++n}`,
-        discoverClaudeMcpServers: () => [],
+        discoverMcpServers: () => [],
       });
       const parentChatId = await daemon.spawnChat({ folder });
       const res = await daemon.createDelegate({ parentChatId, prompt: 'x', wait: true });
@@ -905,7 +905,7 @@ describe('patch_delegate', () => {
         logger: silent,
         now: () => 1_700_000_000_000,
         generateChatId: () => `caps-${++n}`,
-        discoverClaudeMcpServers: () => [],
+        discoverMcpServers: () => [],
       });
       const parentChatId = await daemon.spawnChat({ folder });
       const { id } = await daemon.createDelegate({
@@ -994,7 +994,7 @@ describe('patch_delegate across a host restart', () => {
         let n = 0;
         return () => `gone-${++n}`;
       })(),
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     return { daemon, events, folder };
   }
@@ -1013,7 +1013,7 @@ describe('patch_delegate across a host restart', () => {
         let n = 0;
         return () => `r${++n}-${Math.random().toString(36).slice(2, 6)}`;
       })(),
-      discoverClaudeMcpServers: () => [],
+      discoverMcpServers: () => [],
     });
     return { daemon, events };
   }

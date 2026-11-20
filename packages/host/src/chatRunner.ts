@@ -4,6 +4,7 @@ import {
   HARNESS_TRAITS,
   harnessTraitsForModel,
   harnessModesInclude,
+  type CredentialRejection,
 } from './harnesses.js';
 import {
   inspectTurnDir,
@@ -11,7 +12,7 @@ import {
   listTurnDirs,
   retireTurn,
   turnDirFor,
-  claudePidFor,
+  agentPidFor,
   type Consumed,
   type DurableTurnConfig,
 } from './durableTurn.js';
@@ -22,7 +23,6 @@ import { expandHome } from './expandHome.js';
 import { escapesFolder } from './pathEscape.js';
 import { invalidateGitDirtyCache } from './git-dirty.js';
 import { invalidateFilesRecursiveCache } from './files-recursive.js';
-import { discoverClaudeMcpServers } from './claudeConfigMcp.js';
 import { checkChatFolderAccess } from './folderAccess.js';
 import { SharedMcpPool } from './sharedMcp.js';
 // Host's session manager.
@@ -129,14 +129,7 @@ import {
   type SdkEnvelope,
   type SdkRunOptions,
 } from './sdkBackend.js';
-import {
-  createClaudeSessionProbe,
-  eventIdentity,
-  identityHash,
-  persistedUserContent,
-  type SessionProbe,
-  defaultClaudeProjectsRoot,
-} from './history.js';
+import { eventIdentity, identityHash, persistedUserContent, type SessionProbe } from './history.js';
 import {
   NOTE_END_LINE,
   escapeNoteText,
@@ -214,7 +207,6 @@ import type { LimitFacts } from './sdkBackend.js';
 import { isOverloadedError, limitFailureMessage, statedLimitOf } from './limitFailure.js';
 import { classifyFailure, isSessionAbort, backoffMs as overloadBackoffMs } from './errorClass.js';
 import { describeTurnFailure } from './failureCopy.js';
-import { CLAUDE_BACKEND_ID } from './host.js';
 import {
   applyFindReplace,
   countOccurrences,
@@ -325,7 +317,7 @@ export interface HostOptions {
    * Which SDK backend is wired (`'real'` | `'mock'`). The real Claude Agent
    * SDK `query({ resume })` HANGS forever (no first message, no result, no
    * error) when handed a `resume` session id whose transcript JSONL is absent
-   * from `claude-projects/<folder>/<sessionId>.jsonl` — e.g. a `claudeSessionId`
+   * from `claude-projects/<folder>/<sessionId>.jsonl` — e.g. a `sessionId`
    * persisted by a previous MOCK run (mock writes `mock-session-*.jsonl`, never
    * `<sessionId>.jsonl`), or a transcript pruned out from under us. The mock
    * backend, by contrast, resumes fine without a matching file (it replays from
@@ -336,13 +328,13 @@ export interface HostOptions {
    */
   sdkBackendKind?: 'real' | 'mock';
   /**
-   * MCP servers Claude Code's own config already names for a chat's folder
-   * (`claudeConfigMcp.ts`), merged into `extraMcpServers` ahead of the host's
-   * own Settings → MCP list. Defaults to the real reader; tests inject a stub
-   * (usually `() => []`) so a suite's result never depends on the ambient
-   * `~/.claude.json`/`~/.claude/settings.json` of whatever host runs it.
+   * MCP servers the user's own agent config already names for a chat's folder
+   * (the host wires in Claude Code's, `claudeConfigMcp.ts`), merged into
+   * `extraMcpServers` ahead of the host's own Settings → MCP list. Absent means
+   * none, so a suite's result never depends on the ambient config of whatever
+   * host runs it.
    */
-  discoverClaudeMcpServers?: (folder: string) => McpServerConfig[];
+  discoverMcpServers?: (folder: string) => McpServerConfig[];
   /**
    * Shares each MCP server across chats instead of starting one per chat
    * (`sharedMcp.ts`). Defaults to a pool on a real backend; absent on a mock
@@ -518,17 +510,17 @@ export interface HostOptions {
   /** Test hook: id generator. */
   generateChatId?: () => string;
   /**
-   * Whether a chat's provider session can still be resumed (tests inject one).
-   * Defaults to Claude Code's session store under `claudeProjectsRoot`.
+   * Whether a chat's provider session can still be resumed (the host wiring
+   * passes one that asks each provider). Defaults to the default provider's
+   * own probe over `sessionStoreRoot` (its `defaultSessionProbe` trait).
    */
   sessionProbe?: SessionProbe;
   /**
-   * Root Claude Code keeps its sessions under. Defaults to
-   * `~/.claude/projects`. Needed here (not just inside the default
-   * `sessionProbe`) for the Claude `sessionStore`'s own local-disk store
-   * (`claudeSessionStore.ts`).
+   * Where the provider keeps sessions shared across chats (Claude Code's
+   * projects root). Absent: the provider's own default. Its adapter reads it
+   * when it makes a session ready for a turn.
    */
-  claudeProjectsRoot?: string;
+  sessionStoreRoot?: string;
   /**
    * Hook called at the start of every `sendInput` to optionally prepend
    * harness context (e.g. the broadcast note for special threads,
@@ -664,8 +656,8 @@ export interface HostOptions {
     resumeSessionId: string;
     folder: string;
     model?: string | null;
-    /** The chat's own `CLAUDE_CONFIG_DIR`, where a Claude session's file lives. */
-    claudeConfigDir?: string;
+    /** The private config dir the provider runs under for this chat, if any. */
+    configDir?: string;
   }) => Promise<string | null>;
   /**
    * The Manager sweep's one decision call (spec/06 § Sweep;
@@ -761,7 +753,7 @@ export interface HostOptions {
    */
   titleGenRetryDelayMs?: number;
   /**
-   * Per-host Claude harness config (Task 3). When set, overrides the SDK query
+   * Per-host harness config (Task 3). When set, overrides the SDK query
    * options for every turn on this host. `systemPrompt` replaces the SDK
    * default; `skills` controls which skills are visible.
    */
@@ -769,7 +761,7 @@ export interface HostOptions {
     systemPrompt?: string;
     toolsPrompt?: string;
     skills?: string[] | 'all';
-    /** spec/14 § Agent behavior — Memory toggle. Gates the SDK's `settings.autoMemoryEnabled`. */
+    /** spec/14 § Agent behavior — Memory toggle, applied by the adapter. */
     memoryEnabled?: boolean;
     /**
      * Settings → MCP: the host's ENABLED MCP servers, wired into every turn
@@ -778,8 +770,6 @@ export interface HostOptions {
     mcpServers?: McpServerConfig[];
     /** Settings → MCP: false leaves Patch's own `patch` tools server out of every turn. Absent = on. */
     patchMcpEnabled?: boolean;
-    /** spec/14 § Agent behavior — CLAUDE.md toggle, off. Excluded via `settings.claudeMdExcludes`. */
-    claudeMdExcludePaths?: string[];
   };
   /**
    * The chats' own history log (spec/04 § History). Omitted → one rooted
@@ -1310,7 +1300,6 @@ import {
   type ChatMovePaths,
   attachmentsDirFor,
 } from './chatMove.js';
-import { chatClaudeDir, createClaudeSessionStore } from './claudeSessionStore.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
@@ -1623,7 +1612,7 @@ export interface GoalTriggerInfo {
 
 /** The fork point a forked turn resumes its parent session at (spec/04 § Branching). */
 export interface ForkRun {
-  resumeAtUuid: string | null;
+  throughNativeId: string | null;
   /**
    * The session the fork resumes: the one the kept entry's `nativeRef` names.
    * A provider may give a forked session's messages new ids, so an entry a
@@ -1790,7 +1779,7 @@ const CAPABILITY_ACTION: Record<ProviderCapability, string> = {
 export class EffortNotSupportedError extends Error {
   readonly code = 'effort_not_supported' as const;
   constructor(chatId: string, model: string | undefined) {
-    super(`chat ${chatId} is on model ${model ?? '(none)'}, which has no Claude effort levels`);
+    super(`chat ${chatId} is on model ${model ?? '(none)'}, which has no effort levels`);
     this.name = 'EffortNotSupportedError';
   }
 }
@@ -2110,9 +2099,9 @@ const LOCAL_INSTANT: Intl.DateTimeFormatOptions = {
 export class Daemon {
   readonly chatState: ChatStateMap;
   private readonly opts: Required<
-    Pick<HostOptions, 'now' | 'generateChatId' | 'discoverClaudeMcpServers'>
+    Pick<HostOptions, 'now' | 'generateChatId' | 'discoverMcpServers'>
   > &
-    Omit<HostOptions, 'now' | 'generateChatId' | 'discoverClaudeMcpServers'>;
+    Omit<HostOptions, 'now' | 'generateChatId' | 'discoverMcpServers'>;
 
   /** Active AbortControllers for in-flight queries, keyed by chatId. */
   private readonly aborters = new Map<string, AbortController>();
@@ -2281,7 +2270,7 @@ export class Daemon {
   /**
    * Chats restored from disk via `hydrate()` (or lazy-hydrated in
    * `resumeChat`) — i.e. pre-existing chats from before a host restart. For
-   * these, the next query is a RESUME and MUST carry a `claudeSessionId`; a
+   * these, the next query is a RESUME and MUST carry a `sessionId`; a
    * missing/empty one means the resume is broken and the chat is marked
    * `errored` rather than silently starting a fresh contextless session
    * (spec/04 line 46 — NO FALLBACK, F1).
@@ -2325,7 +2314,8 @@ export class Daemon {
    */
   private readonly titleGenerated = new Set<string>();
   private readonly sessionProbe: SessionProbe;
-  private readonly claudeProjectsRoot: string;
+  /** Where the provider keeps sessions shared across chats; absent means its own default. */
+  private readonly sessionStoreRoot: string | undefined;
   /** The chats' own history log and seq authority (spec/04 § History). */
   readonly chatLog: ChatLog;
   /** Active branch per chat, as records are stamped with it. Dropped when the track changes. */
@@ -2370,7 +2360,7 @@ export class Daemon {
    * RECENT query (spec/02 ## Host restart behaviour, spec/04 ## Resume).
    * `resumeSessionId` is the value of `options.resume` passed to `query()` —
    * `undefined` for a chat's genuine first turn, the persisted
-   * `meta.claudeSessionId` for every resumed turn. Surfaced via
+   * `meta.sessionId` for every resumed turn. Surfaced via
    * `lastQueryDiagnostics()` on the host control UDS so the resume guarantee
    * is OBSERVABLE on the running app (D3-6), not only via the mock SDK's
    * in-process `lastOptions()` hook. Diagnostics only — never gates behaviour.
@@ -2385,7 +2375,7 @@ export class Daemon {
       ...options,
       now: options.now ?? (() => Date.now()),
       generateChatId: options.generateChatId ?? (() => ulid()),
-      discoverClaudeMcpServers: options.discoverClaudeMcpServers ?? discoverClaudeMcpServers,
+      discoverMcpServers: options.discoverMcpServers ?? (() => []),
       sharedMcp:
         options.sharedMcp ?? (options.sdkBackendKind === 'real' ? new SharedMcpPool() : undefined),
     };
@@ -2431,10 +2421,10 @@ export class Daemon {
       this.sendTurnBoundary(chatId, record);
       this.sendSideBranchEntry(chatId, record);
     });
-    this.claudeProjectsRoot = options.claudeProjectsRoot ?? defaultClaudeProjectsRoot();
+    this.sessionStoreRoot = options.sessionStoreRoot;
     this.sessionProbe =
       options.sessionProbe ??
-      createClaudeSessionProbe({ claudeProjectsRoot: this.claudeProjectsRoot });
+      harnessTraitsForModel(undefined).defaultSessionProbe(this.sessionStoreRoot);
     // spec/02 § Self-wake: the host owns durable per-chat timers. On fire it
     // re-invokes the SAME chat (resuming its Claude session) — the agent declares
     // intent via patch_wake_me and ends its turn; the host does the waiting.
@@ -2998,7 +2988,6 @@ export class Daemon {
     memoryEnabled?: boolean;
     mcpServers?: McpServerConfig[];
     patchMcpEnabled?: boolean;
-    claudeMdExcludePaths?: string[];
   } = {};
 
   /** Update the per-host harness config — applies to the next turn. */
@@ -3009,7 +2998,6 @@ export class Daemon {
     memoryEnabled?: boolean;
     mcpServers?: McpServerConfig[];
     patchMcpEnabled?: boolean;
-    claudeMdExcludePaths?: string[];
   }): void {
     this.harnessConfig = config;
   }
@@ -3364,7 +3352,7 @@ export class Daemon {
     for (let i = 0; i < metas.length; i++) metas[i] = this.reconcileFolder(metas[i]!);
     this.chatState.hydrate(metas);
     // Mark every restored chat as hydrated-from-disk: its next query is a
-    // RESUME and must carry a claudeSessionId (F1).
+    // RESUME and must carry a sessionId (F1).
     for (const m of metas) this.hydratedFromDisk.add(m.chatId);
     for (const m of metas) this.stampMissingPermissionMode(m.chatId);
     // Resume each chat's seq above everything any store remembers
@@ -4718,7 +4706,7 @@ export class Daemon {
       turnRetrying: false,
       lastMessages: [],
       lastUpdated: now,
-      claudeSessionId: undefined,
+      sessionId: undefined,
       model,
       // A brand-new chat has no effort override of its own (spec/04 §
       // Effort) — it runs at the model's own default until one is set.
@@ -5363,7 +5351,7 @@ export class Daemon {
   /**
    * Resume a chat — ensures it's in chat_state (hydrating from disk if not in
    * memory), emits a fresh chat.state. Does NOT spawn an SDK session: that
-   * happens lazily on the next user input via the stored claudeSessionId
+   * happens lazily on the next user input via the stored sessionId
    * (per spec/04 ## Resume).
    */
   async resumeChat(chatId: string): Promise<ChatState> {
@@ -5897,7 +5885,7 @@ export class Daemon {
         archivedAt: chat.status === 'archived' ? now : null,
         ...(chat.model !== undefined ? { model: chat.model } : {}),
         ...(chat.permissionMode !== undefined ? { permissionMode: chat.permissionMode } : {}),
-        ...(chat.sessionId !== undefined ? { claudeSessionId: chat.sessionId } : {}),
+        ...(chat.sessionId !== undefined ? { sessionId: chat.sessionId } : {}),
         createdAt: chat.createdAt ?? now,
         updatedAt: now,
         lastUserActivity: now,
@@ -5966,11 +5954,11 @@ export class Daemon {
   private endSessionMemory(chatId: string, why: string): void {
     const state = this.chatState.get(chatId);
     if (state) {
-      state.claudeSessionId = undefined;
-      state.claudeSessionAccountId = undefined;
+      state.sessionId = undefined;
+      state.sessionAccountId = undefined;
     }
     this.opts.metaStore.update(chatId, (m) => {
-      const { claudeSessionId: _session, claudeSessionAccountId: _account, ...rest } = m;
+      const { sessionId: _session, sessionAccountId: _account, ...rest } = m;
       void _session;
       void _account;
       return { ...rest, updatedAt: this.opts.now() };
@@ -6002,7 +5990,7 @@ export class Daemon {
     const window = this.opts.managerContextWindow;
     const state = this.chatState.get(chatId);
     const meta = this.opts.metaStore.read(chatId);
-    if (window === undefined || window <= 0 || !state?.claudeSessionId || !meta) return '';
+    if (window === undefined || window <= 0 || !state?.sessionId || !meta) return '';
     const from = meta.sessionFromSeq ?? 0;
     const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
     const messages = readTrack(this.chatLog, chatId, meta, branchId, -1).flatMap(({ event }) =>
@@ -6016,10 +6004,10 @@ export class Daemon {
       (m) =>
         `${m.role === 'user' ? 'User' : 'Manager'}: ${m.content.length > MANAGER_HANDOVER_MESSAGE_CHARS ? `${m.content.slice(0, MANAGER_HANDOVER_MESSAGE_CHARS)}…` : m.content}`,
     );
-    state.claudeSessionId = undefined;
-    state.claudeSessionAccountId = undefined;
+    state.sessionId = undefined;
+    state.sessionAccountId = undefined;
     this.opts.metaStore.update(chatId, (m) => {
-      const { claudeSessionId: _session, claudeSessionAccountId: _account, ...rest } = m;
+      const { sessionId: _session, sessionAccountId: _account, ...rest } = m;
       void _session;
       void _account;
       return { ...rest, updatedAt: this.opts.now() };
@@ -6054,7 +6042,7 @@ export class Daemon {
     if (!this.opts.generateDigest) {
       throw new Error('rotateThread: no digest generator configured');
     }
-    const outgoingSessionId = state.claudeSessionId;
+    const outgoingSessionId = state.sessionId;
     if (outgoingSessionId === undefined) {
       // Nothing to rotate away from — a thread that has never run a turn (or
       // was already rotated onto a session that has not run one yet) has no
@@ -6066,7 +6054,7 @@ export class Daemon {
       chatId,
       resumeSessionId: outgoingSessionId,
       folder: state.folder,
-      claudeConfigDir: this.claudeConfigDirFor(chatId),
+      ...(await this.readySession(chatId, this.harnessOf(chatId), outgoingSessionId)),
     });
     if (digest === null) {
       this.opts.logger.warn(
@@ -6092,9 +6080,9 @@ export class Daemon {
     // Clear the session so the next turn starts fresh — the same "session
     // lost, start clean" idiom `runQuery` already uses for an orphaned resume
     // id (above), just deliberate here rather than a recovery from a bad state.
-    state.claudeSessionId = undefined;
+    state.sessionId = undefined;
     this.opts.metaStore.update(chatId, (m) => {
-      const { claudeSessionId: _drop, ...rest } = m;
+      const { sessionId: _drop, ...rest } = m;
       void _drop;
       return { ...rest, updatedAt: at };
     });
@@ -7901,7 +7889,7 @@ export class Daemon {
       pendingTurns: pendingTurns.map((t) =>
         (t.fork as ForkRun | undefined)?.fromSessionId === undefined
           ? t
-          : { ...t, fork: { resumeAtUuid: t.fork!.resumeAtUuid } },
+          : { ...t, fork: { throughNativeId: t.fork!.throughNativeId } },
       ),
       updatedAt: this.opts.now(),
     }));
@@ -8335,7 +8323,7 @@ export class Daemon {
   /**
    * The chat's track graph, creating the ROOT branch on first use. A chat that
    * predates branching (or has simply never been forked) gets exactly one root
-   * branch here — synthesised from the chat's current `claudeSessionId`, so the
+   * branch here — synthesised from the chat's current `sessionId`, so the
    * graph and the session id can never disagree. Idempotent: once persisted it
    * is read back untouched.
    */
@@ -8353,7 +8341,7 @@ export class Daemon {
       forkFromSeq: null,
       label: 'main',
       createdAt: meta.createdAt,
-      ...(state?.claudeSessionId ? { sessionId: state.claudeSessionId } : {}),
+      ...(state?.sessionId ? { sessionId: state.sessionId } : {}),
     };
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
@@ -8424,9 +8412,9 @@ export class Daemon {
     if (index < 0) return null;
     const point = forkPointIndex(kind, entries, index, this.chatState.get(chatId)?.model);
     if (point === null) return null;
-    if (point === 'empty') return { resumeAtUuid: null };
+    if (point === 'empty') return { throughNativeId: null };
     const ref = records[point]!.nativeRef!;
-    return { resumeAtUuid: ref.id, fromSessionId: ref.sessionId };
+    return { throughNativeId: ref.id, fromSessionId: ref.sessionId };
   }
 
   /**
@@ -8501,7 +8489,7 @@ export class Daemon {
     }
     const graph = this.ensureBranches(req.chatId);
 
-    const sessionId = state.claudeSessionId;
+    const sessionId = state.sessionId;
     const hasSession = sessionId !== undefined && sessionId.length > 0;
     // A first turn stopped before the provider made a session may not even be
     // in the record yet, though the surface shows it at seq 0. It is the one
@@ -8509,7 +8497,7 @@ export class Daemon {
     const point: ForkRun | null = hasSession
       ? this.recordForkPoint(req.chatId, graph.activeBranchId, req.seq, 'edit')
       : req.seq === 0
-        ? { resumeAtUuid: null }
+        ? { throughNativeId: null }
         : null;
     if (!point) {
       this.emit({
@@ -8544,7 +8532,7 @@ export class Daemon {
     this.branchIds.delete(req.chatId);
     this.emitBranches(req.chatId);
 
-    // `state.claudeSessionId` is still the PARENT's: that is exactly what the
+    // `state.sessionId` is still the PARENT's: that is exactly what the
     // fork resumes from. The new session id arrives on the turn's `result`
     // envelope and is recorded onto this (now active) branch.
     await this.sendInput({
@@ -8667,7 +8655,7 @@ export class Daemon {
 
   /**
    * Make `branchId` the chat's active track (spec/04 § Branching): repoint
-   * `activeBranchId` — and with it `claudeSessionId` — and tell surfaces, which
+   * `activeBranchId` — and with it `sessionId` — and tell surfaces, which
    * re-replay to render the newly-active track.
    *
    * NO FALLBACK: an unknown branch, or one whose first turn has not yet produced
@@ -8708,11 +8696,11 @@ export class Daemon {
       });
       return;
     }
-    state.claudeSessionId = target.sessionId;
+    state.sessionId = target.sessionId;
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       activeBranchId: branchId,
-      claudeSessionId: target.sessionId,
+      sessionId: target.sessionId,
       updatedAt: this.opts.now(),
     }));
     this.branchIds.delete(chatId);
@@ -9083,16 +9071,16 @@ export class Daemon {
   async cancelToolCall(chatId: string, callId: string): Promise<void> {
     const command = this.runningBash.get(chatId)?.get(callId);
     const durable = this.opts.durableTurns;
-    const claudePid = durable ? claudePidFor(durable, chatId) : undefined;
-    if (command === undefined || claudePid === undefined) {
+    const agentPid = durable ? agentPidFor(durable, chatId) : undefined;
+    if (command === undefined || agentPid === undefined) {
       this.opts.logger.warn(
-        { chatId, callId, knownCall: command !== undefined, claudePid },
-        'tool cancel: nothing to cancel (call not running, or no claude process recorded)',
+        { chatId, callId, knownCall: command !== undefined, agentPid },
+        'tool cancel: nothing to cancel (call not running, or no agent process recorded)',
       );
       return;
     }
     try {
-      const pids = await cancelBashCall(claudePid, command);
+      const pids = await cancelBashCall(agentPid, command);
       this.opts.logger.info({ chatId, callId, pids }, 'tool cancel: interrupted a Bash call');
     } catch (err) {
       this.opts.logger.warn({ chatId, callId, err: (err as Error).message }, 'tool cancel: failed');
@@ -9204,9 +9192,9 @@ export class Daemon {
     );
     const ownSession = branch?.sessionId;
     const sideResumeId =
-      fork?.resumeAtUuid === null
+      fork?.throughNativeId === null
         ? undefined
-        : (fork?.fromSessionId ?? ownSession ?? state.claudeSessionId);
+        : (fork?.fromSessionId ?? ownSession ?? state.sessionId);
     const sideIds = this.userTurnIds(chatId, sideResumeId, fork !== undefined);
     try {
       // The side branch's turn opens in the log like any other, so the server
@@ -9251,20 +9239,12 @@ export class Daemon {
           args: mcpArgsOmitting(this.opts.mcpServer.args, state.model),
         }
       : undefined;
-    const sideOwnsSessionFile = HARNESS_TRAITS[this.harnessOf(chatId)].ownsSessionFile;
-    if (sideOwnsSessionFile && sideResumeId)
-      await createClaudeSessionStore({
-        chatId,
-        folder: state.folder,
-        chatDir: this.chatDirFor(chatId),
-        claudeProjectsRoot: this.claudeProjectsRoot,
-        logger: this.opts.logger,
-      }).prepare(sideResumeId);
+    const sideSession = await this.readySession(chatId, this.harnessOf(chatId), sideResumeId);
     const sdkOpts: SdkRunOptions = {
       prompt: composedPrompt,
       cwd: state.folder,
       resumeSessionId: sideResumeId,
-      ...(sideOwnsSessionFile ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
+      ...sideSession,
       ...(fork ? { fork } : {}),
       ...(sideIds ? { promptId: sideIds.promptId } : {}),
       ...(sideIds?.newSessionId !== undefined ? { newSessionId: sideIds.newSessionId } : {}),
@@ -9292,7 +9272,7 @@ export class Daemon {
           req.decisionReason,
         ),
       extraMcpServers: await this.shareMcp(
-        this.opts.discoverClaudeMcpServers(state.folder),
+        this.opts.discoverMcpServers(state.folder),
         state.folder,
       ),
       ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
@@ -9861,12 +9841,12 @@ export class Daemon {
       if (this.aborters.has(state.chatId)) continue;
       // A chat with no session id has never produced a transcript; it is a
       // fresh chat, not a lost one. Leave it.
-      if (!state.claudeSessionId) continue;
+      if (!state.sessionId) continue;
       // Lost iff the captured session's transcript is gone on disk.
       if (
         this.sessionProbe.hasSession({
           folder: state.folder,
-          sessionId: state.claudeSessionId,
+          sessionId: state.sessionId,
           chatDir: this.chatDirFor(state.chatId),
         })
       )
@@ -9882,7 +9862,7 @@ export class Daemon {
       this.hydratedFromDisk.delete(state.chatId);
       removed.push(state.chatId);
       this.opts.logger.info(
-        { chatId: state.chatId, folder: state.folder, sessionId: state.claudeSessionId },
+        { chatId: state.chatId, folder: state.folder, sessionId: state.sessionId },
         'host clean: removed lost chat (transcript gone)',
       );
     }
@@ -9939,7 +9919,7 @@ export class Daemon {
 
   // -------------------------------------------------------------------------
   // Internal: run one SDK query for the chat. Emits wire events as they
-  // arrive, persists nextSeq + claudeSessionId after every emit.
+  // arrive, persists nextSeq + sessionId after every emit.
 
   /** Subagents whose last update told the parent they are out of credit. */
   private readonly pausedDelegates = new Set<string>();
@@ -10083,7 +10063,7 @@ export class Daemon {
       }
     }
 
-    // F1 — a RESUME with no claudeSessionId would silently start a brand-new
+    // F1 — a RESUME with no sessionId would silently start a brand-new
     // contextless session. Distinguish the legitimate first query of a
     // freshly-spawned chat (resume undefined is correct) from a resume of a
     // pre-existing/hydrated chat whose session id is missing/empty. The latter
@@ -10114,7 +10094,7 @@ export class Daemon {
       isResume &&
       hasPriorTurns &&
       !wasClearedForRecovery &&
-      (state.claudeSessionId === undefined || state.claudeSessionId === '')
+      (state.sessionId === undefined || state.sessionId === '')
     ) {
       // No provider session to resume. That is NOT lost work: the chat's own
       // history is Patch's, in ~/.patch/chats/<id>, and a turn killed mid-flight
@@ -10138,7 +10118,7 @@ export class Daemon {
     // `query({ resume })` HANGS indefinitely (no first message, no result, no
     // error — observed as "starting SDK query (resume)" with zero completions)
     // when the resume session id has no transcript JSONL on disk. This happens
-    // when `claudeSessionId` was persisted by a prior MOCK run (which writes
+    // when `sessionId` was persisted by a prior MOCK run (which writes
     // `mock-session-*.jsonl`, never `<sessionId>.jsonl`) or the transcript was
     // pruned. The mock backend resumes fine without the file, so we only apply
     // this for the real backend. Per spec/04 ## Resume, a session we provably
@@ -10147,16 +10127,16 @@ export class Daemon {
     if (
       isResume &&
       this.opts.sdkBackendKind === 'real' &&
-      typeof state.claudeSessionId === 'string' &&
-      state.claudeSessionId.length > 0 &&
+      typeof state.sessionId === 'string' &&
+      state.sessionId.length > 0 &&
       !this.sessionProbe.hasSession({
         folder: state.folder,
-        sessionId: state.claudeSessionId,
+        sessionId: state.sessionId,
         chatDir: this.chatDirFor(chatId),
       })
     ) {
       this.opts.logger.warn(
-        { chatId, orphanedSessionId: state.claudeSessionId, folder: state.folder },
+        { chatId, orphanedSessionId: state.sessionId, folder: state.folder },
         'resume session id has no transcript on disk (mock-origin or pruned); ' +
           'the session is gone, so this turn starts a fresh one',
       );
@@ -10192,8 +10172,8 @@ export class Daemon {
         ? { preferredAccountId: state.preferredAccountId }
         : {}),
       // The key the live session sits on: moving off it throws the session away.
-      ...(state.claudeSessionId !== undefined && state.claudeSessionAccountId !== undefined
-        ? { sessionAccountId: state.claudeSessionAccountId }
+      ...(state.sessionId !== undefined && state.sessionAccountId !== undefined
+        ? { sessionAccountId: state.sessionAccountId }
         : {}),
     });
     // Which key this turn is actually spending, for as long as it runs. Not a
@@ -10245,7 +10225,7 @@ export class Daemon {
       });
       this.opts.logger.error(
         { chatId, reason: oauth.reason },
-        'runQuery refused: Claude OAuth not available (NO API-key fallback)',
+        'runQuery refused: no credential for this provider (NO API-key fallback)',
       );
       // SAY SO IN THE CHAT. `host.unauthenticated` tells Settings, and the
       // activity going idle tells the composer it may type again — but the turn
@@ -10285,13 +10265,13 @@ export class Daemon {
     // (spec/10 § Limits — continue on another account). Patch does not rebuild
     // or replace it; only the prompt cache is the old account's.
     if (
-      state.claudeSessionId !== undefined &&
-      state.claudeSessionAccountId !== undefined &&
+      state.sessionId !== undefined &&
+      state.sessionAccountId !== undefined &&
       oauth.accountId !== undefined &&
-      state.claudeSessionAccountId !== oauth.accountId
+      state.sessionAccountId !== oauth.accountId
     ) {
       this.opts.logger.info(
-        { chatId, sessionId: state.claudeSessionId, runningOn: oauth.accountId },
+        { chatId, sessionId: state.sessionId, runningOn: oauth.accountId },
         'account changed — resuming the same provider session on the new account',
       );
     }
@@ -10365,7 +10345,7 @@ export class Daemon {
     this.runningTurn.set(chatId, {
       message: prompt,
       ...(localId !== undefined ? { localId } : {}),
-      ...(fork ? { fork: { resumeAtUuid: fork.resumeAtUuid } } : {}),
+      ...(fork ? { fork: { throughNativeId: fork.throughNativeId } } : {}),
       // Persisted with the turn so a restart re-sends it as what it was — a
       // wake tick killed mid-turn must not come back as a user turn.
       ...(origin ? { origin } : {}),
@@ -10430,7 +10410,7 @@ export class Daemon {
         k: 'turn.start',
         harness: this.harnessOf(chatId),
         model: state.model ?? null,
-        ...(state.claudeSessionId ? { sessionId: state.claudeSessionId } : {}),
+        ...(state.sessionId ? { sessionId: state.sessionId } : {}),
         origin: origin ?? 'user',
         ...(localId !== undefined ? { localId } : {}),
         ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
@@ -10461,12 +10441,12 @@ export class Daemon {
     // written in; otherwise the chat's own, unless another provider made it
     // (that one is ended below and the turn starts fresh).
     const ownSession =
-      state.claudeSessionId !== undefined &&
-      harnessOfSessionId(state.claudeSessionId) === this.harnessOf(chatId)
-        ? state.claudeSessionId
+      state.sessionId !== undefined &&
+      harnessOfSessionId(state.sessionId) === this.harnessOf(chatId)
+        ? state.sessionId
         : undefined;
     const turnResumeId =
-      fork?.resumeAtUuid === null ? undefined : (fork?.fromSessionId ?? ownSession);
+      fork?.throughNativeId === null ? undefined : (fork?.fromSessionId ?? ownSession);
     // A drawn turn being reattached already has its message and ids.
     const turnIds = reattachesDrawnTurn
       ? undefined
@@ -10582,33 +10562,24 @@ export class Daemon {
     // model was switched in place before linked chats (or a special thread
     // that has just changed provider) starts a fresh session. Patch never
     // carries one provider's session into another's (spec/04 § Provider switches).
-    const sessionHarness: HarnessId | undefined = harnessOfSessionId(state.claudeSessionId);
+    const sessionHarness: HarnessId | undefined = harnessOfSessionId(state.sessionId);
     if (sessionHarness !== undefined && sessionHarness !== targetHarness && !fork) {
       this.endSessionMemory(chatId, 'it was made by another provider');
     }
-    const claudeResumeId: string | undefined =
-      fork?.resumeAtUuid === null
+    const resumeId: string | undefined =
+      fork?.throughNativeId === null
         ? // Editing the FIRST message: the shared prefix is empty, so there is
           // nothing to resume. Resuming the parent would carry the original
           // message and everything after it into the new track.
           undefined
-        : (fork?.fromSessionId ?? state.claudeSessionId);
-    // Claude runs under the chat's own config dir: make its one conversation
-    // file ready (a session from before per-chat config dirs is migrated in).
-    // Patch never edits or reads the file for display.
-    if (HARNESS_TRAITS[targetHarness].ownsSessionFile && claudeResumeId !== undefined) {
-      await createClaudeSessionStore({
-        chatId,
-        folder: state.folder,
-        chatDir: this.chatDirFor(chatId),
-        claudeProjectsRoot: this.claudeProjectsRoot,
-        logger: this.opts.logger,
-      }).prepare(claudeResumeId);
-    }
+        : (fork?.fromSessionId ?? state.sessionId);
+    // The provider makes the session ready for the turn in its own way (spec/02
+    // § Provider adapters); Patch never edits or reads it for display.
+    const session = await this.readySession(chatId, targetHarness, resumeId);
     const sdkPrompt = prompt;
     // Continuing the provider's own saved session is the resume capability
     // (spec/02 § Provider adapters): refused, never replaced with a fresh one.
-    if (claudeResumeId !== undefined && !modelHasCapability(state.model, 'resume')) {
+    if (resumeId !== undefined && !modelHasCapability(state.model, 'resume')) {
       throw new CapabilityUnsupportedError(chatId, 'resume');
     }
     const sdkOpts: SdkRunOptions = {
@@ -10617,10 +10588,8 @@ export class Daemon {
       // Keys the persistent warm-session map (PATCH_PERSISTENT_SESSIONS=1);
       // ignored by the one-shot default path.
       chatId,
-      resumeSessionId: claudeResumeId,
-      ...(HARNESS_TRAITS[targetHarness].ownsSessionFile
-        ? { claudeConfigDir: this.claudeConfigDirFor(chatId) }
-        : {}),
+      resumeSessionId: resumeId,
+      ...session,
       // spec/04 § Branching — this turn opens a new TRACK: resume the parent
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
@@ -10684,37 +10653,22 @@ export class Daemon {
       // whichever prompt is in force rather than replacing it.
       ...(this.harnessConfig.toolsPrompt ? { toolsPrompt: this.harnessConfig.toolsPrompt } : {}),
       ...(this.harnessConfig.skills !== undefined ? { skills: this.harnessConfig.skills } : {}),
-      // spec/14 § Agent behavior — Memory + CLAUDE.md toggles both ride the
-      // SDK's `settings` flag-layer option (highest-priority settings
-      // source), rather than editing the host's own settings.json, so
-      // flipping either never touches a file another chat might be reading.
-      ...(this.harnessConfig.memoryEnabled !== undefined ||
-      (this.harnessConfig.claudeMdExcludePaths?.length ?? 0) > 0
-        ? {
-            settings: {
-              ...(this.harnessConfig.memoryEnabled !== undefined
-                ? { autoMemoryEnabled: this.harnessConfig.memoryEnabled }
-                : {}),
-              ...(this.harnessConfig.claudeMdExcludePaths?.length
-                ? { claudeMdExcludes: this.harnessConfig.claudeMdExcludePaths }
-                : {}),
-            },
-          }
+      // spec/14 § Agent behavior — the Memory toggle, applied by the adapter
+      // as a per-turn override rather than a settings-file write.
+      ...(this.harnessConfig.memoryEnabled !== undefined
+        ? { memoryEnabled: this.harnessConfig.memoryEnabled }
         : {}),
       // Settings → MCP — the host's enabled MCP servers, wired in after
       // `patch` by `buildSdkEnv` (Claude) or `config.mcp_servers` (Codex) —
-      // plus whatever Claude Code's own config already names for this folder
-      // (`claudeConfigMcp.ts`), which the SDK's inline `mcpServers` option
+      // plus the MCP servers the user's own agent config already names for
+      // this folder (`discoverMcpServers`), which the SDK's inline `mcpServers` option
       // would otherwise silently drop. The host's own list is listed second so
       // it wins a name collision: it is the one the user can see and edit
       // inside Patch, so it is the one that should win.
       // Undefined (mock/test callers that never configured harness) reads as
       // none, same as every other harness field's absence.
       extraMcpServers: await this.shareMcp(
-        [
-          ...this.opts.discoverClaudeMcpServers(state.folder),
-          ...(this.harnessConfig.mcpServers ?? []),
-        ],
+        [...this.opts.discoverMcpServers(state.folder), ...(this.harnessConfig.mcpServers ?? [])],
         state.folder,
       ),
       ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
@@ -10723,18 +10677,18 @@ export class Daemon {
     // (control-UDS `lastQueryDiagnostics`, `patch doctor`) — the spec/02
     // restart-resume guarantee (D3-6) without needing the in-process mock hook.
     this.lastQuery.set(chatId, {
-      resumeSessionId: state.claudeSessionId,
+      resumeSessionId: state.sessionId,
       at: this.opts.now(),
     });
     this.opts.logger.info(
       {
         chatId,
-        resumeSessionId: state.claudeSessionId ?? null,
+        resumeSessionId: state.sessionId ?? null,
         // Pass-through SDK options (spec/13): observable on the live host.
         model: state.model ?? null,
         permissionMode,
       },
-      state.claudeSessionId ? 'starting SDK query (resume)' : 'starting SDK query (fresh session)',
+      state.sessionId ? 'starting SDK query (resume)' : 'starting SDK query (fresh session)',
     );
 
     let sawResult = false;
@@ -11282,7 +11236,7 @@ export class Daemon {
         // Same outcome as a gate miss: the chat stays idle and re-runnable, and
         // the host is reported unauthenticated rather than this looking like a
         // one-off SDK fault on one chat.
-        if (isClaudeCredentialRejectedMessage(errMsg)) {
+        if (this.credentialRejectionOf(chatId, errMsg)) {
           this.emitCredentialRejected(chatId, errMsg, userMessageSeq);
           this.chatState.setActivity(chatId, 'idle');
           this.emitState(chatId);
@@ -11329,7 +11283,7 @@ export class Daemon {
               effective: err.effective,
               model: this.chatState.get(chatId)?.model ?? null,
             },
-            'permission mode downgraded by Claude Code — turn refused',
+            'permission mode downgraded by the agent — turn refused',
           );
           return false;
         }
@@ -11371,11 +11325,12 @@ export class Daemon {
           // Restarts spent: fall through and report the failure. The ladder
           // below still does not run for it (see `scheduleSdkRetry` call).
         }
-        // Distinguish a stale/missing Claude session from generic SDK
-        // failures (spec/04 line 46): clear claudeSessionId so the next
-        // input starts fresh, and surface a `claude_session_invalid` code.
-        const isSessionInvalid = isClaudeSessionInvalidError(err);
-        const code: ChatErrorCode = isSessionInvalid ? 'claude_session_invalid' : 'sdk_error';
+        // Distinguish a stale/missing session from generic SDK failures
+        // (spec/04 line 46), in the provider's own words: clear the session so
+        // the next input starts fresh, and surface the provider's lost-session code.
+        const lostTraits = harnessTraitsForModel(this.chatState.get(chatId)?.model);
+        const isSessionInvalid = lostTraits.sessionLost(err);
+        const code: ChatErrorCode = isSessionInvalid ? lostTraits.sessionLostCode : 'sdk_error';
         // A turn that was resumed onto a session with no transcript behind it
         // (one whose first attempt died on a usage limit before Claude wrote
         // anything) has done no work, so the owed turn is sent again as the
@@ -11385,7 +11340,7 @@ export class Daemon {
         // Loud on purpose: the log names the dead session.
         if (isSessionInvalid && this.owedResend.delete(chatId)) {
           const cur = this.chatState.get(chatId);
-          const deadSessionId = cur?.claudeSessionId;
+          const deadSessionId = cur?.sessionId;
           this.endSessionMemory(chatId, 'the provider could not resume its session');
           this.opts.logger.warn(
             { chatId, deadSessionId: deadSessionId ?? null, error: errMsg },
@@ -11405,10 +11360,10 @@ export class Daemon {
         if (isSessionInvalid) {
           const cur = this.chatState.get(chatId);
           if (cur) {
-            cur.claudeSessionId = undefined;
+            cur.sessionId = undefined;
             cur.status = 'errored';
             this.opts.metaStore.update(chatId, (m) => {
-              const { claudeSessionId: _drop, ...rest } = m;
+              const { sessionId: _drop, ...rest } = m;
               void _drop;
               return {
                 ...rest,
@@ -12378,30 +12333,38 @@ export class Daemon {
     });
   }
 
+  /**
+   * The provider's own way of refusing this host's credential, when `message`
+   * is it (the chat's provider traits, spec/02 § Provider adapters).
+   */
+  private credentialRejectionOf(chatId: string, message: string): CredentialRejection | undefined {
+    const traits = harnessTraitsForModel(this.chatState.get(chatId)?.model);
+    return traits.credentialRejection?.matches(message) ? traits.credentialRejection : undefined;
+  }
+
   private emitCredentialRejected(
     chatId: string,
     rawMessage: string,
     userMessageSeq?: number,
   ): void {
+    const traits = harnessTraitsForModel(this.chatState.get(chatId)?.model);
+    const rejection = traits.credentialRejection!;
     this.emit({
       type: 'host.unauthenticated',
       hostId: this.opts.hostId,
-      backendId: CLAUDE_BACKEND_ID,
-      reason: `Claude rejected this host's credential: ${rawMessage}`,
+      backendId: traits.backendId,
+      reason: rejection.reason(rawMessage),
     });
     this.emit({
       type: 'chat.error',
       chatId,
-      error: {
-        code: 'claude_oauth_missing',
-        message: `${this.opts.hostId}'s Claude sign-in is no longer valid, so this turn can't run. Sign in again from Settings → Hosts.`,
-      },
+      error: { code: rejection.code, message: rejection.message(this.opts.hostId) },
       seq: this.bumpSeq(chatId),
       ...(userMessageSeq !== undefined ? { causeSeq: userMessageSeq } : {}),
     });
     this.opts.logger.error(
-      { chatId, rawMessage },
-      "Claude rejected this host's OAuth credential; treating as unauthenticated (NO API-key fallback)",
+      { chatId, rawMessage, backendId: traits.backendId },
+      "the provider rejected this host's credential; treating as unauthenticated (NO API-key fallback)",
     );
   }
 
@@ -12424,7 +12387,7 @@ export class Daemon {
   private handleEnvelope(chatId: string, env: SdkEnvelope, userMessageSeq?: number): void {
     // The harness's own id for this message rides on every history record the
     // envelope produces (`logEmitted`), and only for as long as it is handled.
-    const sessionForRef = env.sessionId ?? this.chatState.get(chatId)?.claudeSessionId;
+    const sessionForRef = env.sessionId ?? this.chatState.get(chatId)?.sessionId;
     if (env.nativeId !== undefined && sessionForRef) {
       this.envelopeRefs.set(chatId, {
         harness: this.harnessOf(chatId),
@@ -12530,7 +12493,7 @@ export class Daemon {
     }
     this.opts.logger.warn(
       { chatId, text: text.slice(0, 200) },
-      'synthetic assistant message shown as a Claude Code notice — the CLI generated it, the model did not',
+      'synthetic assistant message shown as an agent notice — the CLI generated it, the model did not',
     );
     // Not pushed onto chat state: that list is the conversation as the agent
     // had it, and this line is not part of it.
@@ -12548,12 +12511,12 @@ export class Daemon {
   private handleEnvelopeInner(chatId: string, env: SdkEnvelope, userMessageSeq?: number): void {
     if (env.sessionId) {
       const cur = this.chatState.get(chatId);
-      if (cur && cur.claudeSessionId !== env.sessionId) {
+      if (cur && cur.sessionId !== env.sessionId) {
         // spec/04 § History — the chat moved onto a new harness session. Its
         // first, a fork's own, or one the harness rotated to on its own
         // (/clear, /compact).
         const fork = this.runningForks.get(chatId);
-        const previous = cur.claudeSessionId;
+        const previous = cur.sessionId;
         this.logRecord(
           chatId,
           {
@@ -12565,7 +12528,7 @@ export class Daemon {
             ...(fork
               ? {
                   seed: {
-                    resumeAtUuid: fork.resumeAtUuid,
+                    throughNativeId: fork.throughNativeId,
                     ...(previous !== undefined ? { parentSessionId: previous } : {}),
                   },
                 }
@@ -12573,18 +12536,16 @@ export class Daemon {
           },
           { sync: true },
         );
-        cur.claudeSessionId = env.sessionId;
-        cur.claudeSessionAccountId = this.runningOnAccount.get(chatId);
+        cur.sessionId = env.sessionId;
+        cur.sessionAccountId = this.runningOnAccount.get(chatId);
         const sessionFromSeq =
           userMessageSeq ?? Math.max(0, this.chatLog.recordedHighWater(chatId));
         this.opts.metaStore.update(chatId, (m) => ({
           ...m,
-          claudeSessionId: env.sessionId,
+          sessionId: env.sessionId,
           sessionFromSeq,
-          ...(cur.claudeSessionAccountId !== undefined
-            ? { claudeSessionAccountId: cur.claudeSessionAccountId }
-            : {}),
-          // spec/04 § Branching — `claudeSessionId` always mirrors the ACTIVE
+          ...(cur.sessionAccountId !== undefined ? { sessionAccountId: cur.sessionAccountId } : {}),
+          // spec/04 § Branching — `sessionId` always mirrors the ACTIVE
           // branch's session, so a session id captured here (a first turn, or a
           // fork's brand-new session) belongs to whichever track is active.
           // Without this a forked track would never learn its own session and
@@ -12903,7 +12864,7 @@ export class Daemon {
         // throw is the same failure and gets the same report (the turn settles
         // idle on its own once the stream ends, so there is no activity to fix
         // here).
-        if (isClaudeCredentialRejectedMessage(message)) {
+        if (this.credentialRejectionOf(chatId, message)) {
           this.emitCredentialRejected(chatId, message, userMessageSeq);
           return;
         }
@@ -14987,7 +14948,7 @@ export class Daemon {
    * when a turn settles and on shutdown — the log already holds every seq, so
    * this only keeps the meta the sidebar and hydrate read current.
    *
-   * `claudeSessionId` is NOT mirrored here — it is written immediately, at the
+   * `sessionId` is NOT mirrored here — it is written immediately, at the
    * point it actually changes (`handleEnvelopeInner`), which is the only
    * correct value to persist. Re-asserting it from in-memory state on a delay
    * would clobber a legitimate out-of-band clear (an orphaned-session reset, a
@@ -15037,8 +14998,8 @@ export class Daemon {
     const cached = this.branchIds.get(chatId);
     if (cached !== undefined) return cached;
     const meta = this.opts.metaStore.read(chatId);
-    const claudeSessionId = this.chatState.get(chatId)?.claudeSessionId;
-    // A turn about to start resumes `claudeSessionId` — the true resume
+    const currentSessionId = this.chatState.get(chatId)?.sessionId;
+    // A turn about to start resumes `sessionId` — the true resume
     // target, and (spec/04 § Branching) it changes only once a fork's OWN
     // turn actually completes. `activeBranchId` changes the moment `forkChat`
     // is CALLED, which can be well before a fork carried through the queue
@@ -15048,8 +15009,8 @@ export class Daemon {
     // session yet (the fork itself, on its own first turn) has nothing to
     // match, so it falls through to `activeBranchId`, which by then IS its
     // branch (`forkChat`'s creation already made it active).
-    const bySession = claudeSessionId
-      ? meta?.branches?.find((b) => b.sessionId === claudeSessionId)?.branchId
+    const bySession = currentSessionId
+      ? meta?.branches?.find((b) => b.sessionId === currentSessionId)?.branchId
       : undefined;
     const branchId = bySession ?? meta?.activeBranchId ?? `${chatId}-b0`;
     this.branchIds.set(chatId, branchId);
@@ -15065,16 +15026,37 @@ export class Daemon {
     return dirname(this.opts.metaStore.pathFor(chatId));
   }
 
-  /** `~/.patch/chats/<chatId>/claude` — the chat's own `CLAUDE_CONFIG_DIR`
-   * (spec/04 § History): its one conversation file, resumed in place. */
-  private claudeConfigDirFor(chatId: string): string {
-    return chatClaudeDir(this.chatDirFor(chatId));
+  /**
+   * Make the chat's session ready for a turn on `harness` that resumes
+   * `sessionId`, and the run options naming the private config dir the
+   * provider runs under for this chat, if it keeps one (spec/02 § Provider
+   * adapters).
+   */
+  private async readySession(
+    chatId: string,
+    harness: HarnessId,
+    sessionId: string | undefined,
+  ): Promise<{ configDir?: string }> {
+    const traits = HARNESS_TRAITS[harness];
+    const chatDir = this.chatDirFor(chatId);
+    if (sessionId !== undefined) {
+      await traits.prepareSession({
+        chatId,
+        folder: this.chatState.get(chatId)!.folder,
+        chatDir,
+        sessionId,
+        sessionStoreRoot: this.sessionStoreRoot,
+        logger: this.opts.logger,
+      });
+    }
+    const configDir = traits.configDir(chatDir);
+    return configDir !== undefined ? { configDir } : {};
   }
 
-  /** The chat's private config dir — a root `view_file` may read from besides
-   * the chat folder. */
-  chatConfigDir(chatId: string): string {
-    return this.claudeConfigDirFor(chatId);
+  /** The chat's private config dir, if its provider keeps one — a root
+   * `view_file` may read from besides the chat folder. */
+  chatConfigDir(chatId: string): string | undefined {
+    return HARNESS_TRAITS[this.harnessOf(chatId)].configDir(this.chatDirFor(chatId));
   }
 
   /**
@@ -15648,7 +15630,7 @@ export class Daemon {
    * (spec/02 ## Host restart behaviour). Returns `undefined` if no query has
    * run for the chat this process. `resumeSessionId` mirrors `options.resume`
    * handed to the SDK — `null`-equivalent (`undefined`) for a fresh first
-   * turn, the persisted `meta.claudeSessionId` for a resumed turn. Surfaced on
+   * turn, the persisted `meta.sessionId` for a resumed turn. Surfaced on
    * the live control UDS so the restart-resume guarantee (D3-6) is observable
    * against the running app.
    */
@@ -16454,67 +16436,6 @@ function parseQuestionAnswers(edited: string): Record<string, string> {
     throw new PermissionEditInvalidError('AskUserQuestion answers object is empty');
   }
   return answers;
-}
-
-/**
- * Best-effort detection of "the resumed Claude Code session no longer exists
- * or has expired". The SDK doesn't ship a typed error class for this — we
- * pattern-match on the message text the SDK / underlying transport surfaces.
- * Spec/04 line 46: surface a `claude_session_invalid` code so the surface
- * can offer a fresh-start prompt. NO FALLBACK: if it's not session-invalid,
- * it's classified as a generic `sdk_error`.
- */
-function isClaudeSessionInvalidError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const name = err.name;
-  if (name === 'SessionNotFoundError' || name === 'SessionExpiredError') return true;
-  const msg = err.message.toLowerCase();
-  return (
-    msg.includes('session not found') ||
-    msg.includes('session expired') ||
-    msg.includes('invalid session') ||
-    msg.includes('unknown session id') ||
-    msg.includes('no such session') ||
-    // The real Claude Agent SDK rejects a bad `--resume` argument with these
-    // phrasings (e.g. a stale non-UUID id, or one no longer on disk). Treat it
-    // as a stale session: clear claudeSessionId so the next turn starts fresh.
-    msg.includes('--resume requires a valid session') ||
-    (msg.includes('is not a uuid') && msg.includes('session title')) ||
-    msg.includes('does not match any session') ||
-    // The real Claude Agent SDK / CLI surfaces a resume to a session whose
-    // transcript no longer exists on disk as "No conversation found with
-    // session ID: <uuid>". This is a lost session, not a generic SDK fault —
-    // clear claudeSessionId so the next input starts a fresh session rather
-    // than re-attempting the dead resume forever (spec/04 line 46, NO
-    // FALLBACK to a silently-contextless run, but recoverable on next turn).
-    msg.includes('no conversation found')
-  );
-}
-
-/**
- * Detection of "Anthropic refused the credential we handed the SDK". The
- * pre-query gate only knows whether a token is present and locally unexpired —
- * a revoked one, or one whose stored expiry is a lie, passes the gate and is
- * then rejected on every single turn. Pattern-matched on the message text like
- * the session check above, because the SDK has no typed error for it; the real
- * phrasing is `Failed to authenticate. API Error: 401
- * {"error":{"type":"authentication_error",…}}`.
- *
- * A bare 401 is NOT enough — an HTTP 401 the agent hit inside its own tool call
- * says nothing about this host's Claude credential — so the status only counts
- * alongside an auth-specific word.
- */
-function isClaudeCredentialRejectedMessage(message: string): boolean {
-  const msg = message.toLowerCase();
-  if (
-    msg.includes('authentication_error') ||
-    msg.includes('failed to authenticate') ||
-    msg.includes('oauth access token is invalid') ||
-    msg.includes('invalid bearer token')
-  ) {
-    return true;
-  }
-  return msg.includes('api error: 401') && (msg.includes('oauth') || msg.includes('bearer token'));
 }
 
 /**

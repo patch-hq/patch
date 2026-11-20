@@ -43,8 +43,8 @@ describe('C1 session-ID capture', () => {
     ]);
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(metaStore.read(chatId)?.claudeSessionId).toBe('sess-initial');
-    expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-initial');
+    expect(metaStore.read(chatId)?.sessionId).toBe('sess-initial');
+    expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-initial');
   });
 
   it('updates meta.json when the SDK rotates session_id (/clear or /compact)', async () => {
@@ -53,7 +53,7 @@ describe('C1 session-ID capture', () => {
     sdk.enqueue([{ type: 'result', sessionId: 'sess-A' }]);
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(metaStore.read(chatId)?.claudeSessionId).toBe('sess-A');
+    expect(metaStore.read(chatId)?.sessionId).toBe('sess-A');
 
     // Next turn rotates to sess-B (post /clear).
     sdk.enqueue([
@@ -61,7 +61,7 @@ describe('C1 session-ID capture', () => {
       { type: 'assistant', content: 'fresh context', sessionId: 'sess-B' },
     ]);
     await daemon.sendInput({ chatId, message: '/clear', localId: 'L2' });
-    expect(metaStore.read(chatId)?.claudeSessionId).toBe('sess-B');
-    expect(daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-B');
+    expect(metaStore.read(chatId)?.sessionId).toBe('sess-B');
+    expect(daemon.chatState.get(chatId)?.sessionId).toBe('sess-B');
   });
 });

@@ -34,7 +34,7 @@ function host(hostId: string) {
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${hostId}-${++id}`,
-    claudeProjectsRoot: claudeRoot,
+    sessionStoreRoot: claudeRoot,
     sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: claudeRoot }),
   });
   return { daemon, events, sdk, metaStore, folder, home };

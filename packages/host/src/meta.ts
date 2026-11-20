@@ -163,9 +163,9 @@ export const ChatMeta = z
      * Branching) so resume/replay/title/status paths need to know nothing about
      * branches.
      */
-    claudeSessionId: z.string().min(1).optional(),
-    /** Account that created `claudeSessionId`; the session cache is account-scoped. */
-    claudeSessionAccountId: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
+    /** Account that created `sessionId`; the session cache is account-scoped. */
+    sessionAccountId: z.string().min(1).optional(),
     /**
      * The chat's track graph (spec/04 § Branching). A chat is a graph, not a
      * line: editing a user turn forks a new track from it. Oldest-first, root
@@ -334,7 +334,7 @@ export const ChatMeta = z
              * Carried so a resumed fork turn still lands in its own session
              * rather than being replayed into the parent's.
              */
-            fork: z.object({ resumeAtUuid: z.string().nullable() }).strict().optional(),
+            fork: z.object({ throughNativeId: z.string().nullable() }).strict().optional(),
             /**
              * Who started the turn (spec/09 § Whose turn it was). Persisted so a
              * turn re-sent after a restart is still attributed to whoever
@@ -638,7 +638,80 @@ export function createMetaStore(patchHome: string): MetaStore {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
     const rest = { ...(parsed as Record<string, unknown>) };
     for (const key of RETIRED_META_KEYS) delete rest[key];
-    return rest;
+    return renameLegacyKeys(rest);
+  }
+
+  /**
+   * Field names meta keeps ON DISK under the names older builds read, while the
+   * code uses the provider-neutral ones (spec/02 § Provider adapters):
+   * `claudeSessionId` ↔ `sessionId`, `claudeSessionAccountId` ↔
+   * `sessionAccountId`, and a queued fork turn's `fork.resumeAtUuid` ↔
+   * `fork.throughNativeId`.
+   *
+   * Why the old names stay on disk: self-update rolls a host back to the
+   * previous build when the new one fails probation, and that build parses meta
+   * strictly, so a new name on disk would make the chat unreadable to it.
+   * Reading takes either name, the new one first, so a later build that writes
+   * the new names is read fine. Disk switches to the new names once the
+   * minimum supported host version is past this build.
+   */
+  const DISK_NAMES: ReadonlyArray<readonly [code: string, disk: string]> = [
+    ['sessionId', 'claudeSessionId'],
+    ['sessionAccountId', 'claudeSessionAccountId'],
+  ];
+  const FORK_DISK_NAMES = ['throughNativeId', 'resumeAtUuid'] as const;
+
+  /** `obj` with each key named by `code` (new first) or `disk`, under `code`. */
+  function toCodeNames(
+    obj: Record<string, unknown>,
+    names: ReadonlyArray<readonly [string, string]>,
+  ): Record<string, unknown> {
+    const out = { ...obj };
+    for (const [code, disk] of names) {
+      if (!(disk in out)) continue;
+      if (!(code in out)) out[code] = out[disk];
+      delete out[disk];
+    }
+    return out;
+  }
+
+  /** `obj` with each key named by `code` moved to `disk`. */
+  function toDiskNames(
+    obj: Record<string, unknown>,
+    names: ReadonlyArray<readonly [string, string]>,
+  ): Record<string, unknown> {
+    const out = { ...obj };
+    for (const [code, disk] of names) {
+      if (!(code in out)) continue;
+      out[disk] = out[code];
+      delete out[code];
+    }
+    return out;
+  }
+
+  function mapForks(
+    meta: Record<string, unknown>,
+    fn: (fork: Record<string, unknown>) => Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (!Array.isArray(meta['pendingTurns'])) return meta;
+    return {
+      ...meta,
+      pendingTurns: meta['pendingTurns'].map((turn: unknown) => {
+        const fork = (turn as { fork?: Record<string, unknown> } | null)?.fork;
+        return fork ? { ...(turn as Record<string, unknown>), fork: fn(fork) } : turn;
+      }),
+    };
+  }
+
+  function renameLegacyKeys(meta: Record<string, unknown>): Record<string, unknown> {
+    return mapForks(toCodeNames(meta, DISK_NAMES), (f) => toCodeNames(f, [FORK_DISK_NAMES]));
+  }
+
+  /** What `write` puts on disk: the names older builds read (`DISK_NAMES`). */
+  function forDisk(meta: ChatMeta): Record<string, unknown> {
+    return mapForks(toDiskNames(meta as Record<string, unknown>, DISK_NAMES), (f) =>
+      toDiskNames(f, [FORK_DISK_NAMES]),
+    );
   }
 
   /**
@@ -685,7 +758,7 @@ export function createMetaStore(patchHome: string): MetaStore {
   }
 
   function write(meta: ChatMeta): void {
-    atomicWrite(pathFor(meta.chatId), JSON.stringify(meta, null, 2));
+    atomicWrite(pathFor(meta.chatId), JSON.stringify(forDisk(meta), null, 2));
     writeObserver?.(meta);
   }
 

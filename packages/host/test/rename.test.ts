@@ -105,7 +105,7 @@ describe('Host setName (spec/04 § Name — rename)', () => {
       logger: silent,
       now: () => 1_700_000_000_000,
       sessionProbe: createClaudeSessionProbe({
-        claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-rename-claude2-')),
+        sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-rename-claude2-')),
       }),
     });
     await host2.resumeChat(chatId);

@@ -56,7 +56,7 @@ function makeState(over: Partial<ChatState> = {}): ChatState {
     activity: 'idle',
     lastMessages: [],
     lastUpdated: 0,
-    claudeSessionId: undefined,
+    sessionId: undefined,
     model: undefined,
     permissionMode: undefined,
     nextSeq: 0,

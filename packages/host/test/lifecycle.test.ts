@@ -228,7 +228,7 @@ describe('Host lifecycle (group 7)', () => {
       chatId: 'persisted-1',
       folder,
       name: null,
-      claudeSessionId: 'sess-X',
+      sessionId: 'sess-X',
       nextSeq: 5,
       pinned: false,
       pinnedAt: null,
@@ -240,7 +240,7 @@ describe('Host lifecycle (group 7)', () => {
     // Host hasn't hydrated; resume should pull from disk.
     const state = await daemon.resumeChat('persisted-1');
     expect(state.chatId).toBe('persisted-1');
-    expect(state.claudeSessionId).toBe('sess-X');
+    expect(state.sessionId).toBe('sess-X');
     expect(state.activity).toBe('idle');
   });
 
@@ -264,7 +264,7 @@ describe('Host lifecycle (group 7)', () => {
       chatId: 'rehy-1',
       folder,
       name: null,
-      claudeSessionId: 'sess-resume',
+      sessionId: 'sess-resume',
       nextSeq: 0,
       pinned: false,
       pinnedAt: null,
@@ -310,7 +310,7 @@ describe('Host lifecycle (group 7)', () => {
 
     const chatId = await daemon.spawnChat({ folder: folderLocal, prompt: 'hi' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(metaStoreLocal.read(chatId)?.claudeSessionId).toBe('sess-stale');
+    expect(metaStoreLocal.read(chatId)?.sessionId).toBe('sess-stale');
 
     events.length = 0;
     throwSessionInvalid = true;
@@ -322,7 +322,7 @@ describe('Host lifecycle (group 7)', () => {
       code: 'claude_session_invalid',
     });
     // Session id was cleared so the next turn starts fresh.
-    expect(metaStoreLocal.read(chatId)?.claudeSessionId).toBeUndefined();
+    expect(metaStoreLocal.read(chatId)?.sessionId).toBeUndefined();
     // Chat status flipped to errored per spec/04 line 46.
     expect(daemon.chatState.get(chatId)?.status).toBe('errored');
   });
@@ -370,13 +370,13 @@ describe('Host lifecycle (group 7)', () => {
       chatId,
       folder: folderLocal,
       name: null,
-      claudeSessionId: 'sess-lost-on-disk',
+      sessionId: 'sess-lost-on-disk',
       nextSeq: 3,
       createdAt: 1,
       updatedAt: 2,
     });
     daemon.hydrate();
-    expect(metaStoreLocal.read(chatId)?.claudeSessionId).toBe('sess-lost-on-disk');
+    expect(metaStoreLocal.read(chatId)?.sessionId).toBe('sess-lost-on-disk');
 
     events.length = 0;
     throwLost = true;
@@ -387,7 +387,7 @@ describe('Host lifecycle (group 7)', () => {
       code: 'claude_session_invalid',
     });
     // Session id cleared → the next input starts a fresh session (recoverable).
-    expect(metaStoreLocal.read(chatId)?.claudeSessionId).toBeUndefined();
+    expect(metaStoreLocal.read(chatId)?.sessionId).toBeUndefined();
 
     // RECOVERY: the lost-session chat must NOT deadlock. Even though it was
     // (effectively) a resume-only chat, after the session is cleared the next
@@ -401,6 +401,6 @@ describe('Host lifecycle (group 7)', () => {
       (e) => e.type === 'chat.message' && (e as { role?: string }).role === 'assistant',
     );
     expect(assistant).toBeDefined();
-    expect(metaStoreLocal.read(chatId)?.claudeSessionId).toBe('sess-lost');
+    expect(metaStoreLocal.read(chatId)?.sessionId).toBe('sess-lost');
   });
 });

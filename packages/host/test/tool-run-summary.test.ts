@@ -39,7 +39,7 @@ function setup(summarize: (input: SummarizeInput) => Promise<string>, turnDelayM
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => 'chat-1',
-    discoverClaudeMcpServers: () => [],
+    discoverMcpServers: () => [],
     summarizeToolRun: async (input) => {
       (input.live === true ? askedLive : asked).push(input);
       return await summarize(input);

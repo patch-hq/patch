@@ -55,9 +55,9 @@ describe('stop while a resumed turn is getting ready', () => {
 
     holdNext = true;
     const state = (
-      daemon as unknown as { chatState: Map<string, { claudeSessionId?: string }> }
+      daemon as unknown as { chatState: Map<string, { sessionId?: string }> }
     ).chatState.get(chatId)!;
-    state.claudeSessionId ??= 'sess-1';
+    state.sessionId ??= 'sess-1';
 
     const turn = daemon.sendInput({ chatId, message: 'second', localId: 'l2' });
     await new Promise((r) => setTimeout(r, 20));

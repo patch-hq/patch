@@ -36,7 +36,7 @@ function setup(now: () => number, home?: string) {
     now,
     generateChatId: () => `chat-${++id}`,
     sessionProbe: createClaudeSessionProbe({
-      claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-snooze-early-claude-')),
+      sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-snooze-early-claude-')),
     }),
   });
   return { daemon, events, folder, metaStore, dir };

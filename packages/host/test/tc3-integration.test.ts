@@ -445,7 +445,7 @@ describe('TC3 [test-runner] special-thread first turn after a host RESTART (real
       expect(capturedPrompts.at(-1)).toContain('hello from speakers');
       const state = daemon.chatState.get('thread_speakers');
       expect(state?.activity).toBe('idle');
-      expect(state?.claudeSessionId).toBe('sess-tg-1');
+      expect(state?.sessionId).toBe('sess-tg-1');
 
       // No claude_session_missing error was emitted.
       const err = upstream.find((e) => e.type === 'chat.error');

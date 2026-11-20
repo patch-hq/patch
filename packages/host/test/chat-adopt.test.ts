@@ -78,7 +78,7 @@ describe('taking over a replaced host’s chats', () => {
       folder: c.folder,
       name: 'Boiler',
       model: 'claude-opus-5-5',
-      claudeSessionId: 'carried-session',
+      sessionId: 'carried-session',
       nextSeq: 40,
       pinned: true,
       createdAt: 5,
@@ -104,7 +104,7 @@ describe('taking over a replaced host’s chats', () => {
     daemon.adoptChat(chat({ name: 'Server name', nextSeq: 12, sessionId: 'other' }));
     expect(metaStore.read('c1')).toMatchObject({
       name: 'Carried name',
-      claudeSessionId: 'carried-session',
+      sessionId: 'carried-session',
       nextSeq: 12,
     });
     daemon.adoptChat(chat({ nextSeq: 2 }));

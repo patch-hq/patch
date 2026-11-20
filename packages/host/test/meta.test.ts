@@ -4,7 +4,32 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMetaStore, type ChatMeta } from '../src/meta.js';
+import { z } from 'zod';
+import { ChatMeta as ChatMetaSchema, createMetaStore, type ChatMeta } from '../src/meta.js';
+
+/**
+ * The meta a build before the provider-neutral names reads: the same strict
+ * shape with the session fields, and a queued fork's point, under their old names.
+ */
+const PENDING_TURN = (ChatMetaSchema.shape.pendingTurns.unwrap() as z.ZodArray<z.AnyZodObject>)
+  .element;
+const OLD_READER = ChatMetaSchema.omit({
+  sessionId: true,
+  sessionAccountId: true,
+  pendingTurns: true,
+})
+  .extend({
+    claudeSessionId: z.string().min(1).optional(),
+    claudeSessionAccountId: z.string().min(1).optional(),
+    pendingTurns: z
+      .array(
+        PENDING_TURN.omit({ fork: true }).extend({
+          fork: z.object({ resumeAtUuid: z.string().nullable() }).strict().optional(),
+        }),
+      )
+      .optional(),
+  })
+  .strict();
 
 // F2: record the order of fsync/rename so we can prove fsync precedes rename
 // in the atomic-write path. We wrap the real node:fs so writes still land.
@@ -82,6 +107,36 @@ describe('meta store', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).not.toHaveProperty('accountId');
   });
 
+  it('keeps the session fields under the names older builds read, and reads either', () => {
+    const store = createMetaStore(home);
+    const m = makeMeta({
+      chatId: 'named',
+      folder: home,
+      sessionId: 'sess-1',
+      sessionAccountId: 'acct-a',
+      pendingTurns: [{ message: 'edit', fork: { throughNativeId: 'u-7' } }],
+    });
+    store.write(m);
+    const path = join(home, 'chats', 'named', 'meta.json');
+    const onDisk = JSON.parse(readFileSync(path, 'utf8')) as Record<string, any>;
+    // On disk: the old names only, so a host rolled back to the previous build
+    // (which parses meta strictly) still reads it.
+    expect(onDisk).toMatchObject({ claudeSessionId: 'sess-1', claudeSessionAccountId: 'acct-a' });
+    expect(onDisk).not.toHaveProperty('sessionId');
+    expect(onDisk).not.toHaveProperty('sessionAccountId');
+    expect(onDisk.pendingTurns[0].fork).toEqual({ resumeAtUuid: 'u-7' });
+    expect(OLD_READER.safeParse(onDisk).success).toBe(true);
+    // Read back under the new names.
+    expect(store.read('named')).toEqual(m);
+
+    // A later build that writes the new names is read too, the new name first.
+    writeFileSync(
+      path,
+      JSON.stringify({ ...onDisk, sessionId: 'sess-new', claudeSessionId: 'sess-old' }),
+    );
+    expect(store.read('named')!.sessionId).toBe('sess-new');
+  });
+
   it('round-trips a persisted lastError for an errored chat (G1-d6)', () => {
     const store = createMetaStore(home);
     const m = makeMeta({
@@ -121,7 +176,7 @@ describe('meta store', () => {
     // takes a string or nothing.
     const p = store.pathFor('nulled');
     const raw = JSON.parse(readFileSync(p, 'utf8'));
-    writeFileSync(p, JSON.stringify({ ...raw, claudeSessionId: null }));
+    writeFileSync(p, JSON.stringify({ ...raw, sessionId: null }));
     store.write(makeMeta({ chatId: 'torn' }));
     writeFileSync(store.pathFor('torn'), '{"chatId": "torn",');
 
@@ -129,7 +184,7 @@ describe('meta store', () => {
     const bad = store.unreadable().sort((a, b) => a.chatId.localeCompare(b.chatId));
     expect(bad.map((u) => u.chatId)).toEqual(['nulled', 'torn']);
     expect(bad[0]!.path).toBe(p);
-    expect(bad[0]!.error).toMatch(/^claudeSessionId: Expected string, received null$/);
+    expect(bad[0]!.error).toMatch(/^sessionId: Expected string, received null$/);
     expect(bad[1]!.error).toMatch(/JSON/);
   });
 

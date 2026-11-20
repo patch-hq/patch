@@ -110,7 +110,7 @@ describe('resuming turns a host restart interrupted', () => {
     const { home, folder } = setup();
     const first = hostOver(home, firstBackend.backend, 'account-a');
     const chatId = await chatWithHistory(first.daemon, folder, firstBackend);
-    expect(first.metaStore.read(chatId)?.claudeSessionAccountId).toBe('account-a');
+    expect(first.metaStore.read(chatId)?.sessionAccountId).toBe('account-a');
 
     // Leave a genuinely running turn for restart recovery.
     void first.daemon.sendInput({ chatId, message: 'running', localId: 'switch-L1' });
@@ -133,8 +133,8 @@ describe('resuming turns a host restart interrupted', () => {
 
     expect(seenResumeIds).toHaveLength(1);
     expect(seenResumeIds[0]).toBe('sess');
-    expect(second.metaStore.read(chatId)?.claudeSessionAccountId).toBe('account-b');
-    expect(second.metaStore.read(chatId)?.claudeSessionId).toBe('account-b-session');
+    expect(second.metaStore.read(chatId)?.sessionAccountId).toBe('account-b');
+    expect(second.metaStore.read(chatId)?.sessionId).toBe('account-b-session');
   });
 
   it('records the running turn and everything queued behind it, in order', async () => {
@@ -504,7 +504,7 @@ describe('resuming turns a host restart interrupted', () => {
     await tick();
     // The same Claude session carries on, with nothing added to the turn unseen.
     expect(g2.prompts).toEqual([CONTINUE_MESSAGE]);
-    expect(second.daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess');
+    expect(second.daemon.chatState.get(chatId)?.sessionId).toBe('sess');
     const sent = second.events.filter(
       (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
         e.type === 'chat.message' && e.role === 'user',
@@ -776,7 +776,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
         localId: 'L1',
       });
       await tick();
-      expect(first.daemon.chatState.get(chatId)?.claudeSessionId).toBeUndefined();
+      expect(first.daemon.chatState.get(chatId)?.sessionId).toBeUndefined();
 
       const r2 = recordingBackend('sess-2');
       const second = hostWith(home, r2.backend);
@@ -840,7 +840,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       await tick();
       void first.daemon.sendInput({ chatId, message: 'turn two', localId: 'L1' });
       await tick();
-      expect(first.daemon.chatState.get(chatId)?.claudeSessionId).toBe('sess-old');
+      expect(first.daemon.chatState.get(chatId)?.sessionId).toBe('sess-old');
 
       // 'real' kind: sess-old has no <id>.jsonl under the claude projects dir.
       const g2 = recordingBackend('sess-new');

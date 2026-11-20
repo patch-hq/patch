@@ -119,7 +119,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     now: () => Date.now(),
     generateChatId: () => `chat-${++id}`,
     sessionProbe: createClaudeSessionProbe({
-      claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-call-claude-')),
+      sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-call-claude-')),
     }),
   });
   let server: (AudioServerHandle & { port: number }) | undefined;

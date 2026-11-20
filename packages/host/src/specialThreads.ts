@@ -178,7 +178,7 @@ export function ensureSpecialThreads(opts: EnsureSpecialThreadsOptions): void {
         turnRetrying: false,
         lastMessages: [],
         lastUpdated: meta.updatedAt,
-        claudeSessionId: meta.claudeSessionId,
+        sessionId: meta.sessionId,
         model: undefined,
         effort: meta.effort,
         // A special thread carries its own mode like every other chat. An

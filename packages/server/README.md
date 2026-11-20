@@ -193,13 +193,13 @@ revisit later). It is allowed:
 
 `chat.error.error` is `{ code, message }`. Stable codes:
 
-| Code                     | Meaning                                                         |
-| ------------------------ | --------------------------------------------------------------- |
-| `folder_not_found`       | Host failed `existsSync(folder)` at spawn time.                 |
-| `chat_not_found`         | Op (input/pin/archive/stop) targeted an unknown chatId.         |
-| `sdk_error`              | Generic Claude Code SDK failure during a query run.             |
-| `claude_session_invalid` | Resumed `claudeSessionId` is missing/expired (spec/04 line 46). |
-| `claude_oauth_missing`   | OAuth not loaded — the host can't run queries until logged in.  |
+| Code                     | Meaning                                                        |
+| ------------------------ | -------------------------------------------------------------- |
+| `folder_not_found`       | Host failed `existsSync(folder)` at spawn time.                |
+| `chat_not_found`         | Op (input/pin/archive/stop) targeted an unknown chatId.        |
+| `sdk_error`              | Generic Claude Code SDK failure during a query run.            |
+| `claude_session_invalid` | Resumed `sessionId` is missing/expired (spec/04 line 46).      |
+| `claude_oauth_missing`   | OAuth not loaded — the host can't run queries until logged in. |
 
 ## Jobs system (group 9 task B)
 

@@ -2878,9 +2878,6 @@ describe('src/index.ts main() — full host boot', () => {
         logStream: { write: (chunk: string) => void lines.push(chunk) },
       },
     );
-    const harness = (): { claudeMdExcludePaths?: string[] } =>
-      (boot.ready.daemon as unknown as { harnessConfig: { claudeMdExcludePaths?: string[] } })
-        .harnessConfig;
     const ignoredLogs = (): number =>
       lines.filter((l) => l.includes('harnessClaudeMdEnabled: false ignored')).length;
     try {
@@ -2888,7 +2885,6 @@ describe('src/index.ts main() — full host boot', () => {
       boot.fakeServer.authNow();
       const host = await boot.fakeServer.waitForFrame((e) => e.type === 'host.host');
       expect((host as { harnessClaudeMdEnabled?: boolean }).harnessClaudeMdEnabled).toBe(true);
-      expect(harness().claudeMdExcludePaths).toBeUndefined();
       expect(ignoredLogs()).toBe(1);
 
       const before = boot.fakeServer.received.length;
@@ -2902,7 +2898,6 @@ describe('src/index.ts main() — full host boot', () => {
       );
       const after = boot.fakeServer.received.filter((e) => e.type === 'host.host').at(-1);
       expect((after as { harnessClaudeMdEnabled?: boolean }).harnessClaudeMdEnabled).toBe(true);
-      expect(harness().claudeMdExcludePaths).toBeUndefined();
       // Said once for the whole process, not once per frame.
       expect(ignoredLogs()).toBe(1);
     } finally {

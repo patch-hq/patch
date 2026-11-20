@@ -19,6 +19,28 @@ describe('harness traits', () => {
     expect(harnessTraitsForModel(undefined).generatesStatus).toBe(true);
   });
 
+  it('each provider recognises its own lost session and refused credential', () => {
+    const lost = new Error('No conversation found with session ID: 1234');
+    expect(HARNESS_TRAITS.claude.sessionLost(lost)).toBe(true);
+    // A Claude CLI phrase is not another provider's.
+    expect(HARNESS_TRAITS.codex.sessionLost(lost)).toBe(false);
+    expect(HARNESS_TRAITS.codex.sessionLost(new Error('session not found'))).toBe(true);
+    const refused =
+      'Failed to authenticate. API Error: 401 {"error":{"type":"authentication_error"}}';
+    expect(HARNESS_TRAITS.claude.credentialRejection?.matches(refused)).toBe(true);
+    expect(HARNESS_TRAITS.claude.credentialRejection?.code).toBe('claude_oauth_missing');
+    // Codex and ACP agents give no such signal: a 401 in their turn is not
+    // reported as this host's Claude sign-in failing.
+    expect(HARNESS_TRAITS.codex.credentialRejection).toBeUndefined();
+    expect(HARNESS_TRAITS.acp.credentialRejection).toBeUndefined();
+  });
+
+  it('only Claude keeps a private config dir per chat', () => {
+    expect(HARNESS_TRAITS.claude.configDir('/c')).toBe('/c/claude');
+    expect(HARNESS_TRAITS.codex.configDir('/c')).toBeUndefined();
+    expect(HARNESS_TRAITS.acp.configDir('/c')).toBeUndefined();
+  });
+
   it('codex retries only when the turn says it is safe', () => {
     const t = HARNESS_TRAITS.codex.turnRetrySafe;
     expect(t(new Error('x'))).toBe(false);

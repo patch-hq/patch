@@ -3908,9 +3908,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     let raw: { contentType: string; base64: string; filename?: string } | undefined;
     let fileBytes: number | undefined;
     try {
-      const resolved = resolveViewFilePath(state.folder, filePath, [
-        opts.daemon!.chatConfigDir(callerChatId),
-      ]);
+      const configDir = opts.daemon!.chatConfigDir(callerChatId);
+      const resolved = resolveViewFilePath(state.folder, filePath, configDir ? [configDir] : []);
       relPath = resolved.relPath;
       absPath = resolved.absPath;
       kind = resolved.kind;
