@@ -4159,6 +4159,7 @@ export class Daemon {
       timeoutSec: number;
       checkInSec?: number;
       wakeOnMatch?: string;
+      rerunOnReboot?: boolean;
       cwd?: string;
     },
   ): WatchRecord {
@@ -4177,6 +4178,7 @@ export class Daemon {
       timeoutSec: opts.timeoutSec,
       ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
       ...(opts.wakeOnMatch !== undefined ? { wakeOnMatch: opts.wakeOnMatch } : {}),
+      ...(opts.rerunOnReboot !== undefined ? { rerunOnReboot: opts.rerunOnReboot } : {}),
     });
     this.opts.logger.info({ chatId, taskId: rec.taskId }, 'watch: started');
     // spec/02 § Background task completions — a launch starts work the turn

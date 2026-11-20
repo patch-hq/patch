@@ -554,6 +554,7 @@ const WatchStartBody = z
     timeoutSec: z.number().int().positive(),
     checkInSec: z.number().int().positive().optional(),
     wakeOnMatch: z.string().min(1).optional(),
+    rerunOnReboot: z.boolean().optional(),
     cwd: z.string().min(1).optional(),
   })
   .strict();
@@ -2675,7 +2676,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, command, description, timeoutSec, checkInSec, wakeOnMatch, cwd } = parsed.data;
+    const {
+      chatId,
+      command,
+      description,
+      timeoutSec,
+      checkInSec,
+      wakeOnMatch,
+      rerunOnReboot,
+      cwd,
+    } = parsed.data;
     if (!limiter.check(`watch:${chatId}`)) {
       toolLog({
         tool: 'patch_watch',
@@ -2693,6 +2703,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         timeoutSec,
         ...(checkInSec !== undefined ? { checkInSec } : {}),
         ...(wakeOnMatch !== undefined ? { wakeOnMatch } : {}),
+        ...(rerunOnReboot !== undefined ? { rerunOnReboot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
       toolLog({

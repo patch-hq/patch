@@ -86,6 +86,10 @@ export const WatchRecord = z
     pidStart: z.string().min(1).optional(),
     /** Set when the process vanished with no exit code: the task was killed by a restart and is NOT re-run. */
     killed: z.boolean().optional(),
+    /** false = never re-run after a machine reboot (command not safe to repeat). Absent = re-run. */
+    rerunOnReboot: z.boolean().optional(),
+    /** How many times a reboot made the host re-run this watch. */
+    rerunCount: z.number().int().nonnegative().optional(),
   })
   .passthrough();
 export type WatchRecord = z.infer<typeof WatchRecord>;
@@ -130,8 +134,8 @@ const DEFAULT_POLL_MS = 3_000;
  * Runs the command, then records its real exit code in a sidecar file. If the
  * whole group is killed (host restart, reboot) the wrapper dies with it and no
  * sidecar appears — that absence is how a killed watch is told apart from one
- * that finished while the host was down. Patch never re-runs it: it cannot know
- * whether the command is safe to run twice.
+ * that finished while the host was down. After a reboot it is re-run unless the
+ * watch opted out; after a plain host restart it is not.
  */
 const WRAPPER = 'sh -c "$1"; c=$?; echo $c > "$2.tmp" && mv "$2.tmp" "$2"; exit $c';
 export const DEFAULT_CHECK_IN_MS = 60 * 60 * 1000;
@@ -308,6 +312,7 @@ export class WatchScheduler {
     timeoutSec: number;
     checkInSec?: number;
     wakeOnMatch?: string;
+    rerunOnReboot?: boolean;
   }): WatchRecord {
     if (opts.wakeOnMatch !== undefined) {
       try {
@@ -345,6 +350,7 @@ export class WatchScheduler {
       timeoutSec: opts.timeoutSec,
       ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
       ...(opts.wakeOnMatch !== undefined ? { wakeOnMatch: opts.wakeOnMatch, matchOffset: 0 } : {}),
+      ...(opts.rerunOnReboot !== undefined ? { rerunOnReboot: opts.rerunOnReboot } : {}),
       status: 'running',
     };
     this.writeRecord(rec);
@@ -562,12 +568,13 @@ export class WatchScheduler {
       return this.complete(rec, Number.isNaN(code) ? null : code, null);
     }
     const boot = this.bootTimeFn();
-    const cause =
-      boot !== undefined && boot > rec.startedAt
-        ? process.platform === 'darwin'
-          ? 'the Mac rebooted'
-          : 'the machine rebooted'
-        : 'the host restarted';
+    const rebooted = boot !== undefined && boot > rec.startedAt;
+    if (rebooted && rec.rerunOnReboot !== false) return this.rerunAfterReboot(rec);
+    const cause = rebooted
+      ? process.platform === 'darwin'
+        ? 'the Mac rebooted'
+        : 'the machine rebooted'
+      : 'the host restarted';
     this.writeRecord({
       ...rec,
       status: 'failed',
@@ -582,6 +589,60 @@ export class WatchScheduler {
       `${WATCH_PREFIX} "${rec.description}" was killed because ${cause}, and has NOT been re-run. ` +
         `Command: ${rec.command}. Last output:\n${tail === '' ? '(none)' : tail}\n` +
         `Call patch_watch_output("${rec.taskId}") for the full output. Decide whether to run it again.`,
+    );
+  }
+
+  /**
+   * A reboot killed the watch: run the same command again in the same cwd. The
+   * record keeps its task id, output file and `startedAt`, so the original
+   * timeout keeps counting and only the remaining time is left. Watches are
+   * mostly idempotent wait/poll scripts; one that is not opts out with
+   * `rerunOnReboot: false`. A failed respawn is reported, never swallowed.
+   */
+  private async rerunAfterReboot(rec: WatchRecord): Promise<void> {
+    let child: ChildProcess;
+    try {
+      child = this.spawnProcess(
+        rec.chatId,
+        rec.taskId,
+        rec.command,
+        rec.cwd,
+        rec.outputFile,
+        rec.exitFile!,
+      );
+    } catch (err) {
+      this.deps.logger.error(
+        { chatId: rec.chatId, taskId: rec.taskId, err },
+        'watch: re-run failed',
+      );
+      this.writeRecord({
+        ...rec,
+        status: 'failed',
+        killed: true,
+        exitCode: null,
+        signal: null,
+        endedAt: this.deps.now(),
+      });
+      await this.send(
+        rec,
+        `${WATCH_PREFIX} "${rec.description}" was killed by a reboot and the automatic re-run failed: ${err instanceof Error ? err.message : String(err)}. Command: ${rec.command}.`,
+      );
+      return;
+    }
+    const pidStart = this.processStartFn(child.pid!);
+    const { pidStart: _old, ...rest } = rec;
+    this.writeRecord({
+      ...rest,
+      pid: child.pid!,
+      ...(pidStart !== undefined ? { pidStart } : {}),
+      rerunCount: (rec.rerunCount ?? 0) + 1,
+      status: 'running',
+    });
+    this.liveHandles.set(rec.taskId, child);
+    const remaining = Math.max(0, (rec.timeoutSec ?? 0) * 1000 - (this.deps.now() - rec.startedAt));
+    await this.send(
+      rec,
+      `${WATCH_PREFIX} "${rec.description}" was restarted after a reboot (same command, ${formatDuration(remaining)} of its timeout left). No action needed. Task ${rec.taskId}.`,
     );
   }
 

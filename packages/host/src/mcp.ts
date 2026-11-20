@@ -640,10 +640,24 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .describe(
             'Regular expression. While the command keeps running, each complete output line matching it wakes this chat with a `[watch]` message carrying the matching lines (batched per few seconds). For a monitor that stays up after an alert, e.g. "^GUARD:". The normal exit message still arrives when it ends. Omit to be woken only on exit.',
           ),
+        rerunOnReboot: z
+          .boolean()
+          .optional()
+          .describe(
+            'Default true: if the machine reboots while this runs, the host starts the same command again (same cwd, remaining timeout) and tells you in one line. Set false when running the command twice is not safe.',
+          ),
         cwd: z.string().min(1).optional(),
       },
     },
-    async ({ command, description, timeoutSec, checkInMinutes, wakeOnMatch, cwd }) => {
+    async ({
+      command,
+      description,
+      timeoutSec,
+      checkInMinutes,
+      wakeOnMatch,
+      rerunOnReboot,
+      cwd,
+    }) => {
       const body: Record<string, unknown> = {
         chatId: callerChatId,
         command,
@@ -651,6 +665,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         timeoutSec,
         ...(checkInMinutes !== undefined ? { checkInSec: checkInMinutes * 60 } : {}),
         ...(wakeOnMatch !== undefined ? { wakeOnMatch } : {}),
+        ...(rerunOnReboot !== undefined ? { rerunOnReboot } : {}),
       };
       if (cwd !== undefined) body['cwd'] = cwd;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/watch', body });
