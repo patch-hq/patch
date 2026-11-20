@@ -109,6 +109,16 @@ describe('Settings → Goals', () => {
     expect(api.setPreferences).toHaveBeenCalledWith({ goalRefusalLimit: 5 });
   });
 
+  it('shows the stringency and writes the level tapped', async () => {
+    const r = mount(<GoalsPage />);
+    expect(get(r, 'goal-stringency-summary').props.children).toBe('Reads the recent chat');
+    await actAsync(async () => {
+      get(r, 'goal-stringency-3').props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ goalStringency: 3 });
+  });
+
   it('says whether the judge prompt is the built-in one, and opens its editor', async () => {
     const r = mount(<GoalsPage />);
     expect(textOf(get(r, 'goal-judge-summary'))).toBe('Built-in default');

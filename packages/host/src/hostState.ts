@@ -128,6 +128,7 @@ const HostStateFile = z
     watchCheckInMinutes: z.number().int().positive().optional(),
     goalModel: z.string().min(1).optional(),
     goalRefusalLimit: z.number().int().positive().optional(),
+    goalStringency: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
     /**
      * Whether this host automatically retries a turn blocked by a Claude API
      * usage/rate limit. When true the host parks the pending user message and

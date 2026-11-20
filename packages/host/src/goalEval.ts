@@ -19,9 +19,11 @@
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_GOAL_MODEL,
+  DEFAULT_GOAL_STRINGENCY,
   isEndpointModel,
   tailCodePoints,
 } from '@patch/wire';
+import type { GoalStringency } from '@patch/wire';
 import type { SdkBackend } from './sdkBackend.js';
 import type { OAuthCheckResult } from './chatRunner.js';
 import type { Logger } from 'pino';
@@ -32,6 +34,9 @@ export const GOAL_EVAL_MODEL = DEFAULT_GOAL_MODEL;
 
 /** Abort a hung evaluator call so it never leaks a warm SDK query. */
 const GOAL_EVAL_TIMEOUT_MS = 20_000;
+
+/** Level 3 reads files over several tool steps, so it gets longer. */
+const GOAL_EVAL_INVESTIGATE_TIMEOUT_MS = 180_000;
 
 /** Hard cap on the returned reason — a safety bound only; the chat shows the whole reason. */
 const MAX_REASON_LEN = 2000;
@@ -76,6 +81,8 @@ export interface GoalJudgeSettings {
   prompt: string;
   /** The model that judges every chat, whichever provider the chat runs on. */
   model: string;
+  /** How far the judge trusts the agent (Settings → Goals); absent means the default. */
+  stringency?: GoalStringency;
 }
 
 export interface MakeGoalEvaluatorOptions {
@@ -128,7 +135,26 @@ export function parseGoalVerdict(raw: string): GoalEvalResult | null {
   return { verdict, reason, onTrack, onTrackReason };
 }
 
-function buildPrompt(input: GoalEvalInput, instructions: string): string {
+/** What the judge is told about how far to trust the agent, per stringency level. */
+function stringencySection(level: GoalStringency): string[] {
+  if (level === 1)
+    return [
+      "TRUST: take the agent's latest message at its word. It says what is done and what is not; judge the goal from that statement and the scope above.",
+      '',
+    ];
+  if (level === 3)
+    return [
+      "TRUST: none. Do not accept the agent's word, or the conversation's, that anything is done. " +
+        'You have read-only tools in the working folder (Read, Grep, Glob). Open every file, ' +
+        'path and resource the goal depends on or the agent mentions, and check in detail that it ' +
+        'exists and does what the goal needs. Judge "met" only for what you have verified yourself; ' +
+        'anything you could not check is not_met, and the reason says what to show.',
+      '',
+    ];
+  return [];
+}
+
+function buildPrompt(input: GoalEvalInput, instructions: string, level: GoalStringency): string {
   return [
     instructions.trim(),
     '',
@@ -154,9 +180,8 @@ function buildPrompt(input: GoalEvalInput, instructions: string): string {
       'If it names a blocker that stops the in-scope work and only the user can clear it, ' +
       'judge impossible with that blocker as the reason, rather than not_met.',
     '',
-    'CONVERSATION SO FAR (oldest first):',
-    input.transcript,
-    '',
+    ...stringencySection(level),
+    ...(level === 1 ? [] : ['CONVERSATION SO FAR (oldest first):', input.transcript, '']),
     ...(input.checkIn
       ? [
           'This is also a CHECK-IN. Besides the verdict, say whether the work is on track to meet ' +
@@ -187,6 +212,8 @@ export function makeGoalEvaluator(
       prompt: DEFAULT_GOAL_EVAL_PROMPT,
       model: GOAL_EVAL_MODEL,
     };
+    const level = judge.stringency ?? DEFAULT_GOAL_STRINGENCY;
+    const timeoutMs = level === 3 ? GOAL_EVAL_INVESTIGATE_TIMEOUT_MS : GOAL_EVAL_TIMEOUT_MS;
     const model = isEndpointModel(input.chatModel) ? input.chatModel! : judge.model;
     const auth = await opts.resolveOAuth(model);
     if (!auth.ok) {
@@ -197,13 +224,13 @@ export function makeGoalEvaluator(
       return null;
     }
     const abortController = new AbortController();
-    const timer = setTimeout(() => abortController.abort(), GOAL_EVAL_TIMEOUT_MS);
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
     try {
       let finalText = '';
       let deltaText = '';
       for await (const env of opts.sdkBackend.run({
-        prompt: buildPrompt(input, judge.prompt),
-        inferenceProfile: 'classifier',
+        prompt: buildPrompt(input, judge.prompt, level),
+        inferenceProfile: level === 3 ? 'investigator' : 'classifier',
         cwd: input.folder,
         resumeSessionId: undefined,
         abortController,
@@ -223,10 +250,7 @@ export function makeGoalEvaluator(
       // a spent account vs. a real error means — it just returns null either way.
     } catch (err) {
       if (abortController.signal.aborted) {
-        opts.logger?.warn(
-          { chatId: input.chatId },
-          `goal eval: no answer within ${GOAL_EVAL_TIMEOUT_MS}ms`,
-        );
+        opts.logger?.warn({ chatId: input.chatId }, `goal eval: no answer within ${timeoutMs}ms`);
         return null;
       }
       opts.logger?.warn({ chatId: input.chatId, err: (err as Error).message }, 'goal eval failed');

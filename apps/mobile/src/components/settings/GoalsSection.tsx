@@ -10,8 +10,9 @@ import { ModelChoice } from './ModelChoice';
 import { promptSummary } from './AgentBehaviorSection';
 import { writePreferences } from './PreferenceSections';
 import { SettingsPage } from './SettingsPage';
-import { Field, Muted, Row, SettingsButton, WithSettings } from './ui';
-import { DEFAULT_GOAL_EVAL_PROMPT } from '@patch/wire';
+import { Chips, Field, Muted, Row, SettingsButton, WithSettings } from './ui';
+import { DEFAULT_GOAL_EVAL_PROMPT, GOAL_STRINGENCIES, GOAL_STRINGENCY_LABELS } from '@patch/wire';
+import type { GoalStringency } from '@patch/wire';
 import type { AccountPreferences } from '../../api/rest';
 
 export function GoalsPage(): React.ReactElement {
@@ -40,6 +41,21 @@ function GoalControls({ preferences }: { preferences: AccountPreferences }): Rea
         testID="goal-model"
         value={preferences.goalModel}
         onSelect={(id) => writePreferences({ goalModel: id })}
+      />
+      <Row
+        title="Stringency"
+        stack
+        subtitle={GOAL_STRINGENCY_LABELS[preferences.goalStringency]}
+        subtitleTestID="goal-stringency-summary"
+        right={
+          <Chips<`${GoalStringency}`>
+            options={GOAL_STRINGENCIES.map((n) => `${n}` as const)}
+            selected={`${preferences.goalStringency}`}
+            onSelect={(v) => writePreferences({ goalStringency: Number(v) as GoalStringency })}
+            testIDPrefix="goal-stringency"
+            labelPrefix="Stringency"
+          />
+        }
       />
       <Row
         title="Stop after"

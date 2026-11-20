@@ -89,6 +89,7 @@ import {
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
+  DEFAULT_GOAL_STRINGENCY,
   QUESTION_EXPIRY_SECONDS_DEFAULT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   refusingRateLimitScope,
@@ -124,7 +125,7 @@ import {
  * format). Read for those chats' history and search only; nothing writes it.
  */
 const retiredLocalHistoryDir = (patchHome: string): string => join(patchHome, 'local-history');
-import type { ChatInputEvent } from '@patch/wire';
+import type { ChatInputEvent, GoalStringency } from '@patch/wire';
 import { DEFAULT_SMALL_JOB_MODELS } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
@@ -949,6 +950,7 @@ async function startHost(
   };
   let meetingResearchSeconds = DEFAULT_MEETING_RESEARCH_SECONDS;
   let meetingTranscriptionModel = '';
+  let goalStringency: GoalStringency = persistedHostState.goalStringency ?? DEFAULT_GOAL_STRINGENCY;
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
@@ -2164,14 +2166,16 @@ async function startHost(
     if (
       shared.goalEvalPrompt !== goalEvalPrompt ||
       shared.goalModel !== goalModel ||
-      shared.goalRefusalLimit !== goalRefusalLimit
+      shared.goalRefusalLimit !== goalRefusalLimit ||
+      shared.goalStringency !== goalStringency
     ) {
       goalEvalPrompt = shared.goalEvalPrompt;
       goalModel = shared.goalModel;
       goalRefusalLimit = shared.goalRefusalLimit;
+      goalStringency = shared.goalStringency;
       daemon.setGoalRefusalLimit(goalRefusalLimit);
-      hostStateStore.update({ goalEvalPrompt, goalModel, goalRefusalLimit });
-      logger.info({ goalModel, goalRefusalLimit }, 'goal settings changed');
+      hostStateStore.update({ goalEvalPrompt, goalModel, goalRefusalLimit, goalStringency });
+      logger.info({ goalModel, goalRefusalLimit, goalStringency }, 'goal settings changed');
     }
     meetingPrompts = {
       now: shared.meetingNowPrompt,
@@ -5027,7 +5031,7 @@ async function startHost(
     evaluateGoal: makeGoalEvaluator({
       sdkBackend: routedBackend,
       resolveOAuth: resolveModelOAuth,
-      settings: () => ({ prompt: goalEvalPrompt, model: goalModel }),
+      settings: () => ({ prompt: goalEvalPrompt, model: goalModel, stringency: goalStringency }),
       logger,
     }),
     // spec/14 § Tool runs: label each closed run of tool calls with what it was

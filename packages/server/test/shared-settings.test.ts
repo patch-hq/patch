@@ -906,13 +906,16 @@ describe('shared settings routes', () => {
         goalEvalPrompt: 'Judge harshly.',
         goalModel: 'claude-sonnet-5',
         goalRefusalLimit: 5,
+        goalStringency: 3,
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().preferences).toMatchObject({
         goalEvalPrompt: 'Judge harshly.',
         goalModel: 'claude-sonnet-5',
         goalRefusalLimit: 5,
+        goalStringency: 3,
       });
+      expect((await patch({ goalStringency: 4 })).statusCode).toBe(400);
       expect((await patch({ goalEvalPrompt: '' })).statusCode).toBe(400);
       expect((await patch({ goalRefusalLimit: 0 })).statusCode).toBe(400);
       expect((await patch({ goalModel: '' })).statusCode).toBe(400);

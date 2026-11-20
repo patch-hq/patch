@@ -1512,6 +1512,16 @@ describe('Settings → Goals (account-wide)', () => {
     await waitFor(() => expect(server.writes).toEqual([{ goalRefusalLimit: 5 }]));
   });
 
+  it('shows the stringency as 2 by default and writes the one picked', async () => {
+    const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    renderSettings('/settings/goals');
+    const select = (await screen.findByTestId('goal-stringency')) as HTMLSelectElement;
+    expect(select.value).toBe('2');
+    fireEvent.change(select, { target: { value: '3' } });
+    await waitFor(() => expect(server.writes).toEqual([{ goalStringency: 3 }]));
+  });
+
   it('shows Sonnet 5.5 as the judge model, kept as an option', async () => {
     const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
