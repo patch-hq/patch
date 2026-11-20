@@ -10032,7 +10032,7 @@ button.set-row-open:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--text-min);
 }
 .set-list code {
   overflow-wrap: anywhere;
