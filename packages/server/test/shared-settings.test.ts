@@ -419,6 +419,11 @@ describe('SharedSettingsService', () => {
     expect(service.changedEvent().problem).toBeUndefined();
   });
 
+  it('names a first sign-in with no email plainly, numbering only a later one', async () => {
+    const first = await service.addClaude('sk-ant-oat01-a');
+    expect(first.label).toBe('Claude');
+  });
+
   it('stores an Anthropic API key as a Claude account and reports it as an API key', async () => {
     const account = await service.addClaude('sk-ant-api03-key');
     expect(account.label).toBe('Claude API (paid)');

@@ -69,9 +69,9 @@ test('this computer: every step, each choice written where Settings writes it', 
   // 1. Connect an AI — Claude in the browser, the code pasted back.
   await expect(page.getByTestId('welcome-providers')).toBeVisible();
   await expect(page.getByTestId('welcome-next')).toHaveCount(0);
-  // One dot per step this page asks: AI, permissions, keep running, phone —
-  // and the model step joins once an AI is connected.
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  // One dot per step this page asks: AI, permissions, model, keep running,
+  // phone. The count is the same before and after an AI is connected.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
   await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(1);
   await expect(page.getByTestId('welcome-claude-plans')).toHaveCount(0);
   await expect(page.getByTestId('claude-add-api-key')).toBeVisible();
@@ -112,9 +112,10 @@ test('this computer: every step, each choice written where Settings writes it', 
   await expect(page.getByTestId('welcome-model')).toBeVisible();
   await expect(page.getByTestId('welcome-model-claude-sonnet-5')).toBeVisible();
   await shot(page, '4-model');
-  await page.getByTestId('welcome-model-claude-sonnet-5').click();
-  await expect.poll(() => server.patches).toContainEqual({ defaultModel: 'claude-sonnet-5' });
+  // The recommended model is already selected, not the dearest; Continue saves it.
+  await expect(page.getByTestId('welcome-model-claude-sonnet-5').locator('input')).toBeChecked();
   await page.getByTestId('welcome-next').click();
+  await expect.poll(() => server.patches).toContainEqual({ defaultModel: 'claude-sonnet-5' });
 
   // 4. Keep running — on by default; turning one off reaches the shell.
   await expect(page.getByTestId('welcome-keep-running')).toBeVisible();
@@ -162,7 +163,7 @@ test('this computer: every step, each choice written where Settings writes it', 
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
 });
 
-test('nothing connected: skipping says once what it costs, the model step is not asked, and the phone can be skipped', async ({
+test('nothing connected: skipping says once what it costs, the model step says nothing can be chosen yet, and the phone can be skipped', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 960, height: 720 });
@@ -172,8 +173,8 @@ test('nothing connected: skipping says once what it costs, the model step is not
     r.fulfill({ status: 502, json: { error: 'upstream' } }),
   );
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
-  // AI, permissions, phone: no model step with nothing to choose from.
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(3);
+  // AI, permissions, model, phone: the model step stays so the count is fixed.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
   // The cost of skipping is on screen before the click, and one click skips.
   await expect(page.getByTestId('welcome-skip-note')).toHaveText(
     'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
@@ -193,7 +194,11 @@ test('nothing connected: skipping says once what it costs, the model step is not
   await expect(page.getByTestId('welcome-permissions')).not.toContainText('Default');
   await page.getByTestId('welcome-next').click();
 
-  await expect(page.getByTestId('welcome-model')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-model')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-problem')).toHaveText(
+    'Models appear once you connect an AI.',
+  );
+  await page.getByTestId('welcome-next').click();
   await expect(page.getByTestId('welcome-phone')).toBeVisible();
   await expect(page.getByTestId('welcome-skip')).toHaveText('No phone, skip');
   await expect(page.getByTestId('welcome-apk-qr')).toHaveAttribute('width', /\d+/);
@@ -240,21 +245,23 @@ test('ChatGPT only: the model step offers ChatGPT models and moves every chat de
 
   await expect(page.getByTestId('welcome-model')).toBeVisible();
   await expect(page.getByTestId('welcome-model-openai/gpt-5.2')).toBeVisible();
+  // One recommended model per provider; the others are one click down.
+  await expect(page.getByTestId('welcome-model-openai/gpt-5.2-mini')).toHaveCount(0);
+  await page.getByTestId('welcome-model-more').click();
   await expect(page.getByTestId('welcome-model-openai/gpt-5.2-mini')).toBeVisible();
   await expect(page.getByTestId('welcome-model-claude-opus-5')).toHaveCount(0);
-  // The Claude default could not run: it is moved to the newest ChatGPT model,
-  // along with the jobs' and the Manager's.
-  await expect
-    .poll(() => server.patches)
-    .toContainEqual({
-      defaultModel: 'openai/gpt-5.2',
-      jobDefaultModel: 'openai/gpt-5.2',
-      specialThreadModel: 'openai/gpt-5.2',
-    });
+  // The Claude default could not run, so the recommended ChatGPT model reads as
+  // chosen; picking another moves the chat default, the jobs' and the Manager's.
   await expect(page.getByTestId('welcome-model-openai/gpt-5.2').locator('input')).toBeChecked();
   await shot(page, '4-model-chatgpt');
   await page.getByTestId('welcome-model-openai/gpt-5.2-mini').click();
-  await expect.poll(() => server.patches.at(-1)).toEqual({ defaultModel: 'openai/gpt-5.2-mini' });
+  await expect
+    .poll(() => server.patches.at(-1))
+    .toEqual({
+      defaultModel: 'openai/gpt-5.2-mini',
+      jobDefaultModel: 'openai/gpt-5.2-mini',
+      specialThreadModel: 'openai/gpt-5.2-mini',
+    });
   await page.getByTestId('welcome-next').click();
   await expect(page.getByTestId('welcome-phone')).toBeVisible();
 });

@@ -18821,8 +18821,7 @@ a.drop-target,
 .welcome-back:hover {
   background: var(--bg-soft);
 }
-.welcome-back {
-  justify-self: start;
+.welcome-footer > .welcome-back:first-child {
   margin-left: -10px;
 }
 /* A footer whose only action is quiet lines its text up with the cards. */
