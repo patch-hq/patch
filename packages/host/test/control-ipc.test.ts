@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon, ChatNotFoundError } from '../src/chatRunner.js';
+import { RemoteRelayError } from '../src/remote-relay.js';
 import { buildControl } from '../src/control.js';
 import { MemoryJobsStore, JobNotFoundError, JobsLinkOfflineError } from '../src/jobs-interface.js';
 import type { AsyncJobsInterface, Job } from '../src/jobs-interface.js';
@@ -1197,10 +1198,31 @@ describe('C1 Control IPC: GET /chats/folders', () => {
 });
 
 describe('C1 Control IPC: GET /chats/:id', () => {
-  it('401s, 503s with no host, 404s unknown, 200s on hit', async () => {
+  /** Stands in for the server: answers for the chats it knows, by full id only. */
+  const serverKnowing = (ids: () => string[], asked: string[] = []) => ({
+    peekFromServer: async (req: { targetChatId: string }) => {
+      asked.push(req.targetChatId);
+      if (!ids().includes(req.targetChatId)) {
+        throw new RemoteRelayError('chat_not_found', `no such chat: ${req.targetChatId}`);
+      }
+      return {
+        chat_state: { chatId: req.targetChatId, chatStatus: { state: 'idle' } },
+        events: [],
+        truncated: false,
+      };
+    },
+  });
+
+  it('401s, 503s with no host or no server, 404s unknown, and reads even a local chat from the server', async () => {
     const { daemon, jobs, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    const asked: string[] = [];
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      ...serverKnowing(() => [chatId], asked),
+    });
     try {
       const unauth = await app.inject({ method: 'GET', url: `/chats/${chatId}` });
       expect(unauth.statusCode).toBe(401);
@@ -1210,7 +1232,8 @@ describe('C1 Control IPC: GET /chats/:id', () => {
 
       const ok = await app.inject({ method: 'GET', url: `/chats/${chatId}`, headers: AUTH });
       expect(ok.statusCode).toBe(200);
-      expect(ok.json().chatId).toBe(chatId);
+      expect(ok.json()).toEqual({ chatId, chatStatus: { state: 'idle' } });
+      expect(asked).toEqual(['nope', chatId]);
     } finally {
       await app.close();
     }
@@ -1221,12 +1244,24 @@ describe('C1 Control IPC: GET /chats/:id', () => {
     } finally {
       await noHost.close();
     }
+    const noServer = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    try {
+      const res = await noServer.inject({ method: 'GET', url: `/chats/${chatId}`, headers: AUTH });
+      expect(res.statusCode).toBe(503);
+    } finally {
+      await noServer.close();
+    }
   });
 
-  it('resolves a unique id prefix (spec/17-cli.md: "<id> accepts the full ULID or a unique prefix")', async () => {
+  it('resolves a unique prefix of a local chat before asking (spec/17-cli.md: "<id> accepts the full ULID or a unique prefix")', async () => {
     const { daemon, jobs, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      ...serverKnowing(() => [chatId]),
+    });
     try {
       const res = await app.inject({
         method: 'GET',
@@ -1245,7 +1280,12 @@ describe('C1 Control IPC: GET /chats/:id', () => {
     const a = await daemon.spawnChat({ folder });
     const b = await daemon.spawnChat({ folder });
     const sharedPrefixLen = [...a].findIndex((c, i) => c !== b[i]);
-    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    const app = await buildControl({
+      daemon,
+      jobs,
+      localKey: LOCAL_KEY,
+      ...serverKnowing(() => [a, b]),
+    });
     try {
       const res = await app.inject({
         method: 'GET',
