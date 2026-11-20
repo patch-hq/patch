@@ -53,4 +53,33 @@ describe('AccountControl', () => {
     );
     expect(options.slice(1).every((o) => o.textContent?.startsWith('Always '))).toBe(true);
   });
+
+  it('offers an ACP agent’s own accounts for a chat on that agent, so it can be locked', () => {
+    usePreferencesStore.setState({
+      shared: {
+        secrets: {
+          claude: [{ id: 'a1', label: 'Default', connected: true }],
+          codex: [],
+          acp: [
+            { id: 'g1', agentId: 'gemini', label: 'Gemini work', last4: '1111' },
+            { id: 'g2', agentId: 'gemini', label: 'Gemini home', last4: '2222' },
+            { id: 'o1', agentId: 'other', label: 'Other agent', last4: '3333' },
+          ],
+        },
+      },
+    } as unknown as Parameters<typeof usePreferencesStore.setState>[0]);
+    const row = {
+      chatId: 'c2',
+      hostId: 'd1',
+      model: 'acp/gemini/auto',
+      preferredAccountId: null,
+      account: { id: 'g1', label: 'Gemini work' },
+    } as unknown as ChatRow;
+    useChatStore.setState((s) => ({ chats: { ...s.chats, c2: row } }));
+    render(<AccountControl chatId="c2" />);
+    fireEvent.click(screen.getByTestId('chat-account'));
+    const labels = screen.getAllByRole('option').map((o) => o.textContent ?? '');
+    expect(labels.some((l) => l.includes('Gemini home'))).toBe(true);
+    expect(labels.some((l) => l.includes('Other agent') || l.includes('Default'))).toBe(false);
+  });
 });

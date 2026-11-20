@@ -143,8 +143,17 @@ const app = agent({ name: 'fake-acp' })
       process.exit(3);
     }
     if (
+      process.env.FAKE_ACP_REJECT_KEY &&
+      process.env.FAKE_ACP_KEY === process.env.FAKE_ACP_REJECT_KEY
+    )
+      throw new RequestError(
+        -32603,
+        'API key not valid. Please pass a valid API key. (API_KEY_INVALID)',
+      );
+    if (
       text === 'limit' ||
-      (process.env.FAKE_ACP_LIMIT_KEY && process.env.FAKE_ACP_KEY === process.env.FAKE_ACP_LIMIT_KEY)
+      (process.env.FAKE_ACP_LIMIT_KEY &&
+        process.env.FAKE_ACP_KEY === process.env.FAKE_ACP_LIMIT_KEY)
     )
       throw new RequestError(-32603, '429 RESOURCE_EXHAUSTED: quota exceeded for this key');
     if (text === 'slow') {

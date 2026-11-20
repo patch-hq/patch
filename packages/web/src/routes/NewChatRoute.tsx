@@ -24,7 +24,7 @@ import {
   backendIdForModel,
   compactModelLabel,
   providerForModel,
-  accountsKeyForModel,
+  lockableAccounts,
   accountKindForModel,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
@@ -602,8 +602,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // ChatGPT list, whichever backend the model runs on.
   const sharedSecrets = usePreferencesStore((st) => st.shared?.secrets);
   const preferableAccounts = useMemo(() => {
-    const key = accountsKeyForModel(effectiveModel);
-    return ((key !== null ? sharedSecrets?.[key] : undefined) ?? []).filter((a) => a.connected);
+    return lockableAccounts(sharedSecrets, effectiveModel).filter((a) => a.connected);
   }, [sharedSecrets, effectiveModel]);
   // Default to an account that is in credit: when one of the model's accounts
   // is spent and another is not, the chat is pinned to the one that is not

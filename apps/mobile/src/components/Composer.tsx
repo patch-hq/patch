@@ -2663,6 +2663,7 @@ export function Composer({
       <AccountMenu
         visible={accountMenuOpen}
         backendId={accountBackend}
+        model={chatModel}
         selectedId={accountSelected}
         strategySelected={setup ? setup.accountId === null : false}
         onSelect={onAccountSelect}

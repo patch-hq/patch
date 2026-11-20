@@ -55,9 +55,15 @@ import {
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
 import { HostProviderKey, ProviderKeyCheck, ProviderKeyId } from './provider-keys.js';
-import { AcpAgentConfig } from './acpAgents.js';
+import { AcpAgentConfig, parseAcpModel } from './acpAgents.js';
 import { MODEL_ENDPOINT_ID, ModelEndpoints } from './modelEndpoints.js';
-import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
+import {
+  BACKEND_IDS,
+  PROVIDERS,
+  accountsKeyForModel,
+  providerForModel,
+  type ProviderId,
+} from './providers.js';
 import {
   HookDecision,
   HookImages,
@@ -2981,6 +2987,43 @@ export const SharedSecretsSummary = z
   })
   .strict();
 export type SharedSecretsSummary = z.infer<typeof SharedSecretsSummary>;
+
+/** One account a chat can run on or be locked to, whichever provider it is for. */
+export interface LockableAccount {
+  id: string;
+  label: string;
+  connected: boolean;
+  email?: string | undefined;
+  kind?: 'chatgpt' | 'apiKey' | undefined;
+  state?: AccountState | undefined;
+}
+
+/**
+ * The accounts a chat on `model` can run on, in their order (spec/10 §
+ * Choosing an account): its provider's shared list, or for an ACP agent that
+ * agent's own accounts. Empty for a model with no accounts. Every surface's
+ * account picker reads this, so a chat on any provider can be locked the same way.
+ */
+export function lockableAccounts(
+  secrets: Partial<Pick<SharedSecretsSummary, 'claude' | 'codex' | 'acp'>> | undefined,
+  model: string | null | undefined,
+): LockableAccount[] {
+  if (!secrets) return [];
+  const acp = parseAcpModel(model);
+  if (acp) {
+    return (secrets.acp ?? [])
+      .filter((a) => a.agentId === acp.agentId)
+      .map((a) => ({
+        id: a.id,
+        label: a.label,
+        connected: true,
+        kind: 'apiKey' as const,
+        ...(a.state ? { state: a.state } : {}),
+      }));
+  }
+  const key = accountsKeyForModel(model);
+  return key !== null ? [...(secrets[key] ?? [])] : [];
+}
 
 /** Server → host: every shared setting and secret (spec/03 § Settings). */
 export const SettingsSnapshotEvent = z
