@@ -168,6 +168,7 @@ export * from './meeting.js';
 // A chat's own history log, kept independently of any harness (spec/04 § History).
 export * from './chatLog.js';
 export * from './branch-track.js';
+export * from './branch-points.js';
 // Provider keys a host holds, set from Settings → Hosts (spec/02 § Provider keys).
 export * from './provider-keys.js';
 export * from './providers.js';

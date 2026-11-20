@@ -155,6 +155,7 @@ import {
   parseSeqParam,
   rowIndexForSeq,
 } from '../../src/lib/chatJump';
+import { branchPointsOf } from '../../src/lib/branchPoints';
 import { deriveBadge, isRunning } from '../../src/stores/types';
 import { UnifiedDiff, diffFromToolCall } from '../../src/components/UnifiedDiff';
 import { ChatMarkdown } from '../../src/components/ChatMarkdown';
@@ -363,10 +364,16 @@ function ChatDetailBody(): React.ReactElement {
     [chatId],
   );
   const snoozeRecords = row?.snoozeRecords;
-  const rows = React.useMemo(
-    () => insertSnoozeDividers(groupToolRuns(visibleTimeline), snoozeRecords),
-    [visibleTimeline, snoozeRecords],
-  );
+  const chatModelForRows = row?.model;
+  const rows = React.useMemo(() => {
+    // spec/04 § Forking — edit and side thread only where the fork would succeed.
+    const points = branchPointsOf(visibleTimeline, chatModelForRows);
+    return insertSnoozeDividers(groupToolRuns(visibleTimeline), snoozeRecords).map((r) =>
+      r.kind === 'entry' && points.has(r.entry.seq)
+        ? { ...r, branchPoint: points.get(r.entry.seq)! }
+        : r,
+    );
+  }, [visibleTimeline, snoozeRecords, chatModelForRows]);
   // FlatList's `inverted` mode wants data newest-first (see the block comment
   // above) — `rows` stays chronological for everything else on this screen
   // (badge/title derivation, the send-re-pin effect, ...), this reversal is a
@@ -947,6 +954,7 @@ function ChatDetailBody(): React.ReactElement {
             result={item.result}
             handoffPending={item.handoffPending === true}
             handoffAnswer={item.handoffAnswer === true}
+            {...(item.branchPoint ? { branchPoint: item.branchPoint } : {})}
           />
         );
       if (item.key !== highlightKey) return cell;
@@ -3085,9 +3093,12 @@ const TimelineItem = React.memo(function TimelineItem({
   queuedDraft,
   onQueuedDraft,
   onEditQueued,
+  branchPoint,
 }: {
   entry: ChatEventEntry;
   chatId: string;
+  /** spec/04 § Forking — whether an edit or a side thread here would fork. */
+  branchPoint?: { edit: boolean; side: boolean };
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
   /** spec/07 — a voice hand-off the agent has not answered yet. */
@@ -3281,8 +3292,9 @@ const TimelineItem = React.memo(function TimelineItem({
             // the host has no persisted record of yet, so there is no fork
             // point to hang a side thread off (NO FALLBACK) — mirrors web's
             // `canSideThread`.
-            // Offered only where the chat's provider declares branchAtTurn.
-            {...(entry.localId === undefined && modelHasCapability(chatModel, 'branchAtTurn')
+            // Offered only where the chat's provider declares branchAtTurn and
+            // the entry gives the fork a provider id (spec/04 § Side threads).
+            {...(entry.localId === undefined && branchPoint?.side === true
               ? { sideThread: { chatId, seq: entry.seq } }
               : {})}
             // Retry: a settled turn re-runs its user message (an assistant
@@ -3293,10 +3305,11 @@ const TimelineItem = React.memo(function TimelineItem({
               : {})}
             // Edit: a settled text-only user message is replaced by a fork
             // carrying the new text (spec/04 § Branching).
-            // Offered only where the chat's provider declares editAtMessage.
+            // Offered only where the chat's provider declares editAtMessage and
+            // an earlier entry gives the fork a provider id (spec/04 § Forking).
             {...(entry.localId === undefined &&
             !entry.queued &&
-            modelHasCapability(chatModel, 'editAtMessage') &&
+            branchPoint?.edit === true &&
             editSource(chatId, entry) !== null
               ? { edit: (next: string) => editTurn(chatId, entry.seq, next) }
               : {})}

@@ -628,6 +628,11 @@ export interface DelegateUpdateInfo {
 export interface ChatEventEntry {
   /** Source seq (or local timestamp for outgoing user messages). */
   seq: number;
+  /**
+   * The entry carries a provider id, so an edit or side thread can fork at it
+   * (spec/04 § Forking; the server's `branchable`).
+   */
+  branchable?: boolean;
   kind:
     | 'message'
     | 'tool_call'
@@ -2975,6 +2980,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // arm and the retracted-chat guard both `continue` past it. So this marks
       // exactly "some event in this batch was handled".
       changed = true;
+      // spec/04 § Forking — the entry carries a provider id, so an edit or side
+      // thread can fork at it (`canEditAt` / `canSideAt`). Kept on the entry
+      // so the device copy remembers it.
+      if ((event as { branchable?: unknown }).branchable === true && 'chatId' in event) {
+        const seq = (event as { seq?: unknown }).seq;
+        const chatId = (event as { chatId?: unknown }).chatId;
+        if (typeof seq === 'number' && typeof chatId === 'string' && timelines[chatId]) {
+          const list = ownTimeline(chatId);
+          for (let i = list.length - 1; i >= 0; i -= 1) {
+            if (list[i]!.seq !== seq) continue;
+            if (list[i]!.branchable !== true) list[i] = { ...list[i]!, branchable: true };
+            break;
+          }
+        }
+      }
     }
 
     if (!changed) return;

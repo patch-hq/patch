@@ -110,6 +110,14 @@ export interface ProviderDescriptor {
   readonly builtinCommands: readonly string[];
   /** What the provider supports natively; features follow this (spec/02 § Provider adapters). */
   readonly capabilities: ProviderCapabilities;
+  /**
+   * Where the provider can fork a conversation (spec/04 § Forking, § Side
+   * threads), read by `forkPointIndex`. `userTurnIds`: the user's own turn
+   * carries a provider id, so a side thread can keep it. `wholeTurns`: the
+   * provider forks only at turn ends, so a side thread off a user turn keeps
+   * the turns before it.
+   */
+  readonly branching: { readonly userTurnIds: boolean; readonly wholeTurns: boolean };
   /** The provider's own settings Settings exposes (spec/10 § Provider settings). */
   readonly settings: readonly ProviderSettingDescriptor[];
   /**
@@ -174,6 +182,7 @@ export const PROVIDERS = [
       'usage',
       'vim',
     ],
+    branching: { userTurnIds: true, wholeTurns: false },
     capabilities: {
       resume: true,
       editAtMessage: true,
@@ -237,6 +246,7 @@ export const PROVIDERS = [
       'status',
       'undo',
     ],
+    branching: { userTurnIds: false, wholeTurns: true },
     capabilities: {
       resume: true,
       editAtMessage: true,
@@ -278,6 +288,7 @@ export const PROVIDERS = [
     supportsEffort: false,
     loginRequiredCode: 'acp_agent_signed_out',
     builtinCommands: [],
+    branching: { userTurnIds: false, wholeTurns: false },
     capabilities: {
       // Per agent: the adapter reopens a saved session where the agent offers
       // session/load or session/resume, and refuses with a clear error where not.

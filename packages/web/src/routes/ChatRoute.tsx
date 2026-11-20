@@ -25,6 +25,7 @@ import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { railMarkers, nextFarState, isFar, type FarState } from '../lib/scrollRail.js';
 import { classifyTurnFailure } from '../lib/turnFailure.js';
+import { branchPointsOf } from '../lib/branchPoints.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1696,6 +1697,9 @@ export function ChatRoute({
         : baseTrackNav,
     [baseTrackNav, branchGraph, timeline],
   );
+  // spec/04 § Forking — edit and side thread are offered only where the fork
+  // would succeed (the entry, or an earlier one, carries a provider id).
+  const branchPoints = useMemo(() => branchPointsOf(timeline, row?.model), [timeline, row?.model]);
 
   const handleFork = useCallback(
     async (seq: number, message: string, files: OutgoingFile[] = []): Promise<boolean> => {
@@ -2424,6 +2428,7 @@ export function ChatRoute({
             ? { onContinueInterrupted: handleContinueInterrupted }
             : {})}
           onEditTurn={handleEditTurn}
+          branchPoint={branchPoints.get(entry.seq)}
           {...(turnEdit?.seq === entry.seq && !entry.queued ? { editAnchor: true } : {})}
           onSwitchTrack={handleSwitchTrack}
           tracks={trackNav.get(entry.seq)}
@@ -2744,6 +2749,7 @@ const TimelineEntry = memo(function TimelineEntry({
   onContinueTurn,
   onContinueInterrupted,
   onEditTurn,
+  branchPoint,
   editAnchor,
   onSwitchTrack,
   tracks,
@@ -2753,6 +2759,8 @@ const TimelineEntry = memo(function TimelineEntry({
 }: {
   entry: ChatEventEntry;
   chatId: string;
+  /** spec/04 § Forking — whether an edit or a side thread here would fork. */
+  branchPoint?: { edit: boolean; side: boolean } | undefined;
   /** spec/12 § Continue — set on the newest interruption line of an Interrupted chat. */
   onContinueInterrupted?(): void;
   /** spec/08 § Action — this is the job-spawned chat's trigger turn (see `firstUserSeq` above). */
@@ -2978,6 +2986,7 @@ const TimelineEntry = memo(function TimelineEntry({
         {...(onRetryTurn ? { onRetryTurn } : {})}
         {...(onContinueTurn ? { onContinueTurn } : {})}
         {...(onEditTurn ? { onEditTurn } : {})}
+        {...(branchPoint ? { branchPoint } : {})}
         {...(editAnchor ? { editAnchor } : {})}
         {...(onSwitchTrack ? { onSwitchTrack } : {})}
         {...(tracks ? { tracks } : {})}
@@ -3206,6 +3215,7 @@ function MessageEntry({
   onRetryTurn,
   onContinueTurn,
   onEditTurn,
+  branchPoint,
   editAnchor,
   onSwitchTrack,
   tracks,
@@ -3235,6 +3245,8 @@ function MessageEntry({
   onRetryTurn?(entry: ChatEventEntry): void;
   /** spec/14 § Running-turn controls — nudge a `turnStopped` chat onward with a fresh turn. */
   onContinueTurn?(): void;
+  /** spec/04 § Forking — whether an edit or a side thread here would fork. */
+  branchPoint?: { edit: boolean; side: boolean };
   onEditTurn?(seq: number, text: string): void;
   /** This turn is the one being edited in the main composer (spec/04 § Branching). */
   editAnchor?: boolean;
@@ -3361,8 +3373,9 @@ function MessageEntry({
     !entry.queued &&
     !entry.transcribing &&
     !entry.streaming &&
-    // Features follow the provider's declared capability (spec/02 § Provider adapters).
-    modelHasCapability(metaModel, 'editAtMessage') &&
+    // Features follow the provider's declared capability (spec/02 § Provider
+    // adapters), and the fork needs a provider id to fork at (spec/04 § Forking).
+    branchPoint?.edit === true &&
     onEditTurn !== undefined;
   // spec/14 § Side threads panel TRIGGER — "Hovering any message (user or
   // agent)". Same settled-turn restriction as the edit pencil (above), minus
@@ -3375,8 +3388,9 @@ function MessageEntry({
     !entry.transcribing &&
     !entry.streaming &&
     text.length > 0;
-  // A side thread is a branch at a turn: offered only where the provider declares it.
-  const canSideThread = settledTurn && modelHasCapability(metaModel, 'branchAtTurn');
+  // A side thread is a branch at a turn: offered only where the provider
+  // declares it and the entry gives the fork a provider id (spec/04 § Side threads).
+  const canSideThread = settledTurn && branchPoint?.side === true;
   // A settled turn can be retried from the hover button or the context menu —
   // same settled-turn rule as the side-thread trigger. A user turn is sent again
   // as a brand new turn (spec/12 § turn retry); an assistant reply re-runs the

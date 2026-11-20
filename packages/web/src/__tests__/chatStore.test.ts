@@ -3672,3 +3672,23 @@ describe('chatStore — provider-switch handoff rows (spec/04 § Handoff budget)
     });
   });
 });
+
+describe('spec/04 § Forking — branchable entries', () => {
+  it("keeps the server's branchable mark on the entry it belongs to", () => {
+    useChatStore.getState()._reset();
+    useChatStore.getState().applyEvents([
+      { type: 'chat.message', chatId: 'cb', role: 'user', content: 'q', seq: 1 },
+      {
+        type: 'chat.message',
+        chatId: 'cb',
+        role: 'assistant',
+        content: 'a',
+        seq: 2,
+        branchable: true,
+      },
+    ] as never);
+    const tl = useChatStore.getState().timelines['cb']!;
+    expect(tl.find((e) => e.seq === 1)?.branchable).toBeUndefined();
+    expect(tl.find((e) => e.seq === 2)?.branchable).toBe(true);
+  });
+});

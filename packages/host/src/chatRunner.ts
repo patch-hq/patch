@@ -62,6 +62,8 @@ import {
   deriveSnoozeOutcome,
   openSnoozeRecord,
   providerDescriptor,
+  forkPointIndex,
+  type BranchEntry,
   retiredModelNotice,
   modelSupportsEffort,
   ChatErrorCode,
@@ -1622,6 +1624,13 @@ export interface GoalTriggerInfo {
 /** The fork point a forked turn resumes its parent session at (spec/04 § Branching). */
 export interface ForkRun {
   resumeAtUuid: string | null;
+  /**
+   * The session the fork resumes: the one the kept entry's `nativeRef` names.
+   * A provider may give a forked session's messages new ids, so an entry a
+   * branch inherited is forked from the session that wrote it. Absent: the
+   * branch's own session.
+   */
+  fromSessionId?: string;
 }
 
 /** Metadata for a stored attachment (spec § Composer). */
@@ -7885,7 +7894,15 @@ export class Daemon {
     if (!this.opts.metaStore.read(chatId)) return;
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
-      pendingTurns,
+      // A fork's `fromSessionId` stays out of meta: a host rolled back to an
+      // older build reads meta strictly and would refuse the key. A queued
+      // fork turn resumed after a restart forks from the branch's own session.
+      // It can be stored once hosts older than this build are unsupported.
+      pendingTurns: pendingTurns.map((t) =>
+        (t.fork as ForkRun | undefined)?.fromSessionId === undefined
+          ? t
+          : { ...t, fork: { resumeAtUuid: t.fork!.resumeAtUuid } },
+      ),
       updatedAt: this.opts.now(),
     }));
   }
@@ -8376,16 +8393,9 @@ export class Daemon {
   /**
    * Where a new branch forks from, read from the chat's own record (spec/04 §
    * Branching): the provider's id (`nativeRef`) of the last entry the new
-   * branch keeps. Patch never reads the provider's session to find it.
-   *
-   * - `edit`: `seq` must be a user turn on `branchId`'s track; the branch keeps
-   *   everything before it, so the point is the nearest earlier entry that
-   *   carries a `nativeRef`. A user turn the provider never answered carries
-   *   none and is passed over, so editing after a stopped turn works. With no
-   *   provider output before it at all, the branch starts from an empty
-   *   context (`null`).
-   * - `side`: the branch keeps the entry at `seq` itself, so that entry must
-   *   carry a `nativeRef`.
+   * branch keeps, found by the rule the surfaces offer the action by
+   * (`forkPointIndex`). Patch never reads the provider's session to find it.
+   * The fork resumes the session that entry was written in.
    *
    * Returns `null` (the request is refused) when there is no such point: `seq`
    * is not on the track, an edit names something other than a user turn, or
@@ -8396,31 +8406,50 @@ export class Daemon {
     branchId: string,
     seq: number,
     kind: 'edit' | 'side',
-  ): { resumeAtUuid: string | null } | null {
+  ): ForkRun | null {
     const meta = this.opts.metaStore.read(chatId);
     if (!meta) return null;
-    const records = readTrackRecords(this.chatLog, chatId, meta, branchId);
-    let earlierRef: NativeRef | undefined;
-    let earlierOutput = false;
-    for (const record of records) {
-      if (record.rec.k !== 'event') continue;
-      const ev = record.rec.event;
-      if (record.seq === seq) {
-        if (kind === 'side') return record.nativeRef ? { resumeAtUuid: record.nativeRef.id } : null;
-        if (!(ev.type === 'chat.message' && ev.role === 'user')) return null;
-        if (earlierRef) return { resumeAtUuid: earlierRef.id };
-        return earlierOutput ? null : { resumeAtUuid: null };
-      }
-      if (record.seq > seq) continue;
-      if (record.nativeRef) earlierRef = record.nativeRef;
-      if (
-        (ev.type === 'chat.message' && ev.role === 'assistant') ||
-        ev.type === 'chat.tool_call' ||
-        ev.type === 'chat.tool_result'
-      )
-        earlierOutput = true;
-    }
-    return null;
+    const records = readTrackRecords(this.chatLog, chatId, meta, branchId).filter(
+      (r) => r.rec.k === 'event',
+    );
+    const entries: BranchEntry[] = records.map((r) => {
+      const ev = (r.rec as { event: WireEvent }).event as { type: string; role?: string };
+      return {
+        type: ev.type,
+        ...(ev.role !== undefined ? { role: ev.role } : {}),
+        ...(r.nativeRef ? { branchable: true } : {}),
+      };
+    });
+    const index = records.findIndex((r) => r.seq === seq);
+    if (index < 0) return null;
+    const point = forkPointIndex(kind, entries, index, this.chatState.get(chatId)?.model);
+    if (point === null) return null;
+    if (point === 'empty') return { resumeAtUuid: null };
+    const ref = records[point]!.nativeRef!;
+    return { resumeAtUuid: ref.id, fromSessionId: ref.sessionId };
+  }
+
+  /**
+   * The provider ids a turn's own user message is recorded under, for a
+   * provider whose user turns carry one (`branching.userTurnIds`): the id the
+   * provider is to keep the message under, and the session it lands in. A new
+   * session (fresh, or forked) is given its id here, so the message can name
+   * it before the provider reports it.
+   */
+  private userTurnIds(
+    chatId: string,
+    resumable: string | undefined,
+    forked: boolean,
+  ): { promptId: string; newSessionId?: string; ref: NativeRef } | undefined {
+    const harness = this.harnessOf(chatId);
+    if (!providerDescriptor(harness).branching.userTurnIds) return undefined;
+    const promptId = randomUUID();
+    const newSessionId = forked || resumable === undefined ? randomUUID() : undefined;
+    return {
+      promptId,
+      ...(newSessionId !== undefined ? { newSessionId } : {}),
+      ref: { harness, sessionId: newSessionId ?? resumable!, id: promptId },
+    };
   }
 
   /**
@@ -8477,7 +8506,7 @@ export class Daemon {
     // A first turn stopped before the provider made a session may not even be
     // in the record yet, though the surface shows it at seq 0. It is the one
     // turn that can exist without a session, and it forks from an empty context.
-    const point = hasSession
+    const point: ForkRun | null = hasSession
       ? this.recordForkPoint(req.chatId, graph.activeBranchId, req.seq, 'edit')
       : req.seq === 0
         ? { resumeAtUuid: null }
@@ -8522,7 +8551,7 @@ export class Daemon {
       chatId: req.chatId,
       message: req.message,
       localId: req.localId,
-      fork: { resumeAtUuid: point.resumeAtUuid },
+      fork: point,
       ...(req.attachments !== undefined ? { attachments: req.attachments } : {}),
       ...(req.disabledTools !== undefined ? { disabledTools: req.disabledTools } : {}),
       // A fork or side message is typed by a person (spec/04 § Hidden).
@@ -8632,7 +8661,7 @@ export class Daemon {
       branchId: branch.branchId,
       message: req.message,
       localId: req.localId,
-      fork: { resumeAtUuid: point.resumeAtUuid },
+      fork: point,
     });
   }
 
@@ -9167,6 +9196,18 @@ export class Daemon {
       localId,
       createdAt: this.opts.now(),
     };
+    // The session this turn resumes: a fork's is the one its kept entry was
+    // written in; otherwise the branch's own, or the chat's before the branch
+    // has run.
+    const branch = (this.opts.metaStore.read(chatId)?.branches ?? []).find(
+      (b) => b.branchId === branchId,
+    );
+    const ownSession = branch?.sessionId;
+    const sideResumeId =
+      fork?.resumeAtUuid === null
+        ? undefined
+        : (fork?.fromSessionId ?? ownSession ?? state.claudeSessionId);
+    const sideIds = this.userTurnIds(chatId, sideResumeId, fork !== undefined);
     try {
       // The side branch's turn opens in the log like any other, so the server
       // sees it start as well as end (spec/12 § Chat status).
@@ -9187,7 +9228,7 @@ export class Daemon {
       this.chatLog.append(
         chatId,
         { k: 'event', event: userEvent },
-        { branchId, sync: true },
+        { branchId, sync: true, ...(sideIds ? { nativeRef: sideIds.ref } : {}) },
         turnId,
       );
     } catch (err) {
@@ -9199,12 +9240,6 @@ export class Daemon {
       return;
     }
 
-    // Re-read after the OAuth await in case the branch's session landed while
-    // we were waiting (can't happen today — nothing else writes it mid-flight
-    // — but reading fresh here costs nothing and never goes stale).
-    const branch = (this.opts.metaStore.read(chatId)?.branches ?? []).find(
-      (b) => b.branchId === branchId,
-    );
     const mcpServer = this.opts.mcpServer
       ? {
           ...this.opts.mcpServer,
@@ -9216,7 +9251,6 @@ export class Daemon {
           args: mcpArgsOmitting(this.opts.mcpServer.args, state.model),
         }
       : undefined;
-    const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
     const sideOwnsSessionFile = HARNESS_TRAITS[this.harnessOf(chatId)].ownsSessionFile;
     if (sideOwnsSessionFile && sideResumeId)
       await createClaudeSessionStore({
@@ -9232,6 +9266,8 @@ export class Daemon {
       resumeSessionId: sideResumeId,
       ...(sideOwnsSessionFile ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
       ...(fork ? { fork } : {}),
+      ...(sideIds ? { promptId: sideIds.promptId } : {}),
+      ...(sideIds?.newSessionId !== undefined ? { newSessionId: sideIds.newSessionId } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
@@ -10421,6 +10457,20 @@ export class Daemon {
       retryOfSeq !== undefined &&
       this.durableAttach.has(chatId) &&
       this.durableAttach.get(chatId)?.localId === localId;
+    // The session this turn resumes: a fork's is the one its kept entry was
+    // written in; otherwise the chat's own, unless another provider made it
+    // (that one is ended below and the turn starts fresh).
+    const ownSession =
+      state.claudeSessionId !== undefined &&
+      harnessOfSessionId(state.claudeSessionId) === this.harnessOf(chatId)
+        ? state.claudeSessionId
+        : undefined;
+    const turnResumeId =
+      fork?.resumeAtUuid === null ? undefined : (fork?.fromSessionId ?? ownSession);
+    // A drawn turn being reattached already has its message and ids.
+    const turnIds = reattachesDrawnTurn
+      ? undefined
+      : this.userTurnIds(chatId, turnResumeId, fork !== undefined);
     if (reattachesDrawnTurn) {
       userMessageSeq = retryOfSeq;
     } else if (userContent !== null) {
@@ -10458,12 +10508,16 @@ export class Daemon {
       };
       userMessageSeq = raw.seq;
       const [hydrated] = this.hydrateReplayAttachments(chatId, [raw]);
+      // The message is recorded under the id the provider will keep it under.
+      if (turnIds) this.envelopeRefs.set(chatId, turnIds.ref);
       try {
         this.emit(hydrated as ChatMessageEvent);
       } catch (err) {
         if (!(err instanceof HistoryWriteError)) throw err;
         this.abandonTurnOnHistoryFailure(chatId, err);
         return false;
+      } finally {
+        if (turnIds) this.envelopeRefs.delete(chatId);
       }
       if (retryOfSeq !== undefined) {
         // Claude Code's transcript stores this re-send as an ordinary user turn
@@ -10538,7 +10592,7 @@ export class Daemon {
           // nothing to resume. Resuming the parent would carry the original
           // message and everything after it into the new track.
           undefined
-        : state.claudeSessionId;
+        : (fork?.fromSessionId ?? state.claudeSessionId);
     // Claude runs under the chat's own config dir: make its one conversation
     // file ready (a session from before per-chat config dirs is migrated in).
     // Patch never edits or reads the file for display.
@@ -10571,6 +10625,8 @@ export class Daemon {
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
       ...(fork ? { fork } : {}),
+      ...(turnIds ? { promptId: turnIds.promptId } : {}),
+      ...(turnIds?.newSessionId !== undefined ? { newSessionId: turnIds.newSessionId } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),

@@ -150,11 +150,14 @@ export function entryBranch(event: WireEvent): string | undefined {
 
 /**
  * What a surface is sent of a host's event: everything but the provider id and
- * the entry's branch, which are the record's.
+ * the entry's branch, which are the record's. An entry that had a provider id
+ * says so with `branchable` (spec/04 § Forking), so a surface offers an edit or
+ * side thread only where the fork would succeed.
  */
 export function forSurfaces<E extends WireEvent>(event: E): E {
   const { bare } = withoutBranch(event);
-  return (bare as { nativeRef?: unknown }).nativeRef === undefined ? bare : withoutRef(bare).bare;
+  if ((bare as { nativeRef?: unknown }).nativeRef === undefined) return bare;
+  return { ...withoutRef(bare).bare, branchable: true } as E;
 }
 
 /** Which branch's track a history read is for (spec/04 § Branching). */
@@ -512,10 +515,16 @@ export class ChatLogStore {
    */
   entries(chatId: string, fromSeq: number, track?: TrackAsk): WireEvent[] {
     const inTrack = this.trackTest(track);
-    const events = this.read(chatId, fromSeq).filter((e) => {
-      const seq = (e as { seq: number }).seq;
-      return inTrack(seq, this.entryBranches.get(chatId)?.get(seq));
-    });
+    const refs = this.refs.get(chatId);
+    const events = this.read(chatId, fromSeq)
+      .filter((e) => {
+        const seq = (e as { seq: number }).seq;
+        return inTrack(seq, this.entryBranches.get(chatId)?.get(seq));
+      })
+      // Held with a provider id: a surface may fork at it (`forSurfaces`).
+      .map((e) =>
+        refs?.has((e as { seq: number }).seq) ? ({ ...e, branchable: true } as WireEvent) : e,
+      );
     const asked = [...this.questionsOf(chatId).values()]
       .filter(
         (q): q is { request: WireEvent; response: WireEvent; branchId?: string } =>

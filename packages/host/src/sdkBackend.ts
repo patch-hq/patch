@@ -173,6 +173,18 @@ export interface SdkRunOptions {
    * transcript untouched so the original track stays re-openable.
    */
   fork?: { resumeAtUuid: string | null } | undefined;
+  /**
+   * The id the provider records this turn's user message under, for a provider
+   * that takes one (`branching.userTurnIds`): Patch records it as the message's
+   * `nativeRef`, so a side thread can keep the user's own turn.
+   */
+  promptId?: string | undefined;
+  /**
+   * The id a NEW session this turn starts (fresh or forked) is to have, for a
+   * provider that lets the caller choose, so the user message's `nativeRef`
+   * can name its session before the provider reports it.
+   */
+  newSessionId?: string | undefined;
   abortController: AbortController;
   /** Caller-provided OAuth access token, baked into env. */
   oauthAccessToken: string;
@@ -367,11 +379,17 @@ export function claudeCodePersistedUserTurn(prompt: string): string {
 }
 
 /** Append one Claude-Code-shaped JSONL line (role + text) to the transcript. */
-function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: string): string {
-  return appendTranscriptEntry(path, {
-    type: role,
-    message: { role, content: [{ type: 'text', text }] },
-  });
+function appendTranscriptLine(
+  path: string,
+  role: 'user' | 'assistant',
+  text: string,
+  uuid?: string,
+): string {
+  return appendTranscriptEntry(
+    path,
+    { type: role, message: { role, content: [{ type: 'text', text }] } },
+    uuid,
+  );
 }
 
 /**
@@ -383,8 +401,11 @@ function appendTranscriptLine(path: string, role: 'user' | 'assistant', text: st
  * transcript would be un-forkable and the fork path un-exercisable off the real
  * SDK.
  */
-function appendTranscriptEntry(path: string, entry: Record<string, unknown>): string {
-  const uuid = randomUUID();
+function appendTranscriptEntry(
+  path: string,
+  entry: Record<string, unknown>,
+  uuid: string = randomUUID(),
+): string {
   appendFileSync(path, JSON.stringify({ uuid, ...entry }) + '\n', 'utf8');
   return uuid;
 }
@@ -579,7 +600,7 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
       const sessionId =
         !isFork && runOpts.resumeSessionId && runOpts.resumeSessionId.length > 0
           ? runOpts.resumeSessionId
-          : freshSessionId();
+          : (runOpts.newSessionId ?? freshSessionId());
       if (isFork && projectsRoot !== undefined) {
         forkTranscript(
           projectsRoot,
@@ -920,7 +941,12 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
         try {
           mkdirSync(dir, { recursive: true });
           const transcript = join(dir, `${sessionId}.jsonl`);
-          appendTranscriptLine(transcript, 'user', claudeCodePersistedUserTurn(runOpts.prompt));
+          appendTranscriptLine(
+            transcript,
+            'user',
+            claudeCodePersistedUserTurn(runOpts.prompt),
+            runOpts.promptId,
+          );
           for (const ev of script) {
             const uuid = appendEnvelopeToTranscript(transcript, ev);
             if (uuid !== undefined && ev.nativeId === undefined) entryIds.set(ev, uuid);
@@ -1377,10 +1403,16 @@ function disallowedToolsFor(opts: SdkRunOptions): string[] {
  * rather than appending to the parent. Empty when this is an ordinary turn.
  */
 function forkOptsFor(opts: SdkRunOptions): Record<string, unknown> {
+  // A new session (fresh, or forked) takes the id the caller chose for it.
+  const chosen =
+    opts.newSessionId !== undefined && (opts.fork || opts.resumeSessionId === undefined)
+      ? { sessionId: opts.newSessionId }
+      : {};
   // Nothing to fork from when nothing is resumed (an edit of the first message).
-  if (!opts.fork || opts.resumeSessionId === undefined) return {};
+  if (!opts.fork || opts.resumeSessionId === undefined) return chosen;
   return {
     forkSession: true,
+    ...chosen,
     ...(opts.fork.resumeAtUuid !== null ? { resumeSessionAt: opts.fork.resumeAtUuid } : {}),
   };
 }
@@ -1918,24 +1950,33 @@ function withMcpSupervisor(
   };
 }
 
-/** A bare string, or — when images ride along — one user turn of image + text blocks. */
+/**
+ * A bare string, or one user turn: when images ride along (image + text
+ * blocks), or when the turn's message has a chosen id (`promptId`).
+ */
 function oneShotPrompt(opts: SdkRunOptions): string | AsyncIterable<SDKUserMessage> {
   const images = opts.images ?? [];
-  if (images.length === 0) return opts.prompt;
+  if (images.length === 0 && opts.promptId === undefined) return opts.prompt;
   const turn = {
     type: 'user',
     message: {
       role: 'user',
-      content: [
-        ...images.map((i) => ({
-          type: 'image',
-          source: { type: 'base64', media_type: i.mediaType, data: i.data },
-        })),
-        { type: 'text', text: opts.prompt },
-      ],
+      content:
+        images.length === 0
+          ? opts.prompt
+          : [
+              ...images.map((i) => ({
+                type: 'image',
+                source: { type: 'base64', media_type: i.mediaType, data: i.data },
+              })),
+              { type: 'text', text: opts.prompt },
+            ],
     },
     parent_tool_use_id: null,
     session_id: '',
+    // Claude Code keeps a caller's uuid as the message's own id in its session,
+    // which is what `resumeSessionAt` addresses.
+    ...(opts.promptId !== undefined ? { uuid: opts.promptId } : {}),
   } as SDKUserMessage;
   return (async function* () {
     yield turn;
@@ -2240,7 +2281,7 @@ async function returnFromPlanMode(
 // next turn re-opens fresh).
 interface PersistSession {
   query: Query;
-  push: (prompt: string) => void;
+  push: (prompt: string, uuid?: string) => void;
   end: () => void;
   cwd: string;
   idle?: ReturnType<typeof setTimeout> | undefined;
@@ -2254,12 +2295,13 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
   const inbox: SDKUserMessage[] = [];
   let notify: (() => void) | null = null;
   let ended = false;
-  const push = (prompt: string): void => {
+  const push = (prompt: string, uuid?: string): void => {
     inbox.push({
       type: 'user',
       message: { role: 'user', content: prompt },
       parent_tool_use_id: null,
       session_id: '',
+      ...(uuid !== undefined ? { uuid } : {}),
     } as SDKUserMessage);
     notify?.();
     notify = null;
@@ -2363,7 +2405,7 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
   const limitEvents = createLimitEventMemory();
   let lastStopReason: string | undefined;
   try {
-    s.push(opts.prompt);
+    s.push(opts.prompt, opts.promptId);
     for (;;) {
       const next = await s.query.next();
       if (next.done === true) {

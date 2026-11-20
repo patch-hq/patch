@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
-import { ChatLogStore } from '../src/chat-log-store.js';
+import { ChatLogStore, forSurfaces } from '../src/chat-log-store.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -627,6 +627,18 @@ describe('ChatLogStore: turn boundaries and provider ids (spec/01 § Chat record
     const reopened = new ChatLogStore({ dataDir: dir, logger });
     expect(reopened.nativeRef('c1', 0)).toEqual(ref);
     expect(reopened.read('c1', -1)[0]).toEqual(message('c1', 0));
+  });
+
+  test('tells surfaces an entry has a provider id with branchable, live and in history', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(withRef(0));
+    store.commit(message('c1', 1));
+    const [held, bare] = store.page('c1', { limit: 10 }).entries;
+    expect(held).toMatchObject({ seq: 0, branchable: true });
+    expect(held).not.toHaveProperty('nativeRef');
+    expect(bare).not.toHaveProperty('branchable');
+    expect(forSurfaces(withRef(2))).toEqual({ ...message('c1', 2), branchable: true });
+    expect(forSurfaces(message('c1', 3))).toEqual(message('c1', 3));
   });
 
   test('an entry it holds, sent again with its provider id, gains it without being new to surfaces', () => {

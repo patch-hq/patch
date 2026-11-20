@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatBranchesEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
-import { createClaudeSessionProbe } from '../src/history.js';
+import { createClaudeSessionProbe, encodeFolder } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { readBack } from './helpers/readBack.js';
@@ -309,20 +309,39 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     expect(onSide).not.toContain('second question');
   });
 
-  it('refuses a user message: it carries no provider id to fork at', async () => {
-    const { daemon, events, folder } = setup();
+  it("hangs off a user's own message, keeping it: the turn was sent under an id the provider keeps", async () => {
+    const { daemon, sdk, events, folder, home, projectsRoot } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
-    const asked = userMessages(replay(daemon, chatId))[0]!;
+    const log = readFileSync(join(home, 'chats', chatId, 'events.jsonl'), 'utf8')
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as Record<string, any>);
+    const asked = log.find(
+      (r) => r.rec?.event?.type === 'chat.message' && r.rec.event.role === 'user',
+    )!;
+    // The id the message was sent under is its provider id, in the session the
+    // turn ran in — which is also the id the provider wrote it under.
+    const meta = createMetaStore(home).read(chatId)!;
+    expect(asked.nativeRef).toEqual({
+      harness: 'claude',
+      sessionId: meta.claudeSessionId,
+      id: expect.any(String),
+    });
+    const sessionFile = readFileSync(
+      join(projectsRoot, encodeFolder(folder), `${meta.claudeSessionId}.jsonl`),
+      'utf8',
+    );
+    expect(sessionFile).toContain(`"uuid":"${asked.nativeRef.id}"`);
 
     events.length = 0;
     await daemon.sideChat({ chatId, seq: asked.seq, message: 'aside', localId: 'l2' });
-
-    const err = events.find((e) => e.type === 'chat.error') as
-      | { error: { code: string } }
-      | undefined;
-    expect(err?.error.code).toBe('fork_point_not_found');
-    expect(events.some((e) => e.type === 'chat.branches')).toBe(false);
+    expect(events.filter((e) => e.type === 'chat.error')).toEqual([]);
+    expect(sdk.lastOptions()?.fork).toEqual({
+      resumeAtUuid: asked.nativeRef.id,
+      fromSessionId: meta.claudeSessionId,
+    });
+    expect(lastBranches(events).branches).toHaveLength(2);
   });
 
   it('hangs off an ASSISTANT message too — asking about an answer is the common case', async () => {
@@ -440,7 +459,10 @@ describe('spec/04 § Branching — the fork point comes from the record', () => 
     events.length = 0;
     await daemon.forkChat({ chatId, seq: second.seq, message: 'second, again', localId: 'l3' });
     expect(events.filter((e) => e.type === 'chat.error')).toEqual([]);
-    expect(sdk.lastOptions()?.fork).toEqual({ resumeAtUuid: firstAnswer.nativeRef.id });
+    expect(sdk.lastOptions()?.fork).toEqual({
+      resumeAtUuid: firstAnswer.nativeRef.id,
+      fromSessionId: firstAnswer.nativeRef.sessionId,
+    });
   });
 
   it('a side thread forks at the nativeRef of the entry it hangs off', async () => {
@@ -451,7 +473,10 @@ describe('spec/04 § Branching — the fork point comes from the record', () => 
       (r) => r.rec?.event?.type === 'chat.message' && r.rec.event.role === 'assistant',
     )!;
     await daemon.sideChat({ chatId, seq: answer.seq, message: 'why?', localId: 'l2' });
-    expect(sdk.lastOptions()?.fork).toEqual({ resumeAtUuid: answer.nativeRef.id });
+    expect(sdk.lastOptions()?.fork).toEqual({
+      resumeAtUuid: answer.nativeRef.id,
+      fromSessionId: answer.nativeRef.sessionId,
+    });
   });
 
   it('refuses an edit whose earlier entries were recorded before provider ids were kept', async () => {

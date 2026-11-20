@@ -35,7 +35,8 @@ function seedChat(timeline: ChatEventEntry[]): void {
       lastUpdated: 0,
     },
   ]);
-  useChatStore.setState((s) => ({ timelines: { ...s.timelines, c1: timeline } }));
+  const marked = timeline.map((e) => ({ ...e, branchable: true }));
+  useChatStore.setState((s) => ({ timelines: { ...s.timelines, c1: marked } }));
 }
 
 function renderChat() {
