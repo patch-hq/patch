@@ -3339,7 +3339,7 @@ async function startHost(
         const MANAGER_THREAD: SpecialThreadId = 'thread_manager';
         const nextSeqs = event.nextSeqs ?? { [MANAGER_THREAD]: event.nextSeq };
         for (const [chatId, nextSeq] of Object.entries(nextSeqs)) {
-          if (chatId !== MANAGER_THREAD) daemon.noteCommitted(chatId, nextSeq - 1);
+          if (chatId !== MANAGER_THREAD) daemon.continueFrom(chatId, nextSeq);
         }
         daemon
           .handOverThread(MANAGER_THREAD, {
