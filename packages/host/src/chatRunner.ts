@@ -10415,6 +10415,10 @@ export class Daemon {
         },
         seq: OUT_OF_BAND_SEQ,
       });
+      this.recordRefusedTurn(chatId, {
+        code: ChatErrorCode.parse(providerDescriptor(harnessOfModel(state.model)).loginRequiredCode),
+        message: harnessTraitsForModel(state.model).signedOutMessage(this.opts.hostId, oauth.reason),
+      });
       this.chatState.setActivity(chatId, 'idle');
       this.emitState(chatId);
       return false;
@@ -11320,6 +11324,9 @@ export class Daemon {
               at: this.opts.now(),
               outOfCredit: true as const,
             };
+            // The turn's end carries the same words: the server reads the
+            // failure from it (spec/12 § Chat status).
+            turnError = { code: detail.code, message: reportedMsg };
             this.chatState.setLastError(chatId, detail);
             this.chatState.setActivity(chatId, 'errored');
             // A wait that is not coming back soon is an error to read, not a
@@ -14962,6 +14969,7 @@ export class Daemon {
    * the next user action can explicitly start fresh.
    */
   private failPreflight(chatId: string, code: ChatErrorCode, message: string): void {
+    this.recordRefusedTurn(chatId, { code, message });
     const seq = this.bumpSeq(chatId);
     const errorEvent: ChatErrorEvent = {
       type: 'chat.error',
@@ -15198,6 +15206,39 @@ export class Daemon {
    * turn. Throws `HistoryWriteError`; a running turn records the failure so it
    * ends `history_write_failed` rather than carrying on.
    */
+  /**
+   * A turn refused before it could start (signed out, folder gone, session
+   * gone) is still an outcome. It goes in the history log as a turn that
+   * started and ended failed with the reason, so the server, which decides
+   * the chat's status from turn facts alone, can say why (spec/12 § Chat
+   * status). A turn already open records its own end instead.
+   */
+  private recordRefusedTurn(
+    chatId: string,
+    error: { code: ChatErrorCode; message: string },
+  ): void {
+    const state = this.chatState.get(chatId);
+    if (!state || this.chatLog.currentTurnId(chatId) !== undefined) return;
+    const turnId = randomUUID();
+    try {
+      this.chatLog.beginTurn(chatId, turnId);
+      this.logRecord(chatId, {
+        k: 'turn.start',
+        harness: this.harnessOf(chatId),
+        model: state.model ?? null,
+        origin: state.turnOrigin ?? 'user',
+      });
+      this.logRecord(chatId, { k: 'turn.end', outcome: 'failed', error }, { sync: true });
+    } catch (err) {
+      this.opts.logger.error(
+        { chatId, err: (err as Error).message },
+        'history log: could not record a refused turn',
+      );
+    } finally {
+      this.chatLog.endTurn(chatId);
+    }
+  }
+
   private logRecord(
     chatId: string,
     body: Parameters<ChatLog['append']>[1],
@@ -16196,6 +16237,22 @@ export class Daemon {
     this.emit(ev);
   }
 
+  /**
+   * Turns this host owes the chat beyond the one its log has open, while it
+   * is still working (a drain holds `running` until its queue is empty): those
+   * queued behind it, and one it has begun setting up but not yet started.
+   * The server counts them as work still to do, so a drain does not read idle
+   * between its turns.
+   */
+  private turnsOwed(chatId: string): number {
+    // A chat that settled has finished its piece of work: a turn queued after
+    // that (a todo auto-advance, a self-wake) is new work, owed once it starts.
+    if (this.chatState.get(chatId)?.activity !== 'running') return 0;
+    const queued = this.turnQueues.get(chatId)?.length ?? 0;
+    const starting = this.chatLog.currentTurnId(chatId) === undefined ? 1 : 0;
+    return queued + starting;
+  }
+
   /** One-line snippet of the chat's latest user/assistant message, or null. */
   private lastMessagePreview(chatId: string): string | null {
     const head = this.chatLog.lastMessage(chatId);
@@ -16236,8 +16293,8 @@ export class Daemon {
       // status, from the turn and question facts this host reports (spec/12 §
       // Chat status).
       // A fact the server counts as owed work: turns this host holds queued
-      // to run once the current one ends.
-      queuedTurns: this.turnQueues.get(chatId)?.length ?? 0,
+      // to run once the current one ends, and one it is already setting up.
+      queuedTurns: this.turnsOwed(chatId),
       // spec/12 § Continue — a fact for the server: the last turn's process died
       // with the machine and nothing has continued it yet.
       ...(this.interruptedChats.has(chatId) ? { interrupted: true } : {}),

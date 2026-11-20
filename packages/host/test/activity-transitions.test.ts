@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { ChatActivity, WireEvent } from '@patch/wire';
+import { asServerSees } from './serverView.js';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
@@ -34,10 +35,9 @@ function setup(sdk = createMockSdkBackend()) {
   return { daemon, sdk, events, folder };
 }
 
+/** The activity the server reads off each of the host's frames (the host sends none). */
 function activitySequence(events: WireEvent[]): ChatActivity[] {
-  return events
-    .filter((e) => e.type === 'chat.state')
-    .map((e) => (e as unknown as { activity: ChatActivity }).activity);
+  return asServerSees(events).map((e) => (e as unknown as { activity: ChatActivity }).activity);
 }
 
 describe('C1 activity-transition matrix', () => {

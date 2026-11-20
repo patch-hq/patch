@@ -19,6 +19,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon, APPROVAL_ANSWER_TIMEOUT_MS } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -70,7 +71,7 @@ describe('a hidden chat un-hides when it blocks on the user', () => {
     // Persisted, not only in memory — a host restart must not re-bury it.
     expect(metaStore.read(chatId)?.hidden).toBe(false);
     // And the surfaces were told, so the row moves without a reload.
-    const last = events.filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
+    const last = asServerSees(events).filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
     expect((last as { hidden?: boolean }).hidden).toBe(false);
   });
 

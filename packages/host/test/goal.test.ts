@@ -14,6 +14,7 @@ import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { createHistoryReader } from '../src/history.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -48,7 +49,7 @@ describe('Host setGoal (patch/todo.md — /goal)', () => {
 
     await daemon.setGoal(chatId, 'Ship the release by Friday');
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv).toBeDefined();
     expect(stateEv && 'goal' in stateEv && stateEv.goal).toBe('Ship the release by Friday');
     expect(metaStore.read(chatId)?.goal).toBe('Ship the release by Friday');
@@ -78,7 +79,7 @@ describe('Host setGoal (patch/todo.md — /goal)', () => {
 
     await daemon.setGoal(chatId, null);
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'goal' in stateEv && stateEv.goal).toBe(null);
     expect(metaStore.read(chatId)?.goal ?? null).toBe(null);
   });
@@ -103,7 +104,7 @@ describe('Host setGoal (patch/todo.md — /goal)', () => {
       }),
     });
     await host2.resumeChat(chatId);
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'goal' in stateEv && stateEv.goal).toBe('persisted goal');
   });
 

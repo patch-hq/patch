@@ -15,6 +15,7 @@ import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { createHistoryReader } from '../src/history.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -49,7 +50,7 @@ describe('Host setReminder (patch/todo.md — Reminders)', () => {
 
     await daemon.setReminder(chatId, 'Do not touch the prod database');
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv).toBeDefined();
     expect(stateEv && 'reminder' in stateEv && stateEv.reminder).toBe(
       'Do not touch the prod database',
@@ -65,7 +66,7 @@ describe('Host setReminder (patch/todo.md — Reminders)', () => {
 
     await daemon.setReminder(chatId, null);
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'reminder' in stateEv && stateEv.reminder).toBe(null);
     expect(metaStore.read(chatId)?.reminder ?? null).toBe(null);
   });
@@ -89,7 +90,7 @@ describe('Host setReminder (patch/todo.md — Reminders)', () => {
       }),
     });
     await host2.resumeChat(chatId);
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'reminder' in stateEv && stateEv.reminder).toBe('persisted reminder');
   });
 

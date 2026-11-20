@@ -34,7 +34,7 @@ const CHATS: ManagerChatEntry[] = [
     name: 'Garden planning',
     folder: '/p/garden',
     status: 'active',
-    activity: 'running',
+    chatStatus: 'running',
     lastUpdated: NOW - 5 * 60_000,
   },
   {
@@ -42,7 +42,7 @@ const CHATS: ManagerChatEntry[] = [
     name: 'Bus watcher',
     folder: '/p/bus',
     status: 'active',
-    activity: 'idle',
+    chatStatus: 'idle',
     lastUpdated: NOW - 2 * 3_600_000,
   },
   {
@@ -50,7 +50,7 @@ const CHATS: ManagerChatEntry[] = [
     name: 'Bus timetable import',
     folder: '/p/bus-import',
     status: 'active',
-    activity: 'idle',
+    chatStatus: 'idle',
     lastUpdated: NOW - 60_000,
   },
   { chatId: 'c-old', name: 'Old thing', folder: '/p/old', status: 'archived' },
@@ -59,7 +59,7 @@ const CHATS: ManagerChatEntry[] = [
     name: 'Laptop build',
     folder: '/p/build',
     status: 'active',
-    activity: 'idle',
+    chatStatus: 'idle',
     lastUpdated: NOW - 60_000,
   },
 ];

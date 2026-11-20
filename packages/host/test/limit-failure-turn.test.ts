@@ -233,10 +233,16 @@ describe('a limit failure that WAS parked for auto-resume', () => {
     await daemon.sendInput({ chatId, message: 'go' });
     const last = statesIn(events).at(-1);
     expect(last?.rateLimitResumingAt).toBe(RESETS_AT);
-    expect(last?.activity).toBe('errored');
     expect(last?.turnRetrying).not.toBe(true);
-    expect(last?.lastError?.message).toMatch(/usage limit reached/i);
-    expect(last?.lastError?.message).not.toMatch(/spend limit/i);
+    // The host states the turn's end and the provider's words; the server
+    // decides what that makes the chat (spec/12 § Limits and sign-in).
+    expect(last?.activity).toBeUndefined();
+    const end = events.findLast(
+      (e): e is Extract<WireEvent, { type: 'chat.turn_ended' }> => e.type === 'chat.turn_ended',
+    );
+    expect(end?.outcome).toBe('failed');
+    expect(end?.error?.message).toMatch(/usage limit reached/i);
+    expect(end?.error?.message).not.toMatch(/spend limit/i);
     // The bubble already says it; a second chat.error row would be the same news twice.
     expect(errorsIn(events)).toHaveLength(0);
     daemon.shutdown();

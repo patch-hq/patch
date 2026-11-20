@@ -13,6 +13,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const tick = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -246,7 +247,7 @@ describe('todo auto-advance on the host (patch/todo.md § todo list)', () => {
     await daemon.sendInput({ chatId, message: 'plan it', localId: 'u1' });
     await tick(120);
 
-    const withTodos = events.filter(
+    const withTodos = asServerSees(events).filter(
       (e) => e.type === 'chat.state' && Array.isArray((e as { todos?: unknown }).todos),
     ) as Array<{ todos: Array<{ text: string; status: string }> }>;
     expect(withTodos.length).toBeGreaterThan(0);

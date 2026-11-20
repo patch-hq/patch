@@ -13,6 +13,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon, PERMISSION_STOPPED_MESSAGE, type HostOptions } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -302,17 +303,19 @@ describe('message queueing (spec/04)', () => {
     await daemon.stopChat(chatId);
     await waitFor(() => daemon.chatState.get(chatId)?.activity === 'idle');
 
-    const settled = events
-      .slice(mark)
+    const settled = asServerSees(events, mark)
       .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle');
     expect(settled).toHaveLength(1);
     expect((settled[0] as { turnStopped?: boolean }).turnStopped).toBe(true);
 
-    const order = events
-      .slice(mark)
-      .filter((e) => e.type === 'chat.state' || e.type === 'chat.stopped')
-      .map((e) => e.type);
-    expect(order).toEqual(['chat.state', 'chat.stopped']);
+    // The frame that settles the turn reaches the server before the stop is announced.
+    const stoppedAt = events.findIndex((e, i) => i >= mark && e.type === 'chat.stopped');
+    expect(stoppedAt).toBeGreaterThan(mark);
+    expect(
+      asServerSees(events.slice(0, stoppedAt), mark).some(
+        (e) => (e as { activity: string }).activity === 'idle',
+      ),
+    ).toBe(true);
   });
 
   // The flag belongs to the stopped TURN. A promote stops one turn precisely so
@@ -336,8 +339,7 @@ describe('message queueing (spec/04)', () => {
     g.releaseNext(); // the promoted turn runs to its real end
     await waitFor(() => daemon.chatState.get(chatId)?.activity === 'idle');
 
-    const settled = events
-      .slice(mark)
+    const settled = asServerSees(events, mark)
       .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle');
     expect(settled).toHaveLength(1);
     expect((settled[0] as { turnStopped?: boolean }).turnStopped).toBe(false);
@@ -385,8 +387,7 @@ describe('message queueing (spec/04)', () => {
     const mark = events.length;
     await daemon.stopChat(chatId);
 
-    const idle = events
-      .slice(mark)
+    const idle = asServerSees(events, mark)
       .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle');
     expect(idle).toHaveLength(1);
     expect(events.slice(mark).some((e) => e.type === 'chat.stopped')).toBe(false);
@@ -506,8 +507,7 @@ describe('message queueing (spec/04)', () => {
     g.releaseNext(); // turn 1 settles — turn 2 is still queued
     await tick();
 
-    const activities = events
-      .slice(mark)
+    const activities = asServerSees(events, mark)
       .filter((e) => e.type === 'chat.state')
       .map((e) => (e as { activity: string }).activity);
     expect(activities).not.toContain('idle');
@@ -519,8 +519,7 @@ describe('message queueing (spec/04)', () => {
     await tick();
     expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
     expect(
-      events
-        .slice(mark)
+      asServerSees(events, mark)
         .some((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle'),
     ).toBe(true);
   });
@@ -615,8 +614,7 @@ describe('message queueing (spec/04)', () => {
     // The promoted turn really did start, so this is not "nothing happened".
     await waitFor(() => g.prompts.length === 2);
 
-    const activities = events
-      .slice(mark)
+    const activities = asServerSees(events, mark)
       .filter((e) => e.type === 'chat.state')
       .map((e) => (e as { activity: string }).activity);
     expect(activities).not.toContain('idle');
@@ -633,8 +631,7 @@ describe('message queueing (spec/04)', () => {
 
     // Exactly ONE settling frame for the whole drain, at its true end.
     expect(
-      events
-        .slice(mark)
+      asServerSees(events, mark)
         .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle'),
     ).toHaveLength(1);
   });
@@ -675,8 +672,7 @@ describe('message queueing (spec/04)', () => {
     // Turn 2 never reached the SDK; turn 3 did, and is what the chat is running.
     await waitFor(() => g.prompts.length === 2);
 
-    const activities = events
-      .slice(mark)
+    const activities = asServerSees(events, mark)
       .filter((e) => e.type === 'chat.state')
       .map((e) => (e as { activity: string }).activity);
     expect(activities).not.toContain('idle');
@@ -688,8 +684,7 @@ describe('message queueing (spec/04)', () => {
     await waitFor(() => daemon.chatState.get(chatId)?.activity === 'idle');
 
     expect(
-      events
-        .slice(mark)
+      asServerSees(events, mark)
         .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle'),
     ).toHaveLength(1);
   });
@@ -710,7 +705,7 @@ describe('message queueing (spec/04)', () => {
 
     expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
     expect(
-      events.some(
+      asServerSees(events).some(
         (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
       ),
     ).toBe(true);

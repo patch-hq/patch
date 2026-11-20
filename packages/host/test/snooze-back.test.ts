@@ -11,6 +11,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const T0 = 1_700_000_000_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -233,7 +234,7 @@ describe('clearing the Back state', () => {
     expect(last(daemon, other).backCleared).toBe(false);
     expect(metaStore.read(b)?.snoozeRecords?.[0]?.backCleared).toBe(true);
     // Every chat of the set is broadcast so every surface agrees.
-    const broadcast = events
+    const broadcast = asServerSees(events)
       .filter((e) => e.type === 'chat.state')
       .map((e) => (e as { chatId: string }).chatId);
     expect(broadcast).toEqual(expect.arrayContaining([a, b]));

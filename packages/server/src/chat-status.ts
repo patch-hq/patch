@@ -28,7 +28,10 @@ const SESSION_GONE_CODES = new Set(['claude_session_missing', 'claude_session_in
 export interface ChatStatusFacts {
   /** Turns started and not yet ended, by `turnId` (a side branch runs its own). */
   openTurns: string[];
-  /** Requests raised and not yet resolved; `question` marks the question tool. */
+  /**
+   * Requests raised and not yet resolved, kept until the host resolves each;
+   * `question` marks the question tool.
+   */
   openRequests: { id: string; question: boolean }[];
   /** How the latest turn ended. Cleared when the next one starts. */
   lastEnd: { outcome: TurnOutcome; error?: { code: string; message: string } } | null;
@@ -69,9 +72,9 @@ export function emptyFacts(): ChatStatusFacts {
   };
 }
 
-/** True when the chat has a turn in flight or a question waiting on the user. */
+/** True when the chat has a turn in flight or a request waiting on the user. */
 export function isMidTurn(facts: ChatStatusFacts): boolean {
-  return facts.openTurns.length > 0 || facts.openRequests.some((r) => r.question);
+  return facts.openTurns.length > 0 || facts.openRequests.length > 0;
 }
 
 /**
@@ -83,11 +86,10 @@ export function deriveStatus(facts: ChatStatusFacts, owed = false): StatusTarget
   if (facts.away !== null) {
     return { state: facts.away === 'restarting' ? 'host_restarting' : 'host_offline' };
   }
-  const turnOpen = facts.openTurns.length > 0;
-  // An approval is open only while its turn is; a question until it is answered.
-  const asking = facts.openRequests.some((r) => r.question || turnOpen);
-  if (asking) return { state: 'waiting_for_user' };
-  if (turnOpen) return { state: 'running' };
+  // A request is open until its host says it was answered, cancelled or
+  // expired; the host resolves every one, a stopped turn's included.
+  if (facts.openRequests.length > 0) return { state: 'waiting_for_user' };
+  if (facts.openTurns.length > 0) return { state: 'running' };
   if (facts.heldExpired !== null) {
     return { state: 'failed', reason: 'held_message_expired', message: facts.heldExpired };
   }
@@ -171,13 +173,9 @@ export function factsOnTurnEnded(
   outcome: TurnOutcome,
   error: { code: string; message: string } | undefined,
 ): ChatStatusFacts {
-  const openTurns = prev.openTurns.filter((t) => t !== turnId);
   return {
     ...prev,
-    openTurns,
-    // An approval cannot outlive the last open turn; a question can.
-    openRequests:
-      openTurns.length > 0 ? prev.openRequests : prev.openRequests.filter((r) => r.question),
+    openTurns: prev.openTurns.filter((t) => t !== turnId),
     lastEnd: { outcome, ...(error ? { error } : {}) },
     away: null,
   };
@@ -270,6 +268,7 @@ export function legacyActivity(facts: ChatStatusFacts, owed = false): ChatActivi
   if (facts.away === 'offline') return 'errored';
   const turnOpen = facts.openTurns.length > 0;
   if (turnOpen) return facts.openRequests.length > 0 ? 'awaiting-permission' : 'running';
+  if (facts.openRequests.some((r) => !r.question)) return 'awaiting-permission';
   if (facts.held || facts.heldExpired !== null)
     return facts.heldExpired !== null ? 'errored' : 'idle';
   if (owed || facts.hostQueued > 0) return 'running';

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent, TurnOrigin } from '@patch/wire';
+import { asServerSees } from './serverView.js';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
@@ -104,7 +105,7 @@ function setup(backend: SdkBackend, opts: { autoAdvanceTodos?: boolean } = {}) {
 function settledOrigins(events: WireEvent[], chatId: string): Array<TurnOrigin | undefined> {
   const origins: Array<TurnOrigin | undefined> = [];
   let previous: string | undefined;
-  for (const e of events) {
+  for (const e of asServerSees(events)) {
     if (e.type !== 'chat.state' || e.chatId !== chatId) continue;
     const activity = (e as { activity: string }).activity;
     if (activity === 'idle' && previous === 'running') {
@@ -473,7 +474,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     // A turn cut off is not re-run behind anyone's back (spec/12 § Continue):
     // nothing settles, and the chat waits as Interrupted for Continue.
     expect(settledOrigins(events, chatId)).toEqual([]);
-    const states = events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    const states = asServerSees(events).filter((e) => e.type === 'chat.state' && e.chatId === chatId);
     expect(states.at(-1)).toMatchObject({ interrupted: true });
   });
 });

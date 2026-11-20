@@ -16,6 +16,7 @@ import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { createHistoryReader } from '../src/history.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -59,7 +60,7 @@ describe('Host setName (spec/04 § Name — rename)', () => {
 
     await daemon.setName(chatId, 'Bed Planner Rework');
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv).toBeDefined();
     expect(stateEv && 'name' in stateEv && stateEv.name).toBe('Bed Planner Rework');
     expect(metaStore.read(chatId)?.name).toBe('Bed Planner Rework');
@@ -73,7 +74,7 @@ describe('Host setName (spec/04 § Name — rename)', () => {
 
     await daemon.setName(chatId, null);
 
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'name' in stateEv && stateEv.name).toBe(null);
     expect(metaStore.read(chatId)?.name ?? null).toBe(null);
   });
@@ -108,7 +109,7 @@ describe('Host setName (spec/04 § Name — rename)', () => {
       }),
     });
     await host2.resumeChat(chatId);
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'name' in stateEv && stateEv.name).toBe('Persisted Name');
   });
 

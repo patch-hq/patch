@@ -21,6 +21,7 @@ import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/s
 import { createHistoryReader, encodeFolder, type HistoryReader } from '../src/history.js';
 import { chatTranscriptPath } from '../src/claudeSessionStore.js';
 import { limitError } from './limitErrors.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -297,7 +298,7 @@ describe('Host ChatRunner', () => {
       daemon as unknown as { browserHandoff_: { opts: { browser: unknown } } }
     ).browserHandoff_.opts.browser = (daemon as unknown as { browser: unknown }).browser;
     const activities = () =>
-      events
+      asServerSees(events)
         .filter((e) => e.type === 'chat.state' && (e as { chatId: string }).chatId === chatId)
         .map((e) => (e as { activity: string }).activity);
 
@@ -338,9 +339,9 @@ describe('Host ChatRunner', () => {
     expect(perm).toMatchObject({ requestId: 'perm-1', request: { tool: 'Edit' } });
     // Edit tool → host attaches a proposed unified diff.
     expect(perm?.request.proposedDiff).toContain('+y');
-    // The chat transitioned through awaiting-permission (an emitted chat.state
-    // carries that activity) when the permission request arrived mid-stream.
-    const awaiting = events.some(
+    // The chat transitioned through awaiting-permission (as the server reads the
+    // host's frames) when the permission request arrived mid-stream.
+    const awaiting = asServerSees(events).some(
       (e) =>
         e.type === 'chat.state' &&
         (e as { activity?: string }).activity === 'awaiting-permission' &&
@@ -1348,7 +1349,9 @@ describe('Host ChatRunner', () => {
       (e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state',
     );
     expect(state).toBeDefined();
-    expect(state?.activity).toBe('idle');
+    // The host states facts, never an activity: the server decides the status.
+    expect(state?.activity).toBeUndefined();
+    expect(state?.queuedTurns).toBe(0);
   });
 
   describe('replayChat: a persisted turn is never emitted twice (patch/todo.md — "messages are getting repeated in chat history")', () => {
@@ -1527,7 +1530,7 @@ describe('Host ChatRunner', () => {
       expect(daemon.chatState.get(chatId)?.name).toBe('Garden Plant Identification');
       expect(metaStore.read(chatId)?.name).toBe('Garden Plant Identification');
       // A chat.state event carried the new name to surfaces.
-      const named = events.filter(
+      const named = asServerSees(events).filter(
         (e) => e.type === 'chat.state' && e.name === 'Garden Plant Identification',
       );
       expect(named.length).toBeGreaterThan(0);
@@ -1851,7 +1854,7 @@ describe('Host ChatRunner', () => {
       expect(daemon.chatState.get(chatId)?.statusSummary).toBeNull();
       expect(daemon.chatState.get(chatId)?.statusKind).toBeNull();
       // Surfaces were told: a chat.state carrying the cleared status was emitted.
-      const cleared = events.filter(
+      const cleared = asServerSees(events).filter(
         (e) => e.type === 'chat.state' && e.statusSummary === null && e.statusKind === null,
       );
       expect(cleared.length).toBeGreaterThan(0);
@@ -1947,7 +1950,7 @@ describe('Host ChatRunner', () => {
 
     /** The `turnSummary` on the frame that settled the chat to idle. */
     function settlingSummary(events: WireEvent[]): string | null | undefined {
-      const idle = events.filter((e) => e.type === 'chat.state' && e.activity === 'idle');
+      const idle = asServerSees(events).filter((e) => e.type === 'chat.state' && e.activity === 'idle');
       const last = idle[idle.length - 1];
       return last?.type === 'chat.state' ? last.turnSummary : undefined;
     }
@@ -2046,9 +2049,9 @@ describe('Host ChatRunner', () => {
 
       // Surfaces were told about the clear, and no frame emitted while the new
       // turn ran was still quoting the old one.
-      const cleared = events.filter((e) => e.type === 'chat.state' && e.turnSummary === null);
+      const cleared = asServerSees(events).filter((e) => e.type === 'chat.state' && e.turnSummary === null);
       expect(cleared.length).toBeGreaterThan(0);
-      const stale = events.filter(
+      const stale = asServerSees(events).filter(
         (e) => e.type === 'chat.state' && e.turnSummary === 'Planted the top bed.',
       );
       expect(stale).toEqual([]);
@@ -4652,7 +4655,7 @@ describe('Host ChatRunner', () => {
       const state = daemon.chatState.get(chatId);
       expect(state?.activity).toBe('errored');
       // No rateLimitResumingAt emitted on chat.state (auto-resume was never armed).
-      const stateEvents = events.filter(
+      const stateEvents = asServerSees(events).filter(
         (e) => e.type === 'chat.state' && (e as { chatId: string }).chatId === chatId,
       );
       const lastState = stateEvents[stateEvents.length - 1] as

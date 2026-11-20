@@ -13,6 +13,7 @@ import * as chatRunnerModule from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { createHistoryReader, encodeFolder } from '../src/history.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -93,7 +94,7 @@ describe('Host lifecycle (group 7)', () => {
     const chatId = await daemon.spawnChat({ folder });
     events.length = 0;
     await daemon.setPinned(chatId, true);
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv).toBeDefined();
     expect(stateEv && 'pinned' in stateEv && stateEv.pinned).toBe(true);
     // group 8 task 4: chat.state must carry pinnedAt for sidebar ordering.
@@ -107,7 +108,7 @@ describe('Host lifecycle (group 7)', () => {
     const chatId = await daemon.spawnChat({ folder });
     events.length = 0;
     await daemon.setArchived(chatId, true);
-    const stateEv = events.find((e) => e.type === 'chat.state');
+    const stateEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(stateEv && 'status' in stateEv && stateEv.status).toBe('archived');
     expect(metaStore.read(chatId)?.status).toBe('archived');
   });
@@ -125,7 +126,7 @@ describe('Host lifecycle (group 7)', () => {
     const chatId = await daemon.spawnChat({ folder });
     events.length = 0;
     await daemon.setDeleted(chatId, true);
-    const delEv = events.find((e) => e.type === 'chat.state');
+    const delEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(delEv && 'status' in delEv && delEv.status).toBe('deleted');
     expect(metaStore.read(chatId)?.status).toBe('deleted');
     // Excluded from the active list and the archived-only list...
@@ -141,7 +142,7 @@ describe('Host lifecycle (group 7)', () => {
     // Restore brings it back to active.
     events.length = 0;
     await daemon.setDeleted(chatId, false);
-    const restoreEv = events.find((e) => e.type === 'chat.state');
+    const restoreEv = asServerSees(events).find((e) => e.type === 'chat.state');
     expect(restoreEv && 'status' in restoreEv && restoreEv.status).toBe('active');
     expect(metaStore.read(chatId)?.status).toBe('active');
     expect(daemon.listWithFilter().some((c) => c.chatId === chatId)).toBe(true);
@@ -201,7 +202,7 @@ describe('Host lifecycle (group 7)', () => {
       false,
     );
     // A chat.state was emitted flipping it to active.
-    const activeStateEvs = events.filter(
+    const activeStateEvs = asServerSees(events).filter(
       (e) => e.type === 'chat.state' && 'status' in e && e.status === 'active',
     );
     expect(activeStateEvs.length).toBeGreaterThan(0);
