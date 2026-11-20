@@ -96,6 +96,13 @@ function makeHost(overrides: Partial<ManagerVoiceHostDeps> = {}) {
     abandonReply: vi.fn(),
     sendRemote: vi.fn(async () => undefined),
     addTask: vi.fn(async ({ content }) => `Added "${content}".`),
+    listTasks: vi.fn(async () => [
+      { id: 't1', content: 'salt' },
+      { id: 't2', content: 'olive oil' },
+      { id: 't3', content: 'sea salt flakes' },
+    ]),
+    closeTask: vi.fn(async () => undefined),
+    deleteTask: vi.fn(async () => undefined),
     calendar: vi.fn(async () => '[{"title":"Dentist"}]'),
     askAgent: vi.fn(async () => undefined),
     recordNote: (line) => notes.push(line),
@@ -309,7 +316,11 @@ describe('quick tools (a Manager call acts directly)', () => {
   test('add_task files the task with its due date and records it', async () => {
     const { deps, tools, notes } = makeHost();
     const out = await tools.quick('add_task', { content: 'take the bins out', due: 'tomorrow' });
-    expect(deps.addTask).toHaveBeenCalledWith({ content: 'take the bins out', due: 'tomorrow' });
+    expect(deps.addTask).toHaveBeenCalledWith({
+      content: 'take the bins out',
+      due: 'tomorrow',
+      project: '',
+    });
     expect(out).toContain('take the bins out');
     expect(notes).toContain('task added: take the bins out');
   });
@@ -320,6 +331,67 @@ describe('quick tools (a Manager call acts directly)', () => {
       ManagerChatLookupError,
     );
     expect(deps.addTask).not.toHaveBeenCalled();
+  });
+
+  test('add_task passes the list it belongs on', async () => {
+    const { deps, tools } = makeHost();
+    await tools.quick('add_task', { content: 'salt', project: 'Groceries' });
+    expect(deps.addTask).toHaveBeenCalledWith({ content: 'salt', due: '', project: 'Groceries' });
+  });
+
+  test('complete_task ticks off the one task that matches, by id', async () => {
+    const { deps, tools, notes } = makeHost();
+    const out = await tools.quick('complete_task', { task: 'olive', project: 'Groceries' });
+    expect(deps.listTasks).toHaveBeenCalledWith('Groceries');
+    expect(deps.closeTask).toHaveBeenCalledWith('t2');
+    expect(out).toContain('olive oil');
+    expect(notes).toContain('task ticked off: olive oil');
+  });
+
+  test('an exact name wins over a longer one that also matches', async () => {
+    const { deps, tools } = makeHost();
+    await tools.quick('complete_task', { task: 'Salt' });
+    expect(deps.closeTask).toHaveBeenCalledWith('t1');
+  });
+
+  test('a task name that matches several asks which, and changes nothing', async () => {
+    const { deps, tools } = makeHost({
+      listTasks: async () => [
+        { id: 'a', content: 'sea salt' },
+        { id: 'b', content: 'salt and vinegar crisps' },
+      ],
+    });
+    await expect(tools.quick('remove_task', { task: 'salt' })).rejects.toThrow(/Several tasks/);
+    expect(deps.deleteTask).not.toHaveBeenCalled();
+    expect(deps.closeTask).not.toHaveBeenCalled();
+  });
+
+  test('a task name that matches nothing says so', async () => {
+    const { deps, tools } = makeHost();
+    await expect(tools.quick('complete_task', { task: 'caviar' })).rejects.toBeInstanceOf(
+      ManagerChatLookupError,
+    );
+    expect(deps.closeTask).not.toHaveBeenCalled();
+  });
+
+  test('remove_task deletes the matching task by id and records it', async () => {
+    const { deps, tools, notes } = makeHost();
+    const out = await tools.quick('remove_task', { task: 'olive oil' });
+    expect(deps.deleteTask).toHaveBeenCalledWith('t2');
+    expect(out).toContain('Removed');
+    expect(notes).toContain('task removed: olive oil');
+  });
+
+  test('read_project reads the open tasks, and says so when there are none', async () => {
+    const { tools } = makeHost();
+    expect(await tools.quick('read_project', { project: 'Groceries' })).toBe(
+      '"Groceries" has 3 open: salt; olive oil; sea salt flakes.',
+    );
+    const empty = makeHost({ listTasks: async () => [] });
+    expect(await empty.tools.quick('read_project', { project: 'Groceries' })).toContain('no open');
+    await expect(tools.quick('read_project', { project: ' ' })).rejects.toBeInstanceOf(
+      ManagerChatLookupError,
+    );
   });
 
   test('a failing task add is an error, not a silent success', async () => {

@@ -4128,10 +4128,41 @@ async function startHost(
         message,
         revealTarget: true,
       }),
-    addTask: async ({ content, due }) =>
+    addTask: async ({ content, due, project }) =>
       (
-        await runTool('td', ['task', 'add', content, ...(due ? ['--due', due] : [])], 'to-do list')
-      ).trim() || `Added "${content}".`,
+        await runTool(
+          'td',
+          [
+            'task',
+            'add',
+            content,
+            ...(due ? ['--due', due] : []),
+            ...(project ? ['--project', project] : []),
+          ],
+          'to-do list',
+        )
+      ).trim() || `Added "${content}"${project ? ` to ${project}` : ''}.`,
+    listTasks: async (project) => {
+      const out = await runTool(
+        'td',
+        ['task', 'list', '--all', '--json', ...(project ? ['--project', project] : [])],
+        'to-do list',
+      );
+      const parsed = JSON.parse(out) as {
+        results?: Array<{ id: string; content: string }>;
+        error?: { message?: string };
+      };
+      if (!parsed.results) {
+        throw new Error(`The to-do list did not answer: ${parsed.error?.message ?? out.trim()}`);
+      }
+      return parsed.results.map((t) => ({ id: t.id, content: t.content }));
+    },
+    closeTask: async (id) => {
+      await runTool('td', ['task', 'complete', `id:${id}`], 'to-do list');
+    },
+    deleteTask: async (id) => {
+      await runTool('td', ['task', 'delete', `id:${id}`, '--yes'], 'to-do list');
+    },
     calendar: (args) => {
       const script = process.env['PATCH_CALENDAR_SCRIPT'];
       if (!script) {
