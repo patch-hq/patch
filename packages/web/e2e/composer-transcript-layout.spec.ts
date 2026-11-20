@@ -173,7 +173,7 @@ test.describe('composer action buttons — Stop or Send, never both', () => {
 
   test('Stop appears right after Send, before the host confirms running', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
-    await setActivity(page, 'idle');
+    await setStatus(page, 'idle');
     await expect(page.getByTestId('stop-btn')).toHaveCount(0);
     await page.getByTestId('composer-input').fill('hello');
     await page.getByTestId('composer-input').press('Enter');

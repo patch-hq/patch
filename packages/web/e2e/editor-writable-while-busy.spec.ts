@@ -4,7 +4,7 @@ import type { WireEvent } from '@patch/wire';
 // Real-browser proof that the in-app editor is writable while the chat's agent
 // is mid-turn (spec/14 § Editor — "Editable whatever the chat is doing").
 //
-// `chat_bus` is seeded with `activity: 'running'` (dev-harness.tsx), which is
+// `chat_bus` is seeded with `chatStatus: { state: 'running', since: 0 }` (dev-harness.tsx), which is
 // exactly the state that used to mount Monaco read-only and disable Save. The
 // unit tests assert this against a mocked `@monaco-editor/react`; only a real
 // browser proves the REAL Monaco actually accepts typing in that state.

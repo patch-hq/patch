@@ -30,7 +30,7 @@ test.describe('needs-attention queue order', () => {
               permissionMode: 'auto',
               name: n,
               folder: '/home/tom/projects/portfolio',
-              activity: 'idle',
+              chatStatus: { state: 'idle', since: 0 },
               status: 'active',
               pinned: false,
               pinnedAt: null,

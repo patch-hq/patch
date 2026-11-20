@@ -47,7 +47,7 @@ async function park(
         type: 'chat.state',
         chatId: 'chat_md',
         hostId: row.hostId,
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         folder: row.folder,
         lastUpdated: Date.now(),
         permissionMode: 'bypassPermissions',

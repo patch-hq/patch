@@ -31,7 +31,7 @@ async function addChat(
         name: c.chatId,
         pinned: false,
         pinnedAt: null,
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
       },
     ]);

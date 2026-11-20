@@ -31,13 +31,13 @@ function applyEvent(page: import('@playwright/test').Page, event: WireEvent) {
   );
 }
 
-function chatState(activity: string): WireEvent {
+function chatState(state: string): WireEvent {
   return {
     type: 'chat.state',
     chatId: CHAT_ID,
     hostId: 'd1',
     permissionMode: 'auto',
-    activity,
+    chatStatus: { state, since: 0 },
     lastUpdated: Date.now(),
   } as unknown as WireEvent;
 }
@@ -60,7 +60,7 @@ async function oneRecovery(page: import('@playwright/test').Page) {
   // The error lands while the chat is NOT running: one that arrives after a
   // fresh `running` is the host and server streams crossing, and the store
   // drops it on purpose (chatStore `chat.error`).
-  await applyEvent(page, chatState('errored'));
+  await applyEvent(page, chatState('failed'));
   await applyEvent(page, {
     type: 'chat.error',
     chatId: CHAT_ID,

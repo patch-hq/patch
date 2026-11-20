@@ -44,7 +44,7 @@ test('a reconnecting host re-announcing an archived chat never draws it in the l
           chatId: 'reannounce-arch',
           hostId: 'd1',
           folder: '/tmp/reannounce',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           permissionMode: 'auto',
           status: 'archived',
           lastUpdated: Date.now(),

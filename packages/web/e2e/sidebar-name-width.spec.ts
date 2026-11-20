@@ -171,7 +171,7 @@ test.describe('sidebar chat name width', () => {
               name: LONG_NAME,
               preview: null,
               folder: '/home/tom/projects/portfolio',
-              activity: 'idle',
+              chatStatus: { state: 'idle', since: 0 },
               status: 'archived',
               pinned: false,
               pinnedAt: null,
