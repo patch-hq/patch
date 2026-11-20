@@ -6999,7 +6999,7 @@ export async function handleFoldersBrowseRequest(
   hostId: string,
 ): Promise<void> {
   try {
-    const result = await folderRegistry.browse(event.dir);
+    const result = await folderRegistry.browse(event.dir, { create: event.create === true });
     sender({
       type: 'patch.folders.browse.response',
       requestId: event.requestId,

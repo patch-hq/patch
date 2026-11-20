@@ -12471,6 +12471,52 @@ main.empty-state p {
   background: var(--accent-soft, var(--accent-tint));
 }
 
+.folder-create,
+.folder-browser-new {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: var(--text-min);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  word-break: break-all;
+}
+.folder-create {
+  width: 100%;
+  margin-top: 6px;
+}
+.folder-browser-new {
+  width: 100%;
+  margin-top: 4px;
+  text-align: center;
+}
+.folder-create:hover,
+.folder-browser-new:hover {
+  background: var(--accent-tint);
+}
+.folder-create:disabled,
+.folder-browser-new:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.folder-browser-newform {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.folder-browser-newform .folder-input {
+  flex: 1;
+  min-width: 0;
+}
+.folder-browser-newform .folder-browser-new {
+  width: auto;
+  margin-top: 0;
+  padding: 8px 12px;
+}
+
 /* Shared input field — white with a green focus ring (spec/14 § Palette). */
 .folder-input {
   border: 1px solid var(--line);

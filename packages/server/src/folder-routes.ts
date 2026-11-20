@@ -9,7 +9,7 @@
 // Same surface-JWT gate as the sibling `/api/chats` / `/api/settings` routes.
 // NO FALLBACK — missing/invalid/revoked → 401.
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { verifySurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
@@ -95,9 +95,12 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
     clearTimeout(w.timeout);
     w.resolve(event);
   });
-  app.get<{ Querystring: { dir?: string; hostId?: string } }>(
-    '/api/folders/browse',
-    async (req, reply) => {
+  const handleBrowse =
+    (create: boolean) =>
+    async (
+      req: FastifyRequest<{ Querystring: { dir?: string; hostId?: string } }>,
+      reply: FastifyReply,
+    ) => {
       let auth;
       try {
         auth = await requireAuth(req, deps.registry);
@@ -126,6 +129,9 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
         return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
       }
       const dir = (req.query?.dir ?? '').toString().trim();
+      if (create && !dir) {
+        return reply.code(400).send({ error: 'invalid query', message: 'dir is required' });
+      }
       const requestId = deps.idGenerator();
       const result = await new Promise<
         Extract<WireEvent, { type: 'patch.folders.browse.response' }> | 'timeout'
@@ -141,6 +147,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
           hostId,
           // Empty dir → omit so the host returns its browsable roots.
           ...(dir ? { dir } : {}),
+          ...(create ? { create: true } : {}),
         });
       });
       if (result === 'timeout') {
@@ -159,6 +166,16 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
         parent: result.parent ?? null,
         entries: result.entries ?? [],
       });
-    },
+    };
+  app.get<{ Querystring: { dir?: string; hostId?: string } }>(
+    '/api/folders/browse',
+    handleBrowse(false),
+  );
+  // ---- POST /api/folders/create?hostId=&dir=<abs> ----
+  // Make the folder (and any missing parents) on the host, then return its
+  // listing — the new-chat picker's "Create folder".
+  app.post<{ Querystring: { dir?: string; hostId?: string } }>(
+    '/api/folders/create',
+    handleBrowse(true),
   );
 }

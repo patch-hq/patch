@@ -241,7 +241,17 @@ export class FolderRegistry {
    * Dot-directories (`.git`, `.claude`, …) are omitted: they are never valid
    * chat targets and only clutter the tree.
    */
-  async browse(dir?: string): Promise<FolderBrowseResult> {
+  async browse(dir?: string, opts: { create?: boolean } = {}): Promise<FolderBrowseResult> {
+    if (opts.create) {
+      if (!dir) throw new Error('create needs a directory path');
+      const target = resolve(expandHome(dir));
+      // mkdir -p: an existing directory is fine; a file in the way throws
+      // (surfaced as an internal error, never swallowed).
+      await fs.mkdir(target, { recursive: true });
+      // The listing caches above this dir (its parent, the roots view) are stale.
+      this.browseCache.clear();
+      return await this.browse(target);
+    }
     const roots = this.list();
     // Roots view: the top of the tree. Each root is a tappable entry. No
     // filesystem work at all — but still briefly cached so a picker that

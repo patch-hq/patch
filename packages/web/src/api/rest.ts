@@ -1500,6 +1500,16 @@ export const api = {
         dir ? `&dir=${encodeURIComponent(dir)}` : ''
       }`,
     ),
+  // Make a folder (and missing parents) on the host; returns its listing.
+  createFolder: (hostId: string, dir: string) =>
+    request<{
+      hostId: string;
+      dir: string | null;
+      parent: string | null;
+      entries: Array<{ name: string; path: string }>;
+    }>(`/api/folders/create?hostId=${encodeURIComponent(hostId)}&dir=${encodeURIComponent(dir)}`, {
+      method: 'POST',
+    }),
   // Host files (spec/03 § Host files, spec/14 § File browser): a host's
   // filesystem by ABSOLUTE path, with no chat in between — climbing above a
   // chat's folder, or browsing without a chat at all. No `path` lists the
