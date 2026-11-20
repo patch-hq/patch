@@ -107,11 +107,11 @@ describe('call modes', () => {
     ).toBe(true);
   });
 
-  it('clears the call state when the audio socket closes', async () => {
+  it('clears the call state when the audio socket closes because the call moved device', async () => {
     await startVoiceCall('c1');
     expect(useVoiceStore.getState().call).not.toBeNull();
-    // The host dropped the session / the network went. Nobody pressed hang up.
-    lastCallbacks?.onClose();
+    // The host ended the call itself (moved to another device). Nobody pressed hang up.
+    lastCallbacks?.onClose('transferred');
     // Left set, the overlay sits there looking live over a dead socket — and a
     // live call defers the post-deploy reload, so the surface silently stops
     // taking updates until someone restarts it (lib/liveUpdate.ts).
