@@ -53,11 +53,13 @@ On `local`/`direct` there is no fast voice: every utterance is a turn for the ch
 
 ### A call to the Manager
 
-A hosted call (`gemini`, `openai` or `elevenlabs`) opened on the Manager chat works differently: the fast voice is the manager itself, and the Manager's own agent is not in the loop. The Manager's work is talking to other chats, so handing each request to the Manager's agent, which then sends it on with `patch_send_to`, put two agent hops between the user and the chat they meant. Instead the voice has no `dispatch_to_patch`; it has three tools of its own, answered by the host:
+A hosted call (`gemini`, `openai` or `elevenlabs`) opened on the Manager chat works differently: the fast voice is the manager itself, and the Manager's own agent is not in the loop. The Manager's work is talking to other chats, so handing each request to the Manager's agent, which then sends it on with `patch_send_to`, put two agent hops between the user and the chat they meant. Instead the voice has no `dispatch_to_patch`; it has tools of its own, answered by the host. The voice answers questions itself from the conversation (the Manager chat's briefing) and acts directly on common requests; it hands real work to the Manager's agent only through `ask_agent`. Three of the tools concern chats:
 
 - `find_chats` — the account's chats (every host, as `patch_list_chats` lists them), or those whose name or folder matches a few words, each with its name, id, whether it is working and when it was last active. The Manager itself and archived chats are left out. A list the host cannot get (the server link is down) is an error, never a shorter list.
 - `chat_status` — where one chat stands: its status line, goal, open to-dos and last few messages. For a chat on another host only what the listing knows is available, and the answer says so.
 - `send_to_chat` — delivers a message to a chat as `patch_send_to` does (a machine turn the recipient's agent processes as if the user had typed it; a visible sender, so the recipient comes into view).
+
+Four more are quick actions, answered at once and never a search for a chat: `add_task` (a to-do, filed in Todoist through the `td` command on the host), `calendar_agenda` and `add_event` (read and write the calendar through the script named by `PATCH_CALENDAR_SCRIPT`; unset, the tool says the calendar is not set up), and `ask_agent` (passes a request to the Manager chat's own agent and returns at once; the result lands in the Manager chat, not in the call). A failed action is reported as failed, never as done.
 
 A chat is named by its id or by what the user called it. An exact name wins; otherwise the words must pick out one chat. A name that fits none or several is handed back to the voice to ask the user, naming the choices, and nothing is sent; that is not an error. A message that was not delivered is an error the call shows.
 
