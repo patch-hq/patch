@@ -102,6 +102,24 @@ if (
   process.exit(1);
 }
 
+// --unit-shard=2/3 runs a third of one package's suite (vitest --shard), so a
+// suite too slow for one runner can be spread over several. Only with a single
+// vitest package in --packages: other runners have no --shard.
+const UNIT_SHARD = process.argv
+  .slice(2)
+  .find((a) => a.startsWith('--unit-shard='))
+  ?.slice('--unit-shard='.length);
+if (UNIT_SHARD !== undefined) {
+  if (!/^[1-9]\d*\/[1-9]\d*$/.test(UNIT_SHARD)) {
+    console.error(`verify: --unit-shard must look like 2/3, got "${UNIT_SHARD}"`);
+    process.exit(1);
+  }
+  if (PACKAGES === null || PACKAGES.length !== 1) {
+    console.error('verify: --unit-shard needs exactly one package in --packages');
+    process.exit(1);
+  }
+}
+
 const ALL_STEPS = [
   { id: 'lint', label: 'lint', argv: ['pnpm', 'run', 'lint'] },
   { id: 'types', label: 'types', argv: ['pnpm', 'run', 'typecheck'] },
@@ -111,7 +129,13 @@ const ALL_STEPS = [
     argv:
       PACKAGES === null
         ? ['pnpm', 'run', 'test']
-        : ['pnpm', 'run', 'test', ...PACKAGES.map((p) => `--filter=${p}`)],
+        : [
+            'pnpm',
+            'run',
+            'test',
+            ...PACKAGES.map((p) => `--filter=${p}`),
+            ...(UNIT_SHARD === undefined ? [] : ['--', `--shard=${UNIT_SHARD}`]),
+          ],
   },
   {
     id: 'browser',
