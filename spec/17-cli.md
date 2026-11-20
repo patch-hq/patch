@@ -58,6 +58,9 @@ patch accounts disconnect <backend> <accountId>        # confirmed; takes it out
 patch accounts order <backend> <accountId>...
 patch accounts strategy <backend> <strategy>          # priority, round-robin, soonest-reset or least-used
 patch accounts adopt <backend> [--host H]              # store that host's own login as a shared account
+patch accounts acp                                     # ACP agents' accounts: agent, label, last four, state
+patch accounts acp sign-in <agent> [--api-key K] [--account A] [--label L]  # an API key, prompted for when not given (10-auth.md § Signing in)
+patch accounts acp remove <agent> <accountId>
 patch keys                                # provider keys: source and last four
 patch keys set <keyId> [--host H to adopt from its environment]
 patch keys revoke <keyId>                 # confirmed

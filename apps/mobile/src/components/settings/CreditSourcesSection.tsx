@@ -32,6 +32,7 @@ import { NoticeRow } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
 import { ChatGPTSignInFlow, ClaudeSignInFlow } from './SignInFlows';
 import { UsageHistorySection } from './UsageHistorySection';
+import { AcpAccountsSections } from './AcpAccountsSection';
 import { PROVIDERS, type ProviderSpec, type SharedRow } from './providers';
 import { writeShared } from './sharedWrite';
 import { Chips, ErrorLine, Muted, Row } from './ui';
@@ -81,6 +82,7 @@ export function UsagePage(): React.ReactElement {
           {PROVIDERS.map((p) => (
             <Accounts key={p.id} provider={p} rows={p.rows(shared.secrets)} />
           ))}
+          <AcpAccountsSections />
         </>
       )}
     </SettingsPage>

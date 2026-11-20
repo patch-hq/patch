@@ -245,10 +245,20 @@ Two providers have direct adapters because they expose more than ACP does:
 Every ACP agent runs through one provider, `acp`. An agent is configuration,
 not code: the command that starts it speaking ACP on stdio, its arguments, a
 label, which shared provider keys (§ Provider keys) it reads from which
-environment variables, and optionally which of its own session modes matches
-each Patch permission mode. Patch ships Gemini CLI (`gemini --acp`, reading the
-shared `gemini` key as `GEMINI_API_KEY`); the shared `acpAgents` setting adds
-agents or replaces one by id. Its models are `acp/<agent>/<model>`.
+environment variables, the variable an ACP account's API key is passed in
+(`apiKeyEnv`) and the provider-key check that validates such a key
+(`apiKeyCheck`), and optionally which of its own session modes matches each
+Patch permission mode. Patch ships Gemini CLI (`gemini --acp`, taking an
+account's key, else the shared `gemini` key, as `GEMINI_API_KEY`, checked with
+the Gemini key check); the shared `acpAgents` setting adds agents or replaces
+one by id. Its models are `acp/<agent>/<model>`.
+
+An agent's credential is, in order: the key of its first ACP account, which the
+server holds encrypted and sends with every settings snapshot (`10-auth.md` §
+Backend credentials); a shared provider key mapped to the same variable; or the
+agent's own sign-in on that host (Gemini CLI's Google login, for one), which
+Patch neither reads nor carries to other hosts. The host keeps the accounts it
+was last sent in memory and asks the agent again when they change.
 
 - A host offers the agents whose command it has. It asks each one, over
   `initialize` and a `session/new` in a scratch folder that never sends a
@@ -257,8 +267,8 @@ agents or replaces one by id. Its models are `acp/<agent>/<model>`.
   offers `default`). The answer is kept for ten minutes, a failed one for one,
   and asked again when the agent's entry or keys change. Each installed agent is
   a row in Settings → Hosts (`acp:<agent>`) with the state the agent gave:
-  ready, not signed in (add its key under Settings → Providers, or sign in to
-  the agent on that host; there is no sign-in button), or not working, with the
+  ready, not signed in (add an account for it under Settings → AI accounts, or
+  sign in to the agent on that host), or not working, with the
   agent's own words behind Details. A signed-out or broken agent lists no models
   and says why against the `acp` backend in the model picker.
 - A turn is one agent process: `initialize`, the chat's session (new, or the
@@ -959,12 +969,16 @@ and not Secrets (which are injected into chats, `15-design-mobile.md` §
 Settings tab).
 
 Provider keys are shared settings (`01-server.md` § Settings): set once on
-Settings → Providers and used by every host.
+Settings → Providers, held on the server and used by every host. A host never
+sets or deletes a key of its own.
 
-- A key comes from Settings → Providers, or from the host's own environment, read
-  once at boot. A key set from Settings wins over the environment; revoking it
-  lets a host's environment apply again. A key in one host's environment can
-  be adopted from Settings as the shared value.
+- A key comes from the shared settings, or from the host's own environment,
+  read once at boot. The host caches the shared keys from each snapshot in
+  `<patchHome>/keys.json` (mode 0600), replaced whole by the next snapshot, so a
+  host restarted while the server is away starts with the keys it last had. A
+  shared key wins over the environment; revoking it on the server lets a host's
+  environment apply again. A key in one host's environment can be adopted from
+  Settings as the shared value.
 - Everything that uses a key reads it when it opens a session or sends a
   request, so a new snapshot takes effect for the next session with no
   restart. After applying one, each host re-publishes `host.host`, whose

@@ -487,7 +487,7 @@ describe('AcpRegistry', () => {
     const r = await out.reg.models();
     expect(r.models).toEqual([]);
     expect(r.errors.map((e) => e.message)).toEqual([
-      'Fake ACP: not signed in. Add its key under Settings → Providers, or sign in to it on this host.',
+      'Fake ACP: not signed in. Add an account for it under Settings → AI accounts, or sign in to it on this host.',
     ]);
     expect(out.reg.accountState('fake')).toEqual({ state: 'signed_out' });
     expect(out.reg.backendEntries()[0]?.state).toBe('logged-out');

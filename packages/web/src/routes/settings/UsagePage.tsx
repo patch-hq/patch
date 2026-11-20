@@ -9,11 +9,12 @@ import { Group, SettingsPage } from './ui.js';
 import { UsageHistory } from './UsageHistory.js';
 import { PROVIDERS } from './providers.js';
 import { SharedAccounts } from './SharedAccounts.js';
+import { AcpAccounts } from './AcpAccounts.js';
 
 export function UsagePage(): JSX.Element {
   return (
     <SettingsPage
-      intro="The Claude and ChatGPT accounts your agents run on, and how much of each you've used."
+      intro="The Claude, ChatGPT and ACP agent accounts your agents run on, and how much of each you've used."
       title="AI accounts"
       testid="settings-usage"
     >
@@ -28,6 +29,7 @@ export function UsagePage(): JSX.Element {
           <SharedAccounts provider={p} />
         </Group>
       ))}
+      <AcpAccounts />
     </SettingsPage>
   );
 }
