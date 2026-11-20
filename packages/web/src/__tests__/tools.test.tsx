@@ -112,6 +112,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_doc_export',
   'patch_goal_set',
   'patch_goal_get',
+  'patch_goal_propose',
   'patch_goal_clear',
   'patch_watch',
   'patch_watch_list',

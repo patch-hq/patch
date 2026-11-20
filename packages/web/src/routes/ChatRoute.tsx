@@ -54,6 +54,7 @@ import {
   backRecord,
   parseAgentReturn,
   parseAskHuman,
+  parseGoalPropose,
   parseChatSend,
   sendToCall,
   type AgentReturn,
@@ -160,6 +161,7 @@ import { attemptPaging, liveAttemptSelection, type AttemptSelection } from '../l
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
 import { AskHumanCard } from '../components/AskHumanCard.js';
+import { GoalProposalCard } from '../components/GoalProposalCard.js';
 import { toolCallSummary, toolRunNarrative } from '../lib/toolSummary.js';
 import { toolLabel } from '../lib/toolsCatalog.js';
 import { formatElapsed } from '../lib/backgroundTasks.js';
@@ -4381,6 +4383,12 @@ function ToolCall({
   if (askHuman)
     return <AskHumanCard task={askHuman.task} {...(askHuman.why ? { why: askHuman.why } : {})} />;
 
+  const goalProposal =
+    entry.tool && toolLabel(entry.tool) === 'patch_goal_propose'
+      ? parseGoalPropose(entry.toolArgs)
+      : null;
+  if (goalProposal) return <GoalProposalCard chatId={chatId} proposal={goalProposal} />;
+
   // A message to another chat is one "Sent to <chat>" card: the text that
   // went, and the chat's name opening it. A refused send says so on the card.
   const sendTo = sendToCall(entry.tool, entry.toolArgs);
@@ -6059,6 +6067,8 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
       toolLabel(entry.tool) === 'patch_delegate' ||
       sendToCall(entry.tool, entry.toolArgs) !== null ||
       (toolLabel(entry.tool) === 'patch_ask_human' && parseAskHuman(entry.toolArgs) !== null) ||
+      (toolLabel(entry.tool) === 'patch_goal_propose' &&
+        parseGoalPropose(entry.toolArgs) !== null) ||
       (entry.tool === 'TodoWrite' && todoCardItems(entry.toolArgs) !== null))
   );
 }

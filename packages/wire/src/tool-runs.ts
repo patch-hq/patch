@@ -5,7 +5,7 @@
 // host cut differently from a surface would name calls that surface never
 // grouped, and its summary would have nowhere to go.
 
-import { parseAskHuman } from './action-text.js';
+import { parseAskHuman, parseGoalPropose } from './action-text.js';
 import { sendToCall } from './chat-send.js';
 
 /**
@@ -27,6 +27,14 @@ export function isGroupableToolCall(tool: string | undefined, args: unknown): bo
   if (
     (tool === 'patch_ask_human' || tool === 'mcp__patch__patch_ask_human') &&
     parseAskHuman(args) !== null
+  ) {
+    return false;
+  }
+  // A goal proposal is a card the user accepts or edits; folded into a run it
+  // would be hidden behind a click.
+  if (
+    (tool === 'patch_goal_propose' || tool === 'mcp__patch__patch_goal_propose') &&
+    parseGoalPropose(args) !== null
   ) {
     return false;
   }

@@ -19390,3 +19390,104 @@ a.drop-target,
 .agent-msg-text > :last-child {
   margin-bottom: 0;
 }
+
+/* spec/04 § Goals — a patch_goal_propose call drawn as an editable card. */
+.goal-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--ink);
+}
+.goal-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.goal-proposal-state {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.goal-proposal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.goal-proposal-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.goal-proposal-n {
+  flex: none;
+  width: 18px;
+  padding-top: 6px;
+  color: var(--ink-3);
+  text-align: right;
+}
+.goal-proposal-item textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.goal-proposal-item textarea:disabled {
+  opacity: 0.75;
+}
+.goal-proposal-remove,
+.goal-proposal-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  color: var(--ink-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+}
+.goal-proposal-why {
+  margin: 0;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+.goal-proposal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goal-proposal-spacer {
+  flex: 1;
+}
+.goal-proposal-actions button:not(.goal-proposal-add) {
+  font: inherit;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-soft);
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+.goal-proposal-actions .goal-proposal-accept {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.goal-proposal-actions .goal-proposal-accept:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

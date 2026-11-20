@@ -55,3 +55,22 @@ export function parseAskHuman(args: unknown): { task: string; why?: string } | n
   if (typeof task !== 'string' || task.length === 0) return null;
   return typeof why === 'string' && why.length > 0 ? { task, why } : { task };
 }
+
+export interface GoalProposal {
+  condition: string;
+  then: string[];
+  why?: string;
+}
+
+/** The `patch_goal_propose` arguments, or null when they are not its shape. */
+export function parseGoalPropose(args: unknown): GoalProposal | null {
+  if (typeof args !== 'object' || args === null) return null;
+  const { condition, then, why } = args as Record<string, unknown>;
+  if (typeof condition !== 'string' || condition.trim().length === 0) return null;
+  const follow = Array.isArray(then)
+    ? then.filter((g): g is string => typeof g === 'string' && g.trim().length > 0)
+    : [];
+  const out: GoalProposal = { condition, then: follow };
+  if (typeof why === 'string' && why.length > 0) out.why = why;
+  return out;
+}

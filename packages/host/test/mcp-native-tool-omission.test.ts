@@ -31,6 +31,7 @@ it('Codex keeps its native subagents, so patch_agent goes; wakes, loops and goal
     'patch_loop',
     'patch_goal_set',
     'patch_goal_get',
+    'patch_goal_propose',
     'patch_goal_clear',
   ]) {
     expect(names).toContain(n);

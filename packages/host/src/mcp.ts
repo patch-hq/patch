@@ -547,6 +547,34 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     },
   );
 
+  // ---- patch_goal_propose ---------------------------------------------------
+  server.registerTool(
+    'patch_goal_propose',
+    {
+      description:
+        'PROPOSE a goal (or an ordered sequence of goals) for the user to accept, rather than setting it yourself. ' +
+        'Shows a card in this chat with the goal text editable in place; nothing is armed until they accept, ' +
+        'and what they accept is what they edited. Accepting sets the goal on this chat and starts it, exactly as ' +
+        "the composer's /goal does (the first condition is sent as the next turn; the rest queue in order, each " +
+        'starting when the one before is met). Use it when the goal is a commitment the user should shape — ' +
+        'long-running, costly or open-ended — and use patch_goal_set when they have already told you to set one. ' +
+        '`condition` is the first goal, `then` the goals that follow, `why` one line on why this shape. ' +
+        'After calling, STOP and wait: do not start the work, the user may change or decline it.',
+      inputSchema: {
+        condition: z.string().min(1),
+        then: z.array(z.string().min(1)).max(50).optional(),
+        why: z.string().min(1).optional(),
+      },
+    },
+    async ({ condition, then }) =>
+      toolResult({
+        ok: true,
+        proposed: 1 + (then?.length ?? 0),
+        message:
+          'Proposal shown to the user. Nothing is set yet. Stop and wait; if they accept, the goal is set and arrives as your next turn.',
+      }),
+  );
+
   // ---- patch_goal_get -------------------------------------------------------
   server.registerTool(
     'patch_goal_get',

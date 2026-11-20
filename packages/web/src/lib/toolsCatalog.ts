@@ -310,6 +310,14 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'condition: string, then?: string[], remindEvery?: object, checkInEvery?: object',
   },
   {
+    name: patchToolId('patch_goal_propose'),
+    label: 'patch_goal_propose',
+    category: 'patch',
+    description:
+      'Proposes a goal, or a sequence of goals, as a card the user edits in place and accepts, setting nothing until they do.',
+    params: 'condition: string, then?: string[], why?: string',
+  },
+  {
     name: patchToolId('patch_goal_get'),
     label: 'patch_goal_get',
     category: 'patch',

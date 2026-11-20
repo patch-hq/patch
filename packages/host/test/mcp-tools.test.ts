@@ -119,6 +119,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_doc_suggest',
         'patch_goal_clear',
         'patch_goal_get',
+        'patch_goal_propose',
         'patch_goal_set',
         'patch_history',
         'patch_agent',
