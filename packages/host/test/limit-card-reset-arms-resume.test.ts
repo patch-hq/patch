@@ -18,6 +18,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { limitError } from './limitErrors.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = Date.UTC(2023, 10, 14, 12, 0, 0);
@@ -62,7 +63,7 @@ describe('the reset the card shows is the reset the resume is armed for', () => 
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
 
-    const state = events
+    const state = asServerSees(events)
       .filter((e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state')
       .at(-1);
     expect(state?.limitBlock?.resetsAt).toBe(ACCOUNT_RESET);

@@ -12,6 +12,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const NOW = 1_700_000_000_000;
 const RESETS_AT = NOW + 3 * 3_600_000;
@@ -49,7 +50,7 @@ describe('archiving a chat parked on a usage limit', () => {
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
     const states = (): ChatStateEvent[] =>
-      events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+      asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
     expect(states().at(-1)?.limitBlock?.accountLabel).toBe('Work');
 
     await daemon.setArchived(chatId, true);

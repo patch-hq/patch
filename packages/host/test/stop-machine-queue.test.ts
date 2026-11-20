@@ -10,6 +10,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const tick = (ms = 60): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -72,7 +73,9 @@ describe('user stop with turns queued behind it', () => {
           (e as { reason?: string }).reason === 'cancelled',
       ),
     ).toBe(true);
-    const last = [...events].reverse().find((e) => e.type === 'chat.state' && e.chatId === chatId);
+    const last = [...asServerSees(events)]
+      .reverse()
+      .find((e) => e.type === 'chat.state' && e.chatId === chatId);
     expect((last as { activity?: string }).activity).toBe('idle');
   });
 

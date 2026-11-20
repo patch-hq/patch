@@ -23,6 +23,11 @@ import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 
 /** Persistent frame recorder + awaiter (same shape as b1-real-ws.test.ts). */
+/** A transcript fact goes through the host's outbox, the only way it reaches the record. */
+let outboxPosition = 0;
+const outbox = (event: Record<string, unknown>): string =>
+  encode({ type: 'host.outbox', position: ++outboxPosition, event } as never);
+
 class FrameLog {
   readonly frames: WireEvent[] = [];
   constructor(ws: WebSocket) {
@@ -137,7 +142,7 @@ describe('a host gone silent mid-turn makes its chats Host offline', () => {
   /** What a host sends when a turn starts: the fact, then the chat's state. No activity. */
   function startTurn(ws: WebSocket, hostId: string, chatId: string): void {
     ws.send(encode({ type: 'chat.spawned', hostId, chatId, folder: '/proj' }));
-    ws.send(encode({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 1 }));
+    ws.send(outbox({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 1 }));
     ws.send(
       encode({
         type: 'chat.state',

@@ -18,6 +18,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
 import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const NOW = 1_700_000_000_000;
 const RESETS_AT = NOW + 3 * 3_600_000;
@@ -77,7 +78,7 @@ const statedLimit = (): TurnFailedError =>
 const errorsIn = (events: WireEvent[]): ChatErrorEvent[] =>
   events.filter((e): e is ChatErrorEvent => e.type === 'chat.error');
 const statesIn = (events: WireEvent[]): ChatStateEvent[] =>
-  events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
 
 describe('a limit failure nobody parked', () => {
   it('reports it in patch’s words, not the provider’s', async () => {
@@ -236,7 +237,6 @@ describe('a limit failure that WAS parked for auto-resume', () => {
     expect(last?.turnRetrying).not.toBe(true);
     // The host states the turn's end and the provider's words; the server
     // decides what that makes the chat (spec/12 § Limits and sign-in).
-    expect(last?.activity).toBeUndefined();
     const end = events.findLast(
       (e): e is Extract<WireEvent, { type: 'chat.turn_ended' }> => e.type === 'chat.turn_ended',
     );

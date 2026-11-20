@@ -15,6 +15,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -86,11 +87,13 @@ function lastBranches(events: WireEvent[]): ChatBranchesEvent {
   return last;
 }
 
+/** The chat's state now, as the server reads it from every fact so far. */
 function lastState(events: WireEvent[]): ChatStateEvent {
-  const all = events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
-  const last = all[all.length - 1];
+  const frames = events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  const last = frames[frames.length - 1];
   if (!last) throw new Error('no chat.state event emitted');
-  return last;
+  // Read the last frame again after everything since it, as the server would.
+  return asServerSees([...events, last]).at(-1) as ChatStateEvent;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));

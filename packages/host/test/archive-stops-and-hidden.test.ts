@@ -18,6 +18,7 @@ import type { ChatStateEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = 1_700_000_000_000;
@@ -68,7 +69,7 @@ async function tick(ms = 30): Promise<void> {
 }
 
 function lastState(events: WireEvent[], chatId: string): ChatStateEvent | undefined {
-  return events
+  return asServerSees(events)
     .filter((e): e is ChatStateEvent => e.type === 'chat.state' && e.chatId === chatId)
     .at(-1);
 }
@@ -185,7 +186,7 @@ describe('a message into an archived chat starts it again, where it was', () => 
     // moment it starts running, not only after.
     const run = daemon.sendInput({ chatId, message: 'second fire', localId: 'L2' });
     await tick(5);
-    const running = events
+    const running = asServerSees(events)
       .filter((e): e is ChatStateEvent => e.type === 'chat.state' && e.chatId === chatId)
       .find((e) => e.status === 'active' && e.activity === 'running');
     expect(running?.hidden).toBe(true);

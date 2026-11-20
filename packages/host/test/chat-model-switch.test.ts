@@ -25,6 +25,7 @@ import {
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { chatStateFromMeta } from '../src/chatState.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -53,7 +54,7 @@ function setup(opts: { knownModelIds?: () => Promise<ReadonlySet<string>> } = {}
 }
 
 function states(events: WireEvent[]): ChatStateEvent[] {
-  return events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  return asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
 }
 
 describe('a chat model change takes effect on the next turn', () => {

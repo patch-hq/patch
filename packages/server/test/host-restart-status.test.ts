@@ -15,6 +15,11 @@ import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 
+/** A transcript fact goes through the host's outbox, the only way it reaches the record. */
+let outboxPosition = 0;
+const outbox = (event: Record<string, unknown>): string =>
+  encode({ type: 'host.outbox', position: ++outboxPosition, event } as never);
+
 class FrameLog {
   readonly frames: WireEvent[] = [];
   constructor(ws: WebSocket) {
@@ -134,7 +139,7 @@ describe('host restart statuses', () => {
 
   /** A host reattaching to (or starting) a turn: the turn fact, then the chat's state. */
   const running = (chatId: string): string[] => [
-    encode({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 1 }),
+    outbox({ type: 'chat.turn_started', chatId, turnId: `t-${chatId}`, seq: -1, at: 1 }),
     encode({
       type: 'chat.state',
       permissionMode: 'bypassPermissions',
@@ -144,7 +149,7 @@ describe('host restart statuses', () => {
   ];
   /** A host back after its machine went down: the turn it left open ended interrupted. */
   const interrupted = (chatId: string): string[] => [
-    encode({
+    outbox({
       type: 'chat.turn_ended',
       chatId,
       turnId: `t-${chatId}`,

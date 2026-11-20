@@ -11,6 +11,7 @@ import type { ChatStateEvent, WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = 1_700_000_000_000;
@@ -35,7 +36,7 @@ function setup(home = mkdtempSync(join(tmpdir(), 'patch-ctx-'))) {
 }
 
 const states = (events: WireEvent[]): ChatStateEvent[] =>
-  events.filter((e): e is ChatStateEvent => e.type === 'chat.state');
+  asServerSees(events).filter((e): e is ChatStateEvent => e.type === 'chat.state');
 
 const assistantRaw = (read: number) => ({
   type: 'assistant',

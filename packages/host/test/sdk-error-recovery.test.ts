@@ -16,6 +16,7 @@ import { SNOOZE_UNTIL_COMPLETE, type WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError, type SdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
+import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = 1_700_000_000_000;
@@ -171,7 +172,7 @@ describe('a transient SDK error is retried, not dropped', () => {
     await vi.advanceTimersByTimeAsync(400_000);
     const edges: (boolean | undefined)[] = [];
     let prev: string | undefined;
-    for (const e of events) {
+    for (const e of asServerSees(events)) {
       if (e.type !== 'chat.state' || e.chatId !== chatId) continue;
       if (e.activity === 'errored' && prev !== 'errored') edges.push(e.turnRetrying);
       prev = e.activity;

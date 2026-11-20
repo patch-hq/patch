@@ -40,12 +40,12 @@ const CHAT = 'chat-a117';
 // The exact `chat.state` / `chat.message` sequence chatRunner emits for a turn.
 // --------------------------------------------------------------------------
 
-function stateEvent(activity: 'idle' | 'running' | 'errored'): WireEvent {
+/** A chat.state the host emits: a fact snapshot, never a verdict that a turn ran. */
+function stateEvent(): WireEvent {
   return {
     type: 'chat.state',
     chatId: CHAT,
     hostId: 'host-a',
-    activity,
     permissionMode: 'bypassPermissions',
     lastUpdated: Date.now(),
     pinned: false,
@@ -55,6 +55,23 @@ function stateEvent(activity: 'idle' | 'running' | 'errored'): WireEvent {
     preview: null,
     folder: '/tmp/a117',
   } as WireEvent;
+}
+
+let turnNo = 0;
+/** The turn's own start and end: what arms and settles a voice reply. */
+function turnStart(): WireEvent {
+  turnNo += 1;
+  return { type: 'chat.turn_started', chatId: CHAT, turnId: `t${turnNo}`, seq: -1, at: 1 };
+}
+function turnEnd(): WireEvent {
+  return {
+    type: 'chat.turn_ended',
+    chatId: CHAT,
+    turnId: `t${turnNo}`,
+    seq: -1,
+    at: 2,
+    outcome: 'completed',
+  };
 }
 
 function assistantMessage(content: string, seq: number): WireEvent {
@@ -77,10 +94,11 @@ async function replayTurn(
 ): Promise<void> {
   emit({ type: 'chat.input_ack', chatId: CHAT, localId: 'l1' } as WireEvent);
   // >>> The two frames that used to resolve the reply promise with '' <<<
-  emit(stateEvent('idle')); // sendInput: stale statusSummary cleared
-  emit(stateEvent('idle')); // runQuery: preview captured
+  emit(stateEvent()); // sendInput: stale statusSummary cleared
+  emit(stateEvent()); // runQuery: preview captured
   await new Promise((r) => setTimeout(r, 5));
-  emit(stateEvent('running'));
+  emit(turnStart());
+  emit(stateEvent());
   if (opts.deltas !== false) {
     for (const piece of reply.match(/.{1,12}/gs) ?? []) {
       emit(delta(piece, 7));
@@ -88,11 +106,12 @@ async function replayTurn(
     }
   }
   if (reply.length > 0) emit(assistantMessage(reply, 7));
-  emit(stateEvent('idle'));
+  emit(stateEvent());
+  emit(turnEnd());
 }
 
 describe('A1-17 — voice reply bridge (root cause)', () => {
-  test('an idle chat.state emitted BEFORE the turn starts does not settle the reply', async () => {
+  test('a chat.state emitted BEFORE the turn starts does not settle the reply', async () => {
     const bridge = createVoiceReplyBridge();
     const chunks: string[] = [];
     const promise = bridge.awaitReply(CHAT, (c) => chunks.push(c));
@@ -101,18 +120,18 @@ describe('A1-17 — voice reply bridge (root cause)', () => {
       settled = true;
     });
 
-    bridge.observe(stateEvent('idle'));
-    bridge.observe(stateEvent('idle'));
+    bridge.observe(stateEvent());
+    bridge.observe(stateEvent());
     await new Promise((r) => setTimeout(r, 10));
     // Pre-fix this was already resolved with ''.
     expect(settled).toBe(false);
     expect(bridge.pendingCount()).toBe(1);
 
-    bridge.observe(stateEvent('running'));
+    bridge.observe(turnStart());
     bridge.observe(delta('Ban', 7));
     bridge.observe(delta('ana.', 7));
     bridge.observe(assistantMessage('Banana.', 7));
-    bridge.observe(stateEvent('idle'));
+    bridge.observe(turnEnd());
 
     await expect(promise).resolves.toBe('Banana.');
     expect(chunks.join('')).toBe('Banana.');
@@ -126,10 +145,10 @@ describe('A1-17 — voice reply bridge (root cause)', () => {
     // Tail of a PREVIOUS turn still draining while this one is queued.
     bridge.observe(delta('leftover', 6));
     bridge.observe(assistantMessage('previous turn reply', 6));
-    bridge.observe(stateEvent('running'));
+    bridge.observe(turnStart());
     bridge.observe(delta('mine', 7));
     bridge.observe(assistantMessage('mine', 7));
-    bridge.observe(stateEvent('idle'));
+    bridge.observe(turnEnd());
     await expect(promise).resolves.toBe('mine');
     expect(chunks).toEqual(['mine']);
   });
