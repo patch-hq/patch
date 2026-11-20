@@ -109,6 +109,27 @@ async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
   return parsed as T;
 }
 
+/**
+ * Retry a request that never got an HTTP response (fetch threw — a dropped or
+ * stale connection, typically right after the app wakes). Any answer from the
+ * server, error or not, is returned as is: only a transport failure retries,
+ * and only twice, so a real outage still surfaces.
+ */
+export async function retryOnNetworkFailure<T>(
+  run: () => Promise<T>,
+  delaysMs: readonly number[] = [400, 1200],
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (e) {
+      const delay = delaysMs[attempt];
+      if (!(e instanceof TypeError) || delay === undefined) throw e;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 /** A crash the phone caught — mirrors the server's client-crash-routes schema. */
 export interface CrashReport {
   source: 'boundary' | 'global' | 'native';
@@ -501,10 +522,12 @@ export const api = {
     /** The chat this one continues — set when the draft was a linked chat's (spec/04 § Provider switches). */
     continuedFrom?: string;
   }) =>
-    request<{ chatId: string; folder: string; status: 'pending' }>('/api/chats', {
-      method: 'POST',
-      body,
-    }),
+    retryOnNetworkFailure(() =>
+      request<{ chatId: string; folder: string; status: 'pending' }>('/api/chats', {
+        method: 'POST',
+        body,
+      }),
+    ),
   deleteChat: (chatId: string) =>
     request<{ ok: true }>(`/api/chats/${chatId}`, { method: 'DELETE' }),
   // spec/04 § Provider switches — draft a new chat linked to this one: on
