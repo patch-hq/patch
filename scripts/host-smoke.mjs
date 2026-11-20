@@ -86,16 +86,24 @@ export function symlinkProblems(root) {
   return problems;
 }
 
-/** A TCP port nothing is listening on. */
-function freePort() {
-  return new Promise((ok, fail) => {
-    const s = createServer();
-    s.once('error', fail);
-    s.listen(0, '127.0.0.1', () => {
-      const { port } = s.address();
-      s.close(() => ok(port));
+/**
+ * A TCP port nothing is listening on. Picked below the OS ephemeral range
+ * (macOS 49152+, Linux 32768+): the host's own outbound connection to the dead
+ * server takes an ephemeral source port, and on macOS those are handed out
+ * sequentially, so a port just freed from the ephemeral range collides with it
+ * (EADDRINUSE on the audio port).
+ */
+async function freePort() {
+  for (let i = 0; i < 50; i++) {
+    const port = 20000 + Math.floor(Math.random() * 10000);
+    const ok = await new Promise((res) => {
+      const s = createServer();
+      s.once('error', () => res(false));
+      s.listen(port, '0.0.0.0', () => s.close(() => res(true)));
     });
-  });
+    if (ok) return port;
+  }
+  throw new Error('no free port found in 20000-29999');
 }
 
 function parseArgs(argv) {
