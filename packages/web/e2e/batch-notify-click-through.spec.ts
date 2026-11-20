@@ -61,7 +61,7 @@ test.describe('batch view before and at check-in', () => {
     await page.getByTestId('sidebar-view-option-batch').click();
 
     await page.getByTestId('batch-checkin-now').click();
-    expect(checkedInNow).toBe(true);
+    await expect.poll(() => checkedInNow).toBe(true);
 
     const row = page.getByTestId('batch-row-chat_bus');
     await expect(row).not.toContainText('waiting');
