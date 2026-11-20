@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { generateUserKeypair, type RevocationStoreInterface, type UserKeypair } from '@patch/auth';
 import type { SurfaceKind } from '@patch/auth';
 import { ManagerHomeError } from './manager-home-error.js';
+import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
 const SurfaceRecord = z
   .object({
@@ -114,7 +115,8 @@ const ManagerHandoverRecord = z
   .object({
     hostId: z.string().min(1),
     epoch: z.number().int().positive(),
-    nextSeq: z.number().int().nonnegative(),
+    /** The next seq of each special thread, by chat id. */
+    nextSeqs: z.record(z.string().min(1), z.number().int().nonnegative()),
     fromHostName: z.string().min(1),
     toHostName: z.string().min(1),
     message: z.string(),
@@ -219,6 +221,14 @@ export class Registry implements RevocationStoreInterface {
     // field it no longer knows.
     if (rawObj && typeof rawObj === 'object' && 'fcmTokens' in rawObj) {
       delete (rawObj as Record<string, unknown>)['fcmTokens'];
+    }
+    // Migration: a handover recorded before Speakers was handed over too held
+    // the Manager's next seq alone, as `nextSeq`.
+    const handover = (rawObj as { managerHandover?: Record<string, unknown> } | null)
+      ?.managerHandover;
+    if (handover && typeof handover === 'object' && 'nextSeq' in handover) {
+      handover['nextSeqs'] = { [SPECIAL_THREAD_IDS.manager]: handover['nextSeq'] };
+      delete handover['nextSeq'];
     }
     const parsed = RegistryFile.parse(rawObj);
     return new Registry(path, dataDir, parsed);

@@ -7568,11 +7568,13 @@ export type HostOutboxAckEvent = z.infer<typeof HostOutboxAckEvent>;
 
 /**
  * Server -> host: the user made this host the Manager's home (spec/06 § Changing
- * home). The host continues the thread's record from `nextSeq` under the same
- * chat id, marks the handover in the transcript naming both hosts, and sends
- * `message` (the summary the user approved; empty when they cleared it) as an
- * ordinary message. `epoch` counts changes, so a host told the same one twice
- * acts on it once.
+ * home). The host continues each special thread's record from the server's
+ * high-water mark under the same chat id: `nextSeqs` names the next seq of every
+ * special thread, Speakers as well as the Manager. `nextSeq` is the Manager's,
+ * kept for hosts from before `nextSeqs`. The host marks the handover in the
+ * Manager's transcript naming both hosts, and sends `message` (the summary the
+ * user approved; empty when they cleared it) as an ordinary message. `epoch`
+ * counts changes, so a host told the same one twice acts on it once.
  */
 export const HostManagerHandoverEvent = z
   .object({
@@ -7580,6 +7582,8 @@ export const HostManagerHandoverEvent = z
     hostId: z.string().min(1),
     epoch: z.number().int().positive(),
     nextSeq: z.number().int().nonnegative(),
+    /** Absent only from a server that predates it, which hands over the Manager alone. */
+    nextSeqs: z.record(z.string().min(1), z.number().int().nonnegative()).optional(),
     fromHostName: z.string().min(1),
     toHostName: z.string().min(1),
     message: z.string(),
