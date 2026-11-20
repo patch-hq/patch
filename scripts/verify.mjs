@@ -70,11 +70,51 @@ if (BROWSER_SHARD !== undefined && !/^[1-9]\d*\/[1-9]\d*$/.test(BROWSER_SHARD)) 
   process.exit(1);
 }
 
+// CI splits the gate across runners (.github/workflows/test.yml): each runner
+// runs a slice with --layers, and the slices together are the whole gate.
+// --packages narrows the unit layer to those workspace packages (a PR runs only
+// the packages its diff can reach; main runs them all). Both are absent on a
+// hand run, which means everything. An unknown layer is an error, never "run
+// everything", for the same reason as a malformed shard.
+const LAYER_IDS = ['lint', 'types', 'unit', 'browser', 'mock', 'personal', 'scripts'];
+function listArg(name) {
+  const a = process.argv.slice(2).find((x) => x.startsWith(`--${name}=`));
+  return a
+    ? a
+        .slice(name.length + 3)
+        .split(',')
+        .filter(Boolean)
+    : null;
+}
+const LAYERS = listArg('layers');
+for (const l of LAYERS ?? []) {
+  if (!LAYER_IDS.includes(l)) {
+    console.error(`verify: unknown layer "${l}" (layers: ${LAYER_IDS.join(', ')})`);
+    process.exit(1);
+  }
+}
+const PACKAGES = listArg('packages');
+if (
+  PACKAGES !== null &&
+  (PACKAGES.length === 0 || !PACKAGES.every((p) => /^@patch\/[a-z0-9-]+$/.test(p)))
+) {
+  console.error(`verify: --packages must list @patch/* packages, got "${PACKAGES.join(',')}"`);
+  process.exit(1);
+}
+
 const ALL_STEPS = [
-  { label: 'lint', argv: ['pnpm', 'run', 'lint'] },
-  { label: 'types', argv: ['pnpm', 'run', 'typecheck'] },
-  { label: 'unit + contract + integration', argv: ['pnpm', 'run', 'test'] },
+  { id: 'lint', label: 'lint', argv: ['pnpm', 'run', 'lint'] },
+  { id: 'types', label: 'types', argv: ['pnpm', 'run', 'typecheck'] },
   {
+    id: 'unit',
+    label: 'unit + contract + integration',
+    argv:
+      PACKAGES === null
+        ? ['pnpm', 'run', 'test']
+        : ['pnpm', 'run', 'test', ...PACKAGES.map((p) => `--filter=${p}`)],
+  },
+  {
+    id: 'browser',
     label: 'browser',
     argv: [
       'pnpm',
@@ -101,6 +141,7 @@ const ALL_STEPS = [
   ...(BROWSER_SHARD === undefined || BROWSER_SHARD.startsWith('1/')
     ? [
         {
+          id: 'browser',
           label: 'load targets',
           argv: [
             'pnpm',
@@ -116,9 +157,9 @@ const ALL_STEPS = [
         },
       ]
     : []),
-  { label: 'mock leakage', argv: ['node', 'scripts/mock-check.mjs', '--quiet'] },
+  { id: 'mock', label: 'mock leakage', argv: ['node', 'scripts/mock-check.mjs', '--quiet'] },
   // Patch is a public product: no one person's hosts or ids in what a stranger runs.
-  { label: 'personal strings', argv: ['node', 'scripts/personal-check.mjs'] },
+  { id: 'personal', label: 'personal strings', argv: ['node', 'scripts/personal-check.mjs'] },
   // Guards what this very gate — and the deploy around it — decides to run and
   // ship. 5ms, and a wrong answer here is a deploy that reports success without
   // shipping the change. Deliberately NOT skippable.
@@ -126,7 +167,7 @@ const ALL_STEPS = [
   // published OTA is the commit it claims, and whether the surface smoke can
   // tell a blank screen from a working one. ~40ms, deliberately NOT skippable —
   // every failure they cover is a deploy that reports success and is not one.
-  { label: 'deploy + release checks', argv: ['pnpm', 'run', 'test:scripts'] },
+  { id: 'scripts', label: 'deploy + release checks', argv: ['pnpm', 'run', 'test:scripts'] },
 ];
 
 /**
@@ -165,6 +206,7 @@ if (SKIP_BROWSER_GATE_TEMP) {
 }
 
 const STEPS = ALL_STEPS.filter((step) => {
+  if (LAYERS !== null && !LAYERS.includes(step.id)) return false;
   if (SKIP_BROWSER_GATE_TEMP && (step.label === 'browser' || step.label === 'load targets'))
     return false;
   if (!changed || !step.skippableWhenUntouched) return true;

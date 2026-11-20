@@ -1,19 +1,24 @@
-# The test suite (scripts/verify.mjs), on its own. Each change runs it twice:
+# The test gate (scripts/verify.mjs), split across runners. A change is tested
+# twice:
 #
-#   pull request  the cheap layers (lint, types, unit, contract, integration)
-#                 on one runner: quick feedback, and the `tests` check the
-#                 ruleset needs before a PR may enter the merge queue
-#   merge queue   the full gate, four shards, browser layer on, against main
-#                 plus everything queued ahead of it
+#   pull request  the cheap layers (lint, types, the static checks) and the unit,
+#                 contract and integration suites of the packages the diff can
+#                 reach: quick feedback, and the `tests` check a PR needs to merge
+#   push to main  everything: every package's suites and the browser layer in
+#                 four shards. release.yml publishes a commit only when this run
+#                 is green, so a failure here stops the release, not the merges.
 #
-# The heavy run is in the queue because the queue caps how many entries it
-# builds at once (the ruleset's max_entries_to_build), so it can never fill the
-# runner pool. Run on every PR instead, a burst of agent PRs took all 20
-# runners and the queue's and the release's own jobs waited half an hour.
+# PRs merge as soon as their own check is green, with no merge queue: a queue
+# re-ran the full gate once per PR and could build only three at a time, so a
+# busy day backed up for hours. Main is tested instead. Runs on main queue
+# behind each other: one runs, and of the pushes that land meanwhile only the
+# newest waits, so one run covers every PR merged while the last one ran. A
+# commit whose run was skipped that way is superseded; release.yml skips it.
+# A red main goes to needs-attention.yml as main-failed.
 #
-# There is no run on push to main: main only moves through the queue, which
-# fast-forwards it to the commit it tested, so that commit already carries the
-# `tests` check release.yml waits for.
+# scripts/ci-plan.mjs decides the slices: one runner each for the cheap layers,
+# the host suites, the web suites and the remaining packages, plus the four
+# browser shards on main. No runner repeats another's work.
 #
 # Runs only in the project's public repository: Actions minutes are free there.
 
@@ -21,35 +26,27 @@ name: test
 
 on:
   pull_request:
+  push:
+    branches: [main]
+  # Only while the merge queue is being retired: a queue run is a full run.
   merge_group:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to a PR makes the older run pointless. A merge-queue run is never
-# cancelled: its commit becomes main, and release.yml needs its result.
+# A newer push to a PR makes the older run pointless, so it is cancelled. Main
+# is never cancelled mid-run (release.yml is waiting on it); pushes queue.
 concurrency:
-  group: test-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: test-${{ github.event_name == 'merge_group' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # In the queue, four runners wide: every runner runs the cheap layers, and the
-  # browser layer is split between them with Playwright's --shard, because the
-  # whole suite on one runner took about an hour. On a PR, one runner, cheap
-  # layers only.
-  verify:
+  plan:
     if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      # The account's runners are one shared pool. Eight open PRs at four shards
-      # each filled it, and a fully built release sat an hour waiting for the
-      # runner its publish job needs. A PR takes two at a time (its shards run
-      # in two waves), so the pool keeps headroom; main still runs all four.
-      max-parallel: ${{ github.event_name == 'pull_request' && 2 || 4 }}
-      matrix:
-        shard: ${{ fromJSON(github.event_name == 'merge_group' && '["1/4", "2/4", "3/4", "4/4"]' || '["1/1"]') }}
+    outputs:
+      slices: ${{ steps.plan.outputs.slices }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,85 +54,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      # Headroom against the OOM killer (exit 137): the host suite's sidecars,
-      # then headed Chromium, outgrow the runner's RAM. Swap turns a spike into
-      # a slow moment instead of a killed shard.
-      - name: Add swap
-        run: |
-          sudo fallocate -l 6G /mnt/ci-extra.swap
-          sudo chmod 600 /mnt/ci-extra.swap
-          sudo mkswap /mnt/ci-extra.swap
-          sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      # Runners have been failing to resolve every *.ubuntu.com name (azure.archive,
-      # archive, security) while other hosts such as packages.microsoft.com resolve,
-      # so apt -- and with it `playwright install --with-deps` -- failed every shard
-      # before a test ran. Point apt at a mirror outside ubuntu.com instead: the
-      # deb822 sources read /etc/apt/apt-mirrors.txt through their mirror+file: URIs,
-      # and any source naming an ubuntu.com host directly is rewritten too. The
-      # retry and timeout settings apply to every apt call, including Playwright's.
-      - name: Use a non-ubuntu.com apt mirror
+      - id: plan
+        env:
+          FULL: ${{ github.event_name != 'pull_request' }}
+          BASE: origin/${{ github.base_ref }}
         run: |
-          # Probe: one mirror is sometimes unreachable from a runner (kernel.org timed
-          # out on every connection on 2026-11-12), so use the first that answers.
-          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
-          mirror=
-          for m in https://mirrors.edge.kernel.org/ubuntu/ https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/; do
-            # InRelease alone is not enough: a mirror has answered it while failing every
-            # .deb download (kernel.org, 2026-11-15), so also fetch a real package file.
-            deb=$(curl -4 -fsS --max-time 20 "${m}dists/${codename}/main/binary-amd64/Packages.gz" 2>/dev/null | zcat 2>/dev/null | awk '/^Filename: /{print $2; exit}') || deb=
-            if [ -n "$deb" ] && curl -4 -fsS --max-time 20 -o /dev/null "${m}${deb}"; then mirror=$m; break; fi
-            echo "::warning::apt mirror unreachable: $m"
-          done
-          [ -n "$mirror" ] || { echo "::error::no apt mirror reachable"; exit 1; }
-          echo "using apt mirror $mirror"
-          echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
-          sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
-            -exec sed -E -i "s#https?://([a-z0-9-]+\.)*(archive|security)\.ubuntu\.com/ubuntu/?#$mirror#g" {} +
-          # IPv4 only: runners have also failed to connect to the mirror over IPv6.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::ForceIPv4 "true";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99ci-mirror >/dev/null
-          grep -rhE '^(URIs|deb) ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
-      # Three attempts, matching the Xvfb install below.
-      - name: Install Chromium and its system packages
-        run: |
-          for attempt in 1 2 3; do
-            pnpm --filter @patch/web exec playwright install --with-deps chromium && exit 0
-            [ "$attempt" = 3 ] && break
-            wait=$((30 + RANDOM % 31))
-            echo "::warning::playwright install: attempt $attempt failed; retrying in ${wait}s"
-            sleep "$wait"
-            # A 404 means the runner package index is stale: refresh it.
-            sudo apt-get update -qq || true
-          done
-          echo "::error::playwright install: failed after 3 attempts"
-          exit 1
-      # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
-      # tests keep credentials in the native keyring (Secret Service over D-Bus).
-      - name: Install Xvfb and the keyring
-        run: |
-          for attempt in 1 2 3; do
-            sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 \
-              xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
-            [ "$attempt" = 3 ] && break
-            wait=$((30 + RANDOM % 31))
-            echo "::warning::apt-get install: attempt $attempt failed; retrying in ${wait}s"
-            sleep "$wait"
-            # A 404 means the runner package index is stale: refresh it.
-            sudo apt-get update -qq || true
-          done
-          echo "::error::apt-get install: failed after 3 attempts"
-          exit 1
-      # Some suites run against built output (the server serves the web build).
-      # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
-      - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
-      # The browser layer is on here. It is off by default on the dev box, which
-      # is too small for it (verify.mjs explains); a runner is not.
-      # 60 minutes: shard 1 runs the same lint/types/unit layer as the others plus
-      # its browser slice and takes ~36 minutes on a good run, so 40 left no
-      # headroom and timed out the merge queue with every test still passing. A
-      # shard that hung for longer than an hour held every later check behind it.
+          set -euo pipefail
+          if [ "$FULL" = true ]; then
+            slices=$(node scripts/ci-plan.mjs --all)
+          else
+            slices=$(node scripts/ci-plan.mjs --base "$BASE")
+          fi
+          echo "slices=$slices" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: ${{ matrix.slice.name }}
+    needs: [plan]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # The runners are one shared pool with release.yml: keep a PR to four.
+      max-parallel: ${{ github.event_name == 'pull_request' && 4 || 8 }}
+      matrix:
+        slice: ${{ fromJSON(needs.plan.outputs.slices) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+        with:
+          system-deps: ${{ matrix.slice.system }}
       # Samples every 5s so a 137 can be traced to a process: memory, the
       # biggest resident processes, and the job's cgroup limit and OOM counter
       # (a cgroup kill leaves nothing in `free`). The log is printed on failure.
@@ -160,15 +110,27 @@ jobs:
       - name: The gate
         timeout-minutes: 60
         env:
-          PATCH_RUN_BROWSER_GATE: ${{ github.event_name == 'merge_group' && '1' || '0' }}
-          PATCH_BROWSER_SHARD: ${{ matrix.shard }}
+          PATCH_RUN_BROWSER_GATE: ${{ matrix.slice.shard != '' && '1' || '0' }}
+          PATCH_BROWSER_SHARD: ${{ matrix.slice.shard }}
+          LAYERS: ${{ matrix.slice.layers }}
+          PACKAGES: ${{ matrix.slice.packages }}
+          SYSTEM: ${{ matrix.slice.system }}
           # Logs who sends any SIGKILL or group kill (scripts/ci-killtrace.cjs).
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-killtrace.cjs
         run: |
-          dbus-run-session -- bash -euo pipefail -c '
-            printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
-            node scripts/verify.mjs
-          '
+          [ -n "$PATCH_BROWSER_SHARD" ] || unset PATCH_BROWSER_SHARD
+          args=(--layers="$LAYERS")
+          [ -z "$PACKAGES" ] || args+=(--packages="$PACKAGES")
+          # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
+          # tests keep credentials in the native keyring (Secret Service over D-Bus).
+          if [ "$SYSTEM" = true ]; then
+            dbus-run-session -- bash -euo pipefail -c '
+              printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+              node scripts/verify.mjs "$@"
+            ' _ "${args[@]}"
+          else
+            node scripts/verify.mjs "${args[@]}"
+          fi
       - name: Memory log and kernel OOM kills
         if: failure()
         run: |
@@ -178,12 +140,13 @@ jobs:
           echo "--- kernel"; (sudo dmesg || sudo journalctl -k --no-pager) 2>&1 | grep -i -E "out of memory|oom|killed process|cgroup" | tail -n 20 || true
 
   # The one check that branch protection and release.yml look at: green only
-  # when every shard is. Reports on forks too, where verify is skipped, so it is
-  # failed rather than absent there.
+  # when the plan and every slice are. Reports on forks too, where the plan is
+  # skipped, so it is failed rather than absent there.
   tests:
-    needs: [verify]
+    needs: [plan, verify]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
+          test "${{ needs.plan.result }}" = success || { echo "plan: ${{ needs.plan.result }}" >&2; exit 1; }
           test "${{ needs.verify.result }}" = success || { echo "verify: ${{ needs.verify.result }}" >&2; exit 1; }
