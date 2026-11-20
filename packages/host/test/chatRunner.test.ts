@@ -1349,8 +1349,9 @@ describe('Host ChatRunner', () => {
       (e): e is Extract<WireEvent, { type: 'chat.state' }> => e.type === 'chat.state',
     );
     expect(state).toBeDefined();
-    // The host states facts, never an activity: the server decides the status.
-    expect(state?.activity).toBeUndefined();
+    // The host states its facts; `activity` rides along only for a server too
+    // old to decide status itself, and the server link strips it for one that does.
+    expect(state?.activity).toBe('idle');
     expect(state?.queuedTurns).toBe(0);
   });
 

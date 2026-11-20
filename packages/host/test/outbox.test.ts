@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { WireEvent } from '@patch/wire';
+import { decode, encode, type WireEvent } from '@patch/wire';
 import { Outbox } from '../src/outbox.js';
 import { createServerLink, type ServerLink } from '../src/serverLink.js';
 
@@ -333,4 +333,60 @@ describe('server link with an outbox', () => {
       expect(resent.map((f) => f['event'])).toEqual([started(-1), withRef(0)]);
     });
   });
+
+  // spec/12 § Chat status: a server that decides status itself says
+  // `serverStatus`; until a host sees it, it sends chat.state exactly as before,
+  // so a host that updates first still works with the server it finds.
+  describe('chat.state for a server that decides status, and for one that does not', () => {
+    const state = (): WireEvent =>
+      ({
+        type: 'chat.state',
+        chatId: 'c1',
+        hostId: 'h1',
+        activity: 'errored',
+        lastError: { code: 'sdk_error', message: 'boom', at: 1 },
+        queuedTurns: 1,
+        permissionMode: 'auto',
+        lastUpdated: 5,
+      }) as WireEvent;
+    const sentStates = (s: FakeSocket): Record<string, unknown>[] =>
+      s.sent.filter((f) => f['type'] === 'chat.state');
+
+    it('a server without the flag gets the old shape: activity and lastError, no queuedTurns', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
+      link.send(state());
+      const [frame] = sentStates(s);
+      expect(frame).toMatchObject({ activity: 'errored', lastError: { code: 'sdk_error' } });
+      expect(frame).not.toHaveProperty('queuedTurns');
+      // An older server's strict reader takes it, `activity` required as it was.
+      const decodedActivity = (
+        decode(encode(frame as unknown as WireEvent)) as { activity?: string }
+      ).activity;
+      expect(decodedActivity).toBe('errored');
+    });
+
+    it('a server with the flag gets the facts only', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true, serverStatus: true }));
+      link.send(state());
+      const [frame] = sentStates(s);
+      expect(frame).not.toHaveProperty('activity');
+      expect(frame).not.toHaveProperty('lastError');
+      expect(frame).toMatchObject({ queuedTurns: 1 });
+    });
+
+    it('a frame held while offline is shaped for the server it finally reaches', () => {
+      link.start();
+      const first = connect(authOk({ hostOutbox: true, serverStatus: true }));
+      first.close(1006);
+      link.send(state());
+      link.start();
+      const old = connect(authOk({ hostOutbox: true }));
+      const [frame] = sentStates(old);
+      expect(frame).toMatchObject({ activity: 'errored' });
+      expect(frame).not.toHaveProperty('queuedTurns');
+    });
+  });
+
 });
