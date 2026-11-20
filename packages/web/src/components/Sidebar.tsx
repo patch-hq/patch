@@ -1260,6 +1260,7 @@ function BottomNav(): JSX.Element {
   const onSettings = section(['settings'], '/settings');
   const onTriage = section(['triage'], '/triage');
   const onInbox = section(['inbox'], '/inbox');
+  const onWaiting = section(['waiting'], '/waiting');
   return (
     <>
       <nav className="sb-bottom" data-testid="bottom-nav">
@@ -1296,6 +1297,14 @@ function BottomNav(): JSX.Element {
               Inbox
             </OpenableLink>
           )}
+          <OpenableLink
+            to="/waiting"
+            opens={{ kind: 'page', page: 'waiting' }}
+            className={`nav-row ${onWaiting ? 'active' : ''}`}
+            data-testid="nav-waiting"
+          >
+            Waiting
+          </OpenableLink>
           <OpenableLink
             to="/pads"
             opens={{ kind: 'page', page: 'pads' }}

@@ -46,6 +46,7 @@ import { navigateAfterArchive, useLeaveWhenArchivedElsewhere } from './lib/archi
 import { PageNotFound } from './components/PageNotFound.js';
 import { AppErrorBoundary } from './components/AppErrorBoundary.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
+import { WaitingPaneRoute } from './routes/WaitingPaneRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
 import { InboxPaneRoute } from './routes/InboxPaneRoute.js';
@@ -754,6 +755,7 @@ export function AppShell(): JSX.Element {
             <Route path="/pads/:id" element={<PadsPaneRoute ws={wsRef.current} mode="open" />} />
             <Route path="/triage" element={<TriagePaneRoute ws={wsRef.current} />} />
             <Route path="/inbox" element={<InboxPaneRoute ws={wsRef.current} />} />
+            <Route path="/waiting" element={<WaitingPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs" element={<JobsPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs/new" element={<JobPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs/:id" element={<JobPaneRoute ws={wsRef.current} />} />

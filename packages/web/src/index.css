@@ -19355,3 +19355,63 @@ a.drop-target {
 .agent-msg-text > :last-child {
   margin-bottom: 0;
 }
+
+/* Waiting page (spec/14 § Waiting view) */
+.waiting-list {
+  list-style: none;
+  margin: 0;
+  padding: 12px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.waiting-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr auto auto;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.waiting-row:hover {
+  background: var(--bg-hover, var(--bg-elevated));
+}
+.waiting-chat {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waiting-what {
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waiting-chip {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.waiting-when {
+  font-variant-numeric: tabular-nums;
+  min-width: 90px;
+  text-align: right;
+}
+.waiting-empty {
+  padding: 28px;
+  color: var(--ink-faint);
+}
+@media (max-width: 640px) {
+  .waiting-row {
+    grid-template-columns: 1fr auto;
+  }
+  .waiting-what {
+    grid-column: 1 / -1;
+  }
+}

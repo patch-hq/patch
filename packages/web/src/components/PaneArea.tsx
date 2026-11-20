@@ -82,6 +82,7 @@ import { TerminalPanel } from './TerminalPanel.js';
 import { BrowserView } from './BrowserView.js';
 import { TriagePage } from './TriagePage.js';
 import { InboxPage } from './InboxPage.js';
+import { WaitingPage } from './WaitingPage.js';
 import { PadsPage } from './PadsPage.js';
 import { PadPane } from './PadPane.js';
 import { NewPadPage } from './NewPadPage.js';
@@ -176,6 +177,8 @@ function tabTitle(
           return 'Triage';
         case 'inbox':
           return 'Inbox';
+        case 'waiting':
+          return 'Waiting';
         case 'pad':
           return padName ?? 'Pad';
         case 'new-pad':
@@ -221,6 +224,7 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
           return <Files size={16} aria-hidden />;
         case 'triage':
         case 'inbox':
+        case 'waiting':
         case 'pads':
         case 'pad':
         case 'new-pad':
@@ -780,6 +784,8 @@ function TabContent({
           return <TriagePage ws={ws} />;
         case 'inbox':
           return <InboxPage />;
+        case 'waiting':
+          return <WaitingPage />;
         case 'pad':
           return <PadPane padId={d.padId} />;
         case 'new-pad':
@@ -1143,6 +1149,7 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
     }
     out.push(
       tab('new-triage', 'Triage', { kind: 'page', page: 'triage' }, 'Pages'),
+      tab('new-waiting', 'Waiting', { kind: 'page', page: 'waiting' }, 'Pages'),
       tab('new-inbox', 'Inbox', { kind: 'page', page: 'inbox' }, 'Pages'),
       tab('new-pads', 'Pads', { kind: 'page', page: 'pads' }, 'Pages'),
       tab('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }, 'Pages'),

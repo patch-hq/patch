@@ -25,6 +25,7 @@ export type PageKind =
   | 'pads'
   | 'triage'
   | 'inbox'
+  | 'waiting'
   | 'pad'
   | 'new-pad'
   | 'artifact';
@@ -44,6 +45,7 @@ export type TabDescriptor =
   | { kind: 'page'; page: 'pads' }
   | { kind: 'page'; page: 'triage' }
   | { kind: 'page'; page: 'inbox' }
+  | { kind: 'page'; page: 'waiting' }
   | { kind: 'page'; page: 'pad'; padId: string }
   | { kind: 'page'; page: 'new-pad'; chatId?: string }
   /** A page the chat published with `patch_artifact` (spec/14 § Artifacts). `url` is the signed, server-served URL. */
@@ -437,6 +439,7 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
         case 'pads':
         case 'triage':
         case 'inbox':
+        case 'waiting':
         case 'host-files':
           return true;
         case 'job':

@@ -30,6 +30,7 @@ import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
 import { useInboxStore } from './stores/inboxStore.js';
 import { InboxPaneRoute } from './routes/InboxPaneRoute.js';
+import { WaitingPaneRoute } from './routes/WaitingPaneRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
@@ -3198,6 +3199,32 @@ const archiveSize = Number(new URLSearchParams(window.location.search).get('arch
   }) as typeof window.fetch;
 }
 
+// `/waiting` reads the jobs list: serve one one-off job that messages a seeded
+// chat, so the page shows an event wait beside the seeded timers.
+{
+  const prevFetch = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (new URL(url, window.location.origin).pathname !== '/api/jobs')
+      return prevFetch(input, init);
+    const job = {
+      id: 'j_wait1',
+      name: 'PR 412 merged',
+      enabled: true,
+      oneOff: true,
+      createdAt: Date.now() - 25 * 60_000,
+      trigger: { type: 'webhook', path: 'github', scheme: 'github' },
+      action: { type: 'message', chatId: 'chat_bus', prompt: 'the PR merged, carry on' },
+    };
+    return Promise.resolve(
+      new Response(JSON.stringify({ jobs: [job] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }) as typeof window.fetch;
+}
+
 if (archiveSize > 0) {
   const prevFetch = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -4264,6 +4291,7 @@ function Harness(): JSX.Element {
           <Route path="/jobs/:id" element={<JobPaneRoute ws={harnessWs} />} />
           <Route path="/triage" element={<TriagePaneRoute ws={harnessWs} />} />
           <Route path="/inbox" element={<InboxPaneRoute ws={harnessWs} />} />
+          <Route path="/waiting" element={<WaitingPaneRoute ws={harnessWs} />} />
           <Route path="/jobs" element={<JobsPaneRoute ws={harnessWs} />} />
           <Route path="/lifecycle/:kind" element={<LifecycleRoute />} />
           <Route path="/connect" element={<ConnectRoute />} />

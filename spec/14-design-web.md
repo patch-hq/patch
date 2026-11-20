@@ -1495,6 +1495,10 @@ A power user shouldn't have to dig for the shortcut; a new user learns them pass
 
 The shortcuts above are global to the SPA and are written once, in macOS glyphs. Every surface that draws a chord — cheat-sheet, tag, tooltip — renders it for the keyboard in front of the user, from that one definition: a Mac gets the glyphs, and anything else gets the words its keys are printed with, joined with `+` (`Ctrl+Alt+A`, `Alt+E`, `Ctrl+Enter`). Swapping one Apple glyph for another off a Mac would still name a key that keyboard does not have. The underlying chord is unchanged either way. Configurable in Settings → Keyboard.
 
+## Waiting view
+
+A page, `/waiting`, listing what agents are waiting on right now, so a chat that has ended its turn to wait is never invisible. One row per wait: the chat's name, what it is waiting for, a chip (`Timer`, `Loop` or `Event`) and when. Timers are a chat's pending self-wake or loop (`02-host.md` § Self-wake), shown as a countdown, or `after the current turn` for a loop tick held back by a running turn. Events are enabled one-off jobs whose action messages that chat (`08-triggers-and-jobs.md` § One-off jobs): the agent asked to be told when a trigger fires and ended its turn, and the row reads `since <age>`. Timers come first, soonest first, then events, newest first. Archived and deleted chats are left out, and a failed jobs load shows its error rather than an empty list. Clicking a row opens the chat. The page is derived from state the client already holds plus the jobs list; it adds no new wire message.
+
 ## Jobs view
 
 Above the list, a collapsed "Defaults for all jobs" area holds the account-wide job settings (they are not in Settings): the "Default model for jobs" picker, and the "Autonomy prompt" row — the text every job's first user-turn is prefaced with unless that job overrides it (`08-triggers-and-jobs.md` § Autonomy prompt). The prompt opens in the same editor as the Manager's sweep prompt (Save, Cancel, ⌘↵), and Reset writes the built-in default back. It is the only place the account-wide prompt is edited; the job editor shows it only under a collapsed Advanced area.
