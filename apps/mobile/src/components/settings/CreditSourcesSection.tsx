@@ -11,7 +11,7 @@
 
 import React from 'react';
 import { Alert, View } from 'react-native';
-import { describeAccountState, type AccountStrategy, type HostAccountSummary } from '@patch/wire';
+import { describeAccountState, type HostAccountSummary } from '@patch/wire';
 import { api, type SharedBackendId } from '../../api/rest';
 import { space } from '../../lib/theme';
 import { formatReset } from '../../lib/usage';
@@ -20,6 +20,9 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import type { AnchoredMenuItem } from '../AnchoredMenu';
 import { SettingsSection } from '../SettingsSection';
 import {
+  STRATEGIES,
+  STRATEGY_HINT,
+  STRATEGY_LABEL,
   moveAccount,
   moveItems,
   Rank,
@@ -39,25 +42,7 @@ import { Chips, ErrorLine, Muted, Row } from './ui';
 
 export { CLAUDE_ACK_TIMEOUT_MS } from './accountRows';
 
-const STRATEGIES: readonly AccountStrategy[] = [
-  'priority',
-  'round-robin',
-  'soonest-reset',
-  'least-used',
-];
-const STRATEGY_LABEL: Record<AccountStrategy, string> = {
-  priority: 'Priority',
-  'round-robin': 'Round robin',
-  'soonest-reset': 'Soonest reset',
-  'least-used': 'Least used',
-};
-/** What each strategy does, in one sentence (spec/10 § Backend credentials). */
-export const STRATEGY_HINT: Record<AccountStrategy, string> = {
-  priority: 'The first account here that still has allowance',
-  'round-robin': 'Each turn takes the next account along, spent evenly',
-  'soonest-reset': 'The account whose weekly limit resets soonest',
-  'least-used': 'The account with the most allowance left right now',
-};
+export { STRATEGY_HINT } from './accountRows';
 
 export function UsagePage(): React.ReactElement {
   const shared = useSettingsStore((s) => s.data?.shared ?? null);

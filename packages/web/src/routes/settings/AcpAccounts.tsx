@@ -5,7 +5,7 @@
 // four characters and its state. An agent that takes no key runs on its own
 // sign-in on each host and has nothing to add here.
 
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { useState } from 'react';
 import { describeAccountState, resolveAcpAgents, type AcpAgentConfig } from '@patch/wire';
 import { api, type SharedState } from '../../api/rest.js';
@@ -14,7 +14,9 @@ import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { formatResetLocal } from '../../lib/usage.js';
 import { writeShared } from './sharedWrite.js';
-import { Group, Note, Row } from './ui.js';
+import { RankedList } from './accountList.js';
+import { STRATEGIES, STRATEGY_LABELS, STRATEGY_TITLES } from './SharedAccounts.js';
+import { Group, Note, Pills, Row } from './ui.js';
 
 type AcpRow = NonNullable<SharedState['secrets']['acp']>[number];
 
@@ -53,6 +55,7 @@ function AgentGroup({
   loaded: boolean;
 }): JSX.Element {
   const reachable = usePresenceStore((s) => s.connection) === 'connected';
+  const strategy = usePreferencesStore((s) => s.preferences.accountStrategy.acp ?? 'priority');
   const [editing, setEditing] = useState<Editing | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -125,6 +128,56 @@ function AgentGroup({
     </form>
   );
 
+  const entry = (row: AcpRow, handle: ReactNode): JSX.Element =>
+    editing?.accountId === row.id ? (
+      <div key={row.id} className="set-row stack" data-testid={`acp-account-${row.id}`}>
+        <span className="set-row-title">
+          {handle}
+          {row.label}
+        </span>
+        {keyForm}
+      </div>
+    ) : (
+      <Row
+        key={row.id}
+        title={
+          <>
+            {handle}
+            {row.label}
+          </>
+        }
+        sub={[
+          row.last4 ? `API key · ends ${row.last4}` : 'API key',
+          row.state ? describeAccountState(row.state, formatResetLocal) : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+        testid={`acp-account-${row.id}`}
+      >
+        <button
+          type="button"
+          className="set-btn"
+          data-testid={`acp-account-${row.id}-replace`}
+          disabled={!reachable || busy}
+          onClick={() => {
+            setEditing({ agentId: agent.id, accountId: row.id });
+            setDraft('');
+          }}
+        >
+          Replace key
+        </button>
+        <button
+          type="button"
+          className="set-btn danger"
+          data-testid={`acp-account-${row.id}-remove`}
+          disabled={!reachable || busy}
+          onClick={() => void remove(row)}
+        >
+          Remove
+        </button>
+      </Row>
+    );
+
   return (
     <Group
       label={agent.label}
@@ -152,48 +205,35 @@ function AgentGroup({
       {loaded && rows.length === 0 && editing === null ? (
         <Note testid={`${id}-empty`}>No accounts</Note>
       ) : null}
-      {rows.map((row) =>
-        editing?.accountId === row.id ? (
-          <div key={row.id} className="set-row stack" data-testid={`acp-account-${row.id}`}>
-            <span className="set-row-title">{row.label}</span>
-            {keyForm}
-          </div>
-        ) : (
-          <Row
-            key={row.id}
-            title={row.label}
-            sub={[
-              row.last4 ? `API key · ends ${row.last4}` : 'API key',
-              row.state ? describeAccountState(row.state, formatResetLocal) : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-            testid={`acp-account-${row.id}`}
-          >
-            <button
-              type="button"
-              className="set-btn"
-              data-testid={`acp-account-${row.id}-replace`}
-              disabled={!reachable || busy}
-              onClick={() => {
-                setEditing({ agentId: agent.id, accountId: row.id });
-                setDraft('');
-              }}
-            >
-              Replace key
-            </button>
-            <button
-              type="button"
-              className="set-btn danger"
-              data-testid={`acp-account-${row.id}-remove`}
-              disabled={!reachable || busy}
-              onClick={() => void remove(row)}
-            >
-              Remove
-            </button>
-          </Row>
-        ),
-      )}
+      {rows.length > 1 ? (
+        // One strategy for every ACP agent's accounts, as Claude and Codex each have one.
+        <Row title="Pick the account by" testid={`${id}-strategy-row`}>
+          <Pills
+            label="ACP account strategy"
+            options={STRATEGIES}
+            value={strategy}
+            disabled={!reachable}
+            labels={STRATEGY_LABELS}
+            titles={STRATEGY_TITLES}
+            testid={`${id}-strategy`}
+            onChange={(next) =>
+              void writeShared('ACP account strategy', () => api.setAcpStrategy(next))
+            }
+          />
+        </Row>
+      ) : null}
+      {rows.length > 0 ? (
+        <RankedList
+          testid={`${id}-rank`}
+          onCommit={(next) =>
+            writeShared(`${agent.label} order`, () => api.orderAcpAccounts(agent.id, next))
+          }
+          items={rows.map((row) => ({
+            id: row.id,
+            render: (handle: ReactNode) => entry(row, handle),
+          }))}
+        />
+      ) : null}
       {editing?.accountId === null ? (
         <div className="set-row stack" data-testid={`${id}-new`}>
           {keyForm}

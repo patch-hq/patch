@@ -254,9 +254,12 @@ account's key, else the shared `gemini` key, as `GEMINI_API_KEY`, checked with
 the Gemini key check); the shared `acpAgents` setting adds agents or replaces
 one by id. Its models are `acp/<agent>/<model>`.
 
-An agent's credential is, in order: the key of its first ACP account, which the
-server holds encrypted and sends with every settings snapshot (`10-auth.md` §
-Backend credentials); a shared provider key mapped to the same variable; or the
+An agent's credential is, in order: the key of one of its ACP accounts, which
+the server holds encrypted and sends with every settings snapshot (`10-auth.md`
+§ Backend credentials), chosen per turn by the shared account order and the ACP
+account strategy and skipping an account the agent refused as limited or signed
+out (§ Choosing an account there); a shared provider key mapped to the same
+variable; or the
 agent's own sign-in on that host (Gemini CLI's Google login, for one), which
 Patch neither reads nor carries to other hosts. The host keeps the accounts it
 was last sent in memory and asks the agent again when they change.

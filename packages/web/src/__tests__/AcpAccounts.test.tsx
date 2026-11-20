@@ -94,6 +94,35 @@ describe('Settings → AI accounts → ACP agents', () => {
     expect(screen.getByTestId('acp-accounts-gemini-input')).toBeInTheDocument();
   });
 
+  it('orders two accounts as Claude and Codex do, and sets the shared ACP strategy', async () => {
+    const HOME = { ...WORK, id: 'a2', label: 'Home', last4: '2222' };
+    loadShared({ secrets: { acp: [WORK, HOME] } });
+    const order = vi
+      .spyOn(api, 'orderAcpAccounts')
+      .mockResolvedValue(sharedState({ secrets: { acp: [HOME, WORK] } }));
+    const strategy = vi.spyOn(api, 'setAcpStrategy').mockResolvedValue(
+      sharedState({
+        secrets: { acp: [HOME, WORK] },
+        settings: {
+          accountStrategy: { claude: 'priority', codex: 'priority', acp: 'round-robin' },
+        },
+      }),
+    );
+    renderIt();
+    fireEvent.keyDown(screen.getByTestId('acp-accounts-gemini-rank-handle-a1'), {
+      key: 'ArrowDown',
+    });
+    await waitFor(() => expect(order).toHaveBeenCalledWith('gemini', ['a2', 'a1']));
+    fireEvent.click(screen.getByTestId('acp-accounts-gemini-strategy-round-robin'));
+    await waitFor(() => expect(strategy).toHaveBeenCalledWith('round-robin'));
+  });
+
+  it('shows no strategy choice for a single account', () => {
+    loadShared({ secrets: { acp: [WORK] } });
+    renderIt();
+    expect(screen.queryByTestId('acp-accounts-gemini-strategy')).toBeNull();
+  });
+
   it('gives an account a new key, and removes one after confirming', async () => {
     loadShared({ secrets: { acp: [WORK] } });
     const replace = vi

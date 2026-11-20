@@ -83,6 +83,21 @@ export class AcpSignedOutError extends TurnFailedError {
   }
 }
 
+/**
+ * A turn the agent refused with a quota or rate limit. `retrySafe` says no tool
+ * ran before the refusal, so the turn can run again on another account without
+ * doing anything twice (spec/10 § Limits).
+ */
+export class AcpLimitError extends TurnFailedError {
+  override readonly name = 'AcpLimitError';
+  constructor(
+    message: string,
+    readonly retrySafe: boolean,
+  ) {
+    super(message, { kind: 'rate_limit', status: 'rejected' });
+  }
+}
+
 /** What a turn directory says about the ACP turn it holds. */
 export interface RecoveredAcpTurn {
   sessionId?: string;
@@ -154,9 +169,21 @@ export class AcpBackend implements SdkBackend {
     private readonly registry: AcpRegistry,
     readonly history: CodexHistory,
     private readonly clientVersion: string,
+    /** Told when the agent refuses the account a turn ran on as signed out, so it is skipped. */
+    private readonly onAccountSignedOut?: (accountId: string) => void,
   ) {}
 
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
+    try {
+      yield* this.runTurn(opts);
+    } catch (err) {
+      if (err instanceof AcpSignedOutError && opts.accountId !== undefined)
+        this.onAccountSignedOut?.(opts.accountId);
+      throw err;
+    }
+  }
+
+  private async *runTurn(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     const parsed = parseAcpModel(opts.model);
     if (!parsed) throw new Error(`${opts.model ?? 'No model'} is not an ACP agent's model`);
     const agent = this.registry.agent(parsed.agentId);
@@ -204,8 +231,13 @@ export class AcpBackend implements SdkBackend {
     // ---- the process ----
     const queue: QueueItem[] = [];
     let wake: (() => void) | undefined;
+    /** A tool of the agent's ran this turn: running it again would repeat it. */
+    let toolsRan = false;
     const pushEnvelopes = (envs: SdkEnvelope[]): void => {
-      for (const env of envs) queue.push({ env });
+      for (const env of envs) {
+        if (env.type === 'tool_use' && env.tool?.name !== 'TodoWrite') toolsRan = true;
+        queue.push({ env });
+      }
       wake?.();
     };
     let lineAt = 0;
@@ -283,7 +315,12 @@ export class AcpBackend implements SdkBackend {
         if (recovered) durable.attach({ onLine, onExit });
         else
           durable.start(
-            { command, args: agent.args, cwd: opts.cwd, env: this.registry.env(agent) },
+            {
+              command,
+              args: agent.args,
+              cwd: opts.cwd,
+              env: this.registry.env(agent, opts.accountId),
+            },
             { onLine, onExit },
           );
       };
@@ -292,7 +329,7 @@ export class AcpBackend implements SdkBackend {
         command,
         args: agent.args,
         cwd: opts.cwd,
-        env: this.registry.env(agent),
+        env: this.registry.env(agent, opts.accountId),
       });
       proc = {
         write: (line) => child.write(line),
@@ -411,7 +448,7 @@ export class AcpBackend implements SdkBackend {
       if (s.error !== undefined) {
         if (aborted() && (s.error instanceof AcpClosedError || s.error instanceof AcpRpcError))
           return;
-        throw this.turnError(agent, s.error, exitReason, proc.stderrTail());
+        throw this.turnError(agent, s.error, exitReason, proc.stderrTail(), toolsRan);
       }
       const stop = s.result?.stopReason;
       this.registry.noteTurn(agent.id, { state: { state: 'ready' } });
@@ -636,6 +673,7 @@ export class AcpBackend implements SdkBackend {
     err: unknown,
     exitReason: string | undefined,
     stderr: string,
+    toolsRan = false,
   ): Error {
     if (isAuthError(err)) {
       this.registry.noteTurn(agent.id, { state: { state: 'signed_out' } });
@@ -651,10 +689,7 @@ export class AcpBackend implements SdkBackend {
     const message = (err as Error).message ?? String(err);
     if (/\b429\b|RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(message)) {
       this.registry.noteTurn(agent.id, { state: { state: 'limited' } });
-      return new TurnFailedError(`${agent.label}: ${message}`, {
-        kind: 'rate_limit',
-        status: 'rejected',
-      });
+      return new AcpLimitError(`${agent.label}: ${message}`, !toolsRan);
     }
     if (err instanceof TurnFailedError) return err;
     return new TurnFailedError(`${agent.label}: ${message}`, undefined);

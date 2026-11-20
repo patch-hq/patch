@@ -18,6 +18,7 @@ import {
 import { CodexTurnError } from './codexBackend.js';
 import { CODEX_BACKEND_ID } from './codexAccounts.js';
 import { ACP_BACKEND_ID } from './acpRegistry.js';
+import { AcpLimitError } from './acpBackend.js';
 
 export interface HarnessTraits {
   /** The `backendId` this provider's credentials report under (`host.unauthenticated`). */
@@ -88,7 +89,8 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     resolvesPermissionModeByModel: false,
     generatesStatus: false,
     rateLimitSweeps: false,
-    turnRetrySafe: () => false,
+    // A limit refused before any tool ran can run again on the agent's next account.
+    turnRetrySafe: (err) => err instanceof AcpLimitError && err.retrySafe,
     // An agent's limit error states no reset: it fails visibly rather than parking.
     limitMustStateReset: true,
     ownsSessionFile: false,

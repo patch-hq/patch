@@ -61,6 +61,8 @@ patch accounts strategy <backend> <strategy>          # priority, round-robin, s
 patch accounts adopt <backend> [--host H]              # store that host's own login as a shared account
 patch accounts acp                                     # ACP agents' accounts: agent, label, last four, state
 patch accounts acp sign-in <agent> [--api-key K] [--account A] [--label L]  # an API key, prompted for when not given (10-auth.md § Signing in)
+patch accounts acp order <agent> <accountId>...       # one agent's accounts, first to last
+patch accounts acp strategy <strategy>                # how a turn picks among each agent's accounts
 patch accounts acp remove <agent> <accountId>
 patch keys                                # provider keys: source and last four
 patch keys set <keyId> [--host H to adopt from its environment]

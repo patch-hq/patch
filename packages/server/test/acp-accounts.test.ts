@@ -163,6 +163,23 @@ describe('ACP accounts in the shared settings', () => {
     expect(() => svc.removeAcpAccount('gemini', account.id)).toThrow(/No gemini account/);
   });
 
+  it('orders one agent’s accounts and sets the ACP strategy, as Claude and Codex do', async () => {
+    const svc = make();
+    svc.update({
+      acpAgents: [{ id: 'other', label: 'Other', command: 'o', args: [], apiKeyEnv: 'OTHER_KEY' }],
+    });
+    const a = await svc.addAcpAccount('gemini', KEY_A, 'A');
+    const o = await svc.addAcpAccount('other', 'OtherAgentKeyForTests000000', 'O');
+    const b = await svc.addAcpAccount('gemini', KEY_B, 'B');
+    svc.orderAcp('gemini', [b.id, a.id]);
+    expect(svc.secretsSummary().acp?.map((x) => x.label)).toEqual(['B', 'O', 'A']);
+    expect(() => svc.orderAcp('gemini', [b.id])).toThrow(/exactly once/);
+    expect(() => svc.orderAcp('gemini', [b.id, o.id])).toThrow(/exactly once/);
+    expect(svc.current().accountStrategy.acp).toBeUndefined();
+    svc.setAcpStrategy('round-robin');
+    expect(svc.current().accountStrategy).toMatchObject({ acp: 'round-robin', claude: 'priority' });
+  });
+
   it('keeps the accounts across a restart', async () => {
     const svc = make();
     await svc.addAcpAccount('gemini', KEY_A);

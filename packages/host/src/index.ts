@@ -8,6 +8,7 @@ import { ServerEventsClient } from './serverEventsClient.js';
 import { HARNESS_TRAITS } from './harnesses.js';
 import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
 import { ACP_BACKEND_ID, AcpRegistry } from './acpRegistry.js';
+import { AcpAccounts, type AcpRoute } from './acpAccounts.js';
 import { AcpBackend } from './acpBackend.js';
 import { CodexAccounts, CODEX_BACKEND_ID } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
@@ -79,7 +80,7 @@ import {
   type SettingsAdoptRequestEvent,
   type SettingsAdoptResponseEvent,
   type SettingsSnapshotEvent,
-  type SharedAcpAccount,
+  type AccountStrategy,
   type SharedSecrets,
   type SharedSettings,
   type SharedSettingsPatch,
@@ -837,17 +838,32 @@ async function startHost(
   // the server sends with every snapshot (spec/10 § Backend credentials), else
   // a shared provider key, else the agent's own sign-in on this host.
   let onAcpChange: () => void = () => undefined;
-  let acpAccounts: SharedAcpAccount[] = [];
+  // Which ACP account a turn runs on: the shared order and strategy, skipping
+  // an account its agent refused as limited or signed out (spec/10 § Limits).
+  const acpAccounts = new AcpAccounts();
+  /** The shared `accountStrategy.acp`, kept here as each snapshot is applied. */
+  let acpStrategy: AccountStrategy = 'priority';
+  const acpRoute = (): AcpRoute => ({ strategy: acpStrategy });
   const acpRegistry = new AcpRegistry({
     providerKey: (id) => providerKeys.get(id),
-    accountKey: (agentId) => acpAccounts.find((a) => a.agentId === agentId)?.apiKey,
+    accountKey: (agentId, accountId) =>
+      accountId !== undefined
+        ? acpAccounts.get(accountId)?.apiKey
+        : acpAccounts.resolve(agentId, acpRoute())?.apiKey,
     baseEnv: () => ({ ...process.env }),
     scratchDir: join(config.patchHome, 'acp-probe'),
     clientVersion: VERSION,
     onChange: () => onAcpChange(),
   });
   const acpHistory = new CodexHistory(join(config.patchHome, 'acp-history'), 'acp');
-  const acpBackend = new AcpBackend(acpRegistry, acpHistory, VERSION);
+  const acpBackend = new AcpBackend(acpRegistry, acpHistory, VERSION, (accountId) => {
+    acpAccounts.markSignedOut(accountId);
+    logger.warn(
+      { accountId },
+      'ACP account refused as signed out — skipped until it has a new key',
+    );
+    onAcpChange();
+  });
   const routedBackend: SdkBackend = {
     run: (opts) => adapterForModel(providerAdapters, opts.model).run(opts),
   };
@@ -2408,6 +2424,7 @@ async function startHost(
       }
     }
     accountStrategy = shared.accountStrategy;
+    acpStrategy = shared.accountStrategy.acp ?? 'priority';
   };
 
   /** The last snapshot's Claude accounts, to tell a refresh on this host from the server's. */
@@ -2455,10 +2472,7 @@ async function startHost(
       endpointKeys = snapshot.secrets.endpointKeys;
     });
     await part('ACP accounts', () => {
-      const next = snapshot.secrets.acp ?? [];
-      const changed = JSON.stringify(next) !== JSON.stringify(acpAccounts);
-      acpAccounts = next;
-      if (changed) onAcpChange();
+      if (acpAccounts.apply(snapshot.secrets.acp ?? [])) onAcpChange();
     });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
     await part('Claude accounts', () => {
@@ -4687,7 +4701,7 @@ async function startHost(
     // is not installed, or one the agent itself last said was signed out.
     acp: {
       run: (opts) => acpBackend.run(opts),
-      resolveCredential: async (model) => {
+      resolveCredential: async (model, turn) => {
         const agentId = parseAcpModel(model)?.agentId;
         const agent = agentId !== undefined ? acpRegistry.agent(agentId) : undefined;
         if (!agent)
@@ -4697,12 +4711,24 @@ async function startHost(
           };
         if (!acpRegistry.command(agent))
           return { ok: false, reason: `${agent.label} is not installed on this host.` };
-        return { ok: true, accessToken: '' };
+        // An agent with accounts runs on one; one without runs on its provider
+        // key or its own sign-in.
+        const account =
+          agent.apiKeyEnv !== undefined
+            ? acpAccounts.resolve(agent.id, acpRoute(), turn !== undefined)
+            : undefined;
+        return { ok: true, accessToken: '', ...(account ? { accountId: account.id } : {}) };
       },
-      heldAccounts: () => [],
-      accountLabel: () => undefined,
-      accountSpent: () => ({ spent: false }),
-      nextAccountAfterExhausted: () => undefined,
+      heldAccounts: () =>
+        acpRegistry
+          .agents()
+          .flatMap((a) => acpAccounts.forAgent(a.id).map((x) => ({ id: x.id, label: x.label }))),
+      accountLabel: (accountId) => acpAccounts.get(accountId)?.label,
+      accountSpent: (accountId) => ({ spent: acpAccounts.isSkipped(accountId) }),
+      // The agent refused this account with a limit: the turn runs again on the
+      // next of the agent's accounts that has not been refused, if any.
+      nextAccountAfterExhausted: (_chatId, id, message) =>
+        id !== undefined ? acpAccounts.markLimited(id, message, acpRoute()) : undefined,
       accountRouting: () => undefined,
     },
   };

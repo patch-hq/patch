@@ -34,7 +34,13 @@ vi.mock('../src/api/rest', () => {
   }
   return {
     ApiError,
-    api: { addAcpAccount: vi.fn(), replaceAcpKey: vi.fn(), removeAcpAccount: vi.fn() },
+    api: {
+      addAcpAccount: vi.fn(),
+      replaceAcpKey: vi.fn(),
+      removeAcpAccount: vi.fn(),
+      orderAcpAccounts: vi.fn(),
+      setAcpStrategy: vi.fn(),
+    },
   };
 });
 
@@ -127,6 +133,25 @@ describe('mobile Settings → Usage → ACP agents', () => {
     });
     expect(__getLastAlert()?.message).toBe('The provider refused this key (HTTP 400)');
     expect(queryHost(r.root, byTestId('acp-accounts-gemini-input'))).not.toBeNull();
+  });
+
+  it('moves an account up and sets the shared ACP strategy, with two accounts', async () => {
+    const HOME = { ...WORK, id: 'a2', label: 'Home', last4: '2222' };
+    seed([WORK, HOME]);
+    vi.mocked(api.orderAcpAccounts).mockResolvedValue(state([HOME, WORK]) as never);
+    vi.mocked(api.setAcpStrategy).mockResolvedValue(state([HOME, WORK]) as never);
+    const r = open();
+    expect(queryHost(r.root, byTestId('acp-account-a1-up'))).toBeNull();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('acp-account-a2-up')).props.onPress();
+      await flush();
+    });
+    expect(api.orderAcpAccounts).toHaveBeenCalledWith('gemini', ['a2', 'a1']);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('acp-accounts-gemini-strategy-round-robin')).props.onPress();
+      await flush();
+    });
+    expect(api.setAcpStrategy).toHaveBeenCalledWith('round-robin');
   });
 
   it('replaces a key, and removes an account after asking', async () => {
