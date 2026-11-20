@@ -42,6 +42,8 @@ export interface ChatContinueRoutesDeps {
   idGenerator: () => string;
   /** Wait for a host's answer to an owed retire. Injectable for tests. */
   stepTimeoutMs?: number;
+  /** The account's data folder, where owed retires are recorded (spec/01 § Data folder). */
+  accountDir: string;
 }
 
 const RETIRE_TIMEOUT_MS = 120_000;
@@ -184,15 +186,13 @@ export function registerChatContinueRoutes(
   // copy when it next connected. Nothing creates such a debt any more, but one
   // already recorded is still paid, so the old copy does not come back.
   const timeoutMs = deps.stepTimeoutMs ?? RETIRE_TIMEOUT_MS;
-  const retiresPath = deps.registry.dataDir
-    ? join(deps.registry.dataDir, 'pending-retires.json')
-    : null;
+  const retiresPath = join(deps.accountDir, 'pending-retires.json');
   const pendingRetires = new Map<string, string>(loadPendingRetires());
   const pending = new Map<string, { resolve: (ok: boolean) => void; timer: NodeJS.Timeout }>();
 
   // Re-derivable bookkeeping: a corrupt file must not stop the server booting.
   function loadPendingRetires(): [string, string][] {
-    if (!retiresPath || !existsSync(retiresPath)) return [];
+    if (!existsSync(retiresPath)) return [];
     try {
       return Object.entries(
         JSON.parse(readFileSync(retiresPath, 'utf8')) as Record<string, string>,
@@ -206,7 +206,6 @@ export function registerChatContinueRoutes(
     }
   }
   function savePendingRetires(): void {
-    if (!retiresPath) return;
     const tmp = `${retiresPath}.tmp`;
     writeFileSync(tmp, JSON.stringify(Object.fromEntries(pendingRetires)));
     renameSync(tmp, retiresPath);

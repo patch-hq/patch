@@ -1,7 +1,7 @@
 // One-time: bring the standalone Pad service's designs into Patch's Pads.
 //
 //   pnpm --filter @patch/server exec tsx src/scripts/import-standalone-pads.ts \
-//     --from ~/.pad --pads-dir ~/.patch-server/data/pads
+//     --from ~/.pad --pads-dir ~/.patch-server/data/accounts/<folder>/pads
 //
 // Safe to re-run: a design already in Patch is skipped. Exits non-zero if any
 // design could not be imported, naming why.

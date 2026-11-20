@@ -50,6 +50,7 @@ import { DraftAttachmentStore } from './draft-attachments.js';
 import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
 import { ChatLogStore } from './chat-log-store.js';
 import { removeRetiredChatMirror } from './retired-chat-mirror.js';
+import { prepareAccountData } from './account-data.js';
 import { CommitAcks } from './commit-acks.js';
 import { ManagerHome, ManagerHomeError } from './manager-home.js';
 import { HeldInputStore } from './held-input-store.js';
@@ -465,6 +466,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   if (!registry) {
     throw new Error('build(): either registry or dataDir is required');
   }
+  // spec/01 § Data folder. The server's own files stay at the top of the data
+  // folder; everything that belongs to the account lives in the account's
+  // folder inside it, and a data folder still in the old flat layout is moved
+  // over before anything below opens a file. A test that injects only a
+  // registry keeps the account's data beside it.
+  const serverDir = opts.dataDir ?? registry.dataDir;
+  const accountDir = opts.dataDir
+    ? prepareAccountData(opts.dataDir, log.child({ component: 'account-data' }))
+    : registry.dataDir;
 
   const presence = new PresenceTracker({
     sendToPhoneAfter: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).sendToPhoneAfter,
@@ -495,9 +505,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const heldInputs = opts.hostLink
     ? undefined
     : new HeldInputStore({
-        ...((opts.dataDir ?? registry.dataDir)
-          ? { dataDir: opts.dataDir ?? registry.dataDir }
-          : {}),
+        dataDir: accountDir,
         logger: log.child({ component: 'held-input' }),
         hostName: (hostId: string) => registry.hostName(hostId),
       });
@@ -543,7 +551,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Automations). Same dataDir resolution as the jobs subsystem below; absent
   // there is no dataDir (tests that inject a bare registry), so automations
   // tagging is simply unavailable rather than forced with a fallback path.
-  const jobChatLinksDataDir = opts.dataDir ?? registry.dataDir;
+  const jobChatLinksDataDir = accountDir;
   const jobChatLinks = jobChatLinksDataDir
     ? new JobChatLinks({
         dataDir: jobChatLinksDataDir,
@@ -706,8 +714,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   const specialThreadHost = (): string | null => registry.managerHostId();
 
   // The chat mirror's folder, from before search read the record (spec/01 § Chat record).
-  if (registry.dataDir) {
-    removeRetiredChatMirror(registry.dataDir, log.child({ component: 'retired-chat-mirror' }));
+  if (accountDir) {
+    removeRetiredChatMirror(accountDir, log.child({ component: 'retired-chat-mirror' }));
   }
 
   // The Manager's home host (spec/06 § Where special threads run, § Changing home).
@@ -759,7 +767,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // The user's own messages (`patch_activity`, spec/06 § Cross-chat toolset),
   // read from the server's chat record. Chat dwell sessions come from every
   // surface's focus/visibility frames, recorded by the server (ws-hub.ts).
-  const activityLog = new ActivityLog(opts.dataDir ?? registry.dataDir);
+  const activityLog = new ActivityLog(accountDir);
   const activity = createActivityReader({ chatLogStore, chatRegistry, log: activityLog });
 
   // Settings → Computer use: is an agent driving a host's browser, and Stop.
@@ -834,11 +842,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       logger: log.child({ component: 'new-chat-draft-attachments' }),
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
-  const attachmentsDir =
-    process.env['PATCH_ATTACHMENTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'attachments');
+  const attachmentsDir = process.env['PATCH_ATTACHMENTS_DIR'] ?? join(accountDir, 'attachments');
   const newChatDraftAttachmentsDir =
     process.env['PATCH_NEW_CHAT_DRAFT_ATTACHMENTS_DIR'] ??
-    join(registry.dataDir ?? '/tmp', 'new-chat-draft-attachments');
+    join(accountDir, 'new-chat-draft-attachments');
 
   // ---- shared settings (spec/01 § Settings) + the Manager sweep ----
   // Same dataDir resolution as the jobs subsystem: absent one (a test that
@@ -883,7 +890,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     for (const hostId of hostLink.onlineHostIds()) accountSettings.hostOnline(hostId);
   }
 
-  const sweepRuns = createSweepRunStore(opts.dataDir ?? registry.dataDir);
+  const sweepRuns = createSweepRunStore(accountDir);
   const managerSweeper = new ManagerSweeper({
     chats: chatRegistry,
     settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
@@ -952,7 +959,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     log.warn({}, 'PATCH_SPEAKERS_MOCK=1 — recording speakers TTS notifies (DEV/TEST ONLY)');
   }
 
-  const notificationsDataDir = registry.dataDir;
+  const notificationsDataDir = accountDir;
   // Voice devices (spec/16): the control route is mounted further down, but
   // announcements and audio relay need it from here. Text for a device
   // announcement waits here, by session, until the device joins its session.
@@ -992,7 +999,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // suppression gate) rather than down with the jobs subsystem: unlike jobs it
   // needs no deployment credential gate, and the completion notifier needs it
   // now, not backfilled.
-  const batchDataDir = opts.dataDir ?? registry.dataDir;
+  const batchDataDir = accountDir;
   const batchStore = new BatchStore({
     ...(batchDataDir ? { dataDir: batchDataDir } : {}),
     logger: log.child({ component: 'batch-store' }),
@@ -1139,7 +1146,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Voice timers and alarms (spec/16 § Timers and alarms): the server holds the
   // state so a timer outlives the voice session that set it. Devices are told
   // over their control socket, apps and displays over the surface socket.
-  const timersDataDir = opts.dataDir ?? registry.dataDir;
+  const timersDataDir = accountDir;
   const timers = new TimerService({
     logger: log.child({ component: 'timers' }),
     ...(timersDataDir ? { file: join(timersDataDir, 'timers.json') } : {}),
@@ -1338,7 +1345,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     downloadsDir,
     logger: log.child({ component: 'mobile-updates' }),
   });
-  const announceDataDir = opts.dataDir ?? registry.dataDir;
+  const announceDataDir = serverDir;
   if (announceDataDir) {
     const stopAnnouncing = new MobileUpdateNotifier({
       downloadsDir,
@@ -2039,7 +2046,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     if (wanted !== 'stable' && wanted !== 'dev') {
       return reply.code(400).send({ error: 'channel must be "stable" or "dev"' });
     }
-    const dir = opts.dataDir ?? registry.dataDir;
+    const dir = serverDir;
     if (readChannel(dir) === 'off') {
       return reply.code(409).send({
         error: 'this server has updates turned off by its operator (patch-server channel)',
@@ -2115,7 +2122,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       })),
       release: {
         available: readAvailableRelease(downloadsDir)?.version ?? null,
-        channel: readChannel(opts.dataDir ?? registry.dataDir),
+        channel: readChannel(serverDir),
         autoUpdate: updateControl.isAutoUpdate(),
         updating: updateControl.updateAllPending(),
       },
@@ -2244,6 +2251,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // ---- linked chats: provider switch, move, a session that is gone (spec/04 § Provider switches) ----
   registerChatContinueRoutes(app, {
     logger: log.child({ component: 'chat-continue-routes' }),
+    accountDir,
     registry,
     hostLink,
     chatRegistry,
@@ -2280,7 +2288,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // ---- client crash reports (phone error boundary / native crash) ----
   const issueFiler = new IssueFiler({
-    dataDir: opts.dataDir ?? registry.dataDir,
+    dataDir: serverDir,
     logger: log.child({ component: 'issue-filer' }),
     repo: process.env.PATCH_ISSUE_REPO ?? ISSUE_REPO_DEFAULT,
     token: process.env.PATCH_ISSUE_GITHUB_TOKEN,
@@ -2321,7 +2329,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerClientCrashRoutes(app, {
     logger: log.child({ component: 'client-crash-routes' }),
     registry,
-    dataDir: opts.dataDir ?? registry.dataDir,
+    dataDir: serverDir,
     issueFiler,
   });
 
@@ -2446,8 +2454,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'artifacts' }),
     hostLink,
     registry,
-    artifactsDir:
-      process.env['PATCH_ARTIFACTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'artifacts'),
+    artifactsDir: process.env['PATCH_ARTIFACTS_DIR'] ?? join(accountDir, 'artifacts'),
   });
 
   // ---- pads (spec/14 § Pads) ----
@@ -2460,8 +2467,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatRegistry,
     idGenerator,
     publicUrl: () => process.env['PATCH_PUBLIC_URL'] ?? process.env['PATCH_SERVER_URL'] ?? '',
-    padsDir: process.env['PATCH_PADS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'pads'),
-    secretDir: process.env['PATCH_ARTIFACTS_DIR'] ?? join(registry.dataDir ?? '/tmp', 'artifacts'),
+    padsDir: process.env['PATCH_PADS_DIR'] ?? join(accountDir, 'pads'),
+    secretDir: process.env['PATCH_ARTIFACTS_DIR'] ?? join(accountDir, 'artifacts'),
   });
 
   // ---- auth + presence REST routes ----
@@ -2520,7 +2527,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   let jobDispatcher: JobDispatcher;
   // Jobs always use the same dataDir as the registry; if the caller
   // injects a registry directly (tests), we read it back from there.
-  const jobsDataDir = opts.dataDir ?? registry.dataDir;
+  const jobsDataDir = accountDir;
   if (!jobsDataDir) {
     throw new Error('build(): dataDir required for jobs (NO FALLBACKS)');
   }
