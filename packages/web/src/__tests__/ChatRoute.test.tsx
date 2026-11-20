@@ -63,7 +63,7 @@ function seedChat(
   timeline: ChatEventEntry[],
   opts: {
     jobId?: string;
-    activity?: 'idle' | 'running';
+    chatStatus?: { state: string; since: number };
     permissionMode?: 'bypassPermissions' | 'default';
   } = {},
 ): void {
@@ -74,7 +74,7 @@ function seedChat(
       permissionMode: opts.permissionMode ?? ('bypassPermissions' as const),
       name: chatId,
       folder: 'foo',
-      activity: opts.activity ?? 'idle',
+      chatStatus: opts.chatStatus ?? { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -145,7 +145,7 @@ describe('ChatRoute regression', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'one',
         folder: 'foo',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -173,7 +173,7 @@ describe('ChatRoute regression', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: 'speakers',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -201,7 +201,7 @@ describe('ChatRoute regression', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'Manager',
         folder: 'manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 1,
@@ -1361,7 +1361,7 @@ describe('ChatRoute regression', () => {
         permissionMode: 'plan' as const,
         name: 'c-perm-plan',
         folder: 'foo',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1827,7 +1827,7 @@ describe('ChatRoute regression', () => {
     const send = vi.fn();
     seedChat('c-stop', [{ seq: 1, kind: 'message', role: 'user', content: 'go', at: 0 }]);
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, ['c-stop']: { ...s.chats['c-stop']!, activity: 'running' } },
+      chats: { ...s.chats, ['c-stop']: { ...s.chats['c-stop']!, chatStatus: { state: 'running', since: 0 } } },
     }));
     renderChat('c-stop', { send, requestReplay() {} } as unknown as Parameters<
       typeof ChatRoute
@@ -1872,7 +1872,7 @@ describe('ChatRoute regression', () => {
   it('Stop with no connected ws surfaces "not connected"', () => {
     seedChat('c-stop-nows', [{ seq: 1, kind: 'message', role: 'user', content: 'go', at: 0 }]);
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, ['c-stop-nows']: { ...s.chats['c-stop-nows']!, activity: 'running' } },
+      chats: { ...s.chats, ['c-stop-nows']: { ...s.chats['c-stop-nows']!, chatStatus: { state: 'running', since: 0 } } },
     }));
     renderChat('c-stop-nows', null);
     fireEvent.click(screen.getByTestId('stop-btn'));
@@ -1887,7 +1887,7 @@ describe('ChatRoute regression', () => {
     useChatStore.setState((s) => ({
       chats: {
         ...s.chats,
-        ['c-stop-throws']: { ...s.chats['c-stop-throws']!, activity: 'running' },
+        ['c-stop-throws']: { ...s.chats['c-stop-throws']!, chatStatus: { state: 'running', since: 0 } },
       },
     }));
     renderChat('c-stop-throws', { send, requestReplay() {} } as unknown as Parameters<
@@ -2046,7 +2046,7 @@ describe('ChatRoute regression', () => {
     it('⌘↵ and Ctrl+↵ with text send the input and nothing else', async () => {
       const send = vi.fn();
       seedChat('c-cmd-running', [{ seq: 1, kind: 'message', role: 'user', content: 'go', at: 0 }], {
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
       });
       renderChat('c-cmd-running', wsMock(send));
       const composer = screen.getByTestId('composer-input');
@@ -2083,7 +2083,7 @@ describe('ChatRoute regression', () => {
             at: 0,
           },
         ],
-        { activity: 'running' },
+        { chatStatus: { state: 'running', since: 0 } },
       );
       renderChat('c-double-enter', wsMock(send));
       const composer = screen.getByTestId('composer-input');
@@ -2111,7 +2111,7 @@ describe('ChatRoute regression', () => {
             at: 0,
           },
         ],
-        { activity: 'running' },
+        { chatStatus: { state: 'running', since: 0 } },
       );
       renderChat('c-up-still', wsMock(send));
       const up = screen.getByTestId('queued-promote');
@@ -2227,7 +2227,7 @@ describe('ChatRoute regression', () => {
             at: 0,
           },
         ],
-        { activity: 'running' },
+        { chatStatus: { state: 'running', since: 0 } },
       );
       renderChat('c-no-auto', { send, requestReplay() {} } as unknown as Parameters<
         typeof ChatRoute
@@ -4307,7 +4307,7 @@ describe('ChatRoute regression', () => {
   it('shows the "thinking…" indicator whenever running, hiding it only while a message actively streams', async () => {
     seedChat('c-thinking', [{ seq: 1, kind: 'message', role: 'user', content: 'go', at: 0 }]);
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, ['c-thinking']: { ...s.chats['c-thinking']!, activity: 'running' } },
+      chats: { ...s.chats, ['c-thinking']: { ...s.chats['c-thinking']!, chatStatus: { state: 'running', since: 0 } } },
     }));
     renderChat('c-thinking');
     // Waiting for the first token → shows.
@@ -4345,7 +4345,7 @@ describe('ChatRoute regression', () => {
 
     // Turn ends → idle → indicator gone.
     useChatStore.setState((s) => ({
-      chats: { ...s.chats, ['c-thinking']: { ...s.chats['c-thinking']!, activity: 'idle' } },
+      chats: { ...s.chats, ['c-thinking']: { ...s.chats['c-thinking']!, chatStatus: { state: 'idle', since: 0 } } },
     }));
     await waitFor(() => {
       expect(screen.queryByTestId('thinking-indicator')).not.toBeInTheDocument();
@@ -4380,7 +4380,7 @@ describe('ChatRoute regression', () => {
     useChatStore.setState((s) => ({
       chats: {
         ...s.chats,
-        ['c-queued-order']: { ...s.chats['c-queued-order']!, activity: 'running' },
+        ['c-queued-order']: { ...s.chats['c-queued-order']!, chatStatus: { state: 'running', since: 0 } },
       },
     }));
     renderChat('c-queued-order');
@@ -4429,7 +4429,7 @@ describe('ChatRoute regression', () => {
     useChatStore.setState((s) => ({
       chats: {
         ...s.chats,
-        ['c-queued-streaming']: { ...s.chats['c-queued-streaming']!, activity: 'running' },
+        ['c-queued-streaming']: { ...s.chats['c-queued-streaming']!, chatStatus: { state: 'running', since: 0 } },
       },
     }));
     renderChat('c-queued-streaming');
@@ -4456,7 +4456,7 @@ describe('ChatRoute regression', () => {
     useChatStore.setState((s) => ({
       chats: {
         ...s.chats,
-        ['c-pending-order']: { ...s.chats['c-pending-order']!, activity: 'running' },
+        ['c-pending-order']: { ...s.chats['c-pending-order']!, chatStatus: { state: 'running', since: 0 } },
       },
     }));
     renderChat('c-pending-order');
@@ -5102,7 +5102,7 @@ describe('ChatRoute regression', () => {
         todos: [],
         hostId: 'd1',
         folder: '/home/tom/projects/old',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'archived',
         permissionMode: 'bypassPermissions',
         pinned: false,

@@ -19,7 +19,7 @@ function row(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions',
     name: chatId,
     folder: '/tmp',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -63,9 +63,16 @@ describe('threadRows', () => {
     expect(
       ids([
         row('idle'),
-        row('working', { activity: 'running' }),
-        row('question', { statusKind: 'question', statusDeclared: true }),
-        row('permission', { pendingPermissions: [permission] }),
+        row('working', { chatStatus: { state: 'running', since: 0 } }),
+        row('question', {
+          statusKind: 'question',
+          statusDeclared: true,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
+        row('permission', {
+          pendingPermissions: [permission],
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
       ]),
     ).toEqual(['permission', 'question', 'working', 'idle']);
   });
@@ -74,7 +81,7 @@ describe('threadRows', () => {
     expect(
       ids([
         row('idle', { lastUpdated: NOW - 5_000 }),
-        row('working', { activity: 'running' }),
+        row('working', { chatStatus: { state: 'running', since: 0 } }),
         row('guessed-question', {
           statusKind: 'question',
           statusDeclared: false,

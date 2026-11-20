@@ -11,7 +11,7 @@ function row(chatId: string, extra: Record<string, unknown> = {}): never {
     permissionMode: 'auto',
     name: chatId,
     folder: '/tmp/x',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

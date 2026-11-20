@@ -12,7 +12,7 @@ function row(chatId: string, over: Partial<ThreadRankInput> = {}): ThreadRankInp
   return {
     chatId,
     status: 'active',
-    activity: 'idle',
+    chatStatus: { state: 'idle' },
     lastUpdated: 1,
     snoozedUntil: null,
     pendingPermissions: [],
@@ -24,13 +24,16 @@ function row(chatId: string, over: Partial<ThreadRankInput> = {}): ThreadRankInp
 
 describe('threadRowState', () => {
   it('ranks a pending permission, then a declared question, report, running, idle', () => {
-    expect(threadRowState(row('a', { pendingPermissions: [{}] }))).toBe('permission');
-    expect(threadRowState(row('a', { activity: 'awaiting-permission' }))).toBe('permission');
-    expect(threadRowState(row('a', { statusKind: 'question', statusDeclared: true }))).toBe(
-      'question',
-    );
+    const waiting = { chatStatus: { state: 'waiting_for_user' } };
+    expect(threadRowState(row('a', { ...waiting, pendingPermissions: [{}] }))).toBe('permission');
+    expect(threadRowState(row('a', waiting))).toBe('permission');
+    expect(
+      threadRowState(row('a', { ...waiting, statusKind: 'question', statusDeclared: true })),
+    ).toBe('question');
+    // The surface never ranks a row as blocked on its own: only the server's status does.
+    expect(threadRowState(row('a', { pendingPermissions: [{}] }))).toBe('idle');
     expect(threadRowState(row('a', { statusKind: 'report' }))).toBe('report');
-    expect(threadRowState(row('a', { activity: 'running' }))).toBe('working');
+    expect(threadRowState(row('a', { chatStatus: { state: 'running' } }))).toBe('working');
     expect(threadRowState(row('a'))).toBe('idle');
   });
 
@@ -47,12 +50,16 @@ describe('threadRows', () => {
       [
         row('idle-new', { lastUpdated: 50 }),
         row('idle-old', { lastUpdated: 10 }),
-        row('running', { activity: 'running', lastUpdated: 5 }),
-        row('perm', { pendingPermissions: [{}], lastUpdated: 1 }),
+        row('running', { chatStatus: { state: 'running' }, lastUpdated: 5 }),
+        row('perm', {
+          chatStatus: { state: 'waiting_for_user' },
+          pendingPermissions: [{}],
+          lastUpdated: 1,
+        }),
         row('archived', { status: 'archived', lastUpdated: 99 }),
         row('snoozed', { snoozedUntil: NOW + 1, lastUpdated: 99 }),
         row('woken', { snoozedUntil: NOW, lastUpdated: 20 }),
-        row('thread_manager', { activity: 'running' }),
+        row('thread_manager', { chatStatus: { state: 'running' } }),
       ],
       NOW,
     ).map((r) => r.chatId);

@@ -43,7 +43,7 @@ const row = (chatId: string, lastUpdated: number, over: Record<string, unknown> 
   permissionMode: 'bypassPermissions' as const,
   name: chatId,
   folder: 'f',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,
@@ -132,7 +132,7 @@ describe('PatchWs.syncTranscripts', () => {
       chatId: 'c1',
       hostId: 'h1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 5,
     });
     vi.advanceTimersByTime(1500);
@@ -146,7 +146,7 @@ describe('PatchWs.syncTranscripts', () => {
       .getState()
       .hydrate([
         row('open', 1),
-        row('busy', 1, { activity: 'running' }),
+        row('busy', 1, { chatStatus: { state: 'running', since: 0 } }),
         row('away', 1, { hostId: 'h2' }),
         row('ok', 1),
       ]);

@@ -60,7 +60,7 @@ function rowFixture(overrides: Partial<ChatRow> = {}): RowFixture {
     permissionMode: 'bypassPermissions' as const,
     name: 'a chat',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -100,7 +100,7 @@ function usedSpeakers(): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'speakers',
       folder: '/home/tom/.patch/threads/speakers',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -346,7 +346,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -372,7 +372,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -396,7 +396,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'ship it',
         folder: '/work',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -410,7 +410,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'ordinary chat',
         folder: '/work',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -431,7 +431,7 @@ describe('Sidebar', () => {
         name: 'Ordered',
         permissionMode: 'bypassPermissions',
         folder: '/work',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -452,7 +452,7 @@ describe('Sidebar', () => {
       hostId: 'd1',
       permissionMode: 'bypassPermissions' as const,
       folder: '/work',
-      activity: 'idle' as const,
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active' as const,
       pinned: false,
       pinnedAt: null,
@@ -491,7 +491,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -527,7 +527,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -571,7 +571,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -615,7 +615,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -650,7 +650,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -711,7 +711,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -778,7 +778,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'pinned',
         folder: '~/proj',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 100,
@@ -791,7 +791,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'regular',
         folder: '~/proj',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -813,7 +813,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'old',
         folder: '~/proj',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'archived',
         pinned: false,
         pinnedAt: null,
@@ -843,7 +843,7 @@ describe('Sidebar', () => {
         name: null,
         preview: 'fix the sidebar ordering bug',
         folder: '/private/tmp',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'archived',
         pinned: false,
         pinnedAt: null,
@@ -857,7 +857,7 @@ describe('Sidebar', () => {
         name: null,
         preview: 'add a dark mode toggle',
         folder: '/private/tmp',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'archived',
         pinned: false,
         pinnedAt: null,
@@ -998,8 +998,8 @@ describe('Sidebar', () => {
     useChatStore
       .getState()
       .hydrate([
-        rowFixture({ chatId: 'idle2', folder: '~/wk', lastUpdated: 300, activity: 'idle' }),
-        rowFixture({ chatId: 'work2', folder: '~/wk', lastUpdated: 1, activity: 'running' }),
+        rowFixture({ chatId: 'idle2', folder: '~/wk', lastUpdated: 300, chatStatus: { state: 'idle', since: 0 } }),
+        rowFixture({ chatId: 'work2', folder: '~/wk', lastUpdated: 1, chatStatus: { state: 'running', since: 0 } }),
       ]);
     renderInRouter();
     const rows = Array.from(document.querySelectorAll('[data-testid^="chat-row-"]')).map((el) =>
@@ -1015,8 +1015,8 @@ describe('Sidebar', () => {
     useChatStore
       .getState()
       .hydrate([
-        rowFixture({ chatId: 'idle1', folder: '~/proj', lastUpdated: 300, activity: 'idle' }),
-        rowFixture({ chatId: 'work1', folder: '~/proj', lastUpdated: 1, activity: 'running' }),
+        rowFixture({ chatId: 'idle1', folder: '~/proj', lastUpdated: 300, chatStatus: { state: 'idle', since: 0 } }),
+        rowFixture({ chatId: 'work1', folder: '~/proj', lastUpdated: 1, chatStatus: { state: 'running', since: 0 } }),
       ]);
     useChatStore.getState().applyEvent({
       type: 'chat.permission_request',
@@ -1506,7 +1506,7 @@ describe('Sidebar', () => {
       rowFixture({
         chatId: 'u2',
         folder: '/home/tom/projects/untilc',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: 1,
       }),
     ]);
@@ -1679,7 +1679,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -1770,7 +1770,7 @@ describe('Sidebar', () => {
           name: 'old thing',
           preview: 'a snippet',
           folder: '~/proj',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'archived',
           pinned: false,
           pinnedAt: null,
@@ -1966,7 +1966,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: '/home/tom/.patch/threads/speakers',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -2090,7 +2090,7 @@ describe('Sidebar', () => {
           name: 'gone',
           preview: 'a snippet',
           folder: '~/proj',
-          activity: 'idle',
+          chatStatus: { state: 'idle', since: 0 },
           status: 'deleted',
           pinned: false,
           pinnedAt: null,
@@ -2285,7 +2285,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'work one',
         folder: '~/pb',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
       }), // working
       rowFixture({
         chatId: 'att-perm',
@@ -2485,7 +2485,7 @@ describe('Sidebar', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId: 'reply-a',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         status: 'active',
         permissionMode: 'bypassPermissions',
         folder: '~/rf',
@@ -2527,7 +2527,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'manager',
         folder: '/home/tom/.patch/threads/manager',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 50,
@@ -2540,7 +2540,7 @@ describe('Sidebar', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'speakers',
         folder: '/home/tom/.patch/threads/speakers',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -2583,7 +2583,11 @@ describe('Sidebar', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId,
-        activity: 'idle',
+        // A declared question is a chat waiting on the user: the server says so.
+        chatStatus: {
+          state: kind === 'question' && declared ? 'waiting_for_user' : 'idle',
+          since: 0,
+        },
         lastUpdated: Date.now() + 1000,
         statusSummary: summary,
         statusKind: kind,
@@ -2660,7 +2664,7 @@ describe('Sidebar', () => {
     it('does not flip the badge back and forth when a stale REST snapshot lands mid-reconnect', () => {
       vi.useFakeTimers();
       // WS: chat is genuinely running.
-      useChatStore.getState().hydrate([rowFixture({ chatId: 'flick1', activity: 'running' })]);
+      useChatStore.getState().hydrate([rowFixture({ chatId: 'flick1', chatStatus: { state: 'running', since: 0 } })]);
       renderInRouter();
       const row = screen.getByTestId('chat-row-flick1');
       expect(within(row).getByTestId('badge-working')).toBeInTheDocument();
@@ -2668,7 +2672,7 @@ describe('Sidebar', () => {
       // Reconnect: a `hydrate()` REST refetch lands with a stale snapshot
       // (activity briefly reported idle before the host catches up).
       act(() => {
-        useChatStore.getState().hydrate([rowFixture({ chatId: 'flick1', activity: 'idle' })]);
+        useChatStore.getState().hydrate([rowFixture({ chatId: 'flick1', chatStatus: { state: 'idle', since: 0 } })]);
       });
       // Immediately after the stale snapshot, the badge must still read
       // `working` — this is the flicker the settle delay exists to prevent.
@@ -2678,7 +2682,7 @@ describe('Sidebar', () => {
       // Still within the settle window, the WS replay corrects it back.
       act(() => {
         vi.advanceTimersByTime(100); // < BADGE_SETTLE_MS
-        useChatStore.getState().mergeChats([rowFixture({ chatId: 'flick1', activity: 'running' })]);
+        useChatStore.getState().mergeChats([rowFixture({ chatId: 'flick1', chatStatus: { state: 'running', since: 0 } })]);
       });
       expect(within(row).getByTestId('badge-working')).toBeInTheDocument();
 
@@ -2694,13 +2698,13 @@ describe('Sidebar', () => {
 
     it('does still update the badge for a change that holds steady past the settle window', () => {
       vi.useFakeTimers();
-      useChatStore.getState().hydrate([rowFixture({ chatId: 'flick2', activity: 'running' })]);
+      useChatStore.getState().hydrate([rowFixture({ chatId: 'flick2', chatStatus: { state: 'running', since: 0 } })]);
       renderInRouter();
       const row = screen.getByTestId('chat-row-flick2');
       expect(within(row).getByTestId('badge-working')).toBeInTheDocument();
 
       act(() => {
-        useChatStore.getState().mergeChats([rowFixture({ chatId: 'flick2', activity: 'errored' })]);
+        useChatStore.getState().mergeChats([rowFixture({ chatId: 'flick2', chatStatus: { state: 'failed', since: 0 } })]);
       });
       act(() => {
         vi.advanceTimersByTime(300); // > BADGE_SETTLE_MS
@@ -2716,7 +2720,7 @@ describe('Sidebar', () => {
       useChatStore
         .getState()
         .hydrate([
-          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', activity: 'running' }),
+          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', chatStatus: { state: 'running', since: 0 } }),
           rowFixture({ chatId: 'g-idle', name: 'Idle', folder: '/p/beta', lastUpdated: 5 }),
         ]);
       renderInRouter();
@@ -2741,7 +2745,7 @@ describe('Sidebar', () => {
       useChatStore
         .getState()
         .hydrate([
-          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', activity: 'running' }),
+          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', chatStatus: { state: 'running', since: 0 } }),
         ]);
       renderInRouter();
       fireEvent.click(screen.getByTestId('sidebar-grouping-status'));

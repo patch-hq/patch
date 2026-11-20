@@ -33,7 +33,8 @@ describe('chatStore reducer', () => {
     const row = useChatStore.getState().chats['c1'];
     expect(row).toBeDefined();
     expect(row?.folder).toBe('~/projects/foo');
-    expect(row?.activity).toBe('idle');
+    // No status until the server sends one: the surface assumes none.
+    expect(row?.chatStatus).toBeUndefined();
   });
 
   it('addLocalMessage optimistically renders the user turn, reconciled (not duplicated) on replay', () => {
@@ -245,13 +246,13 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c_voice',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 5,
     });
     s.ensureChat('c_voice', '~/somewhere-else');
     const row = useChatStore.getState().chats['c_voice'];
     expect(row?.folder).toBe('~/projects/portfolio'); // unchanged
-    expect(row?.activity).toBe('running'); // preserved
+    expect(row?.chatStatus?.state).toBe('running'); // preserved
   });
 
   it('addLocalMessage seeds an optimistic row for a brand-new chat (no "not found yet" flash)', () => {
@@ -428,7 +429,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 9,
       preview: 'fix the bug',
     });
@@ -446,7 +447,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'awaiting-permission',
+      chatStatus: { state: 'waiting_for_user', since: 0 },
       lastUpdated: 123,
       pinned: true,
       pinnedAt: 100,
@@ -454,7 +455,7 @@ describe('chatStore reducer', () => {
       name: 'fix the layout',
     });
     const row = useChatStore.getState().chats['c1'];
-    expect(row?.activity).toBe('awaiting-permission');
+    expect(row?.chatStatus?.state).toBe('waiting_for_user');
     expect(row?.awaitingPermission).toBe(true);
     expect(row?.pinned).toBe(true);
     expect(row?.pinnedAt).toBe(100);
@@ -469,7 +470,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'errored',
+      chatStatus: { state: 'failed', since: 0 },
       lastUpdated: 10,
       lastError: { code: 'sdk_error', message: 'Out of credit', at: 10 },
     });
@@ -478,7 +479,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 11,
     });
     expect(useChatStore.getState().chats['c1']?.lastError).toBeNull();
@@ -496,7 +497,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 10,
       statusSummary: 'Waiting on which branch to deploy',
       statusKind: 'question',
@@ -511,7 +512,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 11,
     });
     row = useChatStore.getState().chats['c1'];
@@ -523,7 +524,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 12,
       statusSummary: 'Deployed to staging, nothing outstanding',
       statusKind: 'complete',
@@ -542,7 +543,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 10,
       todos: [
         { text: 'rebuild the index', status: 'in_progress' as const },
@@ -559,7 +560,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 11,
     });
     expect(useChatStore.getState().chats['c1']?.todos).toHaveLength(2);
@@ -569,7 +570,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 12,
       todos: [],
     });
@@ -706,7 +707,7 @@ describe('chatStore reducer', () => {
     expect(useChatStore.getState().chats['c1']?.pendingPermissions).toEqual([]);
   });
 
-  it('a trailing idle chat.state does NOT clear an unresolved permission', () => {
+  it('a pending card does not override the status the server sends', () => {
     // Repro of the badge regression: the mock backend / SDK under
     // bypassPermissions emits the permission event then completes the turn,
     // so a `chat.state activity:idle` arrives while the prompt is still
@@ -724,13 +725,15 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 9,
     });
+    // The server's status is shown as sent: a card the surface still holds
+    // does not override it (the server keeps a request open until resolved).
     const row = useChatStore.getState().chats['c1']!;
-    expect(row.awaitingPermission).toBe(true);
-    expect(row.activity).toBe('awaiting-permission');
-    expect(deriveBadge(row)).toBe('permission');
+    expect(row.chatStatus?.state).toBe('idle');
+    expect(row.awaitingPermission).toBe(false);
+    expect(deriveBadge(row)).not.toBe('permission');
   });
 
   it('resolvePermission clears the pending permission + badge + marks the card', () => {
@@ -747,7 +750,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 9,
     });
     useChatStore.getState().resolvePermission('c1', 'r1', 'approve');
@@ -832,7 +835,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'archived',
       lastUpdated: 5,
     });
@@ -934,7 +937,7 @@ describe('chatStore reducer', () => {
           permissionMode: 'bypassPermissions' as const,
           chatId: `stale-${i}`,
           folder: '/Users/tomchambers/projects/portfolio',
-          activity: 'errored',
+          chatStatus: { state: 'failed', since: 0 },
           lastUpdated: Date.now(),
         },
         {
@@ -961,7 +964,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         chatId: `stale-${i}`,
         folder: '/Users/tomchambers/projects/portfolio',
-        activity: 'errored',
+        chatStatus: { state: 'failed', since: 0 },
         lastUpdated: Date.now(),
       });
     }
@@ -1015,7 +1018,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     });
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('working');
@@ -1023,7 +1026,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 2,
     });
     // unvisited & lastSeq(0) > lastReadSeq(-1) → done
@@ -1047,7 +1050,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 100,
     });
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('done');
@@ -1076,7 +1079,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 50,
     });
     useChatStore.getState().markRead('c1');
@@ -1115,7 +1118,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 10,
     });
     useChatStore.getState().markRead('c1');
@@ -1142,7 +1145,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1171,7 +1174,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 20,
     });
     useChatStore.getState().markRead('c1');
@@ -1185,7 +1188,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1280,7 +1283,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1312,15 +1315,17 @@ describe('chatStore reducer', () => {
         args: { command: 'ls' },
         callId: 'call-1',
       });
-      expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('working');
+      // A tool call alone is not a status: only the server's is.
+      expect(deriveBadge(useChatStore.getState().chats['c1']!)).not.toBe('working');
+      expect(useChatStore.getState().chats['c1']!.openCallIds).toEqual(['call-1']);
       s.applyEvent({
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity,
+        chatStatus: { state: activity === 'errored' ? 'failed' : 'idle', since: 0 },
         lastUpdated: 2,
       });
-      expect(useChatStore.getState().chats['c1']!.openToolCalls).toBe(0);
+      expect(useChatStore.getState().chats['c1']!.openCallIds ?? []).toEqual([]);
       expect(deriveBadge(useChatStore.getState().chats['c1']!)).not.toBe('working');
     },
   );
@@ -1335,7 +1340,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 5,
     });
     s.applyEvent({
@@ -1356,7 +1361,7 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     });
     s.applyEvent({
@@ -1374,7 +1379,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1382,7 +1387,7 @@ describe('chatStore reducer', () => {
         lastUpdated: 10,
       },
     ]);
-    expect(useChatStore.getState().chats['c1']!.openToolCalls).toBe(0);
+    expect(useChatStore.getState().chats['c1']!.openCallIds ?? []).toEqual([]);
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).not.toBe('working');
   });
 
@@ -1398,15 +1403,15 @@ describe('chatStore reducer', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity,
+        chatStatus: { state: activity, since: lastUpdated },
         lastUpdated,
       });
     state('running', 20);
     state('idle', 10);
-    expect(useChatStore.getState().chats['c1']!.activity).toBe('running');
+    expect(useChatStore.getState().chats['c1']!.chatStatus?.state).toBe('running');
     expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('working');
     state('idle', 30);
-    expect(useChatStore.getState().chats['c1']!.activity).toBe('idle');
+    expect(useChatStore.getState().chats['c1']!.chatStatus?.state).toBe('idle');
   });
 
   it('a stale REST refetch (hydrate) does not roll activity back', () => {
@@ -1416,14 +1421,14 @@ describe('chatStore reducer', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 20,
     });
     const row = useChatStore.getState().chats['c1']!;
-    s.hydrate([{ ...row, activity: 'idle', lastUpdated: 10 }]);
-    expect(useChatStore.getState().chats['c1']!.activity).toBe('running');
-    s.hydrate([{ ...row, activity: 'idle', lastUpdated: 30 }]);
-    expect(useChatStore.getState().chats['c1']!.activity).toBe('idle');
+    s.hydrate([{ ...row, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 10 }]);
+    expect(useChatStore.getState().chats['c1']!.chatStatus?.state).toBe('running');
+    s.hydrate([{ ...row, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 30 }]);
+    expect(useChatStore.getState().chats['c1']!.chatStatus?.state).toBe('idle');
   });
 
   it('chat.tool_call and chat.tool_result append timeline entries and bump lastSeq', () => {
@@ -1566,7 +1571,6 @@ describe('chatStore reducer', () => {
     expect(row?.pendingPermissions[0]?.requestId).toBe('req-1');
     // The state the single card drives is still correct after the dedup.
     expect(row?.awaitingPermission).toBe(true);
-    expect(row?.activity).toBe('awaiting-permission');
   });
 
   // spec/14 § Side threads panel — a side branch's own question must not leak
@@ -1824,7 +1828,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'old thread',
         folder: '~/old',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'archived',
         pinned: false,
         pinnedAt: null,
@@ -1858,7 +1862,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'renamed',
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: true,
         pinnedAt: 42,
@@ -1911,7 +1915,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'automation run',
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'archived',
         pinned: false,
         pinnedAt: null,
@@ -1939,7 +1943,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'renamed',
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1961,7 +1965,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -1983,7 +1987,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -2123,7 +2127,7 @@ describe('chatStore reducer', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -2356,7 +2360,7 @@ describe('chatStore message queueing (spec/04)', () => {
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       permissionMode: 'default',
       lastUpdated: Date.now() + 1000,
     } as never);
@@ -2609,7 +2613,7 @@ describe('chatStore — chat.stopped (a stopped or interrupted turn)', () => {
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       permissionMode: 'auto',
       lastUpdated: 5,
     });
@@ -3143,7 +3147,8 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'errored',
+      // What a server says while the host is gone: never a failure.
+      chatStatus: { state: 'host_offline', since: 0 },
       lastUpdated: 1,
     });
   }
@@ -3156,7 +3161,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     blip();
     expect(errorRows()).toHaveLength(1);
     expect(errorRows()[0]?.errorCode).toBe('daemon_unavailable');
-    expect(useChatStore.getState().chats['c1']?.activity).toBe('errored');
+    expect(useChatStore.getState().chats['c1']?.chatStatus?.state).toBe('host_offline');
   });
 
   it('drops the notice and the errored state when the resumed turn reports running', () => {
@@ -3166,11 +3171,11 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 2,
     });
     expect(errorRows()).toHaveLength(0);
-    expect(useChatStore.getState().chats['c1']?.activity).toBe('running');
+    expect(useChatStore.getState().chats['c1']?.chatStatus?.state).toBe('running');
     // The user's own message is untouched — only the control-plane notice goes.
     const tl = useChatStore.getState().timelines['c1'] ?? [];
     expect(tl).toHaveLength(1);
@@ -3185,7 +3190,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 2,
     });
     expect(errorRows()).toHaveLength(0);
@@ -3196,7 +3201,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
     // Nothing else arrives. Time passing is NOT a resolution signal.
     await new Promise((r) => setTimeout(r, 30));
     expect(errorRows()).toHaveLength(1);
-    expect(useChatStore.getState().chats['c1']?.activity).toBe('errored');
+    expect(useChatStore.getState().chats['c1']?.chatStatus?.state).toBe('host_offline');
   });
 
   it('leaves a REAL turn failure in place when the chat goes running again', () => {
@@ -3214,7 +3219,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 2,
     });
     const rows = errorRows();
@@ -3238,7 +3243,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 2,
     });
     expect(errorRows()).toHaveLength(0);
@@ -3264,7 +3269,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
         chatId: 'c1',
         hostId: 'd1',
         permissionMode: 'auto',
-        activity: 'errored',
+        chatStatus: { state: 'failed', since: 0 },
         lastUpdated: 1,
       },
       {
@@ -3272,7 +3277,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
         chatId: 'c1',
         hostId: 'd1',
         permissionMode: 'auto',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: 2,
       },
     ]);
@@ -3290,7 +3295,7 @@ describe('chatStore — a resolved daemon_unavailable notice clears itself', () 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 2,
     });
     expect(errorRows()).toHaveLength(0);
@@ -3324,7 +3329,7 @@ describe('chatStore — a chat model change arriving on chat.state', () => {
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 2,
       permissionMode: 'auto',
       model: 'claude-opus-4-1',
@@ -3346,7 +3351,7 @@ describe('chatStore — a chat model change arriving on chat.state', () => {
     s.applyEvent({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 2,
       permissionMode: 'auto',
     });
@@ -3458,7 +3463,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
       chatId: 'c-lim',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'errored',
+      chatStatus: { state: 'failed', since: 0 },
       lastUpdated: 1,
       rateLimitResumingAt: null,
       limitBlock: { scope: 'week', accountLabel: 'Default', resetsAt: 1_000 },
@@ -3476,7 +3481,16 @@ describe('a limit pause the chat has moved past clears itself', () => {
       chatId: 'c-lim',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity,
+      chatStatus: {
+        state:
+          (
+            { running: 'running', 'awaiting-permission': 'waiting_for_user', errored: 'failed' } as Record<
+              string,
+              string
+            >
+          )[activity] ?? 'idle',
+        since: 0,
+      },
       lastUpdated: 2,
     } as never);
   }
@@ -3492,7 +3506,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
     expect(row()?.limitBlock).toBeNull();
     expect(row()?.rateLimitResumingAt).toBeNull();
     expect(row()?.resumeKind).toBeNull();
-    expect(row()?.activity).toBe('running');
+    expect(row()?.chatStatus?.state).toBe('running');
   });
 
   it('drops it when the resumed turn stops for a permission prompt', () => {
@@ -3507,7 +3521,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
       chatId: 'c-lim',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 1,
       rateLimitResumingAt: 9_999,
       resumeKind: 'rate_limit',
@@ -3535,7 +3549,7 @@ describe('a limit pause the chat has moved past clears itself', () => {
       chatId: 'c-lim',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'errored',
+      chatStatus: { state: 'failed', since: 0 },
       lastUpdated: 3,
       limitBlock: { scope: 'session', accountLabel: 'Default' },
     } as never);

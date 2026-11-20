@@ -33,7 +33,11 @@ vi.mock('../api/rest.js', () => ({
 }));
 
 function seedChats(
-  others: Array<{ chatId: string; name: string | null; activity: 'idle' | 'running' }>,
+  others: Array<{
+    chatId: string;
+    name: string | null;
+    chatStatus: { state: 'idle' | 'running'; since: number };
+  }>,
 ): void {
   useChatStore.getState().hydrate([
     {
@@ -42,7 +46,7 @@ function seedChats(
       permissionMode: 'auto' as const,
       name: 'open-chat',
       folder: '/home/tom/projects/open',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -55,7 +59,7 @@ function seedChats(
       permissionMode: 'auto' as const,
       name: o.name,
       folder: `/home/tom/projects/${o.chatId}`,
-      activity: o.activity,
+      chatStatus: o.chatStatus,
       status: 'active' as const,
       pinned: false,
       pinnedAt: null,
@@ -91,7 +95,7 @@ describe('ChatRoute — no background runs bar', () => {
   });
 
   it('renders no bar when a single other chat is running', () => {
-    seedChats([{ chatId: 'c2', name: 'bus-watch', activity: 'running' }]);
+    seedChats([{ chatId: 'c2', name: 'bus-watch', chatStatus: { state: 'running', since: 0 } }]);
     renderChat();
     expect(screen.queryByTestId('bg-runs-bar')).not.toBeInTheDocument();
     expect(screen.queryByText(/other running/i)).not.toBeInTheDocument();
@@ -99,8 +103,8 @@ describe('ChatRoute — no background runs bar', () => {
 
   it('renders no bar when several other chats are running', () => {
     seedChats([
-      { chatId: 'c2', name: 'bus-watch', activity: 'running' },
-      { chatId: 'c3', name: 'nightly', activity: 'running' },
+      { chatId: 'c2', name: 'bus-watch', chatStatus: { state: 'running', since: 0 } },
+      { chatId: 'c3', name: 'nightly', chatStatus: { state: 'running', since: 0 } },
     ]);
     renderChat();
     expect(screen.queryByTestId('bg-runs-bar')).not.toBeInTheDocument();
@@ -109,14 +113,14 @@ describe('ChatRoute — no background runs bar', () => {
   });
 
   it('renders no bar when another chat starts running live', () => {
-    seedChats([{ chatId: 'c2', name: 'bus-watch', activity: 'idle' }]);
+    seedChats([{ chatId: 'c2', name: 'bus-watch', chatStatus: { state: 'idle', since: 0 } }]);
     renderChat();
 
     act(() => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId: 'c2',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         permissionMode: 'auto',
         lastUpdated: 2,
         pendingWake: null,

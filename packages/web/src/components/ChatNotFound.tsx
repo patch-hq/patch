@@ -64,7 +64,7 @@ export function ChatNotFound({ chatId }: { chatId: string }): JSX.Element {
             hostId: c.hostId,
             permissionMode: c.permissionMode,
             folder: c.folder,
-            activity: c.activity,
+            ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
             status: c.status,
             pinned: c.pinned,
             pinnedAt: c.pinnedAt,

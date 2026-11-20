@@ -37,7 +37,7 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
     statusDeclared: null,
     todos: [],
     folder: '/w',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -114,12 +114,13 @@ describe('deriveBadge — an idle chat with background work is not a finished on
       deriveBadge(
         row({
           backgroundTasks: 1,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
           pendingPermissions: [{ requestId: 'r', tool: 'Bash', description: undefined, args: {} }],
         }),
       ),
     ).toBe('permission');
-    expect(deriveBadge(row({ backgroundTasks: 1, status: 'errored' }))).toBe('errored');
-    expect(deriveBadge(row({ backgroundTasks: 1, activity: 'running' }))).toBe('working');
+    expect(deriveBadge(row({ backgroundTasks: 1, chatStatus: { state: 'failed', since: 0 } }))).toBe('errored');
+    expect(deriveBadge(row({ backgroundTasks: 1, chatStatus: { state: 'running', since: 0 } }))).toBe('working');
   });
 });
 
@@ -176,6 +177,7 @@ describe('deriveBadge — monitoring (a self-wake armed, nothing to read yet)', 
       deriveBadge(
         row({
           pendingWake: { message: 'check back', fireAt: 1, notAfter: undefined },
+          chatStatus: { state: 'waiting_for_user', since: 0 },
           pendingPermissions: [{ requestId: 'r', tool: 'Bash', description: undefined, args: {} }],
         }),
       ),
@@ -184,7 +186,7 @@ describe('deriveBadge — monitoring (a self-wake armed, nothing to read yet)', 
       deriveBadge(
         row({
           pendingWake: { message: 'check back', fireAt: 1, notAfter: undefined },
-          status: 'errored',
+          chatStatus: { state: 'failed', since: 0 },
         }),
       ),
     ).toBe('errored');
@@ -192,10 +194,15 @@ describe('deriveBadge — monitoring (a self-wake armed, nothing to read yet)', 
 });
 
 describe('deriveBadge — a declared question is the same fact as a pending permission', () => {
-  it('shows permission for a DECLARED statusKind of question, with no native request pending', () => {
+  it('shows permission when the server says the chat waits on the user for its question', () => {
     expect(
       deriveBadge(
-        row({ statusKind: 'question', statusSummary: 'need a decision', statusDeclared: true }),
+        row({
+          statusKind: 'question',
+          statusSummary: 'need a decision',
+          statusDeclared: true,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
       ),
     ).toBe('permission');
   });
@@ -272,7 +279,7 @@ describe('chatStore — the count reaches the row', () => {
       type: 'chat.state',
       chatId: 'c1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 10,
       backgroundTasks: 2,
     });
@@ -288,7 +295,7 @@ describe('chatStore — the count reaches the row', () => {
       type: 'chat.state',
       chatId: 'c1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 11,
     });
     expect(useChatStore.getState().chats['c1']?.backgroundTasks).toBe(2);
@@ -298,7 +305,7 @@ describe('chatStore — the count reaches the row', () => {
       type: 'chat.state',
       chatId: 'c1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 12,
       backgroundTasks: 0,
     });
@@ -313,7 +320,7 @@ describe('chatStore — the count reaches the row', () => {
         permissionMode: 'auto',
         name: 'a chat',
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -350,7 +357,7 @@ describe('Sidebar row', () => {
         permissionMode: 'auto',
         name: 'backgrounded build',
         folder: '~/p',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

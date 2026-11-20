@@ -25,7 +25,7 @@ function row(over: Partial<ChatRow>): ChatRow {
     pendingWake: null,
     todos: [],
     folder: '/home/tom/projects/patch',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

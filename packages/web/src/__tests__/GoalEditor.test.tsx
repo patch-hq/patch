@@ -134,7 +134,7 @@ describe('GoalBanner — the plan', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'x',
         folder: 'f',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

@@ -13,7 +13,7 @@ interface SnoozedApiRow {
   name: string | null;
   preview: string | null;
   folder: string;
-  activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
+  chatStatus?: import('@patch/wire').ChatStatusInfo;
   status: 'active' | 'archived' | 'errored' | 'deleted';
   pinned: boolean;
   pinnedAt: number | null;
@@ -35,7 +35,6 @@ export function snoozedRowsForStore(chats: unknown[]): Array<
     name: string | null;
     hostId: string;
     folder: string;
-    activity: ChatRow['activity'];
     permissionMode: PermissionMode;
     status: ChatRow['status'];
     pinned: boolean;
@@ -53,7 +52,7 @@ export function snoozedRowsForStore(chats: unknown[]): Array<
     hostId: c.hostId,
     permissionMode: c.permissionMode,
     folder: c.folder,
-    activity: c.activity,
+    ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
     status: c.status,
     pinned: c.pinned,
     pinnedAt: c.pinnedAt,

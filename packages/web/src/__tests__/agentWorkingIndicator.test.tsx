@@ -16,7 +16,7 @@ function row(chatId: string, over: Partial<ChatRow>): ChatRow {
     chatId,
     hostId: 'd1',
     status: 'active',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     pendingPermissions: [],
     ...over,
   } as ChatRow;
@@ -48,13 +48,13 @@ describe('agent working indicator', () => {
     render(<Host />);
     act(() => {
       useChatStore.setState({
-        chats: { a: row('a', { activity: 'running' } as Partial<ChatRow>) },
+        chats: { a: row('a', { chatStatus: { state: 'running', since: 0 } } as Partial<ChatRow>) },
       });
     });
     expect(icon()).toBe('/app/favicon-working.svg');
     expect(setAgentWorking).toHaveBeenLastCalledWith(true);
     act(() => {
-      useChatStore.setState({ chats: { a: row('a', { activity: 'idle' }) } });
+      useChatStore.setState({ chats: { a: row('a', { chatStatus: { state: 'idle', since: 0 } }) } });
     });
     expect(icon()).toBe('/app/favicon.svg');
     expect(setAgentWorking).toHaveBeenLastCalledWith(false);
@@ -64,7 +64,7 @@ describe('agent working indicator', () => {
     render(<Host />);
     act(() => {
       useChatStore.setState({
-        chats: { a: row('a', { activity: 'running', status: 'archived' } as Partial<ChatRow>) },
+        chats: { a: row('a', { chatStatus: { state: 'running', since: 0 }, status: 'archived' } as Partial<ChatRow>) },
       });
     });
     expect(icon()).toBe('/app/favicon.svg');

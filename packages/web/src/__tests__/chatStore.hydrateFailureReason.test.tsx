@@ -12,7 +12,7 @@ function row(extra: Record<string, unknown> = {}): never {
     permissionMode: 'auto',
     name: 'c1',
     folder: '/tmp/x',
-    activity: 'errored',
+    chatStatus: { state: 'failed', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

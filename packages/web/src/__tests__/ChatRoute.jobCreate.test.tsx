@@ -35,7 +35,7 @@ function seed(): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'doorbell',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

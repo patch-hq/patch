@@ -10,7 +10,7 @@ const row = (chatId: string, lastUserActivity: number | undefined, lastUpdated =
   hostId: 'h',
   folder: '/p',
   permissionMode: 'auto' as const,
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,

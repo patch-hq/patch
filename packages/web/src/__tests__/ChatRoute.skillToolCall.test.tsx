@@ -39,7 +39,7 @@ function seed(folder = '/home/tom/projects/bus'): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder,
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

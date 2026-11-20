@@ -15,7 +15,7 @@ describe('sendToNewChat', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'a chat',
         folder: '/home/me/proj',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

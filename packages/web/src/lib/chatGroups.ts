@@ -7,6 +7,7 @@ import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { deriveBadge } from '../stores/chatStore.js';
 import type { ChatRow, FolderRosterEntry } from '../stores/types.js';
 import { isHidden, isSnoozed } from '../stores/types.js';
+import { statusOf } from '../stores/types.js';
 
 /**
  * One project in the sidebar. Paths are scoped to their host (spec/04 § Spawn:
@@ -363,7 +364,7 @@ export function groupChats(
   // most recent first, so a stale finished run (12 days old) sinks to the
   // bottom instead of heading the list.
   const hiddenLive = (c: ChatRow): boolean =>
-    c.activity === 'running' || c.activity === 'awaiting-permission';
+    statusOf(c) === 'running' || statusOf(c) === 'waiting_for_user';
   hidden.sort((a, b) => {
     const la = hiddenLive(a);
     const lb = hiddenLive(b);
@@ -436,7 +437,6 @@ export function needsAttention(row: ChatRow): boolean {
     badge === 'errored' ||
     badge === 'interrupted' ||
     badge === 'signin' ||
-    (row.statusKind === 'question' && row.statusDeclared === true) ||
     row.statusKind === 'report'
   );
 }
@@ -531,10 +531,9 @@ export const CHAT_STATE_FILTERS: readonly ChatStateFilter[] = [
 export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boolean {
   if (filter === 'all') return true;
   const badge = deriveBadge(row);
-  // A chat the host has said nothing about yet (no events, no state frame) has
-  // just been spawned and is waiting on its first turn: pending, so Working —
-  // never Ready, which its idle `read` badge would otherwise put it in.
-  const pending = row.lastSeq === 0 && row.lastUpdated === 0;
+  // A chat the server has not given a status yet is in no state filter: the
+  // surface does not assume one (spec/05 § Chat status).
+  const pending = row.chatStatus === undefined;
   switch (filter) {
     case 'failed':
       return badge === 'errored';
@@ -548,7 +547,6 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // work that is easiest to forget about, since nothing about it is on
       // screen.
       return (
-        pending ||
         badge === 'working' ||
         // Held rather than finished (spec/14 § Status badges).
         badge === 'paused' ||
@@ -558,13 +556,12 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         badge === 'monitoring'
       );
     case 'waiting':
-      // Anything paused ON THE USER: a permission prompt, or an agent that
-      // stopped on a question.
+      // Anything paused ON THE USER, as the server says: a permission prompt or
+      // an agent that stopped on a question (both `waiting_for_user`).
       return (
         badge === 'permission' ||
         badge === 'interrupted' ||
-        badge === 'signin' ||
-        (row.statusKind === 'question' && row.statusDeclared === true)
+        badge === 'signin'
       );
     case 'done':
       // Waiting-on-you chats are ready too: they have responded and the next
@@ -574,8 +571,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         (badge === 'done' ||
           badge === 'read' ||
           commandsOnlyBackground(row) ||
-          badge === 'permission' ||
-          (row.statusKind === 'question' && row.statusDeclared === true))
+          badge === 'permission')
       );
   }
 }

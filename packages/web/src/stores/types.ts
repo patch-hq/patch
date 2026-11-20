@@ -1,12 +1,11 @@
 // Shared store types.
 //
-// Per spec/14-design-web.md sidebar status badges + chat lifecycle. We do not
-// re-export wire types directly because surfaces map activity → display state
-// (e.g. `done`/`unread` is "activity is idle AND lastSeq > lastReadSeq").
+// Per spec/14-design-web.md sidebar status badges + chat lifecycle. A chat's
+// status is the server's (`chatStatus`, spec/05 § Chat status): the surface
+// stores it with its row and displays it, and never works one out itself.
 
 import type {
   ChatContextUsage,
-  ChatActivity,
   ChatStateEvent,
   ChatStatus,
   EffortLevel,
@@ -31,7 +30,6 @@ export interface ChatRow {
    */
   hostId: string;
   folder: string;
-  activity: ChatActivity;
   /** The effective permission mode the chat's next turn will use (`chat.state`). */
   permissionMode: PermissionMode;
   status: ChatStatus;
@@ -279,34 +277,18 @@ export interface ChatRow {
    */
   runningAgents?: number | null;
   /**
-   * The chat's status as the server derived it (spec/05 § Chat status). When
-   * present it decides the badge; absent only from an older server.
+   * The chat's status as the server decided it (spec/05 § Chat status). The
+   * only status a surface shows; absent until the server's first word on the
+   * chat, and then no status is shown rather than an assumed one.
    */
   chatStatus?: import('@patch/wire').ChatStatusInfo;
   /**
-   * Tool calls this surface has seen start and not yet seen finish. A call that
-   * is still running means the chat is working, whatever `activity` says: a
-   * two-minute `Bash` showed the finished tick in the sidebar because nothing
-   * but the host's `activity` fed the badge. Counted from the live
-   * `chat.tool_call` / `chat.tool_result` stream; cleared when the turn is
-   * stopped. Optional like `backgroundTasks`, so fixtures need not declare it.
-   */
-  openToolCalls?: number;
-  /**
-   * Set when the user sends into a settled chat, so the row reads `working` before the
-   * host's first activity frame arrives. The host's next activity frame (or a failed
-   * delivery) clears it; `activity` itself is never touched, since the store reads it
-   * as the host's own word on whether a turn is in flight.
-   */
-  optimisticSend?: boolean;
-  /**
-   * `callId`s of this chat's open tool calls — same lifecycle as
-   * `openToolCalls` above (one array entry per outstanding call, pushed on
-   * `chat.tool_call`, removed on its `chat.tool_result`, cleared on stop/idle)
-   * but keyed by call rather than counted, so a single call's own row can ask
-   * "is MY call still open" instead of "is the chat working on something".
-   * Without this a call's row fell back to the chat-wide `openToolCalls`/
-   * `activity` check, which is also true for a LATER call in a promoted turn —
+   * `callId`s of this chat's open tool calls (one array entry per outstanding
+   * call, pushed on `chat.tool_call`, removed on its `chat.tool_result`,
+   * cleared on stop/idle), so a single call's own row can ask "is MY call
+   * still open" instead of "is the chat working on something". Never read as
+   * the chat's status. Without this a call's row fell back to a chat-wide
+   * check, which is also true for a LATER call in a promoted turn —
    * so a tool call the user had already cancelled kept showing a live spinner
    * and ticking elapsed time for as long as the chat went on being busy with
    * something else entirely.
@@ -373,107 +355,50 @@ export type DisplayBadge =
   | 'monitoring'
   | 'read';
 
+/** The chat's status as the server sent it, or undefined before its first word. */
+export function statusOf(row: { chatStatus?: { state: string } } | undefined): string | undefined {
+  return row?.chatStatus?.state;
+}
+
+/** The server says a turn is in flight on this chat. */
+export function isRunning(row: { chatStatus?: { state: string } } | undefined): boolean {
+  return statusOf(row) === 'running';
+}
+
 /**
  * Whether the Stop control belongs on the composer. A chat parked only on the
  * agent's own question is waiting for the user, not working, so there is
  * nothing to stop; an approval (a turn paused mid-work) still can be stopped.
  */
-export function isStoppable(row: Pick<ChatRow, 'activity' | 'pendingPermissions'>): boolean {
-  if (row.activity === 'running') return true;
-  if (row.activity !== 'awaiting-permission') return false;
+export function isStoppable(row: Pick<ChatRow, 'chatStatus' | 'pendingPermissions'>): boolean {
+  const state = statusOf(row);
+  if (state === 'running') return true;
+  if (state !== 'waiting_for_user') return false;
   const pending = row.pendingPermissions;
-  return pending.length === 0 || pending.some((p) => p.tool !== 'AskUserQuestion');
+  return pending.length > 0 && pending.some((p) => p.tool !== 'AskUserQuestion');
 }
 
-/** Mapping per spec/14 ## Status badges. */
+/**
+ * The badge for a row, per spec/14 § Status badges. What the chat is doing is
+ * the server's status alone (spec/05 § Chat status); the surface adds only its
+ * own read mark and the quiet work the server reports alongside it.
+ */
 export function deriveBadge(row: ChatRow): DisplayBadge {
-  // The server's status decides what the chat is doing (spec/05 § Chat
-  // status); the surface adds only its own read mark and the quiet work the
-  // server reports alongside. Nothing below is consulted for those.
-  const server = row.chatStatus?.state;
-  if (server !== undefined) {
-    if (server === 'waiting_for_user') return 'permission';
-    if (server === 'failed') return 'errored';
-    if (server === 'interrupted') return 'interrupted';
-    if (server === 'waiting_for_sign_in') return 'signin';
-    if (server === 'running') return 'working';
-    if (row.lastSeq > row.lastReadSeq) return 'done';
-    if (server === 'paused') return 'paused';
-    if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
-      return 'away';
-    }
-    if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
-    if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
-    if (row.pendingWake) return 'monitoring';
-    return 'read';
-  }
-  // An unresolved pending permission is the canonical "needs yes/no" signal —
-  // it outlives the transient `awaiting-permission` activity flag, which the
-  // host clears when the turn completes even though the prompt is unanswered.
-  if (row.pendingPermissions.length > 0) return 'permission';
-  if (row.activity === 'awaiting-permission') return 'permission';
-  // A declared QUESTION (`patch_ask_human`) is the same fact as a permission
-  // request — the agent is blocked on the user — even though nothing native is
-  // pending. User: "same difference as needs you." One badge, one colour, for
-  // both ways a chat can be paused on a person rather than a process.
-  //
-  // Gated on `statusDeclared`: a GENERATED `question` guess is not the agent
-  // saying it is blocked, just a one-shot's reading of the last reply (any "?"
-  // is enough to trip it), so it does not get to override the read/unread
-  // check below — it falls through like any other settled turn instead of
-  // freezing the row indigo until a new message arrives.
-  if (row.statusKind === 'question' && row.statusDeclared) return 'permission';
-  // A FAILED chat, ranked above `working` and below a pending decision.
-  //
-  // There was no errored badge at all, so a chat whose turn had died fell
-  // through to `done`/`read` and read as finished — indistinguishable in the
-  // sidebar from one that had succeeded. That is how a run of chats sat there
-  // with "You've hit your monthly spend limit" as their last word and nobody
-  // noticed: the list said they were done.
-  //
-  // Below `permission` because a prompt is answerable right now, whereas a
-  // failure is usually waiting on something else; above `working` because a
-  // chat cannot be both, and if it somehow claims to be, the failure is the more
-  // important fact.
-  //
-  // `status: 'errored'` is the lifetime flag, and the host only drops it when a
-  // turn COMPLETES. A turn that is running now has not failed yet, so it must
-  // not read as failed while the transcript shows it in flight; if that turn
-  // dies the activity goes `errored` and the failure comes back.
-  const running = row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend;
-  if (row.activity === 'errored' || (row.status === 'errored' && !running)) return 'errored';
-  if (running) return 'working';
-  // Unread beats a still-running background job or self-wake loop (User: "unread
-  // beats background always"). The chat HAS something new to look at — that is
-  // the strongest true claim available, and it does not stop being true just
-  // because the same chat also has other work in flight. Ranked here, above
-  // `background`/`monitoring` and below the states above it for the same reason
-  // those are above it: a decision or a failure is a stronger claim than "there
-  // is unread output", but unread output is a stronger claim than "nothing to
-  // see yet, still going".
+  const server = statusOf(row);
+  if (server === 'waiting_for_user') return 'permission';
+  if (server === 'failed') return 'errored';
+  if (server === 'interrupted') return 'interrupted';
+  if (server === 'waiting_for_sign_in') return 'signin';
+  if (server === 'running') return 'working';
   if (row.lastSeq > row.lastReadSeq) return 'done';
-  // An IDLE chat that still has a background command or sub-agent running
-  // (spec/14 § Status badges). The agent is not mid-turn, so nothing else here
-  // fires — the row fell through to `done`/`read` and drew the finished tick
-  // while a build, a test run or a sub-agent it launched was still going. The
-  // tick is the strongest "nothing to do here" signal in the list, and it was
-  // the one being shown for the case where work is still in flight.
-  //
-  // NO FALLBACK: only a POSITIVE count does this. `null`/`undefined` is "nobody
-  // measured" — an older host, or a row that has not yet heard a state frame
-  // — and shows the badge it always did rather than inventing a state.
-  // Running sub-agents are their own state, drawn with their own icon: an
-  // agent is another model working on the chat's behalf, a background task is
-  // a plain process. When both are in flight the agents win — they are the
-  // ones that will talk back.
+  if (server === 'paused') return 'paused';
+  if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
+    return 'away';
+  }
+  // NO FALLBACK: only a POSITIVE count is background work; `null` is "nobody
+  // measured". Agents win over plain tasks, as they are the ones that talk back.
   if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
-  // A self-wake armed (`patch_wake_me`): the agent is not doing anything right
-  // now, has said everything it has to say, and will check back on its own —
-  // distinct from `background` (an actual process running right now) even
-  // though both mean "not finished, nothing to read yet". Below `done`/
-  // `background` for the same reason `background` is below `done`: this is the
-  // quietest true claim, so anything with a stronger one wins first.
   if (row.pendingWake) return 'monitoring';
   return 'read';
 }

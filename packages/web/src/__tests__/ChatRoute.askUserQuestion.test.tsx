@@ -94,7 +94,7 @@ function seedChat(chatId: string, timeline: ChatEventEntry[]): void {
       permissionMode: 'auto' as const,
       name: chatId,
       folder: 'foo',
-      activity: 'awaiting-permission',
+      chatStatus: { state: 'waiting_for_user', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

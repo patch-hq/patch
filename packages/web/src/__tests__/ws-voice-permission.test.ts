@@ -98,7 +98,7 @@ describe('ws permission-during-voice', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: Date.now(),
     });
     expect(useVoiceStore.getState().permission).toBeNull();

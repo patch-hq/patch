@@ -49,13 +49,14 @@ function resend(seq: number, retryOfSeq: number): void {
   });
 }
 
-function state(activity: 'running' | 'errored' | 'idle'): void {
+/** The server's status for the chat, said the old way for brevity. */
+function state(activity: 'running' | 'errored' | 'idle' | 'host_offline'): void {
   useChatStore.getState().applyEvent({
     type: 'chat.state',
     chatId: 'c1',
     hostId: 'd1',
     permissionMode: 'auto',
-    activity,
+    chatStatus: { state: ({ running: 'running', idle: 'idle', errored: 'failed' } as Record<string, string>)[activity] ?? activity, since: 0 },
     lastUpdated: 1,
   });
 }
@@ -190,7 +191,7 @@ describe('chatStore — the failure is temporary once the turn goes round again'
       error: { code: 'daemon_unavailable', message: 'Connection to the host was lost.' },
       seq: -1,
     });
-    state('errored');
+    state('host_offline');
     expect(timeline().filter((e) => e.kind === 'error')).toHaveLength(1);
     // The host is back and running the turn again.
     state('running');
@@ -311,7 +312,7 @@ describe('chatStore — a failed mark does not outlive the turn running again', 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity,
+      chatStatus: { state: ({ running: 'running', idle: 'idle', errored: 'failed' } as Record<string, string>)[activity] ?? activity, since: 0 },
       lastUpdated,
     });
   }
@@ -394,7 +395,7 @@ describe('chatStore — a failure the host retried does not outlive the retry', 
       chatId: 'c1',
       hostId: 'd1',
       permissionMode: 'auto',
-      activity: 'errored',
+      chatStatus: { state: 'failed', since: 0 },
       lastUpdated: 1,
       turnRetrying,
     });

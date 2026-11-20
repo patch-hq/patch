@@ -65,7 +65,7 @@ describe('SidebarWindowRoute', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'a chat',
         folder: '~/proj',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

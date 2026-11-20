@@ -1,5 +1,6 @@
-// spec/14 § Status badges — the full precedence of deriveBadge, one rule per test.
-// Order: permission > errored > working > done (unread) > background > monitoring > read.
+// spec/14 § Status badges, spec/05 § Chat status — what the chat is doing is the
+// server's status alone; the surface adds only its read mark and the quiet work
+// the server reports alongside. Nothing the surface holds overrides the status.
 
 import { describe, it, expect } from 'vitest';
 import { deriveBadge, type ChatRow, type DisplayBadge } from '../stores/types.js';
@@ -22,7 +23,7 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
     statusDeclared: null,
     todos: [],
     folder: '/w',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -43,122 +44,54 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
   } as ChatRow;
 }
 
-describe('deriveBadge — single signals', () => {
+const st = (state: string): Partial<ChatRow> => ({ chatStatus: { state, since: 0 } });
+
+describe('deriveBadge — the server status decides', () => {
   it.each<[string, Partial<ChatRow>, DisplayBadge]>([
-    ['quiet visited chat', {}, 'read'],
-    ['running', { activity: 'running' }, 'working'],
-    ['open tool call while idle', { openToolCalls: 1 }, 'working'],
-    ['zero open tool calls', { openToolCalls: 0 }, 'read'],
-    ['awaiting-permission activity', { activity: 'awaiting-permission' }, 'permission'],
-    ['pending permission with idle activity', { pendingPermissions: [PERM] }, 'permission'],
-    ['declared question', { statusKind: 'question', statusDeclared: true }, 'permission'],
-    ['activity errored', { activity: 'errored' }, 'errored'],
-    ['status errored', { status: 'errored' }, 'errored'],
-    ['unread', { lastSeq: 5, lastReadSeq: 4 }, 'done'],
-    ['background count', { backgroundTasks: 2 }, 'background'],
-    ['pending wake', { pendingWake: WAKE }, 'monitoring'],
-  ])('%s', (_n, over, want) => {
-    expect(deriveBadge(row(over))).toBe(want);
+    ['idle, read', st('idle'), 'read'],
+    ['running', st('running'), 'working'],
+    ['waiting for the user', st('waiting_for_user'), 'permission'],
+    ['failed', st('failed'), 'errored'],
+    ['interrupted', st('interrupted'), 'interrupted'],
+    ['waiting for sign-in', st('waiting_for_sign_in'), 'signin'],
+    ['paused', st('paused'), 'paused'],
+    ['host offline', st('host_offline'), 'away'],
+    ['host restarting', st('host_restarting'), 'away'],
+    ['queued for an offline host', st('queued_offline'), 'away'],
+    ['idle with unread output', { ...st('idle'), lastSeq: 5, lastReadSeq: 1 }, 'done'],
+    ['idle with agents running', { ...st('idle'), runningAgents: 1, backgroundTasks: 2 }, 'agents'],
+    ['idle with a background task', { ...st('idle'), backgroundTasks: 1 }, 'background'],
+    ['idle with a self-wake armed', { ...st('idle'), pendingWake: WAKE }, 'monitoring'],
+  ])('%s → %s', (_name, over, expected) => {
+    expect(deriveBadge(row(over))).toBe(expected);
   });
 });
 
-describe('deriveBadge — edges that must not trigger', () => {
-  it('a GENERATED question does not read as permission', () => {
-    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: false }))).toBe('read');
-    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: null }))).toBe('read');
-  });
-  it('a declared report or complete is not permission', () => {
-    expect(deriveBadge(row({ statusKind: 'report', statusDeclared: true }))).toBe('read');
-    expect(deriveBadge(row({ statusKind: 'complete', statusDeclared: true }))).toBe('read');
-  });
-  it('lastReadSeq ahead of lastSeq is read, not unread', () => {
-    expect(deriveBadge(row({ lastSeq: 2, lastReadSeq: 9 }))).toBe('read');
-  });
-  it('unknown / zero background counts never show background', () => {
-    expect(deriveBadge(row({ backgroundTasks: null }))).toBe('read');
-    expect(deriveBadge(row({ backgroundTasks: undefined }))).toBe('read');
-    expect(deriveBadge(row({ backgroundTasks: 0 }))).toBe('read');
-  });
-});
-
-describe('deriveBadge — pairwise precedence', () => {
-  const signals: Array<[DisplayBadge, Partial<ChatRow>]> = [
-    ['permission', { pendingPermissions: [PERM] }],
-    ['errored', { activity: 'errored' }],
-    ['working', { openToolCalls: 1 }],
-    ['done', { lastSeq: 5, lastReadSeq: 1 }],
-    ['background', { backgroundTasks: 1 }],
-    ['monitoring', { pendingWake: WAKE }],
-  ];
-  for (let i = 0; i < signals.length; i++) {
-    for (let j = i + 1; j < signals.length; j++) {
-      const [hi, hiOver] = signals[i]!;
-      const [lo, loOver] = signals[j]!;
-      it(`${hi} beats ${lo}`, () => {
-        expect(deriveBadge(row({ ...loOver, ...hiOver }))).toBe(hi);
-        expect(deriveBadge(row({ ...hiOver, ...loOver }))).toBe(hi);
-      });
-    }
-  }
-  it('a pending permission outlives activity going idle', () => {
-    expect(deriveBadge(row({ activity: 'idle', pendingPermissions: [PERM], lastSeq: 9 }))).toBe(
-      'permission',
-    );
-  });
-  it('an errored status left over from an earlier failure yields to a turn running now', () => {
-    expect(deriveBadge(row({ status: 'errored', activity: 'running' }))).toBe('working');
-    expect(deriveBadge(row({ status: 'errored', openToolCalls: 1 }))).toBe('working');
-    expect(deriveBadge(row({ status: 'errored', activity: 'idle' }))).toBe('errored');
-  });
-  it('a declared question beats errored and working', () => {
-    const q = { statusKind: 'question', statusDeclared: true } as const;
-    expect(deriveBadge(row({ ...q, activity: 'errored' }))).toBe('permission');
-    expect(deriveBadge(row({ ...q, activity: 'running' }))).toBe('permission');
-  });
-});
-
-// spec/05 § Chat status — when the server sends the chat's status, the badge
-// draws it; the surface adds only its read mark and the quiet work reported
-// alongside, and works out nothing from activity, open tool calls or prompts.
-describe('deriveBadge with the server status', () => {
-  const status = (state: string, extra = {}) => ({ chatStatus: { state, since: 1, ...extra } });
-  it.each([
-    ['waiting_for_user', 'permission'],
-    ['failed', 'errored'],
-    ['interrupted', 'interrupted'],
-    ['waiting_for_sign_in', 'signin'],
-    ['running', 'working'],
-    ['paused', 'paused'],
-    ['host_offline', 'away'],
-    ['host_restarting', 'away'],
-    ['queued_offline', 'away'],
-    ['idle', 'read'],
-  ] as const)('%s draws %s', (state, badge) => {
-    expect(deriveBadge(row(status(state)))).toBe(badge as DisplayBadge);
+describe('deriveBadge — the surface never derives a status of its own', () => {
+  it('a pending permission card does not make an idle chat "needs you"', () => {
+    expect(deriveBadge(row({ pendingPermissions: [PERM] }))).toBe('read');
   });
 
-  it('ignores what the surface itself saw: an idle server status is not working', () => {
-    expect(
-      deriveBadge(
-        row({
-          ...status('idle'),
-          activity: 'running',
-          openToolCalls: 2,
-          pendingPermissions: [PERM],
-        }),
-      ),
-    ).toBe('read');
+  it('a declared question does not either: the server says waiting when it is', () => {
+    expect(deriveBadge(row({ statusKind: 'question', statusDeclared: true }))).toBe('read');
   });
 
-  it('unread beats a held status, and a decision beats unread', () => {
-    expect(deriveBadge(row({ ...status('paused'), lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
-    expect(deriveBadge(row({ ...status('waiting_for_user'), lastSeq: 5, lastReadSeq: 1 }))).toBe(
-      'permission',
-    );
+  it('a lifecycle `errored` flag does not override the server status', () => {
+    expect(deriveBadge(row({ status: 'errored' }))).toBe('read');
   });
 
-  it('an idle chat still draws its reported quiet work', () => {
-    expect(deriveBadge(row({ ...status('idle'), pendingWake: WAKE }))).toBe('monitoring');
-    expect(deriveBadge(row({ ...status('idle'), backgroundTasks: 1 }))).toBe('background');
+  it('before the server has spoken, no status is shown, only the read mark', () => {
+    expect(deriveBadge(row({ chatStatus: undefined }))).toBe('read');
+    expect(deriveBadge(row({ chatStatus: undefined, lastSeq: 3, lastReadSeq: 1 }))).toBe('done');
+  });
+
+  it('a status this surface does not know reads as no status, never a neighbour', () => {
+    expect(deriveBadge(row(st('something_new')))).toBe('read');
+  });
+
+  it('a failure outranks unread output; a pause and an away host are below it', () => {
+    expect(deriveBadge(row({ ...st('failed'), lastSeq: 5, lastReadSeq: 1 }))).toBe('errored');
+    expect(deriveBadge(row({ ...st('paused'), lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
+    expect(deriveBadge(row({ ...st('host_offline'), lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
   });
 });

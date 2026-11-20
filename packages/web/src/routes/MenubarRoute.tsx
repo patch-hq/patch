@@ -192,7 +192,7 @@ export function MenubarRoute(): JSX.Element {
             onClick={() => launchFullApp(c.chatId)}
             aria-label={`open ${deriveChatTitle(c.name)}`}
           >
-            <span className={`menubar-status badge ${activityClass(c.activity)}`} />
+            <span className={`menubar-status badge ${statusClass(c.chatStatus?.state)}`} />
             <span className="menubar-body">
               {/* Same placeholder as every other surface: an unnamed chat is
                   a "New chat", not an "Untitled" one (spec/04 § Name). */}
@@ -246,9 +246,9 @@ export function MenubarRoute(): JSX.Element {
 // Namespaced to match `StatusBadge` — a bare `permission` here would pick up
 // the transcript approval card's `.permission` padding and blow the 8px dot up
 // into a 32px blob (see the `.badge` block in index.css).
-function activityClass(activity: string): string {
-  if (activity === 'awaiting-permission') return 'badge-permission';
-  if (activity === 'running') return 'badge-working';
+function statusClass(state: string | undefined): string {
+  if (state === 'waiting_for_user') return 'badge-permission';
+  if (state === 'running') return 'badge-working';
   return '';
 }
 

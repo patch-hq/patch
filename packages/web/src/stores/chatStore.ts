@@ -24,9 +24,10 @@ import type {
   TodoItem,
   WireEvent,
 } from '@patch/wire';
-import { clearsLimitPause, headCodePoints, isTransientChatError } from '@patch/wire';
+import { headCodePoints, isTransientChatError } from '@patch/wire';
 import {
   deriveBadge,
+  statusOf,
   type ChatRow,
   type DisplayBadge,
   type GoalPlan,
@@ -988,6 +989,11 @@ function snapshotUserActivity(
   return Math.max(r.lastUserActivity ?? r.lastUpdated, existing?.lastUserActivity ?? 0);
 }
 
+/** The server says nothing is in flight on the chat (spec/05 § Chat status). */
+function isSettled(state: string | undefined): boolean {
+  return state !== undefined && state !== 'running' && state !== 'waiting_for_user';
+}
+
 function emptyRow(chatId: string, folder: string): ChatRow {
   return {
     chatId,
@@ -996,7 +1002,6 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     // optimistic row, and every host-scoped action checks for it.
     hostId: '',
     folder,
-    activity: 'idle',
     permissionMode: 'auto',
     status: 'active',
     pinned: false,
@@ -1263,12 +1268,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...existing,
           ...r,
           awaitingState: false,
-          ...(stale ? { activity: existing.activity, lastUpdated: existing.lastUpdated } : {}),
-          // A snapshot that settles the chat means no call is in flight; the
-          // counter is client-side and a lost result would pin `working`.
-          ...(!stale && (r.activity === 'idle' || r.activity === 'errored')
-            ? { openToolCalls: 0, openCallIds: [] }
-            : {}),
+          ...(stale ? { lastUpdated: existing.lastUpdated } : {}),
+          // A snapshot the server says is settled means no call is in flight.
+          ...(!stale && isSettled(r.chatStatus?.state) ? { openCallIds: [] } : {}),
           preview,
           goal,
           goalProgress,
@@ -1296,7 +1298,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           runningAgents,
-          ...(chatStatus ? { chatStatus } : {}),
+          // A snapshot older than the row holds must not roll the status back.
+          ...((stale ? existing.chatStatus : chatStatus)
+            ? { chatStatus: stale ? existing.chatStatus : chatStatus }
+            : {}),
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1845,35 +1850,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         case 'chat.state': {
           const row = ensureRow(event.chatId, event.folder);
           // `lastUpdated` is host-owned and only ever set from state frames,
-          // so an older one is a replay/race, not news. Applying it rolled
-          // `activity` back: a tick on a working chat, orange on a finished one.
+          // so an older one is a replay/race, not news.
           if (event.lastUpdated < row.lastUpdated) break;
-          // An UNRESOLVED pending permission is the canonical "agent paused on a
-          // yes/no" signal (spec/14 ## Status badges → `permission`). The mock
-          // backend (and the SDK under `bypassPermissions`) emits the permission
-          // event and then completes the turn, so a trailing `chat.activity:
-          // idle` arrives while the prompt is still unanswered. We must NOT let
-          // that settle the row back to `done` — the badge + waiting-pill stay
-          // on `permission` until the user actually approves/denies. NO FALLBACK:
-          // the pending list is cleared explicitly on response, not by a timer.
-          const hasPending = row.pendingPermissions.length > 0;
-          const nextActivity = hasPending ? 'awaiting-permission' : event.activity;
+          // The chat's status is the server's (spec/05 § Chat status): stored
+          // as sent, never worked out or overridden here.
+          const state = event.chatStatus?.state ?? row.chatStatus?.state;
           chats[event.chatId] = {
             ...row,
-            activity: nextActivity,
-            optimisticSend: false,
             awaitingState: false,
-            // The turn is over, so no tool call is in flight. The counter is
-            // client-side and only a tool_result decrements it; a result that
-            // never arrived would otherwise pin the row on `working` for good.
-            openToolCalls:
-              event.activity === 'idle' || event.activity === 'errored'
-                ? 0
-                : (row.openToolCalls ?? 0),
-            openCallIds:
-              event.activity === 'idle' || event.activity === 'errored'
-                ? []
-                : (row.openCallIds ?? []),
+            // The server says the turn is over, so no tool call is in flight; a
+            // result that never arrived would otherwise keep a call spinning.
+            openCallIds: isSettled(state) ? [] : (row.openCallIds ?? []),
             // Rendered as reported. The host resolved it against the host
             // default the surface does not hold (spec/02 § Permission mode).
             permissionMode: event.permissionMode,
@@ -1946,7 +1933,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...((event.continuedIn ?? row.continuedIn) !== undefined
               ? { continuedIn: event.continuedIn ?? row.continuedIn }
               : {}),
-            awaitingPermission: hasPending || event.activity === 'awaiting-permission',
+            awaitingPermission: state === 'waiting_for_user',
             // Rate-limit auto-resume timestamp — null when no retry is pending,
             // set when the host schedules one, cleared when it fires. Null is
             // meaningful so only keep the existing value when OMITTED (undefined).
@@ -1972,10 +1959,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.creditReturned !== undefined
                 ? event.creditReturned
                 : (row.creditReturned ?? false),
-            // Why the chat failed, for the failed badge's tooltip. Only meaningful
-            // while errored, so it never outlives the failure.
+            // Why the chat failed, for the failed badge's tooltip, as the server
+            // sent it. Only meaningful while the server says it failed.
             lastError:
-              event.activity !== 'errored'
+              state !== 'failed' && state !== 'waiting_for_sign_in'
                 ? null
                 : event.lastError !== undefined
                   ? event.lastError
@@ -2027,10 +2014,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // (a host returning says nothing about whether THIS chat's turn did).
           // If the host never comes back there is no such event and the notice
           // stays, which is the truth.
-          if (event.activity !== 'errored') {
+          if (state !== 'host_offline' && state !== 'host_restarting') {
             clearTransientErrors(event.chatId, retryingChats.has(event.chatId));
-            if (event.activity === 'running') retryingChats.delete(event.chatId);
-          } else if (event.turnRetrying === true) retryingChats.add(event.chatId);
+          }
+          if (event.turnRetrying === true) retryingChats.add(event.chatId);
           else retryingChats.delete(event.chatId);
           // A generic `sdk_error` is marked on the turn's own bubble, and the
           // host then retries that turn on its own. The mark is cleared when
@@ -2039,7 +2026,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // above text that was visibly still arriving. The host reporting the
           // chat `running` again is the turn being in flight. Only the NEWEST
           // user message can be that turn; an older failure stays failed.
-          if (event.activity === 'running') {
+          if (state === 'running') {
             const held = timelines[event.chatId];
             if (held) {
               let newest = -1;
@@ -2064,7 +2051,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // A chat that is not running cannot be holding anything behind a turn
           // (the server's QueueTracker applies the same rule). `chat.dequeued`
           // is live-only, so a missed one would leave the message QUEUED for good.
-          if (event.activity === 'idle') {
+          if (state === 'idle') {
             const held = timelines[event.chatId];
             if (held?.some((e) => e.queued === true)) {
               timelines[event.chatId] = held.map((e) =>
@@ -2080,7 +2067,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // limit that is blocking nothing, behind a `Try now` with nothing to
           // run. `idle` and `errored` are NOT triggers: an armed pause is an
           // idle chat and a limit nobody parked is an errored one.
-          if (clearsLimitPause(event.activity)) {
+          if (state === 'running' || state === 'waiting_for_user') {
             const settled = chats[event.chatId]!;
             if (
               settled.limitBlock !== null ||
@@ -2297,9 +2284,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // A user message after a call means that call is over: a cancelled
             // call never gets a tool_result, so a replay would otherwise
             // reopen it and its row would tick forever.
-            ...(event.role === 'user' && event.retryOfSeq === undefined
-              ? { openToolCalls: 0, openCallIds: [] }
-              : {}),
+            ...(event.role === 'user' && event.retryOfSeq === undefined ? { openCallIds: [] } : {}),
           };
           // spec/12 § A turn is owed until it settles — the host is re-sending
           // a turn it has already drawn a bubble for. Fold it onto that bubble
@@ -2504,7 +2489,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // Real turn failures are never discarded here.
           if (
             isTransientChatError(event.error.code) &&
-            (row.activity === 'running' || row.activity === 'awaiting-permission')
+            (statusOf(row) === 'running' || statusOf(row) === 'waiting_for_user')
           )
             break;
           // An unclassified agent/SDK failure (as opposed to a specific,
@@ -2637,8 +2622,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // like one still being worked on, and any half-streamed reply keeps its
           // live caret forever.
           const stoppedRow = chats[event.chatId];
-          if (stoppedRow?.openToolCalls || stoppedRow?.openCallIds?.length) {
-            chats[event.chatId] = { ...stoppedRow, openToolCalls: 0, openCallIds: [] };
+          if (stoppedRow?.openCallIds?.length) {
+            chats[event.chatId] = { ...stoppedRow, openCallIds: [] };
           }
           const cur = timelines[event.chatId];
           if (!cur) break;
@@ -2660,7 +2645,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // queued), the aborted run's own settle already flipped `activity` to
           // `idle` before this event arrives, so a running chat here means a
           // promote and anything else (idle, or no row at all) means bare.
-          const promoted = chats[event.chatId]?.activity === 'running';
+          const promoted = statusOf(chats[event.chatId]) === 'running';
           // The interrupted turn's own message is the newest user entry that had
           // actually started: anything still `queued` (type-ahead behind this
           // turn) or `deliveryPending` (not yet observed) was never the running
@@ -2779,15 +2764,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (already) break;
           chats[event.chatId] = {
             ...chats[event.chatId]!,
-            // A row the host has already settled (idle/errored, with a state
-            // frame or REST snapshot behind it) is not working: this call is a
-            // replayed one whose result never came, and counting it pinned a
-            // finished chat on the orange `working` badge. A live call re-arms
-            // the count via the `chat.state{running}` that accompanies it.
-            openToolCalls:
-              (row.activity === 'idle' || row.activity === 'errored') && row.lastUpdated > 0
-                ? (row.openToolCalls ?? 0)
-                : (row.openToolCalls ?? 0) + 1,
             openCallIds: (row.openCallIds ?? []).includes(event.callId)
               ? row.openCallIds!
               : [...(row.openCallIds ?? []), event.callId],
@@ -2817,7 +2793,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (already) break;
           chats[event.chatId] = {
             ...chats[event.chatId]!,
-            openToolCalls: Math.max(0, (row.openToolCalls ?? 0) - 1),
             openCallIds: (row.openCallIds ?? []).filter((id) => id !== event.callId),
           };
           pushTimeline(event.chatId, {
@@ -2973,7 +2948,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chats[event.chatId] = {
             ...row,
             awaitingPermission: true,
-            activity: 'awaiting-permission',
             pendingPermissions: [...row.pendingPermissions, perm],
             lastSeq: Math.max(row.lastSeq, event.seq),
           };
@@ -3053,11 +3027,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...row,
         pendingPermissions: remaining,
         // Clear the paused flag only when nothing else is outstanding; the
-        // activity itself settles via the host's follow-up `chat.state`.
+        // status itself is the server's, on its next `chat.state`.
         awaitingPermission: remaining.length > 0,
-        ...(remaining.length === 0 && row.activity === 'awaiting-permission'
-          ? { activity: 'running' as const }
-          : {}),
       },
     };
     const existing = state.timelines[chatId];
@@ -3119,7 +3090,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...row,
           pendingPermissions: [],
           awaitingPermission: false,
-          ...(row.activity === 'awaiting-permission' ? { activity: 'idle' as const } : {}),
         },
       },
     });
@@ -3194,13 +3164,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [chatId]: {
           ...row,
           preview: row.preview ?? headCodePoints(content, 140),
-          // Working at once, not after the host's first activity frame. Only a settled
-          // chat: a running or blocked one already says the right thing.
-          ...(!opts?.dedupeAgainstPersisted &&
-          local.length === 0 &&
-          (row.activity === 'idle' || row.activity === 'errored')
-            ? { optimisticSend: true }
-            : {}),
         },
       },
     });
@@ -3312,10 +3275,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   failDelivery(chatId, localId) {
-    const row = get().chats[chatId];
-    if (row?.optimisticSend) {
-      set({ chats: { ...get().chats, [chatId]: { ...row, optimisticSend: false } } });
-    }
     updateDeliveryEntry(get, set, chatId, localId, {
       deliveryPending: false,
       deliveryFailed: true,

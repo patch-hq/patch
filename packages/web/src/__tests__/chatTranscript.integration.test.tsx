@@ -153,7 +153,7 @@ function makeRow(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: chatId,
     folder: '/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -199,7 +199,7 @@ function makeFetch(chats: ChatRow[]): ReturnType<typeof vi.fn> {
           name: c.name,
           preview: c.preview,
           folder: c.folder,
-          activity: c.activity,
+          ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
           status: c.status,
           pinned: c.pinned,
           pinnedAt: c.pinnedAt,
@@ -535,7 +535,7 @@ describe('integration: stopping a turn with nothing queued marks it stopped and 
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: Date.now() + 1000,
       } as WireEvent);
       fake.receive({
@@ -557,7 +557,7 @@ describe('integration: stopping a turn with nothing queued marks it stopped and 
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: Date.now() + 2000,
       } as WireEvent);
       fake.receive({ type: 'chat.stopped', chatId: 'c1', reason: 'user-stop' } as WireEvent);
@@ -595,7 +595,7 @@ describe('integration: send-while-running queues then drains', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: Date.now() + 1000,
       } as WireEvent);
     });

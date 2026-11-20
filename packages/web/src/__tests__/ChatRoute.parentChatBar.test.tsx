@@ -22,7 +22,7 @@ const base = {
   hostId: 'd1',
   permissionMode: 'bypassPermissions' as const,
   folder: 'foo',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,

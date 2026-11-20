@@ -12,6 +12,7 @@ import { navigateAfterArchive } from './archiveNav.js';
 import { isSnoozeUntilComplete } from '@patch/wire';
 import { formatWakeAt } from './snoozePresets.js';
 import type { ChatRow } from '../stores/types.js';
+import { isRunning } from '../stores/types.js';
 
 export function newSnoozeSetId(): string {
   return `set-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -36,7 +37,7 @@ export function applySnooze(opts: {
   const store = useChatStore.getState();
   const ui = useUiStore.getState();
   const setId = newSnoozeSetId();
-  const running = targets.filter((c) => c.activity === 'running').length;
+  const running = targets.filter((c) => isRunning(c)).length;
   const previous = new Map(targets.map((c) => [c.chatId, c.snoozedUntil]));
 
   // Snoozing takes the chats off the list, so move on like archive does —
@@ -54,7 +55,7 @@ export function applySnooze(opts: {
     // A project snooze until complete waits for the whole project: chats with
     // work go first, so the host sees a busy set before an idle chat joins it.
     const ordered = [...targets].sort(
-      (a, b) => Number(b.activity === 'running') - Number(a.activity === 'running'),
+      (a, b) => Number(isRunning(b)) - Number(isRunning(a)),
     );
     void (async () => {
       for (const c of ordered) {

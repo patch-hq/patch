@@ -79,7 +79,7 @@ function makeRow(
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder,
-    activity: 'idle' as const,
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,

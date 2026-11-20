@@ -17,7 +17,7 @@ const row = (chatId: string, over: Partial<ChatRow> = {}): ChatRow =>
     hostId: 'h',
     folder: 'f',
     status: 'active',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     lastUpdated: 1,
     ...over,
   }) as ChatRow;

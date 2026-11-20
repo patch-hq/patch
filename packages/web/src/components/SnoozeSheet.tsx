@@ -35,6 +35,7 @@ import {
 } from '../lib/snoozePresets.js';
 import { applySnooze } from '../lib/snoozeApply.js';
 import type { ChatRow } from '../stores/types.js';
+import { isRunning } from '../stores/types.js';
 
 const CUSTOM = 'custom';
 const SLIDER = 'slider';
@@ -94,7 +95,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
         : chats[target.chatId]
           ? [chats[target.chatId]!]
           : [];
-  const running = targets.filter((c) => c.activity === 'running');
+  const running = targets.filter((c) => isRunning(c));
   const notRunning = targets.length - running.length;
   const name =
     target.kind === 'project'

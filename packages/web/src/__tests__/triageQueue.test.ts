@@ -13,7 +13,7 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
     statusDeclared: null,
     todos: [],
     folder: '/w',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     disabled: false,
@@ -36,19 +36,31 @@ describe('awaitsReply', () => {
     expect(awaitsReply(row({ lastReadSeq: 5 }))).toBe(false);
   });
   it('skips a chat still working, archived or hidden', () => {
-    expect(awaitsReply(row({ activity: 'running' }))).toBe(false);
+    expect(awaitsReply(row({ chatStatus: { state: 'running', since: 0 } }))).toBe(false);
     expect(awaitsReply(row({ status: 'archived' }))).toBe(false);
     expect(awaitsReply(row({ hidden: true }))).toBe(false);
   });
   it('skips a chat paused on a permission: a reply cannot grant it', () => {
     expect(
       awaitsReply(
-        row({ pendingPermissions: [{ requestId: 'r' }] as ChatRow['pendingPermissions'] }),
+        row({
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+          pendingPermissions: [{ requestId: 'r' }] as ChatRow['pendingPermissions'],
+        }),
       ),
     ).toBe(false);
   });
   it('keeps a declared question even once seen', () => {
-    expect(awaitsReply(row({ lastReadSeq: 5, statusKind: 'question', statusDeclared: true }))).toBe(
+    expect(
+      awaitsReply(
+        row({
+          lastReadSeq: 5,
+          statusKind: 'question',
+          statusDeclared: true,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
+      ),
+    ).toBe(
       true,
     );
   });

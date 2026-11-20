@@ -35,7 +35,7 @@ function seed(): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -165,10 +165,11 @@ describe('running tool call', () => {
     expect(screen.getByTestId('tool-running')).toBeTruthy();
   });
 
-  it('shows a spinner and elapsed time on an unreturned call, and working in the sidebar', () => {
+  it('shows a spinner and elapsed time on an unreturned call; the sidebar shows the server status', () => {
     seed();
     useChatStore.getState().applyEvent(call);
-    expect(deriveBadge(useChatStore.getState().chats['c1']!)).toBe('working');
+    // The open call is the call's own row; the badge is the server's status.
+    expect(deriveBadge(useChatStore.getState().chats['c1']!)).not.toBe('working');
     renderChat();
     expect(screen.getByTestId('tool-running')).toBeTruthy();
     expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('0s');
@@ -216,11 +217,11 @@ describe('running tool call', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       lastUpdated: 1,
     });
     useChatStore.getState().applyEvent({ type: 'chat.stopped', chatId: 'c1' } as never);
-    expect(useChatStore.getState().chats['c1']!.activity).toBe('running');
+    expect(useChatStore.getState().chats['c1']!.chatStatus?.state).toBe('running');
     renderChat();
     expect(screen.queryByTestId('tool-running')).toBeNull();
   });

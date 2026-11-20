@@ -120,7 +120,7 @@ describe('runDiagnostics', () => {
       JSON.stringify({
         type: 'chat.state',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         permissionMode: 'bypassPermissions',
         lastUpdated: 1,
         limitResetsAt: 2,

@@ -72,7 +72,6 @@ export interface ChatSummaryRow {
   /** The host this chat lives on (spec/04 § Chat model). */
   hostId: string;
   folder: string;
-  activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
   permissionMode: PermissionMode;
   status: 'active' | 'archived' | 'errored';
   pinned: boolean;

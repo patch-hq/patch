@@ -42,7 +42,7 @@ function seedRow(): void {
       permissionMode: 'bypassPermissions' as const,
       name: null,
       folder: '/home/claude-dev/Unite',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

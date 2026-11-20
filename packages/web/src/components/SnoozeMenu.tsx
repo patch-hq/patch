@@ -23,6 +23,7 @@ import { applySnooze } from '../lib/snoozeApply.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { failed } from '../lib/errorCopy.js';
+import { isRunning } from '../stores/types.js';
 
 export { formatWakeTime };
 
@@ -45,7 +46,7 @@ export function SnoozeMenu({
   const snoozed = isSnoozed(row);
   // Same rule as the sheet: only a chat with work to wait for can be snoozed until complete.
   const canUntilComplete =
-    row.activity === 'running' ||
+    isRunning(row) ||
     row.goal !== null ||
     (row.pendingWake != null && row.pendingWake.every === undefined);
 

@@ -35,7 +35,7 @@ describe('Sidebar — switching chats', () => {
         permissionMode: 'bypassPermissions' as const,
         name: `chat ${i}`,
         folder: '~/proj',
-        activity: 'idle' as const,
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active' as const,
         pinned: false,
         pinnedAt: null,
