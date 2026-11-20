@@ -4,7 +4,8 @@
 import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GUIDE_ITEMS, GUIDE_PURPOSE } from '../lib/guide.js';
+import { GUIDE_ITEMS, GUIDE_PURPOSE, isGuideItemDone } from '../lib/guide.js';
+import { useGuideProgress } from '../lib/useGuideProgress.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { CloseIcon } from './icons.js';
 
@@ -12,6 +13,7 @@ export function GettingStarted(): JSX.Element | null {
   const open = useUiStore((s) => s.guideOpen);
   const setOpen = useUiStore((s) => s.setGuideOpen);
   const navigate = useNavigate();
+  const progress = useGuideProgress();
 
   useEffect(() => {
     if (!open) return;
@@ -43,27 +45,43 @@ export function GettingStarted(): JSX.Element | null {
         </header>
         <p className="guide-purpose">{GUIDE_PURPOSE}</p>
         <ul className="guide-list">
-          {GUIDE_ITEMS.map((item) => (
-            <li key={item.id} className="guide-item" data-testid={`guide-${item.id}`}>
-              <div>
-                <div className="guide-title">{item.title}</div>
-                <div className="muted">{item.line}</div>
-              </div>
-              {item.to ? (
-                <button
-                  type="button"
-                  className="guide-go"
-                  data-testid={`guide-go-${item.id}`}
-                  onClick={() => {
-                    setOpen(false);
-                    navigate(item.to as string);
-                  }}
-                >
-                  {item.action}
-                </button>
-              ) : null}
-            </li>
-          ))}
+          {GUIDE_ITEMS.map((item) => {
+            const done = isGuideItemDone(item.id, progress) && item.done !== undefined;
+            const text = done && item.done ? item.done : item;
+            return (
+              <li
+                key={item.id}
+                className="guide-item"
+                data-testid={`guide-${item.id}`}
+                data-done={done ? 'true' : undefined}
+              >
+                <div>
+                  <div className="guide-title">
+                    {done ? (
+                      <span className="guide-tick" aria-hidden>
+                        ✓{' '}
+                      </span>
+                    ) : null}
+                    {text.title}
+                  </div>
+                  <div className="muted">{text.line}</div>
+                </div>
+                {item.to && !done ? (
+                  <button
+                    type="button"
+                    className="guide-go"
+                    data-testid={`guide-go-${item.id}`}
+                    onClick={() => {
+                      setOpen(false);
+                      navigate(item.to as string);
+                    }}
+                  >
+                    {item.action}
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>
