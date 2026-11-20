@@ -118,8 +118,8 @@ describe('WsHub — terminal frames', () => {
     });
     expect(b.sent).toHaveLength(0);
   });
-  it('tells the owning surface its shell ended when the host goes offline', () => {
-    const { hub } = makeHub();
+  it('tells only the owning surface its shell is lost once the host stays away', async () => {
+    const { hub } = makeHub({ terminalLossWindowMs: 40 });
     const a = new FakeSocket();
     const b = new FakeSocket();
     // @ts-expect-error — private map, seeded directly
@@ -135,6 +135,7 @@ describe('WsHub — terminal frames', () => {
 
     // @ts-expect-error — private method, direct unit coverage
     hub['announceHostStatus']('d1', 'offline');
+    await new Promise((r) => setTimeout(r, 120));
 
     const exits = a.sent
       .map((m) => decode(Buffer.from(m)))
@@ -145,7 +146,7 @@ describe('WsHub — terminal frames', () => {
     ).toHaveLength(0);
   });
 
-  describe('a PTY session across its host going away', () => {
+  describe('a terminal session across its host going away', () => {
     const exitsOf = (sock: FakeSocket) =>
       sock.sent.map((m) => decode(Buffer.from(m))).filter((e) => e.type === 'patch.terminal.exit');
     const openPty = (hub: WsHub, sock: FakeSocket): void => {
@@ -207,7 +208,7 @@ describe('WsHub — terminal frames', () => {
       expect(hub['terminalSessionHost'].has('t1')).toBe(false);
     });
 
-    it('a pipe shell on the same host still ends at once, because it died with the host', () => {
+    it('a pipe session outlives the host going away too: its shell runs under its own runner', () => {
       const { hub } = makeHub();
       const a = new FakeSocket();
       openPty(hub, a);
@@ -218,7 +219,8 @@ describe('WsHub — terminal frames', () => {
         silentLogger,
       );
       goOffline(hub);
-      expect(exitsOf(a)).toMatchObject([{ sessionId: 'pipe1', reason: 'daemon_shutdown' }]);
+      expect(exitsOf(a)).toEqual([]);
+      expect(hub['terminalSessionHost'].get('pipe1')).toBe('d1');
       expect(hub['terminalSessionHost'].get('t1')).toBe('d1');
     });
   });

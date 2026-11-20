@@ -1,10 +1,10 @@
-// The host's end of a PTY runner (`ptyHelper.ts` describes the protocol): one
+// The host's end of a terminal runner (`terminalRunner.ts` describes the protocol): one
 // unix-socket connection to `<dir>/sock`, line framed.
 
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 
-export interface PtyLinkHandlers {
+export interface RunnerLinkHandlers {
   /** Terminal output starting at absolute offset `start`; `replay` when it was already in the log at attach. */
   onData: (start: number, data: Buffer, replay: boolean) => void;
   /** The shell ended with this status. */
@@ -13,14 +13,14 @@ export interface PtyLinkHandlers {
   onClose: () => void;
 }
 
-export class PtyLink {
+export class RunnerLink {
   private socket: Socket | null = null;
   private buf = '';
   private next = 0;
   private replayEnd = 0;
   private closed = false;
 
-  private constructor(private readonly handlers: PtyLinkHandlers) {}
+  private constructor(private readonly handlers: RunnerLinkHandlers) {}
 
   /**
    * Connect to a runner and attach from `offset`. The runner creates its socket
@@ -30,10 +30,10 @@ export class PtyLink {
   static async attach(
     dir: string,
     offset: number,
-    handlers: PtyLinkHandlers,
+    handlers: RunnerLinkHandlers,
     waitMs: number,
-  ): Promise<PtyLink> {
-    const link = new PtyLink(handlers);
+  ): Promise<RunnerLink> {
+    const link = new RunnerLink(handlers);
     const deadline = Date.now() + waitMs;
     for (;;) {
       try {

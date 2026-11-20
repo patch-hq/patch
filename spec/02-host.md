@@ -1275,6 +1275,16 @@ folder on it from a surface.
 - A session is a long-lived shell process (`$SHELL`, else `bash`) started
   with `cwd` = the requested folder, stdin/stdout/stderr piped. Long-lived, so
   `cd` and shell state persist across commands, exactly like a real terminal.
+- Every shell, pipe or PTY, runs under a small python3 runner the host starts,
+  not as a child of the host. The runner is detached and owns the shell.
+  Everything the shell prints goes first to an output log in
+  `<patchHome>/terminals/<runner>/`, and the host talks to the runner over a
+  unix socket in the same directory, so a host that is not there loses nothing
+  (§ Surviving a host restart). A pipe session's log keeps stdout and stderr
+  apart, so output replayed after a restart keeps its stream. python3 is present
+  on every host the host runs on; a host where the runner cannot start answers
+  an error (`internal` for a pipe session, `pty_unavailable` for a PTY), never a
+  shell started some other way.
 - A named folder is validated the same way a chat spawn is — it must exist
   on the host. A missing one is a loud `folder_not_found`, so a shell always starts where the
   caller asked.
@@ -1310,7 +1320,8 @@ folder on it from a surface.
   failure above the error that earned it — or, on a chunk that lands mid-line,
   between the two halves of one message.
 - Interrupt is a separate signal frame (`SIGINT`) delivered to the shell's
-  process group, so a runaway command is killable without killing the session.
+  children (the runner records the shell's pid), so a runaway command is
+  killable without killing the session.
 - Lifecycle: the session ends when the surface closes it, when the shell
   exits (exit code reported), or when it goes idle for 30 minutes. The shell
   runs under its own process, so a host restart leaves it running and the host
@@ -1344,13 +1355,8 @@ shell is a login shell (`$SHELL -l`, else `bash -l`), like an ssh session, so
 the user's profile puts their own tools on PATH. It echoes, prompts, completes
 on Tab and runs full-screen programs.
 
-- The PTY is allocated by a small python3 runner the host starts — no native
-  module. python3 is present on every host the host runs on; a host where the
-  runner cannot start answers `pty_unavailable`, never a pipe shell instead.
-- The runner is detached from the host and owns the shell. Everything the shell
-  prints goes first to an output log in `<patchHome>/terminals/<session>/`, and
-  the host talks to the runner over a unix socket in the same directory, so a
-  host that is not there loses nothing (§ Surviving a host restart).
+- The PTY is allocated by the session's runner — no native module. A host where
+  the runner cannot start answers `pty_unavailable`, never a pipe shell instead.
 - `ready` carries `pty: true`. A surface that asked for a PTY and gets a ready
   without it is talking to a host that predates the field and opened a pipe
   shell; it refuses the session and closes it.
@@ -1369,9 +1375,8 @@ on Tab and runs full-screen programs.
 
 #### Surviving a host restart
 
-A host restart leaves a PTY session's shell and its running programs alone
-(§ Host restarts). Only PTY sessions do: a pipe shell is a child of the host and
-ends with it, with `daemon_shutdown`.
+A host restart leaves every terminal session's shell and its running programs
+alone, pipe and PTY alike (§ Host restarts).
 
 - On stop the host lets go of each runner without ending it. On start it reads
   `<patchHome>/terminals/` and reattaches each session to the surface that
@@ -1379,9 +1384,12 @@ ends with it, with `daemon_shutdown`.
   handed over (the host records that offset beside the session, so nothing is
   delivered twice and nothing is skipped). Replayed scrollback is not subject to
   the output rate cap.
-- A surface that opens the `sessionId` of a session the host has running gets
-  that shell, not a new one: `ready`, then the whole scrollback drawn again, and
-  the same shell state.
+- A surface that opens the `sessionId` of a PTY session the host has running
+  gets that shell, not a new one: `ready`, then the whole scrollback drawn
+  again, and the same shell state. Opening the `sessionId` of a running pipe
+  session replaces its shell, as before.
+- A pipe session keeps its completion sentinel beside it, so commands finished
+  after the restart are still reported.
 - The log keeps the last 2 MiB of output once it passes 4 MiB. Offsets stay
   absolute, so a host asking for output that was trimmed is given what remains.
 - A shell that ended while no host was attached is reported on start: its last
@@ -1391,20 +1399,21 @@ ends with it, with `daemon_shutdown`.
 - A runner with no host attached for 30 minutes ends its shell, so an orphaned
   terminal does not outlive the user's interest in it. The idle timeout applies
   as before once a host is attached.
-- The server keeps a PTY session's route when its host goes offline and tells
-  the surface nothing while the host is away: a restart is a blip, not an end.
-  When the host returns, what the surface sees is the host's own reattach
-  report, an `exit` for each shell that ended while away and the output
+- The server keeps every terminal session's route when its host goes offline
+  and tells the surface nothing while the host is away: a restart is a blip, not
+  an end. When the host returns, what the surface sees is the host's own
+  reattach report, an `exit` for each shell that ended while away and the output
   printed meanwhile for the rest. Only a host that has not returned within two
-  minutes of being announced offline has its PTY sessions reported lost, each as
-  `exit` with a null code and `daemon_shutdown`. A pipe session is reported at
-  once, because it died with the host.
+  minutes of being announced offline has its sessions reported lost, each as
+  `exit` with a null code and `daemon_shutdown`.
 - A surface holding a PTY session asks for it again by `sessionId` when its host
   comes back, and when its own link to the server returns. The reply is `ready`
   and the whole scrollback, which replaces what the surface has drawn (the phone
   clears its emulator on that `ready`). A session reported lost reopens the same
-  way and gets a fresh shell under the same id. The web drawer uses pipe
-  sessions only, so it keeps ending and reopening on a host restart.
+  way and gets a fresh shell under the same id. The web drawer's pipe session
+  needs nothing of the kind across a host restart: its route stays, so the
+  output printed meanwhile and later commands' results simply arrive. Only the
+  web surface's own link dropping makes it open a fresh shell.
 - A session record that cannot be read is discarded. The scrollback is on the
   host's disk, readable only by its user.
 

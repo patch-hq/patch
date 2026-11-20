@@ -77,7 +77,7 @@ describe('TerminalSessions', () => {
   });
 
   afterEach(async () => {
-    await sessions.shutdown();
+    await sessions.closeAll();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -265,19 +265,24 @@ describe('TerminalSessions', () => {
     }
   });
 
-  it('shutdown ends every live session with daemon_shutdown', async () => {
+  it("shutdown lets go of every session without ending it (each shell is its runner's)", async () => {
     sessions.handle({ type: 'patch.terminal.open', hostId: 'd1', sessionId: 's1', folder: dir });
     sessions.handle({ type: 'patch.terminal.open', hostId: 'd1', sessionId: 's2', folder: dir });
     await sink.waitFor(
       (e) => e.type === 'patch.terminal.ready' && e.sessionId === 's2',
       'ready s2',
     );
+    await sink.waitFor(
+      (e) => e.type === 'patch.terminal.ready' && e.sessionId === 's1',
+      'ready s1',
+    );
     await sessions.shutdown();
-    const reasons = sink.frames
-      .filter((f) => f.type === 'patch.terminal.exit')
-      .map((f) => (f as { reason: string }).reason);
-    expect(reasons).toEqual(['daemon_shutdown', 'daemon_shutdown']);
+    expect(sink.frames.some((f) => f.type === 'patch.terminal.exit')).toBe(false);
     expect(sessions.count()).toBe(0);
+    // The shells are still there for the next host to adopt — and end.
+    const next = new TerminalSessions({ runDir: join(dir, '.terminals'), emit: sink.emit });
+    expect(await next.adopt()).toBe(2);
+    await next.closeAll();
   });
 
   it('routes every frame back to the opening surface only', async () => {
@@ -447,7 +452,7 @@ describe('TerminalSessions — command completion', () => {
   });
 
   afterEach(async () => {
-    await sessions.shutdown();
+    await sessions.closeAll();
     rmSync(dir, { recursive: true, force: true });
   });
 

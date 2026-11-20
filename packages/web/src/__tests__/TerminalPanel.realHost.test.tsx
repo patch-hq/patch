@@ -69,7 +69,7 @@ describe('TerminalPanel against a real host shell', () => {
 
   afterEach(async () => {
     cleanup();
-    await host.shutdown();
+    await host.closeAll();
     rmSync(dir, { recursive: true, force: true });
   });
 
