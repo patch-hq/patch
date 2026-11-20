@@ -141,7 +141,7 @@ export interface SdkRunOptions {
    * Keeping this as one profile prevents every cosmetic caller from having to
    * remember the same cost-sensitive set of SDK options.
    */
-  inferenceProfile?: 'classifier' | 'research' | undefined;
+  inferenceProfile?: 'classifier' | 'research' | 'investigator' | undefined;
   /** Images sent alongside `prompt` as content blocks. One-shot path only. */
   images?: Array<{ mediaType: string; data: string }> | undefined;
   cwd: string;
@@ -1252,7 +1252,25 @@ const CLASSIFIER_SYSTEM_PROMPT =
 const RESEARCH_SYSTEM_PROMPT =
   'Follow the user instruction exactly. Use web search to check what you are asked about, then return only the requested answer.';
 
+const INVESTIGATOR_SYSTEM_PROMPT =
+  'Follow the user instruction exactly. Use the read-only file tools to check what you are asked about, then return only the requested answer.';
+
 function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
+  // A classifier that may look at the working folder: read-only tools, bounded steps.
+  if (opts.inferenceProfile === 'investigator') {
+    return {
+      tools: ['Read', 'Grep', 'Glob'],
+      skills: [],
+      settingSources: [],
+      systemPrompt: INVESTIGATOR_SYSTEM_PROMPT,
+      thinking: { type: 'disabled' },
+      effort: 'low',
+      maxTurns: 30,
+      persistSession: false,
+      includePartialMessages: false,
+      mcpServers: {},
+    };
+  }
   // Same bare run as a classifier, plus web search and a few turns to use it.
   if (opts.inferenceProfile === 'research') {
     return {

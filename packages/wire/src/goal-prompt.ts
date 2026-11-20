@@ -9,6 +9,20 @@ export const DEFAULT_GOAL_MODEL = 'claude-sonnet-5-5';
 /** How many times in a row the agent may decline or say it is blocked before the goal stops pushing it. */
 export const DEFAULT_GOAL_REFUSAL_LIMIT = 3;
 
+/**
+ * How far the judge trusts the agent (Settings → Goals).
+ * 1 takes the agent's latest message at its word; 2 reads the recent chat;
+ * 3 trusts nothing and checks the files and resources the work touched.
+ */
+export const GOAL_STRINGENCIES = [1, 2, 3] as const;
+export type GoalStringency = (typeof GOAL_STRINGENCIES)[number];
+export const GOAL_STRINGENCY_LABELS: Record<GoalStringency, string> = {
+  1: "Trusts the agent's last reply",
+  2: 'Reads the recent chat',
+  3: 'Checks every resource',
+};
+export const DEFAULT_GOAL_STRINGENCY: GoalStringency = 2;
+
 export const DEFAULT_GOAL_EVAL_PROMPT = `You are judging whether a stated GOAL has been met by an ongoing agent chat.
 You observe the conversation; you cannot act on it, only judge it.
 

@@ -4,7 +4,7 @@
 // these from the shared settings.
 
 import type { JSX } from 'react';
-import { DEFAULT_GOAL_EVAL_PROMPT } from '@patch/wire';
+import { DEFAULT_GOAL_EVAL_PROMPT, GOAL_STRINGENCIES, GOAL_STRINGENCY_LABELS } from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { failed } from '../../lib/errorCopy.js';
@@ -43,6 +43,21 @@ export function GoalsPage(): JSX.Element {
             ))}
           </select>
           <span className="set-unit">judges every chat, whatever model the chat runs</span>
+        </Row>
+        <Row title="Stringency">
+          <select
+            aria-label="Goal judge stringency"
+            value={preferences.goalStringency}
+            disabled={!loaded}
+            data-testid="goal-stringency"
+            onChange={(e) => write({ goalStringency: Number(e.target.value) as 1 | 2 | 3 })}
+          >
+            {GOAL_STRINGENCIES.map((n) => (
+              <option key={n} value={n}>
+                {n} · {GOAL_STRINGENCY_LABELS[n]}
+              </option>
+            ))}
+          </select>
         </Row>
         <Row title="Stop after">
           <PositiveNumberInput

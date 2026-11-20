@@ -161,6 +161,42 @@ describe('makeGoalEvaluator', () => {
     expect(opts?.prompt).toContain(baseInput.transcript);
   });
 
+  it('stringency 1 judges from the last reply alone, 2 reads the chat, 3 lets the judge check resources', async () => {
+    const run = async (stringency?: 1 | 2 | 3) => {
+      const sdk = createMockSdkBackend();
+      sdk.enqueue([
+        { type: 'assistant', content: '{"verdict":"met","reason":"ok"}' },
+        { type: 'result', sessionId: 's' },
+      ]);
+      const evaluate = makeGoalEvaluator({
+        sdkBackend: sdk,
+        resolveOAuth: okOAuth,
+        logger: silent,
+        settings: () => ({
+          prompt: 'Judge.',
+          model: GOAL_EVAL_MODEL,
+          ...(stringency !== undefined ? { stringency } : {}),
+        }),
+      });
+      await evaluate(baseInput);
+      return sdk.lastOptions();
+    };
+    const one = await run(1);
+    expect(one?.inferenceProfile).toBe('classifier');
+    expect(one?.prompt).not.toContain(baseInput.transcript);
+    expect(one?.prompt).toContain(baseInput.agentStatement);
+    expect(one?.prompt).toContain('at its word');
+    const two = await run(2);
+    expect(two?.inferenceProfile).toBe('classifier');
+    expect(two?.prompt).toContain(baseInput.transcript);
+    expect(two?.prompt).not.toContain('TRUST:');
+    expect((await run())?.prompt).toBe(two?.prompt);
+    const three = await run(3);
+    expect(three?.inferenceProfile).toBe('investigator');
+    expect(three?.prompt).toContain(baseInput.transcript);
+    expect(three?.prompt).toContain('TRUST: none');
+  });
+
   it('judges a chat on a model endpoint on that model, and any other chat on the judge model', async () => {
     const sdk = createMockSdkBackend();
     const verdict = [

@@ -37,6 +37,7 @@ import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
+  DEFAULT_GOAL_STRINGENCY,
 } from './goal-prompt.js';
 import {
   DEFAULT_MEETING_RESEARCH_SECONDS,
@@ -2527,6 +2528,8 @@ export const SharedSettings = z
     goalModel: z.string().min(1),
     /** Consecutive refusals after which a goal stops pushing the agent. */
     goalRefusalLimit: z.number().int().positive(),
+    /** How far the judge trusts the agent: 1 its last message, 2 the recent chat, 3 nothing (it checks the resources). */
+    goalStringency: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     quietHoursStart: TimeOfDay,
     quietHoursEnd: TimeOfDay,
     addressWord: z.string().min(1).max(32),
@@ -2734,6 +2737,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   watchCheckInMinutes: DEFAULT_WATCH_CHECK_IN_MINUTES,
   goalModel: DEFAULT_GOAL_MODEL,
   goalRefusalLimit: DEFAULT_GOAL_REFUSAL_LIMIT,
+  goalStringency: DEFAULT_GOAL_STRINGENCY,
   quietHoursStart: '23:00',
   quietHoursEnd: '07:00',
   addressWord: 'patch',
