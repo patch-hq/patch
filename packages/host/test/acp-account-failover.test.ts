@@ -113,12 +113,7 @@ describe('a chat on an ACP agent with two accounts', () => {
           })();
         },
       },
-      historyReader: {
-        hasSession: (o: { sessionId: string }) => known.has(o.sessionId),
-        read: () => [],
-        forkPoint: () => null,
-        sidePoint: () => null,
-      } as any,
+      sessionProbe: { hasSession: (o: { sessionId: string }) => known.has(o.sessionId) },
       claudeProjectsRoot: join(root, 'projects'),
       resolveOAuth: async (_model, turn) => {
         const a = accounts.resolve('fake', route, turn !== undefined);
