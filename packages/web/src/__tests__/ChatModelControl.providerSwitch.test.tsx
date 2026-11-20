@@ -52,7 +52,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

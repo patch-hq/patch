@@ -133,13 +133,13 @@ export { formatWakeAt, formatSnoozeMoment, formatElapsed } from '@patch/wire';
 export function hasWorkToWaitFor(
   chat: {
     chatId: string;
-    activity: string;
+    chatStatus?: { state: string };
     goal?: unknown;
     pendingWake?: { every?: unknown } | null;
   },
   delegateUpdates: Record<string, Record<string, { status: string }>>,
 ): boolean {
-  if (chat.activity === 'running' || (chat.goal ?? null) !== null) return true;
+  if (chat.chatStatus?.state === 'running' || (chat.goal ?? null) !== null) return true;
   if (chat.pendingWake != null && chat.pendingWake.every === undefined) return true;
   return Object.values(delegateUpdates[chat.chatId] ?? {}).some(
     (d) => d.status === 'running' || d.status === 'awaiting-permission',

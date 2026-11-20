@@ -44,7 +44,7 @@ function seedChat(chatId: string): void {
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

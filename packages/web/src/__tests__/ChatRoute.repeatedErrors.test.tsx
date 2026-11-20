@@ -33,7 +33,7 @@ function renderWith(timeline: ChatEventEntry[]) {
       permissionMode: 'auto' as const,
       name: 'c-e',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

@@ -99,7 +99,7 @@ describe('DeliveryTracker (spec/12 § Guaranteed input delivery)', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: 0,
       },
     ],
@@ -383,7 +383,7 @@ describe('DeliveryTracker (spec/12 § Guaranteed input delivery)', () => {
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 0,
     });
     expect(entry('c1', 'L1')?.deliveryPending).toBe(true);

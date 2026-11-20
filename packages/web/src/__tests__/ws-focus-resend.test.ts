@@ -90,7 +90,7 @@ describe('PatchWs — auth.ok resends the currently-open chat focus', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'held',
         folder: 'foo',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

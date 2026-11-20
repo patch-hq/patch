@@ -17,7 +17,7 @@ function rowFixture(overrides: Partial<ChatRow>): ChatRow {
     hostId: 'd1',
     permissionMode: 'bypassPermissions' as const,
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

@@ -53,7 +53,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -226,7 +226,7 @@ describe('composer model selector', () => {
   });
 
   it('says which turn the change applies to', () => {
-    render(row({ activity: 'idle' }));
+    render(row({ chatStatus: { state: 'idle', since: 0 } }));
     fireEvent.click(screen.getByTestId('chat-model'));
     expect(screen.getByTestId('model-popup-note').textContent).toBe('Applies to your next message');
   });
@@ -234,7 +234,7 @@ describe('composer model selector', () => {
   it('says the running turn keeps its model while a turn is running', () => {
     // Presenting the switch as instant would misdescribe the reply streaming
     // underneath the pop-up (spec/04 § Model).
-    render(row({ activity: 'running' }));
+    render(row({ chatStatus: { state: 'running', since: 0 } }));
     fireEvent.click(screen.getByTestId('chat-model'));
     expect(screen.getByTestId('model-popup-note').textContent).toBe(
       'Applies to your next message — this turn keeps its model',

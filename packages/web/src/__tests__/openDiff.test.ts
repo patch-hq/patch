@@ -39,7 +39,7 @@ function seed(chatId: string, folder: string, timeline: unknown[]): void {
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder,
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

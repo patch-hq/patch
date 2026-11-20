@@ -9,7 +9,7 @@ const row = (chatId: string): ChatRow =>
     hostId: 'h',
     folder: 'f',
     status: 'active',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     lastUpdated: 1,
   }) as ChatRow;
 
@@ -19,7 +19,7 @@ const serverRow = (chatId: string) => ({
   hostId: 'h',
   folder: 'f',
   permissionMode: 'default' as const,
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,

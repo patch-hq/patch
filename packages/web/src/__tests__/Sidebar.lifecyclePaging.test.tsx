@@ -18,7 +18,7 @@ function hiddenRow(chatId: string, lastUpdated: number) {
     name: chatId,
     preview: null,
     folder: '~/proj',
-    activity: 'running' as const,
+    chatStatus: { state: 'running', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,

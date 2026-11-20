@@ -43,7 +43,7 @@ function seed(pendingWake: ChatRow['pendingWake']): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'bus watch',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,
@@ -228,7 +228,7 @@ describe('ChatRoute — pending self-wake bar', () => {
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
         lastUpdated: NOW + 60_000,
         pendingWake: null,
         todos: [],
@@ -258,7 +258,7 @@ describe('ChatRoute — pending self-wake bar', () => {
     useChatStore.setState((st) => ({
       chats: {
         ...st.chats,
-        c1: { ...st.chats['c1']!, activity: 'running', limitBlock: { scope: 'session' } },
+        c1: { ...st.chats['c1']!, chatStatus: { state: 'running', since: 0 }, limitBlock: { scope: 'session' } },
       },
       timelines: {
         ...st.timelines,

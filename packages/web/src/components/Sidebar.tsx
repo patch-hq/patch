@@ -116,6 +116,7 @@ import { useChatBadge } from './ChatStatusBadge.js';
 import { shortcutLabel, shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { NewChatSplit } from './NewChatSplit.js';
 import { failed } from '../lib/errorCopy.js';
+import { isRunning } from '../stores/types.js';
 
 // How long a row's badge must be QUIET before we show its new value.
 const BADGE_SETTLE_MS = 250;
@@ -296,7 +297,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // the one state that is unambiguously "handed back to the agent" — the row
   // has stopped waiting on you, so the reason for holding it under the
   // pointer is gone.
-  const activeIsWorking = activeChatId !== null && chats[activeChatId]?.activity === 'running';
+  const activeIsWorking = activeChatId !== null && isRunning(chats[activeChatId]);
   const heldChatId = activeIsWorking ? null : activeChatId;
 
   // "Needs attention" mode: filter the active chat list to only chats that
@@ -1466,7 +1467,7 @@ export function ArchivedSection({
           name: string | null;
           preview: string | null;
           folder: string;
-          activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
+          chatStatus?: import('@patch/wire').ChatStatusInfo;
           status: 'active' | 'archived' | 'errored';
           pinned: boolean;
           pinnedAt: number | null;
@@ -1486,7 +1487,7 @@ export function ArchivedSection({
         hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
-        activity: c.activity,
+        ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
         status: c.status,
         pinned: c.pinned,
         pinnedAt: c.pinnedAt,
@@ -1735,7 +1736,7 @@ export function DeletedSection({
           name: string | null;
           preview: string | null;
           folder: string;
-          activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
+          chatStatus?: import('@patch/wire').ChatStatusInfo;
           status: 'active' | 'archived' | 'errored' | 'deleted';
           pinned: boolean;
           pinnedAt: number | null;
@@ -1752,7 +1753,7 @@ export function DeletedSection({
         hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
-        activity: c.activity,
+        ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
         status: c.status,
         pinned: c.pinned,
         pinnedAt: c.pinnedAt,
@@ -1811,7 +1812,7 @@ export function HiddenSection({
           name: string | null;
           preview: string | null;
           folder: string;
-          activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
+          chatStatus?: import('@patch/wire').ChatStatusInfo;
           status: 'active' | 'archived' | 'errored' | 'deleted';
           pinned: boolean;
           pinnedAt: number | null;
@@ -1832,7 +1833,7 @@ export function HiddenSection({
         hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
-        activity: c.activity,
+        ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
         status: c.status,
         pinned: c.pinned,
         pinnedAt: c.pinnedAt,
@@ -1942,7 +1943,7 @@ export function AutomationsSection({
           name: string | null;
           preview: string | null;
           folder: string;
-          activity: 'idle' | 'running' | 'awaiting-permission' | 'errored';
+          chatStatus?: import('@patch/wire').ChatStatusInfo;
           status: 'active' | 'archived' | 'errored' | 'deleted';
           pinned: boolean;
           pinnedAt: number | null;
@@ -1973,7 +1974,7 @@ export function AutomationsSection({
         hostId: c.hostId,
         permissionMode: c.permissionMode,
         folder: c.folder,
-        activity: c.activity,
+        ...(c.chatStatus ? { chatStatus: c.chatStatus } : {}),
         status: c.status,
         pinned: c.pinned,
         pinnedAt: c.pinnedAt,
@@ -2467,7 +2468,7 @@ const ChatRowView = memo(function ChatRowView({
                 useUiStore.getState().openSnoozeSheet({ kind: 'chat', chatId: row.chatId }),
             },
           ]),
-      ...(snoozed || !(row.activity === 'running' || row.goal !== null)
+      ...(snoozed || !(isRunning(row) || row.goal !== null)
         ? []
         : [
             {

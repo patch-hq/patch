@@ -22,7 +22,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions',
     name: 'a chat',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -151,7 +151,7 @@ describe('groupChats — hidden', () => {
       row({
         chatId: 'failed-job',
         status: 'errored',
-        activity: 'errored',
+        chatStatus: { state: 'failed', since: 0 },
         hidden: true,
         jobId: 'j1',
       }),
@@ -175,10 +175,10 @@ describe('groupChats — hidden', () => {
 
   it('orders hidden: running first (oldest first), then settled newest first', () => {
     const chats = [
-      row({ chatId: 'old-idle', hidden: true, activity: 'idle', lastUpdated: 100 }),
-      row({ chatId: 'new-idle', hidden: true, activity: 'idle', lastUpdated: 300 }),
-      row({ chatId: 'run-b', hidden: true, activity: 'running', lastUpdated: 250 }),
-      row({ chatId: 'run-a', hidden: true, activity: 'running', lastUpdated: 200 }),
+      row({ chatId: 'old-idle', hidden: true, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 100 }),
+      row({ chatId: 'new-idle', hidden: true, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 300 }),
+      row({ chatId: 'run-b', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 250 }),
+      row({ chatId: 'run-a', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 200 }),
     ];
     expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual([
       'run-a',
@@ -216,8 +216,8 @@ describe('groupChats — hidden', () => {
 
   it('orders running hidden chats oldest first, so a run updating settles at the bottom', () => {
     const chats = [
-      row({ chatId: 'newer', hidden: true, activity: 'running', lastUpdated: 300 }),
-      row({ chatId: 'older', hidden: true, activity: 'running', lastUpdated: 100 }),
+      row({ chatId: 'newer', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 300 }),
+      row({ chatId: 'older', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 100 }),
     ];
     expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual(['older', 'newer']);
   });
@@ -531,14 +531,14 @@ describe('groupChats — sidebar ordering (spec/14 § Sidebar ordering)', () => 
         folder: '~/proj',
         lastUpdated: 500,
         lastUserActivity: 500,
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
       }),
       row({
         chatId: 'working-but-older',
         folder: '~/proj',
         lastUpdated: 100,
         lastUserActivity: 100,
-        activity: 'running',
+        chatStatus: { state: 'running', since: 0 },
       }),
     ];
     expect(groupChats(chats).folders[0]!.rows.map((r) => r.chatId)).toEqual([
@@ -677,12 +677,12 @@ describe('stepVisibleChat', () => {
 describe('groupByStatus', () => {
   const grp = (rows: ChatRow[]) => [{ key: 'k', hostId: 'd1', folder: '~/proj', rows }];
   it('buckets rows into status headings in fixed order and drops empty ones', () => {
-    const working = row({ chatId: 'w', activity: 'running', lastSeq: 1, lastUpdated: 5 });
+    const working = row({ chatId: 'w', chatStatus: { state: 'running', since: 0 }, lastSeq: 1, lastUpdated: 5 });
     const ready = row({ chatId: 'r', lastSeq: 3, lastReadSeq: 1, lastUpdated: 5 });
     const read = row({ chatId: 'd', lastSeq: 3, lastReadSeq: 3, lastUpdated: 5 });
     const waiting = row({
       chatId: 'p',
-      activity: 'awaiting-permission',
+      chatStatus: { state: 'waiting_for_user', since: 0 },
       lastSeq: 1,
       lastUpdated: 5,
     });
@@ -695,8 +695,8 @@ describe('groupByStatus', () => {
     ]);
   });
   it('pools rows from every project', () => {
-    const a = row({ chatId: 'a', folder: '~/a', activity: 'running', lastSeq: 1, lastUpdated: 5 });
-    const b = row({ chatId: 'b', folder: '~/b', activity: 'running', lastSeq: 1, lastUpdated: 5 });
+    const a = row({ chatId: 'a', folder: '~/a', chatStatus: { state: 'running', since: 0 }, lastSeq: 1, lastUpdated: 5 });
+    const b = row({ chatId: 'b', folder: '~/b', chatStatus: { state: 'running', since: 0 }, lastSeq: 1, lastUpdated: 5 });
     const out = groupByStatus([
       { key: 'x', hostId: 'd1', folder: '~/a', rows: [a] },
       { key: 'y', hostId: 'd1', folder: '~/b', rows: [b] },

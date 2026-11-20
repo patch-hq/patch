@@ -29,7 +29,7 @@ function seed(jobId: string | null): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'bus check',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

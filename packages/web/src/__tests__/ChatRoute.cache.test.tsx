@@ -48,7 +48,7 @@ function hydrate(chatId: string): void {
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',
-      activity: 'idle' as const,
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active' as const,
       pinned: false,
       pinnedAt: null,

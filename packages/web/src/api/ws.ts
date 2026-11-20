@@ -115,6 +115,7 @@ import {
   readInputReport,
   startIdleDetection,
 } from '../lib/inputPresence.js';
+import { statusOf } from '../stores/types.js';
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
@@ -372,7 +373,7 @@ export class PatchWs {
     this.resyncTimer = window.setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const { activeChatId, chats } = useChatStore.getState();
-      if (activeChatId === null || chats[activeChatId]?.activity !== 'running') return;
+      if (activeChatId === null || statusOf(chats[activeChatId]) !== 'running') return;
       this.lastReplayCursor.delete(activeChatId);
       this.requestReplay(activeChatId);
     }, RUNNING_RESYNC_MS);
@@ -439,7 +440,7 @@ export class PatchWs {
     for (const row of Object.values(chats)) {
       if (row.chatId === activeChatId || queued.has(row.chatId)) continue;
       if (this.syncing?.chatId === row.chatId) continue;
-      if (row.activity === 'running') continue;
+      if (statusOf(row) === 'running') continue;
       if (hosts[row.hostId]?.online === false) continue;
       if (this.syncedAt.get(row.chatId) === row.lastUpdated) continue;
       this.syncQueue.push({ chatId: row.chatId, lastUpdated: row.lastUpdated });
@@ -1422,7 +1423,12 @@ export class PatchWs {
       // background fetch of that chat are its replay, not news.
       if (this.syncing?.chatId !== event.chatId) this.scheduleSync();
       const pending = useVoiceStore.getState().permission;
-      if (pending && pending.chatId === event.chatId && event.activity !== 'awaiting-permission') {
+      if (
+        pending &&
+        pending.chatId === event.chatId &&
+        event.chatStatus !== undefined &&
+        event.chatStatus.state !== 'waiting_for_user'
+      ) {
         useVoiceStore.getState().setPermission(null);
       }
     }

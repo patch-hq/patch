@@ -26,7 +26,7 @@ function seed(chatId: string, timeline: ChatEventEntry[], running = true): void 
       permissionMode: 'bypassPermissions' as const,
       name: chatId,
       folder: 'foo',
-      activity: running ? 'running' : 'idle',
+      chatStatus: { state: running ? 'running' : 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

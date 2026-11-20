@@ -6,13 +6,14 @@
 // Structural on purpose: each surface keeps its own store row type, and this
 // reads only the fields the rule needs.
 
-import type { ChatActivity, ChatStatus, StatusKind } from './events.js';
+import type { ChatStatus, StatusKind } from './events.js';
 
 /** The slice of a surface's chat row the ordering reads. */
 export interface ThreadRankInput {
   chatId: string;
   status: ChatStatus;
-  activity: ChatActivity;
+  /** The chat's status as the server decided it (spec/12 § Chat status). */
+  chatStatus?: { state: string };
   lastUpdated: number;
   snoozedUntil: number | null;
   pendingPermissions: readonly unknown[];
@@ -27,16 +28,17 @@ export function threadRowState(row: ThreadRankInput): ThreadRowState {
   // A NATIVE pending decision. A native request auto-expires, so it is the
   // more urgent of the two ways a chat can be blocked on the user; a declared
   // question just waits.
-  if (row.pendingPermissions.length > 0 || row.activity === 'awaiting-permission') {
-    return 'permission';
+  const state = row.chatStatus?.state;
+  // A declared question (`patch_ask_human`) with nothing native pending is the
+  // agent asking; a generated `question` guess never ranks a row as blocked.
+  const declared = row.statusKind === 'question' && row.statusDeclared === true;
+  if (state === 'waiting_for_user') {
+    return row.pendingPermissions.length === 0 && declared ? 'question' : 'permission';
   }
-  // A generated `question` guess (not a real `patch_ask_human` call) is a
-  // frequent false positive and must not rank the row as blocked.
-  if (row.statusKind === 'question' && row.statusDeclared) return 'question';
   // Not blocked, so it ranks below anything that is — but above a chat still
   // working, because the agent has already decided this one is worth seeing.
   if (row.statusKind === 'report') return 'report';
-  if (row.activity === 'running') return 'working';
+  if (state === 'running') return 'working';
   return 'idle';
 }
 

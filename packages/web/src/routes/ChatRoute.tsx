@@ -202,7 +202,7 @@ import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js
 import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
 import { useReadAloud } from '../lib/readAloud.js';
-import { isStoppable } from '../stores/types.js';
+import { isRunning, isStoppable } from '../stores/types.js';
 import { splitQuoteLines } from '../lib/quoteLines.js';
 
 // How many unresolved, sweepable permission requests this chat has right now.
@@ -2166,7 +2166,7 @@ export function ChatRoute({
   // A message still uploading its attachments is not a running turn: it is in
   // the stream at once, pending, with its own `Uploading n/total` line (spec/15
   // § Composer → Attachments), so it needs no indicator of its own here.
-  const showThinking = row.activity === 'running' && !lastIsStreaming;
+  const showThinking = isRunning(row) && !lastIsStreaming;
 
   // The live transcript and the queued block sit either side of the indicator,
   // so the timeline is emitted in two passes. A live entry's key carries its

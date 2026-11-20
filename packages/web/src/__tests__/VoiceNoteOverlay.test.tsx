@@ -19,7 +19,7 @@ describe('VoiceNoteOverlay', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'Manager',
         folder: 'm',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

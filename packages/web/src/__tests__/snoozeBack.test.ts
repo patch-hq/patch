@@ -89,7 +89,7 @@ describe('groupChats: snoozed chats stay in their project', () => {
         permissionMode: 'auto',
         name: id,
         folder,
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -122,7 +122,7 @@ describe('chat.state carries the records to every surface', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         permissionMode: 'auto',
         lastUpdated: 1,
         status: 'active',

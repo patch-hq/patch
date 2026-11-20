@@ -35,7 +35,7 @@ function row(i: number): ChatRow {
     permissionMode: 'bypassPermissions',
     name: `chat ${i}`,
     folder: FOLDER,
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

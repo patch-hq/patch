@@ -35,7 +35,7 @@ function rowFixture(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: 'a chat',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -206,7 +206,7 @@ describe('sidebar row context menu', () => {
   });
 
   it('Snooze until done is offered only for a running chat and snoozes it until complete at once', async () => {
-    useChatStore.getState().hydrate([rowFixture({ activity: 'running' })]);
+    useChatStore.getState().hydrate([rowFixture({ chatStatus: { state: 'running', since: 0 } })]);
     const snooze = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
     renderSidebar();
 

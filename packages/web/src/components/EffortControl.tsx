@@ -21,6 +21,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { getActiveWs } from '../api/ws.js';
+import { isRunning } from '../stores/types.js';
 
 const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -175,7 +176,7 @@ function Control({ chatId }: { chatId: string }): JSX.Element {
             role="listbox"
           >
             <div className="model-popup-note" data-testid="effort-popup-note">
-              {row.activity === 'running'
+              {isRunning(row)
                 ? 'Applies to your next message — this turn keeps its effort'
                 : 'Applies to your next message'}
             </div>

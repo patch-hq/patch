@@ -28,7 +28,7 @@ function seedChat(folder = '/proj', model?: string): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'deploy',
       folder,
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

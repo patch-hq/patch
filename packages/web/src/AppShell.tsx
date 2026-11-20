@@ -208,7 +208,6 @@ export function AppShell(): JSX.Element {
           // live chat.state.
           pendingWake: c.pendingWake,
           folder: c.folder,
-          activity: c.activity,
           status: c.status,
           pinned: c.pinned,
           pinnedAt: c.pinnedAt,

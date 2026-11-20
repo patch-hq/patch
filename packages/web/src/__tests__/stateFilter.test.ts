@@ -26,7 +26,7 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
     statusDeclared: null,
     todos: [],
     folder: '/w',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -46,20 +46,18 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
 
 describe('deriveBadge — a failed chat is not a finished one', () => {
   it('badges an errored ACTIVITY as errored', () => {
-    expect(deriveBadge(row({ activity: 'errored' }))).toBe('errored');
+    expect(deriveBadge(row({ chatStatus: { state: 'failed', since: 0 } }))).toBe('errored');
   });
 
-  it('badges an errored STATUS as errored, even when the activity settled to idle', () => {
-    // This is the real shape: the turn died, activity fell back to idle, and the
-    // only lasting record is the status. It used to read as `read`.
-    expect(deriveBadge(row({ status: 'errored', activity: 'idle' }))).toBe('errored');
+  it('a lifecycle errored flag alone is not a failure: only the server status is', () => {
+    expect(deriveBadge(row({ status: 'errored' }))).toBe('read');
   });
 
   it('still puts a pending decision first — that is answerable right now', () => {
     expect(
       deriveBadge(
         row({
-          status: 'errored',
+          chatStatus: { state: 'waiting_for_user', since: 0 },
           pendingPermissions: [{ requestId: 'r', tool: 'Bash', description: undefined, args: {} }],
         }),
       ),
@@ -67,7 +65,7 @@ describe('deriveBadge — a failed chat is not a finished one', () => {
   });
 
   it('does not badge a healthy chat as errored', () => {
-    expect(deriveBadge(row({ activity: 'running' }))).toBe('working');
+    expect(deriveBadge(row({ chatStatus: { state: 'running', since: 0 } }))).toBe('working');
     expect(deriveBadge(row({ lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
     expect(deriveBadge(row())).toBe('read');
   });
@@ -77,7 +75,7 @@ describe('needsAttention keeps failed chats in the queue', () => {
   it('a failed chat needs attention', () => {
     // Adding the errored badge took these OUT of `done`; without the errored
     // arm they would have silently dropped out of the queue entirely.
-    expect(needsAttention(row({ status: 'errored' }))).toBe(true);
+    expect(needsAttention(row({ chatStatus: { state: 'failed', since: 0 } }))).toBe(true);
   });
 
   it('a read, finished chat still does not', () => {
@@ -87,29 +85,41 @@ describe('needsAttention keeps failed chats in the queue', () => {
 
 describe('matchesStateFilter', () => {
   it('`all` filters nothing', () => {
-    for (const r of [row(), row({ status: 'errored' }), row({ activity: 'running' })]) {
+    for (const r of [row(), row({ chatStatus: { state: 'failed', since: 0 } }), row({ chatStatus: { state: 'running', since: 0 } })]) {
       expect(matchesStateFilter(r, 'all')).toBe(true);
     }
   });
 
   it('`failed` shows only failures', () => {
-    expect(matchesStateFilter(row({ status: 'errored' }), 'failed')).toBe(true);
-    expect(matchesStateFilter(row({ activity: 'errored' }), 'failed')).toBe(true);
-    expect(matchesStateFilter(row({ activity: 'running' }), 'failed')).toBe(false);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'failed', since: 0 } }), 'failed')).toBe(true);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'failed', since: 0 } }), 'failed')).toBe(true);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'running', since: 0 } }), 'failed')).toBe(false);
     expect(matchesStateFilter(row(), 'failed')).toBe(false);
   });
 
   it('`working` shows only running chats', () => {
-    expect(matchesStateFilter(row({ activity: 'running' }), 'working')).toBe(true);
-    expect(matchesStateFilter(row({ status: 'errored' }), 'working')).toBe(false);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'running', since: 0 } }), 'working')).toBe(true);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'failed', since: 0 } }), 'working')).toBe(false);
   });
 
   it('`waiting` covers a permission prompt AND an agent stopped on a question', () => {
-    expect(matchesStateFilter(row({ activity: 'awaiting-permission' }), 'waiting')).toBe(true);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'waiting_for_user', since: 0 } }), 'waiting')).toBe(true);
+    // A declared question is waiting because the server says so, not because
+    // the surface reads the row's statusKind.
+    expect(
+      matchesStateFilter(
+        row({
+          statusKind: 'question',
+          statusDeclared: true,
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
+        'waiting',
+      ),
+    ).toBe(true);
     expect(
       matchesStateFilter(row({ statusKind: 'question', statusDeclared: true }), 'waiting'),
-    ).toBe(true);
-    expect(matchesStateFilter(row({ activity: 'running' }), 'waiting')).toBe(false);
+    ).toBe(false);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'running', since: 0 } }), 'waiting')).toBe(false);
   });
 
   it('`waiting` excludes a GENERATED question guess — only a declared one counts', () => {
@@ -124,15 +134,15 @@ describe('matchesStateFilter', () => {
   it('`done` never includes a failure — the whole point of the filter', () => {
     expect(matchesStateFilter(row({ lastSeq: 5, lastReadSeq: 1 }), 'done')).toBe(true);
     expect(matchesStateFilter(row(), 'done')).toBe(true);
-    expect(matchesStateFilter(row({ status: 'errored' }), 'done')).toBe(false);
+    expect(matchesStateFilter(row({ chatStatus: { state: 'failed', since: 0 } }), 'done')).toBe(false);
   });
 
   it('agrees with the badge the row itself shows, for every filter', () => {
     // What you filter for and what you see must never disagree.
     const rows = [
-      row({ status: 'errored' }),
-      row({ activity: 'running' }),
-      row({ activity: 'awaiting-permission' }),
+      row({ chatStatus: { state: 'failed', since: 0 } }),
+      row({ chatStatus: { state: 'running', since: 0 } }),
+      row({ chatStatus: { state: 'waiting_for_user', since: 0 } }),
       row({ lastSeq: 5, lastReadSeq: 1 }),
       row(),
     ];
@@ -148,18 +158,17 @@ describe('matchesStateFilter', () => {
   });
 
   it('`done` (Ready) includes chats waiting on the user', () => {
-    expect(matchesStateFilter(row({ activity: 'awaiting-permission' }), 'done')).toBe(true);
-    expect(matchesStateFilter(row({ statusKind: 'question', statusDeclared: true }), 'done')).toBe(
-      true,
-    );
+    expect(matchesStateFilter(row({ chatStatus: { state: 'waiting_for_user', since: 0 } }), 'done')).toBe(true);
+
   });
 });
 
-describe('a freshly spawned chat is pending, not Ready', () => {
-  it('keeps a chat with no events yet out of Ready and in Working', () => {
-    const fresh = row({ lastSeq: 0, lastReadSeq: 0, lastUpdated: 0 });
+describe('a chat the server has not given a status yet', () => {
+  it('is in no state filter: the surface assumes nothing', () => {
+    const fresh = row({ chatStatus: undefined, lastSeq: 0, lastReadSeq: 0, lastUpdated: 0 });
     expect(matchesStateFilter(fresh, 'done')).toBe(false);
-    expect(matchesStateFilter(fresh, 'working')).toBe(true);
+    expect(matchesStateFilter(fresh, 'working')).toBe(false);
+    expect(matchesStateFilter(fresh, 'all')).toBe(true);
   });
 });
 

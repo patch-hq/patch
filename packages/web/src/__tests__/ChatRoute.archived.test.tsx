@@ -39,7 +39,7 @@ function seed(status: 'active' | 'archived'): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'fix layout',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status,
       pinned: false,
       pinnedAt: null,

@@ -61,7 +61,7 @@ describe('useSectionCounts — race with an in-flight mount fetch', () => {
       type: 'chat.state',
       chatId: 'job-1',
       folder: '~/proj',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       permissionMode: 'auto',
       hidden: true,

@@ -54,7 +54,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -127,7 +127,7 @@ describe('ChatHeader — snooze', () => {
   });
 
   it('menu has a direct "Snooze until complete" that posts the until-complete sentinel', async () => {
-    const r = row({ activity: 'running' });
+    const r = row({ chatStatus: { state: 'running', since: 0 } });
     seed(r);
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));

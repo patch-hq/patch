@@ -16,7 +16,7 @@ const row = (chatId: string, name: string | null) => ({
   permissionMode: 'bypassPermissions' as const,
   name,
   folder: '/p/portfolio',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,

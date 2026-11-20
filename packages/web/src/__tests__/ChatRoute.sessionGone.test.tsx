@@ -47,7 +47,7 @@ function seed(extra: Record<string, unknown> = {}): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'test chat',
       folder: '/tmp/foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

@@ -32,7 +32,7 @@ function row(chatId: string, badge: 'working' | 'done', name = chatId): ChatRow 
     permissionMode: 'bypassPermissions' as const,
     name,
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -57,7 +57,7 @@ function row(chatId: string, badge: 'working' | 'done', name = chatId): ChatRow 
     resumeKind: null,
   };
   return badge === 'working'
-    ? { ...base, activity: 'running' }
+    ? { ...base, chatStatus: { state: 'running', since: 0 } }
     : { ...base, lastSeq: 9, lastReadSeq: 5 };
 }
 

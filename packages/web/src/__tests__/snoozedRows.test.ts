@@ -12,7 +12,7 @@ const row = (chatId: string) => ({
   permissionMode: 'default',
   name: chatId,
   folder: 'f',
-  activity: 'idle',
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active',
   pinned: false,
   pinnedAt: null,

@@ -18,6 +18,7 @@ import { loadModels } from '../lib/models.js';
 import { getActiveWs } from '../api/ws.js';
 import { useNavigate } from 'react-router-dom';
 import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
+import { isRunning } from '../stores/types.js';
 
 /**
  * How long the control waits for the host to confirm a model change before it
@@ -265,7 +266,7 @@ export function ModelControl({
         // says which turn it affects — presenting it as instant would
         // misdescribe the reply streaming underneath it (spec/04 § Model).
         note={
-          row.activity === 'running'
+          isRunning(row)
             ? 'Applies to your next message — this turn keeps its model'
             : 'Applies to your next message'
         }

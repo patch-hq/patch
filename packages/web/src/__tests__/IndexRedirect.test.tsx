@@ -16,7 +16,7 @@ function makeRow(chatId: string, overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '/tmp',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

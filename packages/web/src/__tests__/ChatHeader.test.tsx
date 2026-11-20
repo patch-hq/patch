@@ -59,7 +59,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: 'fix layout',
     folder: '~/projects/foo',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -404,7 +404,7 @@ describe('ChatHeader', () => {
   });
 
   it('shows the waiting-on-you pill when awaiting permission', () => {
-    render(<ChatHeader row={row({ awaitingPermission: true, activity: 'awaiting-permission' })} />);
+    render(<ChatHeader row={row({ awaitingPermission: true, chatStatus: { state: 'waiting_for_user', since: 0 } })} />);
     expect(screen.getByTestId('waiting-on-you')).toBeInTheDocument();
   });
 
@@ -412,7 +412,7 @@ describe('ChatHeader', () => {
   // third copy of the same signal the sidebar badge and the transcript's own
   // "Thinking…" dots already show — dropped (see ChatHeader.tsx).
   it('shows no thinking dot next to the title while the chat is running', () => {
-    render(<ChatHeader row={row({ activity: 'running' })} />);
+    render(<ChatHeader row={row({ chatStatus: { state: 'running', since: 0 } })} />);
     expect(screen.queryByTestId('thinking-dot')).not.toBeInTheDocument();
   });
 

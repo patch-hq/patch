@@ -8,11 +8,10 @@ import { deriveBadge, type ChatRow } from '../stores/types.js';
 /** A chat the user can answer with a line of text: finished-unread, or left on a question / report. */
 export function awaitsReply(row: ChatRow): boolean {
   if (row.status !== 'active' || row.hidden === true) return false;
-  return (
-    deriveBadge(row) === 'done' ||
-    (row.statusKind === 'question' && row.statusDeclared === true) ||
-    row.statusKind === 'report'
-  );
+  // Waiting on the user with no approval pending is the agent's own question:
+  // a reply answers it. An approval is not something a reply can grant.
+  const asking = row.chatStatus?.state === 'waiting_for_user' && row.pendingPermissions.length === 0;
+  return deriveBadge(row) === 'done' || asking || row.statusKind === 'report';
 }
 
 /**

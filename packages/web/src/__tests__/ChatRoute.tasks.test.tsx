@@ -47,7 +47,7 @@ function seed(todos: TodoItem[], goal: string | null = null): void {
       permissionMode: 'bypassPermissions' as const,
       name: 'index rebuild',
       folder: 'foo',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

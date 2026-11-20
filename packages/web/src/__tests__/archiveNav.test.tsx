@@ -32,7 +32,7 @@ function row(overrides: Partial<ChatRow> = {}): ChatRow {
     permissionMode: 'bypassPermissions',
     name: 'a chat',
     folder: '~/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,
@@ -214,7 +214,7 @@ describe('archiving the open chat moves you on', () => {
       useChatStore.getState().applyEvent({
         type: 'chat.state',
         chatId,
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         permissionMode: 'bypassPermissions',
         status: 'archived',
         lastUpdated: 200,

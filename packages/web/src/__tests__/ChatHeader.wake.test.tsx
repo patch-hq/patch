@@ -21,7 +21,7 @@ function row(): ChatRow {
     permissionMode: 'bypassPermissions' as const,
     name: 'watcher',
     folder: '~/projects/foo',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     pinnedAt: null,

@@ -68,7 +68,7 @@ describe('Sidebar row', () => {
         permissionMode: 'bypassPermissions' as const,
         name: 'a chat',
         folder: '~/proj',
-        activity: 'errored',
+        chatStatus: { state: 'failed', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,

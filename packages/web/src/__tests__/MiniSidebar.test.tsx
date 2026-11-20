@@ -19,7 +19,7 @@ function row(chatId: string, over: Partial<ChatRow> = {}): ChatRow {
     name: `Chat ${chatId}`,
     hostId: 'd1',
     folder: '/home/x/proj',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode: 'bypassPermissions',
     status: 'active',
     pinned: false,
@@ -71,7 +71,7 @@ describe('MiniSidebar', () => {
     usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
     useChatStore.setState({
       chats: {
-        a: row('a', { activity: 'running' }),
+        a: row('a', { chatStatus: { state: 'running', since: 0 } }),
         b: row('b'),
       },
       folderRoster: [],

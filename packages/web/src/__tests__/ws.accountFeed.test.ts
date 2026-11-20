@@ -42,7 +42,7 @@ const row = (chatId: string, lastUpdated: number, over: Record<string, unknown> 
   permissionMode: 'bypassPermissions' as const,
   name: chatId,
   folder: 'f',
-  activity: 'idle' as const,
+  chatStatus: { state: 'idle', since: 0 },
   status: 'active' as const,
   pinned: false,
   pinnedAt: null,
@@ -182,7 +182,7 @@ describe('PatchWs with the account feed', () => {
       chatId: 'c1',
       hostId: 'h1',
       permissionMode: 'auto',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 2,
       feedPos: 12,
     });

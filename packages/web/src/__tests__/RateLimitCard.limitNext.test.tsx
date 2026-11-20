@@ -18,7 +18,7 @@ function row(over: Partial<ChatRow>): ChatRow {
       permissionMode: 'bypassPermissions' as const,
       name: 'test chat',
       folder: '/tmp/foo',
-      activity: 'errored',
+      chatStatus: { state: 'failed', since: 0 },
       status: 'active',
       pinned: false,
       pinnedAt: null,

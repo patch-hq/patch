@@ -35,7 +35,7 @@ function seedChat(chatId: string, permissionMode: PermissionMode): void {
     name: null,
     hostId: 'd1',
     folder: '/work',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     permissionMode,
     status: 'active',
     pinned: false,

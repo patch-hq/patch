@@ -25,7 +25,7 @@ function row(chatId: string, name: string, lastUpdated: number): ChatRow {
     statusDeclared: null,
     todos: [],
     folder: '/w',
-    activity: 'idle',
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active',
     pinned: false,
     disabled: false,

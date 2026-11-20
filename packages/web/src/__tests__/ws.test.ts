@@ -348,7 +348,7 @@ describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -396,7 +396,7 @@ describe('PatchWs chat.replay cursor ignores a lone error row', () => {
         permissionMode: 'bypassPermissions' as const,
         name: null,
         folder: '~/x',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         status: 'active',
         pinned: false,
         pinnedAt: null,
@@ -434,7 +434,7 @@ describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline'
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
-    activity: 'idle' as const,
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,
@@ -506,7 +506,7 @@ describe("PatchWs replay cursor vs. the hub dropping this surface's subscription
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
-    activity: 'idle' as const,
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,
@@ -565,7 +565,7 @@ describe('PatchWs batched replay (spec/12 § Sequence-based replay)', () => {
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
-    activity: 'idle' as const,
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,
@@ -691,7 +691,7 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
       .getState()
       .setPermission({ requestId: 'r1', chatId: 'c1', summary: 'Approve Bash?' });
     const { ws, fake } = await connectAndOpen();
-    fake.receive(batch([{ type: 'chat.state', chatId: 'c1', seq: 2, activity: 'idle' }]));
+    fake.receive(batch([{ type: 'chat.state', chatId: 'c1', seq: 2, chatStatus: { state: 'idle', since: 0 } }]));
     expect(useVoiceStore.getState().permission).toBeNull();
     ws.close();
   });
@@ -747,7 +747,7 @@ describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
-    activity: 'idle' as const,
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,
@@ -811,7 +811,7 @@ describe('PatchWs replays held chats when a host comes back', () => {
     permissionMode: 'bypassPermissions' as const,
     name: null,
     folder: '~/x',
-    activity: 'idle' as const,
+    chatStatus: { state: 'idle', since: 0 },
     status: 'active' as const,
     pinned: false,
     pinnedAt: null,
@@ -1098,7 +1098,7 @@ describe('PatchWs message dispatch — frames from a NEWER host (spec/03 § Forw
     fake.receive({
       type: 'chat.state',
       chatId: 'c1',
-      activity: 'running',
+      chatStatus: { state: 'running', since: 0 },
       permissionMode: 'bypassPermissions',
       lastUpdated: 1700000000,
       // Whatever the next host adds. This is the frame that drives the
@@ -1109,7 +1109,7 @@ describe('PatchWs message dispatch — frames from a NEWER host (spec/03 § Forw
 
     // The state landed …
     vi.advanceTimersByTime(STORE_BATCH_MS);
-    expect(useChatStore.getState().chats['c1']?.activity).toBe('running');
+    expect(useChatStore.getState().chats['c1']?.chatStatus?.state).toBe('running');
     // … and the user was told nothing, because nothing is wrong.
     expect(useUiStore.getState().errors).toHaveLength(0);
   });
@@ -1802,7 +1802,7 @@ describe('PatchWs dispatch — chat.state clearing the voice permission banner',
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c2',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 1,
     });
     expect(useVoiceStore.getState().permission).not.toBeNull();
@@ -1811,7 +1811,7 @@ describe('PatchWs dispatch — chat.state clearing the voice permission banner',
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'awaiting-permission',
+      chatStatus: { state: 'waiting_for_user', since: 0 },
       lastUpdated: 2,
     });
     expect(useVoiceStore.getState().permission).not.toBeNull();
@@ -1820,7 +1820,7 @@ describe('PatchWs dispatch — chat.state clearing the voice permission banner',
       type: 'chat.state',
       permissionMode: 'bypassPermissions' as const,
       chatId: 'c1',
-      activity: 'idle',
+      chatStatus: { state: 'idle', since: 0 },
       lastUpdated: 3,
     });
     expect(useVoiceStore.getState().permission).toBeNull();
@@ -1833,7 +1833,7 @@ describe('PatchWs dispatch — chat.state clearing the voice permission banner',
         type: 'chat.state',
         permissionMode: 'bypassPermissions' as const,
         chatId: 'c1',
-        activity: 'idle',
+        chatStatus: { state: 'idle', since: 0 },
         lastUpdated: 1,
       }),
     ).not.toThrow();
