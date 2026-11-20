@@ -10,7 +10,12 @@ export interface UtteranceSegmenterOptions {
   sampleRate?: number;
   /** Quiet this long after speech ends the utterance. */
   silenceMs?: number;
-  /** Frame RMS (0..1) above which a frame counts as speech. */
+  /**
+   * Frame RMS (0..1) above which a frame counts as speech — the ceiling. The
+   * working threshold sits at a few times the room's noise floor, so a phone
+   * mic whose noise suppression leaves soft speech under this ceiling still
+   * counts as talking rather than as silence.
+   */
   speechRms?: number;
   /** Speech shorter than this is a cough or a click, not an utterance. */
   minSpeechMs?: number;
@@ -29,6 +34,12 @@ export interface UtteranceSegmenterOptions {
 }
 
 export const DEFAULT_SILENCE_MS = 3000;
+/** The working speech threshold never drops below this, however quiet the room. */
+const MIN_SPEECH_RMS = 0.004;
+/** Speech must be this many times the noise floor. */
+const FLOOR_MARGIN = 3;
+/** How fast the noise-floor estimate climbs toward louder frames. */
+const FLOOR_RISE = 0.002;
 
 export interface UtteranceSegmenter {
   /** Feed one frame; returns the finished utterance's PCM when this frame completed one. */
@@ -85,6 +96,9 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
   // Counts loud frames across the session, so a pause can be named by it.
   let heard = 0;
   let paused = false;
+  // Running estimate of the room's noise level: drops to any quieter frame at
+  // once, climbs slowly, so sustained speech cannot lift it.
+  let floor = speechRms / FLOOR_MARGIN;
 
   function finish(): Int16Array | null {
     const out = loud >= minSpeechSamples ? concat(chunks) : null;
@@ -106,7 +120,10 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
       return finish();
     },
     push(pcm: Int16Array): Int16Array | null {
-      const isLoud = frameRms(pcm) >= speechRms;
+      const rms = frameRms(pcm);
+      const threshold = Math.min(speechRms, Math.max(MIN_SPEECH_RMS, floor * FLOOR_MARGIN));
+      const isLoud = rms >= threshold;
+      floor = rms < floor ? rms : floor + (rms - floor) * FLOOR_RISE;
       if (!speaking) {
         if (!isLoud) {
           preRoll.push(pcm);
