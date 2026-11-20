@@ -1366,6 +1366,32 @@ export class SharedSettingsService {
     this.commit({ secrets: true });
   }
 
+  /** One agent's accounts in a new order: every account, each once. The order is the priority. */
+  orderAcp(agentId: string, accountIds: string[]): void {
+    this.requireSecrets();
+    const all = this.secrets.acp ?? [];
+    const held = all.filter((a) => a.agentId === agentId).map((a) => a.id);
+    const unknown = accountIds.filter((id) => !held.includes(id));
+    const missing = held.filter((id) => !accountIds.includes(id));
+    if (unknown.length || missing.length || new Set(accountIds).size !== accountIds.length) {
+      throw new SettingsError(
+        400,
+        'invalid_order',
+        `The order must name each ${agentId} account exactly once (holds: ${held.join(', ') || 'none'})`,
+      );
+    }
+    const ordered = accountIds.map((id) => all.find((a) => a.id === id)!);
+    // The agent's accounts take the places its accounts held; other agents' stay put.
+    let next = 0;
+    this.secrets.acp = all.map((a) => (a.agentId === agentId ? ordered[next++]! : a));
+    this.commit({ secrets: true });
+  }
+
+  /** How a turn picks among each ACP agent's accounts (spec/10 § Choosing an account). */
+  setAcpStrategy(strategy: AccountStrategy): void {
+    this.update({ accountStrategy: { ...this.settings.accountStrategy, acp: strategy } });
+  }
+
   removeAcpAccount(agentId: string, accountId: string): void {
     this.requireSecrets();
     this.findAcp(agentId, accountId);

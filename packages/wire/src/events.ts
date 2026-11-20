@@ -2714,7 +2714,14 @@ export const SharedSettings = z
      * else a Groq key, else no speech engine. The others name one engine.
      */
     speechBackend: SpeechBackendSetting,
-    accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
+    /**
+     * How a turn picks its account, per provider (spec/10 § Choosing an
+     * account). `acp` covers every ACP agent's accounts, each agent ordered on
+     * its own; absent reads as `priority` (a settings file from before it).
+     */
+    accountStrategy: z
+      .object({ claude: AccountStrategy, codex: AccountStrategy, acp: AccountStrategy.optional() })
+      .strict(),
   })
   .strict();
 export type SharedSettings = z.infer<typeof SharedSettings>;

@@ -55,7 +55,7 @@ test("accounts acp lists, signs in and removes ACP agents' accounts", () => {
   assert.ok(acp, 'accounts acp');
   assert.deepEqual(
     acp.commands.map((c) => c.name()),
-    ['list', 'sign-in', 'remove'],
+    ['list', 'sign-in', 'order', 'strategy', 'remove'],
   );
 });
 

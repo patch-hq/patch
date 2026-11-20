@@ -169,8 +169,11 @@ export function resolveCommand(command: string, pathEnv: string): string | undef
 export interface AcpRegistryOptions {
   /** A shared provider key's value, read at the moment it is used. */
   providerKey(id: ProviderKeyId): string | undefined;
-  /** The API key of the agent's first ACP account, as the server last sent it. */
-  accountKey?(agentId: string): string | undefined;
+  /**
+   * The API key of one of the agent's ACP accounts, as the server last sent
+   * them: `accountId`'s, or with none named the account a turn would run on now.
+   */
+  accountKey?(agentId: string, accountId?: string): string | undefined;
   /** The environment agents are started with. */
   baseEnv(): Record<string, string | undefined>;
   /** Where probes run; nothing of the user's is ever opened by one. */
@@ -220,15 +223,17 @@ export class AcpRegistry {
 
   /**
    * The environment the agent runs with: the host's, plus its keys. The
-   * account's key wins over a provider key mapped to the same variable.
+   * account's key (the turn's own account, else the one a turn would run on)
+   * wins over a provider key mapped to the same variable.
    */
-  env(agent: AcpAgentConfig): Record<string, string | undefined> {
+  env(agent: AcpAgentConfig, accountId?: string): Record<string, string | undefined> {
     const env = { ...this.o.baseEnv() };
     for (const [name, key] of Object.entries(agent.keys ?? {})) {
       const value = this.o.providerKey(key);
       if (value !== undefined) env[name] = value;
     }
-    const account = agent.apiKeyEnv !== undefined ? this.o.accountKey?.(agent.id) : undefined;
+    const account =
+      agent.apiKeyEnv !== undefined ? this.o.accountKey?.(agent.id, accountId) : undefined;
     if (account !== undefined) env[agent.apiKeyEnv!] = account;
     return env;
   }

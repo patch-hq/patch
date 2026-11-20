@@ -15,7 +15,8 @@ import { usePresenceStore } from '../../stores/presenceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { SettingsSection } from '../SettingsSection';
 import { writeShared } from './sharedWrite';
-import { ButtonRow, Field, Muted, Row, SettingsButton } from './ui';
+import { STRATEGIES, STRATEGY_HINT, STRATEGY_LABEL, moveAccount } from './accountRows';
+import { ButtonRow, Chips, Field, Muted, Row, SettingsButton } from './ui';
 
 type AcpRow = NonNullable<SharedState['secrets']['acp']>[number];
 
@@ -45,6 +46,7 @@ function AgentSection({
   rows: AcpRow[];
 }): React.ReactElement {
   const reachable = usePresenceStore((s) => s.connection) === 'connected';
+  const strategy = useSettingsStore((s) => s.data?.preferences.accountStrategy.acp ?? 'priority');
   /** The account getting a new key, `new` for a new account, null when closed. */
   const [editing, setEditing] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
@@ -102,7 +104,21 @@ function AgentSection({
       {rows.length === 0 && editing === null ? (
         <Row title={<Muted>No accounts</Muted>} testID={`${id}-empty`} />
       ) : null}
-      {rows.map((row) => (
+      {rows.length > 1 ? (
+        // One strategy for every ACP agent's accounts, as Claude and Codex each have one.
+        <Row testID={`${id}-strategy`} title="Pick the account by" stack>
+          <Chips
+            options={STRATEGIES}
+            selected={strategy}
+            labelOf={(s) => STRATEGY_LABEL[s]}
+            testIDPrefix={`${id}-strategy`}
+            labelPrefix="ACP account strategy"
+            hintOf={(s) => STRATEGY_HINT[s]}
+            onSelect={(s) => void writeShared('ACP account strategy', () => api.setAcpStrategy(s))}
+          />
+        </Row>
+      ) : null}
+      {rows.map((row, index) => (
         <Row
           key={row.id}
           testID={`acp-account-${row.id}`}
@@ -117,6 +133,26 @@ function AgentSection({
           right={
             editing === row.id ? null : (
               <>
+                {index > 0 ? (
+                  <SettingsButton
+                    testID={`acp-account-${row.id}-up`}
+                    label="Move up"
+                    variant="quiet"
+                    disabled={!reachable || busy}
+                    onPress={() =>
+                      void run(() =>
+                        api.orderAcpAccounts(
+                          agent.id,
+                          moveAccount(
+                            rows.map((r) => r.id),
+                            index,
+                            -1,
+                          ),
+                        ),
+                      )
+                    }
+                  />
+                ) : null}
                 <SettingsButton
                   testID={`acp-account-${row.id}-replace`}
                   label="Replace key"

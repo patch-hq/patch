@@ -27,13 +27,13 @@ import { AccountRow, RankedList, UsageBars, type MenuItem } from './accountList.
 import { Note, Pills, Row } from './ui.js';
 import type { ProviderSpec, SharedRow } from './providers.js';
 
-const STRATEGIES: readonly AccountStrategy[] = [
+export const STRATEGIES: readonly AccountStrategy[] = [
   'priority',
   'round-robin',
   'soonest-reset',
   'least-used',
 ];
-const STRATEGY_LABELS: Record<AccountStrategy, string> = {
+export const STRATEGY_LABELS: Record<AccountStrategy, string> = {
   priority: 'Priority',
   'round-robin': 'Round robin',
   'soonest-reset': 'Soonest reset',

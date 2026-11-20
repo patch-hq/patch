@@ -21,7 +21,7 @@ import { resolveHost } from './hosts.js';
 interface SharedState {
   version: number;
   settings: Record<string, unknown> & {
-    accountStrategy: { claude: string; codex: string };
+    accountStrategy: { claude: string; codex: string; acp?: string };
   };
   secrets: {
     claude: Array<{ id: string; label: string; connected: boolean; email?: string }>;
@@ -520,6 +520,37 @@ export function registerSettingsCommands(program: Command): void {
         });
       },
     );
+
+  acp
+    .command('order <agentId> <accountIds...>')
+    .description("Set one agent's account order: every account, each once, first to last")
+    .option('--json', 'JSON output')
+    .action(async (agentId: string, accountIds: string[], opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).put<SharedState>(
+          `/api/accounts/acp/${encodeURIComponent(agentId)}/order`,
+          { accountIds },
+        );
+        if (opts.json) emitJson(state.secrets.acp ?? []);
+        else for (const line of acpAccountLines(state.secrets.acp)) emitText(line);
+      });
+    });
+
+  acp
+    .command('strategy <strategy>')
+    .description(
+      "How a turn picks among each agent's accounts: priority, round-robin, soonest-reset, least-used",
+    )
+    .option('--json', 'JSON output')
+    .action(async (strategy: string, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).put<SharedState>('/api/accounts/acp/strategy', {
+          strategy,
+        });
+        if (opts.json) emitJson(state.settings.accountStrategy);
+        else emitText(`ACP strategy: ${state.settings.accountStrategy.acp ?? 'priority'}`);
+      });
+    });
 
   acp
     .command('remove <agentId> <accountId>')

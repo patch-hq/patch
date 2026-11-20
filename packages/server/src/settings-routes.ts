@@ -567,6 +567,14 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     }),
   );
   app.put(
+    '/api/accounts/acp/strategy',
+    handle(StrategyBody, (_req, body) => shared.setAcpStrategy(body.strategy)),
+  );
+  app.put(
+    '/api/accounts/acp/:agentId/order',
+    handle(OrderBody, (req, body) => shared.orderAcp(acpOf(req).agentId, body.accountIds)),
+  );
+  app.put(
     '/api/accounts/acp/:agentId/:accountId/key',
     handle(AcpKeyBody, async (req, body) => {
       const { agentId, accountId } = acpOf(req);

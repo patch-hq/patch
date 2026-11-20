@@ -142,7 +142,10 @@ const app = agent({ name: 'fake-acp' })
       await chunk('about to crash');
       process.exit(3);
     }
-    if (text === 'limit')
+    if (
+      text === 'limit' ||
+      (process.env.FAKE_ACP_LIMIT_KEY && process.env.FAKE_ACP_KEY === process.env.FAKE_ACP_LIMIT_KEY)
+    )
       throw new RequestError(-32603, '429 RESOURCE_EXHAUSTED: quota exceeded for this key');
     if (text === 'slow') {
       await chunk('working');

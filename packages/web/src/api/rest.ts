@@ -1067,6 +1067,13 @@ export const api = {
       `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}/key`,
       { method: 'PUT', body: { apiKey } },
     ),
+  orderAcpAccounts: (agentId: string, accountIds: string[]) =>
+    request<SharedState>(`/api/accounts/acp/${encodeURIComponent(agentId)}/order`, {
+      method: 'PUT',
+      body: { accountIds },
+    }),
+  setAcpStrategy: (strategy: AccountStrategy) =>
+    request<SharedState>('/api/accounts/acp/strategy', { method: 'PUT', body: { strategy } }),
   removeAcpAccount: (agentId: string, accountId: string) =>
     request<SharedState>(
       `/api/accounts/acp/${encodeURIComponent(agentId)}/${encodeURIComponent(accountId)}`,
