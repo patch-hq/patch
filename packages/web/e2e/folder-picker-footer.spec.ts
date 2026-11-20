@@ -33,10 +33,12 @@ test('footer stays visible with a long list and the list scrolls', async ({ page
   await expect(page.getByTestId('folder-browser-new')).toBeInViewport();
   const m = await body.evaluate((el) => ({
     scrolls: el.scrollHeight > el.clientHeight,
-    bar: el.offsetWidth - el.clientWidth,
+    // Headless Chromium runs with --hide-scrollbars, so the drawn width is 0
+    // there; overflow-y: scroll is what makes a real browser draw the bar.
+    overflowY: getComputedStyle(el).overflowY,
   }));
   expect(m.scrolls).toBe(true);
-  expect(m.bar).toBeGreaterThan(0);
+  expect(m.overflowY).toBe('scroll');
   const pb = (await popup.boundingBox())!;
   const fb = (await footer.boundingBox())!;
   expect(fb.y + fb.height).toBeLessThanOrEqual(pb.y + pb.height + 1);
