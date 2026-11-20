@@ -13,7 +13,7 @@ test.describe('status badge — each state has its own hue', () => {
   test('the working badge paints --waiting orange, not the green accent', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_md');
 
-    // chat_bus is seeded with activity: 'running' → badge 'working'.
+    // chat_bus is seeded with chatStatus: { state: 'running', since: 0 } → badge 'working'.
     const workingBadge = page.locator(
       '[data-testid="chat-row-chat_bus"] [data-testid="badge-working"]',
     );
@@ -52,7 +52,7 @@ test.describe('status badge — each state has its own hue', () => {
       w.__store.getState().applyEvent({
         type: 'chat.state',
         chatId: 'chat_scroll',
-        activity: 'awaiting-permission',
+        chatStatus: { state: 'waiting_for_user', since: 0 },
         permissionMode: 'auto',
         lastUpdated: Date.now(),
       });
@@ -89,7 +89,7 @@ test.describe('status badge — each state has its own hue', () => {
       w.__store.getState().applyEvent({
         type: 'chat.state',
         chatId: 'chat_scroll',
-        activity: 'awaiting-permission',
+        chatStatus: { state: 'waiting_for_user', since: 0 },
         permissionMode: 'auto',
         lastUpdated: Date.now(),
       });
@@ -140,7 +140,7 @@ test.describe('status badge — dark mode', () => {
       w.__store.getState().applyEvent({
         type: 'chat.state',
         chatId: 'chat_scroll',
-        activity: 'awaiting-permission',
+        chatStatus: { state: 'waiting_for_user', since: 0 },
         permissionMode: 'auto',
         lastUpdated: Date.now(),
       });
