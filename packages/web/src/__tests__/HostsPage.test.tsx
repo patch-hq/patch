@@ -363,9 +363,7 @@ describe('Settings → Hosts', () => {
     usePresenceStore.getState().setHostOnline('host-a', true);
     loadShared({ version: 5, hosts: [{ hostId: 'host-a', appliedVersion: 5 }] });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent(
-      'Has your latest settings',
-    );
+    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Up to date');
     act(() => {
       loadShared({
         version: 6,
@@ -414,7 +412,7 @@ describe('Settings → Hosts', () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
     renderPage('hosts');
-    expect(screen.getByText('Claude Code settings.json')).toBeInTheDocument();
+    expect(screen.getByText('Claude Code advanced settings')).toBeInTheDocument();
     expect(screen.queryByText(/Keep for/)).toBeNull();
   });
 

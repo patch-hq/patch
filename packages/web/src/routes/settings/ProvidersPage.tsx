@@ -235,17 +235,17 @@ export function ClaudeSettingsEditor({ host }: { host: HostPresence }): JSX.Elem
   }
 
   return (
-    <Group label="Claude Code settings.json" testid={id}>
+    <Group testid={id}>
       <div className={`set-row${draft === null ? '' : ' stack'}`} data-testid={`${id}-row`}>
         <div className="set-row-head">
           <div className="set-row-text">
-            <span className="set-row-title">{hostLabel(host)}</span>
+            <span className="set-row-title">Claude Code advanced settings</span>
             <span className="set-sub">
               {report === null
                 ? 'Not reported yet'
                 : value?.trim() === ''
-                  ? 'No custom settings'
-                  : 'Set'}
+                  ? 'Using defaults'
+                  : 'Customised'}
             </span>
           </div>
           {draft === null ? (

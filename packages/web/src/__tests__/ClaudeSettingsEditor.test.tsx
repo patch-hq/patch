@@ -33,8 +33,8 @@ afterEach(() => {
 describe('Settings → Hosts — settings.json', () => {
   it('sits on the host’s page, not Providers or Agent, and offers no keep or discard', async () => {
     await openPage('{"model":"opus"}');
-    expect(screen.getByTestId(ID)).toHaveTextContent('mac');
-    expect(screen.getByTestId(ID)).toHaveTextContent('Set');
+    expect(screen.getByTestId(ID)).toHaveTextContent('Claude Code advanced settings');
+    expect(screen.getByTestId(ID)).toHaveTextContent('Customised');
     expect(screen.queryByText(/Keep for/)).toBeNull();
     expect(screen.queryByText('Discard')).toBeNull();
     expect(screen.queryByTestId('claude-settings-shared-edit')).toBeNull();
