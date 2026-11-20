@@ -14,7 +14,7 @@
 # behind each other: one runs, and of the pushes that land meanwhile only the
 # newest waits, so one run covers every PR merged while the last one ran. A
 # commit whose run was skipped that way is superseded; release.yml skips it.
-# A red main goes to needs-attention.yml as main-failed.
+# A red main stops releases until a fix lands (deploy.md: who fixes it).
 #
 # scripts/ci-plan.mjs decides the slices: one runner each for the cheap layers,
 # the host suites (in two halves), the web suites and the remaining packages,

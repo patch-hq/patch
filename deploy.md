@@ -1,19 +1,24 @@
 # Releasing Patch
 
-Open a PR; when its tests pass it merges itself, and the merge is the release.
+Open a PR; when its tests pass it is merged, and the merge is the release.
 `main` is protected: no direct pushes, and the `tests` check must be green.
 
 0. **Tests** (`.github/workflows/test.yml`) split the gate (`scripts/verify.mjs`)
    across runners; `scripts/ci-plan.mjs` decides the slices. A PR runs the
    cheap layers plus the unit, contract and integration suites of the packages
    its diff can reach (all of them if it touches anything outside the packages
-   but docs), and merges itself, rebased onto main, as soon as that is green.
+   but docs), and is merged, rebased onto main, as soon as that is green.
    There is no merge queue. Every push to `main` runs the whole gate: every
    package and the browser layer in four shards. Main's runs queue, and only
    the newest waiting push is kept, so one run covers everything merged while
    the last one ran; a commit skipped that way is superseded and not released.
    A red main stops releases, not merges, until a fix lands.
-   Three flows keep nothing stuck. A new PR turns on auto-merge (`pr-automerge.yml`, as Tom, using the `AUTOMERGE_TOKEN` PAT secret because a merge made with the Actions bot's token triggers no workflows; the PAT expires and must be renewed) and every push re-arms it. A PR that fails (failed check, conflict with main), a red run on main (`main-failed`, naming every commit since main was last green) or a newly opened issue is sent to Patch as one webhook, which spawns a fresh chat for it that fixes and pushes (the PR then merges), opens a fixing PR, or investigates and closes the issue, directly or with a PR saying `Closes #N`. The senders are `needs-attention.yml` (checks, main, issues; also runnable by hand with a PR/issue number) and `pr-conflicts.yml` (GitHub sends no event for a conflict, so each push to main checks the open PRs). Both call `scripts/needs-attention.mjs` with the `PATCH_ATTENTION_URL` and `PATCH_ATTENTION_SECRET` repo secrets. There is no attempt cap, no label and no sweep; a flaky test is a failure like any other.
+   Merging and failures are handled outside the repository, by a GitHub App the
+   maintainer installs on the repo: it merges an eligible PR (the maintainer's
+   own, not a draft, into `main`) once every check on it has passed, and sends
+   a failed PR check, a refused merge, a red run on `main` or a new issue to
+   the maintainer's own agents to fix. A fork or a self-hosted copy needs its
+   own equivalent, or merges by hand; nothing in `.github/` merges anything.
 1. **GitHub Actions** (`.github/workflows/release.yml`) builds every surface
    alongside main's tests and waits for that commit's `tests` check: the
    server and web release, the Linux and macOS hosts, the signed and notarised

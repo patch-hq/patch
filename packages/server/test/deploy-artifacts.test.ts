@@ -123,28 +123,17 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(workflow).toMatch(/publish: \$\{\{ steps\.wait\.outputs\.publish \}\}/);
     expect(workflow).toMatch(/publish:\n\s*if: [^\n]*needs\.tests\.outputs\.publish == 'true'/);
     expect(workflow).toMatch(/relay:\n\s*if: [^\n]*needs\.tests\.outputs\.publish == 'true'/);
-    // with PRs merged by themselves once green, and conflicts handed back.
-    expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto --rebase/);
-    // It acts as Tom: a merge made with the bot's own token triggers no workflows,
-    // so main would never be tested or released.
-    expect(read('.github/workflows/pr-automerge.yml')).toMatch(
-      /GH_TOKEN: \$\{\{ secrets\.AUTOMERGE_TOKEN \}\}/,
-    );
-    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/github\.token/);
-    // The repo's "delete branch on merge" setting tidies branches.
-    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/--delete-branch|\s-d\s/);
-    // Failures and conflicts go to Patch as a webhook, never a label or a sweep.
-    expect(read('.github/workflows/pr-conflicts.yml')).toMatch(
-      /needs-attention\.mjs --kind pr-conflict/,
-    );
-    expect(read('.github/workflows/pr-conflicts.yml')).not.toMatch(/needs-rebase/);
-    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/schedule:|sweep/);
-    // GitHub owns a PR from green to merged: nothing re-queues an ejected PR.
-    // A failure goes to a fresh Patch chat (scripts/needs-attention.mjs).
-    expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
-    expect(read('scripts/needs-attention.mjs')).not.toMatch(/enqueuePullRequest/);
-    expect(existsSync(join(repoRoot, '.github/workflows/test-retry.yml'))).toBe(false);
-    expect(read('.github/workflows/needs-attention.yml')).toMatch(/--kind main-failed/);
+    // Merging and failure handling live outside the repository (deploy.md): no
+    // workflow here merges PRs, re-queues them or reports failures.
+    for (const gone of [
+      'pr-automerge',
+      'needs-attention',
+      'pr-conflicts',
+      'pr-requeue',
+      'test-retry',
+    ]) {
+      expect(existsSync(join(repoRoot, `.github/workflows/${gone}.yml`))).toBe(false);
+    }
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
     // (spec/11 § Mobile updates).
