@@ -54,8 +54,8 @@ export interface AudioSessionCallbacks {
   onLevel(level: number): void;
   /** Fatal session error (auth, concurrency cap, backend unavailable, …). */
   onError(message: string): void;
-  /** WSS closed (clean or otherwise). */
-  onClose(): void;
+  /** WSS closed (clean or otherwise), with the close reason when one was given. */
+  onClose(reason?: string): void;
 }
 
 export interface OpenAudioSessionOpts {
@@ -68,6 +68,8 @@ export interface OpenAudioSessionOpts {
   addressWord?: string;
   /** Move the chat's call from another surface to this one (spec/07 § A call can move between devices). */
   takeOver?: boolean;
+  /** Redialling a call that dropped (spec/07 § A dropped call comes back). */
+  resumed?: boolean;
   /**
    * Whether to capture the microphone. False opens a session that only plays —
    * the `auto-notify` interrupt of spec/07 § Speaking with no session open,
@@ -297,6 +299,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
         ...(opts.addressWord !== undefined ? { addressWord: opts.addressWord } : {}),
         ...(opts.takeOver === true ? { takeOver: true } : {}),
+        ...(opts.resumed === true ? { resumed: true } : {}),
       };
       ws.send(JSON.stringify(start));
       settled = true;
@@ -357,9 +360,9 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         reject(new Error('audio WSS failed to open'));
       }
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (ev: CloseEvent) => {
       cleanup();
-      callbacks.onClose();
+      callbacks.onClose(ev.reason || undefined);
     });
   });
 }

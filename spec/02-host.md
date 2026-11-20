@@ -287,6 +287,7 @@ agents or replaces one by id. Its models are `acp/<agent>/<model>`.
   server; a switched-off tool of any other kind is refused, since ACP cannot
   switch it off. ACP chats get no generated title (it would be a turn of the
   agent's own, kept in its history).
+- Self-update holds for calls. Installing an update restarts the host, which cuts any voice session it is running, so an update (automatic, staged for a server restart, or asked for) waits while a session is open and installs once the last one closes. The hold is bounded at 30 minutes, after which it installs anyway and logs that it did; the call then comes back by itself (`07-voice-app.md` § A dropped call comes back).
 - Turns outlive the host. An ACP agent runs under the same detached runner as a
   Codex turn (both are JSON-RPC lines on stdio). ACP has no way for a new
   process to rejoin a running prompt, so the runner is what is reattached: the

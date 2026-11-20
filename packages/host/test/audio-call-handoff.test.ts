@@ -38,6 +38,7 @@ interface CallInfo {
   surfaceKind: string;
   chatId: string;
   active: boolean;
+  resumed?: boolean;
 }
 
 let server: (AudioServerHandle & { port: number }) | undefined;
@@ -70,6 +71,7 @@ async function openCall(
     surfaceId: string;
     chatId: string;
     takeOver?: boolean;
+    resumed?: boolean;
     kind?: 'web' | 'mobile';
   },
 ): Promise<{ ws: WebSocket; closed: Promise<string> }> {
@@ -94,6 +96,7 @@ async function openCall(
       surfaceHasAec: true,
       mode: 'call',
       ...(o.takeOver ? { takeOver: true } : {}),
+      ...(o.resumed ? { resumed: true } : {}),
     }),
   );
   return { ws, closed };
@@ -116,6 +119,32 @@ describe('call handoff', () => {
     a.ws.close();
     await wait(60);
     expect(calls.map((c) => c.active)).toEqual([true, false]);
+  });
+
+  test('a redialled call is announced as resumed, so the host can say so in the chat', async () => {
+    const calls: CallInfo[] = [];
+    const s = await start(calls);
+    const first = await openCall(s.port, {
+      sessionId: 's1',
+      surfaceId: 'phone',
+      chatId: 'c1',
+      kind: 'mobile',
+    });
+    await wait(60);
+    first.ws.close();
+    await wait(60);
+    const again = await openCall(s.port, {
+      sessionId: 's2',
+      surfaceId: 'phone',
+      chatId: 'c1',
+      kind: 'mobile',
+      resumed: true,
+    });
+    await wait(60);
+    expect(calls[0]?.resumed).toBeUndefined();
+    expect(calls.at(-1)).toMatchObject({ sessionId: 's2', active: true, resumed: true });
+    again.ws.close();
+    await wait(60);
   });
 
   test('liveCalls lists exactly the calls announced open, for the reconnect snapshot', async () => {

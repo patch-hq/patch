@@ -101,11 +101,14 @@ let _connectTimer: ReturnType<typeof setTimeout> | null = null;
 export const CALL_CONNECT_TIMEOUT_MS = 15_000;
 
 /**
- * A call that drops after it was live (server restart, network change) is
- * redialled by itself on this backoff. After the last attempt fails the
+ * A call that drops after it was live (server restart, host restart, network
+ * change) is redialled by itself on this backoff, about two minutes in all:
+ * long enough to ride out a release restarting the server and the host. After the last attempt fails the
  * red "Call problem" banner and Retry appear, naming the last failure.
  */
-export const CALL_RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+export const CALL_RECONNECT_DELAYS_MS = [
+  1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000, 30_000,
+];
 
 let _reconnect: { attempt: number; chatId: string; mode: AudioSessionMode } | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -431,6 +434,20 @@ export function startVoiceCall(
                 .catch((e: unknown) => show(`microphone check failed: ${String(e)}`));
               break;
             }
+            // The host went away under a live call (it restarted, or the server
+            // lost it): redial rather than end the call (spec/07 § A dropped call
+            // comes back). Only a call that was up, or is itself a redial.
+            if (
+              frame.code === 'host_unreachable' &&
+              (_reconnect !== null || useVoiceStore.getState().callPhase !== 'connecting')
+            ) {
+              reconnectOrGiveUp(
+                chatId,
+                useVoiceStore.getState().callMode,
+                describeVoiceError(frame.code, frame.message),
+              );
+              break;
+            }
             show(describeVoiceError(frame.code, frame.message));
             break;
           }
@@ -459,6 +476,7 @@ export function startVoiceCall(
           mode: useVoiceStore.getState().callMode,
           ...(addressWord !== null ? { addressWord } : {}),
           ...(opts.takeOver === true ? { takeOver: true } : {}),
+          ...(opts.reconnect === true ? { resumed: true } : {}),
         };
         try {
           ws.send(JSON.stringify(start));
@@ -541,6 +559,9 @@ export function startVoiceCall(
           void endVoiceCall();
           return;
         }
+        // A redial is already booked (the host-unreachable error above got here
+        // first): this close is the same drop, not a second one.
+        if (_reconnectTimer !== null) return;
         const st = useVoiceStore.getState();
         if (st.activeSession && st.callError === null) {
           const reason = 'Call dropped — the audio connection closed';

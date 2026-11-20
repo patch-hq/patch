@@ -286,6 +286,8 @@ export interface AudioServerOptions {
     chatId: string;
     active: boolean;
     startedAt: number;
+    /** The surface redialled this call after it dropped. */
+    resumed?: boolean;
   }) => void;
   /**
    * Fired when ANY voice session closes. The device control plane (F2) uses
@@ -447,6 +449,9 @@ class JtiReplayGuard {
 /** How long a closing audio server waits for its clients to say goodbye. */
 export const AUDIO_CLOSE_GRACE_MS = 1_000;
 
+/** The chat line a redialled call leaves (spec/07 § A dropped call comes back). */
+export const CALL_RESUMED_NOTE = 'The call was interrupted, so Patch started a new one';
+
 export async function startAudioServer(opts: AudioServerOptions): Promise<AudioServerHandle> {
   const log = opts.logger;
   const cap = opts.maxConcurrentSessions ?? 4;
@@ -466,6 +471,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       chatId: entry.call.init.chatId,
       active,
       startedAt: entry.call.startedAt,
+      ...(entry.call.init.resumed === true ? { resumed: true } : {}),
     });
   };
 
@@ -759,6 +765,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           ...(start.deviceId !== undefined ? { deviceId: start.deviceId } : {}),
           ...(start.mode !== undefined ? { mode: start.mode } : {}),
           ...(start.addressWord !== undefined ? { addressWord: start.addressWord } : {}),
+          ...(start.resumed === true ? { resumed: true } : {}),
         };
         // spec/07 § Voice — a config matrix. Which surface this session
         // belongs to, then that surface's own {backend, layer} choice, read
@@ -1217,11 +1224,13 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             );
             return;
           }
-          if (!(
-            session instanceof DeepgramDictationSession ||
-            session instanceof ElevenLabsDictationSession ||
-            session instanceof HostDictationSession
-          )) {
+          if (
+            !(
+              session instanceof DeepgramDictationSession ||
+              session instanceof ElevenLabsDictationSession ||
+              session instanceof HostDictationSession
+            )
+          ) {
             send(ws, {
               type: 'audio.error',
               code: 'invalid_frame',

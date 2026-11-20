@@ -54,6 +54,8 @@ export interface SessionInit {
    * § Session modes). Undefined uses {@link DEFAULT_ADDRESS_WORD}.
    */
   addressWord?: string;
+  /** The surface redialled this session after the call dropped. */
+  resumed?: boolean;
 }
 
 export interface SessionDeps {

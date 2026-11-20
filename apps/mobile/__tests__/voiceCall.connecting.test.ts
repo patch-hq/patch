@@ -218,6 +218,48 @@ describe('a dropped call says so', () => {
     }
   });
 
+  it('the host going away mid-call redials rather than ending the call', async () => {
+    startVoiceCall('c1');
+    const sock = await liveCall();
+    const before = FakeWebSocket.instances.length;
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'audio.error',
+        sessionId: 'sess-1',
+        code: 'host_unreachable',
+        message: 'h1 went offline mid-session',
+      }),
+    );
+    // The server closes the socket behind the error: one drop, one redial.
+    sock.emitClose(1011);
+    expect(useVoiceStore.getState().callError).toBeNull();
+    expect(useVoiceStore.getState().callPhase).toBe('connecting');
+    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+  });
+
+  it('a redial tells the host it is picking a dropped call back up; a first dial does not', async () => {
+    startVoiceCall('c1');
+    const sock = await liveCall();
+    const first = JSON.parse(String(sock.sent[0])) as { resumed?: boolean };
+    expect(first.resumed).toBeUndefined();
+    sock.emitClose(1006);
+    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    await flush();
+    const again = FakeWebSocket.last();
+    again.emitOpen();
+    await flush();
+    const start = JSON.parse(String(again.sent[0])) as { type: string; resumed?: boolean };
+    expect(start.type).toBe('audio.session_start');
+    expect(start.resumed).toBe(true);
+  });
+
+  it('keeps redialling for about two minutes, long enough to ride out a release', () => {
+    const total = CALL_RECONNECT_DELAYS_MS.reduce((a, b) => a + b, 0);
+    expect(total).toBeGreaterThanOrEqual(90_000);
+  });
+
   it('gives up with "Call dropped" once every redial has failed', async () => {
     startVoiceCall('c1');
     let sock = await liveCall();
