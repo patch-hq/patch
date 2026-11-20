@@ -1042,7 +1042,11 @@ export class ChatRegistry {
     const facts = this.facts.get(chatId) ?? emptyFacts();
     const held =
       localId === undefined ? [] : facts.held.filter((id) => id !== localId && id !== '*');
-    return this.applyFacts(chatId, { ...facts, held, heldExpired: message }, { tell: false, own: true });
+    return this.applyFacts(
+      chatId,
+      { ...facts, held, heldExpired: message },
+      { tell: false, own: true },
+    );
   }
 
   /** The account feed's latest position (spec/03 § Account feed). */

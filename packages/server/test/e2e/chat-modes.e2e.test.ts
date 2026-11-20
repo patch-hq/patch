@@ -477,9 +477,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     await until(() => last() === 'queued_offline', 3000, 'queued for the offline host');
     await expectReply(client, chatId, 'mode 12b (held turn)');
     await until(() => last() === 'idle', 6000, 'the held turn ran and settled');
-    expect(statuses()).toEqual(
-      expect.arrayContaining(['queued_offline', 'running', 'idle']),
-    );
+    expect(statuses()).toEqual(expect.arrayContaining(['queued_offline', 'running', 'idle']));
 
     // A redelivery of a message the host already took: held, then re-acked
     // without a turn. It must not stay queued.

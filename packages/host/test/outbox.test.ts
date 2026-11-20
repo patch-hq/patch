@@ -388,5 +388,4 @@ describe('server link with an outbox', () => {
       expect(frame).not.toHaveProperty('queuedTurns');
     });
   });
-
 });
