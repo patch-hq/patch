@@ -65,6 +65,7 @@ import { Edit3 } from 'lucide-react';
 import { loadModels, useModelCatalog } from '../lib/models.js';
 import { creditDefaultAccountId, modelSpent, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
+import { ErrorDetail } from '../components/ErrorDetail.js';
 import { HostPicker } from '../components/HostPicker.js';
 import { ModelPicker } from '../components/ModelPicker.js';
 import type { PatchWs } from '../api/ws.js';
@@ -187,6 +188,22 @@ function waitForSpawnRejection(chatId: string, timeoutMs = 800): Promise<SpawnRe
  * vanished). Keyed by the RESOLVED id, pinning the URL is invisible, and
  * switching drafts still remounts because the id itself changed.
  */
+/** A failed folder listing, said in a sentence with the code behind Details. */
+function BrowseError({ err }: { err: unknown }): JSX.Element {
+  const code = err instanceof ApiError ? err.message : '';
+  const message =
+    err instanceof ApiError
+      ? ((err.body as { message?: string } | null)?.message ?? '')
+      : ((err as Error).message ?? '');
+  const human = humaniseError({ code, message }, 'browse');
+  return (
+    <div className="error" data-testid="folder-browser-error">
+      <p>{human.sentence}</p>
+      <ErrorDetail detail={human.detail} testId="folder-browser-error-detail" />
+    </div>
+  );
+}
+
 export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -1333,15 +1350,16 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                       title={browse.dir}
                     >
                       <span className="folder-browser-crumb-name">{folderName(browse.dir)}</span>
-                      <span className="folder-browser-crumb-path mono">{browse.dir}</span>
+                      {/* LRM either side: under the rtl tail-keeping overflow the bare
+                          leading and trailing "/" otherwise jump to the opposite end
+                          ("Users/me/" instead of "/Users/me"). */}
+                      <span className="folder-browser-crumb-path mono">{`\u200E${browse.dir}\u200E`}</span>
                     </span>
                   ) : null}
                   {browseLoading ? (
                     <p className="folder-popup-empty muted">Loading…</p>
                   ) : browseErr ? (
-                    <p className="error" data-testid="folder-browser-error">
-                      {(browseErr as Error).message}
-                    </p>
+                    <BrowseError err={browseErr} />
                   ) : (browse?.entries?.length ?? 0) === 0 ? (
                     // Two different emptinesses, and conflating them stalls people:
                     // AT THE ROOTS VIEW (no `dir`), nothing to browse means this
@@ -1633,11 +1651,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 <div className="new-chat-failed" data-testid="new-chat-failed" role="alert">
                   <p className="new-chat-failed-title">Chat didn’t start</p>
                   <p data-testid="new-chat-failed-error">{draftFailure.sentence}</p>
-                  {draftFailure.detail ? (
-                    <p className="muted" data-testid="new-chat-failed-detail">
-                      {draftFailure.detail}
-                    </p>
-                  ) : null}
+                  <ErrorDetail detail={draftFailure.detail ?? ''} testId="new-chat-failed-detail" />
                   <button
                     type="button"
                     data-testid="new-chat-resend"
