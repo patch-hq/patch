@@ -42,6 +42,16 @@ describe('utterance segmenter', () => {
     expect(out[0]!.length).toBeGreaterThanOrEqual(1000 * 16);
   });
 
+  it('soft speech under the default ceiling still counts as talking, not silence', () => {
+    const seg = createUtteranceSegmenter({ silenceMs: 15_000 });
+    const hush = (): Int16Array => new Int16Array(FRAME).fill(10); // near-silent room
+    const soft = (): Int16Array => new Int16Array(FRAME).fill(300); // rms ~0.009
+    feed(seg, hush, 2000);
+    expect(feed(seg, soft, 20_000)).toHaveLength(0);
+    expect(seg.speaking).toBe(true);
+    expect(feed(seg, hush, 15_400)).toHaveLength(1);
+  });
+
   it('a pause shorter than the window keeps one utterance', () => {
     const seg = createUtteranceSegmenter();
     feed(seg, speech, 500);
