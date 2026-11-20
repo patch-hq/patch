@@ -19,6 +19,7 @@
 // overwriting someone else's change.
 
 import { createHash, randomBytes } from 'node:crypto';
+import { listChildDirs, listingTimeoutMessage } from './boundedListing.js';
 import { open, readdir, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix } from 'node:path';
@@ -112,6 +113,12 @@ async function list(path: string): Promise<Ok> {
   }
   if (!info.isDirectory()) {
     throw new HostFileError('not_a_directory', `not a directory: ${path}`);
+  }
+  // Probe the directory out of process first: a macOS privacy prompt blocks an
+  // in-process read indefinitely and ties up a threadpool thread each time.
+  const probe = await listChildDirs(path);
+  if (probe.kind === 'timeout') {
+    throw new HostFileError('permission_denied', listingTimeoutMessage(path));
   }
   let dirents;
   try {

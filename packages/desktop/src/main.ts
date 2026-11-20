@@ -86,9 +86,11 @@ import { readHostLink, serverLostText, watchServerLink } from './server-watch';
 import {
   friendlyComputerName,
   installLocalHost,
+  HOST_SERVICE_LABEL,
   localHostStatus,
   serverOrigin,
 } from './local-host';
+import { hostAnswers, kickstartHost, watchHost } from './host-watchdog';
 import { LocalSttController } from './local-stt-controller';
 import { modelDir } from './local-stt-models';
 import { SherpaAccurateEngine, SherpaLiveEngine } from './local-stt-workers';
@@ -713,6 +715,20 @@ function startServerLostWatch(): void {
   });
 }
 let serverLostNotified = false;
+
+/** Restart this Mac's host when it stops answering (macOS; a stopped host stays stopped). */
+function startHostWatchdog(): void {
+  if (process.platform !== 'darwin' || typeof process.getuid !== 'function') return;
+  const uid = process.getuid();
+  const patchHome = join(app.getPath('home'), '.patch');
+  watchHost({
+    answers: async () =>
+      !localHostStatus(app.getPath('home')).installed || (await hostAnswers(patchHome)),
+    restart: () => kickstartHost(HOST_SERVICE_LABEL, uid),
+    onRestart: (ok, detail) =>
+      logDesktopEvent({ type: 'host-watchdog:restart', payload: { ok, detail } }),
+  });
+}
 
 /**
  * A document window's chrome on this platform. On Linux the window also names
@@ -2484,6 +2500,7 @@ export function bootstrap(): void {
     registerIpc();
     startMeetingDetection();
     startServerLostWatch();
+    startHostWatchdog();
     setupAutoUpdater();
 
     app.on('activate', () => {
