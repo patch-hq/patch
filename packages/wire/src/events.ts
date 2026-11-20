@@ -3751,11 +3751,10 @@ export const FoldersListEvent = z
     type: z.literal('folders.list'),
     ...folderRegistryFields,
     /**
-     * Every chat this host holds, loaded or not (spec/02 § Chat loading). A host
-     * announces in full only the chats it has loaded at start, so this is how the
-     * server knows the rest still exist: a chat it restored from its own store
-     * and finds here stays, one it does not find is gone. Sent on connect only;
-     * absent from a host that announced every chat in full.
+     * Every chat this host holds, loaded or not (spec/02 § Chat loading). Sent
+     * on connect only. Kept for servers from before the server's record decided
+     * that a chat exists: they dropped a restored chat this list did not name. A
+     * current server does not read it.
      */
     chatIds: z.array(z.string().min(1)).optional(),
   })
