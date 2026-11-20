@@ -86,3 +86,4 @@ pnpm --filter @patch/desktop dev
 
 - Linux + Windows targets — config stays generic but disabled per spec/18.
 - Voice WSS audio capture inside the overlay — group 17 (web) ports here.
+
