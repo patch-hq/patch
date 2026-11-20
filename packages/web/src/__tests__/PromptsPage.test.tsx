@@ -51,7 +51,14 @@ describe('Settings → Prompts', () => {
     expect(await shown('goal-judge')).toBe(DEFAULT_GOAL_EVAL_PROMPT);
     expect(await shown('link-summary')).toBe(DEFAULT_LINK_SUMMARY_PROMPT);
     expect(await shown('job-autonomy')).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
-    for (const id of ['watch-check-in', 'sweep', 'goal-judge', 'link-summary', 'job-autonomy']) {
+    for (const id of [
+      'watch-check-in',
+      'sweep',
+      'manager-voice',
+      'goal-judge',
+      'link-summary',
+      'job-autonomy',
+    ]) {
       expect(screen.getByTestId(`prompt-${id}-mode-default`).getAttribute('aria-pressed')).toBe(
         'true',
       );
