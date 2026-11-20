@@ -47,6 +47,7 @@ const ACCOUNT_FILES: Record<string, string> = {
   'secrets.key': 'k'.repeat(44),
   'jobs/nightly.json': '{"id":"nightly"}',
   'held-input.json': '[]',
+  'tool-calls.jsonl': '{"tool":"patch_send_to"}\n',
   'attachments/c1/a1': 'binary-ish \u0000 bytes',
 };
 /** The server's own files, which stay where they are. */
