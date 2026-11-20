@@ -128,6 +128,9 @@ function chosenModelLabel(): string | null | undefined {
 
 describe('/chats/new', () => {
   beforeEach(() => {
+    usePreferencesStore.setState((st) => ({
+      preferences: { ...st.preferences, experimentalFeatures: true },
+    }));
     seedModelCatalog();
     // Start from an empty roster — a host account left signed OUT by one test
     // otherwise blocks every screen that follows it.
@@ -3151,6 +3154,9 @@ describe('/chats/new model picker treatment', () => {
 // here, without a folder selected.
 describe('/chats/new terminal', () => {
   beforeEach(() => {
+    usePreferencesStore.setState((st) => ({
+      preferences: { ...st.preferences, experimentalFeatures: true },
+    }));
     useChatStore.getState()._reset();
     useComposerAttachmentStore.getState()._reset();
     useUiStore.getState().clearToasts();

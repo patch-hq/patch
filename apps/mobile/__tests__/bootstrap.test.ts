@@ -328,7 +328,6 @@ describe('teardown() — the next account starts from nothing', () => {
     expect(useSettingsStore.getState().data).toBeNull();
     expect(prefs.addressWordOrNull()).toBeNull();
     expect(prefs.voiceConfigOrNull()).toBeNull();
-    expect(prefs.suppressProviderSwitchWarningOrFalse()).toBe(false);
   });
 });
 

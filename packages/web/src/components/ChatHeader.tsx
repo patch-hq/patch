@@ -15,6 +15,7 @@
 // into a menu rather than scroll/shrink). Both renderings call the exact same
 // handlers defined below — no logic is duplicated, only the JSX shape.
 
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -111,7 +112,8 @@ function GroupBadge({ row }: { row: ChatRow }): JSX.Element | null {
 /** Files, Browser, Editor and Terminal: each toggles that tab in the group's
  *  focused pane, the same action as any other tab. Labels collapse to icons
  *  when the group is narrow (`.group-card` is the query container). */
-function GroupTools({ chatId, groupId }: { chatId: string; groupId: string }): JSX.Element {
+function GroupTools({ chatId, groupId }: { chatId: string; groupId: string }): JSX.Element | null {
+  const experimental = useExperimentalFeatures();
   const toggleTab = useLayoutStore((s) => s.toggleTab);
   const root = useLayoutStore((s) => s.groups.find((g) => g.id === groupId)?.root ?? null);
   const items: { id: string; label: string; icon: JSX.Element; descriptor: TabDescriptor }[] = [
@@ -140,6 +142,7 @@ function GroupTools({ chatId, groupId }: { chatId: string; groupId: string }): J
       descriptor: { kind: 'terminal', chatId },
     },
   ];
+  if (!experimental) return null;
   return (
     <div className="group-tools" data-testid="group-tools">
       {items.map((it) => {
@@ -171,6 +174,7 @@ export function ChatHeader({
   row: ChatRow;
   group?: GroupHeaderProps;
 }): JSX.Element {
+  const experimental = useExperimentalFeatures();
   const archiveGlyphs = useActionGlyphs('archiveCurrent');
   const setDeleted = useChatStore((s) => s.setDeleted);
   const setArchived = useChatStore((s) => s.setArchived);
@@ -524,7 +528,7 @@ export function ChatHeader({
         <div className="chat-head-actions" data-testid="chat-head-actions">
           {group ? <GroupTools chatId={row.chatId} groupId={group.groupId} /> : null}
           <div className="head-action-rail" data-testid="head-action-rail">
-            {group ? null : (
+            {group || !experimental ? null : (
               <button
                 type="button"
                 className="head-action"
@@ -792,45 +796,51 @@ export function ChatHeader({
                 role="menu"
                 ref={hamburgerMenuRef}
               >
-                <button
-                  type="button"
-                  className="head-menu-item"
-                  data-testid="hamburger-editor"
-                  role="menuitem"
-                  onClick={() => {
-                    setHamburgerOpen(false);
-                    toggleEditor();
-                  }}
-                >
-                  <Edit3 size={14} aria-hidden />
-                  Editor
-                </button>
-                <button
-                  type="button"
-                  className="head-menu-item"
-                  data-testid="quicklink-files"
-                  role="menuitem"
-                  onClick={() => {
-                    setHamburgerOpen(false);
-                    useLayoutStore
-                      .getState()
-                      .toggleTab({ kind: 'page', page: 'files', chatId: row.chatId });
-                  }}
-                >
-                  Files
-                </button>
-                <button
-                  type="button"
-                  className="head-menu-item"
-                  data-testid="quicklink-terminal"
-                  role="menuitem"
-                  onClick={() => {
-                    setHamburgerOpen(false);
-                    useLayoutStore.getState().toggleTab({ kind: 'terminal', chatId: row.chatId });
-                  }}
-                >
-                  Terminal
-                </button>
+                {experimental ? (
+                  <>
+                    <button
+                      type="button"
+                      className="head-menu-item"
+                      data-testid="hamburger-editor"
+                      role="menuitem"
+                      onClick={() => {
+                        setHamburgerOpen(false);
+                        toggleEditor();
+                      }}
+                    >
+                      <Edit3 size={14} aria-hidden />
+                      Editor
+                    </button>
+                    <button
+                      type="button"
+                      className="head-menu-item"
+                      data-testid="quicklink-files"
+                      role="menuitem"
+                      onClick={() => {
+                        setHamburgerOpen(false);
+                        useLayoutStore
+                          .getState()
+                          .toggleTab({ kind: 'page', page: 'files', chatId: row.chatId });
+                      }}
+                    >
+                      Files
+                    </button>
+                    <button
+                      type="button"
+                      className="head-menu-item"
+                      data-testid="quicklink-terminal"
+                      role="menuitem"
+                      onClick={() => {
+                        setHamburgerOpen(false);
+                        useLayoutStore
+                          .getState()
+                          .toggleTab({ kind: 'terminal', chatId: row.chatId });
+                      }}
+                    >
+                      Terminal
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   className="head-menu-item"

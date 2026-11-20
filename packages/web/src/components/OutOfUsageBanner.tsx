@@ -21,7 +21,7 @@
 // broken, and it comes back on its own at a time this says.
 
 import { useEffect, useState, type JSX } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   backendIdForModel,
   harnessForModel,
@@ -31,12 +31,11 @@ import {
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { getModelCatalog, loadModels } from '../lib/models.js';
-import { getActiveWs } from '../api/ws.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { limitControls } from '../lib/limitControls.js';
 import { accountRows } from './UsagePopover.js';
 import { LimitMenu } from './LimitMenu.js';
-import { ProviderSwitchModal } from './ProviderSwitchModal.js';
+import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
 import {
   formatDurationWords,
   formatReset,
@@ -79,8 +78,9 @@ export function OutOfUsageBanner({
   useEffect(() => {
     if (wantsCatalogue && hostId) void loadModels(hostId);
   }, [wantsCatalogue, hostId]);
-  const suppressWarning = usePreferencesStore((s) => s.preferences.suppressProviderSwitchWarning);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const navigate = useNavigate();
+  // spec/04 § Provider switches — another provider is a new chat linked to
+  // this one, its drafted first message carrying the request that met the limit.
   const sendSwitch = (providerId: string): void => {
     if (chatId === undefined) return;
     const target = getModelCatalog().models.find((m) => harnessForModel(m.id) === providerId);
@@ -88,7 +88,10 @@ export function OutOfUsageBanner({
       pushError(`No ${providerId} model is available on this host to switch to`);
       return;
     }
-    getActiveWs()?.send({ type: 'chat.model_request', chatId, model: target.id, retry: true });
+    draftLinkedChat(chatId, target.id).then(
+      (path) => navigate(path),
+      (err: unknown) => pushError(`Could not start a linked chat: ${linkedChatError(err)}`),
+    );
   };
   const soonestAt = outage?.soonest?.resetsAt;
   useEffect(() => {
@@ -132,22 +135,9 @@ export function OutOfUsageBanner({
             label="Change provider"
             control={providerControl}
             className="out-of-usage-switch-btn"
-            choose={(id) => (suppressWarning ? sendSwitch(id) : setConfirming(id))}
+            choose={(id) => sendSwitch(id)}
           />
         </span>
-      )}
-      {confirming !== null && (
-        <ProviderSwitchModal
-          onCancel={() => setConfirming(null)}
-          onSwitch={(dontShowAgain) => {
-            const target = confirming;
-            setConfirming(null);
-            if (dontShowAgain) {
-              void usePreferencesStore.getState().update({ suppressProviderSwitchWarning: true });
-            }
-            sendSwitch(target);
-          }}
-        />
       )}
     </div>
   );

@@ -46,6 +46,12 @@ export interface NewChatDraft {
   folder: string;
   hostId?: string;
   model?: string;
+  /**
+   * The chat this draft continues (spec/04 § Provider switches, § Moving to
+   * another host): set by the server on a linked chat's draft. Sending it
+   * spawns the chat linked to that one.
+   */
+  continuedFrom?: string;
   text: string;
   /**
    * Why the chat this draft tried to start was refused (spec/04 § Spawn): the
@@ -75,6 +81,7 @@ function parseCached(raw: string): CachedShape {
           text: dd.text,
           ...(typeof dd.model === 'string' ? { model: dd.model } : {}),
           ...(typeof dd.hostId === 'string' ? { hostId: dd.hostId } : {}),
+          ...(typeof dd.continuedFrom === 'string' ? { continuedFrom: dd.continuedFrom } : {}),
           ...(dd.failure &&
           typeof dd.failure.sentence === 'string' &&
           typeof dd.failure.at === 'number'
@@ -172,6 +179,7 @@ interface NewChatDraftState {
       folder: string;
       hostId?: string;
       model?: string;
+      continuedFrom?: string;
       text: string;
       updatedAt: number;
     }[],
@@ -181,6 +189,7 @@ interface NewChatDraftState {
     folder: string;
     hostId?: string;
     model?: string;
+    continuedFrom?: string;
     text: string;
     updatedAt: number;
   }): void;
@@ -225,6 +234,7 @@ function flushPending(id: string): void {
             text: draft.text,
             ...(draft.hostId !== undefined ? { hostId: draft.hostId } : {}),
             ...(draft.model !== undefined ? { model: draft.model } : {}),
+            ...(draft.continuedFrom !== undefined ? { continuedFrom: draft.continuedFrom } : {}),
           },
         }
       : { type: 'new_chat_draft.remove', id };
@@ -371,6 +381,7 @@ export const useNewChatDraftStore = create<NewChatDraftState>((set, get) => ({
         updatedAt: e.updatedAt,
         ...(e.hostId !== undefined ? { hostId: e.hostId } : {}),
         ...(e.model !== undefined ? { model: e.model } : {}),
+        ...(e.continuedFrom !== undefined ? { continuedFrom: e.continuedFrom } : {}),
       };
       if (focused[e.id]) {
         pendingRemote[e.id] = { entry, updatedAt: e.updatedAt };
@@ -400,6 +411,7 @@ export const useNewChatDraftStore = create<NewChatDraftState>((set, get) => ({
       updatedAt: entry.updatedAt,
       ...(entry.hostId !== undefined ? { hostId: entry.hostId } : {}),
       ...(entry.model !== undefined ? { model: entry.model } : {}),
+      ...(entry.continuedFrom !== undefined ? { continuedFrom: entry.continuedFrom } : {}),
     };
     if (get().focused[entry.id]) {
       set({

@@ -70,6 +70,9 @@ export class NewChatDraftStore {
           text: d.text,
           ...(typeof d.hostId === 'string' && d.hostId ? { hostId: d.hostId } : {}),
           ...(typeof d.model === 'string' && d.model ? { model: d.model } : {}),
+          ...(typeof d.continuedFrom === 'string' && d.continuedFrom
+            ? { continuedFrom: d.continuedFrom }
+            : {}),
           updatedAt: d.updatedAt,
         };
       }

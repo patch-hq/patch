@@ -20,7 +20,7 @@ export function ExperimentalPage(): JSX.Element {
       <Group testid="settings-experimental">
         <Row
           title="Show experimental features"
-          sub="Manager, Batch, Meeting mode, dictation and calls"
+          sub="Manager, Batch, Meeting mode, Files, Editor, Terminal, Browser, dictation and calls"
         >
           <Toggle
             checked={preferences.experimentalFeatures}

@@ -92,18 +92,14 @@ describe('a chat effort change is refused on a non-Claude backend', () => {
   });
 });
 
-describe('a chat effort override survives a provider switch', () => {
-  it('stays stored (but inert) across a switch to Codex, and reapplies on a switch back', async () => {
+describe('a chat effort override survives a model change', () => {
+  it('stays stored across a change of model within the provider', async () => {
     const { daemon, sdk, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder, model: 'claude-sonnet-4-6' });
     await daemon.setChatEffort(chatId, 'max');
-
-    await daemon.setChatModel(chatId, 'openai/gpt-5-codex');
-    // Still on the books — a model switch does not silently drop a choice the
-    // user made about this chat's effort.
+    await daemon.setChatModel(chatId, 'claude-opus-4-1');
+    // A model change does not silently drop a choice the user made about effort.
     expect(metaStore.read(chatId)?.effort).toBe('max');
-
-    await daemon.setChatModel(chatId, 'claude-sonnet-4-6');
     await daemon.sendInput({ chatId, message: 'go', localId: 'L1' });
     await new Promise((r) => setTimeout(r, 20));
     expect(sdk.lastOptions()?.effort).toBe('max');

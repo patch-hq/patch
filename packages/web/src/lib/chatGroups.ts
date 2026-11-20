@@ -244,7 +244,15 @@ export function groupChats(
   // thing that DOES drop a folder, so a stale roster row must not resurrect it.
   const deletedFolders = new Set<string>();
   const liveFolders = new Set<string>();
+  // spec/04 § Provider switches — a thread of linked chats is listed once, as
+  // its newest chat; an earlier one is reached from the divider in the chat
+  // that continues it. One whose continuation is gone (deleted, or not
+  // known here) keeps its own row.
+  const continuations = new Set(
+    all.filter((c) => c.status !== 'deleted' && c.continuedFrom !== undefined).map((c) => c.chatId),
+  );
   for (const c of all) {
+    if (c.continuedIn !== undefined && continuations.has(c.continuedIn)) continue;
     // Not drawn until its state says where it belongs (`ChatRow.awaitingState`):
     // a reconnecting host's re-announced archived chats would otherwise flash
     // into the active list and straight back out.

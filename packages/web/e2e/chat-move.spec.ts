@@ -1,17 +1,30 @@
 import { test, expect } from '@playwright/test';
 
 // Real-browser e2e (dev harness, real ChatHeader + MoveChatModal + real CSS)
-// for spec/04 § Moving a chat to another host: ⋯ → Move to… opens the dialog,
-// the other host is chosen with its same-named folder filled in, and Move
-// posts exactly that. The server is stubbed with page.route.
+// for spec/04 § Moving to another host: ⋯ → Move to… opens the dialog, the
+// other host is chosen with its same-named folder filled in, Move posts
+// exactly that, and the linked chat's draft opens on the new-chat screen. The
+// server is stubbed with page.route.
 
 test.describe('move a chat to another host', () => {
-  test('moves chat_md to the other host, into its folder of the same name', async ({ page }) => {
+  test('moves chat_md to the other host, into its folder of the same name, as a linked chat', async ({
+    page,
+  }) => {
     let posted: unknown = null;
     await page.route('**/api/chats/chat_md/move', async (route) => {
       posted = route.request().postDataJSON();
       await route.fulfill({
-        json: { ok: true, chatId: 'chat_md', hostId: 'd2', folder: '/Users/dev/portfolio' },
+        status: 201,
+        json: {
+          draft: {
+            id: 'draft-linked-move',
+            hostId: 'd2',
+            folder: '/Users/dev/portfolio',
+            text: 'This continues "portfolio notes" — carry on with the layout',
+            continuedFrom: 'chat_md',
+            updatedAt: 1,
+          },
+        },
       });
     });
     await page.goto('/app/dev-harness.html?chat=chat_md&hosts=two');
@@ -40,6 +53,10 @@ test.describe('move a chat to another host', () => {
     await page.getByTestId('move-chat-confirm').click();
     await expect(modal).toHaveCount(0);
     await expect.poll(() => posted).toEqual({ hostId: 'd2', folder: '/Users/dev/portfolio' });
+    await expect(page.getByTestId('new-chat-main')).toBeVisible();
+    await expect(page.getByTestId('new-chat-continues')).toBeVisible();
+    await expect(page.getByTestId('composer-input')).toHaveValue(/carry on with the layout/);
+    await page.screenshot({ path: 'test-results/chat-move-linked-draft.png' });
   });
 
   test('a refusal keeps the dialog open with the reason', async ({ page }) => {

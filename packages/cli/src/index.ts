@@ -30,6 +30,10 @@ import { resolveCliVersion } from './version.js';
 const here = dirname(fileURLToPath(import.meta.url));
 
 const program = new Command();
+// The bare `patch` takes `--folder` and `--model` of its own. Without this,
+// commander reads them anywhere on the line, so a subcommand's own `--folder`
+// (`patch chats move <id> --folder …`) was taken by the root and never arrived.
+program.enablePositionalOptions();
 program
   .name('patch')
   .description('Patch — TUI + agent CLI for the patch coordination layer')

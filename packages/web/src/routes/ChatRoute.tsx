@@ -49,7 +49,10 @@ import {
 } from '@patch/wire';
 import { systemMessageSummary } from '../lib/systemMessageSummary';
 import { backRecord, parseAgentReturn, parseAskHuman, type AgentReturn } from '@patch/wire';
+import { harnessForModel, isReservedSpecialThread } from '@patch/wire';
+import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
 import { SnoozeDivider } from '../components/SnoozeDivider.js';
+import { ContinuationDivider } from '../components/ContinuationDivider.js';
 import type { WireEvent } from '@patch/wire';
 import type { Job, JobTrigger } from '@patch/wire/jobs';
 import { describeTrigger } from '../lib/jobDescribe.js';
@@ -1949,6 +1952,19 @@ export function ChatRoute({
         return;
       }
       if (result.modelId === row?.model) return;
+      // Another provider's model opens the provider switch, as the picker does:
+      // a new linked chat (spec/04 § Provider switches).
+      if (
+        row?.model != null &&
+        harnessForModel(result.modelId) !== harnessForModel(row.model) &&
+        !isReservedSpecialThread(chatId)
+      ) {
+        draftLinkedChat(chatId, result.modelId).then(
+          (path) => navigate(path),
+          (err: unknown) => pushError(`Could not start a linked chat: ${linkedChatError(err)}`),
+        );
+        return;
+      }
       if (!ws) {
         pushError('not connected');
         return;
@@ -2498,6 +2514,7 @@ export function ChatRoute({
                   />
                 ) : (
                   <>
+                    <ContinuationDivider row={row} edge="start" />
                     <LoadEarlier chatId={chatId} />
                     {renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)}
                   </>
@@ -2517,6 +2534,7 @@ export function ChatRoute({
                   </div>
                 ) : null}
                 {renderEntries(queuedFrom, timeline.length)}
+                <ContinuationDivider row={row} edge="end" />
                 {/* The limit notice belongs HERE, under the last message, not
                     in the banner stack above the transcript. It is about the
                     turn you just sent — the reply that is not coming yet — so

@@ -88,7 +88,6 @@ import type {
   ChatDelegateUpdateEvent,
   ChatStateEvent,
   ChatSpawnedEvent,
-  ChatMoveBundle,
   ChatStoppedEvent,
   ChatBranchesEvent,
   HookAgentResponseOutcomeEvent,
@@ -1368,10 +1367,8 @@ import { readTrack, readTrackRecords } from './readTrack.js';
 import { recordEntries, turnBoundaryOf } from './recordEntries.js';
 import { toClaudeSessionEntries, estimateTokens, type TrackEntry } from './nativeReconstruct.js';
 import {
-  buildMoveBundle,
   ChatMoveError,
   setAsideMovedChat,
-  writeMoveBundle,
   type ChatMovePaths,
   attachmentsDirFor,
 } from './chatMove.js';
@@ -1800,6 +1797,23 @@ export class UnknownModelError extends Error {
   constructor(hostId: string, model: string) {
     super(`host ${hostId} offers no model with id: ${model}`);
     this.name = 'UnknownModelError';
+  }
+}
+
+/**
+ * A `chat.model_request` named a model of another provider (spec/04 § Model,
+ * § Provider switches). A chat keeps one provider for its life: a switch
+ * starts a new chat linked to this one, drafted by the server. The chat stays
+ * on the model it was on. The Manager and Speakers are the exception: they
+ * change provider in place, on a fresh session (spec/06).
+ */
+export class ProviderSwitchNeedsNewChatError extends Error {
+  readonly code = 'provider_switch_needs_new_chat' as const;
+  constructor(chatId: string, from: string, to: string) {
+    super(
+      `chat ${chatId} runs on ${from}; ${to} is another provider, so switching starts a new linked chat`,
+    );
+    this.name = 'ProviderSwitchNeedsNewChatError';
   }
 }
 
@@ -10052,9 +10066,10 @@ export class Daemon {
   }
 
   // -------------------------------------------------------------------------
-  // Moving a chat to another host (spec/04 § Moving a chat to another host).
-  // The server drives it: export here, import there, retire here. `chatMove.ts`
-  // does the files; these do the chat.
+  // Retiring the old copy of a chat a move before linked chats took over from
+  // the server's copy (spec/04 § Moving to another host). Moves no longer copy
+  // chats; a copy already owed its retire is still set aside when the server
+  // asks. `chatMove.ts` does the files.
 
   private patchHome(): string {
     return dirname(dirname(dirname(this.opts.metaStore.pathFor('_'))));
@@ -10067,78 +10082,14 @@ export class Daemon {
   private movePaths(): ChatMovePaths {
     const chatsRoot = dirname(dirname(this.opts.metaStore.pathFor('_')));
     const patchHome = this.patchHome();
-    return {
-      attachmentsRoot: join(patchHome, 'attachments'),
-      chatsRoot,
-      blobsDir: join(patchHome, 'blobs'),
-      claudeProjectsRoot: this.claudeProjectsRoot,
-      movedRoot: join(patchHome, 'moved'),
-    };
+    return { chatsRoot, movedRoot: join(patchHome, 'moved') };
   }
 
   /**
-   * Everything this chat is on disk, and from now until `retireMovedChat` or
-   * `releaseMovedChat` it takes no new turns. Refused for anything that is
-   * doing something right now — a move is of a chat at rest.
-   */
-  exportChatForMove(chatId: string): ChatMoveBundle {
-    const state = this.chatState.get(chatId);
-    if (!state) throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
-    if (isReservedSpecialThread(chatId)) {
-      throw new ChatMoveError(
-        'unsupported',
-        'a special thread stays on the host that runs the Manager',
-      );
-    }
-    if (
-      this.pumping.has(chatId) ||
-      state.activity === 'running' ||
-      state.activity === 'awaiting-permission'
-    ) {
-      throw new ChatMoveError('busy', 'this chat is mid-turn; move it once it has finished');
-    }
-    if (this.wake.peek(chatId) !== null) {
-      throw new ChatMoveError('busy', 'this chat has a self-wake armed; cancel it before moving');
-    }
-    if (this.watch.count(chatId) > 0) {
-      throw new ChatMoveError(
-        'busy',
-        'this chat is watching a process on this host; stop the watch before moving',
-      );
-    }
-    if (this.hasRunningDelegates(chatId)) {
-      throw new ChatMoveError(
-        'busy',
-        'this chat has a subagent running on this host; let it finish or stop it before moving',
-      );
-    }
-    const nativeProvider = providerForSessionId(state.claudeSessionId);
-    if (nativeProvider !== undefined && !HARNESS_TRAITS[nativeProvider].sessionMovable) {
-      throw new ChatMoveError(
-        'unsupported',
-        `this chat is on a ${providerDescriptor(nativeProvider).label} session, which a move cannot carry yet`,
-      );
-    }
-    this.movingOut.add(chatId);
-    try {
-      this.chatLog.flush();
-      return buildMoveBundle(chatId, this.movePaths());
-    } catch (err) {
-      this.movingOut.delete(chatId);
-      throw err;
-    }
-  }
-
-  /** A move that failed after export: the chat carries on here as it was. */
-  releaseMovedChat(chatId: string): void {
-    this.movingOut.delete(chatId);
-  }
-
-  /**
-   * The chat has arrived on its new host: it stops being one of this host's.
+   * The chat lives on another host now: it stops being one of this host's.
    * Its directory is set aside, not deleted.
    */
-  retireMovedChat(chatId: string): string {
+  private retireMovedChat(chatId: string): string {
     if (!this.movingOut.has(chatId)) {
       throw new ChatMoveError('not_found', `chat ${chatId} is not being moved from this host`);
     }
@@ -10172,81 +10123,6 @@ export class Daemon {
     this.movingOut.add(chatId);
     await this.stopAllWork(chatId);
     return this.retireMovedChat(chatId);
-  }
-
-  /**
-   * Take in a chat moved from another host, to run in `folder` here, and
-   * announce it exactly as a new chat of this host's is announced. Its next
-   * turn resumes the session it arrived with.
-   */
-  importMovedChat(bundle: ChatMoveBundle, folder: string): void {
-    if (this.chatState.has(bundle.chatId)) {
-      throw new ChatMoveError('already_exists', `this host already has chat ${bundle.chatId}`);
-    }
-    const meta = writeMoveBundle(bundle, folder, this.movePaths(), this.opts.now());
-    const chatId = meta.chatId;
-    this.chatState.hydrate([meta]);
-    this.hydratedFromDisk.add(chatId);
-    this.stampMissingPermissionMode(chatId);
-    const state = this.chatState.get(chatId)!;
-    const floor = Math.max(state.nextSeq, this.opts.metaStore.readSeq(chatId) ?? 0);
-    state.nextSeq = this.chatLog.hydrate(chatId, floor).nextSeq;
-    // A takeover is not visible until its canonical transcript is present.
-    // Otherwise a surface can send a turn (or an overdue wake can fire) into
-    // an empty chat in the gap between import and a later log-restore frame.
-    if (bundle.events) this.restoreEvents(chatId, bundle.events as WireEvent[]);
-    // A server-copy takeover carries its self-wake as chat/wake.json. Arm it
-    // here: this host is already running, so the startup scan will not revisit it.
-    this.wake.load(chatId);
-    this.opts.logger.info(
-      { chatId, from: bundle.sourceFolder, folder, files: bundle.files.length },
-      'chat moved here from another host',
-    );
-    this.emit({
-      type: 'chat.spawned',
-      chatId,
-      hostId: this.opts.hostId,
-      folder,
-      ...(state.spawnedByChatId !== undefined ? { parentChatId: state.spawnedByChatId } : {}),
-      ...(state.model !== undefined ? { model: state.model } : {}),
-    });
-    this.emitState(chatId);
-  }
-
-  /**
-   * Move a chat to another folder on THIS host (spec/04 § Moving a chat). It is
-   * the cross-host move done in one place: export, set the old directory aside,
-   * import under the new folder. The folder is checked first so the usual
-   * refusal never happens half-way; if the import fails anyway, the set-aside
-   * directory is put back and the chat is as it was.
-   */
-  refolderChat(chatId: string, requestedFolder: string): void {
-    const folder = expandHome(requestedFolder);
-    const state = this.chatState.get(chatId);
-    if (!state) throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
-    if (state.folder === folder) {
-      throw new ChatMoveError('already_exists', `this chat already runs in ${requestedFolder}`);
-    }
-    if (!existsSync(folder) || !statSync(folder).isDirectory()) {
-      throw new ChatMoveError(
-        'folder_not_found',
-        `${requestedFolder} is not a folder on this host`,
-      );
-    }
-    const bundle = this.exportChatForMove(chatId);
-    const keptAt = this.retireMovedChat(chatId);
-    try {
-      this.importMovedChat(bundle, folder);
-    } catch (err) {
-      const chatDir = join(this.movePaths().chatsRoot, chatId);
-      rmSync(chatDir, { recursive: true, force: true });
-      renameSync(keptAt, chatDir);
-      const meta = ChatMeta.parse(JSON.parse(readFileSync(join(chatDir, 'meta.json'), 'utf8')));
-      this.chatState.hydrate([meta]);
-      this.hydratedFromDisk.add(chatId);
-      this.chatLog.hydrate(chatId, this.chatState.get(chatId)!.nextSeq);
-      throw err;
-    }
   }
 
   /** Chats left out of hydrate because their meta.json could not be read. */
@@ -17406,11 +17282,17 @@ export class Daemon {
       // registry would write the change nowhere and report success.
       if (!this.chatState.get(chatId)) throw new ChatNotFoundError(chatId);
     }
-    // spec/04 § History — crossing providers no longer needs a new chat: the
-    // NEXT turn reconstructs the chat's own track as a native session on the
-    // new harness (chatRunner's `isProviderSwitch` in the turn-start code,
-    // `claudeSessionStore.ts` / `codexBackend.ts`'s `codexReseed`), seamlessly,
-    // rather than refusing here.
+    // spec/04 § Provider switches — a chat keeps one provider for its life.
+    // Choosing another provider's model starts a new linked chat, which the
+    // surface asks the server to draft; a request that still arrives here
+    // (an older surface) is refused and the chat keeps its model.
+    if (
+      !isReservedSpecialThread(chatId) &&
+      s.model !== undefined &&
+      harnessOfModel(s.model) !== harnessOfModel(model)
+    ) {
+      throw new ProviderSwitchNeedsNewChatError(chatId, s.model, model);
+    }
     if (opts?.compact) {
       const targetHarness: HarnessId = harnessOfModel(model);
       const fromHarness: HarnessId | undefined = harnessOfSessionId(s.claudeSessionId);

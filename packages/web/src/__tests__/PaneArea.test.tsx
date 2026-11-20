@@ -14,6 +14,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
 import { _setDragKind } from '../lib/dragState.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useLayoutStore, type LeafPane, type SplitPane } from '../stores/layoutStore.js';
 
 /** Every descriptor in this file is a chat tab — narrow past the union. */
@@ -67,6 +68,9 @@ function renderPanes({ strict = false }: { strict?: boolean } = {}): void {
 }
 
 beforeEach(() => {
+  usePreferencesStore.setState({
+    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+  });
   useLayoutStore.getState()._reset();
   useChatStore.getState()._reset();
 });

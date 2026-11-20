@@ -265,6 +265,8 @@ interface ChatState {
         // ordering).
         lastUserActivity?: number;
         createdAt?: number;
+        continuedFrom?: string;
+        continuedIn?: string;
       }
     >,
   ): void;
@@ -356,6 +358,8 @@ interface ChatState {
         // ordering).
         lastUserActivity?: number;
         createdAt?: number;
+        continuedFrom?: string;
+        continuedIn?: string;
       }
     >,
   ): void;
@@ -1238,6 +1242,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
+      // Server-owned links (spec/04 § Provider switches); set once, never cleared.
+      const continuedFrom = r.continuedFrom ?? existing?.continuedFrom;
+      const continuedIn = r.continuedIn ?? existing?.continuedIn;
       if (existing) {
         // Keep the live-stream + local fields; refresh the server-authoritative
         // ones (name, folder, activity, status, pinned, lastUpdated) from REST.
@@ -1290,6 +1297,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
+          ...(continuedFrom !== undefined ? { continuedFrom } : {}),
+          ...(continuedIn !== undefined ? { continuedIn } : {}),
           lastReadSeq,
         };
       } else {
@@ -1326,6 +1335,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
+          ...(continuedFrom !== undefined ? { continuedFrom } : {}),
+          ...(continuedIn !== undefined ? { continuedIn } : {}),
         };
         next[r.chatId] =
           persisted !== undefined
@@ -1423,6 +1434,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
+      // Server-owned links (spec/04 § Provider switches); set once, never cleared.
+      const continuedFrom = r.continuedFrom ?? existing?.continuedFrom;
+      const continuedIn = r.continuedIn ?? existing?.continuedIn;
       if (existing) {
         const lastReadSeq =
           persisted !== undefined
@@ -1463,6 +1477,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
+          ...(continuedFrom !== undefined ? { continuedFrom } : {}),
+          ...(continuedIn !== undefined ? { continuedIn } : {}),
           lastReadSeq,
         };
       } else {
@@ -1499,6 +1515,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
+          ...(continuedFrom !== undefined ? { continuedFrom } : {}),
+          ...(continuedIn !== undefined ? { continuedIn } : {}),
         };
         next[r.chatId] =
           persisted !== undefined
@@ -1918,6 +1936,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,
             createdAt: event.createdAt ?? row.createdAt,
+            // Server-owned links (spec/04 § Provider switches); an absent field keeps what is known.
+            ...((event.continuedFrom ?? row.continuedFrom) !== undefined
+              ? { continuedFrom: event.continuedFrom ?? row.continuedFrom }
+              : {}),
+            ...((event.continuedIn ?? row.continuedIn) !== undefined
+              ? { continuedIn: event.continuedIn ?? row.continuedIn }
+              : {}),
             awaitingPermission: hasPending || event.activity === 'awaiting-permission',
             // Rate-limit auto-resume timestamp — null when no retry is pending,
             // set when the host schedules one, cleared when it fires. Null is

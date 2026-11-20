@@ -281,14 +281,6 @@ function ChatsGroup(): JSX.Element {
   };
   return (
     <Group label="Chats" testid="settings-transcript">
-      <Row title="Warn before switching provider">
-        <Toggle
-          checked={!preferences.suppressProviderSwitchWarning}
-          disabled={!loaded}
-          onChange={(next) => write({ suppressProviderSwitchWarning: !next })}
-          testid="provider-switch-warning"
-        />
-      </Row>
       {/* spec/10 § Limits — what a turn does after it pauses on a temporary
           limit. Out of credit and signed out always wait for the user. */}
       <Row title="When a turn hits a usage limit" testid="limit-behaviour">

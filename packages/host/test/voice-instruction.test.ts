@@ -2,8 +2,8 @@ import { describe, test, expect } from 'vitest';
 import { HOSTED_VOICE_INSTRUCTION, hostedVoiceInstruction } from '../src/audio/gemini-live.js';
 
 describe('HOSTED_VOICE_INSTRUCTION', () => {
-  test('allows one acknowledgement then silence until the agent result arrives', () => {
-    expect(HOSTED_VOICE_INSTRUCTION).toMatch(/at most one/i);
+  test('makes the acknowledgement optional, then silence until the agent result arrives', () => {
+    expect(HOSTED_VOICE_INSTRUCTION).toMatch(/acknowledgement before a hand-off is optional/i);
     expect(HOSTED_VOICE_INSTRUCTION).toMatch(/silent|say nothing/i);
     expect(HOSTED_VOICE_INSTRUCTION).toMatch(/never repeat|do not repeat/i);
     expect(HOSTED_VOICE_INSTRUCTION).not.toMatch(/so you are never silent/i);

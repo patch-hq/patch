@@ -77,6 +77,11 @@ import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
 import { endMeeting } from './lib/meetingControl.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
+
+/** Files, Editor, Terminal and Browser shortcuts do nothing until Settings → Experimental features is on. */
+function experimentalOn(): boolean {
+  return usePreferencesStore.getState().preferences.experimentalFeatures;
+}
 import { focusedChatId, resolvePane, useLayoutStore } from './stores/layoutStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { composerHotkeyDown, composerHotkeyUp } from './lib/composerMic.js';
@@ -534,6 +539,7 @@ export function AppShell(): JSX.Element {
         });
       },
       onFilePicker: () => {
+        if (!experimentalOn()) return;
         // Group 20 fix DX-8: single-press ⌘P opens the picker directly — it
         // reads whichever chat's `files-recursive` index is cached, which
         // needs a Files tab open for this chat at least once; open it now,
@@ -548,6 +554,7 @@ export function AppShell(): JSX.Element {
         useUiStore.getState().setFilePickerOpen(true);
       },
       onDiffViewer: () => {
+        if (!experimentalOn()) return;
         // ⌘' — G3-1: open the diff editor on the chat's MOST RECENT agent edit.
         if (!activeChatId) {
           pushError('no chat focused');
@@ -610,6 +617,7 @@ export function AppShell(): JSX.Element {
         setCheatSheetOpen(!cur);
       },
       onToggleEditor: () => {
+        if (!experimentalOn()) return;
         // ⌥E — spec/14 § Panes and tabs: the editor rail is gone, so this
         // toggles the active chat's Files tab (open/focus, or close if it's
         // already the focused tab) rather than a docked rail.
@@ -617,6 +625,7 @@ export function AppShell(): JSX.Element {
         useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: activeChatId });
       },
       onToggleTerminal: () => {
+        if (!experimentalOn()) return;
         // ⌃` — spec/14 § Terminal. Only meaningful on a live chat: a terminal
         // tab is rooted at that chat's folder, so there is nothing to toggle
         // elsewhere.
@@ -625,6 +634,7 @@ export function AppShell(): JSX.Element {
         useLayoutStore.getState().toggleTab({ kind: 'terminal', chatId });
       },
       onFileBrowser: () => {
+        if (!experimentalOn()) return;
         // ⌘⇧' — G3-8: open the per-chat file browser, or the host-wide one
         // when no chat is focused (spec/14 § File browser — open without a chat).
         if (!activeChatId) {
@@ -634,6 +644,7 @@ export function AppShell(): JSX.Element {
         useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: activeChatId });
       },
       onSearchInFiles: () => {
+        if (!experimentalOn()) return;
         // ⌘⇧F — search in files (spec/14 § File browser). The chat's own tree
         // has no search UI (an arbitrary host directory can be huge in a way a
         // chat's folder isn't, so that UI is host-browser only) — from a chat

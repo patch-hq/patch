@@ -168,6 +168,7 @@ import {
 import { useLocalUri } from '../../src/lib/servedFile';
 import { copyableText } from '../../src/lib/messageText';
 import { EmptyChatArt } from '../../src/components/EmptyChatArt';
+import { ContinuationDivider } from '../../src/components/ContinuationDivider';
 import { fixed, fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 import { startVoiceCall } from '../../src/lib/voiceCall';
 import { getWs } from '../../src/api/ws';
@@ -1307,7 +1308,12 @@ function ChatDetailBody(): React.ReactElement {
           // asks for the page before what is shown (spec/05 § Loading).
           onEndReached={onReachedTop}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={<EarlierFooter chatId={chatId} />}
+          ListFooterComponent={
+            <View>
+              <ContinuationDivider chatId={chatId} edge="start" />
+              <EarlierFooter chatId={chatId} />
+            </View>
+          }
           keyExtractor={keyExtractor}
           contentContainerStyle={LIST_CONTENT_STYLE}
           renderItem={renderItem}
@@ -1391,8 +1397,9 @@ function ChatDetailBody(): React.ReactElement {
           // screen. The typing indicator belongs after the NEWEST message
           // (the bottom), which is "before" index 0 — the header slot.
           ListHeaderComponent={
-            working || queuedEntries.length > 0 ? (
+            working || queuedEntries.length > 0 || row?.continuedIn !== undefined ? (
               <View>
+                <ContinuationDivider chatId={chatId} edge="end" />
                 {working ? <WorkingIndicator /> : null}
                 {queuedEntries.map((entry, i) => (
                   <TimelineItem

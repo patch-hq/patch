@@ -161,12 +161,6 @@ export function AgentPage(): React.ReactElement {
             </SettingsSection>
             <QuestionExpiry preferences={data.preferences} />
             <SettingsSection title="Chats" testID="settings-agent-chats">
-              <ToggleRow
-                label="Warn before switching provider"
-                testID="provider-switch-warning"
-                value={!data.preferences.suppressProviderSwitchWarning}
-                onChange={(next) => writePreferences({ suppressProviderSwitchWarning: !next })}
-              />
               {/* spec/10 § Limits — what a turn does after it pauses on a
                   temporary limit. Out of credit and signed out always wait. */}
               <Row testID="limit-behaviour" title="When a turn hits a usage limit" stack>

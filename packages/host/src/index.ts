@@ -292,6 +292,11 @@ import {
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
+import {
+  createManagerVoiceTools,
+  MANAGER_CHAT_ID,
+  type ManagerChatEntry,
+} from './audio/managerVoice.js';
 import { createSmartTurnDetector, pcmFromWav, type TurnDetector } from './audio/smartTurn.js';
 import { createChatVoice } from './audio/chatVoice.js';
 import {
@@ -2997,8 +3002,7 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.chat_move.request') {
-        // spec/04 § Moving a chat to another host — one step of a move the
-        // server is driving: export / import / retire / release.
+        // spec/04 § Moving to another host — retire an old moved copy.
         handleChatMoveRequest(event, daemon, sender, logger, selfHostId);
         return;
       }
@@ -3996,6 +4000,76 @@ async function startHost(
       };
     },
   });
+  // spec/07 § A call to the Manager — a hosted voice on the Manager chat sends
+  // to other chats itself. Their replies are caught by the sent turn's own
+  // localId on a bridge of their own, so they never displace a voice session's
+  // hand-off waiting on the same chat.
+  const managerVoiceReplies = createVoiceReplyBridge();
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const managerVoice = createManagerVoiceTools({
+    logger: logger.child({ component: 'manager-voice' }),
+    // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
+    // would read as "there is no such chat". Live state from this host where it has it.
+    listChats: async (): Promise<ManagerChatEntry[]> => {
+      const local = new Map(daemon.listWithFilter().map((c) => [c.chatId, c]));
+      const account = await requestAccountChats(MANAGER_CHAT_ID);
+      return account.map((e) => {
+        const here = local.get(e.chatId);
+        if (here) {
+          return {
+            chatId: here.chatId,
+            name: here.name,
+            folder: here.folder,
+            status: here.status,
+            activity: here.activity,
+            lastUpdated: here.lastUpdated,
+          };
+        }
+        const activity = str(e['activity']);
+        const lastUpdated = e['lastUpdated'];
+        return {
+          chatId: e.chatId,
+          name: str(e['name']) ?? null,
+          folder: str(e['folder']) ?? '',
+          status: str(e['status']) ?? 'active',
+          ...(activity !== undefined ? { activity } : {}),
+          ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
+        };
+      });
+    },
+    isLocal: (chatId) => daemon.chatState.has(chatId),
+    chatDetail: (chatId) => daemon.voiceContext(chatId, { maxChars: 2_000 }),
+    submitInput: async ({ chatId, message, localId }) => {
+      // The same delivery patch_send_to makes: a machine turn, and the Manager is visible.
+      await daemon.submitInput({ chatId, message, localId, origin: 'machine', fromAgent: true });
+      emit({
+        type: 'patch.send_to',
+        sourceChatId: MANAGER_CHAT_ID,
+        targetChatId: chatId,
+        message,
+        revealTarget: true,
+      });
+    },
+    awaitReply: (chatId, localId) => managerVoiceReplies.awaitReply(chatId, undefined, localId),
+    abandonReply: (chatId, err) => managerVoiceReplies.abandon(chatId, err),
+    sendRemote: ({ chatId, message }) =>
+      sendToRemoteChat({
+        sourceChatId: MANAGER_CHAT_ID,
+        targetChatId: chatId,
+        message,
+        revealTarget: true,
+      }),
+    recordNote: (line) => {
+      try {
+        daemon.recordCallNote(MANAGER_CHAT_ID, line);
+      } catch (err) {
+        logger.error(
+          { err: (err as Error).message },
+          'manager voice: could not write into the Manager chat',
+        );
+      }
+    },
+  });
   let artifactAutoRepublisher: ArtifactAutoRepublisher | undefined;
   function emit(event: import('@patch/wire').WireEvent): void {
     forward(event);
@@ -4020,6 +4094,7 @@ async function startHost(
     const addressed = (event as { chatId?: unknown }).chatId;
     if (typeof addressed === 'string' && daemon.isSubagent(addressed)) return;
     voiceReplies.observe(event);
+    managerVoiceReplies.observe(event);
     chatVoice.observe(event);
     link.send(event);
   }
@@ -6354,6 +6429,7 @@ async function startHost(
     },
     // A call's `look_back`: the chat's messages that match a few words, searched on the host.
     lookBack: (chatId, query) => daemon.searchChat(chatId, query),
+    managerVoice,
     makeTimeline: (init) => chatVoice.makeTimeline(init),
     onCallEnded: (info) => chatVoice.callEnded(info),
   });
@@ -7546,9 +7622,9 @@ export async function handleDocExportRequest(
 }
 
 /**
- * One step of moving a chat between hosts (spec/04 § Moving a chat to another
- * host). Every outcome is answered — the server is waiting on it with the chat
- * frozen, so a refusal must come back as a refusal, not as silence.
+ * A server's request to retire this host's old copy of a chat that a move
+ * before linked chats took over (spec/04 § Moving to another host). Every
+ * outcome is answered, so a refusal comes back as a refusal, not as silence.
  */
 export function handleChatMoveRequest(
   event: import('@patch/wire').PatchChatMoveRequestEvent,
@@ -7565,41 +7641,20 @@ export function handleChatMoveRequest(
     op: event.op,
   };
   try {
-    if (event.op === 'export') {
-      const bundle = daemon.exportChatForMove(event.chatId);
-      sender({ ...base, ok: true, bundle });
-      return;
-    }
-    if (event.op === 'import') {
-      if (event.bundle === undefined || event.folder === undefined) {
-        throw new ChatMoveError('internal', 'an import needs a bundle and a folder');
-      }
-      if (event.bundle.chatId !== event.chatId) {
-        throw new ChatMoveError('internal', 'the bundle is for a different chat');
-      }
-      daemon.importMovedChat(event.bundle, event.folder);
-      sender({ ...base, ok: true });
-      return;
-    }
-    if (event.op === 'refolder') {
-      if (event.folder === undefined) {
-        throw new ChatMoveError('internal', 'a refolder needs a folder');
-      }
-      daemon.refolderChat(event.chatId, event.folder);
-      sender({ ...base, ok: true });
-      return;
-    }
+    // A server only asks one thing any more: retire an old copy a move before
+    // linked chats left here (spec/04 § Moving to another host).
     if (event.op === 'retire' && event.force === true) {
-      // A takeover stops running work, which takes a moment: answer when done.
+      // Stopping running work takes a moment: answer when done.
       void daemon
         .retireTakenOverChat(event.chatId)
         .then(() => sender({ ...base, ok: true }))
         .catch(refuse);
       return;
     }
-    if (event.op === 'retire') daemon.retireMovedChat(event.chatId);
-    else daemon.releaseMovedChat(event.chatId);
-    sender({ ...base, ok: true });
+    throw new ChatMoveError(
+      'unsupported',
+      `this host no longer copies chats between hosts (${event.op}); moving starts a new linked chat`,
+    );
   } catch (err) {
     refuse(err);
   }

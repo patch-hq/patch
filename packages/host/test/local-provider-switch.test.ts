@@ -1,6 +1,6 @@
-// A chat switching onto and between local models (docs/providers.md): the
-// switch hands the local harness the chat's track, and a later turn on the
-// local model resumes its own session rather than rebuilding.
+// Chats on a local model (docs/providers.md): a later turn resumes the local
+// harness's own session, and a chat on another provider cannot switch onto one
+// in place (spec/04 § Provider switches).
 
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
@@ -77,38 +77,28 @@ function setup() {
   return { daemon, local, folder, metaStore };
 }
 
-describe('local model provider switch', () => {
-  it('switching onto a local model seeds it from the track, and the mode follows the provider', async () => {
+describe('local model chats', () => {
+  it('a Claude chat cannot switch onto a local model: that starts a new linked chat', async () => {
     const { daemon, local, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder, model: CLAUDE_MODEL });
     await daemon.sendInput({ chatId, message: 'hello claude', localId: 'l1' });
-    await daemon.setChatModel(chatId, LOCAL_MODEL);
-    await daemon.sendInput({ chatId, message: 'hello local', localId: 'l2' });
-
-    const opts = local.calls[0]!;
-    expect(opts.localReseed).toBeDefined();
-    expect(opts.codexReseed).toBeUndefined();
-    const texts = opts.localReseed!.events.flatMap((t) =>
-      t.event.type === 'chat.message' && t.event.role !== 'system' ? [t.event.content] : [],
-    );
-    expect(texts[0]).toBe('hello claude');
-    expect(texts).toHaveLength(2);
-    expect(metaStore.read(chatId)!.claudeSessionId).toMatch(/^local-/);
-    // Local cannot run `auto`: the chat is not left on it.
-    expect(opts.permissionMode).not.toBe('auto');
+    await expect(daemon.setChatModel(chatId, LOCAL_MODEL)).rejects.toMatchObject({
+      code: 'provider_switch_needs_new_chat',
+    });
+    expect(metaStore.read(chatId)!.model).toBe(CLAUDE_MODEL);
+    expect(local.calls).toHaveLength(0);
   });
 
-  it('a second turn on the local model resumes its session without reseeding', async () => {
+  it('a second turn on a local chat resumes its session without reseeding', async () => {
     const { daemon, local, folder, metaStore } = setup();
-    const chatId = await daemon.spawnChat({ folder, model: CLAUDE_MODEL });
+    const chatId = await daemon.spawnChat({ folder, model: LOCAL_MODEL });
     await daemon.sendInput({ chatId, message: 'one', localId: 'l1' });
-    await daemon.setChatModel(chatId, LOCAL_MODEL);
-    await daemon.sendInput({ chatId, message: 'two', localId: 'l2' });
     const session = metaStore.read(chatId)!.claudeSessionId!;
-    await daemon.sendInput({ chatId, message: 'three', localId: 'l3' });
-    const third = local.calls[1]!;
-    expect(third.resumeSessionId).toBe(session);
-    expect(third.localReseed).toBeUndefined();
+    expect(session).toMatch(/^local-/);
+    await daemon.sendInput({ chatId, message: 'two', localId: 'l2' });
+    const second = local.calls[1]!;
+    expect(second.resumeSessionId).toBe(session);
+    expect(second.localReseed).toBeUndefined();
   });
 
   it('a chat spawned on a local model has no effort control', async () => {
