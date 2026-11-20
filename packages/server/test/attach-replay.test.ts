@@ -321,12 +321,13 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
       'log.start',
       'turn.start',
       'event',
-      'event',
-      'event',
-      'event',
-      'event',
-      // The mock reports its session id on the turn's `result`.
+      // Like the real SDK, the mock names its session on the first entry it
+      // writes, so the session is recorded as soon as the turn says anything.
       'session',
+      'event',
+      'event',
+      'event',
+      'event',
       'turn.end',
     ]);
     const firstEvents = before.flatMap((r) => (r.rec.k === 'event' ? [r.rec.event] : []));
