@@ -506,13 +506,6 @@ async function handleServerEvent(
       case 'file.write':
         daemon.writeFile(event.chatId, event.path, event.content);
         return;
-      case 'chat.replay': {
-        const surfaceId = event.forSurfaceId;
-        const wrap = (ev: WireEvent): WireEvent =>
-          surfaceId ? ({ ...(ev as object), forSurfaceId: surfaceId } as WireEvent) : ev;
-        daemon.replayChat(event.chatId, event.fromSeq, (ev) => send(wrap(ev)));
-        return;
-      }
       default:
         return;
     }

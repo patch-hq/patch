@@ -2,8 +2,9 @@
 // uses RN's AppState API (no DOM `document.visibility`).
 //
 // Spec/05 line 71: surface emits `surface.heartbeat` every 10s while
-// foregrounded. Spec/12: replay missed events with chat.replay on
-// reconnect. NO FALLBACK on auth — bad/missing JWT throws at hello-time.
+// foregrounded. History is read only from the server (`chat.history_request`
+// and the account feed, spec/03); a host is never asked. NO FALLBACK on auth —
+// bad/missing JWT throws at hello-time.
 
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useViewPositionStore } from '../stores/viewPositionStore';
@@ -21,15 +22,7 @@ import {
 } from '@patch/wire';
 import { clearCredential, loadCredential, store as feedStore } from '../lib/credential';
 import { useChatStore } from '../stores/chatStore';
-import {
-  heldChatIds,
-  heldCursor,
-  markSynced,
-  needsOfflineSync,
-  pruneTranscripts,
-  saveEvents,
-  saveResolution,
-} from '../lib/transcriptCache';
+import { heldChatIds, heldCursor, saveEvents, saveResolution } from '../lib/transcriptCache';
 import { useFolderStore } from '../stores/folderStore';
 import { useHostRefusalStore } from '../stores/hostRefusalStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -48,7 +41,6 @@ import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
 import { mobileBuildInfo } from '../lib/buildInfo';
 import { refreshRoster } from '../lib/rosterRefresh';
 import { wsUrl } from '../config';
-import { isRunning } from '../stores/types';
 
 /**
  * Say ONCE, per distinct thing, that we ignored something from a newer sender
@@ -83,13 +75,11 @@ export const HEARTBEAT_LIVENESS_TIMEOUT_MS = 30_000;
 export const CONNECT_TIMEOUT_MS = 15_000;
 /**
  * How long inbound store events are gathered before being committed together
- * (see `queueForStore`). One frame: long enough that a `chat.replay` burst —
+ * (see `queueForStore`). One frame: long enough that a history burst —
  * 500+ events inside half a second on a busy chat — collapses into a couple of
  * dozen commits instead of 500+, short enough that a single live message still
  * lands within the same frame it arrived in.
  */
-const PREFETCH_TIMEOUT_MS = 30_000;
-const PREFETCH_MAX_TRIES = 3;
 export const STORE_BATCH_MS = 16;
 /**
  * How long the link must be down, with the app in the FOREGROUND, before the
@@ -132,24 +122,13 @@ export class PatchWs {
   private storeQueue: WireEvent[] = [];
   private storeFlushTimer: TimerHandle | null = null;
   /**
-   * The cursor each chat's last replay was asked from, ON THIS SOCKET. Cleared
+   * The cursor each chat's last history read was asked from, ON THIS SOCKET. Cleared
    * on every new connection, so a reconnect always re-asks while one connection
    * never asks the same question twice.
    */
-  private readonly lastReplayCursor = new Map<string, number>();
+  private readonly lastHistoryCursor = new Map<string, number>();
   /** True once this client has been greeted; later greetings are reconnects. */
   private greeted = false;
-  /**
-   * Offline reading (spec/12 § Offline reading): chats whose transcript is
-   * being fetched straight into the on-device cache, one at a time. A chat
-   * here is NOT painted into the store — nobody has it open.
-   */
-  private prefetchQueue: Array<{ chatId: string; lastUpdated: number }> = [];
-  private prefetching: { chatId: string; lastUpdated: number } | null = null;
-  private prefetchTimer: TimerHandle | null = null;
-  private prefetchTries = new Map<string, number>();
-  /** Debounces live roster changes into one `syncTranscripts` sweep. */
-  private syncDebounce: TimerHandle | null = null;
   /**
    * The chats the server was last told this phone follows, on this socket
    * (`feed.resume` / `feed.follow`, spec/03 § Account feed). `null` until the
@@ -194,10 +173,6 @@ export class PatchWs {
       this.followTimer = null;
     }
     this.followed = null;
-    if (this.syncDebounce !== null) {
-      clearTimeout(this.syncDebounce);
-      this.syncDebounce = null;
-    }
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -236,7 +211,7 @@ export class PatchWs {
   /**
    * Best-effort send: silently no-ops when the socket isn't open. Used for
    * subscribe/heartbeat frames where a dropped frame is re-sent on reconnect
-   * (the connect-time replay loop re-subscribes every known chat).
+   * (the account feed re-subscribes every held chat).
    */
   safeSend(event: WireEvent): void {
     if (!this.ws || this.ws.readyState !== 1) return;
@@ -249,7 +224,7 @@ export class PatchWs {
    *
    * Derived here rather than passed in, so the screen opening a chat and the
    * connect handler catching it up always ask the same question — two callers
-   * computing it differently is a second replay of the same transcript on the
+   * computing it differently is a second read of the same transcript on the
    * same connection, which the store folds for messages and permission cards
    * but not for tool calls.
    *
@@ -259,8 +234,6 @@ export class PatchWs {
    * without the transcript to match, and `fromSeq` is EXCLUSIVE, so asking from
    * it would skip history this surface has never seen.
    */
-  /** The server answers history and runs the account feed (spec/05 § Loading); from `auth.ok`. */
-  private accountFeed = false;
   private readonly historyAsks = new Map<
     string,
     { chatId: string; kind: 'last' | 'before' | 'after' }
@@ -285,7 +258,7 @@ export class PatchWs {
 
   /** The page before the earliest entry shown, as the reader scrolls up. */
   loadEarlier(chatId: string): void {
-    if (!this.accountFeed || !this.ws || this.ws.readyState !== 1) return;
+    if (!this.ws || this.ws.readyState !== 1) return;
     const store = useChatStore.getState();
     if (store.historyLoadingEarlier[chatId] || store.historyMore[chatId] !== true) return;
     this.flushStoreQueue();
@@ -363,7 +336,7 @@ export class PatchWs {
     for (const [chatId, after] of follow) {
       if (already.has(chatId)) continue;
       if (after < 0 && chatId !== activeChatId) continue;
-      this.lastReplayCursor.set(chatId, after);
+      this.lastHistoryCursor.set(chatId, after);
     }
   }
 
@@ -383,7 +356,7 @@ export class PatchWs {
    * it is opened, and one that fell away keeps sending them.
    */
   syncFollow(): void {
-    if (!this.accountFeed || this.followed === null) return;
+    if (this.followed === null) return;
     if (!this.ws || this.ws.readyState !== 1) return;
     const ids = this.followIds();
     const followed = this.followed;
@@ -407,7 +380,7 @@ export class PatchWs {
     const timeline = useChatStore.getState().timelines[chatId];
     if (timeline === undefined || timeline.length === 0) return -1;
     // Error rows are left out: a failed turn's error reaches every surface, so
-    // it can be the only entry held for a chat never replayed, and counting it
+    // it can be the only entry held for a chat never read, and counting it
     // would put the cursor past the whole unseen history.
     return timeline.reduce(
       (max, e) => (e.kind !== 'error' && e.seq >= 0 && e.seq > max ? e.seq : max),
@@ -416,121 +389,25 @@ export class PatchWs {
   }
 
   /**
-   * Ask for a chat's transcript from our cursor, at most once per cursor per
-   * CONNECTION. The request is also what subscribes this surface to the chat's
-   * live detail events, so a chat that is never replayed never receives one.
-   *
-   * Opening a chat asks for its transcript; the socket finishing its connect a
-   * moment later asks again for every held chat — the open one included, its
-   * timeline still empty — so both computed `fromSeq: -1` and the host
-   * streamed the whole transcript twice. The store folds a re-delivered turn
-   * onto its canonical seq, so this is no longer a correctness fix; a second
-   * full transcript over a phone's connection is simply waste.
+   * Ask the server for a chat's history from our cursor (spec/03 § Chat
+   * history), at most once per cursor per CONNECTION. The request is also what
+   * subscribes this surface to the chat's live detail events.
    *
    * Per connection, not for all time: a reconnect must still catch up from the
    * same cursor, because the earlier request may have died with the old socket
-   * before one event came back. A request made while the socket is shut isn't
-   * recorded — it never went, and remembering it would suppress the
-   * connect-time request that exists to replace it.
+   * before one entry came back. A request made while the socket is shut isn't
+   * recorded — it never went. `force` drops the guard: a cached track the
+   * server disagrees with is cleared and asked for again from the same empty
+   * cursor (spec/15 § Instant open).
    */
-  requestReplay(chatId: string, opts?: { force?: boolean }): void {
+  requestHistory(chatId: string, opts?: { force?: boolean }): void {
     if (!this.ws || this.ws.readyState !== 1) return;
-    if (this.accountFeed) {
-      if (opts?.force === true) this.lastReplayCursor.delete(chatId);
-      const after = this.replayCursor(chatId);
-      if (this.lastReplayCursor.get(chatId) === after) return;
-      this.lastReplayCursor.set(chatId, after);
-      this.askHistory(chatId, after >= 0 ? { after } : {});
-      useChatStore.getState().setReplaying(chatId, true);
-      return;
-    }
-    // Someone opening a chat takes it over from the background fetch: the
-    // answer now belongs on screen as well as in the cache.
-    if (this.prefetching?.chatId === chatId) this.endPrefetch(false);
-    this.prefetchQueue = this.prefetchQueue.filter((q) => q.chatId !== chatId);
-    // `force` drops the per-connection guard: a cached track the host
-    // disagrees with is cleared and asked for again from -1, which is the
-    // same cursor the first ask used and would otherwise be discarded as a
-    // repeat (spec/15 § Instant open).
-    if (opts?.force === true) this.lastReplayCursor.delete(chatId);
-    const fromSeq = this.replayCursor(chatId);
-    if (this.lastReplayCursor.get(chatId) === fromSeq) return;
-    this.lastReplayCursor.set(chatId, fromSeq);
-    this.ws.send(JSON.stringify({ type: 'chat.replay', chatId, fromSeq, batch: true }));
+    if (opts?.force === true) this.lastHistoryCursor.delete(chatId);
+    const after = this.replayCursor(chatId);
+    if (this.lastHistoryCursor.get(chatId) === after) return;
+    this.lastHistoryCursor.set(chatId, after);
+    this.askHistory(chatId, after >= 0 ? { after } : {});
     useChatStore.getState().setReplaying(chatId, true);
-  }
-
-  /**
-   * Bring every chat's transcript on this phone level with the roster, so any
-   * chat opens offline (spec/12 § Offline reading). Driven by the roster —
-   * never a timer: a chat is fetched when its `lastUpdated` differs from the
-   * one its held copy was last synced to. One chat in flight at a time, so a
-   * phone never receives a whole library as one burst.
-   */
-  syncTranscripts(): void {
-    // The account feed keeps the chats this phone follows current (spec/05 §
-    // Loading); nothing is fetched chat by chat from a server that runs it.
-    if (this.accountFeed) return;
-    const { chats, activeChatId } = useChatStore.getState();
-    pruneTranscripts(new Set(Object.keys(chats)));
-    const hosts = usePresenceStore.getState().hosts;
-    const queued = new Set(this.prefetchQueue.map((q) => q.chatId));
-    for (const row of Object.values(chats)) {
-      if (row.chatId === activeChatId || queued.has(row.chatId)) continue;
-      if (this.prefetching?.chatId === row.chatId) continue;
-      // A running chat is still moving; it settles with a fresh `lastUpdated`,
-      // which triggers the sweep again.
-      if (isRunning(row)) continue;
-      // A host that is down cannot answer; its chats are picked up on the
-      // next roster refresh after it returns.
-      if (hosts[row.hostId]?.online === false) continue;
-      if (!needsOfflineSync(row.chatId, row.lastUpdated)) continue;
-      this.prefetchQueue.push({ chatId: row.chatId, lastUpdated: row.lastUpdated });
-    }
-    this.pumpPrefetch();
-  }
-
-  private pumpPrefetch(): void {
-    if (this.prefetching !== null) return;
-    if (!this.ws || this.ws.readyState !== 1) return;
-    const next = this.prefetchQueue.shift();
-    if (next === undefined) return;
-    this.prefetching = next;
-    this.ws.send(
-      JSON.stringify({
-        type: 'chat.replay',
-        chatId: next.chatId,
-        fromSeq: heldCursor(next.chatId),
-        batch: true,
-      }),
-    );
-    // A host that never answers is retried quietly (a background copy is not
-    // worth a banner) and logged so it stays debuggable. It gives up after a
-    // few tries; the next roster refresh picks the chat up again.
-    this.prefetchTimer = setTimeout(() => {
-      const stuck = this.prefetching;
-      this.endPrefetch(false);
-      if (stuck === null) return;
-      const tries = (this.prefetchTries.get(stuck.chatId) ?? 0) + 1;
-      this.prefetchTries.set(stuck.chatId, tries);
-      console.warn(`[ws] offline copy of ${stuck.chatId} timed out (try ${tries})`);
-      if (tries < PREFETCH_MAX_TRIES) {
-        this.prefetchQueue.push(stuck);
-        this.pumpPrefetch();
-      }
-    }, PREFETCH_TIMEOUT_MS);
-  }
-
-  private endPrefetch(done: boolean): void {
-    const finished = this.prefetching;
-    this.prefetching = null;
-    if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer);
-    this.prefetchTimer = null;
-    if (done && finished) {
-      this.prefetchTries.delete(finished.chatId);
-      markSynced(finished.chatId, finished.lastUpdated);
-    }
-    this.pumpPrefetch();
   }
 
   private handleAppState = (next: AppStateStatus): void => {
@@ -565,7 +442,7 @@ export class PatchWs {
       // an unchanged cursor is exactly what the per-connection guard swallows.
       // A reply that never arrived would otherwise stay missing until reopen.
       const { activeChatId } = useChatStore.getState();
-      if (activeChatId !== null) this.requestReplay(activeChatId, { force: true });
+      if (activeChatId !== null) this.requestHistory(activeChatId, { force: true });
       this.startHeartbeat();
     } else if (next !== 'active' && prev === 'active') {
       this.safeSend({ type: 'surface.backgrounded' });
@@ -643,9 +520,9 @@ export class PatchWs {
       this.reconnectNow();
     }, CONNECT_TIMEOUT_MS);
 
-    // A new socket has heard nothing: every held chat may need its replay
+    // A new socket has heard nothing: every held chat may need its history
     // again, including one whose request died with the old connection.
-    this.lastReplayCursor.clear();
+    this.lastHistoryCursor.clear();
     // Nothing is followed on a new socket until `feed.resume` says so.
     this.followed = null;
     ws.onopen = (): void => {
@@ -675,41 +552,8 @@ export class PatchWs {
       // treated as "this surface can't connect at all".
       usePresenceStore.getState().noteWsOpen(this.url);
 
-      // A server that ran the account feed last time is resumed from auth.ok
-      // instead (spec/03 § Account feed): nothing is asked chat by chat.
-      if (loadLastAccountFeed()) return;
-      // Replay missed events for the chat the surface has OPEN, plus any chat
-      // whose transcript it already holds (spec/12 § When a surface requests a
-      // replay).
-      const { chats, timelines, activeChatId } = useChatStore.getState();
-      // The chat on screen goes first and UNCONDITIONALLY — it is not looked
-      // up in the roster. A push tapped from a cold start deep-links straight
-      // into a chat this surface has never listed: the roster cache predates
-      // it and `GET /api/chats` has not answered, so iterating the chats we
-      // hold skips the one chat the user is looking at. It is also the one
-      // that must not be skipped, because the replay is what adds the chat to
-      // the server's per-connection watch list — without it the chat receives
-      // no message, tool call or permission prompt, and stays blank.
-      if (activeChatId !== null) this.requestReplay(activeChatId);
-      // Then every chat whose transcript this surface already holds, so a
-      // reconnect catches up on what it missed. spec/12 § "Cold start loads
-      // metadata only": a metadata-only roster row is NOT replayed — blanket
-      // replaying every row cost one inbound event stream per chat, thrashing
-      // the store and every list row, for transcripts nobody is reading.
-      // Transcripts load lazily on open. The active chat repeating here is
-      // absorbed by the per-connection cursor guard in `requestReplay`.
-      for (const chatId of Object.keys(chats)) {
-        if ((timelines[chatId]?.length ?? 0) === 0) continue;
-        this.requestReplay(chatId);
-      }
-      // spec/12 § "Survives a server restart" — the server's surface→host
-      // buffer is gone across a restart, so redeliver every still-pending input
-      // now that the link is back (same localId; the host dedups).
-      deliveryTracker.onReconnect();
-      // Same reasoning for permission/question responses — see
-      // permissionDeliveryTracker.ts.
-      permissionDeliveryTracker.onReconnect();
-      if (this.currentAppState === 'active') this.startHeartbeat();
+      // Every chat this surface holds is caught up by the account feed, resumed
+      // from `auth.ok` (spec/03 § Account feed): nothing is asked chat by chat.
     };
 
     ws.onmessage = (msg: { data: unknown }): void => {
@@ -752,13 +596,6 @@ export class PatchWs {
         this.ws = null;
         this.stopHeartbeat();
         useChatStore.getState().clearReplaying();
-        // The queue is rebuilt from the roster on the next connect.
-        this.prefetchQueue = [];
-        if (this.prefetching !== null) {
-          this.prefetching = null;
-          if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer);
-          this.prefetchTimer = null;
-        }
       }
       // Record WHY, before the early return — a close during teardown is still
       // the last thing that happened to this socket (spec/12 § Connection
@@ -938,14 +775,6 @@ export class PatchWs {
   }
 
   private dispatch(event: WireEvent): void {
-    // A live change to a chat keeps its on-phone transcript current without
-    // waiting for the next roster refresh (spec/12 § Offline reading).
-    if (event.type === 'chat.state' && this.syncDebounce === null) {
-      this.syncDebounce = setTimeout(() => {
-        this.syncDebounce = null;
-        this.syncTranscripts();
-      }, 1000);
-    }
     // A refused ask (unknown chat, host error) will never be followed by a last
     // chunk, so the loading state ends here rather than sitting there forever.
     if (event.type === 'chat.error' && typeof event.chatId === 'string') {
@@ -959,25 +788,24 @@ export class PatchWs {
       // server's cached reports, so the phone's Hosts list is complete from the
       // first frame — asleep hosts included.
       usePresenceStore.getState().setHosts(event.hosts);
-      this.accountFeed = event.accountFeed === true;
-      saveLastAccountFeed(this.accountFeed);
       // spec/14 § Composer — push every draft the server never confirmed
       // (typed while offline, or a save that failed mid-flight) now that the
       // link is back.
       useComposerDraftStore.getState().resendPendingOnReconnect();
       // A RE-connect missed whatever the server fanned out while the socket
-      // was down: replay only covers chats we hold a transcript for, so new,
+      // was down: the feed covers chats we hold a transcript for, so new,
       // renamed, deleted and re-ordered chats need the roster again. The
       // first greeting is covered by bootstrap's cold-start fetch.
       if (this.greeted) void refreshRoster();
-      else this.syncTranscripts();
       this.greeted = true;
-      if (this.accountFeed) {
-        this.resumeFeed();
-        deliveryTracker.onReconnect();
-        permissionDeliveryTracker.onReconnect();
-        if (this.currentAppState === 'active') this.startHeartbeat();
-      }
+      this.resumeFeed();
+      // spec/12 § "Survives a server restart" — the server's surface→host
+      // buffer is gone across a restart, so redeliver every still-pending input
+      // now that the link is back (same localId; the host dedups). Same for
+      // permission/question responses — see permissionDeliveryTracker.ts.
+      deliveryTracker.onReconnect();
+      permissionDeliveryTracker.onReconnect();
+      if (this.currentAppState === 'active') this.startHeartbeat();
       return;
     }
     if (event.type === 'auth.revoked') {
@@ -1238,11 +1066,10 @@ export class PatchWs {
     if (event.type === 'chat.permission_response') {
       permissionDeliveryTracker.ack(event.requestId);
     }
-    // A batched replay is one frame carrying the whole answer (spec/12 §
-    // Sequence-based replay). Unpack into the same queue the live path uses
-    // — same events, same order, same reducer — and commit at once: there is
-    // nothing still to come that it could coalesce with, and asking for a
-    // batch was exactly so the transcript paints once instead of arriving.
+    // A history page is one frame carrying many entries (spec/03 § Chat
+    // history). Unpack into the same queue the live path uses — same events,
+    // same order, same reducer — and commit at once: there is nothing still to
+    // come that it could coalesce with, and the transcript should paint once.
     if (event.type === 'chat.history') {
       const ask = this.historyAsks.get(event.requestId);
       this.historyAsks.delete(event.requestId);
@@ -1292,31 +1119,13 @@ export class PatchWs {
     ) {
       noteFeedPos(event.feedPos);
     }
-    if (event.type === 'chat.replay_batch' && this.prefetching?.chatId === event.chatId) {
-      // Background fetch for the offline cache: straight to disk, not the store.
-      this.cacheOnly(event.events as WireEvent[]);
-      if (event.done) this.endPrefetch(true);
-      return;
-    }
-    if (event.type === 'chat.replay_batch') {
-      // Each inner event goes back through dispatch() so it gets the same
-      // special-case side effects as a live one (diff rail, voice banner,
-      // permission ack, host-refusal toast). dispatch() queues the chat events;
-      // the flush below commits them at once.
-      for (const inner of event.events) this.dispatch(inner as WireEvent);
-      this.flushStoreQueue();
-      // The loading state ends with the LAST chunk, not the first: until then
-      // the transcript may still be arriving, and an empty one is not yet empty.
-      if (event.done) useChatStore.getState().setReplaying(event.chatId, false);
-      return;
-    }
     this.queueForStore(event);
   }
 
   /**
    * Hold a store event for up to one frame so a burst commits once.
    *
-   * A `chat.replay` delivers a whole transcript at once — measured at 582
+   * A history page delivers many entries at once — measured at 582
    * events in 444ms on a busy chat — and a commit per event meant a re-render
    * and a full-timeline regroup per event. Coalescing is what keeps opening a
    * long chat from locking the JS thread. Ordering is preserved: events are
@@ -1407,7 +1216,6 @@ const FEED_RECENT_CHATS = 30;
 /** How long store changes are gathered before checking whether the followed set changed. */
 const FOLLOW_SYNC_MS = 300;
 const FEED_POS_KEY = 'patch.feedPos';
-const ACCOUNT_FEED_KEY = 'patch.accountFeed';
 
 function loadFeedPos(): number | null {
   const raw = feedStore().getString(FEED_POS_KEY);
@@ -1423,13 +1231,4 @@ function saveFeedPos(pos: number): void {
 function noteFeedPos(pos: number): void {
   const held = loadFeedPos();
   if (held === null || pos > held) saveFeedPos(pos);
-}
-
-/** Whether the server ran the account feed when this phone last connected. */
-function loadLastAccountFeed(): boolean {
-  return feedStore().getString(ACCOUNT_FEED_KEY) === '1';
-}
-
-function saveLastAccountFeed(on: boolean): void {
-  feedStore().set(ACCOUNT_FEED_KEY, on ? '1' : '0');
 }

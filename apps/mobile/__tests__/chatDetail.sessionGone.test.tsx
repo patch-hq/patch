@@ -19,7 +19,7 @@ import { __resetRouterMock, __setLocalSearchParams, routerMock } from './stubs/e
 
 const { continueSpy } = vi.hoisted(() => ({ continueSpy: vi.fn() }));
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() }),
+  getWs: () => ({ send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() }),
 }));
 vi.mock('../src/api/rest', () => ({
   api: {

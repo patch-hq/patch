@@ -50,7 +50,7 @@ describe('the server as the log of record', () => {
     await client.waitFor('host.online');
     link.emit({ type: 'chat.spawned', chatId: 'c1', hostId: 'd1', folder: '/w' });
     // Watching the chat is what makes a surface receive its transcript events live.
-    client.replay('c1', -1);
+    client.history('c1');
     await wait(30);
     const say = (seq: number, content = `m${seq}`): WireEvent =>
       ({ type: 'chat.message', chatId: 'c1', role: 'assistant', content, seq }) as WireEvent;
@@ -128,7 +128,7 @@ describe('the server as the log of record', () => {
     }
   });
 
-  it('still routes a replay to the surface that asked, and keeps it', async () => {
+  it('routes an addressed event to the surface that asked, and keeps it', async () => {
     const t = await start();
     try {
       const got: number[] = [];

@@ -53,8 +53,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function replaysOn(sock: FakeWebSocket): unknown[] {
-  return sock.sent.map((s) => JSON.parse(s as string)).filter((m) => m.type === 'chat.replay');
+function asksOn(sock: FakeWebSocket): Array<Record<string, unknown>> {
+  return sock.sent
+    .map((s) => JSON.parse(s as string) as Record<string, unknown>)
+    .filter((m) => m['type'] === 'chat.history_request');
+}
+
+function followsOn(sock: FakeWebSocket): string[] {
+  return sock.sent
+    .map((s) => JSON.parse(s as string) as { type: string; follow?: Array<{ chatId: string }> })
+    .filter((m) => m.type === 'feed.resume')
+    .flatMap((m) => (m.follow ?? []).map((f) => f.chatId));
 }
 
 describe('cold start from a tapped notification', () => {
@@ -69,17 +78,25 @@ describe('cold start from a tapped notification', () => {
     expect(useChatStore.getState().chats[PUSHED_CHAT]).toBeUndefined();
     const r = renderRN(<ChatDetailScreen />);
     // The screen's mount-time request goes nowhere: the socket is CONNECTING.
-    expect(replaysOn(sock)).toEqual([]);
+    expect(asksOn(sock)).toEqual([]);
 
-    // 3. The socket finishes connecting.
+    // 3. The socket finishes connecting and is greeted; the feed it resumes
+    //    follows the chat on screen.
     actSync(() => {
       sock.emitOpen();
+      sock.emitMessage(
+        JSON.stringify({
+          type: 'auth.ok',
+          hosts: [],
+          accountId: 'a',
+          surfaceId: 's',
+          accountFeed: true,
+        }),
+      );
     });
-    expect(replaysOn(sock)).toEqual([
-      { type: 'chat.replay', chatId: PUSHED_CHAT, fromSeq: -1, batch: true },
-    ]);
+    expect(followsOn(sock).filter((c) => c === PUSHED_CHAT)).toHaveLength(1);
 
-    // 4. Which is what makes the chat a WATCHED chat, so its detail events
+    // 4. Following is what makes the chat a WATCHED chat, so its detail events
     //    arrive and the screen stops being blank.
     actSync(() => {
       sock.emitMessage(
@@ -98,7 +115,7 @@ describe('cold start from a tapped notification', () => {
 
   it('does not ask twice when the screen opens on an already-connected socket', () => {
     // The everyday case — tapping a notification while the app is warm. The
-    // screen's own request is the only one, and the chat must not be replayed
+    // screen's own request is the only one, and the chat must not be read
     // a second time from a different cursor: mobile's store folds a
     // re-delivered message and permission card by identity, but a re-delivered
     // tool call would be drawn twice.
@@ -109,8 +126,7 @@ describe('cold start from a tapped notification', () => {
       sock.emitOpen();
     });
     renderRN(<ChatDetailScreen />);
-    expect(replaysOn(sock)).toEqual([
-      { type: 'chat.replay', chatId: PUSHED_CHAT, fromSeq: -1, batch: true },
-    ]);
+    expect(asksOn(sock)).toEqual([expect.objectContaining({ chatId: PUSHED_CHAT })]);
+    expect(asksOn(sock)[0]).not.toHaveProperty('after');
   });
 });

@@ -157,7 +157,7 @@ describe('mobile chatStore', () => {
   it('reconciles an optimistic user echo with its persisted copy by content (no duplicate)', () => {
     const store = useChatStore.getState();
     store.appendLocalUserMessage('c1', 'hi there', 'L1');
-    // The persisted copy re-arrives (e.g. chat.replay after reconnect).
+    // The persisted copy re-arrives (e.g. a history read after reconnect).
     store.applyEvent({
       type: 'chat.message',
       chatId: 'c1',

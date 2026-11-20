@@ -51,10 +51,10 @@ surface registry. SDK lifecycle, chat history, and chat_state live in
   Sorted: pinned first (most-recent-pinned at top by `pinnedAt` desc),
   then non-pinned by `lastUpdated` desc.
 - `GET /api/chats/:id` (authed) — single chat summary; 404 if unknown.
-- `GET /api/chats/:id/history?fromSeq=N` (authed) — **501 Not Implemented**.
-  Realtime history streaming is via WebSocket `chat.replay` (per-surface).
-  Dedicated REST endpoint deferred to a later group (CLI / web SPA
-  cold-start).
+- `GET /api/chats/:id/history?since=N&limit=N&branchId=ID` (authed) — the
+  chat's entries from the server's record, a branch's track when `branchId`
+  is given. The host is never asked. Surfaces page history over WebSocket
+  (`chat.history_request` / `chat.history`, the account feed).
 
 ### Two ways to spawn a chat
 
@@ -151,10 +151,10 @@ pino structured JSON. Every chat-scoped log line includes `accountId`,
 - `packages/server/test/presence.test.ts` — heartbeat, stale sweep
 - `packages/server/test/dedupe.test.ts` — sliding-window input dedupe
 - `packages/server/test/auth-routes.test.ts` — pairing REST round-trip + tampered nonce
-- `packages/server/test/ws-hub.test.ts` — hello auth, replay, host online/offline, malformed-frame close
+- `packages/server/test/ws-hub.test.ts` — hello auth, history from the record, host online/offline, malformed-frame close
 - `packages/server/test/ws-hub-focus.test.ts` — per-chat subscription routing via `chat.focus_change`
 - `packages/server/test/chat-routes.test.ts` — REST `POST/GET /api/chats`
-- `packages/server/test/integration-lifecycle.test.ts` — server+host end-to-end (spawn → message → pin → archive → resume → replay)
+- `packages/server/test/integration-lifecycle.test.ts` — server+host end-to-end (spawn → message → pin → archive → resume → history)
 - `packages/server/test/healthz.test.ts` — health endpoints
 
 ## Per-chat subscription routing (group 7)
@@ -168,16 +168,15 @@ _Detail-level_ events (`chat.message`, `chat.tool_call`,
 subscription. The model is **additive**: a surface emits
 `chat.focus_change { chatId }` to add the chatId to its watched set
 (repeated calls accumulate watched chats); `chat.focus_change
-{ chatId: null }` clears the entire set. `chat.input` and `chat.replay`
-implicitly add the targeted chatId to the watched set. The wire name
+{ chatId: null }` clears the entire set. `chat.input`, `chat.history_request`
+and the account feed's followed chats implicitly add the targeted chatId to the watched set. The wire name
 `focus_change` is slightly off (it's effectively _subscribe_) — kept for
 backwards compatibility, defer renaming.
 
-`chat.replay` is per-surface: the server tags the upstream
-`chat.replay { chatId, fromSeq, forSurfaceId }` so the host can route
-the replayed events back through `forSurfaceId` to a single surface
-rather than fanning out. `forSurfaceId` is a **server-internal** routing
-tag — surfaces never set it.
+History is answered by the server alone, from its record
+(`chat-log-store.ts`), including every branch's track; a host never sees a
+history request. `forSurfaceId` is a **server-internal** routing tag for a
+host's reply to one surface's own request — surfaces never set it.
 
 ## Pinned + archived semantics
 

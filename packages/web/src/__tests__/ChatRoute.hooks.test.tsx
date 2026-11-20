@@ -45,7 +45,7 @@ function seed(): void {
 
 function renderChat(ws: {
   send: ReturnType<typeof vi.fn>;
-  requestReplay?: ReturnType<typeof vi.fn>;
+  requestHistory?: ReturnType<typeof vi.fn>;
 }): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/chats/c1']}>
@@ -80,7 +80,7 @@ describe('ChatRoute — message hooks', () => {
   it('a pass sends normally with no card and no note', async () => {
     vi.mocked(api.checkHooks).mockResolvedValue({ decision: 'pass', results: [] });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('hello there');
     await waitFor(() => expect(ws.send).toHaveBeenCalled());
@@ -97,7 +97,7 @@ describe('ChatRoute — message hooks', () => {
       }),
     );
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('hello there');
     await waitFor(() => expect(screen.getByTestId('composer-checking')).toBeInTheDocument());
@@ -115,7 +115,7 @@ describe('ChatRoute — message hooks', () => {
       }),
     );
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('instant please');
     await waitFor(() =>
@@ -139,7 +139,7 @@ describe('ChatRoute — message hooks', () => {
       }),
     );
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('my hunter2 password');
     await waitFor(() =>
@@ -181,7 +181,7 @@ describe('ChatRoute — message hooks', () => {
       ],
     });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('do it now');
     await waitFor(() => expect(ws.send).toHaveBeenCalled());
@@ -208,7 +208,7 @@ describe('ChatRoute — message hooks', () => {
       ],
     });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('my hunter2 password');
     const card = await screen.findByTestId('hook-block-card');
@@ -238,7 +238,7 @@ describe('ChatRoute — message hooks', () => {
       ],
     });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('my hunter2 password');
     await screen.findByTestId('hook-block-card');
@@ -263,7 +263,7 @@ describe('ChatRoute — message hooks', () => {
       ],
     });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('my hunter2 password');
     await screen.findByTestId('hook-block-card');
@@ -289,7 +289,7 @@ describe('ChatRoute — message hooks', () => {
       ],
     });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('hello');
     await waitFor(() => expect(ws.send).toHaveBeenCalled());
@@ -305,7 +305,7 @@ describe('ChatRoute — message hooks', () => {
       results: [{ hookId: 'hook_d', hookName: 'slow hook', status: 'timeout', durationMs: 15000 }],
     });
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('hello');
     await waitFor(() => expect(ws.send).toHaveBeenCalled());

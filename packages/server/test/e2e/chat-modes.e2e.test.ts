@@ -170,7 +170,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     await client.close();
     const client2 = await h.connectSurface('srf-4c');
     const replayMsgs = record(client2, ['chat.message']);
-    client2.replay(chatId, -1);
+    client2.history(chatId, { after: -1 });
     await until(
       () =>
         replayMsgs.some(
@@ -359,7 +359,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     client2.on('chat.message', (e) => {
       if (e.chatId === chatId) replayMsgs.push({ role: e.role, content: e.content, seq: e.seq });
     });
-    client2.replay(chatId, -1);
+    client2.history(chatId, { after: -1 });
     await until(
       () => replayMsgs.some((m) => m.role === 'assistant' && m.content === original.content),
       3000,
@@ -722,7 +722,7 @@ describe('e2e chat modes: every turn replies or errors, never hangs', () => {
     client2.on('chat.message', (e) => {
       if (e.chatId === chatId && e.role === 'user') userMsgs.push(e.content);
     });
-    client2.replay(chatId, -1);
+    client2.history(chatId, { after: -1 });
     await until(() => userMsgs.length >= 1, 3000, 'user turn replays');
     await new Promise((r) => setTimeout(r, 150));
     expect(userMsgs.filter((c) => c.includes('only once')).length).toBe(1);

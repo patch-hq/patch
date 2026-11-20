@@ -703,14 +703,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   });
 
   // ---- GET /api/chats/:id/history?since=<seq>&branchId=<id> ----
-  // Returns the chat's events with seq >= since. The host owns Claude Code's
-  // persisted JSONL (the server doesn't share its filesystem), so this
-  // round-trips a `patch.chat_history.request` over the host-link and waits
-  // up to 5s for the matching response. NO FALLBACK: timeout → 504; host
-  // errors bubble up with a typed body; unknown chat → 404. `branchId` reads
-  // that branch's own track (spec/04 § Branching) instead of the active one —
+  // Returns the chat's events with seq >= since, from the server's record:
+  // the host is never asked. Unknown chat → 404. `branchId` reads that
+  // branch's own track (spec/04 § Branching) instead of the active one —
   // this is how the side threads panel (spec/14) pulls a tab's content, since
-  // a side branch's messages are not broadcast live over the chat's WS.
+  // a side branch's messages are not broadcast live over the chat's WS. The
+  // delegate route below still asks the host: a subagent is never on the wire.
   const HISTORY_REQUEST_TIMEOUT_MS = 5_000;
   const historyPending = new Map<
     string,
@@ -731,9 +729,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     Params: { id: string };
     Querystring: { since?: string; limit?: string; branchId?: string };
   }>('/api/chats/:id/history', async (req, reply) => {
-    let auth;
     try {
-      auth = await requireAuth(req, deps.registry);
+      await requireAuth(req, deps.registry);
     } catch (e) {
       return reply
         .code((e as Error & { statusCode?: number }).statusCode ?? 401)
@@ -764,77 +761,33 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       }
       limit = n;
     }
-    // A host that is offline cannot answer, but the server holds what passed
-    // through it. Side-branch reads name a track the server does not keep.
-    const hostId = deps.chatRegistry.get(req.params.id)?.hostId;
-    if (
-      deps.chatLogStore &&
-      req.query?.branchId === undefined &&
-      hostId !== undefined &&
-      !deps.hostLink.isOnline(hostId) &&
-      deps.chatLogStore.has(req.params.id)
-    ) {
-      // One past the limit, to know whether another page exists.
-      const held = deps.chatLogStore.read(
-        req.params.id,
-        (since ?? 0) - 1,
-        limit === undefined ? undefined : limit + 1,
-      );
-      if (limit !== undefined && held.length > limit) {
-        const events = held.slice(0, limit);
-        const last = events[events.length - 1] as { seq: number };
-        return reply.code(200).send({ events, nextFromSeq: last.seq + 1, fromServerCopy: true });
-      }
-      return reply.code(200).send({ events: held, fromServerCopy: true });
+    // Answered from the chat record alone, whether or not the chat's host is
+    // online (spec/03 § Chat history); a branch's track, a side branch's
+    // included, is laid out from it too (spec/04 § Branching).
+    const store = deps.chatLogStore;
+    if (!store) {
+      deps.logger.error({ chatId: req.params.id }, 'chat history: this server keeps no record');
+      return reply.code(503).send({ error: 'no_record' });
     }
-    // The request goes to the host that owns the chat — broadcasting it let a
-    // host that does not know the chat answer first with chat_not_found.
-    if (hostId === undefined || !deps.hostLink.isOnline(hostId)) {
-      deps.logger.warn(
-        { chatId: req.params.id, hostId },
-        'chat history: owning host is not online',
-      );
-      return reply.code(503).send({ error: 'host_offline', hostId });
+    const row = deps.chatRegistry.get(req.params.id)!;
+    const branchId = req.query?.branchId || (row.activeBranchId ?? undefined);
+    const all = store.entries(
+      req.params.id,
+      (since ?? 0) - 1,
+      branchId !== undefined ? { branches: row.branches, branchId } : undefined,
+    );
+    if (limit === undefined) return reply.code(200).send({ events: all });
+    // Never end a page between a question and its answer (which has no seq).
+    let end = Math.min(limit, all.length);
+    while (end < all.length && (all[end] as { seq?: unknown }).seq === undefined) end += 1;
+    const events = all.slice(0, end);
+    if (end >= all.length) return reply.code(200).send({ events });
+    let lastSeq = -1;
+    for (const e of events) {
+      const seq = (e as { seq?: unknown }).seq;
+      if (typeof seq === 'number') lastSeq = seq;
     }
-    const requestId = deps.idGenerator();
-    const result = await new Promise<
-      Extract<WireEvent, { type: 'patch.chat_history.response' }> | 'timeout'
-    >((resolveP) => {
-      const timeout = setTimeout(() => {
-        historyPending.delete(requestId);
-        resolveP('timeout');
-      }, HISTORY_REQUEST_TIMEOUT_MS);
-      historyPending.set(requestId, { resolve: resolveP, timeout });
-      deps.hostLink.sendTo(hostId, auth.surfaceId, {
-        type: 'patch.chat_history.request',
-        requestId,
-        chatId: req.params.id,
-        ...(since !== undefined ? { since } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-        // spec/14 § Side threads panel — pull a side thread's own track
-        // through this REST path rather than the live WS stream.
-        ...(req.query?.branchId ? { branchId: req.query.branchId } : {}),
-      });
-    });
-    if (result === 'timeout') {
-      deps.logger.warn({ chatId: req.params.id, hostId }, 'chat history: host timed out');
-      return reply.code(504).send({ error: 'daemon_timeout' });
-    }
-    if (!result.ok) {
-      const code = result.error?.code ?? 'internal';
-      deps.logger.warn(
-        { chatId: req.params.id, hostId, code, message: result.error?.message },
-        'chat history: host refused',
-      );
-      const status = code === 'chat_not_found' ? 404 : 502;
-      return reply
-        .code(status)
-        .send({ error: code, message: result.error?.message ?? 'history error' });
-    }
-    return reply.code(200).send({
-      events: result.events ?? [],
-      ...(result.nextFromSeq !== undefined ? { nextFromSeq: result.nextFromSeq } : {}),
-    });
+    return reply.code(200).send({ events, nextFromSeq: lastSeq + 1 });
   });
 
   // ---- GET /api/chats/:parentId/delegates/:id/history ----

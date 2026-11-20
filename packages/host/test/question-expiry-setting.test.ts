@@ -19,6 +19,7 @@ import { QUESTION_EXPIRY_SECONDS_DEFAULT } from '@patch/wire';
 import { Daemon, questionExpiredMessage, APPROVAL_ANSWER_TIMEOUT_MS } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 const NOW = 1_700_000_000_000;
@@ -189,30 +190,6 @@ describe('the question-expiry setting drives the timer', () => {
     }
   });
 
-  it('replays the SAME deadline to a surface that reconnects part-way through', async () => {
-    vi.useFakeTimers();
-    try {
-      const { daemon, events, folder } = setup();
-      const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
-      await vi.advanceTimersByTimeAsync(50);
-      const original = request(events).expiry;
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      const replayed: WireEvent[] = [];
-      daemon.replayChat(chatId, 0, (e) => replayed.push(e));
-
-      const req = replayed.find((e) => e.type === 'chat.permission_request') as
-        | { expiry?: { at: number; windowMs: number } }
-        | undefined;
-      expect(req, 'the pending question was not replayed').toBeDefined();
-      // Half the window gone, and the reconnecting surface is handed the
-      // original instant — not a fresh 60 seconds from reconnect.
-      expect(req?.expiry).toEqual(original);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('replays a question that expired as a request followed by its denial', async () => {
     vi.useFakeTimers();
     try {
@@ -223,8 +200,7 @@ describe('the question-expiry setting drives the timer', () => {
       await vi.advanceTimersByTimeAsync(QUESTION_EXPIRY_SECONDS_DEFAULT * 1000 + 1000);
       expect(response(events)?.decision).toBe('deny');
 
-      const replayed: WireEvent[] = [];
-      daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+      const replayed = readBack(daemon, chatId);
 
       const reqIdx = replayed.findIndex(
         (e) => e.type === 'chat.permission_request' && e.requestId === requestId,

@@ -3,7 +3,7 @@
 // Tests the host's public action interface end-to-end with the mock SDK.
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -12,7 +12,7 @@ import { ChatNotFoundError, Daemon, FolderNotFoundError } from '../src/chatRunne
 import * as chatRunnerModule from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createHistoryReader, encodeFolder } from '../src/history.js';
+import { createHistoryReader } from '../src/history.js';
 import { asServerSees } from './serverView.js';
 
 const silent = pino({ level: 'silent' });
@@ -402,49 +402,5 @@ describe('Host lifecycle (group 7)', () => {
     );
     expect(assistant).toBeDefined();
     expect(metaStoreLocal.read(chatId)?.claudeSessionId).toBe('sess-lost');
-  });
-
-  it('replayChat reads JSONL and emits events with seq > fromSeq via per-surface emitter', async () => {
-    const { daemon, folder, claudeRoot, sdk } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    // Fake a session id without running a query.
-    const state = daemon.chatState.get(chatId);
-    if (!state) throw new Error('state missing');
-    state.claudeSessionId = 'sess-history';
-    // Write a JSONL file at the expected location.
-    const projDir = join(claudeRoot, encodeFolder(folder));
-    mkdirSync(projDir, { recursive: true });
-    const jsonl = [
-      JSON.stringify({ type: 'user', message: { content: 'first' } }),
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'A' }] } }),
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'B' }] } }),
-    ].join('\n');
-    writeFileSync(join(projDir, 'sess-history.jsonl'), jsonl);
-    void sdk; // avoid unused warning
-    const captured: WireEvent[] = [];
-    daemon.replayChat(chatId, 0, (e) => captured.push(e));
-    expect(captured.length).toBeGreaterThan(0);
-    // spec/03 § Host events — the replay leads with the chat's identity frame,
-    // which names the HOST the chat is pinned to. A surface replaying a chat
-    // it never saw spawned would otherwise have to infer that from whichever
-    // link it happens to be talking to. It carries no `seq` (spec/03 § Goals),
-    // so it does not disturb the sequenced stream that follows.
-    expect(captured[0]).toMatchObject({ type: 'chat.spawned', chatId, hostId: 'd1' });
-    expect(captured[0]).not.toHaveProperty('seq');
-    // spec/04 § Branching — a replay also publishes the chat's track graph, so
-    // the transcript itself is everything BUT those two events.
-    expect(captured.filter((e) => e.type === 'chat.branches')).toHaveLength(1);
-    // A replay also tops up with the chat's CURRENT chat.state (patch/todo.md
-    // — "Patch showing stop after message has returned"), so a reconnecting
-    // surface converges on the real activity even if it missed the live
-    // running -> idle edge while disconnected.
-    expect(captured.filter((e) => e.type === 'chat.state')).toHaveLength(1);
-    expect(
-      captured
-        .filter(
-          (e) => e.type !== 'chat.branches' && e.type !== 'chat.spawned' && e.type !== 'chat.state',
-        )
-        .every((e) => e.type === 'chat.message'),
-    ).toBe(true);
   });
 });

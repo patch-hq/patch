@@ -6,7 +6,7 @@ import { SNOOZE_UNTIL_COMPLETE } from '@patch/wire';
 //   - the pinned-icon and folder-mono-font conditional branches
 //   - useSettledPreview: the row holds its OLD preview steady for
 //     PREVIEW_SETTLE_MS after the underlying preview changes, then updates —
-//     so a burst of chat.replay events doesn't flicker the row through every
+//     so a burst of history entries doesn't flicker the row through every
 //     intermediate message (see ChatRow.tsx's own comment on this).
 //   - the swipe tray reads Pin, Snooze, Archive
 //   - a snoozed row shows its wake time compactly in the right-hand slot

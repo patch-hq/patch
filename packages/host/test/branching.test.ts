@@ -17,6 +17,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -59,9 +60,7 @@ function lastBranches(events: WireEvent[]): ChatBranchesEvent {
 
 /** The replayed transcript, as the surface would see it. */
 function replay(daemon: Daemon, chatId: string, branchId?: string): WireEvent[] {
-  const out: WireEvent[] = [];
-  daemon.replayChat(chatId, -1, (e) => out.push(e), branchId);
-  return out;
+  return readBack(daemon, chatId, branchId !== undefined ? { branchId } : {});
 }
 
 function userMessages(events: WireEvent[]): Array<{ seq: number; content: string }> {
@@ -176,28 +175,24 @@ describe('spec/04 § Branching — edit a user turn forks a new track', () => {
     expect(persisted.activeBranchId).toBe(graph.activeBranchId);
   });
 
-  it('a replay publishes the graph so a reconnecting surface learns the tracks', async () => {
-    const { daemon, folder } = setup();
+  it('a fork publishes the graph, which the server keeps and sends with history', async () => {
+    const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
     const turn = userMessages(replay(daemon, chatId))[0]!;
     await daemon.forkChat({ chatId, seq: turn.seq, message: 'rephrased', localId: 'l2' });
 
-    const out = replay(daemon, chatId);
-    const graph = out.find((e): e is ChatBranchesEvent => e.type === 'chat.branches');
+    const graph = events.filter((e): e is ChatBranchesEvent => e.type === 'chat.branches').at(-1);
     expect(graph).toBeDefined();
     expect(graph!.branches).toHaveLength(2);
   });
 
-  it('a chat that has never been forked publishes a single root track', async () => {
+  it('a chat that has never been forked has a single root track', async () => {
     const { daemon, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'only question', localId: 'l1' });
 
-    const graph = replay(daemon, chatId).find(
-      (e): e is ChatBranchesEvent => e.type === 'chat.branches',
-    );
-    expect(graph).toBeDefined();
+    const graph = daemon.branchesEvent(chatId);
     expect(graph!.branches).toHaveLength(1);
     expect(graph!.branches[0]!.parentBranchId).toBeNull();
     expect(graph!.activeBranchId).toBe(graph!.branches[0]!.branchId);

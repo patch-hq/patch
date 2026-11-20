@@ -36,7 +36,7 @@ import { __getLastAlert, __clearLastAlert } from './stubs/react-native';
 import { reportHost, resetHosts } from './testUtils/settingsFixtures';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 
-const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 const SHARED = {
   version: 2,

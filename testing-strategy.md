@@ -67,7 +67,7 @@ No docker, no host key on disk, no Anthropic credential — the harness mints it
 1. new-chat spawn (REST `POST /api/chats`) + first message → reply; `chat.spawned` + `chat.state` fanned out.
 2. existing-chat second message → reply.
 3. text-only turn → reply.
-4. image attachment turn (REST multipart `POST /api/chats/:id/attachment` → host store over WS) → image-only turn replies; on `chat.replay` the ref is reconstructed and the `[Attachments]` block is stripped.
+4. image attachment turn (REST multipart `POST /api/chats/:id/attachment` → host store over WS) → image-only turn replies; on a history read the ref is reconstructed and the `[Attachments]` block is stripped.
 5. voice-note turn (REST `POST /api/voice/note` → transcript → injected turn → reply). Whisper is stubbed; the route + injection are real.
 6. special thread (`thread_manager`) message → reply.
 7. message queueing — turn B queued behind running turn A (`turnDelayMs`); both reply, in order.

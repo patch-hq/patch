@@ -31,6 +31,7 @@ import {
 const QUESTION_ANSWER_TIMEOUT_MS = QUESTION_EXPIRY_SECONDS_DEFAULT * 1000;
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -121,8 +122,7 @@ describe('AskUserQuestion: an answered question survives a replay', () => {
     });
     await tick();
 
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (e) => replayed.push(e));
+    const replayed = readBack(daemon, chatId);
 
     const reqIdx = replayed.findIndex(
       (e) => e.type === 'chat.permission_request' && e.requestId === req.requestId,

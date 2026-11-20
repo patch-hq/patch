@@ -262,7 +262,7 @@ describe('readTrack', () => {
     expect(readTrack(log, chatId, meta, 'b2').map((t) => t.record.seq)).toEqual([0, 7]);
   });
 
-  it('honours fromSeq exclusively, same as chat.replay', () => {
+  it('honours fromSeq exclusively, as a history request does', () => {
     const home = tmp();
     const log = makeLog(home);
     const chatId = 'chat-4';

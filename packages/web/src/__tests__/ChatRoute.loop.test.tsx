@@ -53,7 +53,7 @@ function seed(): void {
 }
 
 function renderChat(
-  ws: { send: ReturnType<typeof vi.fn>; requestReplay?: ReturnType<typeof vi.fn> } | null = null,
+  ws: { send: ReturnType<typeof vi.fn>; requestHistory?: ReturnType<typeof vi.fn> } | null = null,
 ): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/chats/c1']}>
@@ -89,7 +89,7 @@ describe('ChatRoute — /loop command (02-host.md § Self-wake)', () => {
 
   it('`/loop <interval> <message>` arms the loop via the API WITHOUT sending a chat turn', async () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('/loop 5m check on the build');
 
@@ -136,7 +136,7 @@ describe('ChatRoute — /loop command (02-host.md § Self-wake)', () => {
 
   it('does NOT match a normal message (sends a real chat turn instead)', async () => {
     seed();
-    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    const ws = { send: vi.fn(), requestHistory: vi.fn() };
     renderChat(ws);
     typeAndSend('loop back on this later');
 

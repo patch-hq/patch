@@ -12,9 +12,9 @@ import { __setLocalSearchParams } from './stubs/expo-router';
 vi.mock('../src/api/rest', () => ({
   api: { markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })) },
 }));
-const requestReplay = vi.fn();
+const requestHistory = vi.fn();
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ send: vi.fn(), safeSend: vi.fn(), requestReplay }),
+  getWs: () => ({ send: vi.fn(), safeSend: vi.fn(), requestHistory }),
 }));
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
 
@@ -44,10 +44,10 @@ describe('empty chat on open', () => {
   it('asks for the transcript again, forced, while nothing has arrived', async () => {
     const Screen = (await import('../app/chats/[chatId]')).default;
     renderRN(<Screen />);
-    expect(requestReplay).toHaveBeenCalledTimes(1);
+    expect(requestHistory).toHaveBeenCalledTimes(1);
     actSync(() => vi.advanceTimersByTime(3000));
-    expect(requestReplay).toHaveBeenCalledTimes(2);
-    expect(requestReplay).toHaveBeenLastCalledWith('c1', { force: true });
+    expect(requestHistory).toHaveBeenCalledTimes(2);
+    expect(requestHistory).toHaveBeenLastCalledWith('c1', { force: true });
   });
 
   it('stops asking once a message arrives', async () => {
@@ -59,6 +59,6 @@ describe('empty chat on open', () => {
         .applyEvent({ type: 'chat.message', chatId: 'c1', seq: 0, role: 'user', content: 'hi' }),
     );
     actSync(() => vi.advanceTimersByTime(60000));
-    expect(requestReplay).toHaveBeenCalledTimes(1);
+    expect(requestHistory).toHaveBeenCalledTimes(1);
   });
 });

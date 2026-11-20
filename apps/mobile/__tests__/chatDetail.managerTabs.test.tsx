@@ -17,7 +17,7 @@ vi.mock('../src/api/rest', () => ({
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
   },
 }));
-const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
 

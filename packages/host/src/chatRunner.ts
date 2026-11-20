@@ -491,6 +491,12 @@ export interface HostOptions {
   /** Emit each fan-out event upstream + into observers. */
   emit: (event: WireEvent) => void;
   /**
+   * Send an entry to the server's record that no surface is sent live: a side
+   * branch's content (spec/04 § Parallel branches), which the server keeps so
+   * it can answer a history request naming that branch. Absent: not sent.
+   */
+  recordOnly?: (event: WireEvent) => void;
+  /**
    * The SDK reported this account's usage for the session (5-hour) or week
    * (7-day) window (spec/10 § Surface in Settings — Usage). Optional: tests
    * that don't care about usage omit it and the report is just dropped.
@@ -980,14 +986,14 @@ const ATTACHMENT_BLOCK_HEADER = '[Attachments]';
 /**
  * The inline line a restart-interrupted turn leaves in the history, before the
  * host's automated re-send. Hosts before 2026-11-05 wrote the legacy text on
- * the same re-send, which replay recognises so those chats show the same way.
+ * the same re-send, which the record import recognises so those chats show the same way.
  */
 const RESTART_INTERRUPTION_MARKER = 'Turn interrupted by restart';
 const LEGACY_RESTART_INTERRUPTION_MARKER =
   'Host restarted — the running turn was cut off and has been re-sent';
 
 /**
- * Replay of a chat written before restarts stopped folding: the host's re-send
+ * A chat written before restarts stopped folding: the host's re-send
  * after a restart carried `retryOfSeq`, which surfaces fold into the original
  * bubble behind a pager. A re-send that follows the restart marker is drawn as
  * its own message instead, and the marker's legacy text is rewritten, so an
@@ -2427,7 +2433,10 @@ export class Daemon {
     // spec/01 § Chat record — a turn's start and end reach the server's record
     // the moment the log writes them, including the end a restart writes for a
     // turn its process left open.
-    this.chatLog.onRecord((chatId, record) => this.sendTurnBoundary(chatId, record));
+    this.chatLog.onRecord((chatId, record) => {
+      this.sendTurnBoundary(chatId, record);
+      this.sendSideBranchEntry(chatId, record);
+    });
     this.claudeProjectsRoot = options.claudeProjectsRoot ?? defaultClaudeProjectsRoot();
     this.historyReader =
       options.historyReader ?? createHistoryReader({ claudeProjectsRoot: this.claudeProjectsRoot });
@@ -6784,24 +6793,6 @@ export class Daemon {
   }
 
   /**
-   * Stream replay events for a chat (per-surface). Emitted through the
-   * caller-supplied `emitToSurface` so the server can route to a single
-   * surface rather than fan-out broadcasting.
-   *
-   * Replay reads straight from the chat's own log (spec/04 § History).
-   */
-  replayChat(
-    chatId: string,
-    fromSeq: number,
-    emitToSurface: (event: WireEvent) => void,
-    /** Replay THIS branch's own track (spec/04 § Branching). Default: the active branch. */
-    branchId?: string,
-  ): void {
-    if (!this.chatState.get(chatId)) throw new ChatNotFoundError(chatId);
-    this.replayFromLog(chatId, fromSeq, emitToSurface, branchId);
-  }
-
-  /**
    * One stored blob's bytes, for serving a tool result or image body that
    * replay deliberately did not send (spec/04 § History — blobs).
    *
@@ -6890,140 +6881,6 @@ export class Daemon {
         'history: importing the harness transcript into the chat log failed',
       );
     }
-  }
-
-  /**
-   * Replay a chat straight from its own log (spec/04 § History) — the active
-   * track's records, blobs already rehydrated, no ring/transcript merge: the
-   * log already IS what was shown, in the order it was shown. A failed turn's
-   * `turn.end` (never itself a logged event — `chat.error` is not durable)
-   * replays as a system message flagged `error`, which a surface draws as an error card.
-   */
-  private replayFromLog(
-    chatId: string,
-    fromSeq: number,
-    emitToSurface: (event: WireEvent) => void,
-    branchId?: string,
-  ): void {
-    const state = this.chatState.get(chatId)!;
-    const meta = this.opts.metaStore.read(chatId);
-    if (!meta) throw new ChatNotFoundError(chatId);
-    emitToSurface({
-      type: 'chat.spawned',
-      chatId,
-      hostId: this.opts.hostId,
-      folder: state.folder,
-      ...(state.spawnedByChatId !== undefined ? { parentChatId: state.spawnedByChatId } : {}),
-    });
-    const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
-    const targetBranchId = branchId ?? activeBranchId;
-    this.importLegacyTranscript(chatId);
-    const records = readTrackRecords(this.chatLog, chatId, meta, targetBranchId, fromSeq);
-    // A question that ran out unanswered, or that the user ANSWERED, is replayed
-    // as a request plus its resolution, so a reload draws the card the live
-    // surface showed (greyed out, or with the picks marked) instead of dropping
-    // it and leaving two bare tool rows. Cancelled ones are not: their tool
-    // rows already tell that story.
-    const settledQuestions = new Map<
-      string,
-      { approve: boolean; answers?: Record<string, string> }
-    >();
-    for (const record of records) {
-      if (record.rec.k !== 'permission.decision') continue;
-      if (record.rec.by === 'expiry') {
-        settledQuestions.set(record.rec.requestId, { approve: false });
-      } else if (record.rec.decision === 'approve_with_edits') {
-        const answers = record.rec.editedInput?.['answers'];
-        if (answers !== null && typeof answers === 'object') {
-          settledQuestions.set(record.rec.requestId, {
-            approve: true,
-            answers: answers as Record<string, string>,
-          });
-        }
-      }
-    }
-    const restartState = { afterMarker: false };
-    for (const record of records) {
-      if (
-        record.rec.k === 'permission.request' &&
-        record.rec.tool === ASK_USER_QUESTION &&
-        settledQuestions.has(record.rec.requestId) &&
-        !this.pendingPermissionEvents.has(`${chatId}:${record.rec.requestId}`)
-      ) {
-        emitToSurface({
-          type: 'chat.permission_request',
-          chatId,
-          requestId: record.rec.requestId,
-          request: {
-            tool: record.rec.tool,
-            args: record.rec.args,
-            ...(record.rec.description !== undefined
-              ? { description: record.rec.description }
-              : {}),
-          },
-          seq: record.seq,
-          ...(targetBranchId === activeBranchId ? {} : { branchId: targetBranchId }),
-        });
-        const settled = settledQuestions.get(record.rec.requestId)!;
-        emitToSurface({
-          type: 'chat.permission_response',
-          chatId,
-          requestId: record.rec.requestId,
-          approve: settled.approve,
-          decision: settled.approve ? 'approve_with_edits' : 'deny',
-          ...(settled.answers !== undefined ? { answers: settled.answers } : {}),
-        });
-      } else if (record.rec.k === 'event') {
-        const ev = record.rec.event;
-        // Send the blob REFERENCE, never the body. Tool output is 85-99% of a
-        // long chat's bytes — one measured chat shipped 23 MB to draw 150 KB
-        // of conversation — and every one of those rows arrives collapsed, so
-        // the surface fetches a body only when the reader opens that row.
-        emitToSurface(
-          this.chatLog.externalizeForReplay(chatId, restartResendAsOwnMessage(ev, restartState)),
-        );
-      } else if (record.rec.k === 'turn.end' && record.rec.outcome === 'failed') {
-        emitToSurface({
-          type: 'chat.message',
-          chatId,
-          role: 'system',
-          content: record.rec.error
-            ? `This turn failed: ${record.rec.error.message}`
-            : 'This turn failed.',
-          error: true,
-          seq: record.seq,
-        });
-      }
-    }
-    for (const ev of this.pendingPermissionEvents.values()) {
-      if (ev.chatId === chatId && (ev.branchId ?? activeBranchId) === targetBranchId) {
-        emitToSurface(ev);
-      }
-    }
-    emitToSurface(this.branchesEvent(chatId));
-    // Delegate status pings are live-only (never in the log), so a surface that
-    // reloads or reconnects mid-run would lose every running subagent: no
-    // strip, no header pill, a row stuck on its first guess. Restate each one
-    // from its stored outcome. The seq is the chat's latest, never a new one.
-    const lastSeq = (this.chatState.get(chatId)?.nextSeq ?? 0) - 1;
-    for (const d of this.listDelegates(chatId).reverse()) {
-      emitToSurface({
-        type: 'chat.delegate_update',
-        chatId,
-        delegateId: d.id,
-        label: d.label,
-        status: d.status,
-        ...this.delegateRunFields(d.id, d.status),
-        seq: lastSeq,
-      });
-    }
-    // Top the replay up with the CURRENT chat.state — a reconnecting surface
-    // may have missed the live running -> idle edge entirely while
-    // disconnected, and the message history it just replayed carries no
-    // activity of its own, so without this the Stop button it drove stays
-    // stuck showing "running" even though the reply already came back.
-    const stateEvent = this.buildStateEvent(chatId);
-    if (stateEvent) emitToSurface(stateEvent);
   }
 
   /**
@@ -15392,7 +15249,7 @@ export class Daemon {
     chatId: string,
     event: WireEvent,
     seq: number,
-  ): false | { nativeRef?: NativeRef } {
+  ): false | { nativeRef?: NativeRef; branchId?: string } {
     if (isLoggedEvent(event)) {
       // A tool-run summary is Patch's own and lands whenever the model answers,
       // often in a later turn — it belongs to no harness message, so it takes
@@ -15410,7 +15267,10 @@ export class Daemon {
         },
       );
       if (!logged) return false;
-      return ref !== undefined ? { nativeRef: ref } : {};
+      // The track it was logged on, so the server's record can lay out each
+      // branch's history itself (spec/04 § Branching).
+      const branchId = this.branchIdFor(chatId);
+      return ref !== undefined ? { nativeRef: ref, branchId } : { branchId };
     }
     if (event.type === 'chat.permission_request') {
       this.logRecord(
@@ -15446,15 +15306,40 @@ export class Daemon {
   }
 
   /**
+   * Send an entry the log just wrote on a side branch to the server's record
+   * (spec/04 § Parallel branches). A side branch is never broadcast live, so
+   * this is the only way its content reaches the server, which answers every
+   * history request for it. Sent whole, with its branch and provider id.
+   */
+  private sendSideBranchEntry(chatId: string, record: LogRecord): void {
+    if (record.rec.k !== 'event' || !this.opts.recordOnly) return;
+    if (this.chatState.get(chatId)?.subagent) return;
+    const branch = this.opts.metaStore
+      .read(chatId)
+      ?.branches?.find((b) => b.branchId === record.branchId);
+    if (branch?.sideThread !== true) return;
+    const [entry] = recordEntries(chatId, [record], {
+      rehydrate: (result) => this.chatLog.rehydrate(result),
+      onUnreadable: (seq, err) =>
+        this.opts.logger.warn(
+          { chatId, seq, err: err.message },
+          'side branch: a tool result whose stored body is missing is sent as a reference',
+        ),
+    });
+    if (entry) this.opts.recordOnly(entry);
+  }
+
+  /**
    * The chat's whole record as the server takes it, for the one-time record
    * import (spec/01 § Chat record): every entry of its log, whole and with its
-   * provider id, every turn boundary and every settled question. Transcript the
-   * log never held is brought into it first, as a replay would.
+   * provider id and branch, every turn boundary and every settled question.
+   * Transcript the log never held is brought into it first.
    */
   recordForImport(chatId: string): WireEvent[] {
     if (!this.chatState.get(chatId)) throw new ChatNotFoundError(chatId);
     this.importLegacyTranscript(chatId);
     let unreadable = 0;
+    const restartState = { afterMarker: false };
     const entries = recordEntries(chatId, this.chatLog.read(chatId), {
       rehydrate: (result) => this.chatLog.rehydrate(result),
       onUnreadable: () => {
@@ -15467,7 +15352,9 @@ export class Daemon {
         'record import: tool results whose stored body is missing are sent as references',
       );
     }
-    return entries;
+    // An old chat's restart re-sends read as their own messages in the record,
+    // as they do in a chat written since (`restartResendAsOwnMessage`).
+    return entries.map((e) => restartResendAsOwnMessage(e, restartState));
   }
 
   /**
@@ -15553,8 +15440,9 @@ export class Daemon {
     }
     const chatId = (event as { chatId?: unknown }).chatId;
     const seq = (event as { seq?: unknown }).seq;
-    // The provider's own id for what was logged, for the server's record.
+    // The provider's own id for what was logged, and its track, for the server's record.
     let nativeRef: NativeRef | undefined;
+    let branchId: string | undefined;
     if (
       !o.skipHistory &&
       typeof chatId === 'string' &&
@@ -15572,6 +15460,7 @@ export class Daemon {
         return;
       }
       nativeRef = logged.nativeRef;
+      branchId = logged.branchId;
     }
     if (typeof chatId === 'string' && chatId.length > 0 && typeof seq === 'number' && seq >= 0) {
       // Persisted-class events (messages / tool calls / tool results) are the
@@ -15609,7 +15498,15 @@ export class Daemon {
       if (!o.skipHistory) this.trackToolRun(event);
       return;
     }
-    this.opts.emit(nativeRef !== undefined ? ({ ...event, nativeRef } as WireEvent) : event);
+    this.opts.emit(
+      nativeRef !== undefined || branchId !== undefined
+        ? ({
+            ...event,
+            ...(nativeRef !== undefined ? { nativeRef } : {}),
+            ...(branchId !== undefined ? { branchId } : {}),
+          } as WireEvent)
+        : event,
+    );
     if (!o.skipHistory) this.trackToolRun(event);
     this.trackHookToolTally(event);
     this.trackRunningBash(event);

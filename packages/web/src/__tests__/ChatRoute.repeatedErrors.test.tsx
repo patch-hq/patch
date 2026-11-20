@@ -42,7 +42,7 @@ function renderWith(timeline: ChatEventEntry[]) {
     },
   ]);
   useChatStore.setState((s) => ({ timelines: { ...s.timelines, 'c-e': timeline } }));
-  const ws = { send: vi.fn(), requestReplay() {} } as unknown as Parameters<
+  const ws = { send: vi.fn(), requestHistory() {} } as unknown as Parameters<
     typeof ChatRoute
   >[0]['ws'];
   render(

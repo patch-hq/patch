@@ -88,7 +88,7 @@ const authOk = { type: 'auth.ok', accountId: 'a', surfaceId: 's', hosts: [], acc
 describe('PatchWs with the account feed', () => {
   beforeEach(() => window.localStorage.removeItem('patch.feedPos'));
 
-  it('resumes the feed on connect with the chats it holds, and asks for no replays', async () => {
+  it('resumes the feed on connect with the chats it holds, and asks for nothing chat by chat', async () => {
     const { ws, fake } = await connect();
     useChatStore.getState().hydrate([row('c1', 1), row('c2', 2)]);
     useChatStore.getState().applyEvents([msg('c1', 0), msg('c1', 4)] as never);
@@ -97,9 +97,7 @@ describe('PatchWs with the account feed', () => {
     expect(frames(fake, 'feed.resume')).toEqual([
       { type: 'feed.resume', after: 7, follow: [{ chatId: 'c1', after: 4 }] },
     ]);
-    ws.syncTranscripts();
-    vi.advanceTimersByTime(2000);
-    expect(frames(fake, 'chat.replay')).toEqual([]);
+    expect(frames(fake, 'chat.history_request')).toEqual([]);
     ws.close();
   });
 
@@ -107,7 +105,7 @@ describe('PatchWs with the account feed', () => {
     const { ws, fake } = await connect();
     fake.receive(authOk);
     useChatStore.getState().hydrate([row('c1', 1)]);
-    ws.requestReplay('c1');
+    ws.requestHistory('c1');
     const [ask] = frames(fake, 'chat.history_request');
     expect(ask).toMatchObject({ chatId: 'c1', limit: 100 });
     expect(ask).not.toHaveProperty('after');
@@ -194,16 +192,6 @@ describe('PatchWs with the account feed', () => {
     window.removeEventListener(CHAT_INDEX_STALE_EVENT, onStale);
     expect(reloads).toBe(1);
     expect(window.localStorage.getItem('patch.feedPos')).toBe('30');
-    ws.close();
-  });
-
-  it('an older server, with no feed, still gets replays', async () => {
-    const { ws, fake } = await connect();
-    fake.receive({ ...authOk, accountFeed: undefined });
-    useChatStore.getState().hydrate([row('c1', 1)]);
-    ws.requestReplay('c1');
-    expect(frames(fake, 'chat.replay')).toHaveLength(1);
-    expect(frames(fake, 'chat.history_request')).toEqual([]);
     ws.close();
   });
 });

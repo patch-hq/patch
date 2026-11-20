@@ -315,8 +315,8 @@ interface ChatState {
   mergeRows(rows: ChatListRow[]): void;
   applyEvent(event: WireEvent): void;
   /**
-   * Apply a whole burst of events as ONE store commit. A `chat.replay` hands a
-   * surface its entire transcript at once — 500+ events inside half a second
+   * Apply a whole burst of events as ONE store commit. A history page hands a
+   * surface many entries at once — 500+ events inside half a second
    * for a long-running chat — and applying them one at a time meant one
    * `set()`, one full re-render and one whole-timeline `groupToolRuns` pass per
    * event, plus an array copy per append. That is quadratic in the transcript
@@ -382,16 +382,16 @@ interface ChatState {
    *  1. The detail screen renders with `row === undefined`: title "Chat"
    *     instead of "New chat", folder crumb "—", and `Composer folder=
    *     undefined`, which silently disables `/` skill autocomplete.
-   *  2. `api/ws.ts`'s connect handler replays only chats it finds by iterating
-   *     `Object.keys(chats)`. A row-less chat is skipped, so no `chat.replay`
-   *     is ever sent for it — and `chat.replay` is the ONLY thing that adds the
+   *  2. A connect handler that catches up only chats it finds by iterating
+   *     `Object.keys(chats)` skips a row-less chat, so no history request is
+   *     ever sent for it — and that request is what adds the
    *     chat to the server's per-connection `watchedChats`, which gates every
    *     `chat.message` / `chat.tool_call` / `chat.tool_result` /
    *     `chat.permission_request` (`DETAIL_LEVEL_EVENT_TYPES` in
    *     `packages/server/src/ws-hub.ts`). The chat then receives no reply ever.
    *     The phone hits this where the desktop does not, because it reconnects
    *     on every backgrounding and network change, and because on a cold start
-   *     the detail screen's own mount-time `requestReplay` no-ops silently
+   *     the detail screen's own mount-time `requestHistory` no-ops silently
    *     (the socket isn't open yet).
    *
    * No-op if the row already exists, so `chat.spawned`/`chat.state` reconcile
@@ -1127,13 +1127,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...row,
             preview: headCodePoints(text, 140),
             // `lastUpdated` is the host's (`chat.state`), not this frame's arrival
-            // time: a `chat.replay` re-delivers the whole history, and stamping
+            // time: a history read re-delivers entries, and stamping
             // "now" on each message would turn every read chat unread (as web).
             lastSeq: Math.max(row.lastSeq, event.seq),
           };
           // Reconcile an optimistic outgoing user echo (rendered locally on send —
           // typed or voice) with its persisted copy when it re-arrives (e.g. on a
-          // `chat.replay` after reconnect): match by content on an entry still
+          // history read after reconnect): match by content on an entry still
           // carrying a `localId`, promote it to the real seq, and clear delivery
           // marks — rather than appending a duplicate. Previously mobile relied
           // ONLY on the `fromSeq` replay cursor and would double the turn if the

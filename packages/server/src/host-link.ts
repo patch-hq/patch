@@ -628,7 +628,7 @@ export class InboundHostLink implements HostLink {
     // (`injectHostEvent`'s own mechanism, inlined here rather than calling
     // that method — it is a documented dev/test seam, and this is a genuine
     // production notice) so it reaches the requesting surface exactly like
-    // any other addressed reply (`chat.replay`'s own `forSurfaceId` tagging).
+    // any other addressed reply (`forSurfaceId` tagging).
     // The chat's host is unknown, so name every host it could be on that
     // is not connected right now.
     const names = (this.opts.registeredHostIds?.() ?? [])

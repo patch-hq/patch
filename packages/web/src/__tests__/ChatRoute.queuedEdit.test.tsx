@@ -59,7 +59,7 @@ function renderChat(chatId: string, ws: Ws) {
 
 function fakeWs(): { ws: Ws; send: ReturnType<typeof vi.fn> } {
   const send = vi.fn();
-  return { ws: { send, requestReplay() {} } as unknown as Ws, send };
+  return { ws: { send, requestHistory() {} } as unknown as Ws, send };
 }
 
 const queuedMsgs = () =>

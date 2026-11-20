@@ -25,7 +25,7 @@ export function TriagePage({ ws }: { ws: PatchWs | null }): JSX.Element {
 
   // The transcript of a chat nobody has opened is not loaded yet; ask for it.
   useEffect(() => {
-    if (currentId && ws) ws.requestReplay(currentId);
+    if (currentId && ws) ws.requestHistory(currentId);
   }, [currentId, ws]);
 
   // A new card starts with an empty box, focused.

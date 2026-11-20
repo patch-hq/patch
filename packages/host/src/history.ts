@@ -23,7 +23,7 @@
 // mean anything: a surface passes `fromSeq = <highest seq it saw live>` and
 // gets strictly the events it has not seen. A line-index-derived seq drifts
 // from the live one (a persisted user turn takes a line; a control-path error
-// or artifact takes a seq with no line), which made `chat.replay` re-deliver
+// or artifact takes a seq with no line), which made a history read re-deliver
 // messages the surface had already rendered.
 //
 // An event with no index entry — a transcript written before this chat had a
@@ -225,7 +225,7 @@ export function createHistoryReader(opts: HistoryReaderOptions = {}): HistoryRea
       // interleaved write leaves one damaged record in the middle of an
       // otherwise intact file (seen in the wild: a tool_result truncated
       // mid-string with the next record appended without a newline). Failing
-      // the whole read on it bricked the chat permanently — every `chat.replay`
+      // the whole read on it bricked the chat permanently — every history read
       // returned `sdk_error` and the surface could never open it again.
       //
       // So the damaged LINE is skipped and reported — loudly, never silently:

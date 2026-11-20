@@ -117,7 +117,7 @@ function questionEntry(requestId: string, args: unknown): ChatEventEntry {
 }
 
 function renderChat(chatId: string, send: ReturnType<typeof vi.fn>) {
-  const ws = { send, requestReplay() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+  const ws = { send, requestHistory() {} } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
   return render(
     <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
       <Routes>

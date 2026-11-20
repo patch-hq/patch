@@ -31,7 +31,7 @@ vi.mock('../src/api/rest', () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 
 import { Composer } from '../src/components/Composer';

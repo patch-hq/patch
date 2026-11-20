@@ -95,7 +95,7 @@ describe('ChatLogStore', () => {
     expect((held[0] as { content: string }).content).toBe('second');
   });
 
-  test('drops the routing tag a replayed event carries', () => {
+  test('drops any routing tag an event carries', () => {
     const store = new ChatLogStore({ logger });
     store.observe({ ...message('c1', 1), forSurfaceId: 'srf-1' } as WireEvent);
     expect('forSurfaceId' in (store.read('c1', -1)[0] as object)).toBe(false);
@@ -251,7 +251,7 @@ describe('ChatLogStore', () => {
     ]);
   });
 
-  test("a question and its answer replay at the question's seq; an open one is left to the host", () => {
+  test("a question and its answer read at the question's seq; an open one is live state, not history", () => {
     const store = new ChatLogStore({ dataDir: dir, logger });
     store.commit(message('c1', 1));
     store.commit(message('c1', 4));
@@ -281,7 +281,7 @@ describe('ChatLogStore', () => {
       answers: { pick: 'A' },
     } as WireEvent);
     const shape = (s: ChatLogStore) =>
-      s.replay('c1', -1).map((e) => `${e.type}:${(e as { seq?: number }).seq ?? '-'}`);
+      s.entries('c1', -1).map((e) => `${e.type}:${(e as { seq?: number }).seq ?? '-'}`);
     const expected = [
       'chat.message:1',
       'chat.permission_request:2',
@@ -290,7 +290,7 @@ describe('ChatLogStore', () => {
     ];
     expect(shape(store)).toEqual(expected);
     expect(shape(new ChatLogStore({ dataDir: dir, logger }))).toEqual(expected);
-    expect(store.replay('c1', 2).map((e) => e.type)).toEqual(['chat.message']);
+    expect(store.entries('c1', 2).map((e) => e.type)).toEqual(['chat.message']);
   });
 
   test('a reach is only noted for a chat it holds, and never lowers the mark', () => {
@@ -305,17 +305,6 @@ describe('ChatLogStore', () => {
     store.commit(message('c1', 8));
     expect(store.highWater('c1')).toBe(8);
     expect(new ChatLogStore({ dataDir: dir, logger }).highWater('c1')).toBe(8);
-  });
-
-  test('a batched replay is kept event by event', () => {
-    const store = new ChatLogStore({ logger });
-    store.observe({
-      type: 'chat.replay_batch',
-      chatId: 'c1',
-      events: [message('c1', 1), message('c1', 2)],
-      done: true,
-    } as WireEvent);
-    expect(store.read('c1', -1)).toHaveLength(2);
   });
 
   describe('large tool results', () => {
@@ -633,7 +622,7 @@ describe('ChatLogStore: turn boundaries and provider ids (spec/01 § Chat record
     expect(store.commit(withRef(0))).toBe('new');
     expect(store.nativeRef('c1', 0)).toEqual(ref);
     expect(store.read('c1', -1)[0]).toEqual(message('c1', 0));
-    expect(store.replay('c1', -1)[0]).not.toHaveProperty('nativeRef');
+    expect(store.entries('c1', -1)[0]).not.toHaveProperty('nativeRef');
     expect(store.page('c1', { limit: 10 }).entries[0]).not.toHaveProperty('nativeRef');
     const reopened = new ChatLogStore({ dataDir: dir, logger });
     expect(reopened.nativeRef('c1', 0)).toEqual(ref);
@@ -674,13 +663,114 @@ describe('ChatLogStore: turn boundaries and provider ids (spec/01 § Chat record
 
   test('a record import of a chat it has never seen takes every entry and boundary', () => {
     const store = new ChatLogStore({ dataDir: dir, logger });
-    store.observe({
-      type: 'chat.replay_batch',
-      chatId: 'c1',
-      events: [started('t1', -1), withRef(0), message('c1', 1), ended('t1', 1)],
-    } as WireEvent);
+    for (const e of [started('t1', -1), withRef(0), message('c1', 1), ended('t1', 1)]) {
+      store.observe(e);
+    }
     expect(store.read('c1', -1).map((e) => (e as { seq: number }).seq)).toEqual([0, 1]);
     expect(store.turns('c1')).toHaveLength(1);
     expect(store.nativeRef('c1', 0)).toEqual(ref);
+  });
+});
+
+describe('ChatLogStore: branch tracks (spec/04 § Branching)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-chatlog-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const on = (seq: number, branchId: string, content = `m${seq}`): WireEvent =>
+    ({
+      type: 'chat.message',
+      chatId: 'c1',
+      role: 'assistant',
+      content,
+      seq,
+      branchId,
+    }) as WireEvent;
+  const graph = [
+    { branchId: 'main', parentBranchId: null, forkFromSeq: null },
+    { branchId: 'edit', parentBranchId: 'main', forkFromSeq: 2 },
+    { branchId: 'side', parentBranchId: 'main', forkFromSeq: 1, sideThread: true as const },
+  ];
+  const seqs = (events: WireEvent[]): number[] => events.map((e) => (e as { seq: number }).seq);
+
+  test('lays out each track from its own entries and its ancestors up to the fork', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    for (const e of [on(0, 'main'), on(1, 'main'), on(2, 'main'), on(3, 'main')]) store.commit(e);
+    store.commit(on(4, 'side'));
+    store.commit(on(5, 'edit'));
+    store.commit(on(6, 'side'));
+    // An edit fork replaces the message it forked at; a side thread shares it.
+    expect(seqs(store.entries('c1', -1, { branches: graph, branchId: 'main' }))).toEqual([
+      0, 1, 2, 3,
+    ]);
+    expect(seqs(store.entries('c1', -1, { branches: graph, branchId: 'edit' }))).toEqual([0, 1, 5]);
+    expect(seqs(store.entries('c1', -1, { branches: graph, branchId: 'side' }))).toEqual([
+      0, 1, 4, 6,
+    ]);
+    // Paged the same way.
+    expect(
+      seqs(store.page('c1', { limit: 2, track: { branches: graph, branchId: 'side' } }).entries),
+    ).toEqual([4, 6]);
+  });
+
+  test('keeps the branch across a restart and never reads it out', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(on(0, 'main'));
+    store.commit(on(1, 'side'));
+    expect(store.entries('c1', -1)[0]).not.toHaveProperty('branchId');
+    const reopened = new ChatLogStore({ dataDir: dir, logger });
+    expect(reopened.branchOf('c1', 1)).toBe('side');
+    expect(seqs(reopened.entries('c1', -1, { branches: graph, branchId: 'main' }))).toEqual([0]);
+  });
+
+  test('an entry whose host never said its branch is on the root track', () => {
+    const store = new ChatLogStore({ logger });
+    store.commit(message('c1', 0));
+    store.commit(on(1, 'side'));
+    expect(seqs(store.entries('c1', -1, { branches: graph, branchId: 'main' }))).toEqual([0]);
+    expect(seqs(store.entries('c1', -1, { branches: graph, branchId: 'side' }))).toEqual([0, 1]);
+  });
+
+  test('a resend without the branch does not take it away, and one with it tops it up', () => {
+    const store = new ChatLogStore({ logger });
+    store.commit(message('c1', 0));
+    expect(store.commit(on(0, 'side', 'm0'))).toBe('duplicate');
+    expect(store.branchOf('c1', 0)).toBe('side');
+    expect(store.commit(message('c1', 0, 'm0'))).toBe('duplicate');
+    expect(store.branchOf('c1', 0)).toBe('side');
+  });
+
+  test("an answered question is read on its own branch's track", () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(on(0, 'main'));
+    store.commit(on(1, 'main'));
+    store.notePermission({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      requestId: 'q1',
+      request: { tool: 'AskUserQuestion', args: { questions: [] } },
+      seq: 2,
+      branchId: 'side',
+    } as WireEvent);
+    store.notePermission({
+      type: 'chat.permission_response',
+      chatId: 'c1',
+      requestId: 'q1',
+      approve: true,
+    } as WireEvent);
+    const types = (branchId: string): string[] =>
+      new ChatLogStore({ dataDir: dir, logger })
+        .entries('c1', -1, { branches: graph, branchId })
+        .map((e) => e.type);
+    expect(types('main')).toEqual(['chat.message', 'chat.message']);
+    expect(types('side')).toEqual([
+      'chat.message',
+      'chat.message',
+      'chat.permission_request',
+      'chat.permission_response',
+    ]);
   });
 });

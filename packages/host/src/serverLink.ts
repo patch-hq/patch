@@ -46,6 +46,7 @@ import {
   decodeCompat,
   encode,
   isOutboxEvent,
+  LOGGED_EVENT_TYPES,
   restartingVersion,
   TURN_BOUNDARY_TYPES,
   type AuthOkEvent,
@@ -198,6 +199,11 @@ export interface ServerLink {
   send(event: WireEvent): void;
   /** Whether the link is currently authed/online. */
   isOnline(): boolean;
+  /**
+   * Whether the server last connected to keeps each entry's branch and takes
+   * a side branch's entries (`recordBranches` in `auth.ok`).
+   */
+  keepsBranches(): boolean;
   /** The most recent drop of an authenticated link and its cause, if any. */
   lastDrop(): LinkDrop | undefined;
   /** Stop reconnecting and close any open socket. */
@@ -299,6 +305,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let serverTakesOutbox = false;
   // A server that keeps turn boundaries and provider ids (`recordComplete`).
   let serverKeepsRecord = false;
+  // A server that keeps each entry's branch (`recordBranches`).
+  let serverKeepsBranches = false;
   // A server that decides chat status from facts (`serverStatus`).
   let serverDecidesStatus = false;
   // Down since the host started until the first auth.ok, then since each loss.
@@ -328,6 +336,12 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     for (const ev of buffer.drain()) rawSend(ev);
   }
 
+  /** The event as this connection's server takes it: nothing its reader would refuse. */
+  function forServer(event: WireEvent): WireEvent {
+    const kept = serverKeepsRecord ? event : withoutNativeRef(event);
+    return serverKeepsBranches ? kept : withoutEntryBranch(kept);
+  }
+
   /** Send one outbox entry the way this connection's server takes it. */
   function sendOutboxEntry(position: number, outboxed: WireEvent): void {
     // A server that predates the outbox would not keep it: it is held here
@@ -336,7 +350,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     // An older server's reader refuses what it does not know: it is sent no
     // turn boundaries and no provider ids. The outbox keeps them either way.
     if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(outboxed.type)) return;
-    const event = serverKeepsRecord ? outboxed : withoutNativeRef(outboxed);
+    const event = forServer(outboxed);
     rawSend({ type: 'host.outbox', position, event });
   }
 
@@ -515,6 +529,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         restartingUntil = 0;
         serverTakesOutbox = event.hostOutbox === true;
         serverKeepsRecord = event.recordComplete === true;
+        serverKeepsBranches = event.recordBranches === true;
         serverDecidesStatus = event.serverStatus === true;
         log.info('server-link: authenticated (auth.ok)');
         if (!serverTakesOutbox) {
@@ -588,7 +603,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       }
       // Only a server known to keep them is sent turn boundaries and provider ids.
       if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(event.type)) return;
-      const sendable = serverKeepsRecord ? event : withoutNativeRef(event);
+      const sendable = forServer(event);
       // `online` stays true until the socket's `close` event, but a socket that
       // is already closing no longer writes: buffer for the reconnect.
       if (open) {
@@ -596,6 +611,9 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       } else {
         buffer.push(sendable);
       }
+    },
+    keepsBranches(): boolean {
+      return serverKeepsBranches;
     },
     isOnline(): boolean {
       return online;
@@ -679,6 +697,15 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       }
     },
   };
+}
+
+/** A logged entry without the branch it may carry (spec/04 § Branching). */
+function withoutEntryBranch(event: WireEvent): WireEvent {
+  if (!LOGGED_EVENT_TYPES.has(event.type as never)) return event;
+  if ((event as { branchId?: unknown }).branchId === undefined) return event;
+  const { branchId: _branch, ...rest } = event as WireEvent & { branchId?: unknown };
+  void _branch;
+  return rest as WireEvent;
 }
 
 /** The event without the provider id it may carry (spec/01 § Chat record). */

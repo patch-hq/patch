@@ -14,7 +14,7 @@ vi.mock('../src/api/rest', () => ({
 }));
 const sendMock = vi.fn();
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ send: sendMock, safeSend: vi.fn(), requestReplay: vi.fn() }),
+  getWs: () => ({ send: sendMock, safeSend: vi.fn(), requestHistory: vi.fn() }),
 }));
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
 

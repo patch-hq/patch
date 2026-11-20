@@ -142,71 +142,72 @@ describe('WireTestClient', () => {
     }
   });
 
-  test('replay emits chat.replay with fromSeq', async () => {
+  test('history asks the server for a page of a chat', async () => {
     const fx = await startFixture();
     try {
       const client = new WireTestClient({ url: fx.url });
       await client.connect();
-      client.replay('c1', 12);
+      const requestId = client.history('c1', { after: 12, limit: 50 });
       await waitFor(() => fx.received.length >= 2, 1000);
-      const replay = fx.received[1];
-      expect(replay?.type).toBe('chat.replay');
-      if (replay?.type === 'chat.replay') {
-        expect(replay.chatId).toBe('c1');
-        expect(replay.fromSeq).toBe(12);
-      }
+      expect(fx.received[1]).toEqual({
+        type: 'chat.history_request',
+        requestId,
+        chatId: 'c1',
+        after: 12,
+        limit: 50,
+      });
       await client.close();
     } finally {
       await fx.close();
     }
   });
 
-  test('replayFromLastSeen sends fromSeq=-1 when nothing has been seen', async () => {
+  test('historyFromLastSeen asks after -1 when nothing has been seen', async () => {
     const fx = await startFixture();
     try {
       const client = new WireTestClient({ url: fx.url });
       await client.connect();
       expect(client.lastSeq('c1')).toBeUndefined();
-      client.replayFromLastSeen('c1');
+      client.historyFromLastSeen('c1');
       await waitFor(() => fx.received.length >= 2, 1000);
-      const replay = fx.received[1];
-      expect(replay?.type).toBe('chat.replay');
-      if (replay?.type === 'chat.replay') {
-        // Replay is exclusive (seq > fromSeq); a never-seen client uses -1 so
-        // the host includes seq 0.
-        expect(replay.fromSeq).toBe(-1);
-      }
+      expect(fx.received[1]).toMatchObject({ type: 'chat.history_request', after: -1 });
       await client.close();
     } finally {
       await fx.close();
     }
   });
 
-  test('replayFromLastSeen uses the highest seq seen', async () => {
+  test("a history page's entries reach handlers as frames and count toward lastSeq", async () => {
     const fx = await startFixture();
     try {
       fx.onMessage = (event, conn) => {
         if (event.type !== 'hello') return;
         conn.send(
           encode({
-            type: 'chat.message',
+            type: 'chat.history',
+            requestId: 'r',
             chatId: 'c1',
-            role: 'assistant',
-            content: 'm',
-            seq: 7,
+            entries: [
+              { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'a', seq: 6 },
+              { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'b', seq: 7 },
+            ],
+            more: false,
+            through: 7,
+            pending: [],
+            queued: [],
           }),
         );
       };
       const client = new WireTestClient({ url: fx.url });
+      const seen: number[] = [];
+      client.on('chat.message', (e) => seen.push(e.seq));
       await client.connect();
-      await client.waitFor('chat.message', (e) => e.seq === 7);
-      client.replayFromLastSeen('c1');
+      await waitFor(() => seen.length === 2, 1000);
+      expect(seen).toEqual([6, 7]);
+      expect(client.lastSeq('c1')).toBe(7);
+      client.historyFromLastSeen('c1');
       await waitFor(() => fx.received.length >= 2, 1000);
-      const replay = fx.received[1];
-      expect(replay?.type).toBe('chat.replay');
-      if (replay?.type === 'chat.replay') {
-        expect(replay.fromSeq).toBe(7);
-      }
+      expect(fx.received[1]).toMatchObject({ type: 'chat.history_request', after: 7 });
       await client.close();
     } finally {
       await fx.close();

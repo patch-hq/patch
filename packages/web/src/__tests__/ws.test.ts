@@ -339,24 +339,42 @@ describe('PatchWs connection lifecycle', () => {
   });
 });
 
-describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
-  it('skips an optimistic (localId-carrying) entry and a still-streaming entry when computing fromSeq', async () => {
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'c-mixed',
-        hostId: 'd1',
-        permissionMode: 'bypassPermissions' as const,
-        name: null,
-        folder: '~/x',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        disabled: false,
-        lastUpdated: 1,
-      },
-    ]);
-    // A durable seq-2 message...
+const authOk = { type: 'auth.ok', accountId: 'a', surfaceId: 's', hosts: [], accountFeed: true };
+
+const historyRow = (chatId: string, hostId = 'd1') => ({
+  chatId,
+  hostId,
+  permissionMode: 'bypassPermissions' as const,
+  name: null,
+  folder: '~/x',
+  chatStatus: { state: 'idle' as const, since: 0 },
+  status: 'active' as const,
+  pinned: false,
+  pinnedAt: null,
+  disabled: false,
+  lastUpdated: 1,
+});
+
+function sentOf(fake: FakeWS, type: string): Array<Record<string, unknown>> {
+  return fake.sent
+    .map((s) => JSON.parse(s) as Record<string, unknown>)
+    .filter((e) => e['type'] === type);
+}
+
+function historyAsks(fake: FakeWS, chatId: string): Array<Record<string, unknown>> {
+  return sentOf(fake, 'chat.history_request').filter((e) => e['chatId'] === chatId);
+}
+
+function feedFollows(fake: FakeWS): Array<{ chatId: string; after: number }> {
+  const resume = sentOf(fake, 'feed.resume').at(-1) as
+    | { follow: Array<{ chatId: string; after: number }> }
+    | undefined;
+  return resume?.follow ?? [];
+}
+
+describe('PatchWs history cursor excludes non-durable entries', () => {
+  it('skips an optimistic (localId-carrying) entry and a still-streaming entry', async () => {
+    useChatStore.getState().hydrate([historyRow('c-mixed')]);
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c-mixed',
@@ -364,8 +382,6 @@ describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
       role: 'assistant',
       content: 'durable',
     } as never);
-    // ...followed by a HIGHER-seq optimistic local echo (not yet reconciled)
-    // and a streaming accumulator — neither should raise fromSeq past 2.
     useChatStore.getState().addLocalMessage('c-mixed', 'not yet acked', 'lid-1');
     useChatStore.getState().applyEvent({
       type: 'chat.message_delta',
@@ -373,37 +389,19 @@ describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
       messageSeq: 99,
       delta: 'partial…',
     } as never);
-
-    const ws = new PatchWs('ws://test/ws');
-    ws.connect();
-    await Promise.resolve();
-    const fake = FakeWS.instances[0]!;
-    fake.open();
-    const replay = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .find((e) => e.type === 'chat.replay' && e.chatId === 'c-mixed');
-    expect(replay?.fromSeq).toBe(2); // NOT 99 — the streaming/optimistic entries are excluded
+    const { ws, fake } = await connectAndOpen();
+    fake.receive(authOk);
+    // NOT 99 — the streaming/optimistic entries are excluded.
+    expect(feedFollows(fake)).toEqual([{ chatId: 'c-mixed', after: 2 }]);
+    ws.requestHistory('c-mixed', { force: true });
+    expect(historyAsks(fake, 'c-mixed')[0]?.['after']).toBe(2);
     ws.close();
   });
 });
 
-describe('PatchWs chat.replay cursor ignores a lone error row', () => {
-  it('asks for the whole history when the only entry held is a failed-turn error', async () => {
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'c-err',
-        hostId: 'd1',
-        permissionMode: 'bypassPermissions' as const,
-        name: null,
-        folder: '~/x',
-        chatStatus: { state: 'idle', since: 0 },
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        disabled: false,
-        lastUpdated: 1,
-      },
-    ]);
+describe('PatchWs history cursor ignores a lone error row', () => {
+  it('asks for the last screen when the only entry held is a failed-turn error', async () => {
+    useChatStore.getState().hydrate([historyRow('c-err')]);
     // A failed turn's error is fanned out to every surface, so it lands in a
     // chat this surface never opened and becomes its only timeline entry.
     useChatStore.getState().applyEvent({
@@ -412,49 +410,24 @@ describe('PatchWs chat.replay cursor ignores a lone error row', () => {
       seq: 500,
       error: { code: 'sdk_error', message: 'process ended mid-turn' },
     } as never);
-    expect(useChatStore.getState().timelines['c-err']?.length).toBe(1);
-
-    const ws = new PatchWs('ws://test/ws');
-    ws.connect();
-    await Promise.resolve();
-    const fake = FakeWS.instances[0]!;
-    fake.open();
-    const replay = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .find((e) => e.type === 'chat.replay' && e.chatId === 'c-err');
-    expect(replay?.fromSeq).toBe(-1); // NOT 500 — the history before the error is still unseen
+    const { ws, fake } = await connectAndOpen();
+    fake.receive(authOk);
+    ws.requestHistory('c-err', { force: true });
+    // No `after`: the history before the error is still unseen.
+    expect(historyAsks(fake, 'c-err')[0]).not.toHaveProperty('after');
     ws.close();
   });
 });
 
-describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline', () => {
-  const row = (chatId: string) => ({
-    chatId,
-    hostId: 'd1',
-    permissionMode: 'bypassPermissions' as const,
-    name: null,
-    folder: '~/x',
-    chatStatus: { state: 'idle', since: 0 },
-    status: 'active' as const,
-    pinned: false,
-    pinnedAt: null,
-    disabled: false,
-    lastUpdated: 1,
-  });
-
-  // A chat's FIRST ever replay always asks from fromSeq -1 (empty timeline).
+describe('PatchWs requestHistory dedup guard vs. a deliberately cleared timeline', () => {
   // Switching tracks (ChatRoute's handleSwitchTrack) clears the timeline back
-  // to empty and re-requests immediately — which recomputes fromSeq -1 again
-  // and collides with that same cursor still cached from the first load, so
-  // the plain dedup guard drops the request that was supposed to fetch the
-  // new track's history. The timeline then never refills: a chat history
-  // "goes missing" until a full reload re-syncs it from scratch.
-  it('a plain re-request after clearing the timeline is swallowed by the -1 cursor', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
+  // to empty and re-requests immediately — which recomputes the same empty
+  // cursor the first load cached, so the plain dedup guard drops the request
+  // that was supposed to fetch the new track's history.
+  it('a plain re-request after clearing the timeline is swallowed by the empty cursor', async () => {
+    useChatStore.getState().hydrate([historyRow('c-1')]);
     const { ws, fake } = await connectAndOpen();
-    ws.requestReplay('c-1'); // the chat's first-ever open: fromSeq -1, sent
-
-    // Its full history arrives.
+    ws.requestHistory('c-1');
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c-1',
@@ -462,23 +435,16 @@ describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline'
       role: 'assistant',
       content: 'loaded',
     } as never);
-
-    // Switching tracks clears the timeline and asks again, unforced.
     useChatStore.getState().clearTimeline('c-1');
-    ws.requestReplay('c-1');
-
-    const replays = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .filter((e) => e.type === 'chat.replay' && e.chatId === 'c-1');
-    expect(replays).toHaveLength(1); // the second ask never went out
+    ws.requestHistory('c-1');
+    expect(historyAsks(fake, 'c-1')).toHaveLength(1);
     ws.close();
   });
 
   it('`force` bypasses the cursor so the cleared timeline actually refills', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
+    useChatStore.getState().hydrate([historyRow('c-1')]);
     const { ws, fake } = await connectAndOpen();
-    ws.requestReplay('c-1');
-
+    ws.requestHistory('c-1');
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c-1',
@@ -486,45 +452,22 @@ describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline'
       role: 'assistant',
       content: 'loaded',
     } as never);
-
     useChatStore.getState().clearTimeline('c-1');
-    ws.requestReplay('c-1', { force: true });
-
-    const replays = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .filter((e) => e.type === 'chat.replay' && e.chatId === 'c-1');
-    expect(replays).toHaveLength(2);
-    expect(replays[1]?.fromSeq).toBe(-1);
+    ws.requestHistory('c-1', { force: true });
+    const asks = historyAsks(fake, 'c-1');
+    expect(asks).toHaveLength(2);
+    expect(asks[1]).not.toHaveProperty('after');
     ws.close();
   });
 });
 
-describe("PatchWs replay cursor vs. the hub dropping this surface's subscriptions", () => {
-  const row = (chatId: string) => ({
-    chatId,
-    hostId: 'd1',
-    permissionMode: 'bypassPermissions' as const,
-    name: null,
-    folder: '~/x',
-    chatStatus: { state: 'idle', since: 0 },
-    status: 'active' as const,
-    pinned: false,
-    pinnedAt: null,
-    disabled: false,
-    lastUpdated: 1,
-  });
-
-  // The hub reads `chat.focus_change` with `chatId: null` as "unsubscribe from
-  // everything" and stops sending this socket any chat's detail events (the
-  // reply itself). Leave a chat for the Jobs page, the reply lands while away,
-  // come back: the cursor is unchanged, so the dedup guard swallowed the
-  // re-open's replay, nothing resubscribed the chat, and the pane showed the
-  // user's own turn with no answer (the sidebar summary still arrived, as it
-  // rides the state fanout).
-  it('re-opening a chat after focus was cleared asks for its replay again', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
+describe("PatchWs history cursor vs. the hub dropping this surface's subscriptions", () => {
+  // `chat.focus_change` with `chatId: null` is "unsubscribe from everything":
+  // re-opening the chat must ask again even from the same cursor, or nothing
+  // resubscribes it and the reply that arrived while away never renders.
+  it('re-opening a chat after focus was cleared asks for its history again', async () => {
+    useChatStore.getState().hydrate([historyRow('c-1')]);
     const { ws, fake } = await connectAndOpen();
-    fake.sent.length = 0; // drop the connect-time background sync of c-1
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c-1',
@@ -532,105 +475,36 @@ describe("PatchWs replay cursor vs. the hub dropping this surface's subscription
       role: 'user',
       content: 'why',
     } as never);
-    ws.requestReplay('c-1'); // fromSeq 0
-
+    ws.requestHistory('c-1');
     ws.send({ type: 'chat.focus_change', chatId: null } as never);
-    ws.requestReplay('c-1'); // re-open: same cursor as before
-
-    const replays = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string })
-      .filter((e) => e.type === 'chat.replay' && e.chatId === 'c-1');
-    expect(replays).toHaveLength(2);
+    ws.requestHistory('c-1');
+    expect(historyAsks(fake, 'c-1')).toHaveLength(2);
     ws.close();
   });
 
   it('focusing a chat does not drop the cursor of another', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
+    useChatStore.getState().hydrate([historyRow('c-1')]);
     const { ws, fake } = await connectAndOpen();
-    ws.requestReplay('c-1');
+    ws.requestHistory('c-1');
     ws.send({ type: 'chat.focus_change', chatId: 'c-2' } as never);
-    ws.requestReplay('c-1');
-    const replays = fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string })
-      .filter((e) => e.type === 'chat.replay' && e.chatId === 'c-1');
-    expect(replays).toHaveLength(1);
+    ws.requestHistory('c-1');
+    expect(historyAsks(fake, 'c-1')).toHaveLength(1);
     ws.close();
   });
 });
 
-describe('PatchWs batched replay (spec/12 § Sequence-based replay)', () => {
-  const row = (chatId: string) => ({
-    chatId,
-    hostId: 'd1',
-    permissionMode: 'bypassPermissions' as const,
-    name: null,
-    folder: '~/x',
-    chatStatus: { state: 'idle', since: 0 },
-    status: 'active' as const,
-    pinned: false,
-    pinnedAt: null,
-    disabled: false,
-    lastUpdated: 1,
+describe('PatchWs history pages (spec/03 § Chat history)', () => {
+  const page = (entries: unknown[], pending: unknown[] = []) => ({
+    type: 'chat.history',
+    requestId: 'r',
+    chatId: 'c1',
+    entries,
+    more: false,
+    through: 9,
+    pending,
+    queued: [],
   });
 
-  it('asks for the answer as a batch, because it knows how to read one', async () => {
-    // Opt-in by the SURFACE: a host updates on its own schedule, and one
-    // that started batching at a client which did not understand the frame
-    // would leave that chat looking empty.
-    useChatStore.getState().hydrate([row('c-1')]);
-    const { ws, fake } = await connectAndOpen();
-    ws.requestReplay('c-1');
-    const replay = fake.sent
-      .map((x) => JSON.parse(x) as { type: string; batch?: boolean; chatId?: string })
-      .find((e) => e.type === 'chat.replay' && e.chatId === 'c-1');
-    expect(replay?.batch).toBe(true);
-    ws.close();
-  });
-
-  it('applies a whole batch in one commit, in order, with no coalescing wait', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
-    const { ws, fake } = await connectAndOpen();
-    fake.receive({
-      type: 'chat.replay_batch',
-      chatId: 'c-1',
-      done: true,
-      events: [
-        { type: 'chat.message', chatId: 'c-1', seq: 0, role: 'user', content: 'first' },
-        { type: 'chat.message', chatId: 'c-1', seq: 1, role: 'assistant', content: 'second' },
-        { type: 'chat.message', chatId: 'c-1', seq: 2, role: 'user', content: 'third' },
-      ],
-    });
-    // Synchronously on arrival — not after the 16ms live-path coalescing
-    // window. There is nothing still coming that it could coalesce with.
-    const timeline = useChatStore.getState().timelines['c-1'] ?? [];
-    expect(timeline.map((e) => e.content)).toEqual(['first', 'second', 'third']);
-    ws.close();
-  });
-
-  it('several chunks of one replay build the transcript in order', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
-    const { ws, fake } = await connectAndOpen();
-    fake.receive({
-      type: 'chat.replay_batch',
-      chatId: 'c-1',
-      done: false,
-      events: [{ type: 'chat.message', chatId: 'c-1', seq: 0, role: 'user', content: 'one' }],
-    });
-    fake.receive({
-      type: 'chat.replay_batch',
-      chatId: 'c-1',
-      done: true,
-      events: [{ type: 'chat.message', chatId: 'c-1', seq: 1, role: 'assistant', content: 'two' }],
-    });
-    expect((useChatStore.getState().timelines['c-1'] ?? []).map((e) => e.content)).toEqual([
-      'one',
-      'two',
-    ]);
-    ws.close();
-  });
-});
-
-describe('PatchWs chat.replay_batch — inner events get the same side effects as live ones', () => {
   beforeEach(() => {
     useChatStore
       .getState()
@@ -638,28 +512,38 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
     useUiStore.setState({ pendingDiffByChat: {} });
   });
 
-  const batch = (events: unknown[]) => ({
-    type: 'chat.replay_batch',
-    chatId: 'c1',
-    done: true,
-    events,
-  });
-
-  it('a still-pending Edit request replayed in a batch reopens the diff', async () => {
+  it('applies a whole page in one commit, in order, with no coalescing wait', async () => {
     const { ws, fake } = await connectAndOpen();
     fake.receive(
-      batch([
-        {
-          type: 'chat.permission_request',
-          chatId: 'c1',
-          requestId: 'r1',
-          seq: 1,
-          request: {
-            tool: 'Edit',
-            args: { file_path: '/proj/a.ts', old_string: 'old', new_string: 'new' },
-          },
-        },
+      page([
+        { type: 'chat.message', chatId: 'c1', seq: 0, role: 'user', content: 'first' },
+        { type: 'chat.message', chatId: 'c1', seq: 1, role: 'assistant', content: 'second' },
+        { type: 'chat.message', chatId: 'c1', seq: 2, role: 'user', content: 'third' },
       ]),
+    );
+    const timeline = useChatStore.getState().timelines['c1'] ?? [];
+    expect(timeline.map((e) => e.content)).toEqual(['first', 'second', 'third']);
+    ws.close();
+  });
+
+  it('a still-pending Edit request in a page reopens the diff', async () => {
+    const { ws, fake } = await connectAndOpen();
+    fake.receive(
+      page(
+        [],
+        [
+          {
+            type: 'chat.permission_request',
+            chatId: 'c1',
+            requestId: 'r1',
+            seq: 1,
+            request: {
+              tool: 'Edit',
+              args: { file_path: '/proj/a.ts', old_string: 'old', new_string: 'new' },
+            },
+          },
+        ],
+      ),
     );
     expect(useUiStore.getState().pendingDiffByChat['c1']).toMatchObject({
       requestId: 'r1',
@@ -668,45 +552,34 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
     ws.close();
   });
 
-  it('a replayed permission request raises the mid-voice banner', async () => {
+  it('a pending permission request in a page raises the mid-voice banner', async () => {
     useVoiceStore.getState().startNote('c1', 'ptt');
     const { ws, fake } = await connectAndOpen();
     fake.receive(
-      batch([
-        {
-          type: 'chat.permission_request',
-          chatId: 'c1',
-          requestId: 'r1',
-          seq: 1,
-          request: { tool: 'Bash', args: { command: 'ls' } },
-        },
-      ]),
+      page(
+        [],
+        [
+          {
+            type: 'chat.permission_request',
+            chatId: 'c1',
+            requestId: 'r1',
+            seq: 1,
+            request: { tool: 'Bash', args: { command: 'ls' } },
+          },
+        ],
+      ),
     );
     expect(useVoiceStore.getState().permission?.requestId).toBe('r1');
     ws.close();
   });
 
-  it('a replayed chat.state clears a stale voice banner', async () => {
+  it('an answered question in a page resolves its card and clears the banner', async () => {
     useVoiceStore
       .getState()
       .setPermission({ requestId: 'r1', chatId: 'c1', summary: 'Approve Bash?' });
     const { ws, fake } = await connectAndOpen();
     fake.receive(
-      batch([
-        { type: 'chat.state', chatId: 'c1', seq: 2, chatStatus: { state: 'idle', since: 0 } },
-      ]),
-    );
-    expect(useVoiceStore.getState().permission).toBeNull();
-    ws.close();
-  });
-
-  it('a replayed request + response resolves the card and clears the banner, in order', async () => {
-    useVoiceStore
-      .getState()
-      .setPermission({ requestId: 'r1', chatId: 'c1', summary: 'Approve Bash?' });
-    const { ws, fake } = await connectAndOpen();
-    fake.receive(
-      batch([
+      page([
         {
           type: 'chat.permission_request',
           chatId: 'c1',
@@ -714,7 +587,7 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
           seq: 1,
           request: { tool: 'Bash', args: { command: 'ls' } },
         },
-        { type: 'chat.permission_response', chatId: 'c1', requestId: 'r1', seq: 2, approve: true },
+        { type: 'chat.permission_response', chatId: 'c1', requestId: 'r1', approve: true },
       ]),
     );
     expect(useVoiceStore.getState().permission).toBeNull();
@@ -724,70 +597,11 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
     expect(card?.permissionResolved).toBe('approve');
     ws.close();
   });
-
-  it('a replayed pending-spawn chat.error surfaces its toast', async () => {
-    const { ws, fake } = await connectAndOpen();
-    fake.receive(
-      batch([
-        {
-          type: 'chat.error',
-          chatId: 'pending-spawn',
-          error: { code: 'invalid_frame', message: 'replayed refusal' },
-          seq: -1,
-        },
-      ]),
-    );
-    expect(useUiStore.getState().errors.some((e) => e.message.includes('replayed refusal'))).toBe(
-      true,
-    );
-    ws.close();
-  });
 });
 
 describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)', () => {
-  const row = (chatId: string) => ({
-    chatId,
-    hostId: 'd1',
-    permissionMode: 'bypassPermissions' as const,
-    name: null,
-    folder: '~/x',
-    chatStatus: { state: 'idle', since: 0 },
-    status: 'active' as const,
-    pinned: false,
-    pinnedAt: null,
-    disabled: false,
-    lastUpdated: 1,
-  });
-
-  function replaysSent(fake: FakeWS): Array<{ chatId?: string; fromSeq?: number }> {
-    return fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .filter((e) => e.type === 'chat.replay');
-  }
-
-  it('syncs a metadata-only roster in the background ONE chat at a time on connect', async () => {
-    // spec/12 § Offline reading — GET /api/chats hydrates the sidebar and each
-    // transcript is then fetched in the background, serially, so connect never
-    // kicks off one inbound event stream per known chat at once.
-    useChatStore.getState().hydrate([row('c-1'), row('c-2'), row('c-3')]);
-    const { ws, fake } = await connectAndOpen();
-    expect(replaysSent(fake).map((r) => r.chatId)).toEqual(['c-1']);
-    ws.close();
-  });
-
-  it('still replays the chat the surface has open, even with no transcript yet', async () => {
-    useChatStore.getState().hydrate([row('c-1'), row('c-2')]);
-    useChatStore.getState().setActiveChat('c-2');
-    const { ws, fake } = await connectAndOpen();
-    const replays = replaysSent(fake);
-    // The open chat first; then ONE background sync of the other.
-    expect(replays.map((r) => r.chatId)).toEqual(['c-2', 'c-1']);
-    expect(replays[0]?.fromSeq).toBe(-1);
-    ws.close();
-  });
-
-  it('still replays chats whose transcript is already rendered, so a reconnect misses nothing', async () => {
-    useChatStore.getState().hydrate([row('c-1'), row('c-2')]);
+  it('asks for no chat history on connect; the feed follows only the chats held', async () => {
+    useChatStore.getState().hydrate([historyRow('c-1'), historyRow('c-2'), historyRow('c-3')]);
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c-1',
@@ -796,124 +610,33 @@ describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)
       content: 'already rendered',
     } as never);
     const { ws, fake } = await connectAndOpen();
-    const replays = replaysSent(fake);
-    expect([...new Set(replays.map((r) => r.chatId))]).toEqual(['c-1']);
-    expect(replays[0]?.fromSeq).toBe(4);
+    fake.receive(authOk);
+    expect(sentOf(fake, 'chat.history_request')).toEqual([]);
+    expect(feedFollows(fake)).toEqual([{ chatId: 'c-1', after: 4 }]);
+    ws.close();
+  });
+
+  it('follows the chat on screen, even one the roster does not list yet', async () => {
+    useChatStore.getState().hydrate([historyRow('c-1')]);
+    useChatStore.getState().setActiveChat('c-deep-link');
+    const { ws, fake } = await connectAndOpen();
+    fake.receive(authOk);
+    expect(feedFollows(fake)).toEqual([{ chatId: 'c-deep-link', after: -1 }]);
     ws.close();
   });
 });
 
-describe('PatchWs replays held chats when a host comes back', () => {
-  // A host restart (a deploy, a crash) does not drop this surface's socket to
-  // the SERVER. Before this, nothing asked for what was missed: the connect
-  // sweep only runs on a fresh socket and ChatRoute only replays when the chat
-  // or the link changes identity — so a chat sat holding whatever it had when
-  // the host went down, silently missing every event since.
-  const row = (chatId: string, hostId = 'd1') => ({
-    chatId,
-    hostId,
-    permissionMode: 'bypassPermissions' as const,
-    name: null,
-    folder: '~/x',
-    chatStatus: { state: 'idle', since: 0 },
-    status: 'active' as const,
-    pinned: false,
-    pinnedAt: null,
-    disabled: false,
-    lastUpdated: 1,
-  });
-
-  function replaysSent(fake: FakeWS): Array<{ chatId?: string; fromSeq?: number }> {
-    return fake.sent
-      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
-      .filter((e) => e.type === 'chat.replay');
-  }
-
-  it('replays the open chat from its rendered cursor when its host returns', async () => {
-    useChatStore.getState().hydrate([row('c-1')]);
+describe('PatchWs when a host comes back', () => {
+  // A returning host's events reach this surface live from the server's record,
+  // so nothing is asked of it chat by chat.
+  it('asks for no history', async () => {
+    useChatStore.getState().hydrate([historyRow('c-1')]);
     useChatStore.getState().setActiveChat('c-1');
     const { ws, fake } = await connectAndOpen();
-    useChatStore.getState().applyEvent({
-      type: 'chat.message',
-      chatId: 'c-1',
-      seq: 7,
-      role: 'assistant',
-      content: 'rendered before the host went down',
-    } as never);
-    const before = replaysSent(fake).length;
-
+    fake.receive(authOk);
+    const before = sentOf(fake, 'chat.history_request').length;
     fake.receive({ type: 'host.online', hostId: 'd1' });
-
-    const after = replaysSent(fake).slice(before);
-    expect(after.map((r) => r.chatId)).toEqual(['c-1']);
-    // From the last DURABLE seq we rendered, so the host sends only the tail
-    // we missed rather than the whole transcript again.
-    expect(after[0]?.fromSeq).toBe(7);
-    ws.close();
-  });
-
-  it('asks again even though the cursor has not moved since the last request', async () => {
-    // The dedup guard in requestReplay keys on the cursor, and after a restart
-    // it is usually the SAME number as the request that fetched the history we
-    // are now missing the tail of. Without clearing it, the request that heals
-    // the chat is dropped as a duplicate.
-    useChatStore.getState().hydrate([row('c-1')]);
-    useChatStore.getState().setActiveChat('c-1');
-    const { ws, fake } = await connectAndOpen();
-    expect(replaysSent(fake).length).toBe(1); // the connect-time sweep, fromSeq -1
-
-    fake.receive({ type: 'host.online', hostId: 'd1' });
-
-    const replays = replaysSent(fake);
-    expect(replays.length).toBe(2);
-    expect(replays[1]?.fromSeq).toBe(-1);
-    ws.close();
-  });
-
-  it('replays only the returning host, not every host', async () => {
-    useChatStore.getState().hydrate([row('c-here', 'd1'), row('c-elsewhere', 'd2')]);
-    useChatStore.getState().applyEvent({
-      type: 'chat.message',
-      chatId: 'c-here',
-      seq: 2,
-      role: 'assistant',
-      content: 'x',
-    } as never);
-    useChatStore.getState().applyEvent({
-      type: 'chat.message',
-      chatId: 'c-elsewhere',
-      seq: 3,
-      role: 'assistant',
-      content: 'y',
-    } as never);
-    const { ws, fake } = await connectAndOpen();
-    const before = replaysSent(fake).length;
-
-    fake.receive({ type: 'host.online', hostId: 'd1' });
-
-    expect(
-      replaysSent(fake)
-        .slice(before)
-        .map((r) => r.chatId),
-    ).toEqual(['c-here']);
-    ws.close();
-  });
-
-  it('does not replay a metadata-only chat nobody is looking at', async () => {
-    // Same rule as cold start: a roster row with no rendered transcript loads
-    // lazily on open, so a host restart must not fan one stream in per chat.
-    useChatStore.getState().hydrate([row('c-1'), row('c-2')]);
-    useChatStore.getState().setActiveChat('c-1');
-    const { ws, fake } = await connectAndOpen();
-    const before = replaysSent(fake).length;
-
-    fake.receive({ type: 'host.online', hostId: 'd1' });
-
-    expect(
-      replaysSent(fake)
-        .slice(before)
-        .map((r) => r.chatId),
-    ).toEqual(['c-1']);
+    expect(sentOf(fake, 'chat.history_request').length).toBe(before);
     ws.close();
   });
 });

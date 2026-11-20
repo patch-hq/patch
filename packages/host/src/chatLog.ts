@@ -873,17 +873,6 @@ export class ChatLog {
     this.fs.renameSync(tmp, path);
   }
 
-  /**
-   * The event as replay should SEND it: bulk left in the blob store, never
-   * rehydrated. Records written before per-image blobs existed still hold
-   * inline base64 (317 MB of it on this host), so this runs the same
-   * externalisation over what it read — the sha is the content, so storing it
-   * now is idempotent and the chat is permanently cheaper to open afterwards.
-   */
-  externalizeForReplay(chatId: string, event: LoggedEvent): LoggedEvent {
-    return this.externalize(chatId, event);
-  }
-
   /** The value a blob reference stands for. */
   readBlob(ref: BlobRef): unknown {
     return JSON.parse(this.fs.readFileSync(this.blobPath(ref.$blob), 'utf8') as string) as unknown;

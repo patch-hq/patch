@@ -20,7 +20,7 @@ import { openSideThreadDraft, openExistingSideThread } from '../src/lib/sideThre
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import { __setSafeAreaInsets } from './stubs/safe-area-context';
 
-const wsMock = vi.hoisted(() => ({ send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() }));
+const wsMock = vi.hoisted(() => ({ send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() }));
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 
 const apiMocks = vi.hoisted(() => ({

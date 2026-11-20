@@ -678,9 +678,9 @@ describe('WS hub — onHostEvent edge cases', () => {
     try {
       expect(() => {
         h.hostLink.emit({
-          type: 'chat.replay',
+          type: 'chat.input_ack',
           chatId: 'chat-ghost',
-          fromSeq: 0,
+          localId: 'L1',
           forSurfaceId: 'srf-does-not-exist',
         } as unknown as WireEvent);
       }).not.toThrow();

@@ -13,7 +13,7 @@ import { __setLocalSearchParams } from './stubs/expo-router';
 
 const sendMock = vi.fn();
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ send: sendMock, safeSend: vi.fn(), requestReplay: vi.fn() }),
+  getWs: () => ({ send: sendMock, safeSend: vi.fn(), requestHistory: vi.fn() }),
 }));
 vi.mock('../src/api/rest', () => ({
   api: {

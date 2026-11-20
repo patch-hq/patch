@@ -216,7 +216,7 @@ describe('ChatRoute composer isolation across navigation', () => {
     // (the send path is proved in ChatRoute.test.tsx).
     setActiveWs({
       send: () => {},
-      requestReplay: () => {},
+      requestHistory: () => {},
     } as unknown as Parameters<typeof setActiveWs>[0]);
     render(
       <MemoryRouter initialEntries={['/chats/chat_a']}>
@@ -231,7 +231,7 @@ describe('ChatRoute composer isolation across navigation', () => {
                 <Link to="/chats/chat_b" data-testid="switch-to-b">
                   b
                 </Link>
-                <ChatRoute ws={{ send: () => {}, requestReplay: () => {} } as never} />
+                <ChatRoute ws={{ send: () => {}, requestHistory: () => {} } as never} />
               </>
             }
           />

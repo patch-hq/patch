@@ -1000,17 +1000,6 @@ describe('src/index.ts main() — full host boot', () => {
         content: 'hi',
       });
 
-      // --- chat.replay (handleServerEvent switch, with forSurfaceId wrap) ---
-      boot.fakeServer.send({
-        type: 'chat.replay',
-        chatId: 'chat-main-1',
-        fromSeq: -1,
-        forSurfaceId: 'surface-1',
-      });
-      await boot.fakeServer.waitForFrame(
-        (e) => 'forSurfaceId' in e && (e as { forSurfaceId?: string }).forSurfaceId === 'surface-1',
-      );
-
       // --- chat.unqueue_request / resume_request / pin_request / archive_request
       //     (handleServerEvent switch) ---
       boot.fakeServer.send({
@@ -5415,97 +5404,6 @@ describe('handleServerEvent', () => {
     const { sender, sent } = captureSender();
     await handleServerEvent({ type: 'surface.heartbeat' }, daemon, sender, silent);
     expect(sent).toHaveLength(0);
-  });
-
-  it('chat.replay wraps every replayed event with forSurfaceId', async () => {
-    const { daemon } = makeHost();
-    const folder = makeFolder();
-    const chatId = await daemon.spawnChat({ folder });
-    // A freshly-spawned chat with no turns has nothing in its replay ring —
-    // send one so there's at least one event to wrap.
-    await daemon.sendInput({ chatId, message: 'hi', localId: 'l1' });
-    const { sender, sent } = captureSender();
-    await handleServerEvent(
-      { type: 'chat.replay', chatId, fromSeq: -1, forSurfaceId: 'surface-9' },
-      daemon,
-      sender,
-      silent,
-    );
-    expect(sent.length).toBeGreaterThan(0);
-    for (const e of sent) {
-      expect((e as { forSurfaceId?: string }).forSurfaceId).toBe('surface-9');
-    }
-  });
-
-  it('chat.replay with no forSurfaceId does not wrap', async () => {
-    const { daemon } = makeHost();
-    const folder = makeFolder();
-    const chatId = await daemon.spawnChat({ folder });
-    await daemon.sendInput({ chatId, message: 'hi', localId: 'l1' });
-    const { sender, sent } = captureSender();
-    await handleServerEvent({ type: 'chat.replay', chatId, fromSeq: -1 }, daemon, sender, silent);
-    expect(sent.length).toBeGreaterThan(0);
-    for (const e of sent) {
-      expect('forSurfaceId' in e).toBe(false);
-    }
-  });
-
-  // spec/12 § Sequence-based replay — batching. A 2,000-event chat was 2,000
-  // separate frames across host -> server -> surface, drawn as each landed.
-  // That trickle is what a reader saw as the transcript scrolling past one
-  // message at a time.
-  it('chat.replay { batch: true } answers in batch frames carrying the same events, in order', async () => {
-    const { daemon } = makeHost();
-    const folder = makeFolder();
-    const chatId = await daemon.spawnChat({ folder });
-    await daemon.sendInput({ chatId, message: 'hi', localId: 'l1' });
-
-    const plain = captureSender();
-    await handleServerEvent(
-      { type: 'chat.replay', chatId, fromSeq: -1 },
-      daemon,
-      plain.sender,
-      silent,
-    );
-
-    const batched = captureSender();
-    await handleServerEvent(
-      { type: 'chat.replay', chatId, fromSeq: -1, batch: true },
-      daemon,
-      batched.sender,
-      silent,
-    );
-
-    // Every frame is a batch, and the last one says the transcript is whole.
-    expect(batched.sent.length).toBeGreaterThan(0);
-    for (const e of batched.sent) expect(e.type).toBe('chat.replay_batch');
-    const frames = batched.sent as Array<{ events: unknown[]; done: boolean; chatId: string }>;
-    expect(frames.at(-1)!.done).toBe(true);
-    expect(frames.every((f) => f.chatId === chatId)).toBe(true);
-    // Fewer frames than events — the whole point — carrying exactly what the
-    // unbatched answer carried, in the same order.
-    const flat = frames.flatMap((f) => f.events);
-    expect(batched.sent.length).toBeLessThan(flat.length);
-    expect(flat).toEqual(plain.sent);
-  });
-
-  it('a batched replay is still addressed to the one surface that asked', async () => {
-    const { daemon } = makeHost();
-    const folder = makeFolder();
-    const chatId = await daemon.spawnChat({ folder });
-    await daemon.sendInput({ chatId, message: 'hi', localId: 'l1' });
-    const { sender, sent } = captureSender();
-    await handleServerEvent(
-      { type: 'chat.replay', chatId, fromSeq: -1, batch: true, forSurfaceId: 'surface-9' },
-      daemon,
-      sender,
-      silent,
-    );
-    expect(sent.length).toBeGreaterThan(0);
-    for (const e of sent) {
-      expect(e.type).toBe('chat.replay_batch');
-      expect((e as { forSurfaceId?: string }).forSurfaceId).toBe('surface-9');
-    }
   });
 });
 

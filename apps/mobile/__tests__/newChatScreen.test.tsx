@@ -79,7 +79,7 @@ const { api, ApiErrorClass } = vi.hoisted(() => {
 vi.mock('../src/api/rest', () => ({ api, ApiError: ApiErrorClass }));
 const wsSend = vi.fn();
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ send: wsSend, safeSend: vi.fn(), requestReplay: vi.fn() }),
+  getWs: () => ({ send: wsSend, safeSend: vi.fn(), requestHistory: vi.fn() }),
 }));
 
 import NewChat from '../app/new-chat';

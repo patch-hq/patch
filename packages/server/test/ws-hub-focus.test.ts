@@ -222,49 +222,33 @@ describe('WS hub per-chat subscription routing', () => {
     }
   });
 
-  it('chat.replay routes the per-surface tag and daemon-emitted forSurfaceId events to one surface only', async () => {
+  it('a history request subscribes only the surface that sent it, and never reaches the host', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(44));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });
     try {
-      const a = await makeAuthedClient(h, user, 'srf-replay-A');
-      const b = await makeAuthedClient(h, user, 'srf-replay-B');
-      // A requests replay.
-      a.replay('chat-R', 0);
-      await new Promise((r) => setTimeout(r, 30));
-      const replayFwd = h.hostLink.sent.find((s) => s.event.type === 'chat.replay');
-      expect(replayFwd).toBeDefined();
-      if (replayFwd && replayFwd.event.type === 'chat.replay') {
-        expect(replayFwd.event.forSurfaceId).toBe('srf-replay-A');
-      }
-
-      // Host emits a replayed message tagged for A.
+      const a = await makeAuthedClient(h, user, 'srf-history-A');
+      const b = await makeAuthedClient(h, user, 'srf-history-B');
       const aSeen: number[] = [];
       const bSeen: number[] = [];
       a.on('chat.message', (e) => aSeen.push(e.seq));
       b.on('chat.message', (e) => bSeen.push(e.seq));
-      // Need to subscribe both to even be candidates for fan-out — but the
-      // forSurfaceId tag should override and route only to A.
-      a.send({ type: 'chat.focus_change', chatId: 'chat-R' });
-      b.send({ type: 'chat.focus_change', chatId: 'chat-R' });
+      a.history('chat-R');
       await new Promise((r) => setTimeout(r, 30));
+      expect(h.hostLink.sent.some((s) => /history|replay/.test(s.event.type))).toBe(false);
 
       h.hostLink.emit({
         type: 'chat.message',
         chatId: 'chat-R',
         role: 'assistant',
-        content: 'replay-1',
+        content: 'live-1',
         seq: 1,
-        // forSurfaceId not in the discriminated schema for chat.message, so
-        // we test routing via `forSurfaceId` on chat.replay echoes; emit a
-        // chat.message via the normal fanout path:
       });
       await new Promise((r) => setTimeout(r, 50));
-      // Both watchers see normal fanout messages:
-      expect(aSeen).toContain(1);
-      expect(bSeen).toContain(1);
+      expect(aSeen).toEqual([1]);
+      expect(bSeen).toEqual([]);
       await a.close();
       await b.close();
     } finally {

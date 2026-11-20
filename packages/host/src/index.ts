@@ -147,12 +147,8 @@ import {
   setAccountOrganization,
   type LoadClaudeOAuthOptions,
 } from '@patch/auth';
-import type { HostAccountEvent, ChatReplayBatchEvent } from '@patch/wire';
-import {
-  REPLAY_BATCH_BYTES,
-  DEFAULT_WATCH_CHECK_IN_MINUTES,
-  DEFAULT_WATCH_CHECK_IN_PROMPT,
-} from '@patch/wire';
+import type { HostAccountEvent } from '@patch/wire';
+import { DEFAULT_WATCH_CHECK_IN_MINUTES, DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 import {
   createMockSdkBackend,
   createRealSdkBackend,
@@ -710,8 +706,8 @@ async function startHost(
   }
 
   // 2. SDK backend selection. The mock writes a real JSONL transcript into the
-  // SAME projects root the host's HistoryReader reads, so patch_history /
-  // chat.replay paginate genuine persisted older events on the live stack.
+  // SAME projects root the host's HistoryReader reads, so patch_history
+  // paginates genuine persisted older events on the live stack.
   const sdkBackend: SdkBackend =
     config.sdkBackend === 'real'
       ? createRealSdkBackend()
@@ -2769,8 +2765,13 @@ async function startHost(
       // spec/15 § Secrets: publish the host-owned secret set so every
       // surface's editor is populated from the same source on (re)connect.
       sender({ type: 'secrets.list', secrets: secretsStore.list() });
-      // Only a server that keeps the whole record takes the full import.
-      if (greeting.recordImport === true && greeting.recordComplete === true) {
+      // Only a server that keeps the whole record, each entry's branch with it,
+      // takes the full import.
+      if (
+        greeting.recordImport === true &&
+        greeting.recordComplete === true &&
+        greeting.recordBranches === true
+      ) {
         recordImport?.start();
       }
     },
@@ -5137,6 +5138,12 @@ async function startHost(
     historyRemoteChat,
     sendToRemoteChat,
     emit,
+    // A side branch's entries go to the server's record only: never through the
+    // observers above, and only to a server that keeps branches (spec/04 §
+    // Parallel branches).
+    recordOnly: (event) => {
+      if (link.keepsBranches()) link.send(event);
+    },
     logger,
     mcpServer: {
       command: mcpBin.command,
@@ -8485,52 +8492,6 @@ export async function handleServerEvent(
         // when the path escapes the chat folder, and commits atomically
         // otherwise. See spec/14-design-web.md § Editor.
         daemon.writeFile(event.chatId, event.path, event.content);
-        return;
-      }
-      case 'chat.replay': {
-        // Per-surface replay: tag every emitted event with `forSurfaceId` so
-        // the server routes it to the requesting surface only.
-        const surfaceId = event.forSurfaceId;
-        const wrap = (ev: WireEvent): WireEvent =>
-          surfaceId ? ({ ...(ev as object), forSurfaceId: surfaceId } as WireEvent) : ev;
-        if (event.batch !== true) {
-          // A surface that did not ask for batches gets one frame per event,
-          // exactly as before (spec/12 § Sequence-based replay).
-          daemon.replayChat(event.chatId, event.fromSeq, (ev) => sender(wrap(ev)), event.branchId);
-          return;
-        }
-        // Batched: collect the replay and send it as a few large frames
-        // instead of thousands of small ones. The per-frame overhead across
-        // host -> server -> surface, and drawing each event as it landed,
-        // is what a reader saw as the transcript scrolling past one message
-        // at a time.
-        {
-          const chunk: WireEvent[] = [];
-          let chunkBytes = 0;
-          const flush = (done: boolean): void => {
-            if (chunk.length === 0 && !done) return;
-            sender(
-              wrap({
-                type: 'chat.replay_batch',
-                chatId: event.chatId,
-                events: chunk.splice(0) as ChatReplayBatchEvent['events'],
-                done,
-              } as WireEvent),
-            );
-            chunkBytes = 0;
-          };
-          daemon.replayChat(
-            event.chatId,
-            event.fromSeq,
-            (ev) => {
-              chunk.push(ev);
-              chunkBytes += JSON.stringify(ev).length;
-              if (chunkBytes >= REPLAY_BATCH_BYTES) flush(false);
-            },
-            event.branchId,
-          );
-          flush(true);
-        }
         return;
       }
       default:

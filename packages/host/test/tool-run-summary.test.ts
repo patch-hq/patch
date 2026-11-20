@@ -17,6 +17,7 @@ import {
   parseToolRunSummary,
   makeToolRunSummarizer,
 } from '../src/toolRunGen.js';
+import { readBack } from './helpers/readBack.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -224,9 +225,7 @@ describe('tool run summaries', () => {
     ]);
     const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
     await settle();
-    const replayed: WireEvent[] = [];
-    daemon.replayChat(chatId, -1, (e) => replayed.push(e));
-    await settle();
+    const replayed = readBack(daemon, chatId);
     expect(summaries(replayed).map((s) => [s.callIds, s.summary])).toEqual([
       [['a', 'b'], 'Read both files'],
     ]);

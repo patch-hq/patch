@@ -1,5 +1,5 @@
 // A tool call is identified by its callId: the same call arriving twice (a
-// re-delivered chat.replay, or the same call at a second seq) is one row.
+// re-delivered history read, or the same call at a second seq) is one row.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useChatStore } from '../src/stores/chatStore';

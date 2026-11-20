@@ -549,16 +549,6 @@ export class ChatRegistry {
 
   observe(event: WireEvent): void {
     if (this.gated.has(event)) return;
-    // A batched replay carries events this would otherwise have seen one by
-    // one (spec/12 § Sequence-based replay). Unpack it so asking for batches
-    // changes only HOW MANY FRAMES cross the link, never what the mirror is
-    // told — there is no `forSurfaceId` guard here, so replayed events have
-    // always reached this, and quietly dropping them with batching on would
-    // be a difference nobody asked for.
-    if (event.type === 'chat.replay_batch') {
-      for (const inner of event.events) this.observe(inner as WireEvent);
-      return;
-    }
     if (event.type === 'folders.list') {
       this.syncedHosts.add(event.hostId);
       // The host has finished telling us what it has: a restored chat of this

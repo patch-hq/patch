@@ -68,6 +68,13 @@ describe('chat registry across a server restart', () => {
       pinned: false,
       folder: '/work/j',
     });
+    first.hostLink.emit({
+      type: 'chat.message',
+      chatId: CHAT,
+      role: 'user',
+      content: 'hi',
+      seq: 0,
+    });
     await first.built.app.close(); // flushes the saved mirror
 
     const { built, hostLink, jwt } = await boot();
@@ -89,19 +96,12 @@ describe('chat registry across a server restart', () => {
       const active = await built.app.inject({ method: 'GET', url: '/api/chats', headers });
       expect((active.json() as { chats: unknown[] }).chats).toHaveLength(0);
 
+      // History comes from the server's record; the absent host is never asked.
+      const asked: string[] = [];
       const originalSend = hostLink.sendTo.bind(hostLink);
       hostLink.sendTo = (hostId, surfaceId, event) => {
+        asked.push(event.type);
         originalSend(hostId, surfaceId, event);
-        if (event.type === 'patch.chat_history.request') {
-          setImmediate(() =>
-            hostLink.emit({
-              type: 'patch.chat_history.response',
-              requestId: event.requestId,
-              ok: true,
-              events: [{ type: 'chat.message', chatId: CHAT, role: 'user', content: 'hi', seq: 0 }],
-            }),
-          );
-        }
       };
       const hist = await built.app.inject({
         method: 'GET',
@@ -110,6 +110,7 @@ describe('chat registry across a server restart', () => {
       });
       expect(hist.statusCode).toBe(200);
       expect((hist.json() as { events: { content: string }[] }).events[0]?.content).toBe('hi');
+      expect(asked.filter((t) => t.includes('history'))).toEqual([]);
     } finally {
       await built.app.close();
     }

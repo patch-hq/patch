@@ -19,7 +19,7 @@ const apiMocks = {
 };
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
-const wsMock = { connect: vi.fn(), send: vi.fn(), safeSend: vi.fn(), requestReplay: vi.fn() };
+const wsMock = { connect: vi.fn(), send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({
   getWs: () => wsMock,
   resetWs: vi.fn(),

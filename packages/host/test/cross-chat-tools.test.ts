@@ -364,7 +364,7 @@ describe('agents cannot start agents', () => {
 });
 
 describe('patch_spawn records the chat that launched the new one', () => {
-  it('announces parentChatId on chat.spawned, replays it, and keeps it in meta', async () => {
+  it('announces parentChatId on chat.spawned and keeps it in meta', async () => {
     const { daemon, jobs, folder, events } = setup();
     const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
     try {
@@ -378,10 +378,6 @@ describe('patch_spawn records the chat that launched the new one', () => {
       const spawned = events.find((e) => e.type === 'chat.spawned' && e.chatId === chatId);
       expect(spawned).toMatchObject({ parentChatId: 'caller-chat' });
       expect(daemon.chatState.get(chatId)?.spawnedByChatId).toBe('caller-chat');
-
-      const replayed: WireEvent[] = [];
-      daemon.replayChat(chatId, 0, (e) => replayed.push(e));
-      expect(replayed[0]).toMatchObject({ type: 'chat.spawned', parentChatId: 'caller-chat' });
 
       // A chat nobody spawned carries no parent.
       const plain = await daemon.spawnChat({ folder });

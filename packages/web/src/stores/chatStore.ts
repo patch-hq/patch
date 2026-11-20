@@ -275,7 +275,7 @@ interface ChatState {
   /**
    * Apply a run of events as a SINGLE commit.
    *
-   * A `chat.replay` re-emits a whole transcript as one frame per entry —
+   * A history page delivers many entries at once —
    * measured at 582 events on a busy chat. One commit per event meant one
    * render of the whole stream per message, so a chat visibly filled in a
    * message at a time while the scroll chased the growing content. The fold is
@@ -406,14 +406,14 @@ interface ChatState {
   ): void;
   /**
    * Discard whatever this row's `pendingPermissions` currently holds, right
-   * before a `chat.replay` is requested (`ws.ts`'s `requestReplay`). A host
+   * before a history read is requested (`ws.ts`'s `requestHistory`). A host
    * restart wipes its in-memory `pendingPermissionEvents`/`pendingPermissions`
    * Maps (chatRunner.ts) with no wire event to say so — there is no
    * `chat.permission_response` for a request the host has simply forgotten
    * — so a client that missed the real resolution is stuck showing `permission`
    * forever otherwise (confirmed live: a chat with `activity: idle`, no
    * `declaredStatus`, no pending-decisions record server-side, still drawing
-   * the indigo badge). `replayChat` (chatRunner.ts) re-emits
+   * the indigo badge). the server's history answer (`pending`) carries
    * `chat.permission_request` ONLY for entries still in its live map, so
    * treating a replay as the authoritative resync — clear first, let the
    * incoming stream re-establish anything genuinely still open — matches the
@@ -728,7 +728,7 @@ export interface ChatEventEntry {
   /**
    * Set on an OPTIMISTIC outgoing user message (rendered locally the instant
    * the composer sends, before the host persists it). The matching persisted
-   * `chat.message` that arrives on a later `chat.replay`/reconnect is reconciled
+   * `chat.message` that arrives on a later history read/reconnect is reconciled
    * against this localId so the turn is never shown twice. spec/03: chat.input
    * carries a localId "for dedup".
    */
@@ -2272,7 +2272,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // Do NOT touch `lastUpdated` here. The host owns that timestamp and
           // ships it on `chat.state` (it's `msg.ts` for the real message, not the
           // moment a frame happens to arrive at this client). Bumping it on every
-          // `chat.message` would corrupt it during a `chat.replay`, where the
+          // `chat.message` would corrupt it during a history read, where the
           // whole history re-arrives — every replayed message would reset
           // `lastUpdated` to "now", which is exactly what defeated mark-read.
           chats[event.chatId] = {
@@ -2340,7 +2340,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
           // Reconcile an optimistic outgoing user message (rendered locally on
-          // send) with its persisted echo when it re-arrives on a `chat.replay`
+          // send) with its persisted echo when it re-arrives on a history read
           // after reconnect — match by content on an entry still carrying a
           // localId, and promote it to the real seq rather than appending a dup.
           if (event.role === 'user') {
@@ -2752,7 +2752,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             lastSeq: Math.max(row.lastSeq, event.seq),
           };
           // ALREADY HELD (see the `chat.message` / `chat.error` reconciliation
-          // above): a chat.replay can re-arrive for a transcript we've already
+          // above): a history read can re-arrive for a transcript we've already
           // rendered — opening a chat requests it, and the socket's own connect
           // handler asks again for every held chat a moment later, both from
           // `fromSeq: -1`. Without this guard the re-delivered call was appended
@@ -2832,7 +2832,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // replay-dedup guard below.
           const row = ensureRow(event.chatId);
           const existingEntry = row.providerContext?.[event.providerType];
-          // A chat.replay can re-deliver an event already applied (opening a
+          // A history read can re-deliver an event already applied (opening a
           // chat re-asks from fromSeq: -1, same as chat.tool_call/tool_result
           // above) — without this guard every reopen would double-count.
           if (existingEntry && event.seq <= existingEntry.lastSeq) {
@@ -2906,12 +2906,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const row = ensureRow(event.chatId);
           // ALREADY HELD — the same re-delivered-replay guard as chat.tool_call /
           // chat.tool_result above, but this event reaches it by a WIDER path.
-          // `replayChat` in the host (G2-d1) deliberately re-emits the canonical
+          // the server's history answer deliberately carries the canonical
           // `chat.permission_request` for every STILL-PENDING permission on the
           // chat, and that re-emit is NOT gated on the replay's `fromSeq` the way
           // the transcript events are. So every subsequent replay re-delivers it —
           // not only two racing from `fromSeq: -1` (which ws.ts's
-          // `lastReplayCursor` already suppresses), but the ordinary "leave a chat
+          // `lastHistoryCursor` already suppresses), but the ordinary "leave a chat
           // with a pending Write approval and come back" replay from a further-on
           // cursor. Without this guard that drew the Approve/Deny card twice.
           //
@@ -2981,7 +2981,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // The chat the user is currently viewing is, by definition, read: anything
     // that lands while it's open has been seen. Pin its read watermark to its
-    // `lastSeq` so the post-open `chat.replay` (which raises `lastSeq` AFTER the
+    // `lastSeq` so the post-open history read (which raises `lastSeq` AFTER the
     // mount-time markRead already ran) does not re-flip it to unread, and so
     // genuinely-new live messages in the open chat don't show a stale `done`.
     //
@@ -3334,7 +3334,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const row = get().chats[chatId];
     if (!row) return;
     // Advance the read watermark to whatever seq we've seen so far. New activity
-    // (seq > this) re-marks the chat unread; a `chat.replay` of older seqs does
+    // (seq > this) re-marks the chat unread; a history read of older seqs does
     // not. Never lower the watermark — guards against an out-of-order call.
     const nextRead = Math.max(row.lastReadSeq, row.lastSeq);
     if (nextRead === row.lastReadSeq) return;

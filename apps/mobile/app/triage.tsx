@@ -37,7 +37,7 @@ export default function TriageScreen(): React.ReactElement {
 
   // The transcript of a chat nobody has opened is not loaded yet; ask for it.
   React.useEffect(() => {
-    if (currentId) getWs().requestReplay(currentId);
+    if (currentId) getWs().requestHistory(currentId);
   }, [currentId]);
   React.useEffect(() => {
     setDraft('');

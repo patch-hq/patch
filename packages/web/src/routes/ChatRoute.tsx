@@ -602,7 +602,7 @@ export function ChatRoute({
   // The device's own copy is painted FIRST (spec/12 § Cold start): a chat you
   // have opened before is on screen immediately, even offline, and the ask
   // that follows is only for what is newer than the last seq it holds —
-  // `requestReplay` derives its cursor from the timeline, so feeding the
+  // `requestHistory` derives its cursor from the timeline, so feeding the
   // cache in is all it takes. Nothing is re-downloaded just because the app
   // restarted.
   useEffect(() => {
@@ -630,7 +630,7 @@ export function ChatRoute({
           }
         }
       }
-      if (!cancelled) ws.requestReplay(chatId);
+      if (!cancelled) ws.requestHistory(chatId);
     })();
     void trimCache();
     return () => {
@@ -639,7 +639,7 @@ export function ChatRoute({
   }, [chatId, ws]);
 
   // A replay can be lost without anyone being told — the host was restarting
-  // when it went out — and the same-cursor guard in `requestReplay` would then
+  // when it went out — and the same-cursor guard in `requestHistory` would then
   // swallow every later ask, leaving "No messages yet" on a chat that has
   // history. While an opened chat is still empty, ask again with backoff.
   // Forced, because the cursor is exactly what the lost request carried.
@@ -655,7 +655,7 @@ export function ChatRoute({
         console.warn(
           `[patch] chat ${chatId} still empty after open — asking for its transcript again`,
         );
-        ws.requestReplay(chatId, { force: true });
+        ws.requestHistory(chatId, { force: true });
         attempt += 1;
         schedule();
       }, EMPTY_RETRY_DELAYS_MS[attempt]);
@@ -695,7 +695,7 @@ export function ChatRoute({
         return;
       }
       useChatStore.getState().clearTimeline(chatId);
-      ws.requestReplay(chatId, { force: true });
+      ws.requestHistory(chatId, { force: true });
       return;
     }
     cachedBranch.current = activeBranchId;
@@ -1813,8 +1813,8 @@ export function ChatRoute({
         ws.send({ type: 'chat.branch_switch_request', chatId, branchId });
         // force: the just-cleared timeline recomputes fromSeq -1, which can
         // collide with the cursor cached by this chat's very first load
-        // (see api/ws.ts's requestReplay) and get silently dropped.
-        ws.requestReplay(chatId, { force: true });
+        // (see api/ws.ts's requestHistory) and get silently dropped.
+        ws.requestHistory(chatId, { force: true });
       } catch (err) {
         pushError(failed('switching track'), undefined, (err as Error).message);
       }
