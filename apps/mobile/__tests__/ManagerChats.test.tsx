@@ -78,24 +78,22 @@ beforeEach(() => {
 
 describe('ManagerChatsList', () => {
   it('lists active chats needs-you first, then running, then by recency; no special threads', () => {
-    useChatStore
-      .getState()
-      .hydrate([
-        listRow('idle-new', { lastUpdated: 50 }),
-        listRow('idle-old', { lastUpdated: 10 }),
-        listRow('running', { chatStatus: { state: 'running', since: 0 }, lastUpdated: 5 }),
-        listRow('asks', { lastUpdated: 2 }),
-        listRow('declared-q', {
-          lastUpdated: 3,
-          statusKind: 'question',
-          statusDeclared: true,
-          chatStatus: { state: 'waiting_for_user', since: 0 },
-        }),
-        listRow('archived', { status: 'archived', lastUpdated: 99 }),
-        listRow('snoozed', { snoozedUntil: Date.now() + 60_000, lastUpdated: 99 }),
-        listRow('thread_manager', { chatStatus: { state: 'running', since: 0 } }),
-        listRow('thread_speakers'),
-      ]);
+    useChatStore.getState().hydrate([
+      listRow('idle-new', { lastUpdated: 50 }),
+      listRow('idle-old', { lastUpdated: 10 }),
+      listRow('running', { chatStatus: { state: 'running', since: 0 }, lastUpdated: 5 }),
+      listRow('asks', { lastUpdated: 2 }),
+      listRow('declared-q', {
+        lastUpdated: 3,
+        statusKind: 'question',
+        statusDeclared: true,
+        chatStatus: { state: 'waiting_for_user', since: 0 },
+      }),
+      listRow('archived', { status: 'archived', lastUpdated: 99 }),
+      listRow('snoozed', { snoozedUntil: Date.now() + 60_000, lastUpdated: 99 }),
+      listRow('thread_manager', { chatStatus: { state: 'running', since: 0 } }),
+      listRow('thread_speakers'),
+    ]);
     askPermission('asks', 'r1');
     const r = renderRN(<ManagerChatsList />);
     expect(renderedIds(r)).toEqual(['asks', 'declared-q', 'running', 'idle-new', 'idle-old']);
@@ -142,7 +140,10 @@ describe('ManagerChatsList', () => {
   it('Stop sends a stop request for a running chat, and only a running chat has it', () => {
     useChatStore
       .getState()
-      .hydrate([listRow('run', { chatStatus: { state: 'running', since: 0 } }), listRow('idle', { lastUpdated: 9 })]);
+      .hydrate([
+        listRow('run', { chatStatus: { state: 'running', since: 0 } }),
+        listRow('idle', { lastUpdated: 9 }),
+      ]);
     const r = renderRN(<ManagerChatsList />);
     expect(queryHost(r.root, byLabel('Stop Chat idle'))).toBeNull();
     actSync(() => findHost(r.root, byLabel('Stop Chat run')).props.onPress());

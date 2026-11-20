@@ -258,7 +258,9 @@ describe('Batch view', () => {
   });
 
   it('after check-in, shows no "waiting" label and a Check in now control is absent', () => {
-    useChatStore.getState().hydrate([row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } })]);
+    useChatStore
+      .getState()
+      .hydrate([row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } })]);
     useBatchStore.setState({
       batch: batchRecord({ members: ['a'], checkedIn: true }),
       loaded: true,
@@ -386,7 +388,11 @@ describe('State filter options (Working / Waiting on you / Failed)', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'waiting-row', folder: 'work', chatStatus: { state: 'waiting_for_user', since: 0 } }),
+        row({
+          chatId: 'waiting-row',
+          folder: 'work',
+          chatStatus: { state: 'waiting_for_user', since: 0 },
+        }),
         row({ chatId: 'idle-row', folder: 'work' }),
       ]);
     const r = renderRN(<ChatsScreen />);

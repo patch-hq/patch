@@ -201,14 +201,24 @@ describe('ChatRowItem — pinned + folder conditionals', () => {
 
 describe('ChatRowItem — badge-derived title colour', () => {
   it('shows the muted ink3 title colour for a read (idle, already-visited) row', () => {
-    const readRow = makeRow({ chatStatus: { state: 'idle', since: 0 }, lastUpdated: 1, lastSeq: 1, lastReadSeq: 2 }); // read
+    const readRow = makeRow({
+      chatStatus: { state: 'idle', since: 0 },
+      lastUpdated: 1,
+      lastSeq: 1,
+      lastReadSeq: 2,
+    }); // read
     const r = renderRN(<ChatRowItem row={readRow} />);
     const title = findHost(r.root, byTitle);
     expect(title.props.style.color).toBe(lightColors.ink3);
   });
 
   it('shows the full ink title colour for a non-read (unread/done) row', () => {
-    const doneRow = makeRow({ chatStatus: { state: 'idle', since: 0 }, lastUpdated: 2, lastSeq: 2, lastReadSeq: 1 }); // done
+    const doneRow = makeRow({
+      chatStatus: { state: 'idle', since: 0 },
+      lastUpdated: 2,
+      lastSeq: 2,
+      lastReadSeq: 1,
+    }); // done
     const r = renderRN(<ChatRowItem row={doneRow} />);
     const title = findHost(r.root, byTitle);
     expect(title.props.style.color).toBe(lightColors.ink);

@@ -539,11 +539,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
     case 'waiting':
       // Anything paused ON THE USER, as the server says: a permission prompt or
       // an agent that stopped on a question (both `waiting_for_user`).
-      return (
-        badge === 'permission' ||
-        badge === 'interrupted' ||
-        badge === 'signin'
-      );
+      return badge === 'permission' || badge === 'interrupted' || badge === 'signin';
     case 'done':
       // Waiting-on-you chats are ready too: they have responded and the next
       // move is the user's, so Ready is the whole queue of things to look at.

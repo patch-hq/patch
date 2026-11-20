@@ -258,7 +258,11 @@ describe('ChatRoute — pending self-wake bar', () => {
     useChatStore.setState((st) => ({
       chats: {
         ...st.chats,
-        c1: { ...st.chats['c1']!, chatStatus: { state: 'running', since: 0 }, limitBlock: { scope: 'session' } },
+        c1: {
+          ...st.chats['c1']!,
+          chatStatus: { state: 'running', since: 0 },
+          limitBlock: { scope: 'session' },
+        },
       },
       timelines: {
         ...st.timelines,

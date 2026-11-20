@@ -253,8 +253,18 @@ describe('items memo — group by status (desktop parity)', () => {
     useChatStore
       .getState()
       .hydrate([
-        row({ chatId: 'w', name: 'Busy one', folder: 'alpha', chatStatus: { state: 'running', since: 0 } }),
-        row({ chatId: 'f', name: 'Broke one', folder: 'beta', chatStatus: { state: 'failed', since: 0 } }),
+        row({
+          chatId: 'w',
+          name: 'Busy one',
+          folder: 'alpha',
+          chatStatus: { state: 'running', since: 0 },
+        }),
+        row({
+          chatId: 'f',
+          name: 'Broke one',
+          folder: 'beta',
+          chatStatus: { state: 'failed', since: 0 },
+        }),
         row({ chatId: 'p', name: 'Pinned one', folder: 'alpha', pinned: true, pinnedAt: 1 }),
       ]);
     const r = renderRN(<ChatsScreen />);

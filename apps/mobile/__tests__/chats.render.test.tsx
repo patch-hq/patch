@@ -279,8 +279,20 @@ describe('ChatsScreen — ManagerRow', () => {
   // app — matches the web sidebar's Manager block (spec/14 § Sidebar item 2).
   it('every Manager card voice control targets Manager, whatever chat is open', () => {
     useChatStore.getState().hydrate([
-      { chatId: 'thread_manager', name: null, folder: '', chatStatus: { state: 'idle', since: 0 }, status: 'active' },
-      { chatId: 'other-chat', name: 'other', folder: '/x', chatStatus: { state: 'idle', since: 0 }, status: 'active' },
+      {
+        chatId: 'thread_manager',
+        name: null,
+        folder: '',
+        chatStatus: { state: 'idle', since: 0 },
+        status: 'active',
+      },
+      {
+        chatId: 'other-chat',
+        name: 'other',
+        folder: '/x',
+        chatStatus: { state: 'idle', since: 0 },
+        status: 'active',
+      },
     ]);
     useChatStore.getState().setActiveChat('other-chat');
     const r = renderRN(<ChatsScreen />);

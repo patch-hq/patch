@@ -54,7 +54,9 @@ describe('agent working indicator', () => {
     expect(icon()).toBe('/app/favicon-working.svg');
     expect(setAgentWorking).toHaveBeenLastCalledWith(true);
     act(() => {
-      useChatStore.setState({ chats: { a: row('a', { chatStatus: { state: 'idle', since: 0 } }) } });
+      useChatStore.setState({
+        chats: { a: row('a', { chatStatus: { state: 'idle', since: 0 } }) },
+      });
     });
     expect(icon()).toBe('/app/favicon.svg');
     expect(setAgentWorking).toHaveBeenLastCalledWith(false);
@@ -64,7 +66,12 @@ describe('agent working indicator', () => {
     render(<Host />);
     act(() => {
       useChatStore.setState({
-        chats: { a: row('a', { chatStatus: { state: 'running', since: 0 }, status: 'archived' } as Partial<ChatRow>) },
+        chats: {
+          a: row('a', {
+            chatStatus: { state: 'running', since: 0 },
+            status: 'archived',
+          } as Partial<ChatRow>),
+        },
       });
     });
     expect(icon()).toBe('/app/favicon.svg');

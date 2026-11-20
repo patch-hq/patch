@@ -3484,10 +3484,11 @@ describe('a limit pause the chat has moved past clears itself', () => {
       chatStatus: {
         state:
           (
-            { running: 'running', 'awaiting-permission': 'waiting_for_user', errored: 'failed' } as Record<
-              string,
-              string
-            >
+            {
+              running: 'running',
+              'awaiting-permission': 'waiting_for_user',
+              errored: 'failed',
+            } as Record<string, string>
           )[activity] ?? 'idle',
         since: 0,
       },

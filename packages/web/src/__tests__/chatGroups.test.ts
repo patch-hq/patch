@@ -175,10 +175,30 @@ describe('groupChats — hidden', () => {
 
   it('orders hidden: running first (oldest first), then settled newest first', () => {
     const chats = [
-      row({ chatId: 'old-idle', hidden: true, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 100 }),
-      row({ chatId: 'new-idle', hidden: true, chatStatus: { state: 'idle', since: 0 }, lastUpdated: 300 }),
-      row({ chatId: 'run-b', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 250 }),
-      row({ chatId: 'run-a', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 200 }),
+      row({
+        chatId: 'old-idle',
+        hidden: true,
+        chatStatus: { state: 'idle', since: 0 },
+        lastUpdated: 100,
+      }),
+      row({
+        chatId: 'new-idle',
+        hidden: true,
+        chatStatus: { state: 'idle', since: 0 },
+        lastUpdated: 300,
+      }),
+      row({
+        chatId: 'run-b',
+        hidden: true,
+        chatStatus: { state: 'running', since: 0 },
+        lastUpdated: 250,
+      }),
+      row({
+        chatId: 'run-a',
+        hidden: true,
+        chatStatus: { state: 'running', since: 0 },
+        lastUpdated: 200,
+      }),
     ];
     expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual([
       'run-a',
@@ -216,8 +236,18 @@ describe('groupChats — hidden', () => {
 
   it('orders running hidden chats oldest first, so a run updating settles at the bottom', () => {
     const chats = [
-      row({ chatId: 'newer', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 300 }),
-      row({ chatId: 'older', hidden: true, chatStatus: { state: 'running', since: 0 }, lastUpdated: 100 }),
+      row({
+        chatId: 'newer',
+        hidden: true,
+        chatStatus: { state: 'running', since: 0 },
+        lastUpdated: 300,
+      }),
+      row({
+        chatId: 'older',
+        hidden: true,
+        chatStatus: { state: 'running', since: 0 },
+        lastUpdated: 100,
+      }),
     ];
     expect(groupChats(chats).hidden.map((c) => c.chatId)).toEqual(['older', 'newer']);
   });
@@ -677,7 +707,12 @@ describe('stepVisibleChat', () => {
 describe('groupByStatus', () => {
   const grp = (rows: ChatRow[]) => [{ key: 'k', hostId: 'd1', folder: '~/proj', rows }];
   it('buckets rows into status headings in fixed order and drops empty ones', () => {
-    const working = row({ chatId: 'w', chatStatus: { state: 'running', since: 0 }, lastSeq: 1, lastUpdated: 5 });
+    const working = row({
+      chatId: 'w',
+      chatStatus: { state: 'running', since: 0 },
+      lastSeq: 1,
+      lastUpdated: 5,
+    });
     const ready = row({ chatId: 'r', lastSeq: 3, lastReadSeq: 1, lastUpdated: 5 });
     const read = row({ chatId: 'd', lastSeq: 3, lastReadSeq: 3, lastUpdated: 5 });
     const waiting = row({
@@ -695,8 +730,20 @@ describe('groupByStatus', () => {
     ]);
   });
   it('pools rows from every project', () => {
-    const a = row({ chatId: 'a', folder: '~/a', chatStatus: { state: 'running', since: 0 }, lastSeq: 1, lastUpdated: 5 });
-    const b = row({ chatId: 'b', folder: '~/b', chatStatus: { state: 'running', since: 0 }, lastSeq: 1, lastUpdated: 5 });
+    const a = row({
+      chatId: 'a',
+      folder: '~/a',
+      chatStatus: { state: 'running', since: 0 },
+      lastSeq: 1,
+      lastUpdated: 5,
+    });
+    const b = row({
+      chatId: 'b',
+      folder: '~/b',
+      chatStatus: { state: 'running', since: 0 },
+      lastSeq: 1,
+      lastUpdated: 5,
+    });
     const out = groupByStatus([
       { key: 'x', hostId: 'd1', folder: '~/a', rows: [a] },
       { key: 'y', hostId: 'd1', folder: '~/b', rows: [b] },

@@ -119,8 +119,12 @@ describe('deriveBadge — an idle chat with background work is not a finished on
         }),
       ),
     ).toBe('permission');
-    expect(deriveBadge(row({ backgroundTasks: 1, chatStatus: { state: 'failed', since: 0 } }))).toBe('errored');
-    expect(deriveBadge(row({ backgroundTasks: 1, chatStatus: { state: 'running', since: 0 } }))).toBe('working');
+    expect(
+      deriveBadge(row({ backgroundTasks: 1, chatStatus: { state: 'failed', since: 0 } })),
+    ).toBe('errored');
+    expect(
+      deriveBadge(row({ backgroundTasks: 1, chatStatus: { state: 'running', since: 0 } })),
+    ).toBe('working');
   });
 });
 

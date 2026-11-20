@@ -691,7 +691,11 @@ describe('PatchWs chat.replay_batch — inner events get the same side effects a
       .getState()
       .setPermission({ requestId: 'r1', chatId: 'c1', summary: 'Approve Bash?' });
     const { ws, fake } = await connectAndOpen();
-    fake.receive(batch([{ type: 'chat.state', chatId: 'c1', seq: 2, chatStatus: { state: 'idle', since: 0 } }]));
+    fake.receive(
+      batch([
+        { type: 'chat.state', chatId: 'c1', seq: 2, chatStatus: { state: 'idle', since: 0 } },
+      ]),
+    );
     expect(useVoiceStore.getState().permission).toBeNull();
     ws.close();
   });

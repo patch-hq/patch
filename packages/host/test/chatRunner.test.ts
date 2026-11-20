@@ -1950,7 +1950,9 @@ describe('Host ChatRunner', () => {
 
     /** The `turnSummary` on the frame that settled the chat to idle. */
     function settlingSummary(events: WireEvent[]): string | null | undefined {
-      const idle = asServerSees(events).filter((e) => e.type === 'chat.state' && e.activity === 'idle');
+      const idle = asServerSees(events).filter(
+        (e) => e.type === 'chat.state' && e.activity === 'idle',
+      );
       const last = idle[idle.length - 1];
       return last?.type === 'chat.state' ? last.turnSummary : undefined;
     }
@@ -2049,7 +2051,9 @@ describe('Host ChatRunner', () => {
 
       // Surfaces were told about the clear, and no frame emitted while the new
       // turn ran was still quoting the old one.
-      const cleared = asServerSees(events).filter((e) => e.type === 'chat.state' && e.turnSummary === null);
+      const cleared = asServerSees(events).filter(
+        (e) => e.type === 'chat.state' && e.turnSummary === null,
+      );
       expect(cleared.length).toBeGreaterThan(0);
       const stale = asServerSees(events).filter(
         (e) => e.type === 'chat.state' && e.turnSummary === 'Planted the top bed.',

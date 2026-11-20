@@ -1175,7 +1175,10 @@ describe('answered permission request (spec/15 § Chat detail)', () => {
   it('an approved call still running shows a spinner; it goes once the result lands', () => {
     request('r1');
     useChatStore.setState((st) => ({
-      chats: { ...st.chats, c1: { ...st.chats['c1']!, chatStatus: { state: 'running', since: 0 } } },
+      chats: {
+        ...st.chats,
+        c1: { ...st.chats['c1']!, chatStatus: { state: 'running', since: 0 } },
+      },
     }));
     const r = renderRN(<ChatDetailScreen />);
     const approve = findAllHost(r.root, (i) => i.type === 'Pressable').find((p) =>

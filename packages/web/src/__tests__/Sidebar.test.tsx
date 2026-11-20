@@ -998,8 +998,18 @@ describe('Sidebar', () => {
     useChatStore
       .getState()
       .hydrate([
-        rowFixture({ chatId: 'idle2', folder: '~/wk', lastUpdated: 300, chatStatus: { state: 'idle', since: 0 } }),
-        rowFixture({ chatId: 'work2', folder: '~/wk', lastUpdated: 1, chatStatus: { state: 'running', since: 0 } }),
+        rowFixture({
+          chatId: 'idle2',
+          folder: '~/wk',
+          lastUpdated: 300,
+          chatStatus: { state: 'idle', since: 0 },
+        }),
+        rowFixture({
+          chatId: 'work2',
+          folder: '~/wk',
+          lastUpdated: 1,
+          chatStatus: { state: 'running', since: 0 },
+        }),
       ]);
     renderInRouter();
     const rows = Array.from(document.querySelectorAll('[data-testid^="chat-row-"]')).map((el) =>
@@ -1015,8 +1025,18 @@ describe('Sidebar', () => {
     useChatStore
       .getState()
       .hydrate([
-        rowFixture({ chatId: 'idle1', folder: '~/proj', lastUpdated: 300, chatStatus: { state: 'idle', since: 0 } }),
-        rowFixture({ chatId: 'work1', folder: '~/proj', lastUpdated: 1, chatStatus: { state: 'running', since: 0 } }),
+        rowFixture({
+          chatId: 'idle1',
+          folder: '~/proj',
+          lastUpdated: 300,
+          chatStatus: { state: 'idle', since: 0 },
+        }),
+        rowFixture({
+          chatId: 'work1',
+          folder: '~/proj',
+          lastUpdated: 1,
+          chatStatus: { state: 'running', since: 0 },
+        }),
       ]);
     useChatStore.getState().applyEvent({
       type: 'chat.permission_request',
@@ -2664,7 +2684,9 @@ describe('Sidebar', () => {
     it('does not flip the badge back and forth when a stale REST snapshot lands mid-reconnect', () => {
       vi.useFakeTimers();
       // WS: chat is genuinely running.
-      useChatStore.getState().hydrate([rowFixture({ chatId: 'flick1', chatStatus: { state: 'running', since: 0 } })]);
+      useChatStore
+        .getState()
+        .hydrate([rowFixture({ chatId: 'flick1', chatStatus: { state: 'running', since: 0 } })]);
       renderInRouter();
       const row = screen.getByTestId('chat-row-flick1');
       expect(within(row).getByTestId('badge-working')).toBeInTheDocument();
@@ -2672,7 +2694,9 @@ describe('Sidebar', () => {
       // Reconnect: a `hydrate()` REST refetch lands with a stale snapshot
       // (activity briefly reported idle before the host catches up).
       act(() => {
-        useChatStore.getState().hydrate([rowFixture({ chatId: 'flick1', chatStatus: { state: 'idle', since: 0 } })]);
+        useChatStore
+          .getState()
+          .hydrate([rowFixture({ chatId: 'flick1', chatStatus: { state: 'idle', since: 0 } })]);
       });
       // Immediately after the stale snapshot, the badge must still read
       // `working` — this is the flicker the settle delay exists to prevent.
@@ -2682,7 +2706,11 @@ describe('Sidebar', () => {
       // Still within the settle window, the WS replay corrects it back.
       act(() => {
         vi.advanceTimersByTime(100); // < BADGE_SETTLE_MS
-        useChatStore.getState().mergeChats([rowFixture({ chatId: 'flick1', chatStatus: { state: 'running', since: 0 } })]);
+        useChatStore
+          .getState()
+          .mergeChats([
+            rowFixture({ chatId: 'flick1', chatStatus: { state: 'running', since: 0 } }),
+          ]);
       });
       expect(within(row).getByTestId('badge-working')).toBeInTheDocument();
 
@@ -2698,13 +2726,19 @@ describe('Sidebar', () => {
 
     it('does still update the badge for a change that holds steady past the settle window', () => {
       vi.useFakeTimers();
-      useChatStore.getState().hydrate([rowFixture({ chatId: 'flick2', chatStatus: { state: 'running', since: 0 } })]);
+      useChatStore
+        .getState()
+        .hydrate([rowFixture({ chatId: 'flick2', chatStatus: { state: 'running', since: 0 } })]);
       renderInRouter();
       const row = screen.getByTestId('chat-row-flick2');
       expect(within(row).getByTestId('badge-working')).toBeInTheDocument();
 
       act(() => {
-        useChatStore.getState().mergeChats([rowFixture({ chatId: 'flick2', chatStatus: { state: 'failed', since: 0 } })]);
+        useChatStore
+          .getState()
+          .mergeChats([
+            rowFixture({ chatId: 'flick2', chatStatus: { state: 'failed', since: 0 } }),
+          ]);
       });
       act(() => {
         vi.advanceTimersByTime(300); // > BADGE_SETTLE_MS
@@ -2720,7 +2754,12 @@ describe('Sidebar', () => {
       useChatStore
         .getState()
         .hydrate([
-          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', chatStatus: { state: 'running', since: 0 } }),
+          rowFixture({
+            chatId: 'g-work',
+            name: 'Busy',
+            folder: '/p/alpha',
+            chatStatus: { state: 'running', since: 0 },
+          }),
           rowFixture({ chatId: 'g-idle', name: 'Idle', folder: '/p/beta', lastUpdated: 5 }),
         ]);
       renderInRouter();
@@ -2745,7 +2784,12 @@ describe('Sidebar', () => {
       useChatStore
         .getState()
         .hydrate([
-          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', chatStatus: { state: 'running', since: 0 } }),
+          rowFixture({
+            chatId: 'g-work',
+            name: 'Busy',
+            folder: '/p/alpha',
+            chatStatus: { state: 'running', since: 0 },
+          }),
         ]);
       renderInRouter();
       fireEvent.click(screen.getByTestId('sidebar-grouping-status'));

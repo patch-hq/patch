@@ -63,7 +63,11 @@ const states: Array<[string, Record<string, unknown>, string]> = [
   ['read ahead of seq', { lastSeq: 2, lastReadSeq: 9 }, 'read'],
   ['background', { backgroundTasks: 2 }, 'background'],
   ['monitoring', { pendingWake: WAKE }, 'monitoring'],
-  ['unread while running', { chatStatus: { state: 'running', since: 0 }, lastSeq: 5, lastReadSeq: 1 }, 'working'],
+  [
+    'unread while running',
+    { chatStatus: { state: 'running', since: 0 }, lastSeq: 5, lastReadSeq: 1 },
+    'working',
+  ],
   [
     'unread with permission',
     {

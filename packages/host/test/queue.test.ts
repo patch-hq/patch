@@ -303,8 +303,9 @@ describe('message queueing (spec/04)', () => {
     await daemon.stopChat(chatId);
     await waitFor(() => daemon.chatState.get(chatId)?.activity === 'idle');
 
-    const settled = asServerSees(events, mark)
-      .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle');
+    const settled = asServerSees(events, mark).filter(
+      (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
+    );
     expect(settled).toHaveLength(1);
     expect((settled[0] as { turnStopped?: boolean }).turnStopped).toBe(true);
 
@@ -339,8 +340,9 @@ describe('message queueing (spec/04)', () => {
     g.releaseNext(); // the promoted turn runs to its real end
     await waitFor(() => daemon.chatState.get(chatId)?.activity === 'idle');
 
-    const settled = asServerSees(events, mark)
-      .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle');
+    const settled = asServerSees(events, mark).filter(
+      (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
+    );
     expect(settled).toHaveLength(1);
     expect((settled[0] as { turnStopped?: boolean }).turnStopped).toBe(false);
   });
@@ -387,8 +389,9 @@ describe('message queueing (spec/04)', () => {
     const mark = events.length;
     await daemon.stopChat(chatId);
 
-    const idle = asServerSees(events, mark)
-      .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle');
+    const idle = asServerSees(events, mark).filter(
+      (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
+    );
     expect(idle).toHaveLength(1);
     expect(events.slice(mark).some((e) => e.type === 'chat.stopped')).toBe(false);
   });
@@ -519,8 +522,9 @@ describe('message queueing (spec/04)', () => {
     await tick();
     expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
     expect(
-      asServerSees(events, mark)
-        .some((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle'),
+      asServerSees(events, mark).some(
+        (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
+      ),
     ).toBe(true);
   });
 
@@ -631,8 +635,9 @@ describe('message queueing (spec/04)', () => {
 
     // Exactly ONE settling frame for the whole drain, at its true end.
     expect(
-      asServerSees(events, mark)
-        .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle'),
+      asServerSees(events, mark).filter(
+        (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
+      ),
     ).toHaveLength(1);
   });
 
@@ -684,8 +689,9 @@ describe('message queueing (spec/04)', () => {
     await waitFor(() => daemon.chatState.get(chatId)?.activity === 'idle');
 
     expect(
-      asServerSees(events, mark)
-        .filter((e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle'),
+      asServerSees(events, mark).filter(
+        (e) => e.type === 'chat.state' && (e as { activity: string }).activity === 'idle',
+      ),
     ).toHaveLength(1);
   });
 

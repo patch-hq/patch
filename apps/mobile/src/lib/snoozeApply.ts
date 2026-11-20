@@ -61,9 +61,7 @@ export function applySnoozeSet(opts: {
   if (isProject && until === SNOOZE_UNTIL_COMPLETE) {
     // A project snooze until complete waits for the whole project: chats with
     // work go first, so the host sees a busy set before an idle chat joins it.
-    const ordered = [...targets].sort(
-      (a, b) => Number(isRunning(b)) - Number(isRunning(a)),
-    );
+    const ordered = [...targets].sort((a, b) => Number(isRunning(b)) - Number(isRunning(a)));
     void (async () => {
       for (const c of ordered) {
         try {

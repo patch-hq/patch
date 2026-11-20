@@ -71,7 +71,9 @@ describe('a hidden chat un-hides when it blocks on the user', () => {
     // Persisted, not only in memory — a host restart must not re-bury it.
     expect(metaStore.read(chatId)?.hidden).toBe(false);
     // And the surfaces were told, so the row moves without a reload.
-    const last = asServerSees(events).filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
+    const last = asServerSees(events)
+      .filter((e) => e.type === 'chat.state' && e.chatId === chatId)
+      .at(-1);
     expect((last as { hidden?: boolean }).hidden).toBe(false);
   });
 

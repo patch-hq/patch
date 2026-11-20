@@ -42,12 +42,14 @@ describe('badgeColor', () => {
 
 describe('previewLine', () => {
   it('prefers an explicit preview over activity-derived text', () => {
-    expect(previewLine(row({ preview: 'hello', chatStatus: { state: 'running', since: 0 } }))).toBe('hello');
+    expect(previewLine(row({ preview: 'hello', chatStatus: { state: 'running', since: 0 } }))).toBe(
+      'hello',
+    );
   });
   it('shows "waiting on you" while awaiting permission with no preview', () => {
-    expect(previewLine(row({ preview: '', chatStatus: { state: 'waiting_for_user', since: 0 } }))).toBe(
-      'waiting on you',
-    );
+    expect(
+      previewLine(row({ preview: '', chatStatus: { state: 'waiting_for_user', since: 0 } })),
+    ).toBe('waiting on you');
   });
   it('shows an ellipsis while running with no preview', () => {
     expect(previewLine(row({ preview: '', chatStatus: { state: 'running', since: 0 } }))).toBe('…');

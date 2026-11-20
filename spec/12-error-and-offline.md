@@ -58,7 +58,7 @@ The server keeps to these. A host's report of its own state is a fact and always
 | Running, Waiting for the user, Host restarting         | Host offline                  | the host's link went unannounced, or two minutes passed since it announced a restart       |
 | Host restarting, Host offline                          | Running, Waiting for the user | the host reattached and the turn is live                                                   |
 | Host restarting, Host offline                          | Interrupted                   | the host returned and the turn's process is gone                                           |
-| Running                                                | Interrupted                   | the host came back inside the offline grace and its turn's process is gone                |
+| Running                                                | Interrupted                   | the host came back inside the offline grace and its turn's process is gone                 |
 | Host restarting, Host offline                          | as the turn's outcome gives   | the host returned and its outbox reports the turn ended while it was away                  |
 | Idle, Interrupted, Failed                              | Queued for an offline host    | a message was held for the chat's offline host                                             |
 | Queued for an offline host                             | Running                       | the host returned and took the message                                                     |

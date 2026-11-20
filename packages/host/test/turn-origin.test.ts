@@ -474,7 +474,9 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     // A turn cut off is not re-run behind anyone's back (spec/12 § Continue):
     // nothing settles, and the chat waits as Interrupted for Continue.
     expect(settledOrigins(events, chatId)).toEqual([]);
-    const states = asServerSees(events).filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    const states = asServerSees(events).filter(
+      (e) => e.type === 'chat.state' && e.chatId === chatId,
+    );
     expect(states.at(-1)).toMatchObject({ interrupted: true });
   });
 });

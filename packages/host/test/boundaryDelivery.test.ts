@@ -423,7 +423,9 @@ describe('the host log and the server (spec/01 § Message log)', () => {
     const { daemon, events, folder } = setup(echo);
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'a', localId: 'A' });
-    const states = asServerSees(events).filter((e) => e.type === 'chat.state') as Array<{ lastSeq?: number }>;
+    const states = asServerSees(events).filter((e) => e.type === 'chat.state') as Array<{
+      lastSeq?: number;
+    }>;
     const last = states.at(-1)!.lastSeq;
     const messageSeqs = events
       .filter((e) => e.type === 'chat.message')

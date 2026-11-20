@@ -11,7 +11,8 @@ export function awaitsReply(row: ChatRow): boolean {
   if (row.status !== 'active' || row.hidden === true) return false;
   // Waiting on the user with no approval pending is the agent's own question,
   // as the server says (spec/05 § Chat status); a reply answers it.
-  const asking = row.chatStatus?.state === 'waiting_for_user' && row.pendingPermissions.length === 0;
+  const asking =
+    row.chatStatus?.state === 'waiting_for_user' && row.pendingPermissions.length === 0;
   return deriveBadge(row) === 'done' || asking || row.statusKind === 'report';
 }
 

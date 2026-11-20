@@ -1745,9 +1745,7 @@ export function Composer({
   const showStop =
     !edit &&
     modelHasCapability(row?.model, 'interrupt') &&
-    (running ||
-      (statusOf(row) === 'waiting_for_user' && !onlyQuestionsPending) ||
-      pendingSend) &&
+    (running || (statusOf(row) === 'waiting_for_user' && !onlyQuestionsPending) || pendingSend) &&
     !resolving &&
     draft.trim().length === 0 &&
     attachments.length === 0 &&

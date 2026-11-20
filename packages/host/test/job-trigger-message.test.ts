@@ -190,7 +190,9 @@ describe('job trigger turn (spec/08 § Action, spec/14 § Job trigger turn)', ()
     // Nothing is re-sent, with a hidden reminder or otherwise (spec/12 §
     // Continue): the cut-off tick is reported as a fact and waits for Continue.
     expect(userMessages(events, chatId)).toHaveLength(0);
-    const states = asServerSees(events).filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    const states = asServerSees(events).filter(
+      (e) => e.type === 'chat.state' && e.chatId === chatId,
+    );
     expect(states.at(-1)).toMatchObject({ interrupted: true });
   });
 });

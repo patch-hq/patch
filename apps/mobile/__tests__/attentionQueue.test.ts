@@ -46,12 +46,18 @@ describe('needsAttention', () => {
   });
 
   it('is true for a permission (awaiting-permission) chat', () => {
-    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'waiting_for_user', since: 0 } }))).toBe(true);
+    expect(
+      needsAttention(row({ chatId: 'a', chatStatus: { state: 'waiting_for_user', since: 0 } })),
+    ).toBe(true);
   });
 
   it('is true for an errored chat', () => {
-    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }))).toBe(true);
-    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }))).toBe(true);
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }))).toBe(
+      true,
+    );
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'failed', since: 0 } }))).toBe(
+      true,
+    );
   });
 
   it('is true for a declared question, even once read', () => {
@@ -94,7 +100,9 @@ describe('needsAttention', () => {
   });
 
   it('is false for a working (still going) chat', () => {
-    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }))).toBe(false);
+    expect(needsAttention(row({ chatId: 'a', chatStatus: { state: 'running', since: 0 } }))).toBe(
+      false,
+    );
   });
 
   it('is false for an already-read chat with no declared question/report', () => {
@@ -140,7 +148,11 @@ describe('sortAttentionQueue', () => {
     const before = [r('a', { lastUserActivity: 200 }), r('b', { lastUserActivity: 100 })];
     const after = [
       r('a', { lastUserActivity: 200, lastUpdated: 999 }),
-      r('b', { lastUserActivity: 100, chatStatus: { state: 'waiting_for_user', since: 0 }, lastUpdated: 999 }),
+      r('b', {
+        lastUserActivity: 100,
+        chatStatus: { state: 'waiting_for_user', since: 0 },
+        lastUpdated: 999,
+      }),
     ];
     expect(sortAttentionQueue(before).map((x) => x.chatId)).toEqual(['a', 'b']);
     expect(sortAttentionQueue(after).map((x) => x.chatId)).toEqual(['a', 'b']);
