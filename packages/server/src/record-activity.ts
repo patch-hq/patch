@@ -105,7 +105,9 @@ export function forEachLine(path: string, onLine: (line: string) => void): void 
 /**
  * The user messages in one record file. Lines are events in the order they
  * were written; a later line for a seq replaces an earlier one, so the file is
- * read whole and laid out by seq before collecting.
+ * read whole and laid out by seq before collecting. A subagent's record (it
+ * names its parent) holds no message of the user's: its "user" turns are its
+ * parent agent's instructions, so it is skipped.
  */
 export function userMessagesInFile(
   path: string,
@@ -114,7 +116,10 @@ export function userMessagesInFile(
   out: UserMessageRow[],
 ): void {
   const bySeq = new Map<number, Record<string, unknown>>();
+  let subagent = false;
   forEachLine(path, (line) => {
+    if (line.startsWith('{"parent":')) subagent = true;
+    if (subagent) return;
     if (!line.includes('"role":"user"') && !line.includes('"type":"chat.note"')) return;
     let ev: Record<string, unknown>;
     try {
@@ -124,6 +129,7 @@ export function userMessagesInFile(
     }
     if (typeof ev.seq === 'number') bySeq.set(ev.seq, ev);
   });
+  if (subagent) return;
   const collector = new UserMessageCollector(since, until, out);
   for (const [, ev] of [...bySeq].sort((a, b) => a[0] - b[0])) collector.take(ev);
 }

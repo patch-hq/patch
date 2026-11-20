@@ -17,6 +17,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon, SUBAGENT_PERMISSION_DENIED_MESSAGE } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type SdkBackend } from '../src/sdkBackend.js';
+import { RecordImport } from '../src/recordImport.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -149,14 +150,82 @@ describe('patch_delegate', () => {
     const delivered = messagesOn(events, parentChatId).find((m) => m.content.includes(fullReply))!;
     expect(delivered.content).toBe(`[from ${label}; agent ${id}] ${fullReply}`);
 
-    // Invisible to the user: NOTHING for the subagent's own chatId ever
-    // reached the outbound relay — no chat.spawned, no chat.state, no
-    // chat.message, nothing (spec/02 § Native subagent dispatch).
+    // Invisible to the user: NOTHING addressed to the subagent's own chatId
+    // ever reached the outbound relay — no chat.spawned, no chat.state, no
+    // chat.message (spec/02 § Native subagent dispatch).
     expect(events.some((e) => (e as { chatId?: string }).chatId === id)).toBe(false);
+    // Its entries go to the server's record only wrapped with their parent,
+    // for the parent's read-only transcript.
+    const wrapped = events.filter(
+      (e): e is Extract<WireEvent, { type: 'host.delegate_entry' }> =>
+        e.type === 'host.delegate_entry',
+    );
+    expect(wrapped.length).toBeGreaterThan(0);
+    for (const w of wrapped) {
+      expect(w.parentChatId).toBe(parentChatId);
+      expect((w.event as { chatId?: string }).chatId).toBe(id);
+    }
+    expect(
+      wrapped.some(
+        (w) =>
+          w.event.type === 'chat.message' &&
+          (w.event as { role?: string; content?: string }).role === 'assistant' &&
+          (w.event as { content?: string }).content === fullReply,
+      ),
+    ).toBe(true);
 
     const delegates = daemon.listDelegates(parentChatId);
     expect(delegates).toHaveLength(1);
     expect(delegates[0]).toMatchObject({ id, label, status: 'done' });
+  });
+
+  it('the subagent backfill reads an old subagent from disk and leaves no subagent chat loaded', async () => {
+    const { daemon, sdk, folder, home, metaStore } = setup();
+    const parentChatId = await daemon.spawnChat({ folder });
+    sdk.enqueue([{ type: 'assistant', content: 'the old answer' }, { type: 'result' }]);
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'look into it' });
+    await flushUntil(() => daemon.listDelegates(parentChatId)[0]?.status === 'done');
+    daemon.shutdown();
+
+    // A later start of the host: the finished subagent has no work, so it is
+    // not loaded.
+    const later = new Daemon({
+      hostId: 'd1',
+      metaStore,
+      sdkBackend: createMockSdkBackend(),
+      oauthAccessToken: 'fake-token',
+      emit: () => undefined,
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      discoverClaudeMcpServers: () => [],
+    });
+    later.hydrate();
+    expect(later.chatState.loaded(id)).toBeUndefined();
+
+    const sent: WireEvent[] = [];
+    const imp = new RecordImport({
+      path: join(home, 'delegate-record-import.json'),
+      logger: silent,
+      listChats: () => later.subagentIds(),
+      recordOf: (chatId) => later.delegateRecordForImport(chatId),
+      parentOf: (chatId) => later.delegateParentOf(chatId),
+      send: (e) => sent.push(e),
+      defer: (fn) => fn(),
+    });
+    imp.start();
+    const frame = sent[0] as Extract<WireEvent, { type: 'host.record_import' }>;
+    expect(frame).toMatchObject({ chatId: id, parentChatId, done: true });
+    expect(
+      frame.events.some(
+        (e) =>
+          e.type === 'chat.message' && (e as { content?: string }).content === 'the old answer',
+      ),
+    ).toBe(true);
+    imp.onAck(id);
+    expect(imp.isComplete()).toBe(true);
+    // Nothing the backfill touched stays held by the host.
+    expect(later.chatState.loaded(id)).toBeUndefined();
+    expect(later.chatState.list().some((c) => c.subagent !== undefined)).toBe(false);
   });
 
   it('delivers the reply when the stream stays open after the result (a detached background process)', async () => {

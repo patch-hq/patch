@@ -2703,6 +2703,9 @@ async function startHost(
   // The one-off send of what the server's record lacks (spec/01 § Chat record).
   // Built once the chats are loaded, below; started by a server that takes it.
   let recordImport: RecordImport | undefined;
+  // The same one-off send for `patch_agent` subagents' records, each kept
+  // against its parent, to a server that keeps them (`delegateRecord`).
+  let delegateRecordImport: RecordImport | undefined;
   // Every cross-chat tool call, for the account's tool log (Settings →
   // Activity, spec/06 § Cross-chat toolset): kept on this host until the
   // server on the link keeps the log (`serverReads`), then sent through the
@@ -2823,6 +2826,7 @@ async function startHost(
       ) {
         recordImport?.start();
       }
+      if (greeting.delegateRecord === true) delegateRecordImport?.start();
     },
     onFrame: async (event, sender) => {
       // Host addressing, checked once for the whole inbound stream: ANY frame
@@ -2863,6 +2867,7 @@ async function startHost(
       }
       if (event.type === 'host.record_import_ack') {
         recordImport?.onAck(event.chatId);
+        delegateRecordImport?.onAck(event.chatId);
         return;
       }
       if (event.type === 'chat.committed') {
@@ -3021,10 +3026,6 @@ async function startHost(
           sender,
           logger,
         );
-        return;
-      }
-      if (event.type === 'patch.chat_history.request') {
-        handleChatHistoryRequest(event, daemon, sender, logger);
         return;
       }
       if (event.type === 'patch.skills.request') {
@@ -4032,6 +4033,7 @@ async function startHost(
     onDisconnected: () => {
       linkOnline = false;
       recordImport?.stop();
+      delegateRecordImport?.stop();
       serverEventsClient.endAll('host→server link dropped');
       artifactPublisher.failAll(
         'artifact publish: host→server link dropped before the server answered',
@@ -5223,6 +5225,27 @@ async function startHost(
         throw err;
       }
     },
+    send: (event) => link.send(event),
+  });
+  delegateRecordImport = new RecordImport({
+    path: join(config.patchHome, 'delegate-record-import.json'),
+    logger,
+    // Every subagent on the host, loaded or not: one that finished long ago
+    // still needs its transcript readable from the server. Read from metas,
+    // so listing them loads none.
+    listChats: () => daemon.subagentIds(),
+    // Read from disk without loading the subagent (spec/02 § Chat loading).
+    recordOf: (chatId) => {
+      try {
+        return daemon.delegateRecordForImport(chatId);
+      } catch (err) {
+        if (err instanceof ChatNotFoundError) return null;
+        throw err;
+      }
+    },
+    parentOf: (chatId) => daemon.delegateParentOf(chatId),
+    // Paced, so a few hundred old subagents do not land in one burst at startup.
+    pauseMs: 250,
     send: (event) => link.send(event),
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
@@ -7928,70 +7951,6 @@ export function handleChatMoveRequest(
     const message = (err as Error).message;
     logger.warn({ op: event.op, chatId: event.chatId, code, err: message }, 'chat move refused');
     sender({ ...base, ok: false, error: { code, message } });
-  }
-}
-
-/**
- * Server asked for a chat's persisted history (REST `GET /api/chats/:id/
- * history?since=<seq>`). The host owns Claude Code's JSONL, so it reads the
- * slice via the same HistoryReader that backs `patch_history` and replies
- * inline. `since` maps to `fromSeq` (events with seq >= since). Only
- * user/assistant `chat.message` turns are reconstructed from the JSONL — tool
- * calls/results are live-stream only (see history.ts). `branchId`, when given,
- * reads that branch's own track (spec/04 § Branching) — this is how the
- * side threads panel pulls a tab's content (spec/14), since a side branch's
- * messages are not broadcast live over the chat's WS stream.
- */
-export function handleChatHistoryRequest(
-  event: import('@patch/wire').PatchChatHistoryRequestEvent,
-  daemon: Daemon,
-  sender: (e: WireEvent) => void,
-  logger: Logger,
-): void {
-  try {
-    if (
-      event.requireParent !== undefined &&
-      daemon.delegateParentOf(event.chatId) !== event.requireParent
-    ) {
-      sender({
-        type: 'patch.chat_history.response',
-        requestId: event.requestId,
-        ok: false,
-        error: {
-          code: 'not_a_delegate',
-          message: `${event.chatId} is not a delegate of ${event.requireParent}`,
-        },
-      });
-      return;
-    }
-    const slice = daemon.readHistory({
-      chatId: event.chatId,
-      ...(event.since !== undefined ? { fromSeq: event.since } : {}),
-      ...(event.limit !== undefined ? { limit: event.limit } : {}),
-      ...(event.branchId !== undefined ? { branchId: event.branchId } : {}),
-    });
-    const events = slice.events.filter(
-      (e): e is Extract<WireEvent, { type: 'chat.message' }> => e.type === 'chat.message',
-    );
-    sender({
-      type: 'patch.chat_history.response',
-      requestId: event.requestId,
-      ok: true,
-      events,
-      ...(slice.nextFromSeq !== undefined ? { nextFromSeq: slice.nextFromSeq } : {}),
-    });
-  } catch (err) {
-    const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'internal';
-    logger.warn(
-      { err: (err as Error).message, chatId: event.chatId },
-      'patch.chat_history.request: read failed',
-    );
-    sender({
-      type: 'patch.chat_history.response',
-      requestId: event.requestId,
-      ok: false,
-      error: { code, message: (err as Error).message },
-    });
   }
 }
 

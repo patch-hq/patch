@@ -38,7 +38,6 @@ import {
   HostRenameEvent,
   HostSettingsEvent,
   SharedSettingsPatch,
-  PatchChatHistoryRequestEvent,
   PatchFoldersBrowseRequestEvent,
   PatchFoldersBrowseResponseEvent,
   PatchListChatsResponseEvent,
@@ -518,31 +517,12 @@ describe('regression guards — what host addressing must NOT have changed', () 
     }
   });
 
-  it('keeps the two cursors on their deliberately opposite boundaries', () => {
+  it('lets a surface history request start from nothing (after: -1)', () => {
     // A surface's history request's `after` is EXCLUSIVE (the last seq the
-    // caller already has) so a fresh caller must be able to say -1; `since` on
-    // the REST history request is INCLUSIVE (the first seq the caller wants)
-    // so its floor is 0 and -1 is meaningless there. Host addressing must not
-    // have "aligned" them.
+    // caller already has), so a fresh caller must be able to say -1.
     const ask = { type: 'chat.history_request', requestId: 'r', chatId: 'c1' };
     expect(ChatHistoryRequestEvent.safeParse({ ...ask, after: -1 }).success).toBe(true);
     expect(ChatHistoryRequestEvent.safeParse({ ...ask, after: -2 }).success).toBe(false);
-    expect(
-      PatchChatHistoryRequestEvent.safeParse({
-        type: 'patch.chat_history.request',
-        requestId: 'h1',
-        chatId: 'c1',
-        since: 0,
-      }).success,
-    ).toBe(true);
-    expect(
-      PatchChatHistoryRequestEvent.safeParse({
-        type: 'patch.chat_history.request',
-        requestId: 'h1',
-        chatId: 'c1',
-        since: -1,
-      }).success,
-    ).toBe(false);
   });
 
   it('accepts retryOfSeq on a chat.input and rejects a non-integer one', () => {

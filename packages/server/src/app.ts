@@ -17,6 +17,8 @@ import {
   canonicalizeHostNames,
   decode,
   DEFAULT_SHARED_SETTINGS,
+  HOST_OUTBOX_EVENT_TYPES,
+  isOutboxEvent,
   signInQuestion,
   type ChatInputEvent,
   type HealthzResponse,
@@ -636,6 +638,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // chat by each host (spec/01 § Chat record): taken in, never broadcast.
   hostLink.onEvent((event, fromHostId) => {
     if (event.type !== 'host.record_import') return;
+    // A subagent's record is kept against its parent (spec/02 § Native
+    // subagent dispatch), so its transcript reads back through the parent.
+    if (event.parentChatId !== undefined) chatLogStore.noteParent(event.chatId, event.parentChatId);
     for (const inner of event.events) {
       let parsed: WireEvent;
       try {
@@ -655,6 +660,38 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         chatId: event.chatId,
       });
     }
+  });
+
+  // A `patch_agent` subagent's entries, through its host's outbox (spec/02 §
+  // Native subagent dispatch): kept in the subagent's own record, against its
+  // parent, and never broadcast. The subagent is never listed: no index entry,
+  // no status, no search.
+  hostLink.onEvent((event) => {
+    if (event.type !== 'host.delegate_entry') return;
+    let inner: WireEvent;
+    try {
+      inner = decode(JSON.stringify(event.event));
+    } catch (err) {
+      log.warn(
+        { parentChatId: event.parentChatId, err: (err as Error).message },
+        'delegate entry: not a valid frame; skipped',
+      );
+      return;
+    }
+    const chatId = (inner as { chatId?: unknown }).chatId;
+    if (
+      typeof chatId !== 'string' ||
+      !isOutboxEvent(inner) ||
+      HOST_OUTBOX_EVENT_TYPES.has(inner.type)
+    ) {
+      log.warn(
+        { parentChatId: event.parentChatId, type: inner.type },
+        'delegate entry: not an entry of a chat; skipped',
+      );
+      return;
+    }
+    chatLogStore.noteParent(chatId, event.parentChatId);
+    chatLogStore.observe(inner);
   });
 
   // The Manager's home host: the user's choice, changed only by them (spec/06 § Changing home).
