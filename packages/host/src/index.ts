@@ -7070,6 +7070,8 @@ export async function handleFoldersBrowseRequest(
     const code =
       (err as { code?: string }).code === 'folder_not_found' ? 'folder_not_found' : 'internal';
     if (code === 'internal') {
+      // A listing that timed out reaches the surface as `internal` carrying the
+      // plain-language message (the wire code set is closed).
       logger.warn(
         { err: (err as Error).message, dir: event.dir },
         'patch.folders.browse.request: list failed',

@@ -23,6 +23,7 @@ import { homedir } from 'node:os';
 
 import { isJunkFolder, isReservedSpecialThread } from '@patch/wire';
 import { expandHome } from './expandHome.js';
+import { listChildDirs, listingTimeoutMessage, type ListChildDirs } from './boundedListing.js';
 
 /**
  * Thrown by `FolderRegistry.browse` when a requested directory does not exist
@@ -36,6 +37,15 @@ export class FolderNotFoundError extends Error {
   constructor(dir: string) {
     super(`folder not found or not readable: ${dir}`);
     this.name = 'FolderNotFoundError';
+  }
+}
+
+/** A listing that did not finish in time — in practice a macOS privacy prompt. */
+export class FolderListingTimeoutError extends Error {
+  readonly code = 'folder_listing_timeout' as const;
+  constructor(dir: string) {
+    super(listingTimeoutMessage(dir));
+    this.name = 'FolderListingTimeoutError';
   }
 }
 
@@ -85,6 +95,8 @@ export interface FolderRegistryOptions {
   onChange: (registry: FolderRegistrySnapshot) => void;
   /** Optional seed of explicit project roots (registered folders). */
   registered?: string[];
+  /** Reads a directory's child directories out of process. Tests inject one. */
+  listChildDirs?: ListChildDirs;
 }
 
 /** The registry as the wire carries it for one host. */
@@ -98,6 +110,7 @@ export class FolderRegistry {
   private readonly onChange: (registry: FolderRegistrySnapshot) => void;
   /** Explicit user-designated project roots, in registration order. */
   private readonly registered: string[];
+  private readonly listChildDirs: ListChildDirs;
   /**
    * Last snapshot handed out via `snapshot()` / `onChange` — the change
    * baseline. Held as the SPLIT, not the flattening: un-designating a root
@@ -116,6 +129,7 @@ export class FolderRegistry {
     this.source = opts.source;
     this.onChange = opts.onChange;
     this.registered = [...(opts.registered ?? [])];
+    this.listChildDirs = opts.listChildDirs ?? listChildDirs;
   }
 
   /**
@@ -294,40 +308,16 @@ export class FolderRegistry {
     const cached = this.readBrowseCache(resolved);
     if (cached) return cached;
 
-    // One syscall to read the directory. `readdir` throws ENOTDIR on a file and
-    // ENOENT on a missing path, so the extra pre-`stat` round trip is dropped —
-    // either failure is `folder_not_found` to the client anyway.
-    let dirents;
-    try {
-      dirents = await fs.readdir(resolved, { withFileTypes: true });
-    } catch {
-      // Missing / unreadable path inside a root is still "not found" to the
-      // client, not an internal error.
-      throw new FolderNotFoundError(dir);
-    }
-
-    // Child directories only. `withFileTypes` gives the type with NO per-entry
-    // stat; the only stat we ever do is to resolve a symlink's target — and
-    // those run CONCURRENTLY. Serialising them was the browse-latency
-    // bottleneck: a pnpm `node_modules` is a symlink farm, so a sequential
-    // await-per-symlink turned one listing into hundreds of round trips.
-    const candidates = dirents.filter((d) => !d.name.startsWith('.'));
-    const isDirFlags = await Promise.all(
-      candidates.map(async (d) => {
-        if (d.isDirectory()) return true;
-        if (d.isSymbolicLink()) {
-          try {
-            return (await fs.stat(join(resolved, d.name))).isDirectory();
-          } catch {
-            return false;
-          }
-        }
-        return false;
-      }),
-    );
-    const entries: FolderBrowseEntry[] = candidates
-      .filter((_, i) => isDirFlags[i])
-      .map((d) => ({ name: d.name, path: join(resolved, d.name) }));
+    // The directory is read by a bounded child process, never by this process:
+    // a macOS privacy prompt can block the read indefinitely (see
+    // boundedListing.ts). A missing or unreadable path is `folder_not_found`; a
+    // read that does not finish says plainly what it is probably waiting for.
+    const listing = await this.listChildDirs(resolved);
+    if (listing.kind === 'timeout') throw new FolderListingTimeoutError(resolved);
+    if (listing.kind === 'error') throw new FolderNotFoundError(dir);
+    const entries: FolderBrowseEntry[] = listing.names
+      .filter((n) => !n.startsWith('.'))
+      .map((n) => ({ name: n, path: join(resolved, n) }));
     entries.sort((a, b) => a.name.localeCompare(b.name));
 
     // "Up" one level. From a registered root, going up returns to the roots
