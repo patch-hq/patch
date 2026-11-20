@@ -96,7 +96,10 @@ import {
   FIND_CHATS_DESCRIPTION,
   FIND_CHATS_TOOL_NAME,
   ManagerChatLookupError,
+  MANAGER_QUICK_TOOLS,
+  MANAGER_QUICK_TOOL_NAMES,
   MANAGER_TOOL_NAMES,
+  stringArgs,
   MANAGER_TOOL_PARAMS,
   SEND_TO_CHAT_BLOCKING_DESCRIPTION,
   SEND_TO_CHAT_TOOL_NAME,
@@ -1030,6 +1033,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     try {
       if (name === FIND_CHATS_TOOL_NAME) result = await manager.findChats(arg('query'));
       else if (name === CHAT_STATUS_TOOL_NAME) result = await manager.chatStatus(arg('chat'));
+      else if (MANAGER_QUICK_TOOL_NAMES.has(name))
+        result = await manager.quick(name, stringArgs(args));
       else {
         const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
         result =
@@ -1138,5 +1143,6 @@ function managerRealtimeTools(): Array<Record<string, unknown>> {
       chat: MANAGER_TOOL_PARAMS.chat,
       message: MANAGER_TOOL_PARAMS.message,
     }),
+    ...MANAGER_QUICK_TOOLS.map((t) => fn(t.name, t.description, t.params, t.required)),
   ];
 }

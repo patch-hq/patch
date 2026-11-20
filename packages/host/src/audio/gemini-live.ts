@@ -74,6 +74,9 @@ import {
   FIND_CHATS_DESCRIPTION,
   FIND_CHATS_TOOL_NAME,
   MANAGER_ASYNC_REPLY_RULE,
+  MANAGER_QUICK_TOOLS,
+  MANAGER_QUICK_TOOL_NAMES,
+  stringArgs,
   MANAGER_BLOCKING_REPLY_RULE,
   MANAGER_TOOL_PARAMS,
   MANAGER_TOOLS_RULE,
@@ -469,6 +472,7 @@ function managerDeclarations(): GeminiFunctionDeclaration[] {
       chat: MANAGER_TOOL_PARAMS.chat,
       message: MANAGER_TOOL_PARAMS.message,
     }),
+    ...MANAGER_QUICK_TOOLS.map((t) => stringTool(t.name, t.description, t.params, t.required)),
   ];
 }
 
@@ -1448,6 +1452,10 @@ export class GeminiLiveSession implements VoiceSessionLike {
     }
     if (call.name === CHAT_STATUS_TOOL_NAME) {
       manager.chatStatus(arg('chat')).then(answer, fail);
+      return;
+    }
+    if (MANAGER_QUICK_TOOL_NAMES.has(call.name)) {
+      manager.quick(call.name, stringArgs(call.args)).then(answer, fail);
       return;
     }
     const message = `the voice called a tool a Manager call does not have: ${call.name}`;
