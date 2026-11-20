@@ -144,6 +144,10 @@ test.describe('Settings — Voice engines', () => {
         voiceKeys: { gemini: false, openai: true, deepgram: false },
       });
     });
+    // The key the host holds says nothing. (Checked first: the Voice page is an
+    // experimental page, so the nav has no entry to come back to it from Dictation.)
+    await page.getByTestId('voice-call-engine-openai').click();
+    await expect(page.getByTestId('voice-call-keys')).toHaveCount(0);
     await page.getByTestId('settings-nav-dictation').click();
     await expect(page.getByTestId('dictation-computer-keys')).toHaveCount(0);
     await page.getByTestId('dictation-computer-engine-deepgram').click();
@@ -158,9 +162,5 @@ test.describe('Settings — Voice engines', () => {
       (el) => getComputedStyle(el.closest('.set-sub') as HTMLElement).color,
     );
     expect(color).not.toBe(hint);
-    // The key the host holds says nothing.
-    await page.getByTestId('settings-nav-voice').click();
-    await page.getByTestId('voice-call-engine-openai').click();
-    await expect(page.getByTestId('voice-call-keys')).toHaveCount(0);
   });
 });
