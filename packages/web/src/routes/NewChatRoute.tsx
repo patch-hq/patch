@@ -78,6 +78,9 @@ const HEAD_ICON = 18;
 // How many projects the Project row offers as chips (spec/14 §8): the head of
 // the picker's own list, in its fixed order, so the row never reshuffles.
 const QUICK_FOLDER_COUNT = 4;
+// Fixed height of the folder pop-up (capped to the room measured), so it does
+// not resize as the list filters or the folder changes.
+const FOLDER_POPUP_HEIGHT = 360;
 // How many models the Model row offers as chips (spec/14 §8): the account
 // default first, then the head of the catalogue. Same count as the projects.
 const QUICK_MODEL_COUNT = 4;
@@ -1169,261 +1172,264 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             Same toggle and same host pairing as the pop-up's rows. No tooltip:
             the chip reads the project name and nothing hides behind it. */}
         <span className="new-chat-setup-label">Project</span>
-        <div className="new-chat-setup-row">
-          <div
-            className="new-chat-quick"
-            data-testid="new-chat-quick"
-            onKeyDown={handleQuickFolderKeyDown}
-          >
-            {quickFolders.map((f) => (
-              <button
-                key={f}
-                ref={(el) => {
-                  if (el) quickFolderRefs.current.set(f, el);
-                  else quickFolderRefs.current.delete(f);
-                }}
-                type="button"
-                className={`folder-quick ${f === folder ? 'selected' : ''}`}
-                data-testid={`folder-quick-${f}`}
-                aria-pressed={f === folder}
-                disabled={signedOut}
-                onClick={() => chooseFolder(f)}
-              >
-                {folderOptionLabels[folderOptions.indexOf(f)]}
-              </button>
-            ))}
-            {homeFolder ? (
-              <button
-                type="button"
-                className="folder-quick"
-                data-testid="folder-suggest-home"
-                disabled={signedOut}
-                onClick={() => chooseFolder(homeFolder)}
-              >
-                Home folder
-              </button>
-            ) : null}
-          </div>
-          {/* Folder picker pop-up (spec/14 § Sidebar §8): the pill opens the
+        <div className="new-chat-project-cell" ref={folderAnchorRef}>
+          <div className="new-chat-setup-row">
+            <div
+              className="new-chat-quick"
+              data-testid="new-chat-quick"
+              onKeyDown={handleQuickFolderKeyDown}
+            >
+              {quickFolders.map((f) => (
+                <button
+                  key={f}
+                  ref={(el) => {
+                    if (el) quickFolderRefs.current.set(f, el);
+                    else quickFolderRefs.current.delete(f);
+                  }}
+                  type="button"
+                  className={`folder-quick ${f === folder ? 'selected' : ''}`}
+                  data-testid={`folder-quick-${f}`}
+                  aria-pressed={f === folder}
+                  disabled={signedOut}
+                  onClick={() => chooseFolder(f)}
+                >
+                  {folderOptionLabels[folderOptions.indexOf(f)]}
+                </button>
+              ))}
+              {homeFolder ? (
+                <button
+                  type="button"
+                  className="folder-quick"
+                  data-testid="folder-suggest-home"
+                  disabled={signedOut}
+                  onClick={() => chooseFolder(homeFolder)}
+                >
+                  Home folder
+                </button>
+              ) : null}
+            </div>
+            {/* Folder picker pop-up (spec/14 § Sidebar §8): the pill opens the
               full list, the browse tree and the ad-hoc path field. It reads
               the chosen folder only when no chip does. */}
-          <div className="folder-picker" ref={folderAnchorRef}>
-            <button
-              type="button"
-              className={`folder-pill ${folder !== '' && !folderIsQuick ? 'selected' : ''}`}
-              data-testid="new-chat-folder-pill"
-              aria-haspopup="listbox"
-              aria-expanded={pickerOpen}
-              // Nothing here can be acted on until the host can run a turn.
-              disabled={signedOut}
-              onClick={() => setPickerOpen((v) => !v)}
-            >
-              {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
+            <div className="folder-picker">
+              <button
+                type="button"
+                className={`folder-pill ${folder !== '' && !folderIsQuick ? 'selected' : ''}`}
+                data-testid="new-chat-folder-pill"
+                aria-haspopup="listbox"
+                aria-expanded={pickerOpen}
+                // Nothing here can be acted on until the host can run a turn.
+                disabled={signedOut}
+                onClick={() => setPickerOpen((v) => !v)}
+              >
+                {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
               browsed path, or one past the chips); otherwise the pill is the
               way to the rest of the list and says so. No tooltip. */}
-              <span className="folder-pill-label">
-                {folderIsQuick ? 'Other…' : folder ? folderName(folder) : 'Choose a folder…'}
-              </span>
-              <span className="folder-pill-caret" aria-hidden>
-                ▾
-              </span>
-            </button>
-            {pickerOpen ? (
-              <div
-                className={`folder-popup place-${folderPlacement.direction}`}
-                style={{ maxHeight: folderPlacement.maxHeight }}
-                data-testid="folder-popup"
-                role="listbox"
-              >
-                {/* One field for both jobs: type to narrow the recents below, or
+                <span className="folder-pill-label">
+                  {folderIsQuick ? 'Other…' : folder ? folderName(folder) : 'Choose a folder…'}
+                </span>
+                <span className="folder-pill-caret" aria-hidden>
+                  ▾
+                </span>
+              </button>
+              {pickerOpen ? (
+                <div
+                  className={`folder-popup place-${folderPlacement.direction}`}
+                  style={{ height: Math.min(FOLDER_POPUP_HEIGHT, folderPlacement.maxHeight) }}
+                  data-testid="folder-popup"
+                  role="listbox"
+                >
+                  {/* One field for both jobs: type to narrow the recents below, or
                 type any absolute path the daemon can reach and press Enter. */}
-                <input
-                  type="text"
-                  className="folder-input"
-                  data-testid="new-chat-folder"
-                  placeholder="Search projects or type a path"
-                  aria-label="folder"
-                  value={folder}
-                  onChange={(e) => {
-                    userEditedFolder.current = true;
-                    setFolder(e.target.value);
-                    setFolderHostId(pickerHostId);
-                  }}
-                  onKeyDown={(e) => {
-                    if (isPlainEnter(e)) {
-                      e.preventDefault();
-                      setPickerOpen(false);
-                    }
-                  }}
-                />
-                {/* RECENT — configured + recently-used folders. These are
+                  <input
+                    type="text"
+                    className="folder-input"
+                    data-testid="new-chat-folder"
+                    placeholder="Search projects or type a path"
+                    aria-label="folder"
+                    value={folder}
+                    onChange={(e) => {
+                      userEditedFolder.current = true;
+                      setFolder(e.target.value);
+                      setFolderHostId(pickerHostId);
+                    }}
+                    onKeyDown={(e) => {
+                      if (isPlainEnter(e)) {
+                        e.preventDefault();
+                        setPickerOpen(false);
+                      }
+                    }}
+                  />
+                  {/* RECENT — configured + recently-used folders. These are
                     shortcuts: one tap SELECTS the folder and closes the picker
                     ("start here"). Each row shows the folder NAME (bold) as the
                     primary label; the full path is muted secondary text, never
                     the primary (spec/14 § Sidebar §8). No chevron — a recent row
                     is a destination, not a drill target. */}
-                <section className="folder-section">
-                  <p className="folder-section-head">Recent projects</p>
-                  {folderOptions.length === 0 ? (
-                    /* H3 (desktop review): a proper empty state when there are no
+                  <section className="folder-section">
+                    <p className="folder-section-head">Recent projects</p>
+                    {folderOptions.length === 0 ? (
+                      /* H3 (desktop review): a proper empty state when there are no
                        recent folders — a short prompt pointing at Browse. */
-                    <div className="folder-recent-empty" data-testid="folder-recent-empty">
-                      <p className="folder-recent-empty-title">No recent projects</p>
-                      <p className="folder-recent-empty-hint">
-                        Browse for a project to start a chat in.
+                      <div className="folder-recent-empty" data-testid="folder-recent-empty">
+                        <p className="folder-recent-empty-title">No recent projects</p>
+                        <p className="folder-recent-empty-hint">
+                          Browse for a project to start a chat in.
+                        </p>
+                      </div>
+                    ) : shownFolderIdx.length === 0 ? (
+                      <p className="folder-popup-empty muted" data-testid="folder-recent-nomatch">
+                        No match. Press Enter to use this path.
                       </p>
-                    </div>
-                  ) : shownFolderIdx.length === 0 ? (
-                    <p className="folder-popup-empty muted" data-testid="folder-recent-nomatch">
-                      No match. Press Enter to use this path.
-                    </p>
-                  ) : (
-                    <ul className="folder-popup-list">
-                      {shownFolderIdx.map((i) => {
-                        const f = folderOptions[i] as string;
-                        return (
-                          <li key={f}>
-                            <button
-                              type="button"
-                              className={`folder-option ${f === folder ? 'selected' : ''}`}
-                              data-testid={`folder-option-${f}`}
-                              role="option"
-                              aria-selected={f === folder}
-                              title={f}
-                              onClick={() => chooseFolder(f)}
-                            >
-                              <span className="folder-option-text">
-                                <span className="folder-option-name">{folderName(f)}</span>
-                                {/* The extra path line shows ONLY when this option's
+                    ) : (
+                      <ul className="folder-popup-list">
+                        {shownFolderIdx.map((i) => {
+                          const f = folderOptions[i] as string;
+                          return (
+                            <li key={f}>
+                              <button
+                                type="button"
+                                className={`folder-option ${f === folder ? 'selected' : ''}`}
+                                data-testid={`folder-option-${f}`}
+                                role="option"
+                                aria-selected={f === folder}
+                                title={f}
+                                onClick={() => chooseFolder(f)}
+                              >
+                                <span className="folder-option-text">
+                                  <span className="folder-option-name">{folderName(f)}</span>
+                                  {/* The extra path line shows ONLY when this option's
                                   basename collides with another's — then the
                                   disambiguating label (…/parent/name) is the extra
                                   the user needs. Unique names stand alone. */}
-                                {folderOptionLabels[i] !== folderName(f) ? (
-                                  <span className="folder-option-path mono">
-                                    {folderOptionLabels[i]}
+                                  {folderOptionLabels[i] !== folderName(f) ? (
+                                    <span className="folder-option-path mono">
+                                      {folderOptionLabels[i]}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                {f === folder ? (
+                                  <span className="folder-option-check" aria-hidden>
+                                    ✓
                                   </span>
                                 ) : null}
-                              </span>
-                              {f === folder ? (
-                                <span className="folder-option-check" aria-hidden>
-                                  ✓
-                                </span>
-                              ) : null}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </section>
-                {/* BROWSE (spec/04 § Browsing): drill into the daemon's directory
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </section>
+                  {/* BROWSE (spec/04 § Browsing): drill into the daemon's directory
                         tree. Entry rows carry a chevron — clicking DRILLS IN (opens
                         subfolders), it does NOT select. Selecting the folder you're
                         currently looking at is a separate, clearly-labelled accent
                         action ("Use this folder") below the list. Distinct
                         affordances so drill vs select never read the same. */}
-                <section className="folder-section folder-browser" data-testid="folder-browser">
-                  <div className="folder-browser-bar">
-                    <p className="folder-section-head">Browse</p>
-                    {browse?.dir ? (
-                      <button
-                        type="button"
-                        className="folder-browser-up"
-                        data-testid="folder-browser-up"
-                        onClick={() => setBrowseDir(browse.parent)}
-                      >
-                        ↑ Up
-                      </button>
-                    ) : null}
-                  </div>
-                  {/* Breadcrumb — current folder NAME as the primary label; the
+                  <section className="folder-section folder-browser" data-testid="folder-browser">
+                    <div className="folder-browser-bar">
+                      <p className="folder-section-head">Browse</p>
+                      {browse?.dir ? (
+                        <button
+                          type="button"
+                          className="folder-browser-up"
+                          data-testid="folder-browser-up"
+                          onClick={() => setBrowseDir(browse.parent)}
+                        >
+                          ↑ Up
+                        </button>
+                      ) : null}
+                    </div>
+                    {/* Breadcrumb — current folder NAME as the primary label; the
                           full absolute path is muted secondary text (spec/14 §8).
                           ONLY once drilled in: at the roots view there is no current
                           directory, and a synthetic "Projects" crumb under the
                           "Browse" heading is a stray line of text — not clickable
                           like the rows beneath it, not a heading, and saying nothing
                           the heading doesn't already say. */}
-                  {browse?.dir ? (
-                    <span
-                      className="folder-browser-crumb"
-                      data-testid="folder-browser-crumb"
-                      title={browse.dir}
-                    >
-                      <span className="folder-browser-crumb-name">{folderName(browse.dir)}</span>
-                      {/* LRM either side: under the rtl tail-keeping overflow the bare
+                    {browse?.dir ? (
+                      <span
+                        className="folder-browser-crumb"
+                        data-testid="folder-browser-crumb"
+                        title={browse.dir}
+                      >
+                        <span className="folder-browser-crumb-name">{folderName(browse.dir)}</span>
+                        {/* LRM either side: under the rtl tail-keeping overflow the bare
                           leading and trailing "/" otherwise jump to the opposite end
                           ("Users/me/" instead of "/Users/me"). */}
-                      <span className="folder-browser-crumb-path mono">{`\u200E${browse.dir}\u200E`}</span>
-                    </span>
-                  ) : null}
-                  {browseLoading ? (
-                    <p className="folder-popup-empty muted">Loading…</p>
-                  ) : browseErr ? (
-                    <BrowseError err={browseErr} />
-                  ) : (browse?.entries?.length ?? 0) === 0 ? (
-                    // Two different emptinesses, and conflating them stalls people:
-                    // AT THE ROOTS VIEW (no `dir`), nothing to browse means this
-                    // host has no project folders registered at all — "No
-                    // subfolders here" blames the wrong thing and offers no way
-                    // out. Drilled INTO a folder, it really is an empty folder.
-                    browse?.dir ? (
-                      <p className="folder-popup-empty muted">No subfolders here.</p>
+                        <span className="folder-browser-crumb-path mono">{`\u200E${browse.dir}\u200E`}</span>
+                      </span>
+                    ) : null}
+                    {browseLoading ? (
+                      <p className="folder-popup-empty muted">Loading…</p>
+                    ) : browseErr ? (
+                      <BrowseError err={browseErr} />
+                    ) : (browse?.entries?.length ?? 0) === 0 ? (
+                      // Two different emptinesses, and conflating them stalls people:
+                      // AT THE ROOTS VIEW (no `dir`), nothing to browse means this
+                      // host has no project folders registered at all — "No
+                      // subfolders here" blames the wrong thing and offers no way
+                      // out. Drilled INTO a folder, it really is an empty folder.
+                      browse?.dir ? (
+                        <p className="folder-popup-empty muted">No subfolders here.</p>
+                      ) : (
+                        <p
+                          className="folder-popup-empty muted"
+                          data-testid="folder-browser-no-roots"
+                        >
+                          Nothing here. Type a path below to open any folder on this host.
+                        </p>
+                      )
                     ) : (
-                      <p className="folder-popup-empty muted" data-testid="folder-browser-no-roots">
-                        Nothing here. Type a path below to open any folder on this host.
-                      </p>
-                    )
-                  ) : (
-                    <ul className="folder-browser-list">
-                      {browse?.entries.map((e) => (
-                        <li key={e.path}>
-                          <button
-                            type="button"
-                            className="folder-browser-entry"
-                            data-testid={`folder-browser-entry-${e.name}`}
-                            title={`Open ${e.name}`}
-                            onClick={() => setBrowseDir(e.path)}
-                          >
-                            <span className="folder-browser-entry-name">{e.name}</span>
-                            <span className="folder-browser-entry-chevron" aria-hidden>
-                              ›
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {/* SELECT the currently-browsed directory (distinct from the
+                      <ul className="folder-browser-list">
+                        {browse?.entries.map((e) => (
+                          <li key={e.path}>
+                            <button
+                              type="button"
+                              className="folder-browser-entry"
+                              data-testid={`folder-browser-entry-${e.name}`}
+                              title={`Open ${e.name}`}
+                              onClick={() => setBrowseDir(e.path)}
+                            >
+                              <span className="folder-browser-entry-name">{e.name}</span>
+                              <span className="folder-browser-entry-chevron" aria-hidden>
+                                ›
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* SELECT the currently-browsed directory (distinct from the
                           drill rows above). Absent at the roots view — you can't open
                           a chat in the synthetic "Projects" root. */}
-                  {browse?.dir ? (
-                    <button
-                      type="button"
-                      className="folder-browser-use"
-                      data-testid="folder-browser-use"
-                      onClick={() => {
-                        userEditedFolder.current = true;
-                        setFolder(browse.dir as string);
-                        // The tree just browsed belongs to `pickerHostId`; keep
-                        // the chosen path bound to the host it came from.
-                        setFolderHostId(pickerHostId);
-                        setChosenHostId(pickerHostId);
-                        setPickerOpen(false);
-                      }}
-                    >
-                      Use “{folderName(browse.dir)}”
-                    </button>
-                  ) : null}
-                </section>
-              </div>
-            ) : null}
+                    {browse?.dir ? (
+                      <button
+                        type="button"
+                        className="folder-browser-use"
+                        data-testid="folder-browser-use"
+                        onClick={() => {
+                          userEditedFolder.current = true;
+                          setFolder(browse.dir as string);
+                          // The tree just browsed belongs to `pickerHostId`; keep
+                          // the chosen path bound to the host it came from.
+                          setFolderHostId(pickerHostId);
+                          setChosenHostId(pickerHostId);
+                          setPickerOpen(false);
+                        }}
+                      >
+                        Use “{folderName(browse.dir)}”
+                      </button>
+                    ) : null}
+                  </section>
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
-        {folder !== '' ? (
           <p className="new-chat-folder-path mono muted" data-testid="new-chat-folder-path">
             {folder}
           </p>
-        ) : null}
+        </div>
         {/* The model: the account default first, marked, then the head of the
             catalogue, and the pill that opens the full live list (spec/14 §
             Model selector) — the SAME control the chat header uses to change a

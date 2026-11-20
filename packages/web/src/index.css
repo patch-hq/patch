@@ -11979,7 +11979,9 @@ main.empty-state p {
 /* New-chat: folder picker pop-up in the chat header (spec/14 § Sidebar §8).
    No form/wizard — the chat composer is the entry surface. */
 .folder-picker {
-  position: relative;
+  /* The pop-up anchors to .new-chat-project-cell (full row width), not this
+     pill, whose x moves with the chips and pushed the pop-up off the edge. */
+  position: static;
   align-self: flex-start;
 }
 .folder-pill {
@@ -12093,9 +12095,9 @@ main.empty-state p {
 .folder-popup {
   position: absolute;
   left: 0;
+  right: 0;
   z-index: 20;
-  min-width: 320px;
-  max-width: 480px;
+  max-width: 560px;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -18838,8 +18840,15 @@ a.drop-target {
   font-weight: 600;
 }
 
+.new-chat-project-cell {
+  position: relative;
+  min-width: 0;
+}
 .new-chat-folder-path {
   margin: 4px 0 0;
+  /* Always occupies its line, so choosing a folder never reflows the rows. */
+  min-height: 1.4em;
+  line-height: 1.4;
   font-size: var(--text-min);
   word-break: break-all;
 }

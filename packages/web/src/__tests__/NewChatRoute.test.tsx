@@ -180,6 +180,23 @@ describe('/chats/new', () => {
   // (folder) and model live INSIDE the chat window, in a row under the "New
   // chat" empty state — not in the header. The header is title + actions only;
   // the folder "moves up" to the header crumb once the chat exists.
+  it('keeps the folder path line inside the Project cell, so it is never a stray grid item', () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const grid = screen.getByTestId('new-chat-setup-grid');
+    const path = screen.getByTestId('new-chat-folder-path');
+    expect(path.parentElement).toHaveClass('new-chat-project-cell');
+    expect(path.parentElement?.parentElement).toBe(grid);
+  });
+
   it('puts the folder + model pickers in the chat body under the empty state, not the header', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
