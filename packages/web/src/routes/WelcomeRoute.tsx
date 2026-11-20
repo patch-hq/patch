@@ -9,7 +9,7 @@
 // stored anywhere but where Settings stores it.
 
 import type { JSX } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -33,7 +33,11 @@ import { ErrorDetail } from '../components/ErrorDetail.js';
 import { requestInstall } from '../lib/useInstallPickedProviders.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
 import { permissionModeLabel } from '../lib/permissionModeLabel.js';
-import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
+import {
+  DEFAULT_PREFERENCES,
+  anyProviderConnected,
+  usePreferencesStore,
+} from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { AddChatGPTAccount } from './settings/SharedAccounts.js';
 import { useModelOptions } from './settings/modelOptions.js';
@@ -66,13 +70,12 @@ export function WelcomeRoute(): JSX.Element {
   // The shell says whether this computer runs Patch itself; only then is there
   // anything to keep running.
   const local = params.get('machine') === 'local' && getDesktopBridge()?.keepRunning !== undefined;
-  // With no AI connected there are no models to choose between, so the model
-  // step is not asked at all rather than offering one meaningless option.
-  const connected = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
+  // The model step is always listed so the count never changes mid-way; with no
+  // AI connected it says so rather than offering a meaningless choice.
   const steps: StepId[] = [
     'providers',
     'permissions',
-    ...(connected ? (['model'] as const) : []),
+    'model',
     ...(local ? (['keep-running'] as const) : []),
     'phone',
   ];
@@ -108,22 +111,22 @@ export function WelcomeRoute(): JSX.Element {
             <li key={s} className={i <= index ? 'done' : ''} />
           ))}
         </ol>
-        {step === 'providers' ? <ProvidersStep onNext={next} /> : null}
-        {step === 'permissions' ? <PermissionStep onNext={next} /> : null}
-        {step === 'model' ? <ModelStep onNext={next} /> : null}
-        {step === 'keep-running' ? <KeepRunningStep onNext={next} /> : null}
-        {step === 'phone' ? (
-          <PhoneStep onNext={next} phase={phonePhase} onPhase={setPhonePhase} />
-        ) : null}
-        {index > 0 ? (
-          <button type="button" className="welcome-back" data-testid="welcome-back" onClick={back}>
-            Back
-          </button>
-        ) : null}
+        <BackContext.Provider value={index > 0 ? back : null}>
+          {step === 'providers' ? <ProvidersStep onNext={next} /> : null}
+          {step === 'permissions' ? <PermissionStep onNext={next} /> : null}
+          {step === 'model' ? <ModelStep onNext={next} /> : null}
+          {step === 'keep-running' ? <KeepRunningStep onNext={next} /> : null}
+          {step === 'phone' ? (
+            <PhoneStep onNext={next} phase={phonePhase} onPhase={setPhonePhase} />
+          ) : null}
+        </BackContext.Provider>
       </main>
     </div>
   );
 }
+
+/** Set by the page when a step has a step before it; the footer draws the button. */
+const BackContext = createContext<(() => void) | null>(null);
 
 function Footer({
   onNext,
@@ -142,8 +145,14 @@ function Footer({
   /** False leaves the quiet action as the only one. */
   primary?: boolean;
 }): JSX.Element {
+  const back = useContext(BackContext);
   return (
     <div className="welcome-footer">
+      {back ? (
+        <button type="button" className="welcome-back" data-testid="welcome-back" onClick={back}>
+          Back
+        </button>
+      ) : null}
       {primary ? (
         <button
           type="button"
@@ -371,12 +380,47 @@ function PermissionStep({ onNext }: { onNext: () => void }): JSX.Element {
  */
 const CHAT_MODEL_SETTINGS = ['jobDefaultModel', 'specialThreadModel'] as const;
 
+/** One line on what a model family is for; models outside these say nothing. */
+export function modelHint(id: string): string | undefined {
+  if (/sonnet/i.test(id)) return 'Fast and capable. The right choice for most work.';
+  if (/opus/i.test(id)) return 'The most capable, but slower and the most expensive.';
+  if (/haiku/i.test(id)) return 'The quickest and cheapest, for simple tasks.';
+  return undefined;
+}
+
+/**
+ * The short list shown first: the newest model of each Claude family, and the
+ * first of any other provider. The catalogue is newest first. `def` is the one
+ * a newcomer starts on: the newest Sonnet, else the top of the list.
+ */
+export function recommendedModels<T extends { id: string }>(
+  options: readonly T[],
+): { recommended: T[]; rest: T[]; def: T | undefined } {
+  const seen = new Set<string>();
+  const recommended: T[] = [];
+  for (const m of options) {
+    const family = /sonnet|opus|haiku/i.exec(m.id)?.[0].toLowerCase() ?? providerForModel(m.id);
+    if (seen.has(family)) continue;
+    seen.add(family);
+    recommended.push(m);
+  }
+  const order = (m: T): number => (/sonnet/i.test(m.id) ? 0 : /opus/i.test(m.id) ? 1 : 2);
+  recommended.sort((x, y) => order(x) - order(y));
+  return {
+    recommended,
+    rest: options.filter((m) => !recommended.includes(m)),
+    def: recommended[0],
+  };
+}
+
 function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
   const value = preferences.defaultModel;
   const loaded = usePreferencesStore((s) => s.loaded);
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  const connected = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
   const { options: all, problem } = useModelOptions(value);
+  const [more, setMore] = useState(false);
   // Only the connected providers' models: a ChatGPT user is never offered, or
   // left on, a Claude model they cannot run.
   const runnable = (id: string): boolean =>
@@ -385,35 +429,59 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
       ? true
       : (secrets?.[accountsKeyForBackend(backendIdForModel(id))] ?? []).some((a) => a.connected);
   const options = all.filter((m) => runnable(m.id));
+  const { recommended, rest, def } = recommendedModels(options);
   const choose = (id: string): void => {
     const others = Object.fromEntries(
       CHAT_MODEL_SETTINGS.filter((k) => !runnable(preferences[k])).map((k) => [k, id]),
     );
     void patchShared('default model', { defaultModel: id, ...others });
   };
-  // A default on a provider that isn't connected is moved to the newest model
-  // that is, so what is shown chosen is what new chats will really use.
-  const first = options[0]?.id;
-  const stranded = loaded && secrets !== undefined && !runnable(value);
-  useEffect(() => {
-    if (stranded && first !== undefined) choose(first);
-    // Once per stranded default: `choose` is rebuilt every render and is not
-    // what the move depends on.
-  }, [stranded, first]);
+  // A default on a provider that isn't connected, or the untouched factory
+  // default (the dearest model), reads as the recommended one and is written
+  // when Continue is pressed, so what is shown chosen is what new chats use.
+  // Nothing is written on arrival: the list may still be loading.
+  const start = def?.id;
+  const replaced =
+    loaded &&
+    secrets !== undefined &&
+    (!runnable(value) || value === DEFAULT_PREFERENCES.defaultModel);
+  // What the person clicked wins, even when it is the factory default.
+  const [picked, setPicked] = useState<string | null>(null);
+  const current = picked ?? (replaced && start !== undefined ? start : value);
+  const advance = (): void => {
+    if (picked === null && current !== value) choose(current);
+    onNext();
+  };
+  const shown =
+    more || rest.some((m) => m.id === current) ? [...recommended, ...rest] : recommended;
   return (
     <section className="welcome-step" data-testid="welcome-model">
       <h1>Which model should new chats use?</h1>
       <div className="welcome-options scroll" role="radiogroup" aria-label="Model for new chats">
-        {options.map((m) => (
+        {shown.map((m) => (
           <Option
             key={m.id}
             id={`welcome-model-${m.id}`}
-            checked={value === m.id}
+            checked={current === m.id}
             disabled={!loaded}
             title={compactModelLabel(m.id, m.label === m.id ? undefined : m.label)}
-            onPick={() => choose(m.id)}
+            hint={modelHint(m.id)}
+            onPick={() => {
+              setPicked(m.id);
+              choose(m.id);
+            }}
           />
         ))}
+        {shown.length < options.length ? (
+          <button
+            type="button"
+            className="welcome-skip"
+            data-testid="welcome-model-more"
+            onClick={() => setMore(true)}
+          >
+            More models
+          </button>
+        ) : null}
       </div>
       {problem ? (
         <div className="welcome-note" data-testid="welcome-model-problem" data-kind={problem.kind}>
@@ -423,7 +491,7 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
           ) : null}
         </div>
       ) : null}
-      <Footer onNext={onNext} ready={loaded && runnable(value)} />
+      <Footer onNext={advance} ready={loaded && (!connected || runnable(current))} />
     </section>
   );
 }

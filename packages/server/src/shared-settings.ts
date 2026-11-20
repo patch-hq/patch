@@ -1043,7 +1043,11 @@ export class SharedSettingsService {
         credential.email ||
         (isAnthropicApiKey(credential.accessToken)
           ? 'Claude API (paid)'
-          : `Claude ${this.secrets.claude.length + 1}`),
+          : // No email is available from a sign-in, so the first account is just
+            // "Claude"; a number appears only once a second one needs telling apart.
+            this.secrets.claude.length === 0
+            ? 'Claude'
+            : `Claude ${this.secrets.claude.length + 1}`),
       credential: { ...credential, ...(organizationId ? { organizationId } : {}) },
     };
     this.secrets.claude.push(account);

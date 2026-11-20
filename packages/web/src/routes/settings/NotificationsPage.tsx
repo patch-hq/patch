@@ -57,6 +57,8 @@ export function NotificationsPage(): JSX.Element {
   const { devices } = useDevices();
   const levels = usePreferencesStore((s) => s.preferences.deviceNotifications);
   const notifiable = (devices ?? []).filter((d) => NOTIFIABLE_KINDS.has(d.surfaceKind));
+  // The delay is about the phone, so it is only offered once one is paired.
+  const hasPhone = notifiable.some((d) => d.surfaceKind === 'mobile');
   const anyOn = notifiable.some((d) => levelOf(levels, d.surfaceId) !== 'off');
 
   /** Write the whole map; this device's own switch follows it (useNotificationLevelSync). */
@@ -163,17 +165,19 @@ export function NotificationsPage(): JSX.Element {
             )}
           </Row>
         )}
-        <Row title="Send to my phone after" testid="send-to-phone-after">
-          <Pills
-            label="Send to my phone after"
-            options={OPTIONS}
-            labels={LABELS}
-            value={value}
-            disabled={!loaded}
-            testid="send-to-phone-after-pills"
-            onChange={(next) => void patchShared('send to phone', { sendToPhoneAfter: next })}
-          />
-        </Row>
+        {hasPhone ? (
+          <Row title="Send to my phone after" testid="send-to-phone-after">
+            <Pills
+              label="Send to my phone after"
+              options={OPTIONS}
+              labels={LABELS}
+              value={value}
+              disabled={!loaded}
+              testid="send-to-phone-after-pills"
+              onChange={(next) => void patchShared('send to phone', { sendToPhoneAfter: next })}
+            />
+          </Row>
+        ) : null}
         {idle === null || idle === 'unsupported' ? null : (
           <Row title="Idle detection" testid="idle-detection">
             {idle === 'granted' ? (

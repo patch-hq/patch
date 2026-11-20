@@ -56,11 +56,11 @@ afterEach(() => {
 });
 
 describe('Settings → Notifications → Send to my phone after', () => {
-  it('shows the account setting, defaulting to 1 minute', () => {
+  it('shows the account setting, defaulting to 1 minute', async () => {
     browserWith(null);
     loadShared({ settings: {} });
     renderSettings('/settings/notifications');
-    expect(screen.getByTestId('send-to-phone-after-pills-1m')).toHaveAttribute(
+    expect(await screen.findByTestId('send-to-phone-after-pills-1m')).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -77,10 +77,36 @@ describe('Settings → Notifications → Send to my phone after', () => {
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     loadShared({ settings: { sendToPhoneAfter: '1m' } });
     renderSettings('/settings/notifications');
-    fireEvent.click(screen.getByTestId('send-to-phone-after-pills-lock'));
+    fireEvent.click(await screen.findByTestId('send-to-phone-after-pills-lock'));
     await waitFor(() => expect(server.writes).toContainEqual({ sendToPhoneAfter: 'lock' }));
     fireEvent.click(screen.getByTestId('send-to-phone-after-pills-5m'));
     await waitFor(() => expect(server.writes).toContainEqual({ sendToPhoneAfter: '5m' }));
+  });
+});
+
+describe('Settings → Notifications → no phone paired', () => {
+  it('hides the send-to-phone delay', async () => {
+    browserWith(null);
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({
+        devices: [
+          {
+            surfaceId: 'mac',
+            surfaceKind: 'desktop',
+            label: 'Mac',
+            issuedAt: 1,
+            status: 'online',
+            lastHeartbeat: 1,
+            isCurrent: true,
+          },
+        ],
+      }),
+    );
+    loadShared({ settings: {} });
+    renderSettings('/settings/notifications');
+    await screen.findByTestId('notifications-device-mac');
+    expect(screen.queryByTestId('send-to-phone-after')).toBeNull();
   });
 });
 
