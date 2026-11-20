@@ -162,6 +162,18 @@ describe('Settings → Hosts', () => {
     expect(errors()).toEqual([]);
   });
 
+  it('shows why an update was refused', () => {
+    reportHost('host-a', {
+      hostName: 'laptop',
+      updateAvailable: true,
+      updateRefused: 'Update refused: this computer is out of disk space.',
+    });
+    renderPage('hosts');
+    expect(screen.getByTestId('host-host-a-update-refused').textContent).toMatch(
+      /out of disk space/,
+    );
+  });
+
   it('Update on a host that has one sends host.update to it', () => {
     reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
     usePresenceStore.getState().setHostOnline('host-a', true);

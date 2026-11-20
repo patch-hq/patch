@@ -66,6 +66,7 @@ export function useUpdatesBehind(): boolean {
 
 function hostStatus(h: HostPresence): string {
   if (!h.online) return 'Offline';
+  if (h.host?.updateRefused) return h.host.updateRefused;
   if (h.host?.updatePending) return 'Update on its way';
   return h.host?.updateAvailable ? 'Update available' : 'Up to date';
 }

@@ -34,7 +34,6 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
@@ -549,6 +548,15 @@ export function pruneStaged(patchHome: string, running: string): void {
   }
 }
 
+/**
+ * Where an update is unpacked: under the host's own home, never the system temp
+ * dir — /tmp is often a small tmpfs shared with everything else on the machine,
+ * and a full one stopped a host updating for 90 minutes (2026-11-20).
+ */
+export function updateWorkRoot(patchHome: string): string {
+  return join(patchHome, 'update-work');
+}
+
 /** How old an update work folder must be before the startup sweep removes it. */
 export const UPDATE_WORK_MAX_AGE_MS = 15 * 60_000;
 
@@ -559,12 +567,13 @@ export const UPDATE_WORK_MAX_AGE_MS = 15 * 60_000;
  * an installer may still be running from one. Returns the names removed.
  */
 export function sweepUpdateWorkDirs(
-  root: string = tmpdir(),
+  root: string,
   now: number = Date.now(),
   maxAgeMs: number = UPDATE_WORK_MAX_AGE_MS,
   onError: (name: string, err: unknown) => void = () => {},
 ): string[] {
   const removed: string[] = [];
+  if (!existsSync(root)) return removed;
   for (const name of readdirSync(root)) {
     if (!name.startsWith('patch-update-')) continue;
     const dir = join(root, name);
@@ -658,7 +667,9 @@ export async function applyUpdate(opts: {
 }): Promise<ApplyResult> {
   const stepMs = opts.timeoutMs ?? UPDATE_STEP_TIMEOUT_MS;
   const base = opts.serverUrl.replace(/\/+$/, '');
-  const work = mkdtempSync(join(tmpdir(), 'patch-update-'));
+  const workRoot = updateWorkRoot(opts.patchHome);
+  mkdirSync(workRoot, { recursive: true });
+  const work = mkdtempSync(join(workRoot, 'patch-update-'));
   try {
     let extracted: string;
     let version: string;
@@ -804,6 +815,9 @@ export async function applyUpdate(opts: {
 export function describeUpdateRefusal(reason: string): string {
   if (/no artifact for/.test(reason)) {
     return "Update not ready: the new version hasn't finished building for this computer. Try again in a few minutes.";
+  }
+  if (/ENOSPC|No space left/i.test(reason)) {
+    return 'Update refused: this computer is out of disk space. Free some up and it will retry.';
   }
   return `Update failed: ${reason}`;
 }

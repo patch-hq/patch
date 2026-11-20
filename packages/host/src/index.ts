@@ -43,7 +43,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import pino from 'pino';
 import { installCrashGuard } from './crashGuard.js';
 import {
@@ -200,6 +200,7 @@ import {
   checkForUpdate,
   createArtifactWait,
   describeUpdateRefusal,
+  updateWorkRoot,
   createUpdateGate,
   pruneStaged,
   sweepUpdateWorkDirs,
@@ -1075,6 +1076,8 @@ async function startHost(
   let updateAvailable = false;
   // A newer build is published but this host's artifact is still being built.
   let updatePending = false;
+  // Why the last update attempt was refused, in the words a surface shows; cleared by the next one that is not.
+  let updateRefused: string | undefined;
 
   // See `createUpdateGate` — joins every caller (the `host.update` wire event
   // and `patch hosts update`'s local control command) onto one in-flight
@@ -1139,8 +1142,11 @@ async function startHost(
   // lockstep). Anything left from an older run that is no longer ahead goes.
   pruneStaged(config.patchHome, VERSION);
   try {
-    const sweptWork = sweepUpdateWorkDirs(undefined, undefined, undefined, (name, err) =>
-      logger.warn({ err, folder: name }, 'self-update: could not sweep update folder, skipped'),
+    // The host's own work folder, plus the system temp dir where older builds left theirs.
+    const sweptWork = [updateWorkRoot(config.patchHome), tmpdir()].flatMap((root) =>
+      sweepUpdateWorkDirs(root, undefined, undefined, (name, err) =>
+        logger.warn({ err, folder: name }, 'self-update: could not sweep update folder, skipped'),
+      ),
     );
     if (sweptWork.length)
       logger.info({ removed: sweptWork }, 'self-update: swept leftover update folders');
@@ -1198,7 +1204,17 @@ async function startHost(
       (err: unknown) => logger.error({ err }, 'self-update: staged swap failed'),
     );
   };
-  const applyUpdateOnce = (): ReturnType<typeof applyUpdate> =>
+  const applyUpdateOnce = async (): ReturnType<typeof applyUpdate> => {
+    const result = await applyUpdateOnceRaw();
+    const refused =
+      !result.applied && !result.deferred ? describeUpdateRefusal(result.message) : undefined;
+    if (refused !== updateRefused) {
+      updateRefused = refused;
+      emit(describeHost());
+    }
+    return result;
+  };
+  const applyUpdateOnceRaw = (): ReturnType<typeof applyUpdate> =>
     requestUpdate({
       logger,
       artifactWait,
@@ -1372,6 +1388,7 @@ async function startHost(
       // no newer build" rather than a claim that none exists.
       updateAvailable,
       updatePending,
+      updateRefused,
       permissionModeDefault: daemon.permissionModeDefault(),
       permissionOverrides: daemon.permissionOverrideCount(),
       ...(defaultModel !== undefined ? { defaultModel } : {}),
