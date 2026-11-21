@@ -428,7 +428,7 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await welcome.getByTestId('chatgpt-signin').click();
   await expect(welcome.getByTestId('chatgpt-login-pending')).toBeVisible({ timeout: 5 * 60_000 });
   await shot(welcome, 'chatgpt-pending');
-  await welcome.getByRole('button', { name: 'Cancel sign-in' }).click();
+  await welcome.getByTestId('chatgpt-login-cancel').click();
 
   await skipAi(welcome);
   await permissions(welcome);
