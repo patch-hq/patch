@@ -229,6 +229,19 @@ describe('a dropped call says so', () => {
     expect(useVoiceStore.getState().callError).toBeNull();
   });
 
+  it('a socket error followed by the close still redials a live call', async () => {
+    startVoiceCall('c1');
+    const sock = await liveCall();
+    const before = FakeWebSocket.instances.length;
+    sock.emitError({ type: 'error' });
+    sock.emitClose(1006);
+    expect(useVoiceStore.getState().callError).toBeNull();
+    expect(useVoiceStore.getState().callPhase).toBe('connecting');
+    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+  });
+
   it('a redialled call that stays up gets its full attempts again on the next drop', async () => {
     startVoiceCall('c1');
     let sock = await liveCall();

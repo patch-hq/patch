@@ -596,16 +596,11 @@ describe('audio WS message dispatch', () => {
     ).not.toThrow();
   });
 
-  it('onerror sets an "unknown" audio-WS-error message when the event carries no type', async () => {
+  it('onerror alone leaves the decision to onclose; the close names the error', async () => {
     const sock = await openCall();
     sock.emitError({} as unknown as Event);
-    expect(useVoiceStore.getState().callError).toBe('audio WS error: unknown');
-  });
-
-  it('onerror sets a call error', async () => {
-    const sock = await openCall();
-    sock.emitError({ type: 'error' });
-    expect(useVoiceStore.getState().callError).toMatch(/audio WS error/);
+    expect(useVoiceStore.getState().callError).toBeNull();
+    sock.emitClose(1006);
   });
 
   it('onclose stops the mic + TTS sink', async () => {
