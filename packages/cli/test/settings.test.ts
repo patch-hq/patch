@@ -5,6 +5,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Command } from 'commander';
 import {
+  parseOwnSettingValue,
+  providerSettingLines,
+  providerSettingRows,
   acpAccountLines,
   acpHostLogin,
   acpSignIn,
@@ -29,7 +32,8 @@ const group = (name: string): Command => {
 
 test('settings has show (default) and set', () => {
   const subs = group('settings').commands.map((c) => c.name());
-  for (const name of ['show', 'set']) assert.ok(subs.includes(name), `settings ${name}`);
+  for (const name of ['show', 'set', 'provider', 'provider-set'])
+    assert.ok(subs.includes(name), `settings ${name}`);
   // Claude Code's settings.json is per host now: `patch hosts claude-settings`.
   assert.ok(!subs.includes('claude'), 'settings claude is gone');
 });
@@ -228,4 +232,39 @@ test('an ACP sign-in on a host prints the hand-off, sends a pasted address, and 
     '/api/accounts/acp/gemini/login/l1/callback',
     { url: 'http://127.0.0.1:4000/oauth2callback?code=x' },
   ]);
+});
+
+test('provider settings list every provider’s and agent’s own, chosen or the provider’s default', async () => {
+  const { DEFAULT_SHARED_SETTINGS } = await import('@patch/wire');
+  const rows = providerSettingRows({
+    ...DEFAULT_SHARED_SETTINGS,
+    providerSettings: { codex: { 'history.persistence': 0 } },
+  } as unknown as Record<string, unknown>);
+  assert.deepEqual(
+    rows.map((r) => [r.provider, r.key, r.value, r.source]),
+    [
+      ['claude', 'cleanupPeriodDays', '30 days', 'provider default'],
+      ['codex', 'history.persistence', 'Off', 'chosen'],
+      ['codex', 'history.max_bytes', 'No limit', 'provider default'],
+      ['acp:gemini', 'general.sessionRetention.enabled', 'On', 'provider default'],
+      ['acp:gemini', 'general.sessionRetention.maxAge', '30 days', 'provider default'],
+    ],
+  );
+  assert.deepEqual(
+    providerSettingRows(DEFAULT_SHARED_SETTINGS as unknown as Record<string, unknown>, 'codex').map(
+      (r) => r.key,
+    ),
+    ['history.persistence', 'history.max_bytes'],
+  );
+  assert.match(providerSettingLines(rows)[1]!, /^codex history\.persistence: Off {2}\(chosen\)/);
+});
+
+test('a provider setting is typed as on/off for a switch and a whole number in range otherwise', async () => {
+  const { providerDescriptor } = await import('@patch/wire');
+  const [persistence, maxBytes] = providerDescriptor('codex').settings;
+  assert.equal(parseOwnSettingValue(persistence!, 'off'), 0);
+  assert.equal(parseOwnSettingValue(persistence!, 'On'), 1);
+  assert.throws(() => parseOwnSettingValue(persistence!, 'maybe'), /on or off/);
+  assert.equal(parseOwnSettingValue(maxBytes!, '50'), 50);
+  assert.throws(() => parseOwnSettingValue(maxBytes!, '0'), /from 1 to 10240/);
 });

@@ -11,6 +11,13 @@
 // The one provider with no prefix (`claude`) is the default for any model no
 // prefix claims, so every model Anthropic releases from here on works unedited.
 
+import {
+  acpSettingsId,
+  resolveAcpAgents,
+  type AcpAgentConfig,
+  type OwnSettingsGroup,
+} from './acpAgents.js';
+import type { OwnSetting } from './ownSettings.js';
 import type { PermissionMode } from './events.js';
 
 /**
@@ -41,21 +48,9 @@ export type ProviderCapability = keyof ProviderCapabilities;
  * One of a provider's OWN settings (spec/10 § Provider settings): a value the
  * provider itself reads from its own configuration, such as how long it keeps
  * a session. Patch shows it and writes the user's choice through; it never
- * sets one the user has not chosen.
+ * sets one the user has not chosen (`ownSettings.ts`).
  */
-export interface ProviderSettingDescriptor {
-  /** The key in the provider's own configuration file, and in `providerSettings`. */
-  readonly key: string;
-  readonly label: string;
-  /** One line saying what the setting does, in the provider's terms. */
-  readonly description: string;
-  /** A whole number of days. */
-  readonly kind: 'days';
-  readonly min: number;
-  readonly max: number;
-  /** What the provider does while the setting is absent from its configuration. */
-  readonly providerDefault: number;
-}
+export type ProviderSettingDescriptor = OwnSetting;
 
 /** The kinds an account can be: a subscription sign-in or a paid API key. */
 export type AccountKind = 'chatgpt' | 'apiKey';
@@ -120,6 +115,13 @@ export interface ProviderDescriptor {
   readonly branching: { readonly userTurnIds: boolean; readonly wholeTurns: boolean };
   /** The provider's own settings Settings exposes (spec/10 § Provider settings). */
   readonly settings: readonly ProviderSettingDescriptor[];
+  /**
+   * The format of the provider's own configuration file the settings are
+   * written into (each host's adapter says where the files are). Absent for a
+   * provider with no settings of its own here; an ACP agent declares its own
+   * (`AcpAgentConfig.ownSettings`).
+   */
+  readonly ownConfigFormat?: 'json' | 'toml';
   /**
    * Hosts report the provider's own configuration file (Claude Code's
    * `settings.json`, in `claude_settings.updated`), so Settings can show a value
@@ -210,8 +212,10 @@ export const PROVIDERS = [
         min: 1,
         max: 3650,
         providerDefault: 30,
+        write: { as: 'number' },
       },
     ],
+    ownConfigFormat: 'json',
     ownSettingsReportedByHost: true,
     nativeDuplicates: [
       'patch_agent',
@@ -265,9 +269,35 @@ export const PROVIDERS = [
       steer: true,
     },
     // Codex has no setting that deletes or expires its own sessions: it keeps
-    // every session until one is deleted (`codex delete`). Its `[history]`
-    // settings are about the prompt-recall file, not sessions.
-    settings: [],
+    // every session until one is deleted (`codex delete`). What its own
+    // configuration does offer is its prompt history (`[history]` in each
+    // CODEX_HOME's config.toml, codex-cli 0.154): whether it is kept at all, and
+    // how large it may grow before the oldest entries go.
+    settings: [
+      {
+        key: 'history.persistence',
+        label: 'Keep prompt history',
+        description:
+          'Codex saves every prompt to its own history file. Off, it saves none. Sessions are kept either way.',
+        kind: 'toggle',
+        min: 0,
+        max: 1,
+        providerDefault: 1,
+        write: { as: 'words', words: ['none', 'save-all'] },
+      },
+      {
+        key: 'history.max_bytes',
+        label: 'Prompt history size',
+        description:
+          'Codex drops its oldest saved prompts once the history file grows past this size.',
+        kind: 'megabytes',
+        min: 1,
+        max: 10240,
+        providerDefault: null,
+        write: { as: 'bytes' },
+      },
+    ],
+    ownConfigFormat: 'toml',
     settingsNote:
       'Codex has no setting to delete old sessions. It keeps every session until you delete it with Codex itself.',
     ownSettingsReportedByHost: false,
@@ -527,6 +557,36 @@ export const BACKEND_IDS = ACCOUNT_PROVIDERS.map((p) => p.backendId) as unknown 
   AccountBackendId,
   ...AccountBackendId[],
 ];
+
+/**
+ * Every set of own settings Settings shows (spec/10 § Provider settings; decision
+ * 9): each provider's from the table that has settings or a note, then each ACP
+ * agent's that declares some, under `acp:<agent>`. Surfaces draw this list, and
+ * the server checks a write against it, so neither names a provider.
+ */
+export function ownSettingsGroups(
+  acpAgents: readonly AcpAgentConfig[] | undefined,
+): OwnSettingsGroup[] {
+  const out: OwnSettingsGroup[] = [];
+  for (const p of PROVIDERS as readonly ProviderDescriptor[]) {
+    if (p.settings.length === 0 && p.settingsNote === undefined) continue;
+    out.push({
+      id: p.id,
+      label: p.label,
+      settings: p.settings,
+      ...(p.settingsNote !== undefined ? { note: p.settingsNote } : {}),
+    });
+  }
+  for (const agent of resolveAcpAgents(acpAgents)) {
+    if (!agent.ownSettings) continue;
+    out.push({
+      id: acpSettingsId(agent.id),
+      label: agent.label,
+      settings: agent.ownSettings.settings,
+    });
+  }
+  return out;
+}
 
 /** A setting a provider declares, by its key; throws for one it does not. */
 export function providerSettingDescriptor(

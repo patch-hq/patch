@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import { ProviderKeyId } from './provider-keys.js';
+import { OwnSetting } from './ownSettings.js';
 
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
 
@@ -46,6 +47,27 @@ export const AcpAgentConfig = z
      */
     apiKeyCheck: ProviderKeyId.optional(),
     /**
+     * The agent's OWN settings Settings exposes (spec/10 § Provider settings),
+     * such as how long it keeps sessions, and the file it reads them from:
+     * `file` under the home directory, or under `$<homeEnv>` where the agent
+     * reads that variable instead. Only JSON files. Chosen values are kept
+     * under `providerSettings['acp:<id>']`; an agent without this shows none.
+     */
+    ownSettings: z
+      .object({
+        file: z
+          .string()
+          .min(1)
+          .refine(
+            (f) => !f.startsWith('/') && !f.split('/').includes('..'),
+            'a path under the home directory',
+          ),
+        homeEnv: z.string().regex(ENV_NAME).optional(),
+        settings: z.array(OwnSetting).min(1),
+      })
+      .strict()
+      .optional(),
+    /**
      * The agent's own session mode for each Patch permission mode it has one
      * for. Without one, Patch answers the agent's permission requests itself
      * under that mode.
@@ -72,6 +94,37 @@ export const BUILTIN_ACP_AGENTS: readonly AcpAgentConfig[] = [
     keys: { GEMINI_API_KEY: 'gemini' },
     apiKeyEnv: 'GEMINI_API_KEY',
     apiKeyCheck: 'gemini',
+    // Gemini CLI's own session cleanup (`general.sessionRetention` in its
+    // settings.json, gemini-cli 0.70): on by default, keeping 30 days, never
+    // less than its own minimum of one day.
+    ownSettings: {
+      file: '.gemini/settings.json',
+      homeEnv: 'GEMINI_CLI_HOME',
+      settings: [
+        {
+          key: 'general.sessionRetention.enabled',
+          label: 'Delete old sessions',
+          description:
+            'Gemini CLI deletes its own saved sessions once they are older than the age below.',
+          kind: 'toggle',
+          min: 0,
+          max: 1,
+          providerDefault: 1,
+          write: { as: 'boolean' },
+        },
+        {
+          key: 'general.sessionRetention.maxAge',
+          label: 'Delete sessions after',
+          description:
+            "Gemini CLI deletes a saved session once it is this old. Patch's record of the chat is kept.",
+          kind: 'days',
+          min: 1,
+          max: 3650,
+          providerDefault: 30,
+          write: { as: 'days-duration' },
+        },
+      ],
+    },
     modes: { default: 'default', acceptEdits: 'autoEdit', bypassPermissions: 'yolo' },
   },
 ];
@@ -84,6 +137,25 @@ export function resolveAcpAgents(
   for (const a of BUILTIN_ACP_AGENTS) byId.set(a.id, a);
   for (const a of configured ?? []) byId.set(a.id, a);
   return [...byId.values()];
+}
+
+/** The `providerSettings` key an ACP agent's own settings are kept under. */
+export function acpSettingsId(agentId: string): string {
+  return `acp:${agentId}`;
+}
+
+/**
+ * Every set of own settings Settings shows (spec/10 § Provider settings): each
+ * provider's from the table, then each ACP agent's that declares some. One list,
+ * so surfaces and the server read the same thing and name no provider.
+ */
+export interface OwnSettingsGroup {
+  /** The `providerSettings` key. */
+  id: string;
+  label: string;
+  settings: readonly OwnSetting[];
+  /** What the provider says when it has none Patch can expose. */
+  note?: string;
 }
 
 export const ACP_MODEL_PREFIX = 'acp/';

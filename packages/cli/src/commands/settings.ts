@@ -8,6 +8,10 @@
 import { createInterface } from 'node:readline/promises';
 import { Command } from 'commander';
 import {
+  describeOwnSetting,
+  invalidOwnSettingValue,
+  ownSettingsGroups,
+  type OwnSetting,
   accountsKeyForBackend,
   providerByName,
   providerDescriptor,
@@ -198,6 +202,61 @@ export async function acpHostLogin(
 
 const server = (opts: CommonOpts) => getTransport({ ...opts, remote: true });
 
+/** One provider setting as `patch settings provider` shows it. */
+export interface ProviderSettingRowView {
+  provider: string;
+  key: string;
+  label: string;
+  value: string;
+  /** `chosen` (set in Patch) or `provider default` (the provider's own, untouched). */
+  source: 'chosen' | 'provider default';
+}
+
+/** Every provider setting, chosen value or the provider's default, for one provider or all. */
+export function providerSettingRows(
+  settings: Record<string, unknown>,
+  providerId?: string,
+): ProviderSettingRowView[] {
+  const chosen = (settings['providerSettings'] ?? {}) as Record<string, Record<string, number>>;
+  return ownSettingsGroups(settings['acpAgents'] as never)
+    .filter((g) => providerId === undefined || g.id === providerId)
+    .flatMap((g) =>
+      g.settings.map((s) => {
+        const c = chosen[g.id]?.[s.key];
+        return {
+          provider: g.id,
+          key: s.key,
+          label: `${g.label} · ${s.label}`,
+          value: describeOwnSetting(s, c ?? s.providerDefault),
+          source: c !== undefined ? ('chosen' as const) : ('provider default' as const),
+        };
+      }),
+    );
+}
+
+export function providerSettingLines(rows: readonly ProviderSettingRowView[]): string[] {
+  if (rows.length === 0) return ['(no provider settings)'];
+  return rows.map((r) => `${r.provider} ${r.key}: ${r.value}  (${r.source}) — ${r.label}`);
+}
+
+/** A typed value as the number Patch keeps: on/off for a switch, a whole number otherwise. */
+export function parseOwnSettingValue(setting: OwnSetting, raw: string): number {
+  const v = raw.trim().toLowerCase();
+  const n =
+    setting.kind === 'toggle'
+      ? ['on', 'yes', 'true', '1'].includes(v)
+        ? 1
+        : ['off', 'no', 'false', '0'].includes(v)
+          ? 0
+          : NaN
+      : Number(v);
+  const problem = Number.isNaN(n)
+    ? `${setting.label} is on or off`
+    : invalidOwnSettingValue(setting, n);
+  if (problem !== null) throw new Error(problem);
+  return n;
+}
+
 /** `permission-mode` → `permissionModeDefault`, and the few other CLI names. */
 const SETTING_KEYS: Record<string, string> = {
   'permission-mode': 'permissionModeDefault',
@@ -366,6 +425,52 @@ export function registerSettingsCommands(program: Command): void {
         const res = await server(opts).patch<unknown>('/api/settings', { [field]: next });
         if (opts.json) emitJson(res);
         else emitText(`${field}: ${value}`);
+      });
+    });
+
+  // spec/10 § Provider settings: each provider's own settings, and each ACP
+  // agent's, drawn from the one shared list.
+  settings
+    .command('provider [providerId]')
+    .description(
+      "Each provider's own settings (session retention and the like): the value and where it comes from",
+    )
+    .option('--json', 'JSON output')
+    .action(async (providerId: string | undefined, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const state = await server(opts).get<SharedState>('/api/settings/shared');
+        const rows = providerSettingRows(state.settings, providerId);
+        if (opts.json) emitJson(rows);
+        else for (const line of providerSettingLines(rows)) emitText(line);
+      });
+    });
+
+  settings
+    .command('provider-set <providerId> <key> <value>')
+    .description(
+      "Set one of a provider's own settings on every host: a number (days, MB), or on/off for a switch",
+    )
+    .option('--json', 'JSON output')
+    .action(async (providerId: string, key: string, value: string, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const t = server(opts);
+        const state = await t.get<SharedState>('/api/settings/shared');
+        const group = ownSettingsGroups(state.settings.acpAgents as never).find(
+          (g) => g.id === providerId,
+        );
+        if (!group) throw new Error(`no provider settings for ${providerId}`);
+        const setting = group.settings.find((d) => d.key === key);
+        if (!setting) throw new Error(`${group.label} has no setting ${key}`);
+        const n = parseOwnSettingValue(setting, value);
+        const current = (state.settings.providerSettings ?? {}) as Record<
+          string,
+          Record<string, number>
+        >;
+        const res = await t.patch<unknown>('/api/settings', {
+          providerSettings: { ...current, [providerId]: { ...current[providerId], [key]: n } },
+        });
+        if (opts.json) emitJson(res);
+        else emitText(`${group.label} · ${setting.label}: ${describeOwnSetting(setting, n)}`);
       });
     });
 

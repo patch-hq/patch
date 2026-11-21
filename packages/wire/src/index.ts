@@ -163,6 +163,7 @@ export interface VersionReport {
 export * from './agent-return.js';
 export * from './chat-send.js';
 export * from './events.js';
+export * from './ownSettings.js';
 export * from './reminder-cadence.js';
 export * from './meeting.js';
 // A chat's own history log, kept independently of any harness (spec/04 § History).

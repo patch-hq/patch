@@ -85,4 +85,58 @@ describe("Settings → Providers → a provider's own settings", () => {
       providerSettings: { claude: { cleanupPeriodDays: 90 } },
     });
   });
+
+  it("shows Codex's prompt-history settings at Codex's own defaults, and a switch writes 0 or 1", () => {
+    load();
+    const patch = vi.spyOn(write, 'patchShared').mockResolvedValue(true);
+    show();
+    const keep = screen.getByTestId(
+      'provider-setting-codex-history.persistence-input',
+    ) as HTMLInputElement;
+    expect(keep.checked).toBe(true);
+    expect(screen.getByTestId('provider-settings-note-codex').textContent).toMatch(
+      /no setting to delete old sessions/,
+    );
+    const size = screen.getByTestId(
+      'provider-setting-codex-history.max_bytes-input',
+    ) as HTMLInputElement;
+    expect(size.value).toBe('');
+    expect(size.placeholder).toBe('No limit');
+    fireEvent.click(keep);
+    expect(patch).toHaveBeenCalledWith('keep prompt history', {
+      providerSettings: { codex: { 'history.persistence': 0 } },
+    });
+  });
+
+  it("shows Gemini CLI's own session retention under its agent, and saves a number of days", () => {
+    load();
+    const patch = vi.spyOn(write, 'patchShared').mockResolvedValue(true);
+    show();
+    expect(screen.getByTestId('provider-settings-acp:gemini').textContent).toContain(
+      'Gemini CLI settings',
+    );
+    const age = screen.getByTestId(
+      'provider-setting-acp:gemini-general.sessionRetention.maxAge-input',
+    ) as HTMLInputElement;
+    expect(age.value).toBe('30');
+    fireEvent.change(age, { target: { value: '7' } });
+    fireEvent.blur(age);
+    expect(patch).toHaveBeenCalledWith('delete sessions after', {
+      providerSettings: { 'acp:gemini': { 'general.sessionRetention.maxAge': 7 } },
+    });
+  });
+
+  it('shows no group for an ACP agent that declares no settings of its own', () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({
+      loaded: true,
+      preferences: {
+        ...prefs,
+        providerSettings: {},
+        acpAgents: [{ id: 'gemini', label: 'Gemini CLI', command: 'gemini', args: ['--acp'] }],
+      },
+    });
+    show();
+    expect(screen.queryByTestId('provider-settings-acp:gemini')).toBeNull();
+  });
 });
