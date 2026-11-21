@@ -192,9 +192,8 @@ describe('/chats/new', () => {
       </QueryClientProvider>,
     );
     const grid = screen.getByTestId('new-chat-setup-grid');
-    const path = screen.getByTestId('new-chat-folder-path');
-    expect(path.parentElement).toHaveClass('new-chat-project-cell');
-    expect(path.parentElement?.parentElement).toBe(grid);
+    const pill = screen.getByTestId('new-chat-folder-pill');
+    expect(pill.closest('.new-chat-project-cell')?.parentElement).toBe(grid);
   });
 
   it('puts the folder + model pickers in the chat body under the empty state, not the header', () => {
@@ -362,9 +361,9 @@ describe('/chats/new', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(screen.getByTestId('new-chat-folder-path')).toHaveTextContent(
-      '/home/tom/My first project',
-    );
+    const pill = screen.getByTestId('new-chat-folder-pill');
+    expect(pill).toHaveTextContent('My first project');
+    expect(pill).toHaveAttribute('title', '/home/tom/My first project');
   });
 
   // spec/14 § Empty states — the "Type your first message below…" hint is

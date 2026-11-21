@@ -12382,6 +12382,12 @@ main.empty-state p {
      hovered row got no highlight at all. */
   background: var(--bg-soft);
 }
+.model-option-reason {
+  margin-left: auto;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
 .model-option-desc {
   display: block;
   margin-top: 2px;
@@ -12503,14 +12509,6 @@ main.empty-state p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.folder-browser-crumb-path {
-  font-size: var(--text-min);
-  color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl; /* keep the tail (deepest dir) visible when it overflows */
 }
 .folder-browser-up {
   flex-shrink: 0;
@@ -19019,14 +19017,6 @@ a.drop-target,
 .new-chat-project-cell {
   position: relative;
   min-width: 0;
-}
-.new-chat-folder-path {
-  margin: 4px 0 0;
-  /* Always occupies its line, so choosing a folder never reflows the rows. */
-  min-height: 1.4em;
-  line-height: 1.4;
-  font-size: var(--text-min);
-  word-break: break-all;
 }
 
 /* Triage (spec/14 § Triage): one waiting chat at a time. */

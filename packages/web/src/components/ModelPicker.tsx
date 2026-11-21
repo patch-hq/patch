@@ -25,7 +25,7 @@ import {
 } from '@patch/wire';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useModelCatalog, type ModelOption } from '../lib/models.js';
-import { modelSpent, spentReason, useCredit } from '../lib/credit.js';
+import { modelSpentReason, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
 
@@ -246,7 +246,8 @@ export function ModelPicker({
           {groups.length > 1 ? <div className="model-group-label">{g.label}</div> : null}
           <ul className="model-popup-list">
             {g.models.map((m) => {
-              const spent = modelSpent(m.id, credit.rows, credit.apiKeyProviders);
+              const reason = modelSpentReason(m.id, credit.rows, credit.apiKeyProviders);
+              const spent = reason !== null;
               return (
                 <li key={m.id}>
                   <button
@@ -257,16 +258,18 @@ export function ModelPicker({
                     aria-selected={m.id === selected}
                     aria-disabled={spent}
                     disabled={spent}
+                    title={reason ?? undefined}
                     onClick={() => onSelect(m.id)}
                   >
-                    <span className="model-option-name">
-                      {m.label}
-                      {spent ? (
-                        <span className="model-option-desc">
-                          {spentReason(credit.rows, g.providerId)}
-                        </span>
-                      ) : null}
-                    </span>
+                    <span className="model-option-name">{m.label}</span>
+                    {reason !== null ? (
+                      <span
+                        className="model-option-reason"
+                        data-testid={`model-option-reason-${m.id}`}
+                      >
+                        {reason}
+                      </span>
+                    ) : null}
                     {m.id === selected ? (
                       <span className="model-option-check" aria-hidden>
                         ✓

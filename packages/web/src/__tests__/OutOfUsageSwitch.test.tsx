@@ -121,7 +121,7 @@ describe('OutOfUsageBanner — Change provider', () => {
     renderBanner();
     fireEvent.click(screen.getByTestId('rate-limit-change-provider'));
     const options = within(screen.getByTestId('rate-limit-provider-menu')).getAllByRole('menuitem');
-    expect(options.map((o) => o.textContent)).toEqual(['Codex']);
+    expect(options.map((o) => o.textContent)).toEqual(['ChatGPT']);
     fireEvent.click(options[0]!);
     expect(continueChat).toHaveBeenCalledWith('c1', { model: 'openai/gpt-5' });
     await waitFor(() =>

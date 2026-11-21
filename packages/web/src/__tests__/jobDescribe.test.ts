@@ -90,8 +90,8 @@ describe('describeTrigger', () => {
     );
   });
   it('describes a webhook trigger by scheme', () => {
-    expect(describeTrigger({ type: 'webhook', scheme: 'github' })).toBe('GitHub webhook');
-    expect(describeTrigger({ type: 'webhook', scheme: 'none' })).toBe('Unsigned webhook');
+    expect(describeTrigger({ type: 'webhook', scheme: 'github' })).toBe('GitHub event');
+    expect(describeTrigger({ type: 'webhook', scheme: 'none' })).toBe('Incoming request');
   });
 });
 
@@ -219,7 +219,7 @@ describe('describeTrigger — cron zone', () => {
 
   it('leaves non-cron triggers untouched whatever the viewer zone', () => {
     expect(describeTrigger({ type: 'webhook', scheme: 'github' }, 'America/New_York')).toBe(
-      'GitHub webhook',
+      'GitHub event',
     );
   });
 

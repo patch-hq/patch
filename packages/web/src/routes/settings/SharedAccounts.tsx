@@ -282,7 +282,8 @@ function AccountEntry({
         ) : null}
       </span>
       {sub.length > 0 ? <span className="set-sub">{sub.join(' · ')}</span> : null}
-      {row.state ? (
+      {row.state &&
+      (row.kind === 'apiKey' || reading?.usage !== undefined || row.state.state !== 'ready') ? (
         <span
           className={`set-sub${accountStateRunnable(row.state) ? '' : ' warn'}`}
           data-testid={`account-state-${id}`}

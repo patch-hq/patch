@@ -174,12 +174,12 @@ export interface DurableCodexHandlers {
  * (`localAgent.ts`) speaks the same shape and rides the same runner.
  */
 export interface DurableProcessKind {
-  /** Shown in errors: "Codex process exited". */
+  /** Shown in errors: "ChatGPT process exited". */
   name: string;
   /** Written to `turn.json` and used in log lines. */
   harness: string;
 }
-const CODEX_KIND: DurableProcessKind = { name: 'Codex', harness: 'codex' };
+const CODEX_KIND: DurableProcessKind = { name: 'ChatGPT', harness: 'codex' };
 
 /** The host's end of one Codex (or local-model) turn's runner. */
 export class DurableCodexProcess implements LiveTurn {

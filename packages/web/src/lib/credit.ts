@@ -9,11 +9,16 @@
 // connected always has credit.
 
 import { useMemo } from 'react';
-import { ACCOUNT_PROVIDERS, providerForModel, type ProviderId } from '@patch/wire';
+import {
+  ACCOUNT_PROVIDERS,
+  providerForModel,
+  rateLimitWindowBlocks,
+  type ProviderId,
+} from '@patch/wire';
 import { accountRows, type AccountUsageRow } from '../components/UsagePopover.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
-import { blockingScope, isBlocked } from './usage.js';
+import { formatResetLocal, isBlocked } from './usage.js';
 
 /** The connected API-key accounts per provider, which `accountRows` leaves out. */
 export type ApiKeyProviders = ReadonlySet<ProviderId>;
@@ -70,6 +75,34 @@ export function modelSpent(
   return providerSpent(rows, providerForModel(modelId), apiKeyProviders, now);
 }
 
+/**
+ * Why a model is greyed out, in words — `ChatGPT limit reached until 17 Dec 10:16`
+ * — or null when it is not spent. The date is when the first account of the
+ * provider comes back; no reset known says only that the limit is reached.
+ */
+export function modelSpentReason(
+  modelId: string | null | undefined,
+  rows: readonly AccountUsageRow[],
+  apiKeyProviders: ApiKeyProviders,
+  now: number = Date.now(),
+): string | null {
+  const providerId = providerForModel(modelId);
+  if (!providerSpent(rows, providerId, apiKeyProviders, now)) return null;
+  const own = rows.filter((r) => r.providerId === providerId);
+  const name = own[0]!.backend;
+  // An account is back when its last blocked window resets; the provider is
+  // back when its soonest account is. Any account with no stated reset makes
+  // the date unknowable, so none is claimed.
+  const backAt = own.map((r) => {
+    const resets = (['session', 'week'] as const)
+      .filter((scope) => rateLimitWindowBlocks(scope, r.usage?.[scope], now))
+      .map((scope) => r.usage?.[scope]?.resetsAt);
+    return resets.some((t) => t === undefined) ? undefined : Math.max(...(resets as number[]));
+  });
+  if (backAt.some((t) => t === undefined)) return `${name} limit reached`;
+  return `${name} limit reached until ${formatResetLocal(Math.min(...(backAt as number[])), now)}`;
+}
+
 /** The rate-limited account rows and the API-key providers, read from the stores. */
 export function useCredit(): { rows: AccountUsageRow[]; apiKeyProviders: ApiKeyProviders } {
   const hosts = usePresenceStore((s) => s.hosts);
@@ -89,36 +122,4 @@ export function useCredit(): { rows: AccountUsageRow[]; apiKeyProviders: ApiKeyP
     }
     return { rows: accountRows(hosts, shared), apiKeyProviders };
   }, [hosts, shared]);
-}
-
-const PROVIDER_NOUN: Partial<Record<string, string>> = { claude: 'Claude', codex: 'ChatGPT' };
-
-/**
- * Why a spent provider's models are unavailable, in plain words with a full
- * date — `This ChatGPT account has no usage left until 17 Dec`. The date is the
- * earliest reset among its accounts; none stated reads without one.
- */
-export function spentReason(
-  rows: readonly AccountUsageRow[],
-  providerId: ProviderId,
-  now: number = Date.now(),
-): string {
-  const noun = PROVIDER_NOUN[providerId] ?? providerId;
-  const resets = rows
-    .filter((r) => r.providerId === providerId)
-    .map((r) => {
-      const scope = blockingScope(r.usage, now);
-      return scope === undefined ? undefined : r.usage?.[scope]?.resetsAt;
-    })
-    .filter((t): t is number => t !== undefined);
-  const subject =
-    rows.filter((r) => r.providerId === providerId).length > 1
-      ? `All ${noun} accounts have`
-      : `This ${noun} account has`;
-  if (resets.length === 0) return `${subject} no usage left`;
-  const d = new Date(Math.min(...resets));
-  const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  const sameDay = d.toDateString() === new Date(now).toDateString();
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  return `${subject} no usage left until ${sameDay ? time : date}`;
 }

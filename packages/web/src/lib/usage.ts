@@ -55,38 +55,57 @@ export function formatReset(at: number, now: number = Date.now()): string {
 }
 
 /**
- * The same instant spelled out for a tooltip: local zone named, then UTC.
- *
- * The zone NAME comes from the browser rather than a computed offset, so it
- * says "BST" today and "GMT" from 25 October without anything being changed.
+ * An instant with its full date, in the reader's own zone and no other:
+ * `Thu 17 Dec, 10:16` (the year joins it only when it is not this one).
+ * Tooltips and sentences use it so a reset 26 days away never reads as "Thu".
  */
-export function formatResetDetail(at: number): string {
+export function formatResetDetail(at: number, now: number = Date.now()): string {
   const d = new Date(at);
-  const local = d.toLocaleString(undefined, {
+  const sameYear = new Date(now).getFullYear() === d.getFullYear();
+  const date = d.toLocaleDateString('en-GB', {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
   });
-  const utc = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
-  return `${local} · ${utc}`;
-}
-
-/** Compact local reset for usage tooltips — one clock, with its zone named. */
-export function formatResetLocal(at: number, now: number = Date.now()): string {
-  const d = new Date(at);
-  const sameDay = new Date(now).toDateString() === d.toDateString();
-  return new Intl.DateTimeFormat('en-GB', {
-    ...(sameDay ? {} : { weekday: 'short', day: 'numeric', month: 'short' }),
+  const time = d.toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
-    timeZoneName: 'short',
-  })
-    .format(d)
-    .replace(',', '');
+  });
+  return `${date}, ${time}`;
+}
+
+/**
+ * Compact local reset: the time alone today, otherwise the date and time
+ * (`17 Dec 10:16`). One clock, the reader's; no zone name to disagree with it.
+ */
+export function formatResetLocal(at: number, now: number = Date.now()): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  if (new Date(now).toDateString() === d.toDateString()) return time;
+  const sameYear = new Date(now).getFullYear() === d.getFullYear();
+  const date = d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+  return `${date} ${time}`;
+}
+
+/** Plain words for a window that has stopped work: no provider status codes. */
+export function describeLimitReached(
+  providerLabel: string,
+  resetsAt: number | undefined,
+  now: number = Date.now(),
+): string {
+  return resetsAt !== undefined
+    ? `This ${providerLabel} account has no usage left until ${formatResetLocal(resetsAt, now)}`
+    : `This ${providerLabel} account has no usage left`;
 }
 
 /** How long until an instant, coarsely — `in 28 min`, `in 3 h`, `now`. */
@@ -268,10 +287,10 @@ export function formatAgo(at: number | undefined, now: number = Date.now()): str
   return `${Math.floor(h / 24)} d ago`;
 }
 
-/** `read 2 min ago` — the same, where the line needs to say it is a reading. */
+/** `Updated 2 min ago` — the same, where the line needs to say it is a reading. */
 export function formatReadAt(at: number | undefined, now: number = Date.now()): string | null {
   const ago = formatAgo(at, now);
-  return ago === null ? null : `read ${ago}`;
+  return ago === null ? null : `Updated ${ago}`;
 }
 
 /**

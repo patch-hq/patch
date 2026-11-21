@@ -286,7 +286,7 @@ describe('the endpoint catalogue', () => {
         },
       );
       expect(await registry.models(registry.list()[0]!)).toEqual([
-        { id: 'openai/endpoint/ollama/qwen3:8b', label: 'qwen3:8b · Ollama (Codex)' },
+        { id: 'openai/endpoint/ollama/qwen3:8b', label: 'qwen3:8b · Ollama (ChatGPT)' },
       ]);
       expect(endpoint.requests[0]?.authorization).toBe('Bearer sk-endpoint-key-1234');
     } finally {

@@ -11,7 +11,7 @@ describe('chat.message with error: true', () => {
       type: 'chat.message' as const,
       chatId: 'ce',
       role: 'system' as const,
-      content: 'This turn failed: Codex process exited (0)',
+      content: 'This turn failed: ChatGPT process exited (0)',
       error: true as const,
       seq: 7,
     };
@@ -21,7 +21,7 @@ describe('chat.message with error: true', () => {
     const errs = list.filter((e) => e.seq === 7);
     expect(errs).toHaveLength(1);
     expect(errs[0]!.kind).toBe('error');
-    expect(errs[0]!.content).toBe('This turn failed: Codex process exited (0)');
+    expect(errs[0]!.content).toBe('This turn failed: ChatGPT process exited (0)');
   });
 
   it('leaves an ordinary system message alone', () => {

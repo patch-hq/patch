@@ -162,7 +162,7 @@ export function makeTitleGenerator(
       { dep: typeof opts.codex; name: string } | undefined | null
     > = {
       claude: undefined,
-      codex: { dep: opts.codex, name: 'Codex' },
+      codex: { dep: opts.codex, name: 'ChatGPT' },
       acp: null,
     };
     // An endpoint model never borrows a Claude small-job model the user did not choose.

@@ -95,7 +95,7 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
   {
     id: 'jobs',
     title: 'Jobs',
-    line: 'Run a prompt at set times or when a webhook fires.',
+    line: 'Run a prompt at set times or when another app sends Patch a request.',
     to: '/jobs',
     action: 'Open Jobs',
   },

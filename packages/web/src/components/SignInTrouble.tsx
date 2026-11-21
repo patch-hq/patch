@@ -8,8 +8,11 @@ export function SignInTrouble({
   onRetry,
   apiKey,
   testId,
+  happened,
 }: {
   onRetry: () => void;
+  /** What has gone wrong so far, in words: shown once the options open. */
+  happened: string;
   apiKey?: ReactNode;
   testId: string;
 }): JSX.Element {
@@ -28,9 +31,9 @@ export function SignInTrouble({
   }
   return (
     <div className="set-inline" data-testid={`${testId}-trouble-options`}>
-      <p className="set-note" data-testid={`${testId}-trouble-help`}>
-        The sign-in did not finish. Try again for a fresh sign-in, or use an API key instead.
-      </p>
+      <span className="set-sub" data-testid={`${testId}-trouble-reason`}>
+        {happened}
+      </span>
       <button
         type="button"
         className="set-btn ghost"

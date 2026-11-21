@@ -1657,7 +1657,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             >
               <option value="cron">Cron</option>
               <option value="recurrence">Recurrence</option>
-              <option value="webhook">Webhook</option>
+              <option value="webhook">Incoming request</option>
               <option value="follows">After another job</option>
               {form.triggerType === 'todoist' ? (
                 <option value="todoist">Todoist (legacy)</option>

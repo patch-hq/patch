@@ -107,7 +107,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
       name: 'ChatGPT and OpenAI',
       testId: 'chatgpt',
       Controls: AddChatGPTAccount,
-      installName: 'Codex',
+      installName: 'ChatGPT',
       installTestId: 'codex',
     },
   }),
