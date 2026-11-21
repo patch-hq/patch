@@ -280,19 +280,24 @@ function AccountRow({
           />
         }
       />
-      {twin ? (
-        <Muted testID={`account-${id}-twin`}>
-          Same {provider.name} account as {twin.label}
-        </Muted>
-      ) : null}
-      {reading?.error ? <ErrorLine testID={`account-${id}-error`} message={reading.error} /> : null}
-      <UsageBars
-        usage={reading?.usage}
-        testID={`account-${id}-usage`}
-        refreshing={false}
-        scopes={provider.windows}
-        extraUsageUrl={provider.extraUsageUrl}
-      />
+      {/* Lined up with the row's own text rather than the card's edge. */}
+      <View style={{ paddingHorizontal: space.md + 2 }}>
+        {twin ? (
+          <Muted testID={`account-${id}-twin`}>
+            Same {provider.name} account as {twin.label}
+          </Muted>
+        ) : null}
+        {reading?.error ? (
+          <ErrorLine testID={`account-${id}-error`} message={reading.error} />
+        ) : null}
+        <UsageBars
+          usage={reading?.usage}
+          testID={`account-${id}-usage`}
+          refreshing={false}
+          scopes={provider.windows}
+          extraUsageUrl={provider.extraUsageUrl}
+        />
+      </View>
       {renaming ? (
         <RenameEntry
           testID={`account-${id}-rename`}

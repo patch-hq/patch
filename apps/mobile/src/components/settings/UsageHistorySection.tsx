@@ -108,7 +108,9 @@ export function UsageHistorySection(): React.ReactElement {
           />
         ) : null}
         {win === null ? (
-          <Muted testID="usage-pick-range">Pick a start and end date</Muted>
+          <View style={{ paddingHorizontal: space.md + 2, paddingVertical: space.sm }}>
+            <Muted testID="usage-pick-range">Pick a start and end date</Muted>
+          </View>
         ) : state.kind === 'error' ? (
           <ErrorLine
             testID="usage-history-error"
@@ -116,9 +118,13 @@ export function UsageHistorySection(): React.ReactElement {
             onRetry={() => setAttempt((a) => a + 1)}
           />
         ) : state.kind === 'loading' ? (
-          <Muted>Loading…</Muted>
+          <View style={{ paddingHorizontal: space.md + 2, paddingVertical: space.sm }}>
+            <Muted testID="usage-history-loading">Loading…</Muted>
+          </View>
         ) : series.length === 0 ? (
-          <Muted testID="usage-history-empty">No readings in this period</Muted>
+          <View style={{ paddingHorizontal: space.md + 2, paddingVertical: space.sm }}>
+            <Muted testID="usage-history-empty">No readings in this period</Muted>
+          </View>
         ) : (
           <View testID="usage-burndown">
             <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">

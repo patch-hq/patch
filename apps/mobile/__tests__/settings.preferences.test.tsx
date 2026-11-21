@@ -716,11 +716,10 @@ describe('Voice page: frame', () => {
     expect(findHost(m.root, byTestId('meeting-engine'))).toBeTruthy();
   });
 
-  it('Voice devices with no reported host says to add one', () => {
-    resetHosts();
+  it('lists voice devices once settings have loaded', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
-    expect(textOf(findHost(r.root, byTestId('voice-devices-no-hosts')))).toBe('Add a host first');
+    expect(findHost(r.root, byTestId('settings-voice-devices'))).toBeTruthy();
   });
 
   it('the engine waits for settings to load', () => {

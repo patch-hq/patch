@@ -15,7 +15,6 @@ import { getRoute } from '../../config';
 import { encodePairingUri } from '@patch/wire';
 import { LINKED_DEVICES_TITLE, friendlyDeviceName } from '../../lib/labels';
 import { fonts, radii, space, typography, useTheme } from '../../lib/theme';
-import { usePresenceStore } from '../../stores/presenceStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { SettingsSection } from '../SettingsSection';
 import { agoLabel } from './hostSend';
@@ -215,26 +214,51 @@ function LinkDeviceQr({ onClose }: { onClose: () => void }): React.ReactElement 
 }
 
 /**
- * Voice devices (spec/16) — the account's voice satellites. A voice device has
- * no screen, camera or keyboard, so there is no code or QR to offer here; it is
- * adopted by a host during its adoption window, opened on that host with
- * `patch hosts pair-device`.
+ * Voice devices (spec/16) — the account's voice satellites, read from the same
+ * linked-devices list as the Linked devices page (surfaceKind `voice-device`),
+ * each revocable. A device is added from Settings on the computer.
  */
 export function VoiceDevicesSection(): React.ReactElement {
-  const hosts = usePresenceStore((s) => s.hosts);
-  const withHost = Object.values(hosts).filter((h) => h.host !== null);
   return (
     <SettingsSection title="Voice devices" testID="settings-voice-devices">
-      {withHost.length === 0 ? (
-        <NoticeRow testID="voice-devices-no-hosts" text="Add a host first" />
-      ) : (
-        <Row
-          testID="voice-devices-empty"
-          title="None paired"
-          subtitle="patch hosts pair-device"
-          subtitleTestID="voice-devices-how"
-        />
-      )}
+      <WithSettings testID="voice-devices">
+        {(data) => {
+          const voice = data.devices.filter((d) => d.surfaceKind === 'voice-device');
+          return voice.length === 0 ? (
+            <Row
+              testID="voice-devices-empty"
+              title="None yet"
+              subtitle="Add one from Settings → Voice calls on the computer."
+              subtitleTestID="voice-devices-how"
+            />
+          ) : (
+            <>
+              {voice.map((d) => (
+                <Row
+                  key={d.surfaceId}
+                  testID={`voice-device-${d.surfaceId}`}
+                  leading={<Dot on={d.status === 'online'} />}
+                  title={friendlyDeviceName(d.surfaceKind, d.label)}
+                  subtitle={deviceSubtitle(d)}
+                  right={
+                    <SettingsButton
+                      testID={`voice-device-revoke-${d.surfaceId}`}
+                      label="Revoke"
+                      variant="danger"
+                      onPress={() => {
+                        void api
+                          .revoke(d.surfaceId)
+                          .then(() => useSettingsStore.getState().load())
+                          .catch((e: Error) => Alert.alert('Revoke failed', e.message));
+                      }}
+                    />
+                  }
+                />
+              ))}
+            </>
+          );
+        }}
+      </WithSettings>
     </SettingsSection>
   );
 }

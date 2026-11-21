@@ -353,28 +353,35 @@ describe('Link a device', () => {
 });
 
 describe('Voice devices', () => {
-  it('asks for a host first when none has reported', () => {
-    resetHosts();
+  const voiceDevice = (over: Partial<LinkedDevice> = {}): LinkedDevice =>
+    ({
+      surfaceId: 'vd1',
+      surfaceKind: 'voice-device',
+      label: 'Office',
+      status: 'online',
+      isCurrent: false,
+      lastHeartbeat: Date.now(),
+      ...over,
+    }) as LinkedDevice;
+
+  it('lists the account’s voice devices from the linked devices, each revocable', () => {
+    const f = settingsFixture();
+    seedSettings({ devices: [...f.devices, voiceDevice()] });
     const r = renderRN(<VoiceDevicesSection />);
     expect(hasText(r.root, 'Voice devices')).toBe(true);
-    expect(textOf(findHost(r.root, byTestId('voice-devices-no-hosts')))).toBe('Add a host first');
+    expect(findHost(r.root, byTestId('voice-device-vd1'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('voice-device-revoke-vd1'))).toBeTruthy();
     expect(queryHost(r.root, byTestId('voice-devices-empty'))).toBeNull();
   });
 
-  it('a registered host that has not reported yet does not count', () => {
-    resetHosts();
-    usePresenceStore.getState().setHostOnline('silent', true);
+  it('with none, says where one is added — no stale command, no code or QR', () => {
+    const f = settingsFixture();
+    seedSettings({ devices: f.devices.filter((d) => d.surfaceKind !== 'voice-device') });
     const r = renderRN(<VoiceDevicesSection />);
-    expect(findHost(r.root, byTestId('voice-devices-no-hosts'))).toBeTruthy();
-  });
-
-  it('says how a device is adopted once a host exists — no code or QR', () => {
-    resetHosts();
-    reportHost('d1');
-    const r = renderRN(<VoiceDevicesSection />);
-    expect(queryHost(r.root, byTestId('voice-devices-no-hosts'))).toBeNull();
-    expect(hasText(findHost(r.root, byTestId('voice-devices-empty')), 'None paired')).toBe(true);
-    expect(textOf(findHost(r.root, byTestId('voice-devices-how')))).toBe('patch hosts pair-device');
+    expect(hasText(findHost(r.root, byTestId('voice-devices-empty')), 'None yet')).toBe(true);
+    expect(textOf(findHost(r.root, byTestId('voice-devices-how')))).toMatch(
+      /Voice calls on the computer/,
+    );
     expect(queryHost(r.root, byTestId('link-device-qr'))).toBeNull();
   });
 });
