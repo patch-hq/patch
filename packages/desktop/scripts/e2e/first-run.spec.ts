@@ -262,11 +262,10 @@ async function permissions(page: Page): Promise<void> {
   await expect(page.getByTestId('welcome-mode-default')).toHaveClass(/checked/);
   await shot(page, 'permissions');
   await page.getByTestId('welcome-next').click();
-  // No AI, no models to choose between: the step stays (the count is fixed) and
-  // says so.
-  await expect(page.getByTestId('welcome-model')).toBeVisible();
-  await expect(page.getByTestId('welcome-model-problem')).toContainText('connect an AI');
-  await page.getByTestId('welcome-next').click();
+  // No AI, no models to choose between: the model step is left out, so the next
+  // step is the one after it.
+  await expect(page.getByTestId('welcome-permissions')).toBeHidden();
+  await expect(page.getByTestId('welcome-model')).toHaveCount(0);
 }
 
 /** The phone step: the app download first, then on its own the pairing code. */
