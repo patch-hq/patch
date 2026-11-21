@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src file:"
     />
     <title>Patch</title>
     <!--
@@ -15,6 +15,17 @@
       Same colours and type as the app, so the hand-over is seamless.
     -->
     <style>
+      /* The app's own faces, so the heading here is the heading there. */
+      @font-face {
+        font-family: 'Fraunces Variable';
+        font-weight: 100 900;
+        src: url(./fraunces.woff2) format('woff2-variations');
+      }
+      @font-face {
+        font-family: 'Figtree Variable';
+        font-weight: 300 900;
+        src: url(./figtree.woff2) format('woff2-variations');
+      }
       :root {
         color-scheme: light dark;
         --bg: #f2f0ea;
@@ -56,7 +67,7 @@
         background: var(--bg);
         color: var(--ink);
         font:
-          16px/1.45 'Figtree',
+          16px/1.45 'Figtree Variable',
           -apple-system,
           BlinkMacSystemFont,
           system-ui,
@@ -88,9 +99,21 @@
       h1 {
         margin: 0;
         font:
-          500 30px/1.15 'Fraunces',
+          600 30px/1.15 'Fraunces Variable',
           Georgia,
           serif;
+        font-variation-settings:
+          'opsz' 144,
+          'SOFT' 30;
+      }
+      .logo {
+        display: block;
+        margin-bottom: 16px;
+      }
+      .welcome {
+        margin: 0 0 6px;
+        font-size: 14px;
+        color: var(--ink-3);
       }
       .choices {
         display: grid;
@@ -305,6 +328,30 @@
         </div>
       </div>
       <div id="choose">
+        <svg
+          class="logo"
+          viewBox="0 0 64 64"
+          width="48"
+          height="48"
+          role="img"
+          aria-label="Patch"
+          data-testid="choose-logo"
+        >
+          <circle cx="32" cy="32" r="32" fill="#3a5e2c" />
+          <text
+            x="32"
+            y="46"
+            text-anchor="middle"
+            font-family="Georgia, 'Times New Roman', serif"
+            font-style="italic"
+            font-weight="500"
+            font-size="44"
+            fill="#ebe7dc"
+          >
+            p
+          </text>
+        </svg>
+        <p class="welcome" data-testid="choose-welcome">Welcome to Patch</p>
         <h1>Where should your agents run?</h1>
         <p class="intro" data-testid="choose-intro">
           Patch runs your AI agents on a computer, and you chat with them from here or your phone.
@@ -327,7 +374,7 @@
           <button type="button" class="choice" id="existing" data-testid="choose-existing">
             <span class="choice-title">Connect to an existing Patch</span>
             <span class="choice-hint">
-              Paste a pairing code from Patch on another computer, to join the same account
+              Paste a pairing code from Patch on another computer, to join the same account.
             </span>
           </button>
         </div>

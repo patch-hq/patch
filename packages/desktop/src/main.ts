@@ -521,14 +521,19 @@ function saveWindowBounds(win: BrowserWindow): void {
   }
 }
 
-export function createMainWindow(): BrowserWindow {
-  const placement = resolvePlacement(
+/** Where the main window opens; the setup window opens in the same place, so the hand-over does not jump. */
+function mainWindowPlacement(): ReturnType<typeof resolvePlacement> {
+  return resolvePlacement(
     parseSavedPlacement(
       existsSync(WINDOW_BOUNDS_FILE()) ? readFileSync(WINDOW_BOUNDS_FILE(), 'utf8') : undefined,
     ),
     attachedDisplays(),
     { width: 1200, height: 800 },
   );
+}
+
+export function createMainWindow(): BrowserWindow {
+  const placement = mainWindowPlacement();
   const win = new BrowserWindow({
     x: placement.x,
     y: placement.y,
@@ -2259,9 +2264,15 @@ function showSetupWindow(offerMove = false): {
     fail(m: string): void;
   };
 } {
+  // The same size and place the main window opens at: the steps after this one
+  // are the app's own welcome route in that window, so a narrower setup window
+  // made the whole thing jump wider after the computer was named.
+  const placement = mainWindowPlacement();
   const window = new BrowserWindow({
-    width: 560,
-    height: 680,
+    x: placement.x,
+    y: placement.y,
+    width: placement.width,
+    height: placement.height,
     title: 'Patch',
     // A quiet instance (a test run beside a real Patch) puts nothing on screen.
     show: !QUIET,

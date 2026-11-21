@@ -3153,12 +3153,18 @@ button.nav-row {
    empty state — not in the header. Overflow stays visible so the picker's
    absolutely-positioned dropdown isn't clipped. */
 .new-chat-intro {
-  flex: 1;
+  /* `0 0 auto` + a safe centre: when the setup and usage are taller than the
+     panel the block grows and the stream scrolls to its end, instead of the
+     foot (usage) being clipped behind the composer. */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 20px;
+}
+.chat-stream-content:has(> .new-chat-intro) {
+  justify-content: flex-start;
 }
 .new-chat-intro .empty-chat {
   flex: 0 1 auto;
@@ -9833,21 +9839,7 @@ button.view-file-download {
   font-weight: 600;
   margin: 0;
 }
-/* Desktop: the nav beside the page already names it (selected row), so the
-   page heading would be a repeat. It returns on the phone, where the nav is
-   hidden behind the open page. Kept for screen readers, only unseen. A head
-   with nothing else in it collapses. */
-.set-head h1 {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-.set-head:not(:has(> :not(h1, .set-back))) {
-  margin-bottom: 0;
-}
+/* The page title is always shown: the nav row alone is too easy to miss. */
 .set-head > :not(h1, .set-back) {
   margin-left: auto;
 }
@@ -10769,15 +10761,7 @@ button.set-row-open:focus-visible {
   .set-back {
     display: inline-block;
   }
-  .set-head:not(:has(> :not(h1, .set-back))) {
-    margin-bottom: 22px;
-  }
   .set-head h1 {
-    position: static;
-    width: auto;
-    height: auto;
-    clip-path: none;
-    white-space: normal;
     font-size: 22px;
   }
   .set-head > :not(h1, .set-back) {
@@ -19284,6 +19268,29 @@ a.drop-target,
   list-style: none;
   padding: 0;
   margin: 8px 0;
+  display: inline-block;
+  text-align: left;
+}
+.first-run-intro li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.first-run-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+.first-run-intro li[data-done='true'] .first-run-box {
+  color: var(--ink-3);
 }
 .first-run-actions {
   display: flex;

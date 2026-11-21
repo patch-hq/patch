@@ -124,6 +124,39 @@ export function PadsPage(): JSX.Element {
           </p>
         ) : (
           <div className="empty-chat" data-testid="pads-empty">
+            <svg
+              className="empty-chat-art"
+              viewBox="0 0 240 180"
+              fill="none"
+              role="img"
+              aria-label="No pads yet"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {/* a screen frame with a header rule, in the same family as the jobs calendar */}
+              <rect
+                x="64"
+                y="26"
+                width="112"
+                height="128"
+                rx="16"
+                className="empty-chat-bubble"
+                strokeWidth="3"
+              />
+              <path
+                d="M64 58 h112"
+                className="empty-chat-stem"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+              <circle cx="90" cy="92" r="7" className="empty-chat-dot" />
+              <circle cx="120" cy="92" r="7" className="empty-chat-dot" />
+              <circle cx="150" cy="92" r="7" className="empty-chat-dot" />
+              <circle cx="90" cy="120" r="7" className="empty-chat-dot" />
+              <path
+                d="M160 36 c0 -18 8 -30 26 -34 c-2 18 -10 30 -26 34 z"
+                className="empty-chat-leaf"
+              />
+            </svg>
             <h2 className="empty-chat-title">No pads yet</h2>
             <p className="empty-chat-line">
               A Pad is a design you can edit and send back to a chat. Ask an agent to make one, or

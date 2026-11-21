@@ -65,7 +65,10 @@ describe('progress', () => {
     expect(screen.getByTestId('guide-connect')).toHaveAttribute('data-done', 'true');
     expect(screen.getByTestId('guide-connect')).not.toHaveTextContent('Nothing can be sent');
     expect(screen.queryByTestId('guide-go-connect')).toBeNull();
-    expect(screen.getByTestId('first-run-intro')).toHaveTextContent('✓ AI connected');
+    expect(screen.getByTestId('first-run-intro')).toHaveTextContent('AI connected');
+    expect(
+      document.querySelector('.first-run-intro li[data-done="true"] .first-run-box'),
+    ).toHaveTextContent('✓');
   });
 });
 
