@@ -79,17 +79,34 @@ describe('release event', () => {
   });
 });
 
-describe('out of credit', () => {
-  it('says paused, with the resume time when stated', () => {
-    expect(queueChipLabel(2, true, 'tool', { resetsAt: null })).toBe('Paused · out of credit');
-    expect(queueChipLabel(1, true, 'tool', { resetsAt: 1_800_000_000_000 })).toMatch(
-      /^Paused · out of credit · resumes /,
-    );
-    expect(queueChipLabel(1, false, 'tool', { resetsAt: null })).toBe('Host offline');
+describe('a paused chat, from the server status (decision 35)', () => {
+  const NOW = 1_800_000_000_000;
+  const AT = NOW + 50 * 60_000;
+  const paused = (reason = 'session') => ({
+    chatStatus: { state: 'paused', reason, resetsAt: AT },
   });
-  it('derives the pause from a row, ignoring a plain overload', () => {
+  it('a session limit says so, and when it resumes', () => {
+    expect(queueChipLabel(1, true, 'tool', creditPause(paused()), NOW)).toMatch(
+      /^Paused · session limit · resumes /,
+    );
+    expect(queueChipLabel(1, true, 'tool', creditPause(paused('week')), NOW)).toMatch(
+      /^Paused · weekly limit · resumes /,
+    );
+    expect(queueChipLabel(1, false, 'tool', creditPause(paused()), NOW)).toBe('Host offline');
+  });
+  it('a reset in the past says resuming, never a time gone by', () => {
+    expect(queueChipLabel(1, true, 'tool', creditPause(paused()), AT + 1)).toBe(
+      'Paused · session limit · resuming…',
+    );
+  });
+  it('only the account’s own out state says out of credit', () => {
+    const out = creditPause({ chatStatus: { state: 'failed', reason: 'out_of_credit' } });
+    expect(queueChipLabel(2, true, 'tool', out, NOW)).toBe('Paused · out of credit');
+    const noReset = creditPause({ chatStatus: { state: 'failed', reason: 'limit_no_reset' } });
+    expect(queueChipLabel(2, true, 'tool', noReset, NOW)).toBe('Paused · usage limit');
+  });
+  it('is nothing without a server status that says paused', () => {
     expect(creditPause({})).toBeNull();
-    expect(creditPause({ rateLimitResumingAt: 5, resumeKind: 'overloaded' })).toBeNull();
-    expect(creditPause({ limitBlock: {} })).toEqual({ resetsAt: null });
+    expect(creditPause({ chatStatus: { state: 'running' } })).toBeNull();
   });
 });

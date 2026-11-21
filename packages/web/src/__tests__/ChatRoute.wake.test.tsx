@@ -237,31 +237,33 @@ describe('ChatRoute — pending self-wake bar', () => {
     expect(screen.queryByTestId('wake-bar')).not.toBeInTheDocument();
   });
 
-  it('warns when the chat is out of credit, naming when it comes back', () => {
+  it('warns when the chat is paused on a limit, naming the limit and when it comes back', () => {
     seed({ message: 'check the bus', fireAt: NOW + 9 * 60_000 });
     useChatStore.setState((st) => ({
       chats: {
         ...st.chats,
-        c1: { ...st.chats['c1']!, limitBlock: { scope: 'session', resetsAt: NOW + 3_600_000 } },
+        c1: {
+          ...st.chats['c1']!,
+          chatStatus: { state: 'paused', reason: 'session', resetsAt: NOW + 3_600_000, since: 0 },
+        },
       },
     }));
     renderChat();
     expect(screen.getByTestId('wake-bar')).toHaveAttribute('data-paused', 'true');
     expect(screen.getByTestId('wake-bar')).toHaveClass('wake-bar-warn');
     expect(screen.getByTestId('wake-bar-countdown')).toHaveTextContent(
-      /Wakes in 9m · out of credit until /,
+      /Wakes in 9m · paused · session limit · resumes /,
     );
   });
 
-  it('shows the queued chip as paused when the chat is out of credit', () => {
+  it('shows the queued chip as out of credit only when the server says the account is out', () => {
     seed(null);
     useChatStore.setState((st) => ({
       chats: {
         ...st.chats,
         c1: {
           ...st.chats['c1']!,
-          chatStatus: { state: 'running', since: 0 },
-          limitBlock: { scope: 'session' },
+          chatStatus: { state: 'failed', reason: 'out_of_credit', since: 0 },
         },
       },
       timelines: {

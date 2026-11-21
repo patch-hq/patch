@@ -79,30 +79,73 @@ describe('release event', () => {
   });
 });
 
-describe('out of credit', () => {
-  it('says paused, not just Queued, and when it resumes', () => {
-    const at = new Date(2026, 9, 21, 20, 0).getTime();
-    const label = queueChipLabel(1, true, 'tool', { resetsAt: at });
-    expect(label).toMatch(/^Paused · out of credit · resumes /);
-    expect(label).not.toContain('next tool call');
-    expect(label).toMatch(/8:00|20:00/);
+describe('a paused chat, from the server status (decision 35)', () => {
+  const NOW = new Date(2026, 10, 20, 19, 40).getTime();
+  const AT = new Date(2026, 10, 20, 20, 30).getTime();
+  const paused = (reason = 'session', resetsAt: number | undefined = AT) => ({
+    chatStatus: { state: 'paused', reason, ...(resetsAt !== undefined ? { resetsAt } : {}) },
   });
 
-  it('omits the time when the limit stated none', () => {
-    expect(queueChipLabel(2, true, 'tool', { resetsAt: null })).toBe('Paused · out of credit');
+  it('a session limit says so, and when it resumes', () => {
+    const pause = creditPause(paused());
+    expect(pause).toEqual({ kind: 'limit', scope: 'session', resetsAt: AT });
+    const label = queueChipLabel(1, true, 'tool', pause, NOW);
+    expect(label).toMatch(/^Paused · session limit · resumes \S*(8:30|20:30)/);
+    expect(label).not.toContain('out of credit');
+    expect(label).not.toContain('next tool call');
+    expect(queueChipTitle(1, true, 'tool', pause, NOW)).toBe(
+      'The session limit was reached; this runs once it resets',
+    );
+  });
+
+  it('a weekly limit names the week', () => {
+    expect(queueChipLabel(1, true, 'tool', creditPause(paused('week')), NOW)).toMatch(
+      /^Paused · weekly limit · resumes /,
+    );
+  });
+
+  it('a reset in the past is never a future promise: it says resuming', () => {
+    const after = AT + 90 * 60_000;
+    expect(queueChipLabel(1, true, 'tool', creditPause(paused()), after)).toBe(
+      'Paused · session limit · resuming…',
+    );
+    expect(queueChipTitle(1, true, 'tool', creditPause(paused()), after)).toBe(
+      'The session limit has reset; this runs once the paused turn resumes',
+    );
+  });
+
+  it('only the account’s own out state says out of credit, with no resume time', () => {
+    const out = creditPause({ chatStatus: { state: 'failed', reason: 'out_of_credit' } });
+    expect(out).toEqual({ kind: 'out', resetsAt: null });
+    expect(queueChipLabel(2, true, 'tool', out, NOW)).toBe('Paused · out of credit');
+    // A limit with no reset known is a limit, not out of credit.
+    const noReset = creditPause({ chatStatus: { state: 'failed', reason: 'limit_no_reset' } });
+    expect(queueChipLabel(1, true, 'tool', noReset, NOW)).toBe('Paused · usage limit');
+  });
+
+  it('a pause that waits for the user promises no time', () => {
+    expect(
+      queueChipLabel(
+        1,
+        true,
+        'tool',
+        creditPause({ ...paused(), limitNext: 'switch_provider' }),
+        NOW,
+      ),
+    ).toBe('Paused · session limit');
   });
 
   it('host offline still wins', () => {
-    expect(queueChipLabel(1, false, 'tool', { resetsAt: null })).toBe('Host offline');
+    expect(queueChipLabel(1, false, 'tool', creditPause(paused()), NOW)).toBe('Host offline');
   });
 
-  it('derives the pause from a row: limit block or armed resume, not an overload', () => {
+  it('is nothing for a chat the server does not call paused, whatever the host fields say', () => {
     expect(creditPause({})).toBeNull();
-    expect(creditPause({ rateLimitResumingAt: 5000, resumeKind: 'overloaded' })).toBeNull();
-    expect(creditPause({ limitBlock: { resetsAt: 7000 } })).toEqual({ resetsAt: 7000 });
-    expect(creditPause({ limitBlock: {} })).toEqual({ resetsAt: null });
-    expect(creditPause({ rateLimitResumingAt: 9000, resumeKind: 'rate_limit' })).toEqual({
-      resetsAt: 9000,
+    expect(creditPause({ chatStatus: { state: 'running' } })).toBeNull();
+    expect(creditPause({ chatStatus: { state: 'failed', reason: 'sdk_error' } })).toBeNull();
+    expect(creditPause({ chatStatus: { state: 'waiting_for_sign_in' } })).toEqual({
+      kind: 'signed_out',
+      resetsAt: null,
     });
   });
 });

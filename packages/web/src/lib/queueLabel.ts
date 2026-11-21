@@ -42,25 +42,63 @@ export function queueRelease(
 }
 
 /**
- * The chat is out of credit: nothing queued behind its parked turn runs until
- * the limit lifts, so "Queued · next tool call" would promise a delivery that
- * is not coming. `resetsAt` is the stated return, ms-epoch, or null when the
- * limit named none.
+ * The chat's turn is held on its account: nothing queued behind it runs until
+ * that lifts, so "Queued · next tool call" would promise a delivery that is not
+ * coming. Read from the server's status alone (spec/05 § Chat status; decision
+ * 35): a limit is said as the limit it is, and only an account that is itself
+ * out of credit is called out of credit.
  */
 export interface CreditPause {
+  /** `limit`: a usage limit, waiting for a reset. `out`: the account is out of credit. `signed_out`: it needs signing in. */
+  kind: 'limit' | 'out' | 'signed_out';
+  /** Which pool: `session`, `week`, or another reason the server gave. Only for `limit`. */
+  scope?: string;
+  /** When the limit lifts, ms-epoch; null when nothing stated one or nothing resumes on its own. */
   resetsAt: number | null;
 }
 
-/** The credit pause a chat row is in, or null. A transient overload is not a lack of credit. */
+/** The pause a chat row is in, from its server status, or null. */
 export function creditPause(row: {
-  rateLimitResumingAt?: number | null;
-  resumeKind?: 'rate_limit' | 'overloaded' | null;
-  limitBlock?: { resetsAt?: number } | null;
+  chatStatus?: { state: string; reason?: string; resetsAt?: number } | undefined;
+  limitNext?: 'resume_at_reset' | 'other_account' | 'switch_provider' | 'ask' | null;
 }): CreditPause | null {
-  if (row.resumeKind === 'overloaded' && !row.limitBlock) return null;
-  if (!row.rateLimitResumingAt && !row.limitBlock) return null;
-  const at = row.limitBlock?.resetsAt ?? row.rateLimitResumingAt ?? null;
-  return { resetsAt: at !== null && at > 0 ? at : null };
+  const st = row.chatStatus;
+  if (!st) return null;
+  // A pause that waits for the user does not resume at any time (spec/10 §
+  // Limits), so it is not given one to promise.
+  const waitsForUser = row.limitNext === 'switch_provider' || row.limitNext === 'ask';
+  const at = !waitsForUser && st.resetsAt !== undefined && st.resetsAt > 0 ? st.resetsAt : null;
+  if (st.state === 'paused') {
+    return { kind: 'limit', ...(st.reason ? { scope: st.reason } : {}), resetsAt: at };
+  }
+  if (st.state === 'waiting_for_sign_in') return { kind: 'signed_out', resetsAt: null };
+  if (st.state === 'failed' && st.reason === 'out_of_credit')
+    return { kind: 'out', resetsAt: null };
+  if (st.state === 'failed' && (st.reason === 'limit_no_reset' || st.reason === 'limited')) {
+    return { kind: 'limit', resetsAt: at };
+  }
+  return null;
+}
+
+/** The limit, named by its pool. */
+function limitName(scope: string | undefined): string {
+  if (scope === 'session') return 'session limit';
+  if (scope === 'week') return 'weekly limit';
+  return 'usage limit';
+}
+
+/**
+ * What a pause is, in a few words: "session limit · resumes 20:30". A reset
+ * that has passed is never shown as a promise: the turn is resuming.
+ */
+export function creditPauseText(pause: CreditPause, now: number = Date.now()): string {
+  if (pause.kind === 'out') return 'out of credit';
+  if (pause.kind === 'signed_out') return 'signed out';
+  const name = limitName(pause.scope);
+  if (pause.resetsAt === null) return name;
+  return pause.resetsAt > now
+    ? `${name} · resumes ${formatReset(pause.resetsAt, now)}`
+    : `${name} · resuming…`;
 }
 
 export function queueChipLabel(
@@ -68,12 +106,10 @@ export function queueChipLabel(
   hostOnline = true,
   release?: QueueRelease,
   pause?: CreditPause | null,
+  now: number = Date.now(),
 ): string {
   if (!hostOnline) return 'Host offline';
-  if (pause) {
-    const base = 'Paused · out of credit';
-    return pause.resetsAt === null ? base : `${base} · resumes ${formatReset(pause.resetsAt)}`;
-  }
+  if (pause) return `Paused · ${creditPauseText(pause, now)}`;
   const base = pos === 1 ? 'Queued' : `${ordinal(pos)} in queue`;
   if (release === undefined) return base;
   return `${base} · ${release === 'tool' ? 'next tool call' : 'end of turn'}`;
@@ -85,9 +121,19 @@ export function queueChipTitle(
   hostOnline = true,
   release?: QueueRelease,
   pause?: CreditPause | null,
+  now: number = Date.now(),
 ): string {
   if (!hostOnline) return 'Waiting for the host to come back online';
-  if (pause) return 'Every account is out of credit; this runs once the limit resets';
+  if (pause?.kind === 'out') {
+    return 'The account is out of credit; this runs once credit is added and the turn is continued';
+  }
+  if (pause?.kind === 'signed_out')
+    return 'The account needs signing in again; this runs after that';
+  if (pause) {
+    return pause.resetsAt !== null && pause.resetsAt <= now
+      ? `The ${limitName(pause.scope)} has reset; this runs once the paused turn resumes`
+      : `The ${limitName(pause.scope)} was reached; this runs once it resets`;
+  }
   if (release === 'tool') return 'Goes in when the agent finishes its current tool call';
   if (pos === 1) return 'Runs when the current turn finishes';
   const ahead = pos - 1;
