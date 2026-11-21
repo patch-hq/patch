@@ -172,6 +172,13 @@ export interface E2EHarness {
    * the server sees it online.
    */
   addHost(hostId: string): Promise<E2EHost>;
+  /**
+   * Restart the main host in place: its link closes and its host shuts down,
+   * then a new host boots on the same `~/.patch` and hydrates from it, as after
+   * a self-update. `daemon`, `link` and `sdk` are the new host's afterwards.
+   * Resolves once the server sees it online again.
+   */
+  restartHost(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -306,19 +313,10 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
         // (re)connect (Group 8 fix, DX-M1).
         for (const state of hostDaemon.list()) {
           send({ type: 'chat.spawned', hostId: id, chatId: state.chatId, folder: state.folder });
-          send({
-            type: 'chat.state',
-            permissionMode: 'bypassPermissions',
-            chatId: state.chatId,
-            activity: state.activity,
-            lastUpdated: state.lastUpdated,
-            pinned: state.pinned,
-            pinnedAt: state.pinnedAt,
-            status: state.status,
-            name: state.name,
-            preview: state.preview,
-            folder: state.folder,
-          });
+          // The host's full frame, as index.ts's `announceChat` sends it: a
+          // hand-picked subset forgets what it leaves out (a held turn's limit).
+          const stateEvent = hostDaemon.currentStateEvent(state.chatId);
+          if (stateEvent) send(stateEvent);
         }
         // …and closes the burst with folders.list, which is what tells the
         // server this host's chat list is complete (unknown-chat.ts).
@@ -359,7 +357,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
   // localIds whose next inbound `chat.input` delivery is swallowed at the
   // host's serverLink (models flap/server-restart loss — see `dropNextInput`).
   const dropNextInputLocalIds = new Set<string>();
-  const primary = await bootHost(hostId);
+  let primary = await bootHost(hostId);
   const { daemon, link, sdk } = primary;
   const extraHosts: E2EHost[] = [];
 
@@ -404,7 +402,16 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
       return client;
     },
     dropHostLink(): boolean {
-      return link.dropLink();
+      return harness.link.dropLink();
+    },
+    async restartHost(): Promise<void> {
+      await primary.close();
+      await until(() => built.hostLink.status() === 'offline', 5000, 'host gone');
+      primary = await bootHost(hostId);
+      harness.daemon = primary.daemon;
+      harness.link = primary.link;
+      harness.sdk = primary.sdk;
+      await until(() => built.hostLink.status() === 'online', 5000, 'host back');
     },
     async waitHostOnline(timeoutMs = 5000): Promise<void> {
       await until(() => built.hostLink.status() === 'online', timeoutMs, 'host online');
