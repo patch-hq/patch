@@ -31,14 +31,8 @@ import { api, type LinkedDevice } from '../src/api/rest';
 import { __getLastAlert, __clearLastAlert, __setColorScheme } from './stubs/react-native';
 import { parsePairingUri } from '@patch/wire';
 import { setRoute } from '../src/config';
-import { usePresenceStore } from '../src/stores/presenceStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
-import {
-  reportHost,
-  resetHosts,
-  seedSettings,
-  settingsFixture,
-} from './testUtils/settingsFixtures';
+import { seedSettings, settingsFixture } from './testUtils/settingsFixtures';
 
 vi.mock('../src/api/rest', () => ({
   api: {
