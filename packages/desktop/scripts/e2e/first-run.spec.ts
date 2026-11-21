@@ -293,22 +293,25 @@ async function newcomerSidebar(page: Page): Promise<void> {
 
 /**
  * The first minutes in the app with no AI connected: nothing asks for meeting
- * permissions, the composer says why it can't send, and every "Sign in" goes
- * straight to signing in.
+ * permissions, the new chat says why it can't send, and its link goes straight
+ * to connecting an AI.
  */
 async function firstChat(page: Page): Promise<void> {
   // Setup ends on a new chat, ready to type into — not on the Manager.
   await expect(page).toHaveURL(/\/chats\/new/);
   await expect(page.getByTestId('composer-input')).toBeVisible();
-  const notice = page.getByTestId('composer-signed-out');
-  await expect(notice).toHaveText(/Sign in to Claude to send messages\./);
-  // Signed out is said once, by the composer's notice: no banner as well.
+  // With no AI at all, the new-chat panel says so once, with one link; the
+  // composer adds no second notice.
+  const notice = page.getByTestId('new-chat-setup-reason');
+  await expect(notice).toHaveText(/Connect an AI, Claude or ChatGPT, to send\./);
+  await expect(page.getByTestId('composer-signed-out')).toHaveCount(0);
+  // Said once: no banner as well.
   await expect(page.getByTestId('claude-disconnected-banner')).toHaveCount(0);
   // Meeting permissions wait until a meeting is started.
   await page.waitForTimeout(1500);
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
   await shot(page, 'new-chat');
-  await notice.getByRole('link', { name: 'Sign in' }).click();
+  await notice.getByRole('link', { name: 'Connect an AI' }).click();
   await expect(page).toHaveURL(/\/connect/);
   await expect(page.getByTestId('claude-signin-start')).toBeVisible();
   await shot(page, 'connect');
