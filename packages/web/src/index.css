@@ -18949,7 +18949,8 @@ a.drop-target,
   background: #fff;
   border: 1px solid var(--line);
 }
-.claude-signin {
+.claude-signin,
+.chatgpt-signin {
   display: grid;
   gap: 10px;
   justify-items: start;
