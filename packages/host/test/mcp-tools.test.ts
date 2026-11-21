@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { Daemon } from '../src/chatRunner.js';
+import { DEFAULT_GOAL_CHECK_IN, Daemon } from '../src/chatRunner.js';
 import { buildControl } from '../src/control.js';
 import { MemoryJobsStore } from '../src/jobs-interface.js';
 import { createMetaStore } from '../src/meta.js';
@@ -331,10 +331,10 @@ describe('patch-tools MCP server — full client round-trip', () => {
         goalReminderEvery: { unit: 'turns', n: 3 },
         goalCheckInEvery: { unit: 'minutes', n: 15 },
       });
-      // A plain call replaces the plan, like a new /goal does.
+      // A plain call replaces the plan, like a new /goal does; the check-in falls back to the default.
       await c.callTool({ name: 'patch_goal_set', arguments: { condition: 'Different' } });
       expect(daemon.chatState.get(id)?.goalQueue).toEqual([]);
-      expect(daemon.chatState.get(id)?.goalCheckInEvery).toBeNull();
+      expect(daemon.chatState.get(id)?.goalCheckInEvery).toEqual(DEFAULT_GOAL_CHECK_IN);
     } finally {
       await c.close();
     }
