@@ -19286,7 +19286,7 @@ a.drop-target,
   height: 16px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--text-min);
   line-height: 1;
 }
 .first-run-intro li[data-done='true'] .first-run-box {
