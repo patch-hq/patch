@@ -933,7 +933,9 @@ describe('Settings → Dictation and Voice', () => {
       await screen.findByTestId('voice-engine-local');
       expect(screen.queryByTestId('voice-handoff-toggle')).toBeNull();
       fireEvent.click(screen.getByTestId('voice-engine-gemini'));
-      expect(await screen.findByTestId('voice-variant-heavy')).toHaveTextContent('Thinking');
+      expect(await screen.findByTestId('voice-variant-heavy')).toHaveTextContent(
+        'Gemini 3.8 Live Thinking',
+      );
       const select = (await screen.findByTestId('voice-gemini-voice')) as HTMLSelectElement;
       expect(select.value).toBe('');
       fireEvent.change(select, { target: { value: 'Kore' } });

@@ -47,11 +47,11 @@ test.describe('Settings — Voice', () => {
     await page.getByTestId('voice-engine-gemini').click();
     await expectChosen(page, 'voice-engine', 'Gemini');
     await page.getByTestId('voice-variant-heavy').click();
-    await expectChosen(page, 'voice-variant', 'Thinking');
+    await expectChosen(page, 'voice-variant', 'Gemini 3.8 Live Thinking');
     await expect(page.getByTestId('voice-gemini-voice')).toBeVisible();
     await expect(page.getByTestId('voice-handoff-toggle')).toBeChecked();
     await page.getByTestId('voice-engine-openai').click();
-    await expectChosen(page, 'voice-variant', 'full');
+    await expectChosen(page, 'voice-variant', 'GPT Realtime 2.1');
     await expect(page.getByTestId('voice-openai-voice')).toBeVisible();
     await expect(page.getByTestId('voice-gemini-voice')).toHaveCount(0);
   });
