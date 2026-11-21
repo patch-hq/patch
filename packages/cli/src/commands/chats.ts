@@ -69,7 +69,10 @@ export function registerChatsCommands(program: Command): void {
         // host only. REST (/api/chats) is account-wide already.
         const params = new URLSearchParams();
         if (opts.archived !== undefined) params.set('archived', opts.archived);
-        if (t.kind === 'uds') params.set('callerChatId', requireCallerChat('chats list'));
+        // The host answers the account-wide list from the server with or
+        // without a calling chat, so a plain terminal can list chats too.
+        const caller = process.env['PATCH_CHAT_ID'];
+        if (t.kind === 'uds' && caller) params.set('callerChatId', caller);
         const path = pickPath(t, '/internal/chats', '/api/chats');
         const qs = params.size > 0 ? `?${params.toString()}` : '';
         const res = await t.get<{ chats: ChatSummary[] }>(path + qs);

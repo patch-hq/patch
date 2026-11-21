@@ -1392,3 +1392,38 @@ test('host list, threads list, list and doctor over the host socket read the ser
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('chats list --json: over the host socket it works from a plain terminal, with no calling chat', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'patch-cli-list-'));
+  writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
+  const sock = join(dir, 'host.sock');
+  const seen: string[] = [];
+  const server: Server = createServer((req, res) => {
+    seen.push(req.url ?? '');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(
+      JSON.stringify({ chats: [{ chatId: 'c1', name: 'one', chatStatus: { state: 'idle' } }] }),
+    );
+  });
+  await new Promise<void>((ok) => server.listen(sock, ok));
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATCH_HOME: dir,
+      PATCH_DAEMON_SOCKET: sock,
+      PATCH_DAEMON_LOCAL_KEY: 'k',
+    };
+    delete env['PATCH_CHAT_ID'];
+    const r = await runCli(['chats', 'list', '--json'], env);
+    assert.equal(r.code, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.equal(seen.at(-1), '/internal/chats');
+    assert.equal((JSON.parse(r.stdout) as { chats: { chatId: string }[] }).chats[0]?.chatId, 'c1');
+    // Inside a chat the caller still rides along.
+    const r2 = await runCli(['chats', 'list', '--json'], { ...env, PATCH_CHAT_ID: 'chat-9' });
+    assert.equal(r2.code, 0, `stderr=${r2.stderr}`);
+    assert.equal(seen.at(-1), '/internal/chats?callerChatId=chat-9');
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
