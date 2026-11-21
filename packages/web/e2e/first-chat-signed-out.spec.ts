@@ -46,9 +46,9 @@ test('new chat: no meetings popover, the composer says why and links to signing 
   // Long enough for the old once-ever introduction to have opened.
   await page.waitForTimeout(1000);
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
-  // The default model reads as setup named it, not as an id.
+  // With no AI connected there is no model to show.
   await expect(page.getByTestId('model-quick-claude-opus-5')).toHaveCount(0);
-  await expect(page.getByTestId('new-chat-model')).not.toContainText('claude-opus-5');
+  await expect(page.getByTestId('new-chat-model')).toHaveCount(0);
   await shot(page, '8-new-chat-signed-out');
 
   await notice.getByRole('link').click();
