@@ -77,8 +77,11 @@ export interface ChatStatusFacts {
   /** A held message expired undelivered: the words of the failure. */
   heldExpired: string | null;
   /**
-   * The chat was working when its host went: announced (`restarting`) or not
-   * (`offline`). Cleared when the host speaks for the chat again.
+   * The chat's host is away: announced (`restarting`) or not (`offline`).
+   * Every chat of an away host carries it, whatever it was doing; the facts
+   * beneath it are kept, and decide the status again once the host speaks for
+   * the chat, or closes its start-up announcement without naming a chat that has
+   * nothing in flight (`ChatRegistry.markHostBack`).
    */
   away: 'restarting' | 'offline' | null;
 }
@@ -169,6 +172,12 @@ export function deriveStatus(
   accounts: AccountStateLookup = noAccounts,
 ): StatusTarget {
   if (facts.away !== null) {
+    // A message held for the away host is what the user is waiting on: it says
+    // so, and so does one that expired undelivered.
+    if (facts.heldExpired !== null) {
+      return { state: 'failed', reason: 'held_message_expired', message: facts.heldExpired };
+    }
+    if (facts.held.length > 0) return { state: 'queued_offline' };
     return { state: facts.away === 'restarting' ? 'host_restarting' : 'host_offline' };
   }
   // A request is open until its host says it was answered, cancelled or
@@ -409,7 +418,7 @@ export function factsOnRequestResolved(prev: ChatStatusFacts, requestId: string)
 /** The changes spec/12 § Allowed transitions names. A status may always stay what it is. */
 const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
   // A question the agent declares as its turn ends can land after the end itself.
-  idle: ['running', 'queued_offline', 'waiting_for_user'],
+  idle: ['running', 'queued_offline', 'waiting_for_user', 'host_restarting', 'host_offline'],
   running: [
     'waiting_for_user',
     'idle',
@@ -423,8 +432,20 @@ const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
   waiting_for_user: ['running', 'idle', 'host_restarting', 'host_offline'],
   // The host took the message: a turn starts, or (a duplicate, or one steered
   // into a turn that already ended) the chat is as its other facts say; or it
-  // refused it.
-  queued_offline: ['running', 'idle', 'interrupted', 'failed'],
+  // refused it. A held message that expires leaves the host away showing.
+  queued_offline: [
+    'running',
+    'idle',
+    'interrupted',
+    'failed',
+    'waiting_for_user',
+    'paused',
+    'waiting_for_sign_in',
+    'host_restarting',
+    'host_offline',
+  ],
+  // When the host is back its own facts decide again, whatever they are; a
+  // message held meanwhile reads queued.
   host_restarting: [
     'host_offline',
     'running',
@@ -434,6 +455,7 @@ const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
     'paused',
     'waiting_for_sign_in',
     'failed',
+    'queued_offline',
   ],
   host_offline: [
     'running',
@@ -443,13 +465,21 @@ const ALLOWED: Record<ChatStatusState, readonly ChatStatusState[]> = {
     'paused',
     'waiting_for_sign_in',
     'failed',
+    'queued_offline',
   ],
-  interrupted: ['running', 'queued_offline'],
+  interrupted: ['running', 'queued_offline', 'host_restarting', 'host_offline'],
   // The account a paused or stopped chat ran on can change state under it:
   // signed out, out of credit, signed in again, credit back.
-  paused: ['running', 'idle', 'waiting_for_sign_in', 'failed'],
-  waiting_for_sign_in: ['running', 'idle', 'paused', 'failed'],
-  failed: ['running', 'queued_offline', 'paused', 'waiting_for_sign_in'],
+  paused: ['running', 'idle', 'waiting_for_sign_in', 'failed', 'host_restarting', 'host_offline'],
+  waiting_for_sign_in: ['running', 'idle', 'paused', 'failed', 'host_restarting', 'host_offline'],
+  failed: [
+    'running',
+    'queued_offline',
+    'paused',
+    'waiting_for_sign_in',
+    'host_restarting',
+    'host_offline',
+  ],
 };
 
 export function isAllowedTransition(from: string, to: ChatStatusState): boolean {
@@ -478,7 +508,9 @@ export function nextStatus(
  * `running`; the queue itself asks without it, to know when to release.
  */
 export function legacyActivity(facts: ChatStatusFacts, owed = false): ChatActivity {
-  if (facts.away === 'offline') return 'errored';
+  // The old meaning: only a turn cut off by its host going is an error. An idle
+  // chat on an away host reads idle to a reader that predates `chatStatus`.
+  if (facts.away === 'offline' && isMidTurn(facts)) return 'errored';
   const turnOpen = facts.openTurns.length > 0;
   if (turnOpen) return facts.openRequests.length > 0 ? 'awaiting-permission' : 'running';
   if (facts.openRequests.some((r) => !r.question)) return 'awaiting-permission';

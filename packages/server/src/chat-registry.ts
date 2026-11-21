@@ -576,6 +576,7 @@ export class ChatRegistry {
     if (this.gated.has(event)) return;
     if (event.type === 'folders.list') {
       this.syncedHosts.add(event.hostId);
+      this.markHostBack(event.hostId);
     }
     if (event.type === 'chat.spawned') {
       this.spawnedSet.add(event.chatId);
@@ -998,26 +999,39 @@ export class ChatRegistry {
 
   /**
    * A host went (spec/12 § Chat status): announced (`restarting`) or not
-   * (`offline`). Each of its chats with a turn in flight or a question open
-   * reads Host restarting or Host offline until the host speaks for it again;
-   * a chat with nothing running keeps its status. Returns the `chat.state` of
-   * each chat that changed, for the caller to broadcast.
+   * (`offline`). Every chat of the host reads Host restarting or Host offline,
+   * whatever it was doing, until the host is back; its facts are kept, and
+   * decide its status again then. Returns the `chat.state` of each chat that
+   * changed, for the caller to broadcast.
    */
   markHostAway(hostId: string, how: 'restarting' | 'offline'): ChatStateEvent[] {
     const events: ChatStateEvent[] = [];
     for (const [chatId, row] of this.chats) {
       if (row.hostId !== hostId) continue;
-      const facts = this.facts.get(chatId);
-      if (!facts) continue;
-      const working = isMidTurn(facts) || facts.away !== null;
+      const facts = this.facts.get(chatId) ?? emptyFacts();
       // A restart that ran out of time becomes offline; offline never goes back to restarting.
-      if (!working || facts.away === how || (how === 'restarting' && facts.away === 'offline')) {
-        continue;
-      }
+      if (facts.away === how || (how === 'restarting' && facts.away === 'offline')) continue;
       const event = this.applyFacts(chatId, { ...facts, away: how }, { tell: false, own: true });
       if (event) events.push(event);
     }
     return events;
+  }
+
+  /**
+   * The host is back and has finished announcing what it holds (`folders.list`).
+   * A chat it spoke for has already had its away mark cleared by the host's
+   * own frame; one it did not speak for, with nothing in flight, is as its
+   * kept facts say. A chat that was mid-turn stays away until the host speaks
+   * for it: only the host can say whether that turn is still going. Status
+   * listeners are told of each change.
+   */
+  markHostBack(hostId: string): void {
+    for (const [chatId, row] of this.chats) {
+      if (row.hostId !== hostId) continue;
+      const facts = this.facts.get(chatId);
+      if (!facts || facts.away === null || isMidTurn(facts)) continue;
+      this.applyFacts(chatId, { ...facts, away: null }, { tell: true, own: true });
+    }
   }
 
   /** chatIds on this host with a turn in flight or a question open. */

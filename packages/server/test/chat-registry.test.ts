@@ -434,9 +434,13 @@ describe('ChatRegistry midTurnChatIds', () => {
 });
 
 describe('ChatRegistry markHostAway', () => {
-  it('is a no-op for a host with nothing working', () => {
+  it('marks a host’s idle chat too, and only once', () => {
     const reg = new ChatRegistry({ logger: silentLogger() });
     reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'live', folder: '/proj' });
+    reg.observe({ type: 'chat.spawned', hostId: 'd2', chatId: 'other', folder: '/proj' });
+    expect(reg.markHostAway('d1', 'offline').map((e) => [e.chatId, e.chatStatus?.state])).toEqual([
+      ['live', 'host_offline'],
+    ]);
     expect(reg.markHostAway('d1', 'offline')).toEqual([]);
   });
 

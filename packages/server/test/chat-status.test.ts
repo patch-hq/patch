@@ -3,6 +3,9 @@
 
 import { describe, test, expect } from 'vitest';
 import pino from 'pino';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ChatStateEvent, WireEvent } from '@patch/wire';
 import {
   deriveStatus,
@@ -31,6 +34,8 @@ const state = (over: Partial<ChatStateEvent> = {}): ChatStateEvent =>
     ...over,
   }) as ChatStateEvent;
 
+const foldersList = (hostId: string): WireEvent =>
+  ({ type: 'folders.list', hostId, roots: [], recent: [] }) as WireEvent;
 const started = (chatId = 'c1', turnId = 't1'): WireEvent => ({
   type: 'chat.turn_started',
   chatId,
@@ -246,12 +251,24 @@ describe('transitions', () => {
     ['waiting_for_sign_in', 'paused'],
     ['failed', 'paused'],
     ['failed', 'waiting_for_sign_in'],
+    // A host going takes every chat of it, whatever it was doing.
+    ['idle', 'host_offline'],
+    ['idle', 'host_restarting'],
+    ['interrupted', 'host_offline'],
+    ['paused', 'host_restarting'],
+    ['waiting_for_sign_in', 'host_offline'],
+    ['failed', 'host_offline'],
+    ['queued_offline', 'host_offline'],
+    // A message held while it is away, and the host's own facts when it is back.
+    ['host_offline', 'queued_offline'],
+    ['host_restarting', 'queued_offline'],
+    ['host_restarting', 'idle'],
+    ['host_offline', 'waiting_for_sign_in'],
   ] as const)('%s → %s is allowed', (from, to) => {
     expect(isAllowedTransition(from, to)).toBe(true);
   });
 
   test.each([
-    ['idle', 'host_offline'],
     ['idle', 'failed'],
     ['failed', 'idle'],
     ['host_offline', 'host_restarting'],
@@ -279,6 +296,9 @@ describe('legacyActivity', () => {
     expect(legacyActivity(facts({ declaredQuestion: true }))).toBe('idle');
     expect(legacyActivity(facts({ lastEnd: { outcome: 'failed' } }))).toBe('errored');
     expect(legacyActivity(facts({ openTurns: ['t'], away: 'offline' }))).toBe('errored');
+    // An idle chat on an away host keeps the old meaning for older readers.
+    expect(legacyActivity(facts({ away: 'offline' }))).toBe('idle');
+    expect(legacyActivity(facts({ away: 'restarting' }))).toBe('idle');
   });
 });
 
@@ -446,16 +466,21 @@ describe('ChatRegistry status', () => {
     expect(warnings).toEqual([]);
   });
 
-  test('a chat with nothing running keeps its status when its host goes', () => {
-    const { reg } = make();
+  test('a chat with nothing running reads host offline too, and its own status again once the host is back', () => {
+    const { reg, warnings } = make();
     reg.observe(spawned);
     reg.observe(started());
     reg.observe(ended('failed', { code: 'sdk_error', message: 'x' }));
-    expect(reg.markHostAway('h1', 'offline')).toEqual([]);
-    expect(reg.get('c1')?.chatStatus?.state).toBe('failed');
+    expect(reg.markHostAway('h1', 'offline').map((e) => e.chatStatus?.state)).toEqual([
+      'host_offline',
+    ]);
+    // The host is back and has said what it holds without speaking for this chat.
+    reg.observe(foldersList('h1'));
+    expect(reg.get('c1')?.chatStatus).toMatchObject({ state: 'failed', reason: 'sdk_error' });
+    expect(warnings).toEqual([]);
   });
 
-  test('a planned restart moves working chats on that host to host restarting, and no others', () => {
+  test('a planned restart moves every chat on that host to host restarting, and no other host’s', () => {
     const { reg } = make();
     for (const [chatId, hostId] of [
       ['run', 'h1'],
@@ -470,13 +495,14 @@ describe('ChatRegistry status', () => {
     reg.observe(started('other', 'b'));
     const events = reg.markHostAway('h1', 'restarting');
     expect(events.map((e) => [e.chatId, e.chatStatus?.state]).sort()).toEqual([
+      ['idle', 'host_restarting'],
       ['run', 'host_restarting'],
       ['wait', 'host_restarting'],
     ]);
-    expect(reg.get('idle')?.chatStatus?.state).toBe('idle');
     expect(reg.get('other')?.chatStatus?.state).toBe('running');
     // The window runs out: restarting becomes offline, never the reverse.
     expect(reg.markHostAway('h1', 'offline').map((e) => e.chatStatus?.state)).toEqual([
+      'host_offline',
       'host_offline',
       'host_offline',
     ]);
@@ -539,6 +565,136 @@ describe('ChatRegistry status', () => {
     expect(told.at(-1)?.chatStatus?.state).toBe('idle');
   });
 
+  // spec/12 § Chat status: every chat of an away host reads it, whatever it was
+  // doing; the host's own facts decide again when it is back.
+  describe('a host going and coming back', () => {
+    const chatState = (chatId: string): WireEvent => ({ ...state(), chatId }) as WireEvent;
+
+    test('an idle chat: restarting, offline after the window, idle again when the host closes its list', () => {
+      const { reg, warnings, told } = make();
+      reg.observe(spawned);
+      expect(reg.markHostAway('h1', 'restarting')[0]?.chatStatus?.state).toBe('host_restarting');
+      expect(reg.markHostAway('h1', 'offline')[0]?.chatStatus?.state).toBe('host_offline');
+      expect(reg.get('c1')?.activity).toBe('idle');
+      told.length = 0;
+      reg.observe(foldersList('h1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+      // Surfaces are told: no host frame carried the change.
+      expect(told.map((e) => [e.chatId, e.chatStatus?.state])).toEqual([['c1', 'idle']]);
+      expect(warnings).toEqual([]);
+    });
+
+    test('an idle chat back inside the restart window, spoken for by the host: idle', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markHostAway('h1', 'restarting');
+      reg.observe(chatState('c1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+    });
+
+    test('a running chat stays away when the host closes its list without it, until it speaks', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.observe(started());
+      reg.markHostAway('h1', 'offline');
+      reg.observe(foldersList('h1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('host_offline');
+      // The host speaks for it: the turn is still going.
+      reg.observe(chatState('c1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+    });
+
+    test('a running chat whose turn ended while the host was away: idle', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.observe(started());
+      reg.markHostAway('h1', 'offline');
+      // The host's outbox catches the record up as it reattaches.
+      reg.observe(ended('completed'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
+    });
+
+    test('a running chat cut off by the host going: interrupted once the host says so', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.observe(started());
+      reg.markHostAway('h1', 'offline');
+      reg.observe(ended('interrupted'));
+      reg.observe({ ...state(), interrupted: true } as WireEvent);
+      expect(reg.get('c1')?.chatStatus?.state).toBe('interrupted');
+    });
+
+    test('a chat waiting on the user: away, then waiting again when the host speaks', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.observe(asked());
+      reg.markHostAway('h1', 'offline');
+      expect(reg.get('c1')?.chatStatus?.state).toBe('host_offline');
+      reg.observe(chatState('c1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('waiting_for_user');
+    });
+
+    test('a failed or interrupted chat keeps what it was under the away status', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.observe(started());
+      reg.observe(ended('interrupted'));
+      reg.markHostAway('h1', 'offline');
+      expect(reg.get('c1')?.chatStatus?.state).toBe('host_offline');
+      reg.observe(foldersList('h1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('interrupted');
+    });
+
+    test('a message held for the away host wins over host offline, and the host taking it ends that', () => {
+      const { reg, warnings } = make();
+      reg.observe(spawned);
+      reg.markHostAway('h1', 'offline');
+      expect(reg.markQueued('c1', 'L1')?.chatStatus?.state).toBe('queued_offline');
+      reg.observe(foldersList('h1'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('queued_offline');
+      reg.observe({ type: 'chat.input_ack', chatId: 'c1', localId: 'L1' } as WireEvent);
+      reg.observe(started());
+      expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+      expect(warnings).toEqual([]);
+    });
+
+    test('a held message that expires while the host is away says so, not host offline', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markHostAway('h1', 'offline');
+      reg.markQueued('c1', 'L1');
+      expect(reg.markHeldExpired('c1', 'Not delivered', 'L1')?.chatStatus).toMatchObject({
+        state: 'failed',
+        reason: 'held_message_expired',
+      });
+    });
+
+    test('another host’s list never brings this host’s chats back', () => {
+      const { reg } = make();
+      reg.observe(spawned);
+      reg.markHostAway('h1', 'offline');
+      reg.observe(foldersList('h2'));
+      expect(reg.get('c1')?.chatStatus?.state).toBe('host_offline');
+    });
+
+    test('the away mark survives a server restart, and the host coming back clears it', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'chat-status-away-'));
+      try {
+        const path = join(dir, 'chat-index.jsonl');
+        const first = new ChatRegistry({ persistPath: path, logger: pino({ level: 'silent' }) });
+        first.observe(spawned);
+        first.markHostAway('h1', 'offline');
+        first.flush();
+        const second = new ChatRegistry({ persistPath: path, logger: pino({ level: 'silent' }) });
+        expect(second.get('c1')?.chatStatus?.state).toBe('host_offline');
+        second.observe(foldersList('h1'));
+        expect(second.get('c1')?.chatStatus?.state).toBe('idle');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('a held message the host takes without starting a turn of its own', () => {
     const ack = (localId: string, chatId = 'c1'): WireEvent => ({
       type: 'chat.input_ack',
@@ -551,9 +707,8 @@ describe('ChatRegistry status', () => {
       reg.observe(spawned);
       reg.observe(started());
       reg.markHostAway('h1', 'offline');
-      // While away the turn was still open, so the held message does not queue
-      // the chat; it is remembered all the same.
-      expect(reg.markQueued('c1', 'L1')).toBeNull();
+      // A message held for the away host is what the chat is waiting on.
+      expect(reg.markQueued('c1', 'L1')?.chatStatus?.state).toBe('queued_offline');
       reg.observe(state());
       reg.observe(ack('L1'));
       expect(reg.get('c1')?.chatStatus?.state).toBe('running');

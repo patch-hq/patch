@@ -222,6 +222,60 @@ describe('host restart statuses', () => {
     expect(s.log.statuses('c1')).not.toContain('host_restarting');
   });
 
+  // Every chat of an away host reads it, idle ones included; back, each is what
+  // its own facts say.
+  it('an idle chat reads Host restarting, then Host offline after the window, and idle once the host is back', async () => {
+    const s = await surface();
+    const h = await host();
+    await s.log.until(() => s.log.has('host.online'), 'host.online');
+    h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'quiet', folder: '/p' }));
+    await new Promise((r) => setTimeout(r, 50));
+    h.ws.send(encode({ type: 'host.restarting', hostId: 'daemon-1' }));
+    await s.log.until(() => s.log.statuses('quiet').includes('host_restarting'), 'restarting');
+    h.ws.close();
+    await s.log.until(() => s.log.statuses('quiet').at(-1) === 'host_offline', 'offline', 3000);
+
+    // Back: it re-announces nothing about this chat and closes its list.
+    const back = await host();
+    await s.log.until(
+      () => s.log.frames.filter((f) => f.type === 'host.online').length >= 2,
+      'back',
+    );
+    back.ws.send(encode({ type: 'folders.list', hostId: 'daemon-1', roots: [], recent: [] }));
+    await s.log.until(() => s.log.statuses('quiet').at(-1) === 'idle', 'idle again');
+    back.ws.close();
+  });
+
+  it('an unannounced drop takes idle chats to Host offline too', async () => {
+    const s = await surface();
+    const h = await host();
+    await s.log.until(() => s.log.has('host.online'), 'host.online');
+    h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'quiet', folder: '/p' }));
+    h.ws.send(encode({ type: 'chat.spawned', hostId: 'daemon-1', chatId: 'busy', folder: '/p' }));
+    send(h.ws, running('busy'));
+    await s.log.until(() => s.log.statuses('busy').includes('running'), 'running');
+    h.ws.close();
+    await s.log.until(
+      () =>
+        s.log.statuses('quiet').at(-1) === 'host_offline' &&
+        s.log.statuses('busy').at(-1) === 'host_offline',
+      'both offline',
+    );
+    // The busy one stays away when the host closes its list without it: only
+    // the host can say whether its turn is still going.
+    const back = await host();
+    await s.log.until(
+      () => s.log.frames.filter((f) => f.type === 'host.online').length >= 2,
+      'back',
+    );
+    back.ws.send(encode({ type: 'folders.list', hostId: 'daemon-1', roots: [], recent: [] }));
+    await s.log.until(() => s.log.statuses('quiet').at(-1) === 'idle', 'quiet idle');
+    expect(s.log.statuses('busy').at(-1)).toBe('host_offline');
+    send(back.ws, interrupted('busy'));
+    await s.log.until(() => s.log.statuses('busy').at(-1) === 'interrupted', 'busy interrupted');
+    back.ws.close();
+  });
+
   it('the host reporting the turn interrupted sets Interrupted, and Continue reaches the host', async () => {
     const s = await surface();
     const h = await host();
@@ -267,5 +321,78 @@ describe('host restart statuses', () => {
     send(back.ws, interrupted('c1'));
     await back.log.until(() => back.log.has('chat.continue_request'), 'auto continue at host');
     back.ws.close();
+  });
+});
+
+// spec/12 § Chat status: after the server's own restart, a host has the restart
+// window to come back; the chats of one that has not read Host offline,
+// whatever the server last knew of them.
+describe('after a server restart', () => {
+  let dataDir: string;
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'patch-server-restart-away-'));
+  });
+  afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
+
+  it('chats of a host that has not come back read Host offline after the window; back, each is its own status', async () => {
+    const user = generateUserKeypair();
+    const registry = Registry.load(dataDir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.setDaemonKey({
+      hostId: 'daemon-1',
+      publicKey: user.publicKey,
+      issuedAt: Math.floor(Date.now() / 1000),
+    });
+    const first = await buildAll({ registry, dataDir, logger: false, hostOfflineGraceMs: 0 });
+    first.chatRegistry.observe({
+      type: 'chat.spawned',
+      hostId: 'daemon-1',
+      chatId: 'quiet',
+      folder: '/p',
+    });
+    first.chatRegistry.observe({
+      type: 'chat.spawned',
+      hostId: 'daemon-1',
+      chatId: 'busy',
+      folder: '/p',
+    });
+    first.chatRegistry.observe({
+      type: 'chat.turn_started',
+      chatId: 'busy',
+      turnId: 't1',
+      seq: -1,
+      at: 1,
+    } as WireEvent);
+    first.chatRegistry.flush();
+    await first.app.close();
+
+    const second = await buildAll({
+      registry: Registry.load(dataDir),
+      dataDir,
+      logger: false,
+      hostOfflineGraceMs: 0,
+      hostRestartWindowMs: 300,
+    });
+    try {
+      const status = (id: string): string | undefined =>
+        second.chatRegistry.get(id)?.chatStatus?.state;
+      // Inside the window: what the server last knew.
+      expect(status('quiet')).toBe('idle');
+      expect(status('busy')).toBe('running');
+      await new Promise((r) => setTimeout(r, 500));
+      expect(status('quiet')).toBe('host_offline');
+      expect(status('busy')).toBe('host_offline');
+      // The host comes back and closes its list.
+      second.chatRegistry.observe({
+        type: 'folders.list',
+        hostId: 'daemon-1',
+        roots: [],
+        recent: [],
+      } as WireEvent);
+      expect(status('quiet')).toBe('idle');
+      expect(status('busy')).toBe('host_offline');
+    } finally {
+      await second.app.close();
+    }
   });
 });
