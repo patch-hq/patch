@@ -547,8 +547,14 @@ export function startVoiceCall(
             .pushError(`voice call: mic capture failed: ${(e as Error).message}`);
         });
       };
+      // An error always precedes its close. Setting callError here would make
+      // onclose think the failure was already reported and skip the redial, so
+      // a live call would end on the first socket error. Keep the detail and
+      // let onclose (the single decision point) redial or give up with it.
+      let wsErrorDetail: string | null = null;
       ws.onerror = (e: Event): void => {
-        useVoiceStore.getState().setError(`audio WS error: ${(e as Event).type ?? 'unknown'}`);
+        wsErrorDetail = `audio WS error: ${(e as Event).type ?? 'unknown'}`;
+        console.log(`[patch-voice] call ${wsErrorDetail}`);
       };
       // If the host (or network) drops the session, stop the mic AND the TTS
       // sink so we don't keep capturing into — or playing from — a dead socket.
@@ -572,7 +578,10 @@ export function startVoiceCall(
         if (_reconnectTimer !== null) return;
         const st = useVoiceStore.getState();
         if (st.activeSession && st.callError === null) {
-          const reason = 'Call dropped — the audio connection closed';
+          const reason =
+            wsErrorDetail === null
+              ? 'Call dropped — the audio connection closed'
+              : `Call dropped — ${wsErrorDetail}`;
           // Redial if the call had been live, or if this was itself a redial.
           if (_reconnect !== null || st.callPhase !== 'connecting') {
             reconnectOrGiveUp(chatId, st.callMode, reason);
