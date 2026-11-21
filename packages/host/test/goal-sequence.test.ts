@@ -143,7 +143,7 @@ describe('goal sequence', () => {
     let state = daemon.chatState.get(chatId);
     expect(state?.goalQueue).toEqual([]);
     expect(state?.goalReminderEvery).toBeNull();
-    expect(state?.goalCheckInEvery).toBeNull();
+    expect(state?.goalCheckInEvery).toEqual({ unit: 'minutes', n: 120 });
 
     await daemon.setGoal(chatId, 'Again', { then: ['Next'] });
     await daemon.setGoal(chatId, null);
