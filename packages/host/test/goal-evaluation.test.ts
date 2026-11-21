@@ -657,3 +657,39 @@ describe('maybeEvaluateGoal — a judge that cannot answer', () => {
     expect(state?.declaredStatus?.text).toContain('Goal is not being checked');
   });
 });
+
+describe('maybeEvaluateGoal — default check-in', () => {
+  it('gives a goal a 2-hour check-in unless told otherwise, and null opts out', async () => {
+    const { daemon, folder } = setup(undefined);
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Ship it');
+    expect(daemon.chatState.get(chatId)?.goalCheckInEvery).toEqual({ unit: 'minutes', n: 120 });
+    await daemon.setGoal(chatId, 'Ship it', { checkInEvery: null });
+    expect(daemon.chatState.get(chatId)?.goalCheckInEvery).toBeNull();
+  });
+
+  it('judges the goal once the check-in is due even though a watch never ends', async () => {
+    const evaluateGoal = vi.fn(
+      async (): Promise<GoalVerdict> => ({ verdict: 'met', reason: 'done' }),
+    );
+    const { daemon, folder } = setup(evaluateGoal, { goalWatchPollMs: 200 });
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Do the thing');
+    daemon.startWatch(chatId, {
+      command: 'sleep 5',
+      description: 'a watcher that never ends',
+      timeoutSec: 86_400,
+    });
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(100);
+    expect(evaluateGoal).not.toHaveBeenCalled();
+
+    const st = daemon.chatState.get(chatId);
+    if (st) st.goalCheckInLastAt -= 121 * 60_000;
+    await tick(600);
+    expect(evaluateGoal).toHaveBeenCalled();
+    expect(daemon.chatState.get(chatId)?.goal).toBeNull();
+  }, 8000);
+});

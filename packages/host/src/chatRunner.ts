@@ -1051,6 +1051,13 @@ const ROTATION_CARRY_MESSAGES = 40;
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 
+/**
+ * spec/04 § Goals — check-in. A goal set without a check-in cadence gets this
+ * one; passing `checkInEvery: null` opts out. Time-based, because a chat held
+ * up by a long-running watcher takes no turns, so a turn count never trips.
+ */
+export const DEFAULT_GOAL_CHECK_IN: ReminderEvery = { unit: 'minutes', n: 120 };
+
 /** What surrounds a goal (spec/04 § Goals): the goals after it and its two cadences. */
 export interface GoalPlan {
   then?: string[];
@@ -5395,7 +5402,12 @@ export class Daemon {
     if (!state) throw new ChatNotFoundError(chatId);
     const then = goal === null ? [] : (plan.then ?? []);
     const remindEvery = goal === null ? null : (plan.remindEvery ?? null);
-    const checkInEvery = goal === null ? null : (plan.checkInEvery ?? null);
+    const checkInEvery =
+      goal === null
+        ? null
+        : plan.checkInEvery === undefined
+          ? DEFAULT_GOAL_CHECK_IN
+          : plan.checkInEvery;
     if (
       state.goal === goal &&
       sameQueue(state.goalQueue, then) &&
@@ -11838,7 +11850,20 @@ export class Daemon {
     const watches = this.watch.count(chatId);
     const delegates = this.hasRunningDelegates(chatId);
     const pendingPermission = this.hasPendingPermission(chatId);
-    if (watches > 0 || delegates || pendingPermission) {
+    // A time check-in that has come due is not held back by running watches or
+    // delegates: a watcher that never ends must not stop the goal being checked
+    // for ever. A pending permission still defers — the user is the blocker.
+    const checkInEveryNow = state.goalCheckInEvery;
+    const checkInDue =
+      checkInEveryNow !== null &&
+      checkInEveryNow.unit === 'minutes' &&
+      this.opts.now() - state.goalCheckInLastAt >= checkInEveryNow.n * 60_000;
+    if ((watches > 0 || delegates) && checkInDue && !pendingPermission) {
+      this.opts.logger.warn(
+        { chatId, runningWatches: watches, runningDelegates: delegates },
+        'goal check-in due: evaluating despite background work',
+      );
+    } else if (watches > 0 || delegates || pendingPermission) {
       if (!this.goalDeferLogged.has(chatId)) {
         this.goalDeferLogged.add(chatId);
         this.opts.logger.warn(
