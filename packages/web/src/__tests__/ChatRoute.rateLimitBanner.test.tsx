@@ -283,11 +283,11 @@ describe('ChatRoute — the limit bubble', () => {
       expect(sent).not.toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
     });
 
-    it('no other provider: Change provider is greyed with the reason', () => {
+    it('no other provider connected: Change provider is greyed with the reason', () => {
       setup({ resetsAt: Date.now() + 60_000, other: 'out' });
       renderChat();
       expect(screen.getByTestId('rate-limit-change-provider').getAttribute('title')).toBe(
-        'No other provider has usage left',
+        'No other provider is connected. Connect one to continue now',
       );
     });
 
