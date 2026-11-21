@@ -882,10 +882,10 @@ describe('chat header names its host', () => {
 });
 
 // The new-chat screen must announce a host that cannot run a turn, not let
-// someone discover it by opening the model picker. Everything on that screen
-// depends on it, so it is answered once and stated loudly.
-describe('no connected account blocks the new-chat screen', () => {
-  it('states it and disables the folder and model pickers', async () => {
+// someone discover it by opening the model picker. It is stated once, with a
+// link to connect; the folder and message stay open and there is no model to pick.
+describe('no connected account on the new-chat screen', () => {
+  it('states it once and leaves the folder open with no model picker', async () => {
     reportHost('host-a', { hostName: 'laptop' });
     setSharedAccounts({ claude: [{ connected: false }] });
     const { NewChatRoute } = await import('../routes/NewChatRoute.js');
@@ -897,10 +897,11 @@ describe('no connected account blocks the new-chat screen', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const blocked = await screen.findByTestId('composer-signed-out');
-    expect(blocked).toHaveTextContent('Sign in to Claude to send messages.');
-    expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
-    expect(screen.getByTestId('new-chat-model')).toBeDisabled();
+    const blocked = await screen.findByTestId('new-chat-setup-reason');
+    expect(blocked).toHaveTextContent('Connect an AI, Claude or ChatGPT, to send.');
+    expect(screen.queryByTestId('composer-signed-out')).toBeNull();
+    expect(screen.getByTestId('new-chat-folder-pill')).toBeEnabled();
+    expect(screen.queryByTestId('new-chat-model')).toBeNull();
   });
 });
 
