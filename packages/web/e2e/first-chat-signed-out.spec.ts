@@ -39,8 +39,10 @@ test('new chat: no meetings popover, the composer says why and links to signing 
 }) => {
   await page.goto('/app/dev-harness.html?chat=new');
   await expect(page.getByTestId('composer-input')).toBeVisible();
-  const notice = page.getByTestId('composer-signed-out');
-  await expect(notice).toHaveText(/Sign in to Claude to send messages\./);
+  // The one prompt on a new chat is the setup reason, not the composer notice.
+  const notice = page.getByTestId('new-chat-setup-reason');
+  await expect(notice).toHaveText(/to send\. Your message is kept\./);
+  await expect(page.getByTestId('composer-signed-out')).toHaveCount(0);
   // Long enough for the old once-ever introduction to have opened.
   await page.waitForTimeout(1000);
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
@@ -49,11 +51,11 @@ test('new chat: no meetings popover, the composer says why and links to signing 
   await expect(page.getByTestId('new-chat-model')).not.toContainText('claude-opus-5');
   await shot(page, '8-new-chat-signed-out');
 
-  await notice.getByRole('link', { name: 'Sign in' }).click();
+  await notice.getByRole('link').click();
   await expect(page.getByTestId('connect')).toBeVisible();
   await expect(page.getByTestId('claude-signin-start')).toBeVisible();
   await page.getByTestId('connect-close').click();
-  await expect(page.getByTestId('composer-signed-out')).toBeVisible();
+  await expect(notice).toBeVisible();
   // Signed out is said once on this screen: the notice, with no banner above it.
   await expect(page.getByTestId('claude-disconnected-banner')).toHaveCount(0);
 });
