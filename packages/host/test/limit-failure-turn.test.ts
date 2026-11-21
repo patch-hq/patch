@@ -158,17 +158,15 @@ describe('a limit failure nobody parked', () => {
     daemon.shutdown();
   });
 
-  it('carries the owed turn on from where it stopped when the model is changed with retry', async () => {
-    // Re-sending the bare message made the new model start the whole request
-    // again, discarding what the interrupted attempt had already done.
+  it('delivers the owed turn on the new model when the model is changed with retry', async () => {
+    // The limit refused the turn before the provider took it, so the new model
+    // is given the message itself — under the entry the chat already shows.
     const { daemon, folder, runs } = setup({ err: statedLimit });
     const chatId = await daemon.spawnChat({ folder });
     await daemon.sendInput({ chatId, message: 'go' });
     await daemon.setChatModel(chatId, 'openai/gpt-5', { retry: true });
     for (let i = 0; i < 20 && runs.n < 2; i++) await new Promise((r) => setTimeout(r, 20));
-    expect(runs.prompts[1]).toMatch(/cut off partway/);
-    expect(runs.prompts[1]).toContain('<original-prompt>\ngo\n</original-prompt>');
-    expect(runs.prompts[1]).toMatch(/Carry on$/);
+    expect(runs.prompts[1]).toBe('go');
     daemon.shutdown();
   });
 

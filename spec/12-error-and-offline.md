@@ -116,16 +116,30 @@ Only transient errors retry automatically: a dropped provider connection, a 5xx 
 
 ### What a recovery leaves behind
 
-A turn that recovered is ONE turn, however many goes it took. Every re-send —
-a rung of the ladder, a paused turn coming back — is the host re-running a turn
-the user sent once, so it must not read as a message the user sent again.
+A turn that recovered is ONE turn, however many goes it took, and the provider
+is never handed the same message twice. Whenever the host takes up an owed turn
+again — a paused turn released after a limit, a rung of the transient ladder,
+an account failover, a session that stopped unasked, a turn owed across a
+restart, the host waking from sleep — one rule decides what it sends:
 
-- The re-sent user `chat.message` carries `retryOfSeq`: the seq of the ORIGINAL
-  user message for that turn, on every attempt, never the attempt before it. A
-  surface folds the copy into the bubble already on screen instead of drawing
-  the same sentence a second time. A user retyping the same thing is a new turn.
-  `retryOfSeq` is part of the entry in the chat's record, so the fold holds on
-  every surface and after any reload.
+- The provider already has it. Something the provider produced after the
+  turn's message (a reply, a tool call or result, its thinking) is in the
+  record with a `nativeRef` naming the session the turn resumes (or, for an
+  entry recorded before provider ids were kept, output followed it while the
+  chat still has a session). The host sends a short visible message instead —
+  "Continue — the last turn was cut off by a usage limit." (or a restart, an
+  error, …) — as one new entry in the record, on the same session.
+- The provider never had it. The turn was refused or failed before the
+  provider produced anything, or the session it went to has since been
+  retired. The original message is delivered to the provider once more, and
+  the record does NOT take it again: no second user entry, no copy to fold.
+  The entry already in the chat is the one the model now answers.
+- A turn the host's machine cut off is not sent at all: it shows Interrupted
+  with Continue (§ Continue).
+
+So the record holds the original message exactly once on every path.
+`retryOfSeq` is left to a person's own Retry in place (below).
+
 - Retry on a settled turn forks. Retry in a message's long-press sheet sends
   `chat.fork_request` for the user turn (`04-chats-and-folders.md` § Branching)
   and drops every later turn from the view: the retry starts a new track from

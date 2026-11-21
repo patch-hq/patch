@@ -13,12 +13,7 @@ import {
   buildTodoFireNote,
 } from '../src/todos.js';
 import { buildBroadcastNote } from '../src/specialThreads.js';
-import {
-  MODEL_SWITCH_TURN_REMINDER,
-  SESSION_RESTART_TURN_REMINDER,
-  VOICE_HANDOFF_REMINDER,
-  interruptedTurnResend,
-} from '../src/chatRunner.js';
+import { VOICE_HANDOFF_REMINDER } from '../src/chatRunner.js';
 
 describe('noteBlock / splitLeadingNotes', () => {
   it('round-trips a label and body, leaving the message', () => {
@@ -75,8 +70,6 @@ describe('every note Patch sends the model is plain visible text, not a <system-
       'broadcast',
       buildBroadcastNote([{ ts: 0, message: 'hi', sourceChatName: 'ops' }] as never, 1000) ?? '',
     ],
-    ['Turn moved to another model', 'model switch', MODEL_SWITCH_TURN_REMINDER],
-    ['Turn restarted on a new session', 'session restart', SESSION_RESTART_TURN_REMINDER],
     ['Voice hand-off', 'voice hand-off', VOICE_HANDOFF_REMINDER],
   ];
 
@@ -86,18 +79,5 @@ describe('every note Patch sends the model is plain visible text, not a <system-
     expect(notes).toHaveLength(1);
     expect(notes[0]?.label).toBe(label);
     expect(rest).toBe('');
-  });
-
-  it('a restart re-send keeps the original prompt inside the note and still reads back', () => {
-    const resend = interruptedTurnResend(
-      SESSION_RESTART_TURN_REMINDER,
-      'do the thing [End note] now',
-    );
-    const { notes, rest } = splitLeadingNotes(resend);
-    expect(rest).toBe('Carry on');
-    expect(notes[0]?.text).toContain('do the thing');
-    // A second restart re-supplies the real original, not the previous note.
-    const again = interruptedTurnResend(SESSION_RESTART_TURN_REMINDER, resend);
-    expect(splitLeadingNotes(again).notes[0]?.text).toContain('do the thing [End note] now');
   });
 });

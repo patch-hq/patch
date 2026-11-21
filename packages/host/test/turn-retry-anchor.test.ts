@@ -78,7 +78,7 @@ describe('the SDK-error ladder anchors every rung on the ORIGINAL turn', () => {
     vi.useRealTimers();
   });
 
-  it('emits one user message per attempt, each naming the first one', async () => {
+  it('delivers every rung to the provider, but records the message once (decision 22)', async () => {
     const { backend, calls } = alwaysThrows('ECONNRESET');
     const { daemon, folder, events } = makeHost(backend, 'anchor');
     const chatId = await daemon.spawnChat({ folder, prompt: 'check rons messages' });
@@ -87,17 +87,12 @@ describe('the SDK-error ladder anchors every rung on the ORIGINAL turn', () => {
     await vi.advanceTimersByTimeAsync(400_000);
     expect(calls()).toBe(4);
 
+    // The provider never took the turn (each attempt failed before any
+    // output), so each rung delivers it again — under the one entry the chat
+    // already shows, never as a copy.
     const msgs = userMessages(events, chatId);
-    expect(msgs).toHaveLength(4);
-    // The first is the turn itself and names nothing — there is no earlier
-    // bubble for it to fold into.
+    expect(msgs).toHaveLength(1);
     expect(msgs[0]?.retryOfSeq).toBeUndefined();
-    const original = msgs[0]!.seq;
-    // Every rung after it names the ORIGINAL, never the rung before it. A chain
-    // (each naming its predecessor) would still fold, but only if every
-    // intermediate frame arrived — one dropped rung and the tail detaches into
-    // a bubble of its own.
-    expect(msgs.slice(1).map((m) => m.retryOfSeq)).toEqual([original, original, original]);
     daemon.shutdown();
   });
 });
@@ -131,20 +126,16 @@ describe('a restart resume names the bubble the dead host drew', () => {
   });
 });
 
-describe('the link survives a reload', () => {
-  it('each re-send carries retryOfSeq in the record itself, and meta keeps no retry marks', async () => {
-    // History is read only from Patch's record, so the fold survives a reload
-    // only if every re-sent copy names the turn it repeats on its own entry.
+describe('the record survives a reload', () => {
+  it('holds a laddered turn once, and meta keeps no retry marks', async () => {
+    // History is read only from Patch's record: a turn retried after failing
+    // before the provider took it is in the record once, whatever reloads.
     const { backend } = alwaysThrows('ECONNRESET');
     const { daemon, folder, events, metaStore } = makeHost(backend, 'marks');
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const chatId = await daemon.spawnChat({ folder, prompt: 'check rons messages' });
     await vi.advanceTimersByTimeAsync(400_000);
-    const msgs = userMessages(events, chatId);
-    const original = msgs[0]!.seq;
-
-    expect(msgs.length).toBeGreaterThan(1);
-    for (const m of msgs.slice(1)) expect(m.retryOfSeq).toBe(original);
+    expect(userMessages(events, chatId).map((m) => m.content)).toEqual(['check rons messages']);
     expect(metaStore.read(chatId)).not.toHaveProperty('retryMarks');
     vi.useRealTimers();
     daemon.shutdown();
