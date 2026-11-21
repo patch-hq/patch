@@ -242,7 +242,8 @@ test('after Download, one line says what to do with the disk image', async ({ pa
   );
   await page.goto(SITE);
   const next = page.locator('.hero [data-next]');
-  await expect(next).toBeHidden();
+  // The install step shows from the start, before Download is clicked.
+  await expect(next).toBeVisible();
   const download = page.waitForEvent('download');
   await page.locator('.hero [data-download]').click();
   await download;
