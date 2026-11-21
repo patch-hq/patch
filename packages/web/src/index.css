@@ -12167,15 +12167,20 @@ main.empty-state p {
      composer (todo — "folder picker gets cut off by the composer"). `max-height`
      is set inline by usePopupPlacement; this is what makes the cap mean
      "scroll", not "clip". The scrolling is done by .folder-popup-body so the
-     search field above and the Use / New folder footer below stay put. */
-  overflow: hidden;
+     search field above and the Use / New folder footer below stay put. When the
+     window is too short for search + a usable list + footer, the pop-up itself
+     scrolls rather than squashing the list to nothing. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 /* The one scroll region: Recent + Browse lists. The scrollbar is styled so it
    is always drawn — macOS hides overlay scrollbars until you scroll, which left
    a fresh-Mac user with no hint that Desktop / Documents were below the fold. */
 .folder-popup-body {
   flex: 1 1 auto;
-  min-height: 0;
+  /* A floor, never zero: with min-height 0 a short window gave the list 0px
+     and the Browse header clipped (round-7 fresh-Mac test). */
+  min-height: 120px;
   overflow-y: scroll;
   display: flex;
   flex-direction: column;
@@ -12200,6 +12205,10 @@ main.empty-state p {
   gap: 4px;
   border-top: 1px solid var(--line);
   padding-top: 8px;
+  /* Stays in view even when a short window makes the pop-up itself scroll. */
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-elevated);
 }
 .folder-popup-footer .folder-browser-use {
   margin-top: 0;
