@@ -1548,35 +1548,35 @@ describe('/chats/new', () => {
     expect(b.textContent).toBe('…/work/portfolio');
   });
 
-  it('disables the quick toggles when the host is not signed in, like the pickers beside them', async () => {
-    setSharedAccounts({ claude: [{ connected: false }] });
+  it('keeps the folder choice and the message box open with no AI connected, under one Connect an AI prompt', async () => {
+    setSharedAccounts({ claude: [{ connected: false }], codex: [{ connected: false }] });
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 100) } });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
-    expect(await screen.findByTestId('folder-quick-/home/tom/projects/alpha')).toBeDisabled();
-    expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
-    // The greyed controls say why, with a Sign in action.
-    const reason = screen.getByTestId('new-chat-setup-reason');
-    expect(reason.textContent).toMatch(/sign in to Claude/i);
-    expect(reason.querySelector('a')?.getAttribute('href')).toBe('/connect');
-  });
-
-  it('has no native tooltip on the disabled message box', async () => {
-    setSharedAccounts({ claude: [{ connected: false }] });
-    stubPickerFetch({ folders: [] });
-    renderPicker();
-    await screen.findByTestId('composer-signed-out');
+    expect(await screen.findByTestId('folder-quick-/home/tom/projects/alpha')).toBeEnabled();
+    expect(screen.getByTestId('new-chat-folder-pill')).toBeEnabled();
+    expect(document.querySelector('textarea')?.hasAttribute('disabled')).toBe(false);
     expect(document.querySelector('textarea')?.hasAttribute('title')).toBe(false);
+    // One prompt, covering both providers; the composer adds no second one.
+    const reason = screen.getByTestId('new-chat-setup-reason');
+    expect(reason.textContent).toMatch(/Connect an AI, Claude or ChatGPT/);
+    expect(reason.querySelector('a')?.getAttribute('href')).toBe('/connect');
+    expect(screen.queryByTestId('composer-signed-out')).toBeNull();
+    expect(screen.queryByTestId('claude-disconnected-banner')).toBeNull();
+    // No AI, so no model is offered.
+    expect(screen.queryByTestId('new-chat-model')).toBeNull();
+    expect(screen.queryByTestId('new-chat-quick-models')).toBeNull();
   });
 
-  it('says signed out once on the landing chat: the composer notice, no banner', async () => {
-    setSharedAccounts({ claude: [{ connected: false }] });
+  it("names the provider when another AI is connected but this chat's is not", async () => {
+    setSharedAccounts({ claude: [{ connected: false }], codex: [{ connected: true }] });
     stubPickerFetch({ folders: [] });
     renderPicker();
 
-    expect(await screen.findByTestId('composer-signed-out')).toBeInTheDocument();
-    expect(screen.queryByTestId('claude-disconnected-banner')).toBeNull();
+    const reason = await screen.findByTestId('new-chat-setup-reason');
+    expect(reason.textContent).toMatch(/Sign in to Claude/);
+    expect(screen.queryByTestId('composer-signed-out')).toBeNull();
   });
 
   // ---- Usage (spec/14 §8): apart from the selections, visual, in words ----

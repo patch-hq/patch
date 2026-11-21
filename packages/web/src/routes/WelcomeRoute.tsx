@@ -72,12 +72,13 @@ export function WelcomeRoute(): JSX.Element {
   // The shell says whether this computer runs Patch itself; only then is there
   // anything to keep running.
   const local = params.get('machine') === 'local' && getDesktopBridge()?.keepRunning !== undefined;
-  // The model step is always listed so the count never changes mid-way; with no
-  // AI connected it says so rather than offering a meaningless choice.
+  // With no AI connected there is no model to choose, so the step is left out.
+  // Connecting one on the first step brings it back, which the dots then show.
+  const anyAI = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
   const steps: StepId[] = [
     'providers',
     'permissions',
-    'model',
+    ...(anyAI ? (['model'] as const) : []),
     ...(local ? (['keep-running'] as const) : []),
     'phone',
   ];
