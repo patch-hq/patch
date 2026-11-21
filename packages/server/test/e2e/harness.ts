@@ -37,7 +37,11 @@ import {
   AttachmentChatNotFoundError,
 } from '../../../host/src/chatRunner.js';
 import { createMetaStore } from '../../../host/src/meta.js';
-import { createMockSdkBackend, type MockSdkBackend } from '../../../host/src/sdkBackend.js';
+import {
+  createMockSdkBackend,
+  type MockSdkBackend,
+  type SdkBackend,
+} from '../../../host/src/sdkBackend.js';
 import { createClaudeSessionProbe } from '../../../host/src/history.js';
 import { createServerLink, type ServerLink } from '../../../host/src/serverLink.js';
 import { Outbox } from '../../../host/src/outbox.js';
@@ -102,6 +106,11 @@ export interface HarnessOptions {
   hostBackoffMs?: readonly number[];
   /** Bootstrap the special threads (thread_manager etc.) on the host. */
   specialThreads?: boolean;
+  /**
+   * Wrap the main host's mock SDK backend, to script what the provider does
+   * (refuse a turn with a limit, hold one open). The mock stays the only mock.
+   */
+  wrapSdk?: (mock: MockSdkBackend) => SdkBackend;
 }
 
 export interface E2EHarness {
@@ -254,7 +263,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<E2EHarnes
     const hostDaemon = new Daemon({
       hostId: id,
       metaStore,
-      sdkBackend: hostSdk,
+      sdkBackend: opts.wrapSdk && id === hostId ? opts.wrapSdk(hostSdk) : hostSdk,
       sdkBackendKind: 'mock',
       oauthAccessToken: 'fake-oauth',
       sessionProbe: createClaudeSessionProbe({ claudeProjectsRoot: hostClaudeRoot }),
