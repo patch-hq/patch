@@ -72,7 +72,9 @@ describe('formatResetDetail', () => {
 describe('formatResetLocal', () => {
   it('uses one local clock with its zone named', () => {
     const detail = formatResetLocal(AT, AT - 3 * 86_400_000);
-    expect(detail).toMatch(/^[A-Z][a-z]{2} \d{2}:\d{2} (?:[A-Z]{2,4}|GMT[+-]\d+)$/);
+    expect(detail).toMatch(
+      /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2,3} \d{2}:\d{2} (?:[A-Z]{2,4}|GMT[+-]\d+)$/,
+    );
     expect(detail).not.toContain('UTC ·');
   });
 });

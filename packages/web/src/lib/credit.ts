@@ -13,7 +13,7 @@ import { ACCOUNT_PROVIDERS, providerForModel, type ProviderId } from '@patch/wir
 import { accountRows, type AccountUsageRow } from '../components/UsagePopover.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
-import { isBlocked } from './usage.js';
+import { blockingScope, isBlocked } from './usage.js';
 
 /** The connected API-key accounts per provider, which `accountRows` leaves out. */
 export type ApiKeyProviders = ReadonlySet<ProviderId>;
@@ -89,4 +89,36 @@ export function useCredit(): { rows: AccountUsageRow[]; apiKeyProviders: ApiKeyP
     }
     return { rows: accountRows(hosts, shared), apiKeyProviders };
   }, [hosts, shared]);
+}
+
+const PROVIDER_NOUN: Partial<Record<string, string>> = { claude: 'Claude', codex: 'ChatGPT' };
+
+/**
+ * Why a spent provider's models are unavailable, in plain words with a full
+ * date — `This ChatGPT account has no usage left until 17 Dec`. The date is the
+ * earliest reset among its accounts; none stated reads without one.
+ */
+export function spentReason(
+  rows: readonly AccountUsageRow[],
+  providerId: ProviderId,
+  now: number = Date.now(),
+): string {
+  const noun = PROVIDER_NOUN[providerId] ?? providerId;
+  const resets = rows
+    .filter((r) => r.providerId === providerId)
+    .map((r) => {
+      const scope = blockingScope(r.usage, now);
+      return scope === undefined ? undefined : r.usage?.[scope]?.resetsAt;
+    })
+    .filter((t): t is number => t !== undefined);
+  const subject =
+    rows.filter((r) => r.providerId === providerId).length > 1
+      ? `All ${noun} accounts have`
+      : `This ${noun} account has`;
+  if (resets.length === 0) return `${subject} no usage left`;
+  const d = new Date(Math.min(...resets));
+  const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const sameDay = d.toDateString() === new Date(now).toDateString();
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `${subject} no usage left until ${sameDay ? time : date}`;
 }

@@ -28,6 +28,9 @@ export function SignInTrouble({
   }
   return (
     <div className="set-inline" data-testid={`${testId}-trouble-options`}>
+      <p className="set-note" data-testid={`${testId}-trouble-help`}>
+        The sign-in did not finish. Try again for a fresh sign-in, or use an API key instead.
+      </p>
       <button
         type="button"
         className="set-btn ghost"

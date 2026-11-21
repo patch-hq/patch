@@ -17,10 +17,15 @@
 
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { compactModelLabel } from '@patch/wire';
+import {
+  compactModelLabel,
+  providerDescriptor,
+  providerForModel,
+  type ProviderId,
+} from '@patch/wire';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
-import { useModelCatalog } from '../lib/models.js';
-import { modelSpent, useCredit } from '../lib/credit.js';
+import { useModelCatalog, type ModelOption } from '../lib/models.js';
+import { modelSpent, spentReason, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
 
@@ -163,6 +168,8 @@ export function ModelPicker({
     };
   }, [portalled, open, anchorRef]);
 
+  const groups = groupByProvider(catalog.models);
+
   const popup = !open ? null : (
     <div
       ref={popupRef}
@@ -234,33 +241,44 @@ export function ModelPicker({
           Loading models…
         </div>
       ) : null}
-      <ul className="model-popup-list">
-        {catalog.models.map((m) => {
-          const spent = modelSpent(m.id, credit.rows, credit.apiKeyProviders);
-          return (
-            <li key={m.id}>
-              <button
-                type="button"
-                className={`model-option ${m.id === selected ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
-                data-testid={`model-option-${m.id}`}
-                role="option"
-                aria-selected={m.id === selected}
-                aria-disabled={spent}
-                disabled={spent}
-                title={spent ? 'No usage remaining on any account' : undefined}
-                onClick={() => onSelect(m.id)}
-              >
-                <span className="model-option-name">{m.label}</span>
-                {m.id === selected ? (
-                  <span className="model-option-check" aria-hidden>
-                    ✓
-                  </span>
-                ) : null}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {groups.map((g) => (
+        <div key={g.providerId} data-testid={`model-group-${g.providerId}`}>
+          {groups.length > 1 ? <div className="model-group-label">{g.label}</div> : null}
+          <ul className="model-popup-list">
+            {g.models.map((m) => {
+              const spent = modelSpent(m.id, credit.rows, credit.apiKeyProviders);
+              return (
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    className={`model-option ${m.id === selected ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
+                    data-testid={`model-option-${m.id}`}
+                    role="option"
+                    aria-selected={m.id === selected}
+                    aria-disabled={spent}
+                    disabled={spent}
+                    onClick={() => onSelect(m.id)}
+                  >
+                    <span className="model-option-name">
+                      {m.label}
+                      {spent ? (
+                        <span className="model-option-desc">
+                          {spentReason(credit.rows, g.providerId)}
+                        </span>
+                      ) : null}
+                    </span>
+                    {m.id === selected ? (
+                      <span className="model-option-check" aria-hidden>
+                        ✓
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 
@@ -296,4 +314,27 @@ export function ModelPicker({
   ) : (
     trigger
   );
+}
+
+/** The catalogue grouped by provider, the selected-first order kept inside each group. */
+function groupByProvider(models: readonly ModelOption[]): {
+  providerId: ProviderId;
+  label: string;
+  models: ModelOption[];
+}[] {
+  const order: ProviderId[] = [];
+  const byId = new Map<ProviderId, ModelOption[]>();
+  for (const m of models) {
+    const id = providerForModel(m.id);
+    if (!byId.has(id)) {
+      byId.set(id, []);
+      order.push(id);
+    }
+    byId.get(id)!.push(m);
+  }
+  return order.map((id) => ({
+    providerId: id,
+    label: id === 'codex' ? 'ChatGPT' : providerDescriptor(id).label,
+    models: byId.get(id)!,
+  }));
 }

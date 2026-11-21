@@ -37,7 +37,6 @@ export function NotificationBell(): JSX.Element {
         className="sidebar-collapse-btn notif-bell-btn"
         data-testid="notif-bell"
         aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-        title={open ? undefined : 'Notifications'}
         aria-expanded={open}
         onClick={() => {
           const r = ref.current?.getBoundingClientRect();
