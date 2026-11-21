@@ -50,6 +50,11 @@ vi.mock('../src/lib/voiceTts', () => ({
   stopTtsPlayback: stopTtsPlaybackMock,
 }));
 const { cueMock } = vi.hoisted(() => ({ cueMock: vi.fn(async () => undefined) }));
+const { ringStart, ringStop } = vi.hoisted(() => ({
+  ringStart: vi.fn(async () => undefined),
+  ringStop: vi.fn(async () => undefined),
+}));
+vi.mock('../src/lib/voiceRingback', () => ({ startRingback: ringStart, stopRingback: ringStop }));
 vi.mock('../src/lib/voiceLiveCue', () => ({ playVoiceLiveCue: cueMock }));
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => prefs.addressWord,
@@ -139,6 +144,27 @@ describe('connecting → failed after the timeout', () => {
     );
     vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS * 2);
     expect(useVoiceStore.getState().callError).toBeNull();
+  });
+
+  it('rings while connecting and stops when the line goes live', async () => {
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    expect(ringStart).toHaveBeenCalled();
+    ringStop.mockClear();
+    sock.emitMessage(stateFrame('listening'));
+    expect(ringStop).toHaveBeenCalled();
+  });
+
+  it('stops ringing when the connect times out', async () => {
+    startVoiceCall('c1');
+    await flush();
+    ringStop.mockClear();
+    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    await flush();
+    expect(ringStop).toHaveBeenCalled();
   });
 
   it('plays the live cue once, when the line first leaves connecting', async () => {

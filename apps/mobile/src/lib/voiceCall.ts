@@ -51,6 +51,7 @@
 // never answered by running local instead.
 
 import { playVoiceLiveCue } from './voiceLiveCue';
+import { startRingback, stopRingback } from './voiceRingback';
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent, type AudioSessionMode } from '@patch/wire/audio';
 import { api } from '../api/rest';
@@ -156,6 +157,13 @@ useVoiceStore.subscribe((s) => {
   } else if (s.callPhase !== 'connecting') {
     clearReconnect();
   }
+});
+
+// Ring while a call is being placed (first dial or a redial); silent the
+// moment it goes live, fails or ends.
+useVoiceStore.subscribe((s) => {
+  const ringing = s.activeSession !== null && s.callPhase === 'connecting' && s.callError === null;
+  void (ringing ? startRingback() : stopRingback());
 });
 
 function clearConnectTimer(): void {
