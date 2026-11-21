@@ -187,9 +187,9 @@ export interface WsHubDeps {
    */
   hostOfflineGraceMs?: number;
   /**
-   * How long a host that announced a restart (`host.restarting`) may take to
-   * reattach before its working chats read Host offline instead of Host
-   * restarting (spec/12 § Chat status). Default 2 minutes.
+   * How long a host that announced a restart (`host.restarting`), or any host
+   * after the server's own start, may take to reattach before its chats read
+   * Host offline (spec/12 § Chat status). Default 2 minutes.
    */
   hostRestartWindowMs?: number;
   /**
@@ -286,9 +286,6 @@ export interface WsHubDeps {
 export const HISTORY_PAGE_DEFAULT = 100;
 /** The most one page carries; a followed chat's catch-up comes in pages this size. */
 export const HISTORY_PAGE_MAX = 500;
-
-/** How long after startup a restored mid-turn chat waits for its host before reading as offline. */
-export const RESTORED_HOST_GRACE_MS = 60_000;
 
 export class WsHub {
   /**
@@ -507,6 +504,8 @@ export class WsHub {
   private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Hosts that announced a restart and have not reattached; the timer ends the wait. */
   private readonly restartingHosts = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The server's own start: hosts not back within the restart window are marked offline. */
+  private startupAwayTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Hosts whose socket is being replaced by a new one right now (see the offline handler). */
   private readonly replacingHosts = new Set<string>();
@@ -597,12 +596,12 @@ export class WsHub {
     if (status !== 'offline') return;
     // A call's audio runs on its host, so a host gone offline has no calls.
     this.endCallsOnHost(hostId);
-    // A chat whose host went silent mid-turn reads Host offline (spec/12 §
-    // Chat status): never a stale Running, and never Failed, since the turn may
-    // still be running and its outbox catches the record up when the host
-    // returns. A host that announced a restart is the planned gap: its chats
-    // read Host restarting, and only the restart window running out makes them
-    // Host offline (`beginHostRestart`).
+    // Every chat of a host gone silent reads Host offline (spec/12 § Chat
+    // status): never a stale Running or a plain Idle for a chat that cannot run
+    // now, and never Failed, since a turn may still be running and its outbox
+    // catches the record up when the host returns. A host that announced a
+    // restart is the planned gap: its chats read Host restarting, and only the
+    // restart window running out makes them Host offline (`beginHostRestart`).
     if (!this.restartingHosts.has(hostId)) this.markChatsHostOffline(hostId);
     // A terminal's shell runs under its own runner and outlives a host restart
     // (spec/02 § Host restarts), so its route stays and surfaces are told
@@ -722,13 +721,17 @@ export class WsHub {
   }
 
   constructor(private readonly deps: WsHubDeps) {
-    // A chat restored mid-turn whose host never comes back after a server
-    // restart must not read as running for ever (spec/12 § Chat status).
-    setTimeout(() => {
+    // After a server restart every host gets the restart window to reattach;
+    // the chats of one that has not read Host offline, whatever the server last
+    // knew of them (spec/12 § Chat status). A chat restored as working must
+    // not read as running for ever, nor an idle one as idle.
+    this.startupAwayTimer = setTimeout(() => {
+      this.startupAwayTimer = null;
       for (const hostId of this.registeredHostIds()) {
         if (!deps.hostLink.isOnline(hostId)) this.markChatsHostOffline(hostId);
       }
-    }, RESTORED_HOST_GRACE_MS).unref();
+    }, deps.hostRestartWindowMs ?? HOST_RESTART_WINDOW_MS);
+    this.startupAwayTimer.unref?.();
     // A status change a fact made on its own (a turn boundary, a question) has
     // no host frame to carry it: the server sends its own (spec/12 § Chat status).
     this.statusUnsub = deps.chatRegistry.onStatusChange((event) => this.broadcastChatState(event));
@@ -839,9 +842,9 @@ export class WsHub {
   }
 
   /**
-   * `host.restarting` (spec/12 § Chat status): the host's running and waiting
-   * chats read Host restarting until it reattaches, or Host offline once the
-   * restart window passes without it.
+   * `host.restarting` (spec/12 § Chat status): every chat of the host reads
+   * Host restarting until it reattaches, or Host offline once the restart
+   * window passes without it.
    */
   private beginHostRestart(hostId: string): void {
     const prior = this.restartingHosts.get(hostId);
@@ -857,16 +860,16 @@ export class WsHub {
     }
   }
 
-  /** The host went silent: its working chats read Host offline until it speaks for them again. */
+  /** The host went silent: every chat of it reads Host offline until it is back. */
   private markChatsHostOffline(hostId: string): void {
-    for (const chatId of this.deps.chatRegistry.midTurnChatIds(hostId)) {
-      this.deps.onChatLinkLost?.(chatId);
-    }
-    for (const event of this.deps.chatRegistry.markHostAway(hostId, 'offline')) {
-      this.broadcastChatState(event);
+    const midTurn = this.deps.chatRegistry.midTurnChatIds(hostId);
+    for (const chatId of midTurn) this.deps.onChatLinkLost?.(chatId);
+    const changed = this.deps.chatRegistry.markHostAway(hostId, 'offline');
+    for (const event of changed) this.broadcastChatState(event);
+    if (changed.length > 0) {
       this.deps.logger.warn(
-        { chatId: event.chatId },
-        'host went silent mid-turn; chat reads host offline',
+        { hostId, chats: changed.length, midTurn },
+        'host went silent; its chats read host offline',
       );
     }
   }
@@ -886,6 +889,8 @@ export class WsHub {
     this.offlineTimers.clear();
     for (const t of this.restartingHosts.values()) clearTimeout(t);
     this.restartingHosts.clear();
+    if (this.startupAwayTimer) clearTimeout(this.startupAwayTimer);
+    this.startupAwayTimer = null;
 
     for (const t of this.terminalLossTimers.values()) clearTimeout(t);
     this.terminalLossTimers.clear();
