@@ -3204,6 +3204,13 @@ button.nav-row {
   text-align: right;
   white-space: nowrap;
 }
+.new-chat-setup-label.top {
+  /* The project cell is taller than its chips (the path line sits under them),
+     so the label lines up with the chips, not the middle of the cell. Padding
+     matches a chip's border and padding. */
+  align-self: start;
+  padding-block: 5px;
+}
 .new-chat-setup-row {
   display: flex;
   flex-wrap: wrap;
@@ -19258,6 +19265,9 @@ a.drop-target,
   color: inherit;
   cursor: pointer;
   white-space: nowrap;
+}
+.first-run-intro > p {
+  text-wrap: balance;
 }
 .first-run-intro {
   max-width: 420px;

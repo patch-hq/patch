@@ -14,11 +14,10 @@ import { AcpAccounts } from './AcpAccounts.js';
 export function UsagePage(): JSX.Element {
   return (
     <SettingsPage
-      intro="The Claude, ChatGPT and other agent accounts your agents run on, and how much of each you've used."
+      intro="The Claude, ChatGPT and other accounts your agents run on, and how much of each you've used."
       title="AI accounts"
       testid="settings-usage"
     >
-      <UsageHistory />
       {PROVIDERS.map((p) => (
         <Group
           key={p.id}
@@ -30,6 +29,7 @@ export function UsagePage(): JSX.Element {
         </Group>
       ))}
       <AcpAccounts />
+      <UsageHistory />
     </SettingsPage>
   );
 }

@@ -222,7 +222,7 @@ function AgentGroup({
         // One strategy for every ACP agent's accounts, as Claude and Codex each have one.
         <Row title="Pick the account by" testid={`${id}-strategy-row`}>
           <Pills
-            label="ACP account strategy"
+            label="Other agents account strategy"
             options={STRATEGIES}
             value={strategy}
             disabled={!reachable}
@@ -230,7 +230,7 @@ function AgentGroup({
             titles={STRATEGY_TITLES}
             testid={`${id}-strategy`}
             onChange={(next) =>
-              void writeShared('ACP account strategy', () => api.setAcpStrategy(next))
+              void writeShared('other agents account strategy', () => api.setAcpStrategy(next))
             }
           />
         </Row>

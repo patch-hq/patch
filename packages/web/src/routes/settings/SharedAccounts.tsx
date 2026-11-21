@@ -201,7 +201,7 @@ function AccountEntry({
               onSelect: () => setSigningIn(true),
             },
             {
-              label: 'Paste a token',
+              label: 'Use a setup token',
               detail: 'Use a token from `claude setup-token` instead',
               testid: `account-paste-${id}`,
               onSelect: () =>
@@ -374,7 +374,7 @@ export function AddClaudeAccount(): JSX.Element {
           })()
         }
       >
-        Paste a token
+        Use a setup token
       </button>
     </div>
   );
