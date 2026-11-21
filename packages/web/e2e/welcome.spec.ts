@@ -69,9 +69,9 @@ test('this computer: every step, each choice written where Settings writes it', 
   // 1. Connect an AI — Claude in the browser, the code pasted back.
   await expect(page.getByTestId('welcome-providers')).toBeVisible();
   await expect(page.getByTestId('welcome-next')).toHaveCount(0);
-  // One dot per step this page asks: AI, permissions, model, keep running,
-  // phone. The count is the same before and after an AI is connected.
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
+  // One dot per step this page asks: AI, permissions, keep running, phone. The
+  // model step joins once an AI is connected (checked below).
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
   await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(1);
   await expect(page.getByTestId('welcome-claude-plans')).toHaveCount(0);
   await expect(page.getByTestId('claude-add-api-key')).toBeVisible();
@@ -167,7 +167,7 @@ test('this computer: every step, each choice written where Settings writes it', 
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
 });
 
-test('nothing connected: skipping says once what it costs, the model step says nothing can be chosen yet, and the phone can be skipped', async ({
+test('nothing connected: skipping says once what it costs, there is no model step, and the phone can be skipped', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 960, height: 720 });
@@ -177,8 +177,8 @@ test('nothing connected: skipping says once what it costs, the model step says n
     r.fulfill({ status: 502, json: { error: 'upstream' } }),
   );
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
-  // AI, permissions, model, phone: the model step stays so the count is fixed.
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  // AI, permissions, phone: with no AI there is no model step.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(3);
   // The cost of skipping is on screen before the click, and one click skips.
   await expect(page.getByTestId('welcome-skip-note')).toHaveText(
     'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
@@ -198,11 +198,7 @@ test('nothing connected: skipping says once what it costs, the model step says n
   await expect(page.getByTestId('welcome-permissions')).not.toContainText('Default');
   await page.getByTestId('welcome-next').click();
 
-  await expect(page.getByTestId('welcome-model')).toBeVisible();
-  await expect(page.getByTestId('welcome-model-problem')).toHaveText(
-    'Models appear once you connect an AI.',
-  );
-  await page.getByTestId('welcome-next').click();
+  await expect(page.getByTestId('welcome-model')).toHaveCount(0);
   await expect(page.getByTestId('welcome-phone')).toBeVisible();
   await expect(page.getByTestId('welcome-skip')).toHaveText('No phone, skip');
   await expect(page.getByTestId('welcome-apk-qr')).toHaveAttribute('width', /\d+/);
