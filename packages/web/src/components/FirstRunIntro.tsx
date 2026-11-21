@@ -4,7 +4,7 @@
 
 import type { JSX } from 'react';
 import { useState } from 'react';
-import { GUIDE_ITEMS, GUIDE_PURPOSE, isGuideItemDone } from '../lib/guide.js';
+import { GUIDE_ITEMS, GUIDE_PURPOSE, guideItemText, isGuideItemDone } from '../lib/guide.js';
 import { useGuideProgress } from '../lib/useGuideProgress.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -28,7 +28,7 @@ export function FirstRunIntro(): JSX.Element | null {
           const done = isGuideItemDone(i.id, progress) && i.done !== undefined;
           return (
             <li key={i.id} data-done={done ? 'true' : undefined}>
-              {done && i.done ? `✓ ${i.done.title}` : i.title}
+              {done && i.done ? `✓ ${i.done.title}` : guideItemText(i, progress).title}
             </li>
           );
         })}

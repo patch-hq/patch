@@ -2,6 +2,7 @@
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useChatStore, type ChatEventEntry } from '../stores/chatStore.js';
+import { useAllAccountsLimit } from './accountLimits.js';
 import type { GuideProgress } from './guide.js';
 
 const SPECIAL = new Set<string>(Object.values(SPECIAL_THREAD_IDS));
@@ -20,5 +21,6 @@ export function hasFirstReply(timelines: Record<string, ChatEventEntry[]>): bool
 export function useGuideProgress(): GuideProgress {
   const connected = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
   const hasChat = useChatStore((s) => hasFirstReply(s.timelines));
-  return { connected, hasChat };
+  const limited = useAllAccountsLimit();
+  return { connected, limited, hasChat };
 }

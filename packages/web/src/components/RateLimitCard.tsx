@@ -24,7 +24,7 @@ import { EXTRA_USAGE_URL, LIMIT_NAME, formatReset, formatResetDetail } from '../
 import { formatSpanShort, limitControls, type LimitControl } from '../lib/limitControls.js';
 import { accountRows } from './UsagePopover.js';
 import { LimitMenu } from './LimitMenu.js';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
 
 const EXTRA_USAGE_URLS: Record<string, string> = {
@@ -87,7 +87,14 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
       ? 'Claude is busy right now'
       : `${limitName}${pastReset ? ' reset' : ''}${account}`;
   const sendLabel = creditReturned || limitNext === 'ask' ? 'Continue' : 'Send';
-  const nextLine = isOverload ? null : limitNextText(limitNext, creditReturned);
+  // With one account there is no "next account": say what is true instead,
+  // and offer to add one.
+  const noNextAccount = limitNext === 'other_account' && controls.onlyAccount;
+  const nextLine = isOverload
+    ? null
+    : noNextAccount
+      ? 'This is your only account. Add another to carry on now, or wait for the reset.'
+      : limitNextText(limitNext, creditReturned);
 
   const send = (): void => {
     getActiveWs()?.send({ type: 'chat.resume_now_request', chatId: row.chatId });
@@ -171,6 +178,14 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
         {nextLine !== null ? (
           <p className="limit-unsent" data-testid="rate-limit-next">
             {nextLine}
+            {noNextAccount ? (
+              <>
+                {' '}
+                <Link to="/connect" data-testid="rate-limit-add-account">
+                  Add an account
+                </Link>
+              </>
+            ) : null}
           </p>
         ) : null}
 

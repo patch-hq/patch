@@ -65,6 +65,18 @@ describe('the limit card under decision 25', () => {
     expect(screen.getByTestId('rate-limit-send').textContent).toBe('Continue');
   });
 
+  it('with a single account never says it continues on the next account', () => {
+    render(
+      <MemoryRouter>
+        <RateLimitCard row={row({ limitBlock: { scope: 'week' }, limitNext: 'other_account' })} />
+      </MemoryRouter>,
+    );
+    const next = screen.getByTestId('rate-limit-next');
+    expect(next.textContent).not.toMatch(/next account/);
+    expect(next.textContent).toMatch(/only account/);
+    expect(screen.getByTestId('rate-limit-add-account').getAttribute('href')).toBe('/connect');
+  });
+
   it('says what each behaviour will do', () => {
     expect(limitNextText('resume_at_reset', false)).toMatch(/resets/);
     expect(limitNextText('other_account', false)).toMatch(/next account/);

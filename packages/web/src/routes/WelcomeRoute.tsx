@@ -40,6 +40,7 @@ import {
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { noUsageText, useBackendLimit } from '../lib/accountLimits.js';
 import { PROVIDERS as PROVIDER_CARDS } from './settings/providers.js';
 import { useModelOptions } from './settings/modelOptions.js';
 import { patchShared } from './settings/sharedWrite.js';
@@ -226,28 +227,41 @@ export function connectedNames(
  * Connect page (routes/ConnectRoute) draw the same cards.
  */
 export function ProviderCards(): JSX.Element {
-  const secrets = usePreferencesStore((s) => s.shared?.secrets);
   return (
     <>
-      {PROVIDER_CARDS.map((p) => {
-        const connected = secrets ? p.rows(secrets).filter((a) => a.connected) : [];
-        const { name, testId, Controls, installName, installTestId } = p.welcome;
-        return (
-          <div className="welcome-provider" data-testid={`welcome-${testId}`} key={p.id}>
-            <div className="welcome-provider-head">
-              <span className="welcome-provider-name">{name}</span>
-              {connected.length > 0 ? (
-                <span className="welcome-ok" data-testid={`welcome-${testId}-connected`}>
-                  {connectedNames(name, connected)}
-                </span>
-              ) : null}
-            </div>
-            {connected.length === 0 ? <Controls /> : null}
-            <InstallStatus backendId={p.id} name={installName} testId={installTestId} />
-          </div>
-        );
-      })}
+      {PROVIDER_CARDS.map((p) => (
+        <ProviderCard key={p.id} p={p} />
+      ))}
     </>
+  );
+}
+
+function ProviderCard({ p }: { p: (typeof PROVIDER_CARDS)[number] }): JSX.Element {
+  const secrets = usePreferencesStore((st) => st.shared?.secrets);
+  const connected = secrets ? p.rows(secrets).filter((a) => a.connected) : [];
+  const { name, testId, Controls, installName, installTestId } = p.welcome;
+  // Signed in is not the same as usable: an account that has used its limit
+  // says so, and offers another sign-in rather than a green tick.
+  const limit = useBackendLimit(p.id);
+  return (
+    <div className="welcome-provider" data-testid={`welcome-${testId}`}>
+      <div className="welcome-provider-head">
+        <span className="welcome-provider-name">{name}</span>
+        {connected.length > 0 && !limit ? (
+          <span className="welcome-ok" data-testid={`welcome-${testId}-connected`}>
+            {connectedNames(name, connected)}
+          </span>
+        ) : null}
+      </div>
+      {connected.length > 0 && limit ? (
+        <p className="welcome-warn" role="status" data-testid={`welcome-${testId}-limited`}>
+          {noUsageText(limit, Date.now(), connected.length > 1)}. Add another account or provider
+          below to carry on.
+        </p>
+      ) : null}
+      {connected.length === 0 || limit ? <Controls /> : null}
+      <InstallStatus backendId={p.id} name={installName} testId={installTestId} />
+    </div>
   );
 }
 

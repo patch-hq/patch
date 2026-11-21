@@ -18,6 +18,8 @@ export interface LimitControls {
   account: LimitControl & { options: { id: string; label: string }[] };
   provider: LimitControl & { options: { id: string; label: string }[] };
   extraUsage: LimitControl;
+  /** True when no other account of this chat's provider is connected at all. */
+  onlyAccount: boolean;
   /** The filled button: the first enabled of account, provider, send. */
   main: 'account' | 'provider' | 'send' | null;
 }
@@ -46,6 +48,10 @@ export function limitControls(input: {
       ? { enabled: false, reason: `Available at ${formatReset(resetsAt, now)}` }
       : { enabled: true };
 
+  const sameProvider = rows.filter((r) => r.providerId === input.currentProviderId);
+  const onlyAccount = !sameProvider.some((r) => r.accountId !== input.currentAccountId);
+  const otherProviderConnected = rows.some((r) => r.providerId !== input.currentProviderId);
+
   const accountOptions = left
     .filter(
       (r) => r.providerId === input.currentProviderId && r.accountId !== input.currentAccountId,
@@ -53,14 +59,26 @@ export function limitControls(input: {
     .map((r) => ({ id: r.accountId, label: r.label }));
   const account = accountOptions.length
     ? { enabled: true, options: accountOptions }
-    : { enabled: false, reason: 'No other account has usage left', options: accountOptions };
+    : {
+        enabled: false,
+        reason: onlyAccount
+          ? 'Only one account is connected. Add another to continue now'
+          : 'No other account has usage left',
+        options: accountOptions,
+      };
 
   const providerOptions = PROVIDERS.filter(
     (p) => p.id !== input.currentProviderId && left.some((r) => r.providerId === p.id),
   ).map((p) => ({ id: p.id as string, label: p.label }));
   const provider = providerOptions.length
     ? { enabled: true, options: providerOptions }
-    : { enabled: false, reason: 'No other provider has usage left', options: providerOptions };
+    : {
+        enabled: false,
+        reason: otherProviderConnected
+          ? 'No other provider has usage left'
+          : 'No other provider is connected. Connect one to continue now',
+        options: providerOptions,
+      };
 
   const extraUsage: LimitControl = input.overageBlocked
     ? { enabled: true }
@@ -81,7 +99,7 @@ export function limitControls(input: {
             : send.enabled
               ? 'send'
               : null;
-  return { send, account, provider, extraUsage, main };
+  return { send, account, provider, extraUsage, onlyAccount, main };
 }
 
 /** `16 min`, `2 h 5 min`, `3 d 4 h` — the compact span the card's corner uses. */

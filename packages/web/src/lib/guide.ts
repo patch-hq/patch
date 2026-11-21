@@ -2,6 +2,8 @@
 // One list feeds the new-chat intro and the "Getting started" modal, so the two
 // never disagree.
 
+import { formatReset } from './usage.js';
+
 export interface GuideItem {
   id: string;
   title: string;
@@ -16,13 +18,40 @@ export interface GuideItem {
 /** What the user has already done, from live state. */
 export interface GuideProgress {
   connected: boolean;
+  /** Set when every connected account is out of usage, with when that ends. */
+  limited?: { until: number | null } | null;
   hasChat: boolean;
 }
 
 export function isGuideItemDone(id: string, progress: GuideProgress): boolean {
-  if (id === 'connect') return progress.connected;
+  // Connected but out of usage is not ready: the step stays open.
+  if (id === 'connect') return progress.connected && !progress.limited;
   if (id === 'chat') return progress.hasChat;
   return false;
+}
+
+/** What the connect step says when it is done, honest about a spent account. */
+export function connectDoneText(progress: GuideProgress): { title: string; line: string } {
+  if (progress.limited) {
+    const until =
+      progress.limited.until === null ? '' : ` until ${formatReset(progress.limited.until)}`;
+    return {
+      title: 'AI connected, but out of usage',
+      line: `No usage left${until}. Messages wait until then. Add another account or provider to carry on.`,
+    };
+  }
+  return { title: 'AI connected', line: 'You can send messages. Add another account any time.' };
+}
+
+/** The title and line an item shows now: the honest limit wording replaces the connect step's. */
+export function guideItemText(
+  item: GuideItem,
+  progress: GuideProgress,
+): { title: string; line: string } {
+  if (item.id === 'connect' && progress.connected && progress.limited) {
+    return connectDoneText(progress);
+  }
+  return item;
 }
 
 export const GUIDE_PURPOSE = 'Patch runs your coding agents, on this machine or any other.';
@@ -35,6 +64,7 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
     to: '/connect',
     action: 'Sign in',
     done: { title: 'AI connected', line: 'You can send messages. Add another account any time.' },
+    // `connectDoneText` replaces this when the account is out of usage.
   },
   {
     id: 'chat',
