@@ -35,7 +35,7 @@ test.describe('Settings → Providers → Model endpoints', () => {
     // The key never rides in the settings.
     expect(JSON.stringify(server.patches)).not.toContain('sk-endpoint-key-1234');
     await expect(page.getByTestId('model-endpoint-ollama-api')).toHaveText(
-      'OpenAI-compatible · runs in Codex',
+      'OpenAI-compatible · runs in ChatGPT',
     );
   });
 

@@ -22,7 +22,7 @@ test.describe('Settings → Agent → Permission mode', () => {
       'Ask first',
       'Allow edits',
       'Never ask',
-      'Plan only (Claude and Codex only)',
+      'Plan only (Claude and ChatGPT only)',
     ]);
     await select.selectOption('acceptEdits');
     await expect

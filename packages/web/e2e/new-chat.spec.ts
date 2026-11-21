@@ -368,8 +368,9 @@ test.describe('new chat header', () => {
     await second.click();
     await expect(second).toHaveAttribute('aria-pressed', 'true');
 
-    // No tooltip on any chip or pill: the name is the whole story.
-    for (const el of await setup.locator('.folder-quick, .folder-pill, .model-pill').all()) {
+    // No tooltip on a chip or the model pill: the name is the whole story. The
+    // folder pill shows the full path, since its name may be cut short.
+    for (const el of await setup.locator('.folder-quick, .model-pill').all()) {
       await expect(el).not.toHaveAttribute('title', /.*/);
     }
   });
