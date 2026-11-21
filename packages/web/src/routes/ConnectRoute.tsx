@@ -26,8 +26,9 @@ export function ConnectRoute(): JSX.Element {
         <section className="welcome-step">
           <h1>Connect an AI</h1>
           <p className="welcome-note">
-            Works with a Claude Pro or Max plan, or a ChatGPT Plus or Pro plan. An API key is billed
-            separately by the provider.
+            Works with Claude Pro, Max, Team or Enterprise plans (work single sign-on included), or
+            ChatGPT Plus, Pro, Business or Enterprise plans. An API key is billed separately by the
+            provider.
           </p>
           <ProviderCards />
           <div className="welcome-footer">

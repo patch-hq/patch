@@ -4,11 +4,12 @@
 // has approved on any device. That makes it the sign-in for a headless host's
 // owner too: approve on a phone, and every host picks the login up.
 
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { api, type ChatGPTSignInStarted } from '../api/rest.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { problemText } from '../routes/settings/sharedWrite.js';
+import { SignInTrouble } from './SignInTrouble.js';
 
 type Phase =
   | { kind: 'idle' }
@@ -20,12 +21,15 @@ export function ChatGPTSignIn({
   label,
   onDone,
   primary = false,
+  apiKey,
 }: {
   /** Sign this row in again rather than adding an account. */
   accountId?: string;
   label?: string;
   onDone?: () => void;
   primary?: boolean;
+  /** An API-key button: beside the sign-in until it starts, under "Trouble signing in?" after. */
+  apiKey?: ReactNode;
 }): JSX.Element {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +87,8 @@ export function ChatGPTSignIn({
         ...(accountId ? { accountId } : {}),
         ...(label ? { label } : {}),
       });
+      // Like Claude: the person's own browser opens by itself.
+      window.open(started.url, '_blank', 'noopener');
       setPhase({ kind: 'waiting', started });
     } catch (e) {
       setError(problemText(e));
@@ -93,15 +99,18 @@ export function ChatGPTSignIn({
   if (phase.kind !== 'waiting') {
     return (
       <div className="chatgpt-signin" data-testid="chatgpt-signin-box">
-        <button
-          type="button"
-          className={`set-btn${primary ? ' primary' : ''}`}
-          data-testid="chatgpt-signin"
-          disabled={phase.kind === 'starting'}
-          onClick={() => void start()}
-        >
-          Sign in with ChatGPT
-        </button>
+        <div className="set-inline">
+          <button
+            type="button"
+            className={`set-btn${primary ? ' primary' : ''}`}
+            data-testid="chatgpt-signin"
+            disabled={phase.kind === 'starting'}
+            onClick={() => void start()}
+          >
+            Sign in with ChatGPT
+          </button>
+          {apiKey}
+        </div>
         {error ? (
           <p className="set-error" role="alert" data-testid="chatgpt-login-error">
             {error}
@@ -111,34 +120,45 @@ export function ChatGPTSignIn({
     );
   }
   const { started } = phase;
+  const cancel = (): void => {
+    void api.chatgptSignInCancel(started.signInId).catch(() => undefined);
+    setPhase({ kind: 'idle' });
+  };
   return (
-    <div className="set-inline" role="status" data-testid="chatgpt-login-pending">
-      <span className="set-row-title">
-        Open the sign-in page on any device, enter this code, and come back here.
-      </span>
+    <div className="chatgpt-signin waiting" role="status" data-testid="chatgpt-login-pending">
+      <p className="claude-signin-label">
+        Waiting for you to sign in at ChatGPT… If asked, enter this code.
+      </p>
       <code className="set-code" data-testid="chatgpt-login-code">
         {started.userCode}
       </code>
-      <a
-        className="set-btn"
-        href={started.url}
-        target="_blank"
-        rel="noreferrer"
-        data-testid="chatgpt-login-open"
-      >
-        Open sign-in
-      </a>
-      <button
-        type="button"
-        className="set-btn ghost"
-        data-testid="chatgpt-login-cancel"
-        onClick={() => {
-          void api.chatgptSignInCancel(started.signInId).catch(() => undefined);
-          setPhase({ kind: 'idle' });
-        }}
-      >
-        Cancel sign-in
-      </button>
+      <div className="set-inline">
+        <a
+          className="set-btn ghost"
+          href={started.url}
+          target="_blank"
+          rel="noreferrer"
+          data-testid="chatgpt-login-open"
+        >
+          Open ChatGPT again
+        </a>
+        <button
+          type="button"
+          className="set-btn ghost"
+          data-testid="chatgpt-login-cancel"
+          onClick={cancel}
+        >
+          Cancel
+        </button>
+        <SignInTrouble
+          testId="chatgpt-signin"
+          apiKey={apiKey}
+          onRetry={() => {
+            cancel();
+            void start();
+          }}
+        />
+      </div>
       {warning ? (
         <p className="set-error" role="status">
           {warning}

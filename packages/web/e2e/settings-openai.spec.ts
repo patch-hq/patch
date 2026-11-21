@@ -60,11 +60,11 @@ test('Sign in with ChatGPT shows the code the server holds, with no host involve
   await page.getByTestId('chatgpt-signin').click();
   const pending = page.getByTestId('chatgpt-login-pending');
   await expect(pending).toContainText('ABCD-1234');
-  await expect(pending.getByRole('link', { name: 'Open sign-in' })).toHaveAttribute(
+  await expect(pending.getByRole('link', { name: 'Open ChatGPT again' })).toHaveAttribute(
     'href',
     'https://auth.openai.com/codex/device',
   );
-  await expect(pending.getByRole('button', { name: 'Cancel sign-in' })).toBeVisible();
+  await expect(pending.getByRole('button', { name: 'Cancel' })).toBeVisible();
   expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_add_account')).toEqual([]);
 });
 
@@ -138,4 +138,27 @@ test('Codex sign-in on Hosts opens Usage, where the ChatGPT sign-in runs on the 
   await expect(page.getByText(/Paste a token from.*claude setup-token/)).toBeHidden();
   await page.getByTestId('chatgpt-signin').click();
   await expect(page.getByTestId('chatgpt-login-pending')).toContainText('ABCD-1234');
+});
+
+test('a ChatGPT sign-in that does not come back offers Trouble signing in', async ({ page }) => {
+  await stubSettingsApi(page);
+  await stubChatGPTSignIn(page);
+  await page.goto(settingsUrl('usage'));
+  await page.getByTestId('chatgpt-signin').click();
+  const pending = page.getByTestId('chatgpt-login-pending');
+  await expect(pending).toContainText('ABCD-1234');
+  await expect(pending.getByTestId('chatgpt-add-api-key')).toHaveCount(0);
+  await page.screenshot({
+    path: process.env['SHOT_DIR']
+      ? `${process.env['SHOT_DIR']}/chatgpt-waiting.png`
+      : 'test-results/chatgpt-waiting.png',
+  });
+  await pending.getByTestId('chatgpt-signin-trouble').click();
+  await expect(pending.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(pending.getByTestId('chatgpt-add-api-key')).toBeVisible();
+  await page.screenshot({
+    path: process.env['SHOT_DIR']
+      ? `${process.env['SHOT_DIR']}/chatgpt-trouble.png`
+      : 'test-results/chatgpt-trouble.png',
+  });
 });

@@ -6,11 +6,12 @@
 // this just waits for it. Used by Settings and by the welcome
 // steps after the desktop app's first run.
 
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { api } from '../api/rest.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { problemText } from '../routes/settings/sharedWrite.js';
+import { SignInTrouble } from './SignInTrouble.js';
 
 type Phase =
   | { kind: 'idle' }
@@ -23,6 +24,7 @@ export function ClaudeSignIn({
   label,
   onDone,
   primary = false,
+  apiKey,
 }: {
   /** Sign this row in again rather than adding an account. */
   accountId?: string;
@@ -30,6 +32,8 @@ export function ClaudeSignIn({
   onDone?: () => void;
   /** Draw the first button as the page's primary action. */
   primary?: boolean;
+  /** An API-key button: beside the sign-in until it starts, under "Trouble signing in?" after. */
+  apiKey?: ReactNode;
 }): JSX.Element {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [code, setCode] = useState('');
@@ -116,15 +120,18 @@ export function ClaudeSignIn({
   if (phase.kind === 'idle' || phase.kind === 'starting') {
     return (
       <div className="claude-signin" data-testid="claude-signin">
-        <button
-          type="button"
-          className={`set-btn${primary ? ' primary' : ''}`}
-          data-testid="claude-signin-start"
-          disabled={phase.kind === 'starting'}
-          onClick={() => void start()}
-        >
-          Sign in with Claude
-        </button>
+        <div className="set-inline">
+          <button
+            type="button"
+            className={`set-btn${primary ? ' primary' : ''}`}
+            data-testid="claude-signin-start"
+            disabled={phase.kind === 'starting'}
+            onClick={() => void start()}
+          >
+            Sign in with Claude
+          </button>
+          {apiKey}
+        </div>
         {error ? (
           <p className="set-error" role="alert" data-testid="claude-signin-error">
             {error}
@@ -141,6 +148,16 @@ export function ClaudeSignIn({
     setPhase({ kind: 'idle' });
     setError(null);
   };
+  const trouble = (
+    <SignInTrouble
+      testId="claude-signin"
+      apiKey={apiKey}
+      onRetry={() => {
+        cancel();
+        void start();
+      }}
+    />
+  );
   const reopen = (
     <a
       className="set-btn ghost"
@@ -169,6 +186,7 @@ export function ClaudeSignIn({
           >
             Cancel
           </button>
+          {trouble}
         </div>
         {error ? (
           <p className="set-error" role="alert" data-testid="claude-signin-error">
@@ -223,6 +241,7 @@ export function ClaudeSignIn({
         >
           Cancel
         </button>
+        {trouble}
       </div>
       {error ? (
         <p className="set-error" role="alert" data-testid="claude-signin-error">

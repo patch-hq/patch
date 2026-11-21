@@ -342,19 +342,13 @@ export function AddClaudeApiKey(): JSX.Element {
 
 /** Claude's card on the welcome step: sign in in the browser, or add an API key. */
 export function WelcomeClaudeControls(): JSX.Element {
-  return (
-    <div className="set-inline">
-      <ClaudeSignIn primary />
-      <AddClaudeApiKey />
-    </div>
-  );
+  return <ClaudeSignIn primary apiKey={<AddClaudeApiKey />} />;
 }
 
 export function AddClaudeAccount(): JSX.Element {
   return (
     <div className="set-inline set-add-bar start">
-      <ClaudeSignIn />
-      <AddClaudeApiKey />
+      <ClaudeSignIn apiKey={<AddClaudeApiKey />} />
       <button
         type="button"
         className="set-btn ghost"
@@ -387,30 +381,31 @@ export function AddClaudeAccount(): JSX.Element {
 export function AddChatGPTAccount(): JSX.Element {
   return (
     <div className="set-add-bar start stack" data-testid="add-chatgpt-account">
-      <div className="set-inline">
-        <ChatGPTSignIn />
-        <button
-          type="button"
-          className="set-btn ghost"
-          data-testid="chatgpt-add-api-key"
-          onClick={() =>
-            void (async () => {
-              const key = await useUiStore.getState().prompt({
-                title: 'Add an OpenAI API key',
-                message: 'Paid per use. Paste the key:',
-                placeholder: 'sk-…',
-                confirmLabel: 'Add',
-              });
-              if (key === null || key.trim() === '') return;
-              await writeShared('add API key', () =>
-                api.addAccount('codex', { apiKey: key.trim() }),
-              );
-            })()
-          }
-        >
-          Add API key
-        </button>
-      </div>
+      <ChatGPTSignIn apiKey={<AddChatGPTApiKey />} />
     </div>
+  );
+}
+
+function AddChatGPTApiKey(): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="set-btn ghost"
+      data-testid="chatgpt-add-api-key"
+      onClick={() =>
+        void (async () => {
+          const key = await useUiStore.getState().prompt({
+            title: 'Add an OpenAI API key',
+            message: 'Paid per use. Paste the key:',
+            placeholder: 'sk-…',
+            confirmLabel: 'Add',
+          });
+          if (key === null || key.trim() === '') return;
+          await writeShared('add API key', () => api.addAccount('codex', { apiKey: key.trim() }));
+        })()
+      }
+    >
+      Add API key
+    </button>
   );
 }

@@ -432,6 +432,23 @@ describe('Settings → Usage → ChatGPT sign-in', () => {
     expect(screen.queryByTestId('chatgpt-no-host')).toBeNull();
   });
 
+  it('opens the browser itself and offers a way out: try again or an API key', async () => {
+    loadShared();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const start = vi.spyOn(api, 'chatgptSignInStart').mockResolvedValue(started);
+    vi.spyOn(api, 'chatgptSignInStatus').mockResolvedValue({ status: 'pending' });
+    vi.spyOn(api, 'chatgptSignInCancel').mockResolvedValue(undefined as never);
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('chatgpt-signin'));
+    await waitFor(() => expect(screen.getByTestId('chatgpt-login-pending')).toBeInTheDocument());
+    expect(open).toHaveBeenCalledWith(started.url, '_blank', 'noopener');
+    expect(screen.queryByTestId('chatgpt-add-api-key')).toBeNull();
+    fireEvent.click(screen.getByTestId('chatgpt-signin-trouble'));
+    expect(screen.getByTestId('chatgpt-add-api-key')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('chatgpt-signin-retry'));
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+  });
+
   it('applies the account once the server has the login', async () => {
     loadShared();
     vi.spyOn(api, 'chatgptSignInStart').mockResolvedValue(started);
