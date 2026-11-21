@@ -4,4 +4,6 @@ const { copyFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const root = join(__dirname, '..');
-copyFileSync(join(root, 'src/setup/setup.html'), join(root, 'dist/setup.html'));
+for (const f of ['setup.html', 'fraunces.woff2', 'figtree.woff2']) {
+  copyFileSync(join(root, 'src/setup', f), join(root, 'dist', f));
+}

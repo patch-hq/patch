@@ -14,7 +14,7 @@ import { AcpAccounts } from './AcpAccounts.js';
 export function UsagePage(): JSX.Element {
   return (
     <SettingsPage
-      intro="The Claude, ChatGPT and ACP agent accounts your agents run on, and how much of each you've used."
+      intro="The Claude, ChatGPT and other agent accounts your agents run on, and how much of each you've used."
       title="AI accounts"
       testid="settings-usage"
     >

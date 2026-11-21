@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { loadCachedJobs, saveCachedJobs } from '../lib/jobsCache.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import type { Job, JobAction, JobLatestRun } from '@patch/wire/jobs';
 import { compactModelLabel } from '@patch/wire';
 import { api } from '../api/rest.js';
@@ -243,8 +244,8 @@ export function JobsRoute(): JSX.Element {
             />
           </>
         ) : null}
-        <Link to="/jobs/new" className="primary-btn" data-testid="jobs-new">
-          + New job
+        <Link to="/jobs/new" className="primary-btn pads-new" data-testid="jobs-new">
+          <Plus size={16} aria-hidden /> New job
         </Link>
       </header>
       <JobDefaults />

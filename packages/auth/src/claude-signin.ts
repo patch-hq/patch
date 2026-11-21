@@ -179,12 +179,25 @@ export interface ClaudeLoopbackListener {
   close: () => void;
 }
 
+// The page the browser lands on after claude.ai approves: the app's own
+// palette, card and wordmark, light and dark, so it reads as Patch and not as a
+// bare browser page. Self-contained: nothing is fetched from this tiny server.
 const LOOPBACK_PAGE = (title: string, line: string): string =>
   `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
-  `<meta name="color-scheme" content="light dark"><title>${title}</title>` +
-  `<body style="font:16px/1.45 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:Canvas;color:CanvasText">` +
-  `<main style="width:min(420px,88vw)"><h1 style="font:500 28px/1.15 Georgia,serif;margin:0 0 12px">${title}</h1>` +
-  `<p style="margin:0;opacity:.7">${line}</p></main>`;
+  `<meta name="color-scheme" content="light dark"><title>${title} · Patch</title>` +
+  `<style>` +
+  `:root{--bg:#f2f0ea;--card:#fff;--ink:#1b1813;--ink-3:#645c50;--line:#ddd6c6}` +
+  `@media(prefers-color-scheme:dark){:root{--bg:#191817;--card:#2d2b28;--ink:#efede9;--ink-3:#928d84;--line:#4a463f}}` +
+  `body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,system-ui,sans-serif}` +
+  `main{width:min(420px,88vw);box-sizing:border-box;padding:40px 32px;background:var(--card);border:1px solid var(--line);border-radius:16px;text-align:center}` +
+  `svg{display:block;margin:0 auto 20px}` +
+  `h1{font:600 30px/1.15 Georgia,serif;margin:0 0 10px}` +
+  `p{margin:0;color:var(--ink-3)}` +
+  `</style>` +
+  `<body><main>` +
+  `<svg viewBox="0 0 64 64" width="48" height="48" role="img" aria-label="Patch"><circle cx="32" cy="32" r="32" fill="#3a5e2c"/>` +
+  `<text x="32" y="46" text-anchor="middle" font-family="Georgia,serif" font-style="italic" font-weight="500" font-size="44" fill="#ebe7dc">p</text></svg>` +
+  `<h1>${title}</h1><p>${line}</p></main>`;
 
 /**
  * Listen on this machine for claude.ai's redirect, the way Claude Code's own

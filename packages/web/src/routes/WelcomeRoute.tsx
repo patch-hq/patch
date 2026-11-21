@@ -393,7 +393,8 @@ const CHAT_MODEL_SETTINGS = ['jobDefaultModel', 'specialThreadModel'] as const;
 
 /** One line on what a model family is for; models outside these say nothing. */
 export function modelHint(id: string): string | undefined {
-  if (/fable/i.test(id)) return 'Our newest and most capable. Best for the hardest work.';
+  if (/fable/i.test(id))
+    return 'The newest and most capable Claude model. Best for the hardest work.';
   if (/sonnet/i.test(id)) return 'Fast and capable. The right choice for most work.';
   if (/opus/i.test(id))
     return 'Very capable for complex work, but slower and costlier than Sonnet.';

@@ -11,6 +11,8 @@ export interface GuideItem {
   /** Where the feature lives; absent when it is something you do in the composer. */
   to?: string;
   action?: string;
+  /** Only listed while Settings → Experimental features is on. */
+  experimental?: boolean;
   /** Shown instead of title/line/action once the step is done. */
   done?: { title: string; line: string };
 }
@@ -86,6 +88,7 @@ export const GUIDE_ITEMS: readonly GuideItem[] = [
   },
   {
     id: 'manager',
+    experimental: true,
     title: 'The Manager',
     line: 'A pinned chat for questions about all your chats: what is running, and what needs you.',
   },

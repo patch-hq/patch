@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GUIDE_ITEMS, GUIDE_PURPOSE, guideItemText, isGuideItemDone } from '../lib/guide.js';
 import { useGuideProgress } from '../lib/useGuideProgress.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { CloseIcon } from './icons.js';
 
@@ -14,6 +15,7 @@ export function GettingStarted(): JSX.Element | null {
   const setOpen = useUiStore((s) => s.setGuideOpen);
   const navigate = useNavigate();
   const progress = useGuideProgress();
+  const experimental = useExperimentalFeatures();
 
   useEffect(() => {
     if (!open) return;
@@ -45,7 +47,7 @@ export function GettingStarted(): JSX.Element | null {
         </header>
         <p className="guide-purpose">{GUIDE_PURPOSE}</p>
         <ul className="guide-list">
-          {GUIDE_ITEMS.map((item) => {
+          {GUIDE_ITEMS.filter((item) => experimental || !item.experimental).map((item) => {
             const done = isGuideItemDone(item.id, progress) && item.done !== undefined;
             const text = done && item.done ? item.done : guideItemText(item, progress);
             return (
