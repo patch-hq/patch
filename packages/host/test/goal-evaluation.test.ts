@@ -647,7 +647,9 @@ describe('maybeEvaluateGoal — a judge that cannot answer', () => {
     await daemon.setGoal(chatId, 'Ship it');
     await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
     await tick(300);
-    expect(daemon.chatState.get(chatId)?.declaredStatus?.text ?? '').not.toContain('not being checked');
+    expect(daemon.chatState.get(chatId)?.declaredStatus?.text ?? '').not.toContain(
+      'not being checked',
+    );
 
     await daemon.sendInput({ chatId, message: 'again', localId: 'u2' });
     await tick(300);
@@ -692,4 +694,22 @@ describe('maybeEvaluateGoal — default check-in', () => {
     expect(evaluateGoal).toHaveBeenCalled();
     expect(daemon.chatState.get(chatId)?.goal).toBeNull();
   }, 8000);
+
+  it('keeps the check-in clock across a host restart', async () => {
+    const first = setup(undefined);
+    const chatId = await first.daemon.spawnChat({ folder: first.folder });
+    await tick();
+    await first.daemon.setGoal(chatId, 'Ship it');
+    const before = first.daemon.chatState.get(chatId)?.goalCheckInLastAt;
+    const remindBefore = first.daemon.chatState.get(chatId)?.goalReminderLastAt;
+    expect(before).toBeGreaterThan(0);
+    await tick(40);
+    first.daemon.shutdown();
+
+    const second = setup(undefined, { home: first.home });
+    second.daemon.hydrate();
+    expect(second.daemon.chatState.get(chatId)?.goalCheckInLastAt).toBe(before);
+    expect(second.daemon.chatState.get(chatId)?.goalReminderLastAt).toBe(remindBefore);
+    second.daemon.shutdown();
+  });
 });

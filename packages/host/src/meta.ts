@@ -57,6 +57,14 @@ export const ChatMeta = z
     /** How often the evaluator is asked if the active goal is on track (spec/04 § Goals). */
     goalCheckInEvery: ReminderEvery.nullable().optional(),
     /**
+     * When the goal was last restated / last checked in on (or set), ms.
+     * Persisted so a host restart does not restart the time cadences
+     * (spec/04 § Goals). Absent on older files: `chatStateFromMeta` falls back
+     * to the goal's start time.
+     */
+    goalReminderLastAt: z.number().optional(),
+    goalCheckInLastAt: z.number().optional(),
+    /**
      * The chat's most recently FINISHED goal (spec/04 § Goals — "A finished
      * goal stays viewable from the chat header"). `null`/absent until a goal
      * has resolved met/impossible at least once. Optional for back-compat.

@@ -5511,6 +5511,8 @@ export class Daemon {
       goalQueue: plan.then,
       goalReminderEvery: plan.remindEvery,
       goalCheckInEvery: plan.checkInEvery,
+      goalReminderLastAt: now,
+      goalCheckInLastAt: now,
       updatedAt: now,
     }));
     this.emitState(chatId);
@@ -7186,6 +7188,7 @@ export class Daemon {
       if (due) {
         state.goalReminderTurnsSince = 0;
         state.goalReminderLastAt = nowMs;
+        this.opts.metaStore.update(state.chatId, (m) => ({ ...m, goalReminderLastAt: nowMs }));
         const reminder = buildGoalReminder(state.goal);
         if (head !== null) head = reminder + head;
         else rewrittenWhole = reminder + rewrittenWhole;
@@ -12033,6 +12036,7 @@ export class Daemon {
     if (result.onTrack !== undefined && result.onTrackReason !== undefined) {
       state.goalCheckInTurnsSince = 0;
       state.goalCheckInLastAt = now;
+      this.opts.metaStore.update(chatId, (m) => ({ ...m, goalCheckInLastAt: now }));
       state.goalProgress.lastCheckIn = {
         at: now,
         status: result.onTrack,
