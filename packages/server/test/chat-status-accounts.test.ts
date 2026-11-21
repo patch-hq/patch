@@ -375,3 +375,76 @@ describe('ChatRegistry: limits from a host that reports them as facts', () => {
     expect(reg.get('c1')?.chatStatus?.state).toBe('idle');
   });
 });
+
+describe('a turn held across a host restart (decision 34)', () => {
+  const spawned: WireEvent = { type: 'chat.spawned', chatId: 'c1', hostId: 'h1', folder: '/w' };
+  const frame = (over: Partial<ChatStateEvent>): ChatStateEvent =>
+    ({
+      type: 'chat.state',
+      chatId: 'c1',
+      hostId: 'h1',
+      permissionMode: 'auto',
+      lastUpdated: 1,
+      account: { id: 'work', label: 'work' },
+      ...over,
+    }) as ChatStateEvent;
+  const hold = { accountId: 'work', scope: 'session', resetsAt: 9_000, message: 'limit' };
+  const make = (state: AccountState | undefined) => {
+    const reg = new ChatRegistry({ now: () => 100 });
+    reg.setAccounts({
+      state: (id) => (id === 'work' ? state : undefined),
+      hostLimitFacts: () => true,
+    });
+    const seen: string[] = [];
+    reg.onStatusChange((e) => seen.push(e.chatStatus!.state));
+    reg.observe(spawned);
+    return { reg, seen };
+  };
+
+  test('the hold a frame states is the whole fact: paused with its reset, though the turn end never came', () => {
+    const { reg } = make({ state: 'limited', until: 9_000 });
+    // A restarted host announces the chat; the turn's end was sent before the
+    // restart, to a server that has since forgotten it, or never at all.
+    reg.observe(frame({ limitNext: 'other_account', limitHold: hold }));
+    expect(reg.get('c1')?.chatStatus).toMatchObject({
+      state: 'paused',
+      reason: 'session',
+      resetsAt: 9_000,
+      accountId: 'work',
+    });
+  });
+
+  test('a host that holds an owed turn is never read as idle, even with nothing said of the limit', () => {
+    const { reg } = make({ state: 'ready' });
+    reg.observe(frame({ limitNext: 'other_account' }));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('paused');
+    expect(reg.get('c1')?.chatStatus?.accountId).toBe('work');
+  });
+
+  test('paused before the restart stays paused through it, and runs when the host releases it', () => {
+    const { reg, seen } = make({ state: 'ready' });
+    reg.observe({ type: 'chat.turn_started', chatId: 'c1', turnId: 't1', seq: -1, at: 1 });
+    reg.observe(frame({ limitNext: 'other_account', limitHold: hold }));
+    reg.observe({
+      type: 'chat.turn_ended',
+      chatId: 'c1',
+      turnId: 't1',
+      seq: -1,
+      at: 2,
+      outcome: 'failed',
+      limit: hold,
+    } as WireEvent);
+    expect(reg.get('c1')?.chatStatus?.state).toBe('paused');
+    // The host restarts and announces the chat with the same hold, many times.
+    reg.markHostAway('h1', 'restarting');
+    reg.observe(frame({ limitNext: 'other_account', limitHold: hold }));
+    reg.observe(frame({ limitNext: 'other_account', limitHold: hold }));
+    expect(reg.get('c1')?.chatStatus?.state).toBe('paused');
+    // Not once idle, nor failed, while the turn was owed.
+    expect(seen.filter((s) => s === 'idle' || s === 'failed')).toEqual([]);
+    // Released: the frame says the host no longer holds it, and the turn starts.
+    reg.observe(frame({ limitNext: null, limitHold: null }));
+    reg.observe({ type: 'chat.turn_started', chatId: 'c1', turnId: 't2', seq: -1, at: 3 });
+    expect(reg.get('c1')?.chatStatus?.state).toBe('running');
+  });
+});

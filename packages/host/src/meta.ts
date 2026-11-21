@@ -27,6 +27,7 @@ import {
   ReminderEvery,
   SnoozeRecord,
   TodoItem,
+  TurnLimit,
   TurnOrigin,
 } from '@patch/wire';
 
@@ -385,6 +386,12 @@ export const ChatMeta = z
             limitNext: z
               .enum(['resume_at_reset', 'other_account', 'switch_provider', 'ask'])
               .optional(),
+            /**
+             * For a credit wait, the limit the turn met: the account, the pool,
+             * the stated reset and the provider's words. Kept so a restart can
+             * re-arm the reset and report the same hold as before it.
+             */
+            limit: TurnLimit.optional(),
           })
           .strict(),
       )

@@ -1593,6 +1593,21 @@ export const ChatStatusInfo = z
   .strict();
 export type ChatStatusInfo = z.infer<typeof ChatStatusInfo>;
 
+/** What a turn that ended on a provider limit says about it (`chat.turn_ended.limit`). */
+export const TurnLimit = z
+  .object({
+    /** The account the turn ran on. */
+    accountId: z.string().min(1).optional(),
+    /** The pool that ran out, where the provider said (`session`, `week`), else `unknown`. */
+    scope: z.string().min(1),
+    /** ms-epoch the provider stated the limit lifts. Absent when nothing stated one. */
+    resetsAt: z.number().int().optional(),
+    /** The provider's own words. */
+    message: z.string(),
+  })
+  .strict();
+export type TurnLimit = z.infer<typeof TurnLimit>;
+
 export const ChatStateEvent = z
   .object({
     type: z.literal('chat.state'),
@@ -2022,6 +2037,16 @@ export const ChatStateEvent = z
       .enum(['resume_at_reset', 'other_account', 'switch_provider', 'ask'])
       .nullable()
       .optional(),
+    /**
+     * Host fact: the limit the turn this host holds owed met (the account, the
+     * pool, the stated reset and the provider's words), stated whole on every
+     * frame while it holds the turn, a park restored after a restart included
+     * (spec/12 § Limits and sign-in). The server reads the chat's status from
+     * it and the account's state, so a frame that comes before the turn's end,
+     * or after a restart that end will never be sent again, still says paused.
+     * Null or absent when nothing is held. Absent from an older host.
+     */
+    limitHold: TurnLimit.nullable().optional(),
     /**
      * Credit has been seen on an account since this chat stopped for credit.
      * Patch does not re-run the turn on its own (decision 25): the surface
@@ -7653,20 +7678,6 @@ export type ChatTurnStartedEvent = z.infer<typeof ChatTurnStartedEvent>;
  * when the turn ended. `error` is the code and the provider's own wording when
  * it failed.
  */
-/** What a turn that ended on a provider limit says about it (`chat.turn_ended.limit`). */
-export const TurnLimit = z
-  .object({
-    /** The account the turn ran on. */
-    accountId: z.string().min(1).optional(),
-    /** The pool that ran out, where the provider said (`session`, `week`), else `unknown`. */
-    scope: z.string().min(1),
-    /** ms-epoch the provider stated the limit lifts. Absent when nothing stated one. */
-    resetsAt: z.number().int().optional(),
-    /** The provider's own words. */
-    message: z.string(),
-  })
-  .strict();
-export type TurnLimit = z.infer<typeof TurnLimit>;
 
 export const ChatTurnEndedEvent = z
   .object({

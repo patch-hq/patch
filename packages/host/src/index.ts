@@ -2655,6 +2655,11 @@ async function startHost(
     publishHost();
     if (!firstSnapshotApplied) {
       firstSnapshotApplied = true;
+      // The accounts are known now: a park the restart carried over is released
+      // where it may run, and its reset re-armed where it is still ahead
+      // (spec/10 § Limits). Nothing else would wake it: no timer survived the
+      // restart, and a usage reading may never come.
+      daemon.releaseRestoredParks();
       // The first account and key sync is in: only now is a missing credential
       // or an unreadable catalogue a real fault rather than a host still starting.
       const result = await resolveOAuth();

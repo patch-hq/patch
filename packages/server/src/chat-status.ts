@@ -266,9 +266,27 @@ export function factsFromHostState(
     const limitHeld = event.limitNext !== null && event.limitNext !== undefined;
     const overloadRetry =
       typeof event.rateLimitResumingAt === 'number' && event.resumeKind === 'overloaded';
+    // The hold the host states on the frame itself (`limitHold`) is the whole
+    // fact; without it, the limit its turn's end reported. A host that says it
+    // holds an owed turn is never read as idle (decision 34): with nothing
+    // stated about the limit, it is an unknown one on the chat's account.
+    const hold = event.limitHold ?? undefined;
+    const heldLimit: ChatStatusFacts['limit'] = !limitHeld
+      ? null
+      : hold
+        ? {
+            reason: hold.scope,
+            ...(hold.resetsAt !== undefined ? { resetsAt: hold.resetsAt } : {}),
+            ...(hold.accountId !== undefined ? { accountId: hold.accountId } : {}),
+            message: hold.message,
+          }
+        : (prev.limit ?? {
+            reason: 'unknown',
+            ...(accountId !== null && accountId !== undefined ? { accountId } : {}),
+          });
     return {
       ...prev,
-      ...limitLifted(prev, limitHeld ? prev.limit : null),
+      ...limitLifted(prev, heldLimit),
       limitHeld,
       accountId,
       interrupted: event.interrupted === true,
