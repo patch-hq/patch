@@ -105,7 +105,7 @@ describe('JobsRoute', () => {
     expect(screen.getByTestId('job-trigger-bus')).toHaveTextContent('weekdays at 8:57am');
     expect(screen.getByTestId('job-action-bus')).toHaveTextContent('spawn · skill');
     expect(screen.getByTestId('job-action-bus')).toHaveTextContent('bus-watch');
-    expect(screen.getByTestId('job-trigger-gh')).toHaveTextContent('GitHub webhook');
+    expect(screen.getByTestId('job-trigger-gh')).toHaveTextContent('GitHub event');
     expect(screen.getByTestId('job-action-gh')).toHaveTextContent('message · prompt');
   });
 
@@ -701,8 +701,8 @@ describe('JobsRoute search', () => {
   it('narrows by trigger type via the natural-language trigger label', async () => {
     renderJobs();
     await waitFor(() => expect(screen.getByTestId('job-bus')).toBeInTheDocument());
-    // "github webhook" is the rendered trigger label for the gh job.
-    type('webhook');
+    // "github event" is the rendered trigger label for the gh job.
+    type('github event');
     expect(screen.getByTestId('job-gh')).toBeInTheDocument();
     expect(screen.queryByTestId('job-bus')).toBeNull();
     // "weekdays at 8:57am" is the bus job's cron label.
