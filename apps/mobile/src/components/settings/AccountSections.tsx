@@ -48,10 +48,16 @@ export function AccountPage(): React.ReactElement {
     <SettingsPage title="Account" testID="settings-page-account">
       <AccountSection />
       <SettingsSection title="Connection" testID="settings-connection">
-        <SettingsButton
-          testID="account-connection"
-          label="Reconnect to server"
-          onPress={() => useUiStore.getState().setDiagnosticsOpen(true)}
+        <Row
+          title="Connection to the server"
+          subtitle="Check the link and reconnect"
+          right={
+            <SettingsButton
+              testID="account-connection"
+              label="Reconnect"
+              onPress={() => useUiStore.getState().setDiagnosticsOpen(true)}
+            />
+          }
         />
       </SettingsSection>
       <WithSettings testID="sync-position-settings">
