@@ -80,14 +80,13 @@ describe('queued messages on the chat screen', () => {
     ]);
   });
 
-  it('reads "Paused · out of credit" on the chip while the chat is out of credit', () => {
+  it('reads "Paused · out of credit" on the chip only when the server says the account is out', () => {
     apply({
       type: 'chat.state',
       chatId: 'c1',
-      chatStatus: { state: 'running', since: 0 },
+      chatStatus: { state: 'failed', reason: 'out_of_credit', since: 0 },
       permissionMode: 'bypassPermissions',
       lastUpdated: 1,
-      limitBlock: { scope: 'session' },
     } as never);
     queue('A', 'first queued');
     const r = renderRN(<ChatDetailScreen />);

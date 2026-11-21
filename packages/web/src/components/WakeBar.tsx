@@ -19,8 +19,7 @@ import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { failed } from '../lib/errorCopy.js';
-import { creditPause } from '../lib/queueLabel.js';
-import { formatReset } from '../lib/usage.js';
+import { creditPause, creditPauseText } from '../lib/queueLabel.js';
 import { WakeEditModal } from './WakeEditModal.js';
 
 /**
@@ -83,12 +82,7 @@ export function WakeBar({ row }: { row: ChatRow }): JSX.Element | null {
   // A wake is a turn; with the chat out of credit it cannot run, so the bar
   // warns instead of promising a time it cannot keep.
   const pause = creditPause(row);
-  const pauseNote =
-    pause === null
-      ? ''
-      : pause.resetsAt === null
-        ? ' · out of credit'
-        : ` · out of credit until ${formatReset(pause.resetsAt, now)}`;
+  const pauseNote = pause === null ? '' : ` · paused · ${creditPauseText(pause, now)}`;
 
   function dismiss(): void {
     void api.setLoop(row.chatId, null).catch((err) => {

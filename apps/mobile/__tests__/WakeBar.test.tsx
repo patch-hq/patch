@@ -69,17 +69,17 @@ describe('WakeBar', () => {
     );
   });
 
-  it('warns when the chat is out of credit, naming when it comes back', () => {
+  it('warns when the chat is paused on a limit, naming the limit and when it comes back', () => {
     const r = renderRN(
       <WakeBar
         row={{
           ...row({ message: 'check', fireAt: NOW + 9 * 60_000 }),
-          limitBlock: { resetsAt: NOW + 3_600_000 },
+          chatStatus: { state: 'paused', reason: 'session', resetsAt: NOW + 3_600_000, since: 0 },
         }}
       />,
     );
     expect(textOf(queryHost(r.root, byTestId('wake-bar-countdown'))!)).toMatch(
-      /Wakes in 9m · out of credit until /,
+      /Wakes in 9m · paused · session limit · resumes /,
     );
   });
 

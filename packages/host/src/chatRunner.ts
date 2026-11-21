@@ -507,6 +507,11 @@ export interface HostOptions {
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
   /** Test hook: clock. */
   now?: () => number;
+  /**
+   * How long the resume line waits for a released turn's first model output
+   * before letting the next chat start anyway (`drainResumeBacklog`). 30 s by default.
+   */
+  resumeAdmitTimeoutMs?: number;
   /** Test hook: id generator. */
   generateChatId?: () => string;
   /**
@@ -2361,6 +2366,7 @@ export class Daemon {
   >();
 
   constructor(options: HostOptions) {
+    this.resumeAdmitTimeoutMs = options.resumeAdmitTimeoutMs ?? 30_000;
     this.opts = {
       ...options,
       now: options.now ?? (() => Date.now()),
@@ -2728,9 +2734,13 @@ export class Daemon {
 
   /**
    * Parked chats waiting for their turn to be released, in the order they were
-   * parked. Resume is ONE AT A TIME (`drainResumeBacklog`): a limit reset that
+   * parked. Resume is STAGGERED (`drainResumeBacklog`): a limit reset that
    * released every parked chat in the same tick started dozens of turns at once
    * on a box that runs a few, and each one died on its first call (15:00, 12 Oct).
+   * The next is admitted once the one in front has got past the provider's
+   * limit check, never once its whole turn has finished: agent turns run for
+   * tens of minutes, and six chats released at 20:30 ran one after another
+   * until 22:10 on an account with credit the whole time (20 Nov).
    */
   private readonly resumeBacklog: Array<{
     chatId: string;
@@ -2738,6 +2748,14 @@ export class Daemon {
     start: () => Promise<void> | undefined;
   }> = [];
   private resumeDraining = false;
+  /**
+   * Released chats waiting to be told the provider accepted their turn: the
+   * first model output of the turn, or its end. The resume line admits the next
+   * chat on it (`drainResumeBacklog`).
+   */
+  private readonly resumeAdmits = new Map<string, () => void>();
+  /** How long the line waits for the head's first model output before admitting the next anyway. */
+  private readonly resumeAdmitTimeoutMs: number;
   /**
    * Chats whose current pump is re-sending a turn that is OWED (released from a
    * park, an errored sweep or a restart), as opposed to one a person just
@@ -2767,13 +2785,14 @@ export class Daemon {
   }
 
   /**
-   * Release the owed turns one by one. The next is admitted only when the one
-   * in front has SETTLED, and never when it settled by failing on the provider:
-   * a chat that is parked again, or blocked on credit, means the provider is
-   * still refusing, and releasing the next chat would only feed it to the same
-   * wall. The line then HOLDS — nothing is dropped, every chat stays parked on
-   * disk — and the next credit event, reset timer or manual resume carries on
-   * from the front.
+   * Release the owed turns one by one, staggered. The next is admitted once the
+   * one in front has got past the provider's limit check: its turn produced
+   * model output (the provider accepted it), or ended, or a short while passed
+   * with no refusal. Never when it was refused again: a chat that is parked
+   * again, or blocked on credit, means the provider is still refusing, and
+   * releasing the next chat would only feed it to the same wall. The line then
+   * HOLDS — nothing is dropped, every chat stays parked on disk — and the next
+   * credit event, reset timer or manual resume carries on from the front.
    */
   private async drainResumeBacklog(): Promise<void> {
     if (this.resumeDraining) return;
@@ -2781,11 +2800,25 @@ export class Daemon {
     try {
       while (this.resumeBacklog.length > 0) {
         const head = this.resumeBacklog.shift()!;
+        let timer: NodeJS.Timeout | undefined;
+        const admitted = new Promise<void>((resolve) => {
+          this.resumeAdmits.set(head.chatId, resolve);
+          timer = setTimeout(resolve, this.resumeAdmitTimeoutMs);
+        });
+        let settled: Promise<void> | undefined;
         try {
-          await head.start();
+          settled = head.start();
         } catch (err) {
           this.opts.logger.error({ err, chatId: head.chatId }, 'resume: turn failed to start');
         }
+        await Promise.race([
+          admitted,
+          (settled ?? Promise.resolve()).catch((err: unknown) => {
+            this.opts.logger.error({ err, chatId: head.chatId }, 'resume: turn failed to start');
+          }),
+        ]);
+        clearTimeout(timer);
+        this.resumeAdmits.delete(head.chatId);
         if (this.rateLimitPendingTurns.has(head.chatId) || this.limitBlocks.has(head.chatId)) {
           this.resumeBacklog.unshift(head);
           this.opts.logger.warn(
@@ -2798,6 +2831,14 @@ export class Daemon {
     } finally {
       this.resumeDraining = false;
     }
+  }
+
+  /** The provider accepted this chat's released turn, or the turn is over: let the line move. */
+  private admitResume(chatId: string): void {
+    const admit = this.resumeAdmits.get(chatId);
+    if (!admit) return;
+    this.resumeAdmits.delete(chatId);
+    admit();
   }
 
   /** Lift one parked chat's pause and re-send its owed turn. */
@@ -11529,6 +11570,9 @@ export class Daemon {
         this.aborters.delete(chatId);
         this.runs.delete(chatId);
         this.closeTurnInHistory(chatId, turnOutcome, turnError, turnLimit);
+        // However it ended, the line need not wait on it any longer; a refusal
+        // has parked it again by now, and the line holds on that.
+        this.admitResume(chatId);
         // However the turn ended — settled, stopped, errored — it is no longer
         // in flight, so it must stop looking like a turn a restart interrupted.
         this.runningTurn.delete(chatId);
@@ -12398,6 +12442,16 @@ export class Daemon {
   private readonly turnDidSomething = new Set<string>();
 
   private handleEnvelope(chatId: string, env: SdkEnvelope, userMessageSeq?: number): void {
+    // Model output: the provider accepted the turn, so a released chat behind
+    // it in the resume line may start (`drainResumeBacklog`).
+    if (
+      env.type === 'assistant' ||
+      env.type === 'assistant_delta' ||
+      env.type === 'tool_use' ||
+      env.type === 'result'
+    ) {
+      this.admitResume(chatId);
+    }
     // The harness's own id for this message rides on every history record the
     // envelope produces (`logEmitted`), and only for as long as it is handled.
     const sessionForRef = env.sessionId ?? this.chatState.get(chatId)?.sessionId;

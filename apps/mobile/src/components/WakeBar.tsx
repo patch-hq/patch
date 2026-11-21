@@ -19,7 +19,7 @@ import { Pressable, Text, TextInput } from 'react-native';
 import { AlarmClock } from 'lucide-react-native';
 import type { ChatRow } from '../stores/types';
 import { cancelWake, writeLoopMessage } from '../lib/chatMeta';
-import { creditPause, formatResume } from '../lib/queueLabel';
+import { creditPause, creditPauseText } from '../lib/queueLabel';
 import { BarDetailSheet } from './chatBars/BarDetailSheet';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
@@ -69,12 +69,7 @@ export function WakeBar({ row }: { row: ChatRow | undefined }): ReactElement | n
   const countdown = formatWakeCountdown(wake.fireAt - now);
   // A wake is a turn; out of credit it cannot run, so the bar warns.
   const pause = creditPause(row);
-  const pauseNote =
-    pause === null
-      ? ''
-      : pause.resetsAt === null
-        ? ' · out of credit'
-        : ` · out of credit until ${formatResume(pause.resetsAt, now)}`;
+  const pauseNote = pause === null ? '' : ` · paused · ${creditPauseText(pause, now)}`;
 
   const every = wake.every;
   const unchanged = draft.trim() === '' || draft.trim() === wake.message;

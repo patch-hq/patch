@@ -33,8 +33,15 @@ describe('limitBarText', () => {
 
 describe('creditPause', () => {
   it('promises no resume time for a pause that waits on the user', () => {
-    const row = { limitBlock: { resetsAt: 5_000 }, limitNext: 'switch_provider' as const };
-    expect(creditPause(row)).toEqual({ resetsAt: null });
-    expect(creditPause({ ...row, limitNext: 'resume_at_reset' })).toEqual({ resetsAt: 5_000 });
+    const row = {
+      chatStatus: { state: 'paused', reason: 'session', resetsAt: 5_000 },
+      limitNext: 'switch_provider' as const,
+    };
+    expect(creditPause(row)).toEqual({ kind: 'limit', scope: 'session', resetsAt: null });
+    expect(creditPause({ ...row, limitNext: 'resume_at_reset' })).toEqual({
+      kind: 'limit',
+      scope: 'session',
+      resetsAt: 5_000,
+    });
   });
 });

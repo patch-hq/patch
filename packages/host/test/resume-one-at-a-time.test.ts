@@ -1,4 +1,4 @@
-// Parked turns go back ONE AT A TIME, and a provider refusal holds the line.
+// Parked turns go back STAGGERED, and a provider refusal holds the line.
 //
 // 12 Oct 2026, 15:00 UTC. The Claude limit lifted and 34 parked turns were
 // re-sent in a single tick — every chat parked on the same reset had a timer
@@ -7,9 +7,16 @@
 // completed a turn were resumed onto a session with no transcript and ended
 // `errored` with their prompts dropped.
 //
-// A queue admits the next item when the one in front has settled, and not when
-// the provider has merely refused it: feeding the next chat to a wall that has
-// just refused the first only repeats the refusal N times.
+// 20 Nov 2026. The fix for that admitted the next chat only when the one in
+// front had FINISHED its whole turn. Agent turns run for tens of minutes: six
+// chats released at 20:30 ran one after another, and at 22:10 the last was
+// still shown paused on an account at 30% use.
+//
+// So the line admits the next chat once the one in front has got past the
+// provider's limit check (its first model output, or its end, or a short wait
+// with no refusal), never once its turn is over; and not when the provider has
+// refused it again: feeding the next chat to a wall that has just refused the
+// first only repeats the refusal N times.
 
 import { transcriptFor } from './helpers/chatTranscript.js';
 import { describe, expect, it } from 'vitest';
@@ -34,6 +41,10 @@ const NO_RESET_SPEND_LIMIT =
 interface Probe {
   /** Refuse every run with the usage limit while true. */
   limited: boolean;
+  /** Held open after its first output until released: a long agent turn. */
+  longTurn?: { prompt: string; release: Promise<void> };
+  /** Says nothing at all until released: a slow provider that has not refused. */
+  silentTurn?: { prompt: string; release: Promise<void> };
   running: number;
   peak: number;
   order: string[];
@@ -52,8 +63,10 @@ function backend(probe: Probe): SdkBackend {
           // A real turn takes time; without this a serial and a parallel
           // release would be indistinguishable.
           await new Promise((r) => setTimeout(r, 5));
+          if (probe.silentTurn?.prompt === opts.prompt) await probe.silentTurn.release;
           if (probe.limited) throw limitError(NO_RESET_SPEND_LIMIT, { resetsAt: RESETS_AT });
           yield { type: 'assistant', content: 'done', raw: {} };
+          if (probe.longTurn?.prompt === opts.prompt) await probe.longTurn.release;
           yield { type: 'result', sessionId: `s-${opts.prompt}`, content: 'done', raw: {} };
           probe.completed.push(opts.prompt);
         } finally {
@@ -65,7 +78,7 @@ function backend(probe: Probe): SdkBackend {
   };
 }
 
-async function parkChats(n: number) {
+async function parkChats(n: number, opts: { admitTimeoutMs?: number } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'patch-resume-line-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-resume-line-f-')));
   const probe: Probe = { limited: true, running: 0, peak: 0, order: [], completed: [] };
@@ -83,6 +96,7 @@ async function parkChats(n: number) {
     now: () => NOW + clock++,
     generateChatId: () => `chat-${next++}`,
     nextAccountAfterExhausted: () => undefined,
+    ...(opts.admitTimeoutMs !== undefined ? { resumeAdmitTimeoutMs: opts.admitTimeoutMs } : {}),
   });
   daemon.setLimitBehaviour('other_account');
   const ids: string[] = [];
@@ -99,16 +113,51 @@ async function parkChats(n: number) {
 const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
 
 describe('resuming parked turns', () => {
-  it('runs them one at a time, in the order they were parked, and loses none', async () => {
+  it('starts them in the order they were parked, never in one tick, and loses none', async () => {
     const { daemon, probe } = await parkChats(8);
     probe.limited = false;
 
     expect(daemon.resumeAllRateLimited()).toBe(8);
+    // Staggered: the line has started only the first when the release returns.
+    expect(probe.order).toEqual([]);
     await settle(800);
 
-    expect(probe.peak).toBe(1);
     expect(probe.order).toEqual(Array.from({ length: 8 }, (_, i) => `turn-${i}`));
     expect(probe.completed).toHaveLength(8);
+    daemon.shutdown();
+  });
+
+  it('six chats on one account all start within seconds while the first runs a long turn', async () => {
+    const { daemon, probe } = await parkChats(6);
+    let finishFirst!: () => void;
+    probe.longTurn = { prompt: 'turn-0', release: new Promise<void>((r) => (finishFirst = r)) };
+    probe.limited = false;
+
+    const t0 = Date.now();
+    expect(daemon.resumeAllRateLimited()).toBe(6);
+    for (let i = 0; i < 200 && probe.order.length < 6; i++) await settle(10);
+
+    // Every owed turn has started, in order, though the first is still running.
+    expect(probe.order).toEqual(Array.from({ length: 6 }, (_, i) => `turn-${i}`));
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    expect(probe.completed).not.toContain('turn-0');
+    expect(probe.peak).toBeGreaterThan(1);
+    finishFirst();
+    await settle();
+    expect(probe.completed).toHaveLength(6);
+    daemon.shutdown();
+  });
+
+  it('a turn that says nothing yet does not hold the line past the admit timeout', async () => {
+    const { daemon, probe } = await parkChats(3, { admitTimeoutMs: 50 });
+    probe.limited = false;
+    let finish!: () => void;
+    probe.silentTurn = { prompt: 'turn-0', release: new Promise<void>((r) => (finish = r)) };
+    daemon.resumeAllRateLimited();
+    await settle(400);
+    expect(probe.order).toEqual(['turn-0', 'turn-1', 'turn-2']);
+    finish();
+    await settle();
     daemon.shutdown();
   });
 
@@ -126,13 +175,12 @@ describe('resuming parked turns', () => {
       expect(daemon.chatState.get(chatId)).toBeDefined();
     }
 
-    // Credit returns, the line carries on from the FRONT, still one by one.
+    // Credit returns, the line carries on from the FRONT, in order.
     probe.limited = false;
     probe.order.length = 0;
     daemon.resumeAllRateLimited();
     await settle(800);
 
-    expect(probe.peak).toBe(1);
     expect(probe.order).toEqual(Array.from({ length: 6 }, (_, i) => `turn-${i}`));
     expect(probe.completed).toHaveLength(6);
     daemon.shutdown();

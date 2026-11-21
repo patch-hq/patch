@@ -155,6 +155,7 @@ import {
   queueChipTitle,
   queueRelease,
   creditPause,
+  type CreditPause,
   type QueueRelease,
 } from '../lib/queueLabel.js';
 import { attemptPaging, liveAttemptSelection, type AttemptSelection } from '../lib/turnAttempts.js';
@@ -3260,11 +3261,14 @@ function MessageEntry({
 }): JSX.Element {
   // spec/04 ## Message queueing — a queued entry on a chat paused for credit
   // says so. Selected as a primitive so the selector never returns a fresh object.
-  const pauseAt = useChatStore((s) => {
+  const pauseKey = useChatStore((s) => {
     const p = entry.queued ? creditPause(s.chats[chatId] ?? {}) : null;
-    return p === null ? undefined : (p.resetsAt ?? 0);
+    return p === null ? undefined : JSON.stringify(p);
   });
-  const pause = pauseAt === undefined ? null : { resetsAt: pauseAt || null };
+  const pause = useMemo(
+    () => (pauseKey === undefined ? null : (JSON.parse(pauseKey) as CreditPause)),
+    [pauseKey],
+  );
   // spec/14 § Side threads panel TRIGGER — hover button + right-click "Open
   // side thread" on ANY message, user or agent.
   const sideThreadMenu = useContextMenu();
