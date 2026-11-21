@@ -98,3 +98,21 @@ describe('limitControls — the user’s limit behaviour leads (decision 25)', (
     expect(c.main).toBe('send');
   });
 });
+
+describe('limitControls with a single account', () => {
+  it('says there is no other account, and no other provider, and why', () => {
+    const c = limitControls({ ...base, rows: [row('claude', 'work', true)] });
+    expect(c.onlyAccount).toBe(true);
+    expect(c.account.enabled).toBe(false);
+    expect(c.account.reason).toMatch(/Only one account is connected/);
+    expect(c.provider.reason).toMatch(/No other provider is connected/);
+  });
+  it('a second account that is also out is not "only one account"', () => {
+    const c = limitControls({
+      ...base,
+      rows: [row('claude', 'work', true), row('claude', 'home', true)],
+    });
+    expect(c.onlyAccount).toBe(false);
+    expect(c.account.reason).toBe('No other account has usage left');
+  });
+});

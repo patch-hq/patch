@@ -4,7 +4,7 @@
 import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GUIDE_ITEMS, GUIDE_PURPOSE, isGuideItemDone } from '../lib/guide.js';
+import { GUIDE_ITEMS, GUIDE_PURPOSE, guideItemText, isGuideItemDone } from '../lib/guide.js';
 import { useGuideProgress } from '../lib/useGuideProgress.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { CloseIcon } from './icons.js';
@@ -47,7 +47,7 @@ export function GettingStarted(): JSX.Element | null {
         <ul className="guide-list">
           {GUIDE_ITEMS.map((item) => {
             const done = isGuideItemDone(item.id, progress) && item.done !== undefined;
-            const text = done && item.done ? item.done : item;
+            const text = done && item.done ? item.done : guideItemText(item, progress);
             return (
               <li
                 key={item.id}
@@ -76,7 +76,7 @@ export function GettingStarted(): JSX.Element | null {
                       navigate(item.to as string);
                     }}
                   >
-                    {item.action}
+                    {item.id === 'connect' && progress.connected ? 'Add account' : item.action}
                   </button>
                 ) : null}
               </li>

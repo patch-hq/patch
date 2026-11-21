@@ -18825,6 +18825,11 @@ a.drop-target,
 .welcome-ok::before {
   content: '✓ ';
 }
+.welcome-warn {
+  margin: 0;
+  font-size: 14px;
+  color: var(--amber);
+}
 .welcome-note {
   margin: 0;
   font-size: 14px;
