@@ -488,17 +488,17 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
             }}
           />
         ))}
-        {shown.length < options.length ? (
-          <button
-            type="button"
-            className="welcome-skip"
-            data-testid="welcome-model-more"
-            onClick={() => setMore(true)}
-          >
-            More models
-          </button>
-        ) : null}
       </div>
+      {shown.length < options.length ? (
+        <button
+          type="button"
+          className="welcome-skip"
+          data-testid="welcome-model-more"
+          onClick={() => setMore(true)}
+        >
+          More models
+        </button>
+      ) : null}
       {problem ? (
         <div className="welcome-note" data-testid="welcome-model-problem" data-kind={problem.kind}>
           <p>{problem.text}</p>

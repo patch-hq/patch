@@ -195,9 +195,9 @@ function HostSettingsState({ host }: { host: HostPresence }): React.ReactElement
         ? 'Not applied yet'
         : 'Gets them when it reconnects'
       : state.appliedVersion === shared.version
-        ? 'Up to date'
+        ? 'Has your latest settings'
         : host.online
-          ? 'Updating'
+          ? 'Getting your latest settings'
           : 'Gets the latest when it reconnects';
   return (
     <SettingsSection testID={`host-${host.hostId}-settings-version`}>

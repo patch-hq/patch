@@ -579,13 +579,13 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
         ? 'Not applied yet'
         : 'Gets them when it reconnects'
       : state.appliedVersion === shared.version
-        ? 'Up to date'
+        ? 'Has your latest settings'
         : host.online
-          ? 'Updating'
+          ? 'Getting your latest settings'
           : 'Gets the latest when it reconnects';
   return (
     <Row
-      title="Your preferences"
+      title="Settings on this host"
       testid={`host-${host.hostId}-settings-version`}
       sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />

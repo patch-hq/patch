@@ -64,6 +64,8 @@ export function formatResetDetail(at: number): string {
   const d = new Date(at);
   const local = d.toLocaleString(undefined, {
     weekday: 'short',
+    day: 'numeric',
+    month: 'short',
     hour: '2-digit',
     minute: '2-digit',
     timeZoneName: 'short',
@@ -77,7 +79,7 @@ export function formatResetLocal(at: number, now: number = Date.now()): string {
   const d = new Date(at);
   const sameDay = new Date(now).toDateString() === d.toDateString();
   return new Intl.DateTimeFormat('en-GB', {
-    ...(sameDay ? {} : { weekday: 'short' }),
+    ...(sameDay ? {} : { weekday: 'short', day: 'numeric', month: 'short' }),
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',

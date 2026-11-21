@@ -300,8 +300,10 @@ export function UsageBars({
             data-testid={testIdFor(scope)}
             title={
               win.resetsAt !== undefined
-                ? `${win.status} · resets ${formatResetDetail(win.resetsAt)} (${formatUntil(win.resetsAt)})`
-                : win.status
+                ? `${blocked ? 'No usage left until' : 'Resets'} ${formatResetDetail(win.resetsAt)} (${formatUntil(win.resetsAt)})`
+                : blocked
+                  ? 'No usage left'
+                  : undefined
             }
           >
             <span className="set-bar-label">{SCOPE_LABELS[scope]}</span>

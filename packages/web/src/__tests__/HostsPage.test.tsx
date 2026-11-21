@@ -375,7 +375,9 @@ describe('Settings → Hosts', () => {
     usePresenceStore.getState().setHostOnline('host-a', true);
     loadShared({ version: 5, hosts: [{ hostId: 'host-a', appliedVersion: 5 }] });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Up to date');
+    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent(
+      'Has your latest settings',
+    );
     act(() => {
       loadShared({
         version: 6,

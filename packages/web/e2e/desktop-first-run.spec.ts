@@ -72,7 +72,7 @@ test.describe('first run', () => {
     const steps = page.getByTestId('steps').locator('li');
     await expect(steps).toHaveText([
       'Starting Patch',
-      'Creating your account',
+      'Preparing your workspace',
       'Setting up this computer',
       'Connecting',
     ]);
