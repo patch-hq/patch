@@ -151,6 +151,9 @@ function pipeOnceOpen(a: RelaySocket, b: RelaySocket, afterFirst?: string): void
   });
 }
 
+/** How long a tunnelled session may wait for the host's `ready` before it is refused. Under the surface's 15s connect watchdog so the specific error lands first. */
+export const AUDIO_RELAY_READY_TIMEOUT_MS = 8_000;
+
 /** Live voice calls: surface audio sockets currently open on this server. */
 export interface AudioCalls {
   active(): number;
@@ -161,7 +164,14 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
   const open = new Set<RelaySocket>();
 
   /** sessionId → the tunnelled session's surface-facing socket + owning host, for as long as the bridge is open. */
-  const tunnelled = new Map<string, { socket: RelaySocket; hostId: string }>();
+  const tunnelled = new Map<
+    string,
+    { socket: RelaySocket; hostId: string; readyTimer: ReturnType<typeof setTimeout> | null }
+  >();
+  const clearReady = (entry: { readyTimer: ReturnType<typeof setTimeout> | null }): void => {
+    if (entry.readyTimer !== null) clearTimeout(entry.readyTimer);
+    entry.readyTimer = null;
+  };
 
   const sendToHost = (hostId: string, event: WireEvent): void =>
     deps.hostLink.sendTo(hostId, AUDIO_RELAY_BRIDGE_SURFACE_ID, event);
@@ -178,12 +188,16 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     }
     const entry = tunnelled.get(event.sessionId);
     if (!entry || entry.hostId !== fromHostId) return;
-    if (event.type === 'patch.audio_relay.ready') return; // informational only
+    if (event.type === 'patch.audio_relay.ready') {
+      clearReady(entry);
+      return;
+    }
     if (event.type === 'patch.audio_relay.frame') {
       const data = Buffer.from(event.data, 'base64');
       entry.socket.send(event.binary ? data : data.toString('utf8'));
       return;
     }
+    clearReady(entry);
     tunnelled.delete(event.sessionId);
     if (event.type === 'patch.audio_relay.error') {
       deps.logger.warn(
@@ -203,6 +217,7 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     if (status !== 'offline') return;
     for (const [sessionId, entry] of tunnelled) {
       if (entry.hostId !== hostId) continue;
+      clearReady(entry);
       tunnelled.delete(sessionId);
       sendAudioError(entry.socket, 'host_unreachable', `${hostId} went offline mid-session`);
     }
@@ -211,6 +226,7 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
   app.addHook('onClose', async () => {
     unsubEvent();
     unsubStatus();
+    for (const entry of tunnelled.values()) clearReady(entry);
     tunnelled.clear();
   });
 
@@ -220,7 +236,33 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
     hostId: string,
     afterFirst?: string,
   ): void {
-    tunnelled.set(sessionId, { socket, hostId });
+    const entry = {
+      socket,
+      hostId,
+      readyTimer: null as ReturnType<typeof setTimeout> | null,
+    };
+    tunnelled.set(sessionId, entry);
+    // An "online" host whose link is half-open (a Mac that slept) swallows the
+    // open frame and never answers. Say so by name instead of leaving the
+    // surface to hit its own generic connect timeout.
+    entry.readyTimer = setTimeout(() => {
+      entry.readyTimer = null;
+      if (!tunnelled.delete(sessionId)) return;
+      deps.logger.warn(
+        { sessionId, hostId, afterMs: AUDIO_RELAY_READY_TIMEOUT_MS },
+        'audio relay: host did not confirm the tunnelled session in time',
+      );
+      sendToHost(hostId, {
+        type: 'patch.audio_relay.close',
+        sessionId,
+      } as PatchAudioRelayCloseEvent);
+      sendAudioError(
+        socket,
+        'host_unreachable',
+        `${hostId} is online but did not answer the call setup within ${AUDIO_RELAY_READY_TIMEOUT_MS / 1000}s`,
+      );
+    }, AUDIO_RELAY_READY_TIMEOUT_MS);
+    entry.readyTimer.unref();
     let extra = afterFirst;
     const forward = (data: Buffer, isBinary: boolean): void => {
       sendToHost(hostId, {
@@ -238,6 +280,7 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       }
     });
     const closeTunnel = (): void => {
+      clearReady(entry);
       if (!tunnelled.delete(sessionId)) return;
       sendToHost(hostId, {
         type: 'patch.audio_relay.close',
