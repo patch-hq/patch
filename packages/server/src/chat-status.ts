@@ -306,8 +306,22 @@ export function factsFromHostState(
         : {}),
       ...(event.limitBlock.raw !== undefined ? { message: event.limitBlock.raw } : {}),
     };
+  } else if (event.limitHold) {
+    limit = {
+      reason: event.limitHold.scope,
+      ...(event.limitHold.resetsAt !== undefined ? { resetsAt: event.limitHold.resetsAt } : {}),
+      ...(event.limitHold.accountId !== undefined ? { accountId: event.limitHold.accountId } : {}),
+      message: event.limitHold.message,
+    };
   } else if (typeof event.rateLimitResumingAt === 'number') {
     limit = { reason: event.resumeKind ?? 'rate_limit', resetsAt: event.rateLimitResumingAt };
+  } else if (event.limitNext !== null && event.limitNext !== undefined) {
+    // The host holds an owed turn and says nothing more of the limit: never
+    // idle (decision 34). An unknown limit on the chat's account.
+    limit = {
+      reason: 'unknown',
+      ...(accountId !== null && accountId !== undefined ? { accountId } : {}),
+    };
   }
   return {
     ...prev,
