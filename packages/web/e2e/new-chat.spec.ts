@@ -231,6 +231,89 @@ test.describe('new chat header', () => {
     expect(stray).toEqual([]);
   });
 
+  // Round-7 blocker: the browse list was squashed to zero height, so no folder
+  // could be seen or opened. The list must have real height and show the home
+  // folder's subfolders, even in a short window.
+  for (const height of [900, 600, 480]) {
+    test(`folder picker browse list has real height at ${height}px tall`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height });
+      const names = ['Desktop', 'Documents', 'Downloads', 'Library', 'Movies', 'Music', 'Pictures'];
+      await page.route('**/api/folders/browse*', (r) =>
+        r.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            dir: '/Users/tom',
+            parent: '/Users',
+            entries: names.map((name) => ({ name, path: `/Users/tom/${name}` })),
+          }),
+        }),
+      );
+      await page.goto(NEW);
+      await page.getByTestId('new-chat-folder-pill').click();
+      const browser = page.getByTestId('folder-browser');
+      await expect(browser.getByTestId('folder-browser-entry-Desktop')).toBeVisible();
+      const m = await browser.evaluate((el) => {
+        const list = el.querySelector('.folder-browser-list') as HTMLElement;
+        const bar = el.querySelector('.folder-browser-bar') as HTMLElement;
+        return {
+          list: list.getBoundingClientRect().height,
+          bar: bar.getBoundingClientRect().height,
+          barScroll: bar.scrollHeight,
+          rows: list.querySelectorAll('li').length,
+        };
+      });
+      expect(m.rows).toBe(names.length);
+      expect(m.list).toBeGreaterThan(40);
+      expect(m.bar + 1).toBeGreaterThanOrEqual(m.barScroll);
+      // The first subfolder can be scrolled to and clicked.
+      await browser.getByTestId('folder-browser-entry-Desktop').click();
+    });
+  }
+
+  // Round-9 blocker: at the default 1200x800 window the picker opened upward
+  // into a tiny box with the list under a clipped header. The home folder's
+  // subfolders must be visible and clickable with no scrolling in the picker.
+  test('folder picker at 1200x800 shows the home subfolders without scrolling', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1200, height: 800 });
+    const names = ['Desktop', 'Documents', 'Downloads', 'Library', 'Movies', 'Music', 'Pictures'];
+    await page.route('**/api/folders/browse*', (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          dir: '/Users/tom',
+          parent: '/Users',
+          entries: names.map((name) => ({ name, path: `/Users/tom/${name}` })),
+        }),
+      }),
+    );
+    await page.goto(NEW);
+    await page.getByTestId('new-chat-folder-pill').click();
+    const popup = page.getByTestId('folder-popup');
+    await expect(popup).toBeVisible();
+    const box = (await popup.boundingBox())!;
+    expect(box.height).toBeGreaterThan(400);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(800);
+    const head = page.getByTestId('folder-browser').locator('.folder-section-head');
+    await expect(head).toBeVisible();
+    const hb = (await head.boundingBox())!;
+    expect(hb.y).toBeGreaterThanOrEqual(box.y);
+    // Several folders are inside the list's own box right away.
+    const list = page.getByTestId('folder-browser').locator('.folder-browser-list');
+    const lb = (await list.boundingBox())!;
+    expect(lb.height).toBeGreaterThan(120);
+    for (const name of names.slice(0, 3)) {
+      const eb = (await page.getByTestId(`folder-browser-entry-${name}`).boundingBox())!;
+      expect(eb.y).toBeGreaterThanOrEqual(lb.y);
+      expect(eb.y + eb.height).toBeLessThanOrEqual(lb.y + lb.height + 1);
+    }
+    await page.getByTestId('folder-browser-entry-Desktop').click();
+  });
+
   // spec/14 §8 § New-chat setup row — the recent projects are toggle buttons in
   // the row itself, so choosing one is a single click rather than a trip
   // through the pop-up. jsdom applies no stylesheets, so the "reads as one

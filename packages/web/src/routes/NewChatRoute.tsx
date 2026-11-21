@@ -78,9 +78,6 @@ const HEAD_ICON = 18;
 // How many projects the Project row offers as chips (spec/14 §8): the head of
 // the picker's own list, in its fixed order, so the row never reshuffles.
 const QUICK_FOLDER_COUNT = 4;
-// Fixed height of the folder pop-up (capped to the room measured), so it does
-// not resize as the list filters or the folder changes.
-const FOLDER_POPUP_HEIGHT = 520;
 // How many models the Model row offers as chips (spec/14 §8): the account
 // default first, then the head of the catalogue. Same count as the projects.
 const QUICK_MODEL_COUNT = 4;
@@ -549,7 +546,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // the composer.
   const folderAnchorRef = useRef<HTMLDivElement | null>(null);
   const modelAnchorRef = useRef<HTMLDivElement | null>(null);
-  const folderPlacement = usePopupPlacement(folderAnchorRef, pickerOpen);
   const modelPlacement = usePopupPlacement(modelAnchorRef, modelOpen);
   // spec/14 § Dismissing pop-ups (click-off): a press anywhere outside the open
   // picker closes it and selects nothing. All anchors wrap their pill AND
@@ -1326,12 +1322,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 </span>
               </button>
               {pickerOpen ? (
-                <div
-                  className={`folder-popup place-${folderPlacement.direction}`}
-                  style={{ height: Math.min(FOLDER_POPUP_HEIGHT, folderPlacement.maxHeight) }}
-                  data-testid="folder-popup"
-                  role="listbox"
-                >
+                <div className="folder-popup" data-testid="folder-popup" role="listbox">
                   {/* One field for both jobs: type to narrow the recents below, or
                 type any absolute path the daemon can reach and press Enter. */}
                   <input

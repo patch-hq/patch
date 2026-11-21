@@ -12139,30 +12139,38 @@ main.empty-state p {
   outline-offset: 1px;
 }
 .folder-popup {
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 20;
-  max-width: 560px;
+  /* A centred sheet, not an anchored pop-up: the setup row sits low in a
+     window with a composer under it, and every anchored placement (down, up,
+     measured) ended up a sliver. A fixed sheet has the same room wherever the
+     row is. The Recent list is capped inside the body so the Browse list is
+     always on screen. */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  width: min(560px, calc(100vw - 32px));
+  height: min(520px, calc(100vh - 32px));
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  /* 8px scale: even padding, even gap between the Recent / Browse / path
-     sections; a hairline divides each section (spec/14 § Sidebar §8). */
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* The pop-up scrolls INSIDE its measured space rather than running past the
-     composer (todo — "folder picker gets cut off by the composer"). `max-height`
-     is set inline by usePopupPlacement; this is what makes the cap mean
-     "scroll", not "clip". The scrolling is done by .folder-popup-body so the
-     search field above and the Use / New folder footer below stay put. When the
-     window is too short for search + a usable list + footer, the pop-up itself
-     scrolls rather than squashing the list to nothing. */
-  overflow-x: hidden;
+  overflow: hidden;
+}
+.folder-popup > .folder-input {
+  flex: none;
+}
+.folder-popup-body > .folder-section:not(.folder-browser) {
+  flex: none;
+  max-height: 156px;
   overflow-y: auto;
+}
+.folder-popup-body > .folder-browser {
+  flex: none;
 }
 /* The one scroll region: Recent + Browse lists. The scrollbar is styled so it
    is always drawn — macOS hides overlay scrollbars until you scroll, which left
@@ -12171,7 +12179,7 @@ main.empty-state p {
   flex: 1 1 auto;
   /* A floor, never zero: with min-height 0 a short window gave the list 0px
      and the Browse header clipped (round-7 fresh-Mac test). */
-  min-height: 120px;
+  min-height: 220px;
   overflow-y: scroll;
   display: flex;
   flex-direction: column;
