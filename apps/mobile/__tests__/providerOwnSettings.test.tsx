@@ -106,4 +106,29 @@ describe('mobile Settings → Providers → Claude settings', () => {
     expect(queryHost(r.root, byTestId('provider-settings-note-codex'))).not.toBeNull();
     expect(queryHost(r.root, byTestId('provider-settings-codex-cleanupPeriodDays'))).toBeNull();
   });
+
+  it('shows Codex’s prompt-history switch and size, and Gemini CLI’s session retention, each saving its own number', async () => {
+    seedSettings();
+    const update = vi.spyOn(useSettingsStore.getState(), 'updatePreferences').mockResolvedValue();
+    const r = await open();
+    const keep = findHost(r.root, byTestId('provider-setting-codex-history.persistence-input'));
+    expect(keep.props.value).toBe(true);
+    await actAsync(() => {
+      keep.props.onValueChange(false);
+    });
+    expect(update).toHaveBeenCalledWith({
+      providerSettings: { codex: { 'history.persistence': 0 } },
+    });
+    const size = findHost(r.root, byTestId('provider-setting-codex-history.max_bytes-input'));
+    expect(size.props.placeholder).toBe('No limit');
+    const age = 'provider-setting-acp:gemini-general.sessionRetention.maxAge';
+    expect(findHost(r.root, byTestId(`${age}-input`)).props.value).toBe('30');
+    await actAsync(() => findHost(r.root, byTestId(`${age}-input`)).props.onChangeText('7'));
+    await actAsync(() => {
+      findHost(r.root, byTestId(`${age}-save`)).props.onPress();
+    });
+    expect(update).toHaveBeenLastCalledWith({
+      providerSettings: { 'acp:gemini': { 'general.sessionRetention.maxAge': 7 } },
+    });
+  });
 });

@@ -822,6 +822,10 @@ export class CodexAccounts {
       throw error;
     }
   }
+  /** Every CODEX_HOME this host runs Codex with: each account's, and the endpoints'. */
+  homes(): string[] {
+    return [...this.accounts.map((a) => a.home), this.endpointHome];
+  }
   /** Where Codex keeps endpoint chats' threads: beside the logins, shared by every endpoint. */
   get endpointHome(): string {
     return join(this.opts.root, 'endpoints');

@@ -7,7 +7,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   PROVIDERS,
-  providerDescriptor,
+  ownSettingsGroups,
+  type OwnSettingsGroup,
   providerKeyCheckText,
   providerKeyInfo,
   type ProviderKeyId,
@@ -55,50 +56,62 @@ export function ProvidersPage(): JSX.Element {
  * the user chooses.
  */
 export function ProviderOwnSettings(): JSX.Element {
+  const acpAgents = usePreferencesStore((s) => s.preferences.acpAgents);
   return (
     <>
-      {(PROVIDERS as readonly ProviderDescriptor[])
-        .filter((p) => p.settings.length > 0 || p.settingsNote !== undefined)
-        .map((p) => (
-          <Group key={p.id} label={`${p.label} settings`} testid={`provider-settings-${p.id}`}>
-            {p.settings.map((setting) => (
-              <ProviderSettingRow key={setting.key} providerId={p.id} setting={setting} />
-            ))}
-            {p.settingsNote !== undefined ? (
-              <Note testid={`provider-settings-note-${p.id}`}>{p.settingsNote}</Note>
-            ) : null}
-          </Group>
-        ))}
+      {ownSettingsGroups(acpAgents).map((g) => (
+        <Group key={g.id} label={`${g.label} settings`} testid={`provider-settings-${g.id}`}>
+          {g.settings.map((setting) => (
+            <ProviderSettingRow key={setting.key} group={g} setting={setting} />
+          ))}
+          {g.note !== undefined ? (
+            <Note testid={`provider-settings-note-${g.id}`}>{g.note}</Note>
+          ) : null}
+        </Group>
+      ))}
     </>
   );
 }
 
+/** A dotted path's number in a JSON document, or undefined. */
+function numberAt(doc: unknown, key: string): number | undefined {
+  let at = doc;
+  for (const part of key.split('.')) {
+    if (at === null || typeof at !== 'object') return undefined;
+    at = (at as Record<string, unknown>)[part];
+  }
+  return typeof at === 'number' ? at : undefined;
+}
+
 function ProviderSettingRow({
-  providerId,
+  group,
   setting,
 }: {
-  providerId: string;
+  group: OwnSettingsGroup;
   setting: ProviderSettingDescriptor;
 }): JSX.Element {
   const chosen = usePreferencesStore(
-    (s) => s.preferences.providerSettings[providerId]?.[setting.key],
+    (s) => s.preferences.providerSettings[group.id]?.[setting.key],
   );
   const loaded = usePreferencesStore((s) => s.loaded);
   const hosts = usePresenceStore((s) => s.hosts);
-  let value = setting.providerDefault;
-  let source = `${providerDescriptor(providerId).label}'s own default`;
+  const reportedByHost = (PROVIDERS as readonly ProviderDescriptor[]).some(
+    (p) => p.id === group.id && p.ownSettingsReportedByHost,
+  );
+  let value: number | null = setting.providerDefault;
+  let source = `${group.label}'s own default`;
   let problem: string | null = null;
   if (chosen !== undefined) {
     value = chosen;
     source = 'Chosen here';
-  } else if (providerDescriptor(providerId).ownSettingsReportedByHost) {
+  } else if (reportedByHost) {
     // The provider's own configuration file, as the hosts report it.
     for (const h of sortHosts(Object.values(hosts))) {
       const text = h.claudeSettings?.settingsJson ?? '';
       if (text.trim() === '') continue;
       try {
-        const own = (JSON.parse(text) as Record<string, unknown>)[setting.key];
-        if (typeof own === 'number') {
+        const own = numberAt(JSON.parse(text), setting.key);
+        if (own !== undefined) {
           value = own;
           source = `Set in ${hostLabel(h)}'s own settings.json`;
           break;
@@ -108,41 +121,56 @@ function ProviderSettingRow({
       }
     }
   }
-  function commit(raw: string): void {
-    const n = Number(raw);
+  function commit(n: number): void {
     if (!Number.isInteger(n) || n === value) return;
     void patchShared(setting.label.toLowerCase(), {
       providerSettings: {
         ...usePreferencesStore.getState().preferences.providerSettings,
-        [providerId]: {
-          ...usePreferencesStore.getState().preferences.providerSettings[providerId],
+        [group.id]: {
+          ...usePreferencesStore.getState().preferences.providerSettings[group.id],
           [setting.key]: n,
         },
       },
     });
   }
+  const id = `provider-setting-${group.id}-${setting.key}`;
+  const label = `${group.label}: ${setting.label}`;
   return (
-    <Row
-      title={setting.label}
-      sub={problem ?? `${source}. ${setting.description}`}
-      testid={`provider-setting-${providerId}-${setting.key}`}
-    >
-      <input
-        type="number"
-        min={setting.min}
-        max={setting.max}
-        className="set-num"
-        aria-label={`${providerDescriptor(providerId).label}: ${setting.label}`}
-        data-testid={`provider-setting-${providerId}-${setting.key}-input`}
-        key={value}
-        defaultValue={value}
-        disabled={!loaded}
-        onBlur={(e) => commit(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit((e.target as HTMLInputElement).value);
-        }}
-      />
-      <span className="set-unit">days</span>
+    <Row title={setting.label} sub={problem ?? `${source}. ${setting.description}`} testid={id}>
+      {setting.kind === 'toggle' ? (
+        <input
+          type="checkbox"
+          className="set-check"
+          aria-label={label}
+          data-testid={`${id}-input`}
+          checked={value === 1}
+          disabled={!loaded}
+          onChange={(e) => commit(e.target.checked ? 1 : 0)}
+        />
+      ) : (
+        <>
+          <input
+            type="number"
+            min={setting.min}
+            max={setting.max}
+            className="set-num"
+            aria-label={label}
+            data-testid={`${id}-input`}
+            key={value ?? 'none'}
+            defaultValue={value ?? ''}
+            placeholder={value === null ? 'No limit' : undefined}
+            disabled={!loaded}
+            onBlur={(e) => {
+              if (e.target.value !== '') commit(Number(e.target.value));
+            }}
+            onKeyDown={(e) => {
+              const raw = (e.target as HTMLInputElement).value;
+              if (e.key === 'Enter' && raw !== '') commit(Number(raw));
+            }}
+          />
+          <span className="set-unit">{setting.kind === 'days' ? 'days' : 'MB'}</span>
+        </>
+      )}
     </Row>
   );
 }

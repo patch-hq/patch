@@ -277,7 +277,7 @@ describe('SharedSettingsService', () => {
     service.update({ providerSettings: { claude: { cleanupPeriodDays: 90 } } });
     expect(service.current().providerSettings).toEqual({ claude: { cleanupPeriodDays: 90 } });
     expect(() => service.update({ providerSettings: { claude: { nope: 1 } } })).toThrow(
-      /claude has no setting nope/,
+      /Claude has no setting nope/,
     );
     expect(() => service.update({ providerSettings: { nope: { a: 1 } } })).toThrow(
       /unknown provider/,
@@ -288,6 +288,34 @@ describe('SharedSettingsService', () => {
       ).toThrow(/whole number from 1 to 3650/);
     }
     expect(service.current().providerSettings).toEqual({ claude: { cleanupPeriodDays: 90 } });
+  });
+
+  it("takes Codex's and each ACP agent's own settings, each only as its own kind allows", () => {
+    service.update({
+      providerSettings: {
+        codex: { 'history.persistence': 0, 'history.max_bytes': 50 },
+        'acp:gemini': { 'general.sessionRetention.maxAge': 7 },
+      },
+    });
+    expect(service.current().providerSettings).toEqual({
+      codex: { 'history.persistence': 0, 'history.max_bytes': 50 },
+      'acp:gemini': { 'general.sessionRetention.maxAge': 7 },
+    });
+    expect(() =>
+      service.update({ providerSettings: { codex: { 'history.persistence': 2 } } }),
+    ).toThrow(/on \(1\) or off \(0\)/);
+    expect(() =>
+      service.update({
+        providerSettings: { 'acp:gemini': { 'general.sessionRetention.maxAge': 0 } },
+      }),
+    ).toThrow(/from 1 to 3650/);
+    // An agent with no settings of its own has none to set.
+    expect(() =>
+      service.update({
+        acpAgents: [{ id: 'gemini', label: 'Gemini CLI', command: 'gemini', args: ['--acp'] }],
+        providerSettings: { 'acp:gemini': { 'general.sessionRetention.maxAge': 7 } },
+      }),
+    ).toThrow(/unknown provider: acp:gemini/);
   });
 
   it('stores model endpoints in the settings and their keys only as secrets', async () => {

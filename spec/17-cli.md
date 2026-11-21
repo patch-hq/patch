@@ -51,6 +51,8 @@ patch voice [profiles]                    # the people voice devices recognise (
 patch voice recent                        # the voices the devices heard lately, newest first, with who each was taken for
 patch voice enrol <name> <recentId>... [--access owner|household|guest] [--context T]   # fold heard voices into a person's voiceprint; creates the person if new
 patch voice remove <name>                 # forget a person
+patch settings provider [<provider>]          # each provider's own settings (session retention and the like): value and where it comes from
+patch settings provider-set <provider> <key> <value>  # a number (days, MB), or on/off; written on every host (10-auth.md § Settings)
 patch accounts [<backend>]                # the shared backend accounts, in order
 patch accounts add <backend> --token T [--label L]
 patch accounts sign-in <backend>                   # sign in through the server: prints the address and code to open on any device (10-auth.md § Signing in)

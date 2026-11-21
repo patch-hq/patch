@@ -9,6 +9,7 @@
 import type { AccountStrategy, HarnessId } from '@patch/wire';
 import { providerForModel } from '@patch/wire';
 import type { SdkBackend } from './sdkBackend.js';
+import type { OwnConfigFile } from './providerSettings.js';
 
 export type CredentialResult =
   | { ok: true; accessToken: string; accountId?: string }
@@ -41,6 +42,12 @@ export interface ProviderAdapter {
   ): string | undefined;
   /** How far through its accounts exhaustion has got; undefined when the provider has nothing to say. */
   accountRouting(): AccountRouting | undefined;
+  /**
+   * The provider's own configuration files on this host that its own settings
+   * are written into (spec/10 § Provider settings), in the format its
+   * descriptor declares. Empty for a provider with none here.
+   */
+  ownConfigs(): OwnConfigFile[];
 }
 
 export interface AccountRouting {

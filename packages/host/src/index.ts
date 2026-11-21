@@ -2,7 +2,7 @@ import { cutoffMs } from './cleanup.js';
 import { removeRetiredNativeCopies } from './retiredNativeCopies.js';
 import { removeRetiredTelegramFolder } from './retiredTelegramThread.js';
 import type { ElevenLabsTtsModel } from './audio/elevenlabs.js';
-import { applyClaudeProviderSettings } from './providerSettings.js';
+import { applyOwnSettings, ownConfigFile, type OwnConfigFile } from './providerSettings.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { HARNESS_TRAITS } from './harnesses.js';
@@ -81,6 +81,11 @@ import {
   type SettingsAdoptRequestEvent,
   type SettingsAdoptResponseEvent,
   type SettingsSnapshotEvent,
+  type OwnSetting,
+  PROVIDERS,
+  type ProviderDescriptor,
+  type HarnessId,
+  acpSettingsId,
   type AcpLoginRequestEvent,
   type AcpLoginUpdateEvent,
   type AccountStrategy,
@@ -2272,16 +2277,6 @@ async function startHost(
       );
     }
     daemon.setProviderPermissionDefaults(shared.providerPermissionDefaults);
-    try {
-      // spec/10 § Provider settings: write what the user chose for Claude Code's own settings.
-      const written = applyClaudeProviderSettings(claudeHome, shared.providerSettings);
-      if (written.length > 0) {
-        logger.info({ written }, 'Claude Code settings written from Settings');
-        emit({ type: 'claude_settings.updated', hostId: selfHostId, ...claudeSettingsSnapshot() });
-      }
-    } catch (err) {
-      logger.error({ err }, 'Claude Code settings not written: settings.json cannot be edited');
-    }
     endpointSettings = shared.modelEndpoints;
     modelEndpoints.apply(endpointSettings, endpointKeys);
     acpRegistry.setConfigured(shared.acpAgents);
@@ -2566,6 +2561,55 @@ async function startHost(
     },
     codex: (accounts) => codexAccounts.applyShared(accounts),
   };
+  /**
+   * spec/10 § Provider settings: write what the user chose for each provider's
+   * own settings into its own files on this host, and each installed ACP
+   * agent's into the file it declares. Nothing chosen, nothing written. Throws
+   * naming every file that could not be written, after writing the rest.
+   */
+  const applyProviderOwnSettings = (shared: SharedSettings): void => {
+    const failed: string[] = [];
+    const apply = (
+      label: string,
+      files: OwnConfigFile[],
+      format: 'json' | 'toml',
+      settings: readonly OwnSetting[],
+      chosen: Record<string, number> | undefined,
+    ): void => {
+      try {
+        const written = applyOwnSettings(files, format, settings, chosen).filter(
+          (w) => w.written.length > 0,
+        );
+        if (written.length > 0)
+          logger.info({ written }, `${label}'s own settings written from Settings`);
+      } catch (err) {
+        failed.push(`${label}: ${(err as Error).message}`);
+      }
+    };
+    for (const provider of PROVIDERS as readonly ProviderDescriptor[]) {
+      if (provider.ownConfigFormat === undefined || provider.settings.length === 0) continue;
+      apply(
+        provider.label,
+        providerAdapters[provider.id as HarnessId].ownConfigs(),
+        provider.ownConfigFormat,
+        provider.settings,
+        shared.providerSettings[provider.id],
+      );
+    }
+    for (const agent of acpRegistry.installed()) {
+      const own = agent.ownSettings;
+      if (!own) continue;
+      const home = (own.homeEnv !== undefined ? process.env[own.homeEnv] : undefined) || homedir();
+      apply(
+        agent.label,
+        [ownConfigFile(join(home, own.file))],
+        'json',
+        own.settings,
+        shared.providerSettings[acpSettingsId(agent.id)],
+      );
+    }
+    if (failed.length > 0) throw new Error(`could not be written: ${failed.join('; ')}`);
+  };
   const applySnapshot = async (snapshot: SettingsSnapshotEvent): Promise<string | undefined> => {
     const errors: string[] = [];
     const part = async (name: string, run: () => void | Promise<void>): Promise<void> => {
@@ -2604,6 +2648,9 @@ async function startHost(
     for (const provider of ACCOUNT_PROVIDERS) {
       await part(`${provider.label} accounts`, () => applyAccounts(provider.accountsKey));
     }
+    // After the accounts: a provider's own files include each account's. A file
+    // that cannot be written is reported back in `settings.applied`.
+    await part('provider settings', () => applyProviderOwnSettings(snapshot.settings));
     link.send(buildAccountReport());
     publishHost();
     if (!firstSnapshotApplied) {
@@ -4795,6 +4842,21 @@ async function startHost(
             : {}),
         };
       },
+      // Claude Code's own settings.json: Settings shows what it holds, so a write is announced.
+      ownConfigs: () => [
+        {
+          label: join(claudeHome, 'settings.json'),
+          read: () => readClaudeSettingsJson(claudeHome),
+          write: (text) => {
+            writeClaudeSettingsJson(claudeHome, text);
+            emit({
+              type: 'claude_settings.updated',
+              hostId: selfHostId,
+              ...claudeSettingsSnapshot(),
+            });
+          },
+        },
+      ],
     },
     codex: {
       run: (opts) => codexBackend.run(opts),
@@ -4831,6 +4893,9 @@ async function startHost(
       },
       nextAccountAfterExhausted: (_chatId, id) => codexAccounts.markExhausted(id),
       accountRouting: () => undefined,
+      // Each CODEX_HOME's config.toml: every account's, and the endpoints'.
+      ownConfigs: () =>
+        codexAccounts.homes().map((home) => ownConfigFile(join(home, 'config.toml'))),
     },
     // An ACP agent's credential is its provider key or its own sign-in, which
     // only the agent can judge: a turn is refused here only for an agent that
@@ -4882,6 +4947,8 @@ async function startHost(
             )
           : undefined,
       accountRouting: () => undefined,
+      // An ACP agent's own files are its own (`AcpAgentConfig.ownSettings`).
+      ownConfigs: () => [],
     },
   };
 

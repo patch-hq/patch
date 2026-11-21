@@ -52,11 +52,11 @@ import {
   type AccountState,
   type WireEvent,
   accountsKeyForBackend,
-  PROVIDERS,
-  type ProviderDescriptor,
   isAnthropicApiKey,
   type ProviderBackendId,
   limitBehaviourFromAutoResume,
+  ownSettingsGroups,
+  invalidOwnSettingValue,
   resolveAcpAgents,
   type AcpAgentConfig,
   type SharedAcpAccount,
@@ -983,21 +983,19 @@ export class SharedSettingsService {
         throw new SettingsError(400, 'invalid_input', `${id} cannot run permission mode ${mode}`);
       }
     }
+    // spec/10 § Provider settings: only a setting a provider (or ACP agent)
+    // declares, and only a value it takes.
+    const groups = ownSettingsGroups(parsed.data.acpAgents ?? this.settings.acpAgents);
     for (const [id, chosen] of Object.entries(parsed.data.providerSettings ?? {})) {
-      const declared = (PROVIDERS as readonly ProviderDescriptor[]).find((p) => p.id === id);
+      const declared = groups.find((g) => g.id === id);
       if (!declared) throw new SettingsError(400, 'invalid_input', `unknown provider: ${id}`);
       for (const [key, value] of Object.entries(chosen)) {
         const setting = declared.settings.find((d) => d.key === key);
         if (!setting) {
-          throw new SettingsError(400, 'invalid_input', `${id} has no setting ${key}`);
+          throw new SettingsError(400, 'invalid_input', `${declared.label} has no setting ${key}`);
         }
-        if (!Number.isInteger(value) || value < setting.min || value > setting.max) {
-          throw new SettingsError(
-            400,
-            'invalid_input',
-            `${setting.label} must be a whole number from ${setting.min} to ${setting.max}`,
-          );
-        }
+        const problem = invalidOwnSettingValue(setting, value);
+        if (problem !== null) throw new SettingsError(400, 'invalid_input', problem);
       }
     }
     // An endpoint taken out takes its key with it.
