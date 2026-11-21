@@ -429,9 +429,9 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     goalReminderEvery: meta.goalReminderEvery ?? null,
     goalCheckInEvery: meta.goalCheckInEvery ?? null,
     goalReminderTurnsSince: 0,
-    goalReminderLastAt: Date.now(),
+    goalReminderLastAt: meta.goalReminderLastAt ?? meta.updatedAt,
     goalCheckInTurnsSince: 0,
-    goalCheckInLastAt: Date.now(),
+    goalCheckInLastAt: meta.goalCheckInLastAt ?? meta.updatedAt,
     // Progress counters are in-memory only (see field doc) — a rehydrated
     // active goal starts counting from zero again rather than guessing.
     goalProgress: meta.goal
