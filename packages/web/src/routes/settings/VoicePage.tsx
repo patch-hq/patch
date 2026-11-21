@@ -31,9 +31,9 @@ const PROVIDER_LABELS: Record<VoiceBackend, string> = {
 type Variant = Exclude<VoiceLayer, 'direct'>;
 const VARIANTS: readonly Variant[] = ['light', 'heavy'];
 const VARIANT_NAMES: Record<Exclude<VoiceBackend, 'local'>, Record<Variant, string>> = {
-  gemini: { light: 'Flash', heavy: 'Thinking' },
-  openai: { light: 'mini', heavy: 'full' },
-  elevenlabs: { light: 'Haiku', heavy: 'Sonnet' },
+  gemini: { light: 'Flash 2.5 Native Audio', heavy: 'Gemini 3.8 Live Thinking' },
+  openai: { light: 'GPT Realtime 2.1 mini', heavy: 'GPT Realtime 2.1' },
+  elevenlabs: { light: 'Claude Haiku 4.5', heavy: 'Claude Sonnet 4.5' },
 };
 const variantOf = (layer: VoiceLayer): Variant => (layer === 'heavy' ? 'heavy' : 'light');
 
