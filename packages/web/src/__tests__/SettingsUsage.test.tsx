@@ -78,7 +78,9 @@ describe('Settings → Usage → accounts', () => {
     expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work');
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work@example.com');
-    expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('Ready');
+    // Usage is not known yet, so no status is claimed — least of all "Ready".
+    expect(screen.getByTestId('account-claude-code-acct-a')).not.toHaveTextContent('Ready');
+    expect(screen.queryByTestId('account-state-claude-code-acct-a')).toBeNull();
     expect(screen.getByTestId('account-state-claude-code-acct-b')).toHaveTextContent('Signed out');
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });

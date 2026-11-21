@@ -360,9 +360,12 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // than cleared, so the folds come back when the filter comes off. Memoised
   // for a stable identity — the drawn order below is published to the selection
   // store from an effect keyed on it.
+  // A lone project is never folded: with one project, folding it empties the
+  // list, and the first chat reads as having vanished.
+  const soleProject = view.folders.length <= 1;
   const effectiveCollapsed = useMemo(
-    () => (attentionOnly || stateFilter !== 'all' ? [] : collapsedFolders),
-    [attentionOnly, stateFilter, collapsedFolders],
+    () => (attentionOnly || stateFilter !== 'all' || soleProject ? [] : collapsedFolders),
+    [attentionOnly, stateFilter, collapsedFolders, soleProject],
   );
 
   // Reserve the scrollbar's gutter only while a scrolling band actually shows
@@ -1016,6 +1019,7 @@ function RegularSidebar({
                         data-testid={`folder-collapse-${folder}`}
                         aria-expanded={!collapsed}
                         aria-label={`${collapsed ? 'Expand' : 'Collapse'} project ${projectName}`}
+                        disabled={view.folders.length <= 1}
                         onClick={() => toggleFolderCollapsed(key)}
                       >
                         {collapsed ? (

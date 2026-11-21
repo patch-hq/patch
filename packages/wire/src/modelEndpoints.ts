@@ -102,7 +102,7 @@ export const isEndpointModel = (id: string | null | undefined): boolean =>
 
 /** The picker label for a model on an endpoint: the model, then where it runs. */
 export function endpointModelLabel(endpoint: Pick<ModelEndpoint, 'label' | 'api'>, model: string) {
-  return `${model} · ${endpoint.label} (${endpoint.api === 'openai' ? 'Codex' : 'Claude Code'})`;
+  return `${model} · ${endpoint.label} (${endpoint.api === 'openai' ? 'ChatGPT' : 'Claude Code'})`;
 }
 
 // ---- the retired local-model loop ----
@@ -133,7 +133,7 @@ export function retiredModelNotice(
     message:
       `This chat ran on Patch's own local-model loop, which has been removed. ` +
       `Its history stays here, but it cannot continue. Start a new chat to keep working with ${model}: ` +
-      `local models now run through Codex.`,
+      `local models now run through ChatGPT.`,
     replacementModel: endpointModelId({ id: MIGRATED_LOCAL_ENDPOINT_ID, api: 'openai' }, model),
   };
 }

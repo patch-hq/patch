@@ -38,9 +38,9 @@ describe('permission mode copy', () => {
     expect(permissionModeOptionLabel('auto', ['claude'])).toBe('Auto');
   });
 
-  it('describes a mode by Codex behaviour when only Codex runs it', () => {
+  it('describes a mode by ChatGPT behaviour when only Codex runs it', () => {
     expect(permissionModeHint('default', ['codex'])).toBe(PERMISSION_MODE_COPY.default.notes.codex);
-    expect(permissionModeHint('default', ['claude', 'codex'])).toContain('Codex:');
+    expect(permissionModeHint('default', ['claude', 'codex'])).toContain('ChatGPT:');
     expect(permissionModeHint('plan', ['claude', 'codex'])).toBe(
       'Reads and plans, changes nothing',
     );

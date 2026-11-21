@@ -45,6 +45,14 @@
       a.hidden = true;
     }
   });
+  // The install step shows from the start, so it is known before Download is
+  // clicked; clicking a link for another file replaces it below.
+  if (build) {
+    document.querySelectorAll('[data-next]').forEach(function (p) {
+      p.textContent = NEXT[build.file];
+      p.hidden = false;
+    });
+  }
   // Without a build for this device, the hero points to Get started instead.
   document.querySelectorAll('[data-no-build]').forEach(function (a) {
     a.hidden = Boolean(build);
@@ -92,7 +100,7 @@
       console.error('Patch: download sizes unavailable:', err);
     });
 
-  // After a download starts, one line on what to do with the file, under every
+  // A click on a download link says what to do with that file, under every
   // download button so it is beside whichever was clicked.
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('a[href^="' + BASE + '"]');

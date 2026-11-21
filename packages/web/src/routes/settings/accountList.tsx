@@ -298,13 +298,7 @@ export function UsageBars({
             key={scope}
             className={`set-bar-row${cls}`}
             data-testid={testIdFor(scope)}
-            title={
-              win.resetsAt !== undefined
-                ? `${blocked ? 'No usage left until' : 'Resets'} ${formatResetDetail(win.resetsAt)} (${formatUntil(win.resetsAt)})`
-                : blocked
-                  ? 'No usage left'
-                  : undefined
-            }
+            title={barTitle(scope, win) || undefined}
           >
             <span className="set-bar-label">{SCOPE_LABELS[scope]}</span>
             <span className="set-bar" aria-hidden="true">
@@ -342,7 +336,7 @@ export function UsageBars({
       })}
       {showReadAt && usage.at !== undefined && (
         <span className="set-sub set-bars-read-at" data-testid={`${testId}-read-at`}>
-          read {formatReset(usage.at)}
+          Updated {formatReset(usage.at)}
         </span>
       )}
     </div>
@@ -356,6 +350,19 @@ export function UsageBars({
  * not mean anyone switched anything off — the add-on was never taken out, so
  * the line says where to turn it on.
  */
+/** What a bar's tooltip says: plain words, one local time, the full date. */
+function barTitle(scope: Scope, win: RateLimitWindow): string {
+  const state = rateLimitWindowState(scope, win);
+  if (state === 'blocked') {
+    return win.resetsAt !== undefined
+      ? `No usage left until ${formatResetDetail(win.resetsAt)}`
+      : 'No usage left';
+  }
+  return win.resetsAt !== undefined
+    ? `Resets ${formatResetDetail(win.resetsAt)} (${formatUntil(win.resetsAt)})`
+    : '';
+}
+
 /** The reason as plain words, for the hover title when the column clips it. */
 function describeDisabledReason(reason: string): string {
   if (reason === OVERAGE_DISABLED_REASON) return 'Extra usage is off: turn it on at claude.ai';
@@ -382,7 +389,8 @@ function DisabledReason({
       </a>
     );
   }
-  if (reason === OVERAGE_DISABLED_REASON) return <>disabled</>;
-  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>disabled</>;
+  // The row already says "off"; repeating it as "disabled" read as a stutter.
+  if (reason === OVERAGE_DISABLED_REASON) return <></>;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>set by your organisation</>;
   return <>{reason}</>;
 }

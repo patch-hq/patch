@@ -42,7 +42,7 @@ export function codexTarget(
     'linux-arm64': { triple: 'aarch64-unknown-linux-musl', suffix: 'linux-arm64' },
   };
   const hit = table[`${platform}-${arch}`];
-  if (!hit) throw new Error(`Codex publishes no build for ${platform}-${arch}`);
+  if (!hit) throw new Error(`ChatGPT publishes no build for ${platform}-${arch}`);
   return hit;
 }
 

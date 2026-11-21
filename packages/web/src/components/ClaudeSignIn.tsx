@@ -151,6 +151,7 @@ export function ClaudeSignIn({
   const trouble = (
     <SignInTrouble
       testId="claude-signin"
+      happened={error ?? 'Claude has not sent the sign-in back to Patch yet.'}
       apiKey={apiKey}
       onRetry={() => {
         cancel();

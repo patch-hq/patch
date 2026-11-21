@@ -301,7 +301,7 @@ describe('Settings → Hosts', () => {
       backends: [
         {
           id: 'codex',
-          label: 'Codex',
+          label: 'ChatGPT',
           version: null,
           state: 'absent',
           error: 'codex not found at /usr/bin/codex',
@@ -434,7 +434,7 @@ describe('Settings → Hosts', () => {
     loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
-      backends: [{ id: 'codex', label: 'Codex', version: null, state: 'logged-out' }],
+      backends: [{ id: 'codex', label: 'ChatGPT', version: null, state: 'logged-out' }],
     });
     usePresenceStore.getState().setHostOnline('host-a', true);
     renderPage('hosts');
@@ -448,7 +448,7 @@ describe('Settings → Hosts', () => {
     loadShared();
     reportHost('host-a', {
       hostName: 'laptop',
-      backends: [{ id: 'codex', label: 'Codex', version: null, state: 'logged-out' }],
+      backends: [{ id: 'codex', label: 'ChatGPT', version: null, state: 'logged-out' }],
     });
     renderPage('hosts');
     const btn = screen.getByTestId('host-host-a-backend-codex-connect');

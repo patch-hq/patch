@@ -60,22 +60,25 @@ describe('formatReset on a distant day', () => {
 });
 
 describe('formatResetDetail', () => {
-  it('carries the UTC alongside the local time, both labelled', () => {
-    const detail = formatResetDetail(AT);
-    expect(detail).toContain('09:40 UTC');
-    // And a named local zone — the half that was missing when two unlabelled
-    // clocks were on screen together.
-    expect(detail).toMatch(/[A-Z]{2,4}/);
+  it('is one local clock with the full date, and no UTC beside it', () => {
+    const detail = formatResetDetail(AT, AT);
+    expect(detail).toMatch(/^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2,4}, \d{2}:\d{2}$/);
+    expect(detail).not.toMatch(/UTC|GMT/);
+  });
+
+  it('adds the year only when it is not this one', () => {
+    expect(formatResetDetail(AT, AT + 400 * 86_400_000)).toMatch(/\d{4}/);
   });
 });
 
 describe('formatResetLocal', () => {
-  it('uses one local clock with its zone named', () => {
+  it('gives the date and time for another day, with no zone name', () => {
     const detail = formatResetLocal(AT, AT - 3 * 86_400_000);
-    expect(detail).toMatch(
-      /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2,3} \d{2}:\d{2} (?:[A-Z]{2,4}|GMT[+-]\d+)$/,
-    );
-    expect(detail).not.toContain('UTC ·');
+    expect(detail).toMatch(/^\d{1,2} [A-Z][a-z]{2,4} \d{2}:\d{2}$/);
+  });
+
+  it('gives the time alone for today', () => {
+    expect(formatResetLocal(AT, AT)).toMatch(/^\d{2}:\d{2}$/);
   });
 });
 
@@ -294,8 +297,8 @@ describe('formatAgo', () => {
 
 describe('formatReadAt', () => {
   it('says how old the reading is — a stale figure must not pass for a live one', () => {
-    expect(formatReadAt(AT - 5 * 60_000, AT)).toBe('read 5 min ago');
-    expect(formatReadAt(AT - 3 * 3_600_000, AT)).toBe('read 3 h ago');
+    expect(formatReadAt(AT - 5 * 60_000, AT)).toBe('Updated 5 min ago');
+    expect(formatReadAt(AT - 3 * 3_600_000, AT)).toBe('Updated 3 h ago');
   });
 
   it('renders nothing when the reading has no timestamp', () => {
@@ -459,8 +462,8 @@ describe('presentFailure', () => {
   });
   it('leaves other failures in full', async () => {
     const { presentFailure } = await import('../lib/usage.js');
-    expect(presentFailure('This turn failed: Codex process exited (0)')).toBe(
-      'Codex process exited (0)',
+    expect(presentFailure('This turn failed: ChatGPT process exited (0)')).toBe(
+      'ChatGPT process exited (0)',
     );
   });
 });

@@ -150,7 +150,7 @@ export class CodexClient {
       child.stdin.on('error', (error) => this.fail(error));
       child.on('error', (error) => this.fail(error));
       child.on('exit', (code, signal) =>
-        this.fail(new Error(`Codex process exited (${signal ?? code})`)),
+        this.fail(new Error(`ChatGPT process exited (${signal ?? code})`)),
       );
       createInterface({ input: child.stdout }).on('line', (line) =>
         this.onLine(line, undefined, child),
@@ -181,7 +181,7 @@ export class CodexClient {
     try {
       msg = JSON.parse(line);
     } catch {
-      this.fail(new Error('Codex returned invalid JSON'));
+      this.fail(new Error('ChatGPT returned invalid JSON'));
       if (child) this.signal(child, 'SIGTERM');
       else this.options.durable?.kill('SIGTERM');
       return;
@@ -210,14 +210,14 @@ export class CodexClient {
       }
       for (const listener of this.listeners) listener(notification);
       if (msg.id !== undefined && this.listeners.size === 0)
-        this.respond(msg.id, undefined, 'No handler for Codex request');
+        this.respond(msg.id, undefined, 'No handler for ChatGPT request');
       return;
     }
     const waiter = this.pending.get(msg.id);
     if (!waiter) return;
     clearTimeout(waiter.timer);
     this.pending.delete(msg.id);
-    if (msg.error) waiter.reject(new Error(`Codex RPC ${msg.error.code}: ${msg.error.message}`));
+    if (msg.error) waiter.reject(new Error(`ChatGPT RPC ${msg.error.code}: ${msg.error.message}`));
     else waiter.resolve(msg.result ?? {});
   }
   request(
@@ -229,7 +229,7 @@ export class CodexClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex ${method} timed out`));
+        reject(new Error(`ChatGPT ${method} timed out`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try {

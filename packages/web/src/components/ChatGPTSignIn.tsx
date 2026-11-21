@@ -152,6 +152,7 @@ export function ChatGPTSignIn({
         </button>
         <SignInTrouble
           testId="chatgpt-signin"
+          happened={error ?? 'ChatGPT has not confirmed the code yet.'}
           apiKey={apiKey}
           onRetry={() => {
             cancel();

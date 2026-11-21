@@ -41,7 +41,7 @@ export class CodexRuntime {
         .catch((err: unknown) => {
           this.provision = {
             state: 'failed',
-            error: `Installing Codex failed: ${err instanceof Error ? err.message : String(err)}`,
+            error: `Installing ChatGPT failed: ${err instanceof Error ? err.message : String(err)}`,
           };
           throw err;
         })
@@ -78,7 +78,7 @@ export class CodexRuntime {
           continue;
         }
         if (Date.now() > deadline) {
-          throw new Error(`Codex install is locked by another process (${lock})`);
+          throw new Error(`ChatGPT install is locked by another process (${lock})`);
         }
         await new Promise((r) => setTimeout(r, 250));
       }
@@ -98,7 +98,7 @@ export class CodexRuntime {
     if (this.version) return this.executable;
     await this.installPackage(this.root);
     if (!this.version)
-      throw new Error(`Codex ${CODEX_VERSION} installation did not produce its executable`);
+      throw new Error(`ChatGPT ${CODEX_VERSION} installation did not produce its executable`);
     return this.executable;
   }
 }

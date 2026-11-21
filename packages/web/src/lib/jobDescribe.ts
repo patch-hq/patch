@@ -58,14 +58,14 @@ export function describeRecurrenceRule(rrule: string): string {
   return recurrencePhrase(rrule) || `recurrence · ${rrule}`;
 }
 
-/** How each webhook scheme reads in a trigger label — product names as written. */
+/** How each incoming-request scheme reads in a trigger label: product names as written, no "webhook". */
 const WEBHOOK_SCHEME_LABEL: Record<WebhookTrigger['scheme'], string> = {
-  none: 'Unsigned',
-  bearer: 'Bearer',
-  'hmac-sha256': 'HMAC',
-  github: 'GitHub',
-  stripe: 'Stripe',
-  todoist: 'Todoist',
+  none: 'Incoming request',
+  bearer: 'Incoming request',
+  'hmac-sha256': 'Incoming request',
+  github: 'GitHub event',
+  stripe: 'Stripe event',
+  todoist: 'Todoist event',
 };
 
 /**
@@ -85,7 +85,7 @@ export function describeTrigger(trigger: JobTrigger, viewerTimeZone?: string): s
       return zone === null ? label : `${label} · ${zone}`;
     }
     case 'webhook': {
-      return `${WEBHOOK_SCHEME_LABEL[trigger.scheme]} webhook`;
+      return WEBHOOK_SCHEME_LABEL[trigger.scheme];
     }
     case 'todoist':
       return trigger.filter ? `Todoist task ${trigger.filter}` : 'Todoist task tagged @claude';

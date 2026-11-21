@@ -48,7 +48,7 @@ test('typing a missing path offers Create, and creating selects it', async ({ pa
   await create.click();
   await expect(page.getByTestId('folder-popup')).toHaveCount(0);
   expect(created).toEqual([TYPED]);
-  await expect(page.getByTestId('new-chat-folder-path')).toHaveText(TYPED);
+  await expect(page.getByTestId('new-chat-folder-pill')).toHaveAttribute('title', TYPED);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/3-created.png` });
 });
 

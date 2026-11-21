@@ -84,7 +84,7 @@ describe('CodexRuntime install state', () => {
     await expect(runtime.ensure()).rejects.toThrow('registry unreachable');
     expect(runtime.provision).toEqual({
       state: 'failed',
-      error: 'Installing Codex failed: registry unreachable',
+      error: 'Installing ChatGPT failed: registry unreachable',
     });
   });
 });

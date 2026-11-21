@@ -227,7 +227,7 @@ export const PROVIDERS = [
   },
   {
     id: 'codex',
-    label: 'Codex',
+    label: 'ChatGPT',
     modelPrefix: 'openai/',
     sessionIdPrefix: 'codex-',
     // Codex has no classifier-driven approval, so no `auto`.
@@ -268,7 +268,7 @@ export const PROVIDERS = [
       interrupt: true,
       steer: true,
     },
-    // Codex has no setting that deletes or expires its own sessions: it keeps
+    // ChatGPT has no setting that deletes or expires its own sessions: it keeps
     // every session until one is deleted (`codex delete`). What its own
     // configuration does offer is its prompt history (`[history]` in each
     // CODEX_HOME's config.toml, codex-cli 0.154): whether it is kept at all, and
@@ -278,7 +278,7 @@ export const PROVIDERS = [
         key: 'history.persistence',
         label: 'Keep prompt history',
         description:
-          'Codex saves every prompt to its own history file. Off, it saves none. Sessions are kept either way.',
+          'ChatGPT saves every prompt to its own history file. Off, it saves none. Sessions are kept either way.',
         kind: 'toggle',
         min: 0,
         max: 1,
@@ -289,7 +289,7 @@ export const PROVIDERS = [
         key: 'history.max_bytes',
         label: 'Prompt history size',
         description:
-          'Codex drops its oldest saved prompts once the history file grows past this size.',
+          'ChatGPT drops its oldest saved prompts once the history file grows past this size.',
         kind: 'megabytes',
         min: 1,
         max: 10240,
@@ -299,7 +299,7 @@ export const PROVIDERS = [
     ],
     ownConfigFormat: 'toml',
     settingsNote:
-      'Codex has no setting to delete old sessions. It keeps every session until you delete it with Codex itself.',
+      'ChatGPT has no setting to delete old sessions. It keeps every session until you delete it with ChatGPT itself.',
     ownSettingsReportedByHost: false,
     nativeDuplicates: ['patch_agent'],
   },

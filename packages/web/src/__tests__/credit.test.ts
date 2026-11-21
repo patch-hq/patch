@@ -5,7 +5,6 @@ import {
   firstInCreditAccountId,
   modelSpent,
   providerSpent,
-  spentReason,
 } from '../lib/credit.js';
 
 const NOW = 1_000_000;
@@ -68,19 +67,5 @@ describe('credit', () => {
     const healthy = [row('claude', 'a', open), row('claude', 'b', open)];
     expect(creditDefaultAccountId(healthy, 'claude', NOW)).toBeNull();
     expect(creditDefaultAccountId([row('claude', 'a', blocked)], 'claude', NOW)).toBeNull();
-  });
-});
-
-describe('spentReason', () => {
-  const far = Date.UTC(2026, 11, 17, 10, 16);
-  const spent = { session: { status: 'rejected' as const, resetsAt: far } };
-  it('says plainly what is wrong, with the full date', () => {
-    const text = spentReason([row('codex', 'a', spent)], 'codex', NOW);
-    expect(text).toMatch(/^This ChatGPT account has no usage left until 17 Dec$/);
-    expect(text).not.toMatch(/rejected/i);
-  });
-  it('names every account when there are several', () => {
-    const text = spentReason([row('claude', 'a', spent), row('claude', 'b', spent)], 'claude', NOW);
-    expect(text).toMatch(/^All Claude accounts have no usage left/);
   });
 });

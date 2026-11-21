@@ -63,7 +63,7 @@ import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { UsageCrumb } from '../components/UsageCrumb.js';
 import { Edit3 } from 'lucide-react';
 import { loadModels, useModelCatalog } from '../lib/models.js';
-import { creditDefaultAccountId, modelSpent, useCredit } from '../lib/credit.js';
+import { creditDefaultAccountId, modelSpent, modelSpentReason, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from '../components/ErrorDetail.js';
 import { HostPicker } from '../components/HostPicker.js';
@@ -1311,13 +1311,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 type="button"
                 className={`folder-pill ${folder !== '' && !folderIsQuick ? 'selected' : ''}`}
                 data-testid="new-chat-folder-pill"
+                title={folder || undefined}
                 aria-haspopup="listbox"
                 aria-expanded={pickerOpen}
                 onClick={() => setPickerOpen((v) => !v)}
               >
                 {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
               browsed path, or one past the chips); otherwise the pill is the
-              way to the rest of the list and says so. No tooltip. */}
+              way to the rest of the list and says so. The full path is the tooltip. */}
                 <span className="folder-pill-label">
                   {folderIsQuick ? 'Other…' : folder ? folderName(folder) : 'Choose a folder…'}
                 </span>
@@ -1461,10 +1462,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                           <span className="folder-browser-crumb-name">
                             {folderName(browse.dir)}
                           </span>
-                          {/* LRM either side: under the rtl tail-keeping overflow the bare
-                          leading and trailing "/" otherwise jump to the opposite end
-                          ("Users/me/" instead of "/Users/me"). */}
-                          <span className="folder-browser-crumb-path mono">{`\u200E${browse.dir}\u200E`}</span>
                         </span>
                       ) : null}
                       {browseLoading ? (
@@ -1579,9 +1576,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               ) : null}
             </div>
           </div>
-          <p className="new-chat-folder-path mono muted" data-testid="new-chat-folder-path">
-            {folder}
-          </p>
         </div>
         {/* The model: the account default first, marked, then the head of the
             catalogue, and the pill that opens the full live list (spec/14 §
@@ -1600,7 +1594,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   onKeyDown={handleQuickModelKeyDown}
                 >
                   {quickModels.map((id) => {
-                    const spent = modelSpent(id, credit.rows, credit.apiKeyProviders);
+                    const spentReason = modelSpentReason(id, credit.rows, credit.apiKeyProviders);
+                    const spent = spentReason !== null;
                     return (
                       <button
                         key={id}
@@ -1612,7 +1607,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                         className={`model-quick ${id === effectiveModel ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
                         data-testid={`model-quick-${id}`}
                         aria-pressed={id === effectiveModel}
-                        title={spent ? 'No usage remaining on any account' : undefined}
+                        title={spentReason ?? undefined}
                         disabled={spent || (signedOut && !hostHasCreditSource)}
                         onClick={() => chooseModel(id)}
                       >

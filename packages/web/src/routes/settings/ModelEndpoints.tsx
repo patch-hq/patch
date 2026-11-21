@@ -16,7 +16,7 @@ import { patchShared, writeShared } from './sharedWrite.js';
 import { Group, Note, Row } from './ui.js';
 
 export const API_LABEL: Record<ModelEndpointApi, string> = {
-  openai: 'OpenAI-compatible · runs in Codex',
+  openai: 'OpenAI-compatible · runs in ChatGPT',
   anthropic: 'Anthropic-compatible · runs in Claude Code',
 };
 

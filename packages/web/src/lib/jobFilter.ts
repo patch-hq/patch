@@ -36,7 +36,7 @@ export const JOB_TRIGGER_FILTERS: ReadonlyArray<{ value: JobTriggerFilter; label
   { value: 'cron', label: 'Cron' },
   { value: 'recurrence', label: 'Recurrence' },
   { value: 'follows', label: 'Follows' },
-  { value: 'webhook', label: 'Webhook' },
+  { value: 'webhook', label: 'Incoming request' },
   { value: 'todoist', label: 'Todoist' },
 ];
 

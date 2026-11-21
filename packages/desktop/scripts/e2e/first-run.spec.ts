@@ -453,7 +453,7 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await newcomerSidebar(welcome);
   // With a host: no folder is chosen for the first chat, and the model reads
   // by the name setup used, never as an id.
-  await expect(welcome.getByTestId('new-chat-folder-path')).toHaveText('');
+  await expect(welcome.getByTestId('new-chat-folder-pill')).not.toHaveAttribute('title', /.+/);
   await expect(welcome.getByTestId('new-chat-setup')).not.toContainText('claude-');
   await shot(welcome, 'new-chat-this-computer');
 
