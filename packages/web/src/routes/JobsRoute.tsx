@@ -248,11 +248,14 @@ export function JobsRoute(): JSX.Element {
           <Plus size={16} aria-hidden /> New job
         </Link>
       </header>
-      <JobDefaults />
+      {isLoading || jobs.length > 0 ? <JobDefaults /> : null}
       {isLoading ? (
         <p>Loading…</p>
       ) : jobs.length === 0 ? (
-        <JobsEmpty />
+        <>
+          <JobsEmpty />
+          <JobDefaults />
+        </>
       ) : matches.length === 0 ? (
         <p className="jobs-no-matches" data-testid="jobs-no-matches">
           {noMatchesMessage(query.trim(), filter)}

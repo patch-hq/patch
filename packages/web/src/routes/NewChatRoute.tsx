@@ -1261,7 +1261,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             that opens the picker for the rest, to browse, or to type a path.
             Same toggle and same host pairing as the pop-up's rows. No tooltip:
             the chip reads the project name and nothing hides behind it. */}
-        <span className="new-chat-setup-label">Project</span>
+        <span className="new-chat-setup-label top">Project</span>
         <div className="new-chat-project-cell" ref={folderAnchorRef}>
           <div className="new-chat-setup-row">
             <div

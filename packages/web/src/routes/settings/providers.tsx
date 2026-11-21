@@ -97,7 +97,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
   }),
   spec({
     id: 'codex',
-    name: 'Codex',
+    name: 'ChatGPT',
     windows: ['session', 'week'],
     pasteToken: false,
     signInDetail: 'Sign in with ChatGPT using a code you approve on any device',
