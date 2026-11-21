@@ -18,6 +18,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
+import { AUDIO_RELAY_READY_TIMEOUT_MS } from '../src/audio-relay.js';
 import { Registry } from '../src/registry.js';
 import { PresenceTracker } from '../src/presence.js';
 import { InProcessHostLink } from '../src/host-link.js';
@@ -460,6 +461,40 @@ describe('audio relay: tunnelled over the host link (no audioRelayHost declared)
     });
     await closePromise;
   });
+
+  it('refuses with a named host_unreachable when an online host never confirms the tunnelled session', async () => {
+    const { sessionId, audioUrl } = await mintToken();
+    const client = new WebSocket(`${serverUrl}${audioUrl}`);
+    const clientLog = new MessageLog(client);
+    const closePromise = waitClose(client, 12_000);
+    await waitOpen(client);
+    const got = await clientLog.next(12_000);
+    expect(JSON.parse(got.data.toString('utf8'))).toMatchObject({
+      type: 'audio.error',
+      code: 'host_unreachable',
+      message: expect.stringContaining('did not answer the call setup'),
+    });
+    expect(
+      hostLink.sent.some(
+        (s) =>
+          s.event.type === 'patch.audio_relay.close' &&
+          (s.event as { sessionId: string }).sessionId === sessionId,
+      ),
+    ).toBe(true);
+    await closePromise;
+  }, 20_000);
+
+  it('does not refuse a tunnelled session once the host has confirmed it (ready)', async () => {
+    const { sessionId, audioUrl } = await mintToken();
+    const client = new WebSocket(`${serverUrl}${audioUrl}`);
+    const clientLog = new MessageLog(client);
+    await waitOpen(client);
+    hostLink.emit({ type: 'patch.audio_relay.ready', sessionId } as unknown as WireEvent, HOST_ID);
+    await new Promise((r) => setTimeout(r, AUDIO_RELAY_READY_TIMEOUT_MS + 500));
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    await expect(clientLog.next(200)).rejects.toThrow('timeout');
+    client.close();
+  }, 20_000);
 
   it('counts a live call while its socket is open, and none after it closes', async () => {
     expect(audioCalls.active()).toBe(0);
