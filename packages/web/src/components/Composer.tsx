@@ -2366,7 +2366,7 @@ export const Composer = forwardRef(function Composer(
           </button>
         </div>
       ) : null}
-      {claudeDisconnected && !edit ? (
+      {claudeDisconnected && !edit && !isNewChat ? (
         // The input stays, so a draft can be written, but it says at once why
         // it won't send and goes straight to signing in.
         <div className="composer-signed-out" data-testid="composer-signed-out" role="status">
@@ -2885,7 +2885,7 @@ export const Composer = forwardRef(function Composer(
               // reconnect (Todoist 6hWrcpCQFqXGJpF6). A missing Claude
               // credential is the one case that disables the field itself:
               // that turn can never run at all.
-              disabled={claudeDisconnected}
+              disabled={claudeDisconnected && !isNewChat}
               rows={1}
             />
             {/* Dictate sits inside the field, bottom-right, so the action row

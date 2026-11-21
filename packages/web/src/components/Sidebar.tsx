@@ -59,7 +59,11 @@ import { clearComposerDraft } from '../stores/composerDraftStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
-import { useExperimentalFeatures } from '../stores/preferencesStore.js';
+import {
+  anyProviderConnected,
+  useExperimentalFeatures,
+  usePreferencesStore,
+} from '../stores/preferencesStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
@@ -613,6 +617,9 @@ function RegularSidebar({
   sectionCounts: SectionCounts | null;
 }): JSX.Element {
   const experimental = useExperimentalFeatures();
+  const hydrated = useChatStore((s) => s.hydrated);
+  const noChats = useChatStore((s) => Object.keys(s.chats).length === 0);
+  const noAI = usePreferencesStore((s) => anyProviderConnected(s.shared)) === false;
   const channelsGlyphs = useActionGlyphs('toggleChannels');
   const archivedGlyphs = useActionGlyphs('toggleArchived');
   const navigate = useNavigate();
@@ -863,6 +870,20 @@ function RegularSidebar({
             {showCatchingUp ? (
               <div className="catching-up" data-testid="sidebar-catching-up" aria-live="polite">
                 Catching up…
+              </div>
+            ) : null}
+
+            {/* Nothing yet: a new install has no chats, and a blank list reads
+                as broken. With no AI connected the next step is connecting one. */}
+            {!showSidebarSkeleton && hydrated && noChats && !attentionOnly ? (
+              <div className="empty-hint" data-testid="sidebar-empty">
+                {noAI ? (
+                  <>
+                    No chats yet. <Link to={CONNECT_PATH}>Connect an AI</Link> to start one.
+                  </>
+                ) : (
+                  'No chats yet. Start one with New chat.'
+                )}
               </div>
             ) : null}
 

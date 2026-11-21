@@ -570,6 +570,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // `null` = not reported yet; only a definite `connected: false` blocks, so a
   // slow first report does not flash a wall of red on every load.
   const hostHasCreditSource = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
+  const noAI = usePreferencesStore((s) => anyProviderConnected(s.shared)) === false;
   const signedOut =
     usePreferencesStore((s) =>
       providerConnectedForModel(
@@ -1218,10 +1219,16 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       {/* One labelled row per decision, in the order they are taken: host,
           project, model, account (spec/14 §8). A row with nothing to decide —
           one host, one account — is absent rather than drawn with one chip. */}
+      {/* The one prompt for a chat that cannot run yet. The folder and the
+          first message stay open: the message is kept as a draft. */}
       {signedOut ? (
         <p className="new-chat-setup-reason" data-testid="new-chat-setup-reason" role="status">
-          Project and model are unavailable until you sign in to{' '}
-          {providerNameForModel(effectiveModel)}. <Link to={CONNECT_PATH}>Sign in</Link>
+          {noAI ? (
+            <>Connect an AI, Claude or ChatGPT, to send. Your message is kept.</>
+          ) : (
+            <>Sign in to {providerNameForModel(effectiveModel)} to send. Your message is kept.</>
+          )}{' '}
+          <Link to={CONNECT_PATH}>{noAI ? 'Connect an AI' : 'Sign in'}</Link>
         </p>
       ) : null}
       <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
@@ -1280,7 +1287,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   className={`folder-quick ${f === folder ? 'selected' : ''}`}
                   data-testid={`folder-quick-${f}`}
                   aria-pressed={f === folder}
-                  disabled={signedOut}
                   onClick={() => chooseFolder(f)}
                 >
                   {folderOptionLabels[folderOptions.indexOf(f)]}
@@ -1291,7 +1297,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   type="button"
                   className="folder-quick"
                   data-testid="folder-suggest-home"
-                  disabled={signedOut}
                   onClick={() => chooseFolder(homeFolder)}
                 >
                   Home folder
@@ -1308,8 +1313,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 data-testid="new-chat-folder-pill"
                 aria-haspopup="listbox"
                 aria-expanded={pickerOpen}
-                // Nothing here can be acted on until the host can run a turn.
-                disabled={signedOut}
                 onClick={() => setPickerOpen((v) => !v)}
               >
                 {/* The folder's BASENAME when no chip shows the choice (an ad-hoc or
@@ -1586,63 +1589,67 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             live chat's model, so the app has one model control rather than
             two. No deselect: a chat always spawns on some model. Nothing is
             offered while the catalogue is unreadable — the pop-up says why. */}
-        <span className="new-chat-setup-label">Model</span>
-        <div className="new-chat-setup-row">
-          {quickModels.length > 0 ? (
-            <div
-              className="new-chat-quick new-chat-quick-models"
-              data-testid="new-chat-quick-models"
-              onKeyDown={handleQuickModelKeyDown}
-            >
-              {quickModels.map((id) => {
-                const spent = modelSpent(id, credit.rows, credit.apiKeyProviders);
-                return (
-                  <button
-                    key={id}
-                    ref={(el) => {
-                      if (el) quickModelRefs.current.set(id, el);
-                      else quickModelRefs.current.delete(id);
-                    }}
-                    type="button"
-                    className={`model-quick ${id === effectiveModel ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
-                    data-testid={`model-quick-${id}`}
-                    aria-pressed={id === effectiveModel}
-                    title={spent ? 'No usage remaining on any account' : undefined}
-                    disabled={spent || (signedOut && !hostHasCreditSource)}
-                    onClick={() => chooseModel(id)}
-                  >
-                    <span className="quick-label">
-                      {compactModelLabel(id, catalogModels.find((m) => m.id === id)?.label)}
-                    </span>
-                    {id === hostModel ? <span className="quick-sub">default</span> : null}
-                  </button>
-                );
-              })}
+        {noAI ? null : (
+          <>
+            <span className="new-chat-setup-label">Model</span>
+            <div className="new-chat-setup-row">
+              {quickModels.length > 0 ? (
+                <div
+                  className="new-chat-quick new-chat-quick-models"
+                  data-testid="new-chat-quick-models"
+                  onKeyDown={handleQuickModelKeyDown}
+                >
+                  {quickModels.map((id) => {
+                    const spent = modelSpent(id, credit.rows, credit.apiKeyProviders);
+                    return (
+                      <button
+                        key={id}
+                        ref={(el) => {
+                          if (el) quickModelRefs.current.set(id, el);
+                          else quickModelRefs.current.delete(id);
+                        }}
+                        type="button"
+                        className={`model-quick ${id === effectiveModel ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
+                        data-testid={`model-quick-${id}`}
+                        aria-pressed={id === effectiveModel}
+                        title={spent ? 'No usage remaining on any account' : undefined}
+                        disabled={spent || (signedOut && !hostHasCreditSource)}
+                        onClick={() => chooseModel(id)}
+                      >
+                        <span className="quick-label">
+                          {compactModelLabel(id, catalogModels.find((m) => m.id === id)?.label)}
+                        </span>
+                        {id === hostModel ? <span className="quick-sub">default</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <ModelPicker
+                selected={effectiveModel}
+                onSelect={chooseModel}
+                open={modelOpen}
+                onToggle={() => setOpenPicker((v) => (v === 'model' ? null : 'model'))}
+                anchorRef={modelAnchorRef}
+                placement={modelPlacement}
+                testId="new-chat-model"
+                disabled={signedOut && !hostHasCreditSource}
+                active={!modelIsQuick && effectiveModel !== null}
+                {...(modelIsQuick ? { triggerLabel: 'More…' } : {})}
+              />
+              {effectiveModel !== null && effectiveModel !== accountDefaultModel ? (
+                <button
+                  type="button"
+                  className="new-chat-make-default"
+                  data-testid="new-chat-make-default"
+                  onClick={makeDefaultModel}
+                >
+                  Set as default
+                </button>
+              ) : null}
             </div>
-          ) : null}
-          <ModelPicker
-            selected={effectiveModel}
-            onSelect={chooseModel}
-            open={modelOpen}
-            onToggle={() => setOpenPicker((v) => (v === 'model' ? null : 'model'))}
-            anchorRef={modelAnchorRef}
-            placement={modelPlacement}
-            testId="new-chat-model"
-            disabled={signedOut && !hostHasCreditSource}
-            active={!modelIsQuick && effectiveModel !== null}
-            {...(modelIsQuick ? { triggerLabel: 'More…' } : {})}
-          />
-          {effectiveModel !== null && effectiveModel !== accountDefaultModel ? (
-            <button
-              type="button"
-              className="new-chat-make-default"
-              data-testid="new-chat-make-default"
-              onClick={makeDefaultModel}
-            >
-              Set as default
-            </button>
-          ) : null}
-        </div>
+          </>
+        )}
         {/* The account this chat is LOCKED to (spec/10 § Backend
             credentials — preferred account): a spent account is waited on, not
             walked past. Auto leaves the choice to the account strategy. Only the chosen model's backend's accounts are offered,
