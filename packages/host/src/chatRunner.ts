@@ -2953,7 +2953,88 @@ export class Daemon {
   /** The pause is over: forget what was to release it. */
   private clearLimitWait(chatId: string): void {
     this.limitNext.delete(chatId);
+    this.limitHolds.delete(chatId);
     this.creditReturned.delete(chatId);
+  }
+
+  /**
+   * The limit each held turn met, reported whole on every `chat.state` while
+   * the turn is held (`limitHold`), and kept on the park so a restart reports
+   * the same hold and can re-arm its reset.
+   */
+  private readonly limitHolds = new Map<string, TurnLimit>();
+
+  /**
+   * Arm the release of a parked turn at its reset, through the resume line:
+   * every chat parked on the same reset has a timer firing at the same instant.
+   */
+  private armLimitResetTimer(chatId: string, at: number): void {
+    const existing = this.rateLimitTimers.get(chatId);
+    if (existing) clearTimeout(existing);
+    this.rateLimitResumingAt.set(chatId, at);
+    const timer = setTimeout(
+      () => {
+        this.rateLimitTimers.delete(chatId);
+        // The pause bubble is lifted when the turn is released.
+        if (!this.rateLimitPendingTurns.has(chatId)) {
+          this.rateLimitResumingAt.delete(chatId);
+          this.limitBlocks.delete(chatId);
+          this.clearLimitWait(chatId);
+          this.resumeKindMap.delete(chatId);
+          this.unparkTurn(chatId);
+          this.emitState(chatId);
+          return;
+        }
+        this.enqueueResume(chatId, () => this.releaseParkedChat(chatId, 'rl'));
+      },
+      Math.min(Math.max(0, at - this.opts.now()), 2_147_483_000),
+    );
+    this.rateLimitTimers.set(chatId, timer);
+  }
+
+  /**
+   * After a restart, once the accounts are known (spec/10 § Limits): each park
+   * the restart carried over, which nothing would otherwise wake, is released
+   * through the resume line at once when its behaviour lets the host release it
+   * and it may run now (its stated reset has passed, or an account it may use
+   * has credit); a park whose reset is still ahead has its reset re-armed. A
+   * park waiting for the user (`switch_provider`, `ask`) is left for the user.
+   * Returns what it did, for the log.
+   */
+  releaseRestoredParks(): { released: string[]; armed: string[] } {
+    const released: string[] = [];
+    const armed: string[] = [];
+    const now = this.opts.now();
+    for (const chatId of [...this.rateLimitPendingTurns.keys()]) {
+      if (this.rateLimitTimers.has(chatId) || this.runs.has(chatId)) continue;
+      const next = this.limitNext.get(chatId) ?? this.limitBehaviour;
+      if (next === 'ask' || next === 'switch_provider') continue;
+      const resetsAt = this.limitHolds.get(chatId)?.resetsAt;
+      const model = this.chatState.get(chatId)?.model;
+      // Where the host can say whether any account it may use has credit, it is
+      // asked; where it cannot, the provider is: a refusal parks the turn again.
+      const credit =
+        !harnessTraitsForModel(model).hostCreditAggregate ||
+        this.opts.hostOutOfCredit?.(chatId) !== true;
+      // A reset still ahead with credit elsewhere is tried now too: the turn
+      // runs on whichever account it may use has credit, and a refusal (its
+      // only account still spent) parks it again, holding the line.
+      if ((resetsAt !== undefined && resetsAt <= now) || credit) {
+        released.push(chatId);
+        this.enqueueResume(chatId, () => this.releaseParkedChat(chatId, 'acct'));
+      } else if (resetsAt !== undefined) {
+        armed.push(chatId);
+        this.armLimitResetTimer(chatId, resetsAt);
+        this.emitState(chatId);
+      }
+    }
+    if (released.length + armed.length > 0) {
+      this.opts.logger.info(
+        { released, armed },
+        'resume: parks carried over a restart — released where they may run, reset re-armed where it is ahead',
+      );
+    }
+    return { released, armed };
   }
 
   /**
@@ -3840,6 +3921,8 @@ export class Daemon {
           this.parkedTurns.set(m.chatId, head);
           this.rateLimitPendingTurns.set(m.chatId, head);
           if (head.limitNext !== undefined) this.limitNext.set(m.chatId, head.limitNext);
+          // The same hold as before the restart: the limit, its account and reset.
+          if (head.limit !== undefined) this.limitHolds.set(m.chatId, head.limit);
           // The turns queued behind it were owed too; put them back in order.
           for (const q of recorded.slice(1)) {
             this.enqueueQueued(
@@ -8086,6 +8169,8 @@ export class Daemon {
     retryOfSeq: number | undefined,
     waitingFor: 'credit' | 'retry',
     limitNext?: LimitNext,
+    /** For a credit wait, the limit the turn met (`limitHold`). */
+    limit?: TurnLimit,
   ): void {
     // spec/09 § Whose turn it was — a park is the SAME turn waiting to go round
     // again, so it keeps the origin it already had. Read off chat state, which
@@ -8098,6 +8183,7 @@ export class Daemon {
       ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
       waitingFor,
       ...(limitNext !== undefined ? { limitNext } : {}),
+      ...(limit !== undefined ? { limit } : {}),
     });
     this.persistPendingTurns(chatId);
   }
@@ -11220,8 +11306,17 @@ export class Daemon {
           if (next !== undefined) this.limitNext.set(chatId, next);
           else this.limitNext.delete(chatId);
           this.creditReturned.delete(chatId);
+          /** The limit this turn met, as held while it is owed (`limitHold`). */
+          let hold: TurnLimit | undefined;
           if (resumeKind === 'rate_limit') {
             this.setLimitBlock(chatId, errMsg, limit, statedResetsAt);
+            const block = this.limitBlocks.get(chatId);
+            hold = {
+              ...(block?.accountId !== undefined ? { accountId: block.accountId } : {}),
+              scope: block?.scope ?? 'unknown',
+              ...(statedResetsAt !== undefined ? { resetsAt: statedResetsAt } : {}),
+              message: errMsg,
+            };
           }
           if (prompt !== undefined) {
             this.rateLimitPendingTurns.set(chatId, {
@@ -11229,7 +11324,8 @@ export class Daemon {
               localId,
               ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
             });
-            this.parkTurn(chatId, prompt, localId, turnAnchorSeq, 'credit', next);
+            if (hold) this.limitHolds.set(chatId, hold);
+            this.parkTurn(chatId, prompt, localId, turnAnchorSeq, 'credit', next, hold);
           }
           // A usage limit is a failed turn that happens to be owed, not a
           // finished one: `idle` drew the green tick and rang "finished". The
@@ -11262,14 +11358,7 @@ export class Daemon {
             // account, with the provider's words and stated reset. The server
             // reads the account's state to say whether that is a pause, a
             // sign-in or out of credit (spec/12 § Limits and sign-in).
-            if (prompt !== undefined) {
-              turnLimit = {
-                ...(block?.accountId !== undefined ? { accountId: block.accountId } : {}),
-                scope: block?.scope ?? 'unknown',
-                ...(statedResetsAt !== undefined ? { resetsAt: statedResetsAt } : {}),
-                message: errMsg,
-              };
-            }
+            if (prompt !== undefined && hold) turnLimit = hold;
             this.chatState.setLastError(chatId, detail);
             this.chatState.setActivity(chatId, 'errored');
             // A wait that is not coming back soon is an error to read, not a
@@ -11325,23 +11414,7 @@ export class Daemon {
             { chatId, resumeAt, delayMs, resumeKind },
             'rate limit / overload hit — scheduling auto-resume',
           );
-          const timer = setTimeout(() => {
-            this.rateLimitTimers.delete(chatId);
-            // Through the resume line, not straight to `sendInput`: every chat
-            // parked on the same reset has a timer firing at the same instant.
-            // The pause bubble is lifted when the turn is released.
-            if (!this.rateLimitPendingTurns.has(chatId)) {
-              this.rateLimitResumingAt.delete(chatId);
-              this.limitBlocks.delete(chatId);
-              this.clearLimitWait(chatId);
-              this.resumeKindMap.delete(chatId);
-              this.unparkTurn(chatId);
-              this.emitState(chatId);
-              return;
-            }
-            this.enqueueResume(chatId, () => this.releaseParkedChat(chatId, 'rl'));
-          }, delayMs);
-          this.rateLimitTimers.set(chatId, timer);
+          this.armLimitResetTimer(chatId, resumeAt);
           return false;
         }
         // The credential passed the pre-query gate but the API rejected it, so
@@ -16326,6 +16399,10 @@ export class Daemon {
       limitNext:
         this.limitNext.get(chatId) ??
         (this.rateLimitPendingTurns.has(chatId) ? this.limitBehaviour : null),
+      // The limit the held turn met, whole, on every frame while it is held.
+      limitHold: this.rateLimitPendingTurns.has(chatId)
+        ? (this.limitHolds.get(chatId) ?? null)
+        : null,
       creditReturned: this.creditReturned.has(chatId),
       // spec/02 § Background task completions — how many of this chat's
       // patch_watch tasks are still running after the turn that launched them
