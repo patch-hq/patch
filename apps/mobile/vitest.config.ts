@@ -19,6 +19,14 @@ import path from 'node:path';
 // React renderer, not a DOM one).
 
 export default defineConfig({
+  plugins: [
+    {
+      // Metro resolves audio assets to a numeric module id; under Node a stub id is enough.
+      name: 'wav-asset-stub',
+      transform: (_code: string, id: string) =>
+        id.endsWith('.wav') ? { code: 'export default 1;', map: null } : null,
+    },
+  ],
   test: {
     include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
     environment: 'node',
