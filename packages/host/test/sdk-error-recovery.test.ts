@@ -327,7 +327,7 @@ describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
     daemon.shutdown();
   });
 
-  it('the fresh restart says plainly the new session has no memory of the chat, and carries the message', async () => {
+  it('the fresh restart is given the message itself, the memory boundary said in the record', async () => {
     const prompts: string[] = [];
     let calls = 0;
     const backend: SdkBackend = {
@@ -343,11 +343,10 @@ describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
     await daemon.spawnChat({ folder, prompt: 'latest question' });
     await new Promise((r) => setTimeout(r, 150));
     expect(calls).toBe(3);
-    // The resumed re-send repeats the prompt; the fresh one says, visibly, that
-    // the new session knows nothing of the chat (nothing is rebuilt).
-    expect(prompts[1]).not.toContain('no memory of this chat');
-    expect(prompts[2]).toContain('no memory of this chat');
-    expect(prompts[2]).toContain('latest question');
+    // Neither attempt got as far as the provider taking the turn, so each is
+    // given the message itself; the record's own divider says the fresh
+    // session has no memory of the chat (nothing is rebuilt).
+    expect(prompts).toEqual(['latest question', 'latest question', 'latest question']);
     daemon.shutdown();
   });
 });

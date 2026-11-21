@@ -130,14 +130,7 @@ import {
   type SdkRunOptions,
 } from './sdkBackend.js';
 import { eventIdentity, identityHash, persistedUserContent, type SessionProbe } from './history.js';
-import {
-  NOTE_END_LINE,
-  escapeNoteText,
-  extractNotes,
-  noteBlock,
-  unescapeNoteText,
-  type NoteItem,
-} from './notes.js';
+import { extractNotes, noteBlock, type NoteItem } from './notes.js';
 import { randomUUID } from 'node:crypto';
 import { WakeScheduler, parseDelayMs, type WakeRecord } from './wake.js';
 import { LiveChats, metaHasLiveWork } from './liveChats.js';
@@ -1021,40 +1014,32 @@ const TITLE_GEN_RETRY_DELAY_MS = 3_000;
  */
 export const CONTINUE_MESSAGE = 'Carry on from where you were cut off.';
 
-/**
- * Folded into a turn the reader moved to another model with Retry. The turn did
- * not finish on the model that started it; the new one resumes the same session
- * and is told to continue it.
- */
-export const MODEL_SWITCH_TURN_REMINDER = noteBlock(
-  'Turn moved to another model',
-  'This turn was cut off partway through and has been moved to a different model. ' +
-    'Check what had already been done before you continue — carry on from there ' +
-    'rather than starting the whole request again.',
-);
+/** Why an owed turn is being sent again, in the words its continue message uses. */
+export type OwedTurnCause = 'limit' | 'restart' | 'error' | 'sleep' | 'abort' | 'account';
+
+const OWED_TURN_CAUSE_TEXT: Record<OwedTurnCause, string> = {
+  limit: 'a usage limit',
+  restart: 'a restart',
+  error: 'an error',
+  sleep: 'the host going to sleep',
+  abort: 'its session stopping',
+  account: 'an account running out of credit',
+};
 
 /**
- * Folded into a turn re-sent on a fresh session after the SDK aborted its
- * session twice. Patch does not rebuild the old session (spec/04 § Resume), so
- * the new one knows nothing of the chat: the note says so, visibly, and the
- * model works from the message and what it can see in the folder.
+ * What an owed turn sends when the provider already holds its prompt (spec/12
+ * § A turn is owed until it settles, plan decision 22): an ordinary visible
+ * message, never the prompt again.
  */
-export const SESSION_RESTART_TURN_REMINDER = noteBlock(
-  'Turn restarted on a new session',
-  'This turn was cut off partway through when its session failed, and has been restarted ' +
-    'on a new session that has no memory of this chat. Check the folder for what had ' +
-    'already been done before acting, and ask if the request depends on earlier context ' +
-    'you cannot see.',
-);
+export function continueOwedTurnMessage(cause: OwedTurnCause): string {
+  return `Continue — the last turn was cut off by ${OWED_TURN_CAUSE_TEXT[cause]}.`;
+}
 
 /** Longest stretch of one message a handover note carries. */
 const MANAGER_HANDOVER_MESSAGE_CHARS = 4_000;
 
 /** Messages a session rotation carries over when no `managerContextWindow` is set. */
 const ROTATION_CARRY_MESSAGES = 40;
-
-const ORIGINAL_OPEN = '<original-prompt>\n';
-const ORIGINAL_CLOSE = '\n</original-prompt>';
 
 /**
  * spec/04 § Goals — check-in. A goal set without a check-in cadence gets this
@@ -1076,41 +1061,6 @@ function sameQueue(a: string[], b: string[]): boolean {
 
 function sameEvery(a: ReminderEvery | null, b: ReminderEvery | null): boolean {
   return a === b || (a !== null && b !== null && a.unit === b.unit && a.n === b.n);
-}
-
-/**
- * Appends the interrupted turn's own prompt to a restart reminder, inside the
- * reminder block so it reaches the agent but is stripped from the chat text.
- * The resumed session does not reliably still hold the original ask (nor its
- * autonomy instructions), so without this a bare "Carry on" leaves the agent
- * guessing. Any closing tag in the prompt is escaped so it cannot end the block.
- */
-function withOriginalPrompt(reminder: string, original: string): string {
-  const body = ORIGINAL_OPEN + escapeNoteText(original) + ORIGINAL_CLOSE;
-  const end = reminder.lastIndexOf('\n' + NOTE_END_LINE);
-  return (
-    reminder.slice(0, end) +
-    '\nThe prompt that turn was given, in full — follow it, including any instructions about ' +
-    'not asking questions:\n' +
-    body +
-    reminder.slice(end)
-  );
-}
-
-/**
- * The prompt a previously resumed turn carried, so a second restart re-supplies
- * the real original rather than the previous reminder wrapped around "Carry on".
- */
-function originalPromptOf(message: string): string {
-  const start = message.indexOf(ORIGINAL_OPEN);
-  const end = message.lastIndexOf(ORIGINAL_CLOSE);
-  if (!message.startsWith('[Note: ') || start < 0 || end < start) return message;
-  return unescapeNoteText(message.slice(start + ORIGINAL_OPEN.length, end));
-}
-
-/** The text a cut-off head turn is re-sent as. */
-export function interruptedTurnResend(reminder: string, turnMessage: string): string {
-  return withOriginalPrompt(reminder, originalPromptOf(turnMessage)) + 'Carry on';
 }
 
 /**
@@ -1581,6 +1531,13 @@ export interface SendInputOptions {
    * same thing is still a new turn, not an attempt at an old one.
    */
   retryOfSeq?: number;
+  /**
+   * The turn's message is ALREADY in the record at this seq and the provider
+   * never received it (plan decision 22, `owedTurnInput`): it is delivered to
+   * the provider now without writing it again, so the chat shows it once and
+   * the existing entry is the one the model answers.
+   */
+  deliverDrawn?: number;
   /**
    * The host is re-sending a turn it accepted under this SAME `localId`
    * before a restart (`resumeInterruptedTurns`). The chat's accepted localIds
@@ -2665,7 +2622,7 @@ export class Daemon {
    * owes nothing, so the caller can say nothing happened rather than imply it
    * did.
    */
-  resumeRateLimitedNow(chatId: string, opts?: { carryOn?: boolean }): boolean {
+  resumeRateLimitedNow(chatId: string): boolean {
     // A limit nobody parked is offered the same control (spec/12): auto-resume
     // decides whether a TIMER was set, not whether the turn is still owed. The
     // owed turn is the parked one — written by the limit path itself, and by the
@@ -2715,19 +2672,19 @@ export class Daemon {
     this.emitState(chatId);
     if (!pending) return true;
     const state = this.chatState.get(chatId);
-    // A retry on another model continues the turn rather than repeating its
-    // prompt, as a restart does: the work done so far is in what the model gets.
+    // A turn the provider already holds continues with a visible message (on
+    // whichever model it now runs); one it never received is delivered once
+    // under the entry it already has (`owedTurnInput`).
+    const input = this.owedTurnInput(chatId, pending.message, pending.retryOfSeq, 'limit');
     void this.sendInput({
       chatId,
-      message: opts?.carryOn
-        ? interruptedTurnResend(MODEL_SWITCH_TURN_REMINDER, pending.message)
-        : pending.message,
+      message: input.message,
       localId: this.resumeLocalId('manual', chatId),
       // Waiting out a limit does not change whose turn it was (spec/09).
       ...(state?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
-      // spec/12 § A turn is owed until it settles — the bubble is already on
-      // screen from the attempt the limit killed, so fold onto it.
-      ...(pending.retryOfSeq !== undefined ? { retryOfSeq: pending.retryOfSeq } : {}),
+      // spec/12 § A turn is owed until it settles — a re-sent prompt folds onto
+      // the bubble already on screen from the attempt the limit killed.
+      ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
     });
     return true;
   }
@@ -2864,14 +2821,15 @@ export class Daemon {
     this.emitState(chatId);
     const state = this.chatState.get(chatId);
     this.owedResend.add(chatId);
+    const input = this.owedTurnInput(chatId, pending.message, pending.retryOfSeq, 'limit');
     return this.sendInput({
       chatId,
-      message: pending.message,
+      message: input.message,
       localId: this.resumeLocalId(kind, chatId),
       // Waiting out a limit does not change whose turn it was (spec/09).
       ...(state?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
       // spec/12 § A turn is owed until it settles.
-      ...(pending.retryOfSeq !== undefined ? { retryOfSeq: pending.retryOfSeq } : {}),
+      ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
     });
   }
 
@@ -3605,6 +3563,92 @@ export class Daemon {
   }
 
   /**
+   * The ONE decision every path that sends an owed turn again goes through
+   * (plan decision 22): Patch never re-sends what the provider already has.
+   *
+   * The provider holds the turn's prompt when the session the turn would
+   * resume took it and answered: something the provider produced after the
+   * turn's user message at `anchorSeq` (its reply, a tool call or result, its
+   * thinking) carries a `nativeRef` naming the chat's current session, or, for
+   * entries recorded before provider ids were kept, the provider produced
+   * output after it while the chat still has a session. Then the turn
+   * continues with a short visible message instead, and that message is an
+   * ordinary entry of its own. Otherwise — refused before the provider took
+   * it, or a session that has since been retired — the prompt is delivered
+   * once more WITHOUT a second entry: the one already in the record is what
+   * the model answers (`deliverDrawn`). Either way the record holds the
+   * original message once.
+   */
+  private owedTurnInput(
+    chatId: string,
+    prompt: string,
+    anchorSeq: number | undefined,
+    cause: OwedTurnCause,
+  ): { message: string; deliverDrawn?: number; continued: boolean } {
+    if (anchorSeq === undefined || !this.providerHoldsTurn(chatId, anchorSeq)) {
+      // Never received: delivered once more, under the entry it already has
+      // (a turn never drawn is drawn now, as any first attempt is).
+      return {
+        message: prompt,
+        ...(anchorSeq !== undefined ? { deliverDrawn: anchorSeq } : {}),
+        continued: false,
+      };
+    }
+    // Kept so a continue that lands on a session the provider has since lost
+    // can still give the original prompt to the fresh one.
+    this.continuedTurns.set(chatId, { prompt, anchorSeq });
+    this.opts.logger.info(
+      { chatId, anchorSeq, cause },
+      'owed turn: the provider already has its prompt — continuing with a visible message instead of re-sending it',
+    );
+    return { message: continueOwedTurnMessage(cause), continued: true };
+  }
+
+  /** Does the chat's current session already hold the turn drawn at `anchorSeq`? */
+  private providerHoldsTurn(chatId: string, anchorSeq: number): boolean {
+    const sessionId = this.chatState.get(chatId)?.sessionId;
+    const meta = this.opts.metaStore.read(chatId);
+    if (sessionId === undefined || !meta) return false;
+    const records = readTrackRecords(
+      this.chatLog,
+      chatId,
+      meta,
+      meta.activeBranchId ?? this.branchIdFor(chatId),
+      anchorSeq - 1,
+    );
+    for (const record of records) {
+      if (record.seq < anchorSeq) continue;
+      // A user message's id is the one Patch gave it before sending, so it says
+      // nothing about whether the provider took the turn; only what the
+      // provider produced does.
+      const ev = record.rec.k === 'event' ? record.rec.event : undefined;
+      if (ev?.type === 'chat.message' && ev.role === 'user') continue;
+      if (record.nativeRef) {
+        if (record.nativeRef.sessionId === sessionId) return true;
+        continue;
+      }
+      if (!ev) continue;
+      if (
+        record.seq > anchorSeq &&
+        ((ev.type === 'chat.message' && ev.role === 'assistant') ||
+          ev.type === 'chat.tool_call' ||
+          ev.type === 'chat.tool_result')
+      )
+        return true;
+    }
+    return false;
+  }
+
+  /**
+   * Turns sent on as a continue message, by chat: the original prompt and its
+   * bubble, for when the session it relied on turns out to be gone.
+   */
+  private readonly continuedTurns = new Map<string, { prompt: string; anchorSeq: number }>();
+
+  /** `deliverDrawn` by `chatId\0localId`, from `sendInput` to the turn's run. */
+  private readonly drawnDeliveries = new Map<string, number>();
+
+  /**
    * Continue on an interrupted chat (`chat.continue_request`, spec/12 §
    * Continue): a visible message asking the agent to carry on, which reads in
    * the chat like any other message. A chat that is not interrupted (already
@@ -3705,13 +3749,12 @@ export class Daemon {
    * Message will resend."), and this is what makes that promise true — without
    * it the work simply stopped and waited for a human to notice and retype.
    *
-   * The head turn is re-sent with a note (its own `chat.note` entry, not part
-   * of the user's bubble) telling the agent it was cut off. The reminder also carries the turn's
-   * ORIGINAL prompt in full (`interruptedTurnResend`): the resumed session is
-   * not a reliable copy of it, and an autonomous turn's instructions ("don't ask
-   * questions") were being lost, so the agent guessed. Being inside the note
-   * the user's bubble stays short — what it shows is just `'Carry on'`. Turns
-   * that were only ever queued never began, so they go back verbatim.
+   * A head turn the restart cut off is not re-sent: the chat shows it
+   * Interrupted and Continue (or the automatic setting) carries it on with a
+   * visible message. Any other owed turn goes through `owedTurnInput`: one the
+   * provider already holds continues with a visible message, one it never
+   * received is delivered under the entry it already has. Turns that were only
+   * ever queued never began, so they go as they were.
    *
    * The head entry is trusted only as far as the chat's own log backs it up.
    * `persistPendingTurns` writes meta.json separately from (and after) the
@@ -3957,7 +4000,17 @@ export class Daemon {
           this.markInterrupted(m.chatId);
           continue;
         }
-        const message = turn.message;
+        // A turn the provider already holds (a head that was waiting on a
+        // retry when the host stopped) continues with a visible message; one
+        // only queued has no bubble yet and goes as it was. A reattached turn
+        // is the same turn still running and goes verbatim to reattach.
+        const input: { message: string; deliverDrawn?: number; retryOfSeq?: number } = reattach
+          ? {
+              message: turn.message,
+              ...(turn.retryOfSeq !== undefined ? { retryOfSeq: turn.retryOfSeq } : {}),
+            }
+          : this.owedTurnInput(m.chatId, turn.message, turn.retryOfSeq, 'restart');
+        const message = input.message;
         // Deliberately not awaited, and deliberately issued in one synchronous
         // pass: `sendInput` sets the chat's `pumping` guard before its first
         // await, so the second and later turns here see a live pump and queue
@@ -3989,7 +4042,8 @@ export class Daemon {
           // choosing to re-run a turn. Folding a restart's re-send into the
           // original bubble hid everything between attempts behind the pager
           // (spec/12 § Restart interruptions), so it draws as its own message.
-          ...(turn.retryOfSeq !== undefined ? { retryOfSeq: turn.retryOfSeq } : {}),
+          ...(input.retryOfSeq !== undefined ? { retryOfSeq: input.retryOfSeq } : {}),
+          ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
@@ -6990,6 +7044,11 @@ export class Daemon {
       throw new Error('This chat is moving to another host; send it again once it has arrived.');
     }
     this.rearmDelegate(req.chatId);
+    // Read by the run of this turn, by its localId: it carries the turn
+    // through the queue without a field of its own on every hop.
+    if (req.deliverDrawn !== undefined && req.localId !== undefined) {
+      this.drawnDeliveries.set(`${req.chatId}\u0000${req.localId}`, req.deliverDrawn);
+    }
 
     // `/goal` is Patch's, not Claude Code's: a person's turn that still leads
     // with it (a surface that did not strip it) sets the goal here and sends
@@ -8149,17 +8208,19 @@ export class Daemon {
     // localId) is the idempotency key, so re-sending under the failed turn's
     // id is silently deduped and the retry never happens. That made the
     // second and third rungs of the ladder unreachable.
+    const input = this.owedTurnInput(chatId, prompt, retryOfSeq, 'error');
     void this.sendInput({
       chatId,
-      message: prompt,
+      message: input.message,
       localId: `${localIdPrefix}-${this.opts.now()}`,
       // spec/09 § Whose turn it was — a retry is the same turn, so it settles
       // as whatever it was. A user turn that had to go round the error ladder
       // still notifies once; a wake tick that did still says nothing.
       ...(cur.turnOrigin ? { origin: cur.turnOrigin } : {}),
       // The fresh localId above is what makes the host RUN this rung at
-      // all; this is what stops every surface drawing it as a second message.
-      ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
+      // all; this is what stops every surface drawing a re-sent prompt as a
+      // second message.
+      ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
     }).catch((err: unknown) => {
       this.opts.logger.error({ chatId, err }, 'sdk error: retry could not be sent');
     });
@@ -9997,7 +10058,12 @@ export class Daemon {
     // to name the turn later — the crash marker, the park, the retry ladder —
     // reads THIS, so every rung points at the original rather than at the rung
     // before it.
-    let turnAnchorSeq: number | undefined = retryOfSeq;
+    // A turn already in the record that the provider never received is
+    // delivered now under the entry it already has (`deliverDrawn`).
+    const drawnKey = localId !== undefined ? `${chatId}\u0000${localId}` : undefined;
+    const deliverDrawn = drawnKey !== undefined ? this.drawnDeliveries.get(drawnKey) : undefined;
+    if (drawnKey !== undefined) this.drawnDeliveries.delete(drawnKey);
+    let turnAnchorSeq: number | undefined = deliverDrawn ?? retryOfSeq;
     /* v8 ignore next 3 -- defensive invariant only: every path into runQuery (runTurnsFrom / drainQueue) is serialized behind the synchronous `pumping` add/check with no `await` in between, so a second runQuery for the same chatId can never observe an existing aborter. Unreachable via the public API. */
     if (this.aborters.has(chatId)) {
       throw new Error(`runQuery: chat ${chatId} is already running`);
@@ -10483,6 +10549,8 @@ export class Daemon {
       retryOfSeq !== undefined &&
       this.durableAttach.has(chatId) &&
       this.durableAttach.get(chatId)?.localId === localId;
+    // Already drawn, never received: delivered now, recorded once.
+    const deliversDrawnTurn = !reattachesDrawnTurn && deliverDrawn !== undefined;
     // The session this turn resumes: a fork's is the one its kept entry was
     // written in; otherwise the chat's own, unless another provider made it
     // (that one is ended below and the turn starts fresh).
@@ -10494,11 +10562,14 @@ export class Daemon {
     const turnResumeId =
       fork?.throughNativeId === null ? undefined : (fork?.fromSessionId ?? ownSession);
     // A drawn turn being reattached already has its message and ids.
-    const turnIds = reattachesDrawnTurn
-      ? undefined
-      : this.userTurnIds(chatId, turnResumeId, fork !== undefined);
+    const turnIds =
+      reattachesDrawnTurn || deliversDrawnTurn
+        ? undefined
+        : this.userTurnIds(chatId, turnResumeId, fork !== undefined);
     if (reattachesDrawnTurn) {
       userMessageSeq = retryOfSeq;
+    } else if (deliversDrawnTurn) {
+      userMessageSeq = deliverDrawn;
     } else if (userContent !== null) {
       // spec/04 § Notes to the agent — each note this turn carries is its own
       // entry, ahead of the message it went with.
@@ -10931,12 +11002,13 @@ export class Daemon {
           turnOutcome = 'interrupted';
           turnError = undefined;
           const cur = this.chatState.get(chatId);
+          const input = this.owedTurnInput(chatId, prompt, turnAnchorSeq, 'sleep');
           void this.sendInput({
             chatId,
-            message: prompt,
+            message: input.message,
             localId: `sleep-retry-${chatId}-${++this.sleepRetrySeq}-${this.opts.now()}`,
             ...(cur?.turnOrigin ? { origin: cur.turnOrigin } : {}),
-            ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
+            ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
           });
           return false;
         }
@@ -11006,13 +11078,14 @@ export class Daemon {
             );
             if (prompt !== undefined) {
               this.failoverRerunPending.add(chatId);
+              const input = this.owedTurnInput(chatId, prompt, userMessageSeq, 'account');
               void this.sendInput({
                 chatId,
-                message: prompt,
+                message: input.message,
                 localId: `acct-failover-${chatId}-${this.opts.now()}`,
-                // The turn already has a bubble: name it rather than replay
-                // the message as a new one.
-                ...(userMessageSeq !== undefined ? { retryOfSeq: userMessageSeq } : {}),
+                // A re-sent prompt already has a bubble: name it rather than
+                // replay the message as a new one.
+                ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
                 ...(cur?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
               }).catch((err: unknown) => {
                 // The re-run never started: nothing is pending, so a snooze may end.
@@ -11349,14 +11422,17 @@ export class Daemon {
               { chatId, aborts, restartFresh, error: errMsg },
               'session aborted without a stop — re-sending the turn instead of the retry ladder',
             );
+            // A fresh session has none of the turn, so it gets the prompt; the
+            // same session already has it and is asked to continue.
+            // (On the fresh session the old one's work is gone, so the check
+            // finds nothing it holds and the prompt is delivered once more.)
+            const input = this.owedTurnInput(chatId, prompt, turnAnchorSeq, 'abort');
             void this.sendInput({
               chatId,
-              message: restartFresh
-                ? interruptedTurnResend(SESSION_RESTART_TURN_REMINDER, prompt)
-                : prompt,
+              message: input.message,
               localId: `session-abort-${chatId}-${aborts}-${this.opts.now()}`,
               ...(cur?.turnOrigin ? { origin: cur.turnOrigin } : {}),
-              ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
+              ...(input.deliverDrawn !== undefined ? { deliverDrawn: input.deliverDrawn } : {}),
             });
             this.chatState.setActivity(chatId, 'idle');
             this.emitState(chatId);
@@ -11386,12 +11462,17 @@ export class Daemon {
             { chatId, deadSessionId: deadSessionId ?? null, error: errMsg },
             'resumed onto a session with no transcript — re-sending the owed turn as a fresh session',
           );
+          // A continue message means nothing to a fresh session: it gets the
+          // turn's original prompt, folded onto the original bubble.
+          const original = this.continuedTurns.get(chatId);
+          this.continuedTurns.delete(chatId);
+          const anchor = original?.anchorSeq ?? turnAnchorSeq;
           void this.sendInput({
             chatId,
-            message: prompt,
+            message: original?.prompt ?? prompt,
             localId: this.resumeLocalId('rl', chatId),
             ...(cur?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
-            ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
+            ...(anchor !== undefined ? { deliverDrawn: anchor } : {}),
           });
           this.chatState.setActivity(chatId, 'idle');
           this.emitState(chatId);
@@ -16014,7 +16095,7 @@ export class Daemon {
     if (closest !== current) this.recordAutomaticPermissionModeChange(chatId, closest);
     this.emitState(chatId);
     // After the state is out, so the re-sent turn starts on the new model.
-    if (opts?.retry) this.resumeRateLimitedNow(chatId, { carryOn: true });
+    if (opts?.retry) this.resumeRateLimitedNow(chatId);
   }
 
   /**
