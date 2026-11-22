@@ -367,6 +367,29 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
     return list.map((f) => ({ path: f.path, data: Buffer.from(f.base64, 'base64') }));
   }
 
+  /**
+   * A Pad filed under Patch itself must be built from a capture of the real
+   * screen (the design kit's `real.css`) or carry a reference screenshot.
+   * Without either it is a lookalike, so say so in the tool result. A flag,
+   * not a refusal: the Pad is still made.
+   */
+  function referenceWarnings(app: string | null | undefined, files: FileInput[]): string[] {
+    if (!app || !/^patch$/i.test(app.trim())) return [];
+    const has = files.some((f) => {
+      const p = f.path.toLowerCase();
+      return (
+        /(^|\/)real\.css$/.test(p) ||
+        /(^|\/)reference[^/]*\.(png|jpe?g|webp)$/.test(p) ||
+        /(^|\/)reference\/.+\.(png|jpe?g|webp)$/.test(p)
+      );
+    });
+    return has
+      ? []
+      : [
+          'No real-Patch reference in this design (no real.css captured from the real app, no reference/ screenshot). It is a lookalike: capture the real screen with design/_kit and compare against a real screenshot before showing it.',
+        ];
+  }
+
   function deliver(pad: PadRecord, message: string): void {
     if (!deps.chatRegistry.get(pad.chatId)) {
       throw new PadError(502, `the chat this Pad belongs to (${pad.chatId}) no longer exists`);
@@ -823,15 +846,19 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
           chatId: req.chatId,
           device: req.device ?? 'desktop',
         });
+        const input = decodeFiles(req.files);
         try {
-          writeFiles(pad.id, decodeFiles(req.files), true);
+          writeFiles(pad.id, input, true);
           screensOf(pad.id);
         } catch (err) {
           store.remove(pad.id);
           throw err;
         }
         refreshThumbs(pad.id);
-        return view(store.mustGet(pad.id));
+        const warnings = referenceWarnings(pad.app, input);
+        return warnings.length
+          ? { ...view(store.mustGet(pad.id)), warnings }
+          : view(store.mustGet(pad.id));
       }
       case 'update': {
         const pad = owned(req.padId, req.chatId);
