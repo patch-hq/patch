@@ -36,6 +36,7 @@ function makeHandlers(): ShortcutHandlers {
     onGlobalVoiceStart: vi.fn(),
     onGlobalVoiceEnd: vi.fn(),
     onToggleSidebar: vi.fn(),
+    onToggleZen: vi.fn(),
     onToggleChannels: vi.fn(),
     onToggleArchived: vi.fn(),
     onPrevChat: vi.fn(),
@@ -193,6 +194,8 @@ describe('useShortcuts — G2 required chords', () => {
     expect(handlers.onSearch).toHaveBeenCalledTimes(1);
     press({ key: '/', metaKey: true });
     expect(handlers.onToggleSidebar).toHaveBeenCalledTimes(1);
+    press({ key: '.', metaKey: true });
+    expect(handlers.onToggleZen).toHaveBeenCalledTimes(1);
     press({ key: '1', metaKey: true });
     expect(handlers.onJumpManager).toHaveBeenCalledTimes(1);
     press({ key: '2', metaKey: true });

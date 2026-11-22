@@ -820,6 +820,8 @@ interface UiState {
   /** Whether the sidebar groups chats under projects or under status headings. */
   grouping: SidebarGrouping;
   sidebarCollapsed: boolean;
+  /** Zen mode: one chat, full screen, nothing else. Never persisted — a reload leaves it. */
+  zenMode: boolean;
   /** Sidebar drawn as a rail of status dots (spec/14 § Mini sidebar). */
   sidebarMini: boolean;
   setSidebarMini(v: boolean): void;
@@ -985,6 +987,7 @@ interface UiState {
   /** Fold a project's rows away in the sidebar, or unfold them again. */
   toggleFolderCollapsed(folder: string): void;
   setSidebarCollapsed(v: boolean): void;
+  setZenMode(v: boolean): void;
   setCheatSheetOpen(v: boolean): void;
   setGuideOpen(v: boolean): void;
   setDiagnosticsOpen(v: boolean): void;
@@ -1131,6 +1134,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   forgottenFolders: loadForgottenFolders(),
   collapsedFolders: loadCollapsedFolders(),
   sidebarCollapsed: loadSidebarHiddenParam(),
+  zenMode: false,
   sidebarMini: loadBool(SIDEBAR_MINI_KEY),
   cheatSheetOpen: false,
   guideOpen: false,
@@ -1249,6 +1253,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setSidebarCollapsed(v) {
     set({ sidebarCollapsed: v });
+  },
+  setZenMode(v) {
+    set({ zenMode: v });
   },
   setCheatSheetOpen(v) {
     set({ cheatSheetOpen: v });
