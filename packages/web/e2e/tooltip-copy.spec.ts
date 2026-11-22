@@ -66,6 +66,8 @@ for (const [name, url] of [
         if (String(t.testid).startsWith('goal-marker-')) return false;
         // The connection dot exposes live status for each link, not control help.
         if (t.testid === 'conn-dot') return false;
+        // The context ring's tooltip says what the gauge measures, on purpose.
+        if (t.testid === 'context-ring') return false;
         return words > 5 && !isFullValue(t);
       });
       expect(wordy).toEqual([]);

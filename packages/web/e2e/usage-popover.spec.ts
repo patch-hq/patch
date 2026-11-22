@@ -101,7 +101,8 @@ test.describe('usage popover', () => {
 
     const ring = page.getByTestId('context-ring');
     await expect(ring).toBeVisible();
-    await expect(ring).toHaveAttribute('title', 'Context 25% · 50k / 200k');
+    await expect(ring).toHaveAttribute('title',
+      'Context window 25% full · 50k / 200k. How much of this chat the agent can hold in mind at once.',);
     const r = await ring.boundingBox();
     const s = await page.getByTestId('send-btn').boundingBox();
     expect(r && s).toBeTruthy();
@@ -116,13 +117,13 @@ test.describe('usage popover', () => {
     await page.goto(HARNESS);
     await seed(page, { usedTokens: 50_000, windowTokens: 200_000, at: Date.now() });
     const ring = page.getByTestId('context-ring');
-    await expect(ring.getByTestId('context-ring-label')).toHaveText('25%');
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('Context 25%');
     await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
     await seed(page, { usedTokens: 50_000, at: Date.now() });
-    await expect(ring.getByTestId('context-ring-label')).toHaveText('?');
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('Context ?');
     await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
     await seed(page, null);
-    await expect(ring.getByTestId('context-ring-label')).toHaveText('Context –');
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('Context not measured');
     await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
   });
 
@@ -139,7 +140,10 @@ test.describe('usage popover', () => {
   test('an unknown window still shows the ring, unfilled', async ({ page }) => {
     await page.goto(HARNESS);
     await seed(page, { usedTokens: 50_000, at: Date.now() });
-    await expect(page.getByTestId('context-ring')).toHaveAttribute('title', 'Context ? · 50k / ?');
+    await expect(page.getByTestId('context-ring')).toHaveAttribute(
+      'title',
+      'Context window ? full · 50k / ?. How much of this chat the agent can hold in mind at once.',
+    );
   });
 
   test('the bottom usage control remains available before the chat has been measured', async ({
@@ -150,7 +154,10 @@ test.describe('usage popover', () => {
     const ring = page.getByTestId('context-ring');
     await expect(ring).toBeVisible();
     await expect(ring).toHaveClass(/unknown/);
-    await expect(ring).toHaveAttribute('title', 'Usage · context not measured');
+    await expect(ring).toHaveAttribute(
+      'title',
+      'Context window not measured yet. It shows how much of this chat the agent can hold in mind at once.',
+    );
     await ring.click();
     await expect(page.getByTestId('usage-popover')).toBeVisible();
     await expect(page.getByTestId('usage-pop-context')).toHaveCount(0);
