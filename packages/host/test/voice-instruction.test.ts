@@ -66,3 +66,14 @@ describe('task logging', () => {
     },
   );
 });
+
+describe('auto: practical and judgement calls', () => {
+  test('go to the agent, not answered by the voice', () => {
+    for (const async of [false, true]) {
+      const text = hostedVoiceInstruction('auto', async);
+      expect(text).toMatch(/only what is simple or conversational/i);
+      expect(text).toMatch(/judgement call/i);
+      expect(text).toMatch(/however sure you feel/i);
+    }
+  });
+});

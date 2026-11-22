@@ -304,6 +304,11 @@ const NO_FALSE_CLAIMS =
   '<noise> or leaves it empty: that is silence, not a request — say nothing and invent nothing.\n\n';
 
 const GENERAL_QUESTION_RULE =
+  'You answer only what is simple or conversational yourself: chat, a quick fact, a clarification ' +
+  'of what was just said. Anything practical or a judgement call — how to do or fit something, ' +
+  'whether a way of doing it is right or safe, what to choose or buy, a diagnosis — goes to the ' +
+  `agent through ${DISPATCH_TOOL_NAME}, however sure you feel: a confident wrong answer is worse ` +
+  'than a short wait, and the agent has the context. ' +
   'The conversation is not your only source: a general factual question ("when would I use X ' +
   'rather than Y?") is answered from your own knowledge. If you are not sure of the answer, or ' +
   `it needs looking up, call ${DISPATCH_TOOL_NAME} at once. Never say you have nothing in the ` +
