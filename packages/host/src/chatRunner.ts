@@ -652,6 +652,12 @@ export interface HostOptions {
     model: string;
   }) => Promise<SweepDecisionResult | null>;
   /**
+   * Speak a sweep run's feed (spec/06 § The feed): into an open call, or as a
+   * speak-only call. Unset, a run asked to speak records the failure in its
+   * result rather than staying silent unnoticed.
+   */
+  speakFeed?: (text: string) => void;
+  /**
    * Cross-host history read (spec/03 § Cross-chat tools — same relay
    * `patch_history` uses). `runManagerSweep` uses this for a candidate whose
    * `hostId` is not this host's own.
@@ -6389,6 +6395,7 @@ export class Daemon {
   private async buildSweepDigest(
     candidates: readonly ManagerSweepCandidate[],
     messagesPerChat: number,
+    speak = false,
   ): Promise<string> {
     const sections = await Promise.all(
       candidates.map(async (c) => {
@@ -6407,7 +6414,11 @@ export class Daemon {
       '{"decisions": [{"chatId": "...", "folder": "...", "action": "answer|digest|leave", "message": "...", "question": "...", "reason": "..."}]}\n' +
       '"answer": the standing instructions cover the question; "message" is what to send the chat. ' +
       '"digest": it ends in a question you cannot answer; "question" is that question in one plain line and "reason" says why you could not answer it (e.g. the standing instructions do not cover it, or it needs a person to decide). ' +
-      '"leave": no question. Give "chatId" and "folder" exactly as listed above. No prose outside the JSON.'
+      '"leave": no question. Give "chatId" and "folder" exactly as listed above. No prose outside the JSON.' +
+      (speak
+        ? '\nEvery entry, whatever its action, also has "summary": one short spoken sentence on what that chat just did, ' +
+          'naming the chat the way a person would (not its id), to be read aloud to Tom. Plain words, no markdown, no paths.'
+        : '')
     );
   }
 
@@ -6503,6 +6514,7 @@ export class Daemon {
     messagesPerChat: number;
     prompt: string;
     model: string;
+    speak?: boolean;
   }): Promise<ManagerSweepResultEvent> {
     if (!this.opts.decideSweep) {
       return {
@@ -6529,7 +6541,8 @@ export class Daemon {
     const epoch = this.sweepEpoch;
     const cancelled = (): boolean => this.sweepEpoch !== epoch || this.managerDisabled();
     if (cancelled()) return idle(0);
-    const digest = await this.buildSweepDigest(req.candidates, req.messagesPerChat);
+    const speak = req.speak === true;
+    const digest = await this.buildSweepDigest(req.candidates, req.messagesPerChat, speak);
     const result = await this.opts.decideSweep({
       digest,
       prompt: req.prompt,
@@ -6551,10 +6564,19 @@ export class Daemon {
     const digestLines: string[] = [];
     const digestPlain: string[] = [];
     const seen = new Set<string>();
+    /** The spoken feed, in the order the run answered (spec/06 § The feed). */
+    const spoken: string[] = [];
     for (const decision of result.decisions) {
       const candidate = byChatId.get(decision.chatId);
       if (!candidate || seen.has(decision.chatId)) continue; // not asked about, or a duplicate — ignore
       seen.add(decision.chatId);
+      if (speak) {
+        const summary = decision.summary?.trim();
+        if (summary) spoken.push(summary);
+        if (decision.action === 'digest' && decision.question?.trim()) {
+          spoken.push(`It asks: ${decision.question.trim()}`);
+        }
+      }
       const edge = candidate.edge;
       const leave = (detail: string): void => {
         actions.push({ chatId: candidate.chatId, action: 'leave', edge, detail });
@@ -6639,11 +6661,23 @@ export class Daemon {
         message: `${heading}:\n${digestPlain.join('\n')}`,
       });
     }
+    let speakError: string | undefined;
+    if (speak && spoken.length > 0 && !cancelled()) {
+      if (this.opts.speakFeed) {
+        const text = spoken.join(' ');
+        this.noteOnManager(`Spoken: ${text}`);
+        this.opts.speakFeed(text);
+      } else {
+        speakError = 'manager-sweep: feed is on but this host cannot speak it';
+        this.opts.logger.warn({ runId: req.runId }, speakError);
+      }
+    }
     return {
       type: 'manager.sweep_result',
       runId: req.runId,
       actions,
       tokensUsed: result.tokensUsed,
+      ...(speakError !== undefined ? { error: speakError } : {}),
     };
   }
 

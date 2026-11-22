@@ -115,6 +115,18 @@ export class CallOrchestrator {
       return callId;
     }
 
+    // spec/06 § The feed — a feed line is spoken or not placed. Under `notify`
+    // it does not ring: the chat's own finish notification already went out.
+    if (event.speakOnly === true) {
+      state.status = 'timeout';
+      this.scheduleGc(callId);
+      this.deps.logger.info(
+        { callId, chatId: event.chatId },
+        'call: speak-only and reach is notify, not placed',
+      );
+      return callId;
+    }
+
     // Fan out: concurrent push (urgent, kind=call) + desktop ring + chat.call_request.
     const ring: ChatCallRequestEvent = {
       type: 'chat.call_request',

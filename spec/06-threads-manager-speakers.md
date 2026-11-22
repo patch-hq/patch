@@ -323,6 +323,17 @@ Every message the Manager sends to a chat shows in the Manager thread as a quiet
 
 **Settings** (Manager settings page, `14-design-web.md` § `/settings` details): Sweep enabled (off by default), the delivery slider (Instant, 5 / 15 / 30 minutes, 1 / 2 / 4 / 8 hours, a day; default 30 minutes), messages per chat, the standing instructions, and the model the run uses (default a mid-size model). The standing instructions are editable plain text with a Reset to default (`principles.md` § No hidden prompt content); the default covers nothing, so by default every question goes to Tom.
 
+### The feed
+
+For when Tom is doing something else (DIY with a podcast on, a drive) and wants to hear what his chats are doing without looking. **Speak finishes** (`sweepSpeak`, off by default) on the Manager settings page turns it on; it rides on the sweep, so the sweep must be enabled too, and Instant is the timing that makes it a feed.
+
+With it on, the run's decision also returns, for every chat whatever its action, `summary`: one short spoken sentence on what that chat just did. After the run the summaries, followed by each open question ("It asks: …"), are joined into one message and spoken:
+
+- into an open call on the Manager host if there is one, the same way `patch_call` speaks into an open session;
+- otherwise as a speak-only call (`patch.call` with `speakOnly`): under `auto-notify` it is read out over whatever is playing (`09-notifications.md` § Reaching the user); under `notify` it is not placed at all — never a ring, because each chat's own finish notification has already gone out.
+
+What was spoken is noted on the Manager thread as a `system` entry. A run asked to speak on a host that has no way to speak reports that as the run's error rather than staying quiet.
+
 **Visible.** The Manager view shows a slim line — "Last sweep 14:30 · answered 2 · digest 1" — expandable to what it did to which chat for the last ten runs, with links to open each chat. Sweep runs are also recorded and listed like job runs (`08-triggers-and-jobs.md` § Logs).
 
 ## Speakers thread

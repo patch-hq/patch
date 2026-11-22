@@ -2647,6 +2647,8 @@ export const SharedSettings = z
     sweepPrompt: z.string().min(1),
     /** The model the sweep's one decision call runs on. */
     sweepModel: z.string().min(1),
+    /** The spoken feed (spec/06 § The feed): each sweep also writes one line on what every finished chat did, and the run's lines and open questions are spoken — into an open call, or over whatever is playing under `auto-notify`. Off by default. */
+    sweepSpeak: z.boolean(),
     /** The instructions the message-link Summarise button runs with; "Reset to default" writes `DEFAULT_LINK_SUMMARY_PROMPT` back. */
     linkSummaryPrompt: z.string().min(1),
     /** Meeting-mode instructions for the live "now" block; "Reset to default" writes `DEFAULT_MEETING_NOW_PROMPT` back. */
@@ -2879,6 +2881,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   sweepPrompt: DEFAULT_SWEEP_PROMPT,
   // Mid-size by default (spec/06 § Settings).
   sweepModel: 'claude-sonnet-5',
+  sweepSpeak: false,
   linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
   meetingNowPrompt: DEFAULT_MEETING_NOW_PROMPT,
   meetingNotesPrompt: DEFAULT_MEETING_NOTES_PROMPT,
@@ -5089,6 +5092,8 @@ export const ManagerSweepRunEvent = z
     messagesPerChat: z.number().int().positive(),
     prompt: z.string().min(1),
     model: z.string().min(1),
+    /** The spoken feed is on (spec/06 § The feed): ask for a summary line per chat and speak the run. Absent reads as off. */
+    speak: z.boolean().optional(),
   })
   .strict();
 export type ManagerSweepRunEvent = z.infer<typeof ManagerSweepRunEvent>;
@@ -10036,6 +10041,12 @@ export const PatchCallEvent = z
     chatId: z.string().min(1),
     /** Optional reason text — pre-call message; falls through as the push body on timeout. */
     message: z.string().optional(),
+    /**
+     * Speak it or nothing (spec/06 § The feed): spoken under `auto-notify`, and
+     * under `notify` not placed at all rather than ringing — a feed line is not
+     * worth a ring. Absent reads as an ordinary call.
+     */
+    speakOnly: z.boolean().optional(),
   })
   .strict();
 export type PatchCallEvent = z.infer<typeof PatchCallEvent>;

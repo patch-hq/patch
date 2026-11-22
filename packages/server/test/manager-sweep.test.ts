@@ -137,6 +137,25 @@ describe('ManagerSweeper', () => {
     expect(requested[0]!.candidates.map((c) => c.chatId)).toEqual(['c1']);
   });
 
+  test('the spoken feed is off by default, and the run carries the setting through', () => {
+    expect(DEFAULT_SETTINGS.sweepSpeak).toBe(false);
+    const seen: boolean[] = [];
+    const s2 = new ManagerSweeper({
+      chats,
+      settings: () => ({ ...settings, sweepIntervalMinutes: 0, sweepSpeak: true }),
+      managerHostId: () => 'd1',
+      runSweep: (req) => seen.push(req.speak),
+      cancelSweep: () => true,
+      runs,
+      logger,
+      now: () => nowMs,
+    });
+    emit(spawned('c1'));
+    s2.observe(state('c1', { activity: 'running' }));
+    s2.observe(state('c1', { activity: 'idle' }));
+    expect(seen).toEqual([true]);
+  });
+
   test('instant: a chat going idle while a run is in flight is picked up once it reports back', () => {
     settings = { ...settings, sweepIntervalMinutes: 0 };
     goIdle('c1');

@@ -5371,6 +5371,13 @@ async function startHost(
     // relays it uses to read a non-local candidate's recent messages and to
     // nudge/wake one (same relays `patch_history`/`patch_send_to` use).
     decideSweep: makeSweepDecider({ sdkBackend, runOnAccountWithCredit, logger }),
+    // spec/06 § The feed — a run's spoken lines go into an open call on this
+    // host if there is one (as `patch_call` does), otherwise to the server as a
+    // speak-only call: read out under `auto-notify`, never a ring.
+    speakFeed: (text: string) => {
+      if (audioServer?.interruptOpenCall(text) === true) return;
+      emit({ type: 'patch.call', chatId: 'thread_manager', message: text, speakOnly: true });
+    },
     historyRemoteChat: historyFromServer,
     sendToRemoteChat,
     emit,
