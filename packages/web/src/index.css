@@ -1220,9 +1220,9 @@ body {
      So separation between the fixed rows lives on the TOP margin of the row
      below, and their bottom margins are 0 — the idiom the rest of the sidebar
      already uses (`.sb-folder`, `.sb-recent-folders`, `.sb-pinned` and
-     `.sb-lifecycle` all separate themselves from what precedes them). The one
-     bottom margin left in the stack is `.sb-row.special`'s, which has nothing
-     below it but the band itself and so cannot double with anything. */
+     `.sb-lifecycle` all separate themselves from what precedes them). The Manager
+     row (`.sb-row.special`) sits above the header, which owns the gap below
+     it, so it carries no bottom margin. */
   display: flex;
   flex-direction: column;
   /* The aside itself NEVER scrolls (spec/14 § Sidebar → Scroll regions) — its
@@ -1577,7 +1577,7 @@ body {
      then landed in the narrow tools column and truncated ("…Ma…"). */
   grid-template-columns: 18px 1fr auto;
   font-weight: 600;
-  margin: 8px var(--sb-inset-right) 4px var(--sb-inset);
+  margin: 8px var(--sb-inset-right) 0 var(--sb-inset);
   /* Distinct special-status treatment (todo: "Manager needs a more distinct
      design"): reads as an accent-tinted card with an accent border so a new
      user can tell the meta-operator apart from ordinary chats at a glance. */

@@ -88,12 +88,17 @@ test('the band is taller than the chrome used to leave it', async ({ page }) => 
 test('the sidebar still reads as separate controls, not one fused stack', async ({ page }) => {
   await openReportedState(page);
   const seams = await chromeSeams(page);
-  // Reclaiming the doubling must not run the controls together. Only two
-  // seams may draw no gap: the chat list meeting the lifecycle group, and the
-  // lifecycle group meeting the bottom nav. Each is separated by a border, not
-  // space (the list runs to the divider on purpose).
+  // Reclaiming the doubling must not run the controls together. Only three
+  // seams may draw no gap: the header meeting the chat list, the chat list
+  // meeting the lifecycle group, and the lifecycle group meeting the bottom
+  // nav. Each is separated by a border, not space (the list runs to the
+  // divider on purpose).
   const fused = seams.filter((s) => s.gap === 0).map((s) => `${s.above} | ${s.below}`);
-  expect(fused).toEqual(['sb-scroll | sb-lifecycle', 'sb-lifecycle | sb-bottom']);
+  expect(fused).toEqual([
+    'sb-header | sb-scroll',
+    'sb-scroll | sb-lifecycle',
+    'sb-lifecycle | sb-bottom',
+  ]);
 });
 
 test('the chat list scrolls all the way to the divider above the lifecycle bar', async ({
