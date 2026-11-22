@@ -132,6 +132,10 @@ export function ClaudeSignIn({
           </button>
           {apiKey}
         </div>
+        <p className="set-sub" data-testid="claude-signin-explain">
+          claude.ai will ask to connect “Claude Code”. That is how Patch runs Claude. Sign in
+          however claude.ai offers, including an emailed link or your work single sign-on.
+        </p>
         {error ? (
           <p className="set-error" role="alert" data-testid="claude-signin-error">
             {error}
