@@ -104,6 +104,13 @@ const INPUT_FORMAT = 'pcm_16000';
 const OUTPUT_FORMAT = 'pcm_24000';
 
 /**
+ * Longest a call may run. Set explicitly: left unset, ElevenLabs applies its own
+ * default cap (about 10 minutes) and cuts longer calls off. One hour bounds the
+ * spend at the $0.08/min billing rate (about $4.80) if a call is left open.
+ */
+export const ELEVENLABS_MAX_CALL_SECONDS = 3600;
+
+/**
  * How long a reply's audio must be quiet, once its full text has arrived, before
  * the reply counts as finished. ElevenLabs never marks the last audio chunk
  * (`is_final` stays false and `agent_response_complete` is not sent — observed
@@ -416,6 +423,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
             tool_ids: this.toolIds,
           },
         },
+        conversation: { max_duration_seconds: ELEVENLABS_MAX_CALL_SECONDS },
         asr: { user_input_audio_format: INPUT_FORMAT },
         tts: {
           agent_output_audio_format: OUTPUT_FORMAT,
@@ -914,7 +922,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private onWsClose(code: number, reason: Buffer | string): void {
     if (this.closed) return;
     const why = typeof reason === 'string' ? reason : reason?.toString('utf8');
-    const message = `ElevenLabs Agents closed the session (code ${code}${why ? `: ${why}` : ''})`;
+    const hitLimit = code === 1000 && /max call duration/i.test(why ?? '');
+    const message = hitLimit
+      ? 'The call reached its time limit. Retry to continue.'
+      : `ElevenLabs Agents closed the session (code ${code}${why ? `: ${why}` : ''})`;
     if (this.setupWaiter) {
       const w = this.setupWaiter;
       this.setupWaiter = undefined;

@@ -178,6 +178,7 @@ describe('ElevenLabsAgentSession — provisioning', () => {
     expect(agent['conversation_config'].agent.prompt.tool_ids).toEqual(['tool-1', 'tool-2']);
     expect(agent['conversation_config'].agent.prompt.prompt).toContain('garden');
     expect(agent['conversation_config'].agent.first_message).toBe('');
+    expect(agent['conversation_config'].conversation.max_duration_seconds).toBe(3600);
     expect(agent['conversation_config'].asr.user_input_audio_format).toBe('pcm_16000');
     expect(agent['conversation_config'].tts.agent_output_audio_format).toBe('pcm_24000');
     expect(rest.some((r) => r.path.includes('get-signed-url?agent_id=agent-1'))).toBe(true);
@@ -205,6 +206,16 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       '/v1/convai/tools/tool-1?force=true',
       '/v1/convai/tools/tool-2?force=true',
     ]);
+  });
+
+  test('hitting the max call duration is reported as a time limit, not a generic close', async () => {
+    const { deps, events, onFatal, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.emit('close', 1000, Buffer.from('Max call duration exceeded'));
+    expect(onFatal).toHaveBeenCalled();
+    const err = events.find((e) => e.type === 'audio.error') as { message: string };
+    expect(err.message).toBe('The call reached its time limit. Retry to continue.');
   });
 
   test('a rejected provisioning call is fatal and reported — no fallback', async () => {
