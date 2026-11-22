@@ -628,7 +628,7 @@ test.describe('new chat header', () => {
     await seedUsage(page);
     const crumb = page.getByTestId('chat-usage');
     await expect(crumb).toBeVisible();
-    await expect(crumb).toHaveAttribute('aria-label', '5-hour 42%');
+    await expect(crumb).toHaveAttribute('aria-label', '5-hour 42% used');
     await expect(crumb.locator('.chat-usage-bar i')).toHaveAttribute('style', /width: 42%/);
 
     // Opens the same popover a live chat's crumb does, with no context section
