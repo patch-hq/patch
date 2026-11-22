@@ -18,7 +18,7 @@
 // app's own output.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -50,6 +50,18 @@ async function answering(origin) {
     () => null,
   );
   return r?.ok ? await r.json().catch(() => ({})) : null;
+}
+
+// The app registers its login item only once the person has chosen on the
+// Keep running step (keep-running.json exists). This script stands in for that
+// choice: open at login on.
+if (mode === 'login-item') {
+  const prefs = join(DATA, 'keep-running.json');
+  if (!existsSync(prefs)) {
+    mkdirSync(DATA, { recursive: true });
+    writeFileSync(prefs, JSON.stringify({ openAtLogin: true, keepAwake: true }));
+    log(`recorded the Keep running choice in ${prefs}`);
+  }
 }
 
 const before = rememberedOrigin();
