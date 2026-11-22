@@ -115,6 +115,31 @@ describe('pads', () => {
     }
   });
 
+  it('flags a Patch Pad that carries no real-app reference', async () => {
+    const { built, ask } = await makeApp();
+    try {
+      const make = async (app: string, extra: string[]) => {
+        const res = await ask('c1', {
+          op: 'create',
+          name: 'Host offline',
+          app,
+          files: [
+            { path: 'index.html', base64: b64(PAGE) },
+            ...extra.map((path) => ({ path, base64: b64('x') })),
+          ],
+        });
+        expect(res.ok, JSON.stringify(res.error)).toBe(true);
+        return res.result as { warnings?: string[] };
+      };
+      expect((await make('Patch', [])).warnings?.[0]).toMatch(/No real-Patch reference/);
+      expect((await make('Patch', ['real.css'])).warnings).toBeUndefined();
+      expect((await make('patch', ['reference/chat.png'])).warnings).toBeUndefined();
+      expect((await make('Dog Log', [])).warnings).toBeUndefined();
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('answers a signature of multi-byte characters with 401, not a 500', async () => {
     const { built, create } = await makeApp();
     try {
