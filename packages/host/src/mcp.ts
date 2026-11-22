@@ -1446,15 +1446,24 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_ask_human',
     {
       description:
-        "Say you are BLOCKED until the user does something themselves, in the world: grant a permission the OS will only take by hand, plug something in, sign a form, take a photo. Not for a decision (ask a question) and not for approving a tool (that already prompts) — this is for work only they can do. It pushes to their phone, pulls this chat out of Hidden (or Archived), and leaves the task ON the chat's row until they act on it — so a hidden job cannot sit blocked where nobody is looking, and a missed notification does not lose the request. Say the task as an instruction they could follow without reading the chat ('grant Screen Recording to Foreman Observer in System Settings'), and put the consequence in `why` ('until then I am judging your day from window titles alone'). Having called it, decide for yourself whether to wait or carry on with what is still possible. If the result says delivered:false (the chat is snoozed) the user was NOT pushed; the task is still on the chat's row.",
+        "Say you are BLOCKED until the user does something themselves, in the world: grant a permission the OS will only take by hand, plug something in, sign a form, take a photo. Not for a decision (ask a question) and not for approving a tool (that already prompts) — this is for work only they can do. It pushes to their phone, pulls this chat out of Hidden (or Archived), and leaves the task ON the chat's row until they act on it — so a hidden job cannot sit blocked where nobody is looking, and a missed notification does not lose the request. Say the task as an instruction they could follow without reading the chat ('grant Screen Recording to Foreman Observer in System Settings'), and put the consequence in `why` ('until then I am judging your day from window titles alone'). If this chat has a goal, the goal is held (not judged impossible) until they reply, or until `until` passes. Having called it, decide for yourself whether to wait or carry on with what is still possible. If the result says delivered:false (the chat is snoozed) the user was NOT pushed; the task is still on the chat's row.",
       inputSchema: {
         task: z.string().min(1),
         why: z.string().min(1).optional(),
+        until: z
+          .string()
+          .optional()
+          .describe('ISO time the blocker clears by itself; an armed goal resumes then.'),
       },
     },
-    async ({ task, why }) => {
+    async ({ task, why, until }) => {
       const body: Record<string, unknown> = { task, callerChatId };
       if (why !== undefined) body['why'] = why;
+      if (until !== undefined) {
+        const at = Date.parse(until);
+        if (Number.isNaN(at)) throw new Error('patch_ask_human: until must be an ISO time');
+        body['resumeAt'] = at;
+      }
       const res = await uds<unknown>({ method: 'POST', path: '/internal/ask_human', body });
       return toolResult(res);
     },

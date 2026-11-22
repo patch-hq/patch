@@ -953,6 +953,7 @@ const AskHumanBody = z
   .object({
     task: z.string().min(1),
     why: z.string().min(1).optional(),
+    resumeAt: z.number().int().positive().optional(),
     callerChatId: z.string().min(1),
   })
   .strict();
@@ -4246,7 +4247,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { task, why, callerChatId } = parsed.data;
+    const { task, why, resumeAt, callerChatId } = parsed.data;
     if (!limiter.check(`ask_human:${callerChatId}`)) {
       toolLog({
         tool: 'patch_ask_human',
@@ -4275,6 +4276,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // idle like every other — the one chat in a month that genuinely needed a
     // person, indistinguishable from the ones that merely finished.
     await opts.daemon!.declareStatus(callerChatId, 'question', task);
+    // An armed goal waits too, rather than being judged impossible meanwhile.
+    opts.daemon!.holdGoalForUser(callerChatId, resumeAt);
     if (opts.emitWire) {
       const event: WireEvent = {
         type: 'notify',

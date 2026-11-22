@@ -284,6 +284,37 @@ describe('maybeEvaluateGoal — relentless until met, stopped only by a deadlock
     expect(state?.lastGoal?.outcome).toBe('met');
   });
 
+  it('a goal held by the agent for a stated time resumes when the time passes', async () => {
+    let n = 0;
+    const evaluateGoal: EvaluateGoal = async () => {
+      n += 1;
+      return n === 1
+        ? { verdict: 'blocked', reason: 'Mac is inside Nightlock hours' }
+        : { verdict: 'met', reason: 'tested' };
+    };
+    const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('waiting') });
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Test on the Mac');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+    expect(daemon.chatState.get(chatId)?.goalProgress?.waitingOnUser).toBe(true);
+
+    daemon.holdGoalForUser(chatId, Date.now() + 100);
+    expect(daemon.chatState.get(chatId)?.goalProgress?.waitingOnUser).toBe(true);
+    await tick(600);
+    expect(n).toBe(2);
+    expect(daemon.chatState.get(chatId)?.lastGoal?.outcome).toBe('met');
+  });
+
+  it('holdGoalForUser does nothing for a chat with no goal', async () => {
+    const { daemon, folder } = setup(async () => ({ verdict: 'met', reason: 'x' }));
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    daemon.holdGoalForUser(chatId);
+    expect(daemon.chatState.get(chatId)?.goalProgress ?? null).toBeNull();
+  });
+
   it('presses on after the first two refusals, resubmitting the reason as guidance', async () => {
     let n = 0;
     const evaluateGoal: EvaluateGoal = async () => {
