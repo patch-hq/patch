@@ -1607,59 +1607,6 @@ export function ChatRoute({
     [chatId],
   );
 
-  // A `turnFailed` message was already delivered and run — its `localId` is
-  // permanently used up (the host dedups a repeat), so retrying it is a
-  // brand new turn with the same text, not a re-send of the old localId
-  // (unlike `handleRetryDelivery`, which re-sends one that never took effect).
-  const handleRetryTurn = useCallback(
-    (clicked: ChatEventEntry): void => {
-      if (!ws) {
-        pushError('not connected');
-        return;
-      }
-      // Retrying an assistant reply re-runs the user turn it answered.
-      let entry = clicked;
-      if (clicked.role === 'assistant') {
-        const tl = useChatStore.getState().timelines[chatId] ?? [];
-        const at = tl.findIndex((e) => e === clicked || e.seq === clicked.seq);
-        const prior = tl
-          .slice(0, at < 0 ? 0 : at)
-          .reverse()
-          .find(
-            (e) =>
-              e.kind === 'message' &&
-              e.role === 'user' &&
-              !e.goalTrigger &&
-              !e.hookTrigger &&
-              !e.jobTrigger &&
-              e.origin !== 'machine' &&
-              (e.content ?? '').length > 0,
-          );
-        if (!prior) {
-          pushError('no earlier message to retry');
-          return;
-        }
-        entry = prior;
-      }
-      const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      // spec/12 § Retry in place — no second bubble: the retry names the turn it
-      // re-runs and the host folds the result into that bubble as another
-      // attempt (the `< >` pager). The failure mark on the bubble stays until
-      // the retry is observed running, so an undelivered retry is not silent.
-      const disabledTools = useToolsStore.getState().disabledFor(chatId);
-      deliveryTracker.submit(
-        chatId,
-        entry.content ?? '',
-        localId,
-        entry.attachments,
-        (e) => ws.send(e),
-        disabledTools,
-        entry.seq,
-      );
-    },
-    [ws, chatId, pushError],
-  );
-
   // spec/14 § Running-turn controls — a `turnStopped` message was already seen
   // by the agent before the user stopped it, so "Continue" sends a fresh nudge
   // turn rather than re-submitting this message's text (which the agent already
@@ -1781,6 +1728,74 @@ export function ChatRoute({
       return true;
     },
     [ws, chatId, pushError],
+  );
+
+  // A `turnFailed` message was already delivered and run — its `localId` is
+  // permanently used up (the host dedups a repeat), so retrying it is a
+  // brand new turn with the same text, not a re-send of the old localId
+  // (unlike `handleRetryDelivery`, which re-sends one that never took effect).
+  const handleRetryTurn = useCallback(
+    (clicked: ChatEventEntry): void => {
+      if (!ws) {
+        pushError('not connected');
+        return;
+      }
+      // Retrying an assistant reply re-runs the user turn it answered.
+      let entry = clicked;
+      if (clicked.role === 'assistant') {
+        const tl = useChatStore.getState().timelines[chatId] ?? [];
+        const at = tl.findIndex((e) => e === clicked || e.seq === clicked.seq);
+        const prior = tl
+          .slice(0, at < 0 ? 0 : at)
+          .reverse()
+          .find(
+            (e) =>
+              e.kind === 'message' &&
+              e.role === 'user' &&
+              !e.goalTrigger &&
+              !e.hookTrigger &&
+              !e.jobTrigger &&
+              e.origin !== 'machine' &&
+              (e.content ?? '').length > 0,
+          );
+        if (!prior) {
+          pushError('no earlier message to retry');
+          return;
+        }
+        entry = prior;
+      }
+      // A turn that ran and settled is already in the agent's session, so a
+      // second copy would be read as the user asking again. Where the provider
+      // can branch, fork at the turn instead: the new track replaces the
+      // message and its reply rather than adding to them (spec/04 § Branching).
+      if (
+        !entry.turnFailed &&
+        modelHasCapability(useChatStore.getState().chats[chatId]?.model ?? null, 'editAtMessage')
+      ) {
+        void handleFork(
+          entry.seq,
+          entry.content ?? '',
+          (entry.attachments ?? []).map((ref) => ({ name: ref.name, kind: ref.kind, ref })),
+        );
+        return;
+      }
+      const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // spec/12 § Retry in place — no second bubble: the retry names the turn it
+      // re-runs and the host folds the result into that bubble as another
+      // attempt (the `< >` pager). The failure mark on the bubble stays until
+      // the retry is observed running, so an undelivered retry is not silent.
+      const disabledTools = useToolsStore.getState().disabledFor(chatId);
+      deliveryTracker.submit(
+        chatId,
+        entry.content ?? '',
+        localId,
+        entry.attachments,
+        (e) => ws.send(e),
+        disabledTools,
+        entry.seq,
+      );
+    },
+    [ws, chatId, pushError, handleFork],
   );
 
   // Carry a settled user turn back into the main composer: its text, and every
