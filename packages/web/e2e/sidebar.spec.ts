@@ -145,7 +145,9 @@ test.describe('sidebar', () => {
       .getByTestId('chat-row-chat_bus')
       .scrollIntoViewIfNeeded()
       .catch(() => {});
-    await page.getByTestId('folder-archive-/home/tom/projects/bus').click({ force: true });
+    // The folder's actions only take space while its header is hovered.
+    await page.locator('.sb-folder').filter({ has: page.getByTestId('folder-archive-/home/tom/projects/bus') }).hover();
+    await page.getByTestId('folder-archive-/home/tom/projects/bus').click();
 
     // The app's own modal appears — a real DOM dialog with a fixed-position
     // overlay, not the Mac-native confirm().
@@ -172,7 +174,9 @@ test.describe('sidebar', () => {
     await page.route('**/api/chats/**', (r) => r.fulfill({ status: 200, body: '{"ok":true}' }));
     await page.goto(HARNESS);
     await expect(page.getByTestId('chat-row-chat_bus')).toBeVisible();
-    await page.getByTestId('folder-archive-/home/tom/projects/bus').click({ force: true });
+    // The folder's actions only take space while its header is hovered.
+    await page.locator('.sb-folder').filter({ has: page.getByTestId('folder-archive-/home/tom/projects/bus') }).hover();
+    await page.getByTestId('folder-archive-/home/tom/projects/bus').click();
     await expect(page.getByTestId('confirm-modal')).toBeVisible();
     await page.getByTestId('confirm-cancel').click();
     await expect(page.getByTestId('confirm-modal')).toHaveCount(0);

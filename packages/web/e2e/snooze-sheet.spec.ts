@@ -259,7 +259,9 @@ test.describe('snooze sheet', () => {
     page,
   }) => {
     await seed(page, THREE());
-    await page.getByTestId(`folder-snooze-${FOLDER}`).click({ force: true });
+    // The folder's actions only take space while its header is hovered.
+    await page.locator('.sb-folder').filter({ has: page.getByTestId(`folder-snooze-${FOLDER}`) }).hover();
+    await page.getByTestId(`folder-snooze-${FOLDER}`).click();
     await expect(page.getByTestId('snooze-sheet-title')).toHaveText('Snooze work');
     await expect(page.getByTestId('snooze-sheet-subtitle')).toHaveText('3 chats');
     const box = page.getByTestId('snooze-sheet-run');
@@ -279,7 +281,9 @@ test.describe('snooze sheet', () => {
     // Pinned: near 09:00 the wall clock hides 1 day / Tomorrow 9am as duplicates.
     await page.clock.setFixedTime(new Date('2026-10-21T10:00:00Z'));
     await seed(page, THREE());
-    await page.getByTestId(`folder-snooze-${FOLDER}`).click({ force: true });
+    // The folder's actions only take space while its header is hovered.
+    await page.locator('.sb-folder').filter({ has: page.getByTestId(`folder-snooze-${FOLDER}`) }).hover();
+    await page.getByTestId(`folder-snooze-${FOLDER}`).click();
     await page.getByTestId('snooze-sheet-preset-1-day').click();
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('snooze-sheet')).toHaveCount(0);
