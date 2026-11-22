@@ -33,6 +33,7 @@ const delegateControl = vi.fn(
 
 vi.mock('../api/rest.js', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     delegateControl: (c: string, d: string, a: string) => delegateControl(c, d, a),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),

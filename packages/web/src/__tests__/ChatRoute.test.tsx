@@ -35,6 +35,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
       // The Manager's model pill names its model, so it reads the catalogue.
       models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
       getNotifications: vi.fn(async () => ({ items: [], unread: 0 })),
+      getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
       markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
       getFileContent: vi.fn(async (_chatId: string, _path: string) => ({
         path: _path,

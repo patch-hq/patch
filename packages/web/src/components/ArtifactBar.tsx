@@ -12,11 +12,17 @@
 // publish time.
 
 import { formatClock } from '../lib/formatDateTime.js';
-import { Fragment, useLayoutEffect, useRef, useState, type JSX } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { LayoutTemplate } from 'lucide-react';
+import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { deriveArtifacts, type ArtifactRow } from '../lib/artifacts.js';
+import {
+  deriveArtifacts,
+  mergeArtifacts,
+  type ArtifactRow,
+  type ServerArtifact,
+} from '../lib/artifacts.js';
 import { openArtifact } from '../lib/openArtifact.js';
 import { StatusPill, StatusRow } from './StatusRow.js';
 
@@ -58,7 +64,23 @@ function useFitCount(
 
 export function ArtifactBar({ chatId }: { chatId: string }): JSX.Element | null {
   const timeline = useChatStore((s) => s.timelines[chatId]);
-  const artifacts = deriveArtifacts(timeline ?? []);
+  const live = deriveArtifacts(timeline ?? []);
+  // The transcript is paged: the server's list supplies the older ones. It is
+  // fetched again whenever the chat publishes something new.
+  const [served, setServed] = useState<ServerArtifact[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getChatArtifacts(chatId)
+      .then((r) => {
+        if (!cancelled) setServed(r.artifacts);
+      })
+      .catch((err) => console.error('artifact bar: could not load the artifact list', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, live.length]);
+  const artifacts = mergeArtifacts(live, served);
   const open = useUiStore((s) => s.artifactsOpen);
   const setOpen = useUiStore((s) => s.setArtifactsOpen);
   const titles = artifacts.map((a) => a.title).join('\u0000');

@@ -12,6 +12,7 @@ import { __getLinkingOpenedUrls, __resetLinkingOpenedUrls } from './stubs/react-
 
 vi.mock('../src/api/rest', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     deleteChat: vi.fn(),
     pinChat: vi.fn(),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),

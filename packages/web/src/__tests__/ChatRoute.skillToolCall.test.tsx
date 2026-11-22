@@ -20,6 +20,7 @@ const skillsMock = vi.fn();
 
 vi.mock('../api/rest.js', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     getFileContentAtHead: vi.fn(async () => ({ path: '', content: '', size: 0 })),

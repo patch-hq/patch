@@ -20,6 +20,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
   return {
     ApiError: actual.ApiError,
     api: {
+      getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
       markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
       getFileContent: vi.fn(),
       getFileContentAtHead: vi.fn(),

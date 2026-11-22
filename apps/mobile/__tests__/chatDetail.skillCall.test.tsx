@@ -12,6 +12,7 @@ import { __setLocalSearchParams, routerMock } from './stubs/expo-router';
 const skillsMock = vi.fn();
 vi.mock('../src/api/rest', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     deleteChat: vi.fn(),
     pinChat: vi.fn(),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),

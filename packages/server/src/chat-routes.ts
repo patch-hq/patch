@@ -33,7 +33,13 @@ import {
   ReminderEvery,
   TodoItem,
 } from '@patch/wire';
-import type { ChatErrorCode, ChatSpawnRequestEvent, ReportedBackend, WireEvent } from '@patch/wire';
+import type {
+  ChatArtifactEvent,
+  ChatErrorCode,
+  ChatSpawnRequestEvent,
+  ReportedBackend,
+  WireEvent,
+} from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
@@ -771,6 +777,42 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       if (typeof seq === 'number') lastSeq = seq;
     }
     return reply.code(200).send({ events, nextFromSeq: lastSeq + 1 });
+  });
+
+  // ---- GET /api/chats/:id/artifacts ----
+  // Every artifact (and Pad) the chat has published, newest first, one per
+  // artifactId. The transcript a surface holds is paged, so a long chat's
+  // Artifacts row cannot be built from it alone. NO FALLBACK: a server that
+  // keeps no log answers 503 rather than an empty list.
+  app.get<{ Params: { id: string } }>('/api/chats/:id/artifacts', async (req, reply) => {
+    try {
+      await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    if (!deps.chatRegistry.get(req.params.id)) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    if (!deps.chatLogStore) return reply.code(503).send({ error: 'chat_log_unavailable' });
+    const latest = new Map<string, ChatArtifactEvent>();
+    for (const e of deps.chatLogStore.read(req.params.id, -1)) {
+      if (e.type !== 'chat.artifact') continue;
+      const held = latest.get(e.artifactId);
+      if (!held || e.seq > held.seq) latest.set(e.artifactId, e);
+    }
+    const artifacts = [...latest.values()]
+      .sort((a, b) => b.seq - a.seq)
+      .map((e) => ({
+        artifactId: e.artifactId,
+        title: e.title,
+        url: e.url,
+        path: e.path,
+        seq: e.seq,
+        updatedAt: e.updatedAt,
+      }));
+    return reply.code(200).send({ artifacts });
   });
 
   // ---- GET /api/chats/:parentId/delegates/:id/history ----

@@ -23,6 +23,7 @@ import { getWs, resetWs, STORE_BATCH_MS } from '../src/api/ws';
 
 vi.mock('../src/api/rest', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     deleteChat: vi.fn(async () => ({ ok: true as const })),
     pinChat: vi.fn(async () => undefined),

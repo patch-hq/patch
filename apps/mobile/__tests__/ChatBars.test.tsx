@@ -30,6 +30,7 @@ const apiMocks = {
   archiveChat: vi.fn(async () => undefined),
   hideChat: vi.fn(async (): Promise<unknown> => undefined),
   watchList: vi.fn(async () => ({ tasks: [] })),
+  getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
 };
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 

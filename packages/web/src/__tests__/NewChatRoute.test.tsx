@@ -448,12 +448,16 @@ describe('/chats/new', () => {
   // the fix must show the message in the REAL ChatRoute transcript almost
   // immediately, without waiting on that confirmation at all.
   it('shows the sent message in the new chat immediately, without waiting for the host to confirm the spawn', async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ chatId: 'c-instant', folder: '~/x', status: 'pending' }), {
-          status: 202,
-          headers: { 'content-type': 'application/json' },
-        }),
+    const fetchMock = vi.fn(async (url: string | URL) =>
+      String(url).endsWith('/artifacts')
+        ? new Response(JSON.stringify({ artifacts: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        : new Response(JSON.stringify({ chatId: 'c-instant', folder: '~/x', status: 'pending' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          }),
     );
     vi.stubGlobal('fetch', fetchMock);
     // No `requestHistory` stub needed for the assertion to hold, but ChatRoute
@@ -499,12 +503,16 @@ describe('/chats/new', () => {
   // has spawned the chat, the setup "moves up" — the folder reads as the live
   // chat's title hover and the in-body setup row is gone.
   it('after the first message the folder moves up into the chat title hover', async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ chatId: 'c-up', folder: '~/x', status: 'pending' }), {
-          status: 202,
-          headers: { 'content-type': 'application/json' },
-        }),
+    const fetchMock = vi.fn(async (url: string | URL) =>
+      String(url).endsWith('/artifacts')
+        ? new Response(JSON.stringify({ artifacts: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        : new Response(JSON.stringify({ chatId: 'c-up', folder: '~/x', status: 'pending' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          }),
     );
     vi.stubGlobal('fetch', fetchMock);
     const ws = { send: vi.fn(), requestHistory: vi.fn() } as unknown as PatchWs;

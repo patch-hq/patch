@@ -222,6 +222,7 @@ function makeFetch(chats: ChatRow[] = []): ReturnType<typeof vi.fn> {
     if (u === '/api/chats/counts') {
       return json({ hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 });
     }
+    if (u.endsWith('/artifacts')) return json({ artifacts: [] });
     if (u === '/api/notifications') return json({ items: [], unread: 0 });
     if (u.includes('/archive')) return json({ ok: true });
     // One chat by id (spec/01 § HTTP API) — the chat panel asks for this when
@@ -1198,6 +1199,12 @@ describe('AppShell', () => {
       const u = String(url);
       if (u === '/api/chats' && (!init || (init.method ?? 'GET') === 'GET')) {
         return new Response(JSON.stringify({ chats: [row] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (u.endsWith('/artifacts')) {
+        return new Response(JSON.stringify({ artifacts: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });

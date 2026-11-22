@@ -31,6 +31,7 @@ import { useUiStore } from '../src/stores/uiStore';
 const { uploadAttachmentSpy } = vi.hoisted(() => ({ uploadAttachmentSpy: vi.fn() }));
 vi.mock('../src/api/rest', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     deleteChat: vi.fn(),
     pinChat: vi.fn(),

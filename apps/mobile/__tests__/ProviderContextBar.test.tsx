@@ -19,7 +19,12 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import type { SettingsResponse } from '../src/api/rest';
 
-vi.mock('../src/api/rest', () => ({ api: { watchList: vi.fn(async () => ({ tasks: [] })) } }));
+vi.mock('../src/api/rest', () => ({
+  api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
+    watchList: vi.fn(async () => ({ tasks: [] })),
+  },
+}));
 
 const { ChatBars } = await import('../src/components/ChatBars');
 

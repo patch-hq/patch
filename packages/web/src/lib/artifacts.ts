@@ -30,3 +30,31 @@ export function deriveArtifacts(entries: ChatEventEntry[]): ArtifactRow[] {
   }
   return rows.sort((a, b) => b.seq - a.seq);
 }
+
+/** One artifact as `GET /api/chats/:id/artifacts` returns it. */
+export interface ServerArtifact {
+  artifactId: string;
+  title: string;
+  path: string;
+  url: string;
+  seq: number;
+  updatedAt: number;
+}
+
+/**
+ * The transcript a surface holds is paged, so older artifacts are missing from
+ * it. The server's list is the complete index; an entry already in the
+ * transcript wins (it carries the live title and publish time).
+ */
+export function mergeArtifacts(
+  fromTimeline: ArtifactRow[],
+  fromServer: ServerArtifact[],
+): ArtifactRow[] {
+  const known = new Set(fromTimeline.map((a) => a.artifactId));
+  const rows = [...fromTimeline];
+  for (const a of fromServer) {
+    if (known.has(a.artifactId)) continue;
+    rows.push({ ...a, at: a.updatedAt });
+  }
+  return rows.sort((a, b) => b.seq - a.seq);
+}
