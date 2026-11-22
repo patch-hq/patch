@@ -856,10 +856,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     for (const event of events) {
-      // Once the roster has landed, only `chat.spawned` creates a chat. Any other
-      // chat-scoped frame for a chat neither rostered nor already held (an
-      // archived chat that woke, a replay after a host restart) would go through
-      // `ensureRow` and appear as a new ACTIVE row in the Chats list.
+      // An entry of the server's chat index — it carries its feed position —
+      // naming the chat active is the account's word that the chat is in the
+      // list: one unarchived on another device comes back this way (spec/03 §
+      // Account feed).
+      if (event.type === 'chat.state' && event.feedPos !== undefined && event.status === 'active') {
+        rosteredChatIds.add(event.chatId);
+      }
+      // Once the roster has landed, only `chat.spawned` and the server's index
+      // create a chat. Any other chat-scoped frame for a chat neither rostered
+      // nor already held (an archived chat that woke, a replay after a host
+      // restart) would go through `ensureRow` and appear as a new ACTIVE row in
+      // the Chats list.
       if (
         rosterLanded &&
         event.type !== 'chat.spawned' &&

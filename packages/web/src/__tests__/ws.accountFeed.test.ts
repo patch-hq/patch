@@ -4,7 +4,7 @@
 // and never replays chat by chat.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PatchWs, CHAT_INDEX_STALE_EVENT } from '../api/ws.js';
+import { PatchWs, CHAT_INDEX_STALE_EVENT, FEED_RECENT_CHATS, FOLLOW_SYNC_MS } from '../api/ws.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 
@@ -193,5 +193,106 @@ describe('PatchWs with the account feed', () => {
     expect(reloads).toBe(1);
     expect(window.localStorage.getItem('patch.feedPos')).toBe('30');
     ws.close();
+  });
+});
+
+// A chat that comes into the list while the surface is connected — unarchived
+// on another device, or new — is followed at once, so its entries arrive live
+// without its being opened (spec/03 § Account feed: a device sends feed.follow
+// whenever its set changes).
+describe('PatchWs follows chats as they come into the list', () => {
+  beforeEach(() => window.localStorage.removeItem('patch.feedPos'));
+
+  // As the server sends it: an entry of its chat index, with its feed position.
+  const state = (chatId: string, status: string, lastUpdated = 5) => ({
+    type: 'chat.state',
+    ...row(chatId, lastUpdated, { status }),
+    feedPos: lastUpdated,
+  });
+  const settle = (): void => {
+    vi.advanceTimersByTime(FOLLOW_SYNC_MS + 50);
+  };
+
+  it('follows a chat unarchived on another device, and drops it if it is archived again', async () => {
+    const { ws, fake } = await connect();
+    useChatStore.getState().hydrate([row('c1', 1)]);
+    fake.receive(authOk);
+    expect(frames(fake, 'feed.resume')[0]!['follow']).toEqual([]);
+
+    fake.receive(state('c-back', 'active'));
+    settle();
+    expect(frames(fake, 'feed.follow')).toEqual([
+      { type: 'feed.follow', follow: [{ chatId: 'c-back', after: -1 }] },
+    ]);
+
+    // A later frame for it changes nothing.
+    fake.receive(state('c-back', 'active', 6));
+    settle();
+    expect(frames(fake, 'feed.follow')).toHaveLength(1);
+
+    fake.receive(state('c-back', 'archived', 7));
+    settle();
+    expect(frames(fake, 'feed.follow')[1]).toEqual({ type: 'feed.follow', follow: [] });
+    ws.close();
+  });
+
+  it('follows a chat listed as archived that comes back, and a chat new to the account', async () => {
+    const { ws, fake } = await connect();
+    useChatStore.getState().hydrate([row('c-old', 1, { status: 'archived' })]);
+    fake.receive(authOk);
+    fake.receive(state('c-old', 'active'));
+    fake.receive({ type: 'chat.spawned', chatId: 'c-new', hostId: 'h1', folder: 'f' });
+    fake.receive(state('c-new', 'active', 8));
+    settle();
+    const [follow] = frames(fake, 'feed.follow');
+    expect((follow!['follow'] as Array<{ chatId: string }>).map((f) => f.chatId).sort()).toEqual([
+      'c-new',
+      'c-old',
+    ]);
+    ws.close();
+  });
+
+  it('follows the chat opened, and sends nothing when the set is unchanged or before the resume', async () => {
+    const { ws, fake } = await connect();
+    useChatStore.getState().hydrate([row('c1', 1)]);
+    // Before the feed is resumed there is no set to change.
+    useChatStore.getState().setActiveChat('c1');
+    settle();
+    expect(frames(fake, 'feed.follow')).toEqual([]);
+    fake.receive(authOk);
+    expect(frames(fake, 'feed.resume')[0]!['follow']).toEqual([{ chatId: 'c1', after: -1 }]);
+    useChatStore.getState().hydrate([row('c1', 2)]);
+    settle();
+    expect(frames(fake, 'feed.follow')).toEqual([]);
+    useChatStore.getState().setActiveChat(null);
+    settle();
+    expect(frames(fake, 'feed.follow')).toEqual([{ type: 'feed.follow', follow: [] }]);
+    ws.close();
+  });
+
+  it('keeps the newest arrivals only, and holds back while the socket is not open', async () => {
+    const { ws, fake } = await connect();
+    fake.receive(authOk);
+    for (let i = 0; i <= FEED_RECENT_CHATS; i++) fake.receive(state(`n${i}`, 'active', 10 + i));
+    settle();
+    const ids = (frames(fake, 'feed.follow')[0]!['follow'] as Array<{ chatId: string }>).map(
+      (f) => f.chatId,
+    );
+    expect(ids).toHaveLength(FEED_RECENT_CHATS);
+    expect(ids).not.toContain('n0');
+    fake.readyState = 3;
+    fake.receive(state('late', 'active', 99));
+    settle();
+    expect(frames(fake, 'feed.follow')).toHaveLength(1);
+    ws.close();
+  });
+
+  it('close() stops a pending follow check', async () => {
+    const { ws, fake } = await connect();
+    fake.receive(authOk);
+    fake.receive(state('c-back', 'active'));
+    ws.close();
+    settle();
+    expect(frames(fake, 'feed.follow')).toEqual([]);
   });
 });

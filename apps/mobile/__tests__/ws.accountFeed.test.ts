@@ -120,6 +120,33 @@ describe('phone with the account feed', () => {
     ws.close();
   });
 
+  it('follows a chat that comes back into the list (unarchived on another device) without its being opened', () => {
+    const ws = connect();
+    FakeWebSocket.last().emitMessage(JSON.stringify(authOk));
+    expect(sent('feed.resume')[0]!['follow']).toEqual([]);
+    // The server tells every device the chat is active again; unarchiving made
+    // it the most recently changed chat on the account.
+    FakeWebSocket.last().emitMessage(
+      JSON.stringify({
+        type: 'chat.state',
+        chatId: 'c-back',
+        hostId: 'h1',
+        name: 'back',
+        folder: '/f',
+        status: 'active',
+        pinned: false,
+        permissionMode: 'default',
+        lastUpdated: Date.now(),
+        chatStatus: { state: 'idle', since: 0 },
+      }),
+    );
+    vi.advanceTimersByTime(400);
+    const follows = sent('feed.follow');
+    expect(follows).toHaveLength(1);
+    expect(follows[0]!['follow']).toEqual([{ chatId: 'c-back', after: -1 }]);
+    ws.close();
+  });
+
   it('sends no feed.follow to a server without the feed', () => {
     const ws = connect();
     FakeWebSocket.last().emitMessage(JSON.stringify({ ...authOk, accountFeed: false }));

@@ -2002,13 +2002,19 @@ export class WsHub {
         return;
       }
       case 'feed.follow': {
+        const before = conn.followedChats ?? new Set<string>();
         const now = new Set(event.follow.map((f) => f.chatId));
         conn.followedChats = now;
         for (const chatId of [...conn.watchedChats])
           if (!now.has(chatId)) conn.watchedChats.delete(chatId);
+        // Every chat newly followed is caught up from the position the device
+        // holds, even one this socket was already watching: a chat a device
+        // acted on (unarchived, pinned, sent to) is watched from that moment,
+        // but watching sends only what happens next, never what the device
+        // has not got. A chat it already followed was caught up when it was.
         this.follow(
           conn,
-          event.follow.filter((f) => !conn.watchedChats.has(f.chatId)),
+          event.follow.filter((f) => !before.has(f.chatId)),
         );
         return;
       }

@@ -153,6 +153,11 @@ export const HEARTBEAT_LIVENESS_TIMEOUT_MS = 30_000;
  */
 export const STORE_BATCH_MS = 16;
 
+/** How many chats that came into the list live a surface follows besides those it holds. */
+export const FEED_RECENT_CHATS = 30;
+/** How long store changes are gathered before the follow set is re-checked. */
+export const FOLLOW_SYNC_MS = 300;
+
 export class PatchWs {
   private ws: WebSocket | null = null;
   private backoff = INITIAL_BACKOFF_MS;
@@ -184,6 +189,22 @@ export class PatchWs {
     { chatId: string; kind: 'last' | 'before' | 'after' }
   >();
   private historySeq = 0;
+  /**
+   * The chats the server was last told this surface follows, on this socket
+   * (`feed.resume` / `feed.follow`, spec/03 § Account feed). `null` until the
+   * feed is resumed on the current connection.
+   */
+  private followed: Set<string> | null = null;
+  /**
+   * Chats that came into the list live on this socket — new, or back from the
+   * archive on another device — newest last. Followed while they stay active,
+   * though this surface holds nothing of them yet: they are the chats arriving
+   * at the top of its list (spec/03 § Account feed).
+   */
+  private readonly arrived = new Set<string>();
+  /** Coalesces store changes into one `feed.follow` check. */
+  private followTimer: number | null = null;
+  private storeUnsub: (() => void) | null = null;
   /** Store events gathered so far in the current batch window, in arrival order. */
   private storeQueue: WireEvent[] = [];
   private storeFlushTimer: number | null = null;
@@ -196,10 +217,25 @@ export class PatchWs {
     this.closed = false;
     this.openOnce();
     this.attachVisibility();
+    // Opening or leaving a chat, and the list changing (a chat new, unarchived
+    // or moved to the top elsewhere), change what this surface follows; the
+    // server hears about it with `feed.follow`.
+    this.storeUnsub?.();
+    this.storeUnsub = useChatStore.subscribe((now, prev) => {
+      if (now.activeChatId !== prev.activeChatId || now.chats !== prev.chats)
+        this.scheduleFollowSync();
+    });
   }
 
   close(): void {
     this.closed = true;
+    this.storeUnsub?.();
+    this.storeUnsub = null;
+    if (this.followTimer !== null) {
+      window.clearTimeout(this.followTimer);
+      this.followTimer = null;
+    }
+    this.followed = null;
     if (this.reconnectTimer !== null) {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -497,32 +533,101 @@ export class PatchWs {
   }
 
   /**
+   * The chats this surface follows (spec/03 § Account feed, spec/05 § Loading):
+   * the chat open, every chat it holds a transcript of, and every chat that
+   * came into its list live and is still active. Cheap — it reads no
+   * transcript — because it is re-checked as the list changes. The open chat
+   * is followed even before the roster lists it (a deep link on a cold start):
+   * following is what subscribes this socket to it.
+   */
+  private followIds(): Set<string> {
+    const { chats, timelines, activeChatId } = useChatStore.getState();
+    const ids = new Set<string>();
+    if (activeChatId !== null) ids.add(activeChatId);
+    for (const chatId of Object.keys(chats)) {
+      if ((timelines[chatId]?.length ?? 0) > 0) ids.add(chatId);
+    }
+    for (const chatId of this.arrived) {
+      if (chats[chatId]?.status === 'active') ids.add(chatId);
+    }
+    return ids;
+  }
+
+  /**
+   * A chat entering this surface's list live: one it did not list, or listed
+   * as archived, now active. Keeps the newest `FEED_RECENT_CHATS` of them.
+   */
+  private noteArrival(chatId: string, status: string | undefined): void {
+    if (this.followed === null || status !== 'active') return;
+    if (useChatStore.getState().chats[chatId]?.status === 'active') return;
+    this.arrived.delete(chatId);
+    this.arrived.add(chatId);
+    if (this.arrived.size > FEED_RECENT_CHATS) {
+      this.arrived.delete(this.arrived.values().next().value as string);
+    }
+  }
+
+  /**
+   * The followed chats with the position held in each, noted as this socket's
+   * history cursor for every chat not already followed: the server catches each
+   * up, so opening one need not ask again from the same place.
+   */
+  private followList(
+    ids: Set<string>,
+    already: Set<string>,
+  ): Array<{ chatId: string; after: number }> {
+    this.flushStoreQueue();
+    const { timelines } = useChatStore.getState();
+    const follow: Array<{ chatId: string; after: number }> = [];
+    for (const chatId of ids) {
+      const after = (timelines[chatId] ?? []).reduce(
+        (max, e) => (e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max),
+        -1,
+      );
+      if (!already.has(chatId)) this.lastHistoryCursor.set(chatId, after);
+      follow.push({ chatId, after });
+    }
+    return follow;
+  }
+
+  /**
    * After every connect, to a server that runs the feed: the last feed position
-   * this device holds and every chat it holds, with the position it holds in
+   * this device holds and every chat it follows, with the position it holds in
    * each (spec/03 § Account feed). The server sends what changed since and
    * catches each chat up; nothing is asked of a host.
    */
   private resumeFeed(): void {
-    this.flushStoreQueue();
-    const { chats, timelines, activeChatId } = useChatStore.getState();
-    const follow: Array<{ chatId: string; after: number }> = [];
-    // The open chat is followed even before the roster lists it (a deep link
-    // on a cold start): following is what subscribes this socket to it.
-    const ids = new Set(Object.keys(chats));
-    if (activeChatId !== null) ids.add(activeChatId);
-    for (const chatId of ids) {
-      const timeline = timelines[chatId];
-      const held = chatId === activeChatId || (timeline?.length ?? 0) > 0;
-      if (!held) continue;
-      const after = (timeline ?? []).reduce(
-        (max, e) => (e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max),
-        -1,
-      );
-      this.lastHistoryCursor.set(chatId, after);
-      follow.push({ chatId, after });
-    }
+    const ids = this.followIds();
+    const follow = this.followList(ids, new Set());
+    this.followed = ids;
     const after = loadFeedPos();
     this.send({ type: 'feed.resume', ...(after !== null ? { after } : {}), follow });
+  }
+
+  private scheduleFollowSync(): void {
+    if (this.followTimer !== null) return;
+    this.followTimer = window.setTimeout(() => {
+      this.followTimer = null;
+      this.syncFollow();
+    }, FOLLOW_SYNC_MS);
+  }
+
+  /**
+   * Tell the server when the set of chats this surface follows has changed — a
+   * chat opened, one that appears or comes back (new, or unarchived on another
+   * device), one dropped off the list — with `feed.follow`, which replaces the
+   * set. Without it the server keeps the set from connect time: a chat that
+   * came back since gets no entries live until it is opened.
+   */
+  syncFollow(): void {
+    const followed = this.followed;
+    if (followed === null) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const ids = this.followIds();
+    if (ids.size === followed.size && [...ids].every((c) => followed.has(c))) return;
+    const follow = this.followList(ids, followed);
+    this.followed = ids;
+    this.send({ type: 'feed.follow', follow });
   }
 
   private openOnce(): void {
@@ -535,6 +640,10 @@ export class PatchWs {
     // A new socket has heard nothing: every held chat may need its history again,
     // including one whose previous request died with the old connection.
     this.lastHistoryCursor.clear();
+    // Nor has it been told what this surface follows: that waits for the resume.
+    // A chat that arrived on the last socket and was caught up is held now.
+    this.followed = null;
+    this.arrived.clear();
 
     const ws = new WebSocket(this.url);
     this.ws = ws;
@@ -1319,6 +1428,8 @@ export class PatchWs {
     ) {
       noteFeedPos(event.feedPos);
     }
+    if (event.type === 'chat.state') this.noteArrival(event.chatId, event.status);
+    if (event.type === 'chat.spawned') this.noteArrival(event.chatId, 'active');
     // Chat events go to chatStore — coalesced, see queueForStore.
     this.queueForStore(event);
   }
