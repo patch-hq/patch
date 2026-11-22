@@ -1689,6 +1689,10 @@ body {
   font-weight: 600;
   color: var(--ink-3);
   padding: 8px 20px 4px;
+  /* The row's action buttons (22px) show only on hover; the header keeps their
+     height so the rows below do not jump when the pointer arrives. */
+  min-height: 34px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;

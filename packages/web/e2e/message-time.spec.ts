@@ -52,9 +52,10 @@ test.describe('hovering a message shows the real time it arrived', () => {
     const time = page.getByTestId('msg-time');
     await expect(time).toHaveCount(1);
 
-    const expected = new Date(CREATED_AT).toLocaleTimeString(undefined, {
+    const expected = new Date(CREATED_AT).toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
+      hourCycle: 'h23',
     });
     await expect(time).toHaveText(expected);
 
@@ -104,11 +105,12 @@ test.describe('hovering a message shows the real time it arrived', () => {
     const time = page.getByTestId('msg-time');
     await expect(time).toHaveCount(1);
 
-    const expectedTime = new Date(CREATED_AT).toLocaleTimeString(undefined, {
+    const expectedTime = new Date(CREATED_AT).toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
+      hourCycle: 'h23',
     });
-    const expectedDay = new Date(CREATED_AT).toLocaleDateString(undefined, {
+    const expectedDay = new Date(CREATED_AT).toLocaleDateString('en-GB', {
       day: 'numeric',
       month: 'short',
     });
