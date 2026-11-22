@@ -18,7 +18,7 @@
 // app's own output.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -57,6 +57,15 @@ if (before && (await answering(before))) {
   log(
     `before launch, a server is already answering on ${before}: ${JSON.stringify(await answering(before))}`,
   );
+}
+
+// A login item is only registered once the user has chosen (the welcome step's
+// Keep running). The smoke is that user: a remembered choice of the defaults.
+const keepRunningFile = join(DATA, 'keep-running.json');
+if (mode === 'login-item' && !existsSync(keepRunningFile)) {
+  mkdirSync(DATA, { recursive: true });
+  writeFileSync(keepRunningFile, JSON.stringify({ openAtLogin: true, keepAwake: true }));
+  log(`remembered the Keep running choice in ${keepRunningFile}`);
 }
 
 const port = await new Promise((ok, no) => {
