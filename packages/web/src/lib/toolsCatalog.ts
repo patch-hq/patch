@@ -414,7 +414,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description:
       'Says the agent is blocked until the user does something themselves, in the world.',
-    params: 'task: string, why?: string',
+    params: 'task: string, why?: string, until?: string',
   },
   {
     name: patchToolId('patch_report'),
