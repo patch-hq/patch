@@ -164,6 +164,10 @@ function UsageCard({
               // (nothing sent in the last five hours). A reading that carries
               // the week but not the session is that case, not a gap: say so.
               const notStarted = scope === 'session' && row.usage?.week !== undefined;
+              // A blocked week means nothing will start; "0%" beside it reads as spare room.
+              const weekBlocked =
+                row.usage?.week !== undefined &&
+                rateLimitWindowState('week', row.usage.week) === 'blocked';
               return (
                 <Fragment key={scope}>
                   <span className="new-chat-usage-label">{label}</span>
@@ -171,7 +175,11 @@ function UsageCard({
                     className="new-chat-usage-fig new-chat-usage-missing"
                     data-testid={`new-chat-usage-${row.key}-${scope}`}
                   >
-                    {notStarted ? '0% · starts with your first message' : 'not reported'}
+                    {notStarted
+                      ? weekBlocked
+                        ? 'no session running'
+                        : '0% · starts with your first message'
+                      : 'not reported'}
                   </span>
                 </Fragment>
               );

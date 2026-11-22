@@ -34,6 +34,7 @@ export function ChatGPTSignIn({
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -81,6 +82,7 @@ export function ChatGPTSignIn({
   const start = async (): Promise<void> => {
     setError(null);
     setWarning(null);
+    setCopied(false);
     setPhase({ kind: 'starting' });
     try {
       const started = await api.chatgptSignInStart({
@@ -127,12 +129,29 @@ export function ChatGPTSignIn({
   return (
     <div className="chatgpt-signin waiting" role="status" data-testid="chatgpt-login-pending">
       <p className="claude-signin-label">
-        Waiting for you to sign in at ChatGPT… If asked, enter this code.
+        Waiting for you to sign in at ChatGPT… Enter this code at{' '}
+        <a href={started.url} target="_blank" rel="noreferrer" data-testid="chatgpt-login-link">
+          {started.url}
+        </a>
+        .
       </p>
       <code className="set-code" data-testid="chatgpt-login-code">
         {started.userCode}
       </code>
       <div className="set-inline">
+        <button
+          type="button"
+          className="set-btn"
+          data-testid="chatgpt-login-copy"
+          onClick={() => {
+            void navigator.clipboard
+              .writeText(started.userCode)
+              .then(() => live.current && setCopied(true))
+              .catch((e: unknown) => live.current && setError(problemText(e)));
+          }}
+        >
+          {copied ? 'Copied' : 'Copy code'}
+        </button>
         <a
           className="set-btn ghost"
           href={started.url}
