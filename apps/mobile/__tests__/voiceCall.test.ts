@@ -553,6 +553,29 @@ describe('audio WS message dispatch', () => {
     expect(flushTtsPlaybackMock).toHaveBeenCalled();
   });
 
+  it('user speech after tts_end flushes the TTS audio still queued on the phone', async () => {
+    const sock = await openCall();
+    sock.emitMessage(JSON.stringify({ type: 'audio.tts_end', sessionId: 'sess-1' }));
+    flushTtsPlaybackMock.mockClear();
+    sock.emitMessage(
+      JSON.stringify({ type: 'audio.transcript_partial', sessionId: 'sess-1', text: 'no wait' }),
+    );
+    expect(flushTtsPlaybackMock).toHaveBeenCalledTimes(1);
+    expect(useVoiceStore.getState().callPhase).toBe('transcribing');
+  });
+
+  it('a trailing partial while the reply is speaking does not flush it', async () => {
+    const sock = await openCall();
+    sock.emitMessage(
+      JSON.stringify({ type: 'audio.state', sessionId: 'sess-1', state: 'speaking' }),
+    );
+    flushTtsPlaybackMock.mockClear();
+    sock.emitMessage(
+      JSON.stringify({ type: 'audio.transcript_partial', sessionId: 'sess-1', text: 'late' }),
+    );
+    expect(flushTtsPlaybackMock).not.toHaveBeenCalled();
+  });
+
   it('audio.error sets a call error and pushes a UI error', async () => {
     const sock = await openCall();
     sock.emitMessage(

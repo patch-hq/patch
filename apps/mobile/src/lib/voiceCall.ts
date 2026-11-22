@@ -385,6 +385,18 @@ export function startVoiceCall(
             // Live interim STT — the call bar shows it as the trailing line of the
             // running transcript until the committed turn lands over the main WS.
             console.log(`[patch-voice] call transcript_partial: "${frame.text}"`);
+            // The voice model streams faster than real time, so the host calls the
+            // turn finished (tts_end → listening) while seconds of it are still
+            // queued on the phone. The model then has nothing to interrupt and
+            // sends no barge_in, so the user's words must stop the playback here.
+            // Not in hands-free: speech there is not necessarily for Patch.
+            if (
+              useVoiceStore.getState().callPhase === 'listening' &&
+              useVoiceStore.getState().callMode !== 'hands-free'
+            ) {
+              console.log('[patch-voice] call user speech over queued TTS → flush TTS sink');
+              void flushTtsPlayback().catch(() => undefined);
+            }
             useVoiceStore.getState().setCallPhase('transcribing');
             useVoiceStore.getState().setCallTranscriptPartial(frame.text);
             break;
