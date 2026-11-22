@@ -232,6 +232,18 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       'expected pcm_16000 / pcm_24000',
     );
   });
+
+  test('an agent that never initiates fails the call, naming the stalled stage', async () => {
+    const { deps, events, onFatal, last } = makeDeps({ setupTimeoutMs: 1500 });
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    session.onSessionStart();
+    await vi.waitFor(() => expect(last.ws).toBeDefined());
+    last.ws!.emit('open');
+    await vi.waitFor(() => expect(onFatal).toHaveBeenCalled(), { timeout: 4000 });
+    const err = events.find((e) => e.type === 'audio.error') as { message: string };
+    expect(err.message).toContain('did not start within');
+    expect(err.message).toContain('waiting for the agent to initiate');
+  });
 });
 
 describe('ElevenLabsAgentSession — conversation', () => {

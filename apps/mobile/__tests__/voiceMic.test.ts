@@ -212,7 +212,7 @@ describe('voiceMic — the frame subscription never outlives its capture', () =>
     }
   });
 
-  it("an earlier capture's failed start does not drop the subscription of the one that replaced it", async () => {
+  it("an earlier capture's failed start does not drop the subscription of the one queued behind it", async () => {
     let failFirst!: (e: Error) => void;
     let starts = 0;
     const { removed, restore } = await withSubscriptions(() => {
@@ -227,13 +227,67 @@ describe('voiceMic — the frame subscription never outlives its capture', () =>
       const { startMicCapture } = await import('../src/lib/voiceMic');
       const first = startMicCapture(vi.fn(), vi.fn());
       await Promise.resolve();
-      await startMicCapture(vi.fn(), vi.fn()); // replaces the first (sub1 removed)
+      // Starts run one at a time: the second waits for the first to settle.
+      const second = startMicCapture(vi.fn(), vi.fn());
       failFirst(new Error('late failure'));
       await expect(first).rejects.toThrow('late failure');
-      // sub1 once (replaced) and once more (its own failure) — sub2 never.
+      await second;
+      // sub1 dropped by its own failure — sub2, the live capture, never.
       expect(removed).not.toContain('sub2');
     } finally {
       restore();
     }
+  });
+});
+
+describe('voiceMic — a recorder that opens but never delivers audio', () => {
+  it('reports it through onError after the first-frame timeout, and not once a frame arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      Platform.OS = 'android';
+      NativeModules['PatchVoiceMic'] = {
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(async () => undefined),
+        addListener: vi.fn(),
+        removeListeners: vi.fn(),
+      };
+      const { startMicCapture, stopMicCapture, MIC_FIRST_FRAME_TIMEOUT_MS } =
+        await import('../src/lib/voiceMic');
+      const onError = vi.fn();
+      await startMicCapture(vi.fn(), onError);
+      await vi.advanceTimersByTimeAsync(MIC_FIRST_FRAME_TIMEOUT_MS + 10);
+      expect(onError).toHaveBeenCalledWith(expect.stringMatching(/delivered no audio/));
+      await stopMicCapture();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs a stop still in flight before the next start, so it cannot kill the new capture', async () => {
+    Platform.OS = 'android';
+    const order: string[] = [];
+    let releaseStop: () => void = () => undefined;
+    NativeModules['PatchVoiceMic'] = {
+      start: vi.fn(async () => void order.push('start')),
+      stop: vi.fn(() => {
+        if (order.includes('stop')) return Promise.resolve();
+        order.push('stop');
+        return new Promise<void>((r) => {
+          releaseStop = r;
+        });
+      }),
+      addListener: vi.fn(),
+      removeListeners: vi.fn(),
+    };
+    const { startMicCapture, stopMicCapture } = await import('../src/lib/voiceMic');
+    const stopping = stopMicCapture();
+    const starting = startMicCapture(vi.fn(), vi.fn());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(['stop']);
+    releaseStop();
+    await stopping;
+    await starting;
+    expect(order).toEqual(['stop', 'start']);
+    await stopMicCapture();
   });
 });

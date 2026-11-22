@@ -113,6 +113,13 @@ const OUTPUT_FORMAT = 'pcm_24000';
  */
 export const REPLY_QUIET_MS = 600;
 
+/**
+ * How long the agent has to be provisioned, connected and initiated before the
+ * call is declared failed. Kept under the phone's 15s connect timeout so the
+ * user is told which stage stalled instead of "no answer from the host".
+ */
+export const SETUP_TIMEOUT_MS = 12_000;
+
 /** Expressive audio tags the voice model writes into its text (`[happy] Banana!`). */
 const AUDIO_TAG = /\[[a-z][a-z ]*\]\s*/gi;
 
@@ -154,6 +161,8 @@ export interface ElevenLabsAgentDeps {
   onFatal?: (message: string) => void;
   /** Test seams. */
   replyQuietMs?: number;
+  /** Override of {@link SETUP_TIMEOUT_MS}. */
+  setupTimeoutMs?: number;
   wsCtor?: ElevenLabsWsCtor;
   fetchImpl?: ElevenLabsFetch;
   apiBase?: string;
@@ -188,6 +197,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private closed = false;
   private fatal = false;
   private micQueue: Buffer[] = [];
+  private setupStage = 'reading the chat';
+  private setupTimer?: ReturnType<typeof setTimeout>;
   private setupWaiter?: { resolve: () => void; reject: (err: Error) => void };
   private lastSpokeAt?: number;
   private agentId?: string;
@@ -448,9 +459,17 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   onSessionStart(): void {
     if (this.state !== 'connecting') return;
-    void this.connect().catch((err: Error) => {
-      this.die(`ElevenLabs Agents session failed to open: ${err.message}`);
-    });
+    const limit = this.deps.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
+    this.setupTimer = setTimeout(() => {
+      this.die(
+        `ElevenLabs agent did not start within ${Math.round(limit / 1000)}s (stalled ${this.setupStage})`,
+      );
+    }, limit);
+    void this.connect()
+      .catch((err: Error) => {
+        this.die(`ElevenLabs Agents session failed to open: ${err.message}`);
+      })
+      .finally(() => clearTimeout(this.setupTimer));
   }
 
   private async connect(): Promise<void> {
@@ -467,8 +486,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       },
       'elevenlabs-agent: chat briefing',
     );
+    this.setupStage = 'creating the agent';
     const url = await this.provision();
     if (this.closed) return;
+    this.setupStage = 'opening the conversation socket';
     const Ctor = this.deps.wsCtor ?? (WsImpl as unknown as ElevenLabsWsCtor);
     const ws = new Ctor(url);
     this.ws = ws;
@@ -488,6 +509,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     const configured = new Promise<void>((resolve, reject) => {
       this.setupWaiter = { resolve, reject };
     });
+    this.setupStage = 'waiting for the agent to initiate';
     this.sendJson({ type: 'conversation_initiation_client_data' });
     await configured;
     if (this.closed) return;
