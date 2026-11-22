@@ -33,7 +33,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'usage', title: 'AI accounts', group: 'Setup' },
   { id: 'hosts', title: 'Hosts', group: 'Setup' },
   { id: 'devices', title: 'Linked devices', group: 'Setup' },
-  { id: 'providers', title: 'Service keys', group: 'Setup' },
+  { id: 'providers', title: 'Connected services', group: 'Setup' },
   { id: 'notifications', title: 'Notifications', group: 'Setup' },
   { id: 'agent', title: 'Agent', group: 'Agents' },
   { id: 'chats', title: 'Chats', group: 'Agents' },

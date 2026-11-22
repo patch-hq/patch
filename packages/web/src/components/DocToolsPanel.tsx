@@ -5,6 +5,7 @@
 // file. All three read/write through `useDocView` (`lib/docEditor.ts`) — the
 // host always answers with the updated view, so none of these keep their
 // own copy of it.
+import { formatDateTime } from '../lib/formatDateTime.js';
 import { useState } from 'react';
 import type { JSX } from 'react';
 import type { DocAction, DocMode, DocView } from '@patch/wire';
@@ -213,7 +214,7 @@ export function HistoryPanel({ view, dispatch }: DocPanelProps): JSX.Element {
                   <span className="doc-history-author">
                     {v.savedBy === 'agent' ? 'Agent' : 'You'}
                   </span>
-                  <span className="doc-history-time">{new Date(v.createdAt).toLocaleString()}</span>
+                  <span className="doc-history-time">{formatDateTime(v.createdAt)}</span>
                   {v.restoredFrom ? <span className="doc-history-restored">restored</span> : null}
                 </button>
               </li>

@@ -4,6 +4,7 @@
 // since harness boot (onerror, unhandledrejection, console.error).
 // Never rendered in production (gated on import.meta.env.DEV).
 
+import { formatClock } from '../lib/formatDateTime.js';
 import type { JSX } from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { getDevErrors, clearDevErrors, onDevErrors } from '../lib/devErrorQueue.js';
@@ -85,7 +86,7 @@ function DevErrorOverlayInner(): JSX.Element {
           {errors.map((err, i) => (
             <li key={i} className="dev-error-entry" data-testid={`dev-error-entry-${i}`}>
               <span className="dev-error-type">{err.type}</span>
-              <span className="dev-error-time">{new Date(err.at).toLocaleTimeString()}</span>
+              <span className="dev-error-time">{formatClock(err.at)}</span>
               <span className="dev-error-message">{err.message}</span>
             </li>
           ))}

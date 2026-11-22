@@ -7,6 +7,7 @@
 // host older than the entry text sends no `body`, which is said, not shown as
 // an empty memory.
 
+import { formatDay } from '../../lib/formatDateTime.js';
 import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
 import type { ClaudeMemoryEntry } from '@patch/wire';
@@ -196,9 +197,7 @@ function MemoryDetail({
   const meta = [
     memory.memoryType || 'unknown',
     projectLabel(memory),
-    memory.updatedAt !== undefined
-      ? new Date(memory.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-      : null,
+    memory.updatedAt !== undefined ? formatDay(memory.updatedAt) : null,
   ].filter((x): x is string => x !== null);
 
   function save(): void {

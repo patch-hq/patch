@@ -65,7 +65,7 @@ describe('OutOfUsageBanner — when credit has run out', () => {
     const reset = screen.getByTestId('out-of-usage-reset');
     expect(reset.textContent).toMatch(/resets at .+ \(1 hour 30 minutes\)\./);
     // One local clock with the full date on hover, no zone name beside it.
-    expect(reset.getAttribute('title')).toMatch(/^\w{3} \d{1,2} \w{3}, \d{2}:\d{2}$/);
+    expect(reset.getAttribute('title')).toMatch(/^\d{1,2} \w{3,4} \d{2}:\d{2}$/);
     expect(reset.getAttribute('title')).not.toMatch(/UTC|GMT/);
     expect(screen.getByRole('link', { name: 'Usage' }).getAttribute('href')).toBe(
       '/settings/usage',

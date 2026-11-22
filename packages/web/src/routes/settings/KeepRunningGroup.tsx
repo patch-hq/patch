@@ -54,8 +54,8 @@ export function KeepRunningGroup(): JSX.Element | null {
       </Row>
       {server ? (
         <Row
-          title="Patch server on this computer"
-          sub="Keeps running when the app is closed. Turning it off stops it until you open Patch again."
+          title="Keep Patch running in the background"
+          sub="Your phone and other devices can still reach this computer after you close the window. Turning it off stops that until you open Patch again."
         >
           <button
             type="button"

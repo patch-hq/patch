@@ -3,6 +3,7 @@
 // through each one's own bounded tool-calls.jsonl (GET /api/tool-log,
 // mirroring patch_activity's /api/activity).
 
+import { formatDateTime } from '../../lib/formatDateTime.js';
 import { useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '../../api/rest.js';
@@ -75,7 +76,7 @@ export function ActivityPage(): JSX.Element {
             testid={`activity-row-${i}`}
             title={`${e.tool}${e.ok ? '' : ` — ${e.err ?? 'failed'}`}`}
             sub={[
-              new Date(e.ts).toLocaleString(),
+              formatDateTime(e.ts),
               e.hostId,
               label(e.callerChatId) !== undefined ? `from ${label(e.callerChatId)}` : null,
               label(e.targetChatId) !== undefined ? `to ${label(e.targetChatId)}` : null,

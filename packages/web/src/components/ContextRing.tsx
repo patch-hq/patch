@@ -2,7 +2,7 @@
 // of Send (spec/14 § Composer — context ring), read as a gauge: a solid track
 // that fills clockwise, with the percentage said beside it. Pressing it opens
 // the usage popover. It remains present before the host has measured the chat
-// (empty track, `Context –`, so the gauge names itself without a hover), so usage details always have one stable home.
+// (empty track, `Context not measured`, so the gauge names itself without a hover), so usage details always have one stable home.
 
 import { useRef, useState, type JSX } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
@@ -19,7 +19,9 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
   const ref = useRef<HTMLButtonElement>(null);
   const level = ctx?.level ?? 'unknown';
   const label = ctx ? `Context ${ctx.percent}` : 'Usage details';
-  const title = ctx ? `Context ${ctx.percent} · ${ctx.tokens}` : 'Usage · context not measured';
+  const title = ctx
+    ? `Context window ${ctx.percent} full · ${ctx.tokens}. How much of this chat the agent can hold in mind at once.`
+    : 'Context window not measured yet. It shows how much of this chat the agent can hold in mind at once.';
   return (
     <>
       <button
@@ -45,7 +47,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
           />
         </svg>
         <span className="context-ring-label" data-testid="context-ring-label">
-          {ctx?.percent ?? 'Context –'}
+          {ctx ? `Context ${ctx.percent}` : 'Context not measured'}
         </span>
       </button>
       {open ? (

@@ -3,6 +3,7 @@
 // Renders header + event stream + composer. Real diff viewer + file browser
 // land in group 19 (the Monaco editor right-rail).
 
+import { formatWhen } from '../lib/formatDateTime.js';
 import { isDictatedSend, markDictatedSend } from '../lib/dictatedSends.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import type { JSX } from 'react';
@@ -4198,11 +4199,7 @@ export function midTurnPositionLabel(step: number | undefined): string {
  * doesn't read as if it just arrived.
  */
 export function formatMessageTime(at: number, now: number = Date.now()): string {
-  const date = new Date(at);
-  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  if (new Date(now).toDateString() === date.toDateString()) return time;
-  const day = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  return `${day} ${time}`;
+  return formatWhen(at, now);
 }
 
 // A page the agent published with `patch_artifact` (spec/14 § Artifacts).

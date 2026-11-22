@@ -46,8 +46,8 @@ describe('formatReset', () => {
     expect(formatReset(AT, AT - 60_000)).not.toMatch(/Mon|Tue|Wed|Thu|Fri|Sat|Sun/);
   });
 
-  it('names the weekday when it is not today, so a stale reading cannot pass for now', () => {
-    expect(formatReset(AT + 3 * 86_400_000, AT)).toMatch(/Mon|Tue|Wed|Thu|Fri|Sat|Sun/);
+  it('names the date when it is not today, so a stale reading cannot pass for now', () => {
+    expect(formatReset(AT + 3 * 86_400_000, AT)).toMatch(/^\d{1,2} \w{3,4} \d{2}:\d{2}$/);
   });
 });
 
@@ -55,14 +55,14 @@ describe('formatReset on a distant day', () => {
   it('carries the date, so "Tue" cannot be read as the Tuesday just gone', () => {
     const wed = Date.UTC(2026, 9, 28, 14, 0); // Wed 28 Oct 2026
     const nextTue = Date.UTC(2026, 10, 3, 15, 0);
-    expect(formatReset(nextTue, wed)).toMatch(/Tue.*(3 Nov|Nov 3)/);
+    expect(formatReset(nextTue, wed)).toBe('3 Nov 15:00');
   });
 });
 
 describe('formatResetDetail', () => {
   it('is one local clock with the full date, and no UTC beside it', () => {
     const detail = formatResetDetail(AT, AT);
-    expect(detail).toMatch(/^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2,4}, \d{2}:\d{2}$/);
+    expect(detail).toMatch(/^\d{1,2} [A-Z][a-z]{2,4} \d{2}:\d{2}$/);
     expect(detail).not.toMatch(/UTC|GMT/);
   });
 
@@ -230,7 +230,7 @@ describe('summariseUsage', () => {
       },
       AT,
     );
-    expect(out?.text).toBe('Weekly 62%');
+    expect(out?.text).toBe('Weekly 62% used');
     expect(out?.level).toBe('ok');
   });
 
@@ -255,7 +255,7 @@ describe('summariseUsage', () => {
       },
       AT,
     );
-    expect(out?.text).toBe('Weekly 60%');
+    expect(out?.text).toBe('Weekly 60% used');
     expect(out?.level).toBe('warn');
   });
 
@@ -280,7 +280,7 @@ describe('summariseUsage', () => {
       { week: { status: 'allowed', utilization: 0.28, resetsAt: AT } },
       AT - 60_000,
     );
-    expect(out?.title).toContain('Weekly 28%');
+    expect(out?.title).toContain('Weekly 28% used');
     expect(out?.title).not.toContain('allowed');
     expect(out?.title).not.toContain('UTC ·');
   });

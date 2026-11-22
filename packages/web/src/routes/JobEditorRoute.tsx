@@ -3,6 +3,7 @@
 // One-form view per spec/14 ## Jobs view. Trigger picker (cron/recurrence/
 // webhook/todoist) + JSONata filter textarea + two-axis action picker.
 
+import { formatDateTime } from '../lib/formatDateTime.js';
 import { DateTimeField } from '../components/DateTimeField.js';
 import { PromptEditor } from '../components/PromptEditor.js';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -1557,7 +1558,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           <span
             className="job-lifecycle-chip job-lifecycle-chip-expired"
             data-testid="job-editor-expired"
-            title={`Expired ${new Date((data as Job).expiredAt as number).toLocaleString()} — enable to fire once more`}
+            title={`Expired ${formatDateTime((data as Job).expiredAt as number)} — enable to fire once more`}
           >
             Expired
           </span>
@@ -2808,14 +2809,14 @@ function JobQueuePanel({ job }: { job: Job }): JSX.Element {
         <ul onKeyDown={(e) => runListKeyDown(e, job.id)}>
           {data.inFlight.map((e) => (
             <li key={`f-${e.chatId}-${e.localId}`} data-testid="job-queue-running">
-              <span>{new Date(e.startedAt).toLocaleString()}</span>
+              <span>{formatDateTime(e.startedAt)}</span>
               <span className="status status-running">running</span>
               <RunChatLink jobId={job.id} chatId={e.chatId} />
             </li>
           ))}
           {data.queued.map((e) => (
             <li key={`q-${e.fireId}`} data-testid="job-queue-waiting">
-              <span>{new Date(e.queuedAt).toLocaleString()}</span>
+              <span>{formatDateTime(e.queuedAt)}</span>
               <span className="status status-queued">waiting</span>
               {/* No chat link: a queued fire has not been sent, so the chat it
                   names does not exist yet and the link would dead-end. */}
@@ -3027,7 +3028,7 @@ function RunRow({ run, jobId }: { run: JobRun; jobId: string }): JSX.Element {
   return (
     <li className={linked ? 'run-row run-row-linked' : 'run-row'} ref={rowRef} data-linked={linked}>
       <div className="run-row-head">
-        <span>{new Date(run.ts).toLocaleString()}</span>
+        <span>{formatDateTime(run.ts)}</span>
         <span className={`status status-${run.status}`}>{run.status}</span>
         {badCode ? (
           <span className="run-exit" data-testid="run-exit">

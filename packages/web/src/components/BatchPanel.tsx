@@ -6,6 +6,7 @@
 // whole point is not to watch them one at a time. From check-in on, real
 // status badges show, done first.
 
+import { formatClock } from '../lib/formatDateTime.js';
 import type { JSX } from 'react';
 import { useMemo } from 'react';
 import { OpenableLink } from './OpenableLink.js';
@@ -26,7 +27,7 @@ const CHECK_IN_CHOICES: { label: string; choice: BatchCheckInChoice }[] = [
 ];
 
 function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatClock(ms);
 }
 
 export function BatchPanel(): JSX.Element {
