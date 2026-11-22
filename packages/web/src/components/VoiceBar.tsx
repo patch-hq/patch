@@ -134,7 +134,7 @@ export function VoiceBar(): JSX.Element | null {
           className="vb-action end"
           data-testid="voice-bar-end"
           aria-label="end voice session"
-          onClick={endVoiceCall}
+          onClick={() => endVoiceCall()}
         >
           <PhoneOff size={16} aria-hidden />
         </button>

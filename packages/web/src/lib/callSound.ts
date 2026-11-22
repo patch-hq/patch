@@ -1,12 +1,14 @@
-// The two short sounds of a call: a rising pair when it connects, a falling pair when it
-// ends. Played in the page, on the same output the call's audio uses, so they are heard
+// The short sounds of a call: a rising pair when it connects, a falling pair when it
+// ends, a low double beep when it fails, and one soft note each time a dropped line is redialled. Played in the page, on the same output the call's audio uses, so they are heard
 // where the call is heard and cost nothing.
 
-type Kind = 'pickup' | 'hangup';
+type Kind = 'pickup' | 'hangup' | 'error' | 'reconnecting';
 
-const NOTES: Record<Kind, [number, number]> = {
+const NOTES: Record<Kind, number[]> = {
   pickup: [660, 880],
   hangup: [880, 523],
+  error: [330, 330, 247],
+  reconnecting: [523],
 };
 const NOTE_SECONDS = 0.09;
 const GAIN = 0.1;

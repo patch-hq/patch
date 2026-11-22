@@ -50,7 +50,7 @@
 // engine when one fails (`describeVoiceError`) — a hosted engine's failure is
 // never answered by running local instead.
 
-import { playVoiceLiveCue } from './voiceLiveCue';
+import { playVoiceCue, playVoiceLiveCue } from './voiceLiveCue';
 import { startRingback, stopRingback } from './voiceRingback';
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent, type AudioSessionMode } from '@patch/wire/audio';
@@ -164,6 +164,21 @@ useVoiceStore.subscribe((s) => {
 useVoiceStore.subscribe((s) => {
   const ringing = s.activeSession !== null && s.callPhase === 'connecting' && s.callError === null;
   void (ringing ? startRingback() : stopRingback());
+});
+
+// A call that has failed for good says so aloud. A redial clears its error
+// within the same update, so it is read from the store now, not from the
+// notification, and an error that stays is cued once.
+let _errorCued = false;
+useVoiceStore.subscribe(() => {
+  const s = useVoiceStore.getState();
+  if (s.activeSession === null || s.callError === null) {
+    _errorCued = false;
+    return;
+  }
+  if (_errorCued) return;
+  _errorCued = true;
+  void playVoiceCue('error');
 });
 
 function clearConnectTimer(): void {
@@ -663,6 +678,11 @@ export function setCallMode(next: AudioSessionMode): void {
 export async function endVoiceCall(): Promise<void> {
   // Invalidate any in-flight setup so it tears itself down.
   _callGen++;
+  // A call hung up while failed has already said so with the error cue.
+  const endedState = useVoiceStore.getState();
+  if (endedState.activeSession !== null && endedState.callError === null) {
+    void playVoiceCue('ended');
+  }
   clearConnectTimer();
   clearReconnect();
   const sessionId = useVoiceStore.getState().activeSession?.sessionId;

@@ -583,7 +583,9 @@ describe('voiceController', () => {
   it('a non-TTS onError from the call session pushes the generic toast and ends the call', async () => {
     useUiStore.getState().clearToasts();
     await startVoiceCall('c1');
+    vi.mocked(playCallSound).mockClear();
     lastCallbacks?.onError('backend unavailable');
+    expect(vi.mocked(playCallSound).mock.calls).toEqual([['error']]);
     expect(useVoiceStore.getState().call).toBeNull();
     expect(endSpy).toHaveBeenCalledWith('ended');
     expect(useUiStore.getState().errors[0]?.message).toBe('voice call: backend unavailable');

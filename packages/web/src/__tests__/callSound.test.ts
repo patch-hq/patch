@@ -41,10 +41,14 @@ describe('call sounds', () => {
     vi.stubGlobal('AudioContext', a.FakeCtx);
     playCallSound('pickup');
     playCallSound('hangup');
-    expect(a.oscillators.map((o) => o.frequency.value)).toEqual([660, 880, 880, 523]);
+    playCallSound('error');
+    playCallSound('reconnecting');
+    expect(a.oscillators.map((o) => o.frequency.value)).toEqual([
+      660, 880, 880, 523, 330, 330, 247, 523,
+    ]);
     expect(a.oscillators.every((o) => o.start.mock.calls.length === 1)).toBe(true);
     vi.advanceTimersByTime(1000);
-    expect(a.close).toHaveBeenCalledTimes(2);
+    expect(a.close).toHaveBeenCalledTimes(4);
   });
 
   it('says so, loudly, when the browser cannot play a sound', () => {
