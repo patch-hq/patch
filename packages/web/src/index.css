@@ -12318,12 +12318,21 @@ main.empty-state p {
   left: 0;
   z-index: 20;
   min-width: 220px;
+  /* Sized by its longest model name, not by the pill it hangs from: an absolute
+     box shrinks to its anchor's width, which wrapped "GPT-5.6-Terra · ChatGPT"
+     into a narrow column and pushed a horizontal scrollbar across the page. */
+  width: max-content;
+  max-width: min(360px, calc(100vw - 32px));
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 8px;
+  overflow-x: hidden;
   overflow-y: auto;
+}
+.model-option-name {
+  white-space: nowrap;
 }
 /* PopupSelect lists: the options are plain rows, so the list shrink-wraps them. */
 .popup-select-list {
