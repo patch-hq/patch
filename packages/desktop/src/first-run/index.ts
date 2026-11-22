@@ -10,6 +10,8 @@ import { readSaved, welcomeUrl, writeSaved, type SavedConnection } from './conne
 
 export { welcomeUrl };
 import { launchPatch, type Launch, type SetupUi } from './launch.js';
+import { APP_BUNDLE_ID } from '../app-id.js';
+import { readPrefs } from '../keep-running.js';
 import { freePort, startLocalServer, startLocalService } from './local-server.js';
 import { serviceControl, type ServiceControl } from './server-service.js';
 import { bringUpLocal } from './setup-local.js';
@@ -65,13 +67,27 @@ async function post(
 }
 
 /** The Mac's launchd agent for this app's own server. */
-export function macService(userHome: string): ServiceControl {
-  return serviceControl({ userHome, uid: process.getuid?.() ?? 0 });
+export function macService(userHome: string, userData: string): ServiceControl {
+  return serviceControl({
+    userHome,
+    serverHome: localHome(userData),
+    // Only a user who has said yes at "Keep Patch running" gets a login-time agent.
+    atLogin: () => {
+      const file = join(userData, 'keep-running.json');
+      return existsSync(file) && readPrefs(file).openAtLogin;
+    },
+    uid: process.getuid?.() ?? 0,
+  });
+}
+
+/** The server agent follows the "Open at login" choice (macOS). */
+export function setServerAtLogin(userHome: string, userData: string, on: boolean): void {
+  macService(userHome, userData).setAtLogin(on);
 }
 
 /** Settings → Hosts → turn the server on this Mac off (spec/11 § Server on a Mac). */
-export function turnOffLocalServer(userHome: string): Promise<void> {
-  return macService(userHome).turnOff();
+export function turnOffLocalServer(userHome: string, userData: string): Promise<void> {
+  return macService(userHome, userData).turnOff();
 }
 
 export function launch(env: FirstRunEnv): Promise<Launch> {
@@ -110,7 +126,12 @@ export function launch(env: FirstRunEnv): Promise<Launch> {
             // On a Mac the server is a launchd agent of its own (spec/11 § Server on a
             // Mac); elsewhere the app still starts it and stops it at quit.
             return process.platform === 'darwin'
-              ? startLocalService({ ...base, userHome: env.home, service: macService(env.home) })
+              ? startLocalService({
+                  ...base,
+                  userHome: env.home,
+                  appId: APP_BUNDLE_ID,
+                  service: macService(env.home, env.userData),
+                })
               : startLocalServer(base);
           },
           call: post,

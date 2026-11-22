@@ -30,6 +30,8 @@ export interface ServiceEnv {
   node: { execPath: string; env: Record<string, string> };
   port: number;
   relayUrl?: string;
+  /** The app's bundle id: macOS lists the agent under that app's name and icon. */
+  appId: string;
 }
 
 const xml = (s: string): string =>
@@ -69,6 +71,10 @@ export function serverPlist(env: ServiceEnv, userHome: string): string {
   <dict>
 ${entries}
   </dict>
+  <key>AssociatedBundleIdentifiers</key>
+  <array>
+    <string>${xml(env.appId)}</string>
+  </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${log}</string>
@@ -116,6 +122,13 @@ export function layOutRelease(home: string, releaseDir: string, release: string)
 export interface ServiceControl {
   /** Registers the agent from `plist` and starts it, restarting a running one that differs. */
   install(plist: string, restart: boolean): Promise<void>;
+  /**
+   * Whether macOS starts the agent at login. Registering it in LaunchAgents is
+   * what makes macOS announce a background item, so that is done only once the
+   * user has agreed (the "Keep Patch running" step); until then the agent runs
+   * from the install home for this session only.
+   */
+  setAtLogin(on: boolean): void;
   /** Stops the agent and keeps it from starting at login until `install` runs again. */
   turnOff(): Promise<void>;
   /** Whether launchd has the agent loaded. */
@@ -124,13 +137,25 @@ export interface ServiceControl {
 
 export function serviceControl(opts: {
   userHome: string;
+  /** The server's install home: the agent runs from the plist kept there. */
+  serverHome: string;
+  /** Whether the user has agreed to Patch opening at login. */
+  atLogin: () => boolean;
   uid: number;
   launchctl?: Launchctl;
 }): ServiceControl {
   const lc = opts.launchctl ?? realLaunchctl;
   const domain = `gui/${opts.uid}`;
   const target = `${domain}/${SERVER_SERVICE_LABEL}`;
-  const path = serverPlistPath(opts.userHome);
+  const loginPath = serverPlistPath(opts.userHome);
+  const path = join(opts.serverHome, 'agent.plist');
+  const syncLogin = (on: boolean): void => {
+    if (!on) return rmSync(loginPath, { force: true });
+    if (!existsSync(path))
+      throw new Error(`${path} is missing: the server agent was never installed`);
+    mkdirSync(join(opts.userHome, 'Library', 'LaunchAgents'), { recursive: true });
+    writeFileSync(loginPath, readFileSync(path));
+  };
   const must = async (args: string[]): Promise<void> => {
     const r = await lc(args);
     if (!r.ok) throw new Error(`launchctl ${args.join(' ')} failed: ${r.output}`);
@@ -139,9 +164,10 @@ export function serviceControl(opts: {
   return {
     loaded,
     async install(plist, restart) {
-      mkdirSync(join(opts.userHome, 'Library', 'LaunchAgents'), { recursive: true });
+      mkdirSync(opts.serverHome, { recursive: true });
       const changed = !existsSync(path) || readFileSync(path, 'utf8') !== plist;
       if (changed) writeFileSync(path, plist);
+      syncLogin(opts.atLogin());
       // A turn-off disabled the label; opening the app turns it back on.
       await must(['enable', target]);
       const isLoaded = await loaded();
@@ -160,6 +186,7 @@ export function serviceControl(opts: {
       }
       await must(['bootstrap', domain, path]);
     },
+    setAtLogin: syncLogin,
     async turnOff() {
       await must(['disable', target]);
       if (await loaded()) await must(['bootout', target]);

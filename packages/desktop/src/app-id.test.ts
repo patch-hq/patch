@@ -11,7 +11,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { APP_BUNDLE_ID } from './app-id';
+
 const PUBLISHED_APP_ID = 'dev.patchhq.app';
+
+test('the id the server agent names is the published one', () => {
+  assert.equal(APP_BUNDLE_ID, PUBLISHED_APP_ID);
+});
 
 test('electron-builder appId is the id installed shells update under', () => {
   const yml = readFileSync(join(__dirname, '..', 'electron-builder.yml'), 'utf8');

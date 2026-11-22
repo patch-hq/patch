@@ -227,6 +227,8 @@ export async function startLocalServer(opts: LocalServerOptions): Promise<LocalS
 export interface LocalServiceOptions extends LocalServerOptions {
   /** The user's home directory, where the launchd agent is registered. */
   userHome: string;
+  /** The app's bundle id, named in the agent so macOS shows it as the app. */
+  appId: string;
   service: ServiceControl;
 }
 
@@ -267,7 +269,13 @@ export async function startLocalService(opts: LocalServiceOptions): Promise<Loca
   }
   await opts.service.install(
     serverPlist(
-      { home: opts.home, node: opts.node, port: opts.port, relayUrl: opts.relayUrl },
+      {
+        home: opts.home,
+        node: opts.node,
+        port: opts.port,
+        relayUrl: opts.relayUrl,
+        appId: opts.appId,
+      },
       opts.userHome,
     ),
     moved,

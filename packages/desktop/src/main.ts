@@ -22,6 +22,7 @@ import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
 import { spawn, spawnSync } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
+import { APP_NAME } from './app-id';
 import { KeepRunning, OPENED_AT_LOGIN_ARG, setLinuxAutostart } from './keep-running';
 import { applyMacLoginItem, macLoginItemBlocker, shouldOfferMove } from './app-location';
 import {
@@ -139,6 +140,8 @@ let activeLaunch: { stop(): Promise<void>; mode?: 'local' | 'remote' | 'relay' }
  * open at login, and the system kept awake on mains power so a phone reaches it.
  */
 let keepRunning: KeepRunning | null = null;
+/** The setup window, kept on screen until the main window has drawn its first screen. */
+let handoverSetup: BrowserWindow | null = null;
 /** The command-line flag that tells the main window's preload this computer runs Patch. */
 const LOCAL_MACHINE_ARG = '--patch-local-machine';
 
@@ -148,6 +151,14 @@ const LOCAL_MACHINE_ARG = '--patch-local-machine';
 // without rebuilding.
 /** A second, isolated Patch for the synthetic meeting test; null in every normal run. */
 const QUIET = quietInstanceFromEnv(process.env);
+// The app's name comes from package.json (`@patch/desktop`), which showed in the
+// macOS app menu ("About @patch/desktop"). Name it Patch, keeping the data folder
+// the old name gave it so nothing saved is left behind.
+{
+  const dataDir = app.getPath('userData');
+  app.setName(APP_NAME);
+  app.setPath('userData', dataDir);
+}
 if (QUIET) app.setPath('userData', QUIET.userDataDir);
 
 const GLOBAL_HOTKEY = process.env['PATCH_GLOBAL_HOTKEY'] ?? 'Control+Space';
@@ -542,7 +553,7 @@ export function createMainWindow(): BrowserWindow {
     title: 'Patch',
     // Opened at login to keep agents and the phone connection running, the app
     // starts in the menu bar rather than putting a window in front of the user.
-    show: !QUIET && !openedAtLogin(),
+    show: !QUIET && !openedAtLogin() && !(handoverSetup && !handoverSetup.isDestroyed()),
     // No native title bar — the SPA runs to the window's top edge and the
     // traffic lights float over its top-left (spec/05 § Window chrome; the user,
     // App Updates: "clean at top, no patch top bar"). The renderer reserves
@@ -577,6 +588,27 @@ export function createMainWindow(): BrowserWindow {
   win.on('move', scheduleBoundsSave);
   win.on('resize', scheduleBoundsSave);
   win.on('close', () => saveWindowBounds(win));
+  const handover = handoverSetup && !handoverSetup.isDestroyed() ? handoverSetup : null;
+  handoverSetup = null;
+  if (handover) {
+    // Show the main window only once the page has put something on screen, then
+    // drop the setup window under it.
+    let handed = false;
+    const hand = (): void => {
+      if (handed) return;
+      handed = true;
+      void waitForFirstScreen(win)
+        .catch((err) => console.error('[patch] the first screen was slow to draw:', err))
+        .then(() => {
+          if (win.isDestroyed()) return;
+          win.show();
+          if (!handover.isDestroyed()) handover.destroy();
+        });
+    };
+    win.webContents.once('did-finish-load', hand);
+    // A page that failed to load still hands over, to the load-retry screen.
+    win.webContents.once('did-fail-load', hand);
+  }
   void win.loadURL(initialUrl ?? SERVER_URL);
   initialUrl = null; // the credential fragment is handed over once; later loads need none
   attachLoadRetry(win, SERVER_URL);
@@ -602,6 +634,20 @@ export function createMainWindow(): BrowserWindow {
   // orphaned main window. The factory owns the invariant so callers can't drift.
   mainWindow = win;
   return win;
+}
+
+/** Resolves once the page's root element has content; rejects after 10s. */
+async function waitForFirstScreen(win: BrowserWindow): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (win.isDestroyed()) return;
+    const drawn = await win.webContents.executeJavaScript(
+      "(document.getElementById('root')?.childElementCount ?? 0) > 0",
+    );
+    if (drawn === true) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the page had drawn nothing after 10s');
 }
 
 /** Tray popover — small frameless window anchored to the tray icon. */
@@ -1006,7 +1052,8 @@ function startKeepRunning(userData: string): void {
     setOpenAtLogin: (on) => {
       if (QUIET) console.log(`[patch] quiet instance: open at login ${on} not applied`);
       else if (linux) setLinuxAutostart(autostart, appImage as string, on);
-      else if (mac)
+      else if (mac) {
+        loadFirstRun().setServerAtLogin(app.getPath('home'), userData, on);
         applyMacLoginItem(on, {
           bundlePath,
           recordFile: join(userData, 'login-item.json'),
@@ -1016,7 +1063,7 @@ function startKeepRunning(userData: string): void {
           warn: (m) => console.error(`[patch] login item: ${m}`),
           info: (m) => console.log(`[patch] login item: ${m}`),
         });
-      else app.setLoginItemSettings({ openAtLogin: on });
+      } else app.setLoginItemSettings({ openAtLogin: on });
     },
     onBattery: () => powerMonitor.isOnBatteryPower(),
     onPowerSourceChange: (cb) => {
@@ -2083,7 +2130,7 @@ function setupAutoUpdater(): void {
   ipcMain.handle('patch:local-server:turn-off', async () => {
     if (!keepRunning || process.platform !== 'darwin')
       throw new Error('This computer does not run the Patch server as a service');
-    await loadFirstRun().turnOffLocalServer(app.getPath('home'));
+    await loadFirstRun().turnOffLocalServer(app.getPath('home'), app.getPath('userData'));
     // The host on this Mac goes with it, for real: a host left running with no
     // server only looks like a working Patch that has stopped answering.
     if (localHostStatus(app.getPath('home')).installed) {
@@ -2400,8 +2447,11 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
     app.exit(1);
     return 'stop';
   }
+  // The setup window stays up, showing its progress, until the main window has
+  // drawn the next screen (createMainWindow): closing it here left a blank white
+  // window while the welcome page loaded.
   const done = setup as ReturnType<typeof showSetupWindow> | null;
-  if (done) done.window.destroy();
+  handoverSetup = done ? done.window : null;
   return 'ready';
 }
 

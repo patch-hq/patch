@@ -57,7 +57,7 @@ const node = { execPath: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } };
 
 test('the agent runs the launcher from the install home and comes back whenever it stops', () => {
   const plist = serverPlist(
-    { home: '/h/server', node, port: 21000, relayUrl: 'wss://r' },
+    { home: '/h/server', node, port: 21000, relayUrl: 'wss://r', appId: 'dev.test.app' },
     '/Users/a',
   );
   assert.match(plist, new RegExp(`<key>Label</key><string>${SERVER_SERVICE_LABEL}</string>`));
@@ -67,6 +67,10 @@ test('the agent runs the launcher from the install home and comes back whenever 
   assert.match(plist, /<key>PORT<\/key><string>21000<\/string>/);
   assert.match(plist, /<key>HOST<\/key><string>127.0.0.1<\/string>/);
   assert.match(plist, /<key>PATCH_SERVER_HOME<\/key><string>\/h\/server<\/string>/);
+  assert.match(
+    plist,
+    /<key>AssociatedBundleIdentifiers<\/key>\s*<array>\s*<string>dev.test.app<\/string>/,
+  );
   assert.match(plist, /<key>PATCH_RELAY_URL<\/key><string>wss:\/\/r<\/string>/);
 });
 
@@ -112,14 +116,21 @@ function fakeLaunchctl() {
 test('installing registers the agent once, restarts it only when it changed, and turning it off disables it', async () => {
   const userHome = scratch();
   const lc = fakeLaunchctl();
-  const svc = serviceControl({ userHome, uid: 501, launchctl: lc.fn });
+  const svc = serviceControl({
+    userHome,
+    serverHome: join(userHome, 'srv'),
+    atLogin: () => true,
+    uid: 501,
+    launchctl: lc.fn,
+  });
   await svc.install('<plist a/>', false);
   assert.equal(readFileSync(serverPlistPath(userHome), 'utf8'), '<plist a/>');
+  assert.equal(readFileSync(join(userHome, 'srv', 'agent.plist'), 'utf8'), '<plist a/>');
   const t = `gui/501/${SERVER_SERVICE_LABEL}`;
   assert.deepEqual(lc.calls, [
     `enable ${t}`,
     `print ${t}`,
-    `bootstrap gui/501 ${serverPlistPath(userHome)}`,
+    `bootstrap gui/501 ${join(userHome, 'srv', 'agent.plist')}`,
   ]);
   lc.calls.length = 0;
   await svc.install('<plist a/>', false);
@@ -159,7 +170,13 @@ test('a reinstall does not bootstrap until launchd has finished removing the old
     }
     return { ok: true, output: '' };
   };
-  const svc = serviceControl({ userHome: scratch(), uid: 501, launchctl: lc });
+  const svc = serviceControl({
+    userHome: scratch(),
+    serverHome: scratch(),
+    atLogin: () => false,
+    uid: 501,
+    launchctl: lc,
+  });
   await svc.install('<plist a/>', false);
   await svc.install('<plist b/>', false);
   assert.equal(loaded, true);
@@ -168,6 +185,8 @@ test('a reinstall does not bootstrap until launchd has finished removing the old
 test('a launchctl failure is an error, not a silent skip', async () => {
   const svc = serviceControl({
     userHome: scratch(),
+    serverHome: scratch(),
+    atLogin: () => false,
     uid: 501,
     launchctl: async (a) => ({ ok: a[0] === 'print', output: 'boom' }),
   });
@@ -183,6 +202,7 @@ function launchdStandIn(
   const svc: ServiceControl = {
     loaded: async () => children.length > 0,
     turnOff: async () => undefined,
+    setAtLogin: () => undefined,
     install: async () => {
       children.push(
         spawn('/bin/sh', [join(home, 'current', 'patch-server')], {
@@ -214,6 +234,7 @@ test("the service starts from the home's own copy of the release and stop() leav
       port,
       node,
       userHome: root,
+      appId: 'dev.test.app',
       service: svc,
     });
     assert.equal((await fetch(`${server.origin}/api/healthz`)).status, 200);
@@ -263,6 +284,7 @@ test('an app-started server from before the move is stopped so the agent can tak
       port,
       node,
       userHome: root,
+      appId: 'dev.test.app',
       service: svc,
     });
     const body = (await (await fetch(`${server.origin}/api/healthz`)).json()) as { gitSha: string };
@@ -289,7 +311,34 @@ test('a restart waits for launchd to finish unloading before it bootstraps', asy
       return { ok: false, output: 'Bootstrap failed: 5: Input/output error' };
     return { ok: true, output: '' };
   };
-  const svc = serviceControl({ userHome: scratch(), uid: 501, launchctl: fn });
+  const svc = serviceControl({
+    userHome: scratch(),
+    serverHome: scratch(),
+    atLogin: () => false,
+    uid: 501,
+    launchctl: fn,
+  });
   await svc.install('<plist/>', true);
   assert.equal(calls[calls.length - 1], 'bootstrap');
+});
+
+test('until the user agrees nothing is registered with macOS; agreeing and declining move the login agent', async () => {
+  const userHome = scratch();
+  let agreed = false;
+  const svc = serviceControl({
+    userHome,
+    serverHome: join(userHome, 'srv'),
+    atLogin: () => agreed,
+    uid: 501,
+    launchctl: fakeLaunchctl().fn,
+  });
+  await svc.install('<plist a/>', false);
+  assert.equal(existsSync(serverPlistPath(userHome)), false);
+  svc.setAtLogin(true);
+  assert.equal(readFileSync(serverPlistPath(userHome), 'utf8'), '<plist a/>');
+  svc.setAtLogin(false);
+  assert.equal(existsSync(serverPlistPath(userHome)), false);
+  agreed = true;
+  await svc.install('<plist a/>', false);
+  assert.equal(existsSync(serverPlistPath(userHome)), true);
 });
