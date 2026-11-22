@@ -207,6 +207,13 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
       'op: string, title?: string, topicId?: string, bullets?: string[], decided?: boolean, headline?: string, source?: object',
   },
   {
+    name: patchToolId('patch_capture_screen'),
+    label: 'patch_capture_screen',
+    category: 'patch',
+    description: 'Reads the real Patch screen the user captured, so the agent sees what they see.',
+    params: "surface?: 'web' | 'phone'",
+  },
+  {
     name: patchToolId('patch_pad_list'),
     label: 'patch_pad_list',
     category: 'patch',
