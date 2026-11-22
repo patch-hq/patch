@@ -178,7 +178,7 @@ function buildPrompt(input: GoalEvalInput, instructions: string, level: GoalStri
       'if the agent reports a problem that lies outside that scope (for example a design bug a ' +
       'test turned up) and says it is leaving it, that does not make the goal not_met. ' +
       'If it names a blocker that stops the in-scope work and only the user can clear it, ' +
-      'judge impossible with that blocker as the reason, rather than not_met.',
+      'judge blocked with that blocker as the reason (impossible is only for a goal no one could ever meet), rather than not_met.',
     '',
     ...stringencySection(level),
     ...(level === 1 ? [] : ['CONVERSATION SO FAR (oldest first):', input.transcript, '']),

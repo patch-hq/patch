@@ -2305,6 +2305,8 @@ export class Daemon {
   /** Chats whose current goal-evaluation deferral has already been logged. */
   private readonly goalDeferLogged = new Set<string>();
   private readonly goalWatchPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Timed holds (spec/04 § Goals — blocked): wakes a goal held until a stated time. */
+  private readonly goalHoldTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** OAuth gate run before every query. See HostOptions.resolveOAuth. */
   private readonly resolveOAuth: NonNullable<HostOptions['resolveOAuth']>;
   /**
@@ -3198,6 +3200,8 @@ export class Daemon {
     // next real turn re-evaluates it.
     for (const t of this.goalWatchPollTimers.values()) clearTimeout(t);
     this.goalWatchPollTimers.clear();
+    for (const t of this.goalHoldTimers.values()) clearTimeout(t);
+    this.goalHoldTimers.clear();
     // Stop the resident watch poll. Persisted watch records (and any process
     // they still name) are untouched — a fresh host re-attaches on hydrate.
     this.watch.dispose();
@@ -5818,6 +5822,49 @@ export class Daemon {
     if (!moved) this.emitState(chatId);
   }
 
+  private cancelGoalHoldTimer(chatId: string): void {
+    const t = this.goalHoldTimers.get(chatId);
+    if (t !== undefined) clearTimeout(t);
+    this.goalHoldTimers.delete(chatId);
+  }
+
+  /**
+   * spec/04 § Goals — blocked. The agent itself says it needs the user
+   * (`patch_ask_human`): an armed goal is held exactly as if the judge had said
+   * `blocked`. With `resumeAt` (epoch ms) the hold also lifts when that time
+   * passes and the agent is sent back to work. No-op without an armed goal.
+   */
+  holdGoalForUser(chatId: string, resumeAt?: number): void {
+    const state = this.chatState.get(chatId);
+    if (!state || state.goal === null || !state.goalProgress) return;
+    state.goalProgress = { ...state.goalProgress, waitingOnUser: true };
+    this.cancelGoalHoldTimer(chatId);
+    if (resumeAt !== undefined) {
+      const delay = Math.max(0, resumeAt - this.opts.now());
+      const timer = setTimeout(() => {
+        this.goalHoldTimers.delete(chatId);
+        const s = this.chatState.get(chatId);
+        if (!s || s.goal === null || !s.goalProgress?.waitingOnUser) return;
+        s.goalProgress = { ...s.goalProgress, waitingOnUser: false };
+        this.emitState(chatId);
+        if (this.isTurnRunning(chatId)) return;
+        const reason = 'The time you were waiting for has passed. Carry on.';
+        void this.sendInput({
+          chatId,
+          message: buildGoalNotMetMessage(s.goal, reason),
+          localId: randomUUID(),
+          origin: 'machine',
+          goalTrigger: { reason },
+        }).catch((err) => {
+          this.opts.logger.warn({ chatId, err }, 'goal timed hold: resume failed to send');
+        });
+      }, delay);
+      timer.unref?.();
+      this.goalHoldTimers.set(chatId, timer);
+    }
+    this.emitState(chatId);
+  }
+
   async setArchived(chatId: string, archived: boolean): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
@@ -5895,6 +5942,7 @@ export class Daemon {
     const goalPoll = this.goalWatchPollTimers.get(chatId);
     if (goalPoll !== undefined) clearTimeout(goalPoll);
     this.goalWatchPollTimers.delete(chatId);
+    this.cancelGoalHoldTimer(chatId);
     this.goalDeferLogged.delete(chatId);
     this.parkedTurns.delete(chatId);
     this.persistPendingTurns(chatId);
@@ -10532,6 +10580,7 @@ export class Daemon {
     // A turn is starting, so a goal held by an earlier stop is live again.
     if (state.goalProgress?.pausedByStop || state.goalProgress?.waitingOnUser)
       state.goalProgress = { ...state.goalProgress, pausedByStop: false, waitingOnUser: false };
+    this.cancelGoalHoldTimer(chatId);
     this.emitState(chatId);
 
     // Record the turn as in-flight BEFORE the SDK is asked to run it. Everything
