@@ -6417,7 +6417,7 @@ export class Daemon {
       '"leave": no question. Give "chatId" and "folder" exactly as listed above. No prose outside the JSON.' +
       (speak
         ? '\nEvery entry, whatever its action, also has "summary": one short spoken sentence on what that chat just did, ' +
-          'naming the chat the way a person would (not its id), to be read aloud to Tom. Plain words, no markdown, no paths.'
+          'naming the chat the way a person would (not its id), to be read aloud to the user. Plain words, no markdown, no paths.'
         : '')
     );
   }
