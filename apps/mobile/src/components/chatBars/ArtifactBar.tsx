@@ -14,7 +14,8 @@ import { useRouter, type Href } from 'expo-router';
 import { LayoutTemplate } from 'lucide-react-native';
 import { apiUrl } from '../../config';
 import { useChatStore } from '../../stores/chatStore';
-import { deriveArtifacts } from '../../lib/artifacts';
+import { deriveArtifacts, mergeArtifacts, type ServerArtifact } from '../../lib/artifacts';
+import { api } from '../../api/rest';
 import { openArtifactTarget } from '../../lib/pads';
 import { openArtifactViewer } from '../ArtifactViewer';
 import { radii, space, textMin, useTheme } from '../../lib/theme';
@@ -32,7 +33,23 @@ export function ArtifactBar({ chatId }: { chatId: string }): ReactElement | null
       hide.remove();
     };
   }, []);
-  const artifacts = deriveArtifacts(timeline ?? []);
+  const live = deriveArtifacts(timeline ?? []);
+  // The transcript is paged: the server's list supplies the older ones, and is
+  // fetched again whenever the chat publishes something new.
+  const [served, setServed] = useState<ServerArtifact[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getChatArtifacts(chatId)
+      .then((r) => {
+        if (!cancelled) setServed(r.artifacts);
+      })
+      .catch((err) => console.error('artifact bar: could not load the artifact list', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, live.length]);
+  const artifacts = mergeArtifacts(live, served);
   if (artifacts.length === 0 || keyboardOpen) return null;
 
   return (

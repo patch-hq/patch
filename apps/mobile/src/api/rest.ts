@@ -661,6 +661,17 @@ export const api = {
     request<{ events: Array<Record<string, unknown>>; nextFromSeq?: number }>(
       `/api/chats/${chatId}/history?branchId=${encodeURIComponent(opts.branchId)}`,
     ),
+  getChatArtifacts: (chatId: string) =>
+    request<{
+      artifacts: {
+        artifactId: string;
+        title: string;
+        path: string;
+        url: string;
+        seq: number;
+        updatedAt: number;
+      }[];
+    }>(`/api/chats/${encodeURIComponent(chatId)}/artifacts`),
   // spec/15 § Chat detail — Delegate tool row: the pushed read-only
   // transcript screen. A subagent is never in the chat registry (spec/02 §
   // Native subagent dispatch), so this reads its history through the PARENT.

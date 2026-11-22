@@ -21,6 +21,7 @@ import type { ChatEventEntry } from '../stores/chatStore.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     checkHooks: vi.fn(async () => ({ decision: 'pass', results: [] })),
   },

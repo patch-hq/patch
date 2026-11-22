@@ -25,6 +25,7 @@ function cid(d: { kind: string; chatId?: string }): string {
 
 vi.mock('../api/rest.js', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     getFileContentAtHead: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),

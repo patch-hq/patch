@@ -6,7 +6,7 @@
 // (newest-published-first).
 
 import { describe, it, expect } from 'vitest';
-import { deriveArtifacts } from '../lib/artifacts.js';
+import { deriveArtifacts, mergeArtifacts } from '../lib/artifacts.js';
 import type { ChatEventEntry } from '../stores/chatStore.js';
 
 function artifactEntry(over: Partial<ChatEventEntry> = {}): ChatEventEntry {
@@ -60,5 +60,24 @@ describe('deriveArtifacts', () => {
       { seq: 3, kind: 'tool_call', at: 0, tool: 'Read' },
     ]);
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('mergeArtifacts', () => {
+  const served = (id: string, seq: number) => ({
+    artifactId: id,
+    title: id,
+    path: `${id}.html`,
+    url: `/u/${id}`,
+    seq,
+    updatedAt: 5,
+  });
+  it('adds the older artifacts the paged transcript lacks, newest first', () => {
+    const live = deriveArtifacts([
+      artifactEntry({ artifactId: 'new', seq: 9, artifactTitle: 'Live' }),
+    ]);
+    const rows = mergeArtifacts(live, [served('new', 9), served('old', 2), served('mid', 5)]);
+    expect(rows.map((r) => r.artifactId)).toEqual(['new', 'mid', 'old']);
+    expect(rows[0]!.title).toBe('Live');
   });
 });

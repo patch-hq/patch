@@ -10,7 +10,10 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { __setLocalSearchParams } from './stubs/expo-router';
 
 vi.mock('../src/api/rest', () => ({
-  api: { markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })) },
+  api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
+    markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
+  },
 }));
 const requestHistory = vi.fn();
 vi.mock('../src/api/ws', () => ({

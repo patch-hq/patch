@@ -30,6 +30,7 @@ import { JUMP_HIGHLIGHT_MS, JUMP_MAX_RETRIES, JUMP_WAIT_MS } from '../src/lib/ch
 
 vi.mock('../src/api/rest', () => ({
   api: {
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     deleteChat: vi.fn(),
     pinChat: vi.fn(),

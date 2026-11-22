@@ -33,6 +33,7 @@ vi.mock('../src/api/rest', () => ({
     deleteChat: vi.fn(),
     pinChat: vi.fn(),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
   },
 }));
 vi.mock('../src/api/ws', () => ({

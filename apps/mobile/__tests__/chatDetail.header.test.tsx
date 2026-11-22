@@ -29,6 +29,7 @@ import { __pressBack } from './stubs/react-native';
 import { __resetRouterMock, __setLocalSearchParams, routerMock } from './stubs/expo-router';
 
 const apiMocks = {
+  getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
   deleteChat: vi.fn(async () => ({ ok: true as const })),
   pinChat: vi.fn(async () => undefined),
   snoozeChat: vi.fn(async () => undefined),

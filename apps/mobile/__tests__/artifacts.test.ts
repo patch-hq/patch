@@ -3,7 +3,7 @@
 // packages/web/src/__tests__/artifacts.test.ts.
 
 import { describe, it, expect } from 'vitest';
-import { deriveArtifacts } from '../src/lib/artifacts';
+import { deriveArtifacts, mergeArtifacts } from '../src/lib/artifacts';
 import type { ChatEventEntry } from '../src/stores/chatStore';
 
 const artifactEntry = (seq: number, artifactId: string, title: string): ChatEventEntry => ({
@@ -37,5 +37,27 @@ describe('deriveArtifacts', () => {
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.artifactId).toBe('a1');
+  });
+});
+
+describe('mergeArtifacts', () => {
+  const row = (id: string, seq: number, title = id) => ({
+    artifactId: id,
+    title,
+    path: `${id}.html`,
+    url: `/u/${id}`,
+    seq,
+  });
+  it('adds older artifacts the paged transcript lacks, newest first, transcript winning', () => {
+    const rows = mergeArtifacts(
+      [row('new', 9, 'Live')],
+      [
+        { ...row('new', 9), updatedAt: 1 },
+        { ...row('old', 2), updatedAt: 1 },
+        { ...row('mid', 5), updatedAt: 1 },
+      ],
+    );
+    expect(rows.map((r) => r.artifactId)).toEqual(['new', 'mid', 'old']);
+    expect(rows[0]!.title).toBe('Live');
   });
 });

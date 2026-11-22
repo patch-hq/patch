@@ -437,6 +437,17 @@ export const api = {
   listPads: () => request<{ pads: PadView[] }>('/api/pads'),
   padLibrary: () =>
     request<{ apps: { app: string; screens: PadLibraryScreen[] }[] }>('/api/pads/library'),
+  getChatArtifacts: (chatId: string) =>
+    request<{
+      artifacts: {
+        artifactId: string;
+        title: string;
+        path: string;
+        url: string;
+        seq: number;
+        updatedAt: number;
+      }[];
+    }>(`/api/chats/${encodeURIComponent(chatId)}/artifacts`),
   getPad: (id: string) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`),
   createPad: (body: PadCreateBody) => request<PadView>('/api/pads', { method: 'POST', body }),
   addPadScreens: (id: string, screens: { name: string; html: string; width?: number }[]) =>

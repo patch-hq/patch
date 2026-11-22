@@ -715,6 +715,42 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('GET /api/chats/:id/artifacts lists every artifact once, newest first', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-art', folder: '/work/a' });
+      const art = (artifactId: string, seq: number, title: string) =>
+        hostLink.emit({
+          type: 'chat.artifact',
+          chatId: 'c-art',
+          artifactId,
+          title,
+          url: `/api/chats/c-art/artifact/${artifactId}`,
+          path: `${artifactId}.html`,
+          updatedAt: seq * 10,
+          seq,
+        });
+      art('pad-1', 1, 'First');
+      art('pad-2', 2, 'Second');
+      art('pad-1', 3, 'First v2');
+      const res = await built.app.inject({
+        method: 'GET',
+        url: '/api/chats/c-art/artifacts',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { artifacts: Array<{ artifactId: string; title: string }> };
+      expect(body.artifacts.map((a) => [a.artifactId, a.title])).toEqual([
+        ['pad-1', 'First v2'],
+        ['pad-2', 'Second'],
+      ]);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('GET /api/chats/:id/history from the record honours limit, and reads everything with no since', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
