@@ -16,6 +16,7 @@
 // Web Audio API is surfaced to the caller rather than silently degrading.
 
 import { createPcm16Downsampler } from './pcmDownsample.js';
+import { holdAudio } from './audioHold.js';
 import { silentAudioContext } from './silentAudioContext.js';
 
 /** Test seam: inject a mic-stream factory + an AudioContext implementation. */
@@ -56,7 +57,14 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
       | undefined);
   if (!AudioCtx) throw new Error('Web Audio API unavailable');
 
-  const stream = await getMedia({ audio: true });
+  const release = holdAudio();
+  let stream: MediaStream;
+  try {
+    stream = await getMedia({ audio: true });
+  } catch (e) {
+    release();
+    throw e;
+  }
   // No output device: this only records (lib/silentAudioContext.ts).
   const audioCtx = silentAudioContext(AudioCtx);
   // Same gesture-loss workaround as audioSession: the async getUserMedia breaks
@@ -116,6 +124,7 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
     }
     for (const t of stream.getTracks()) t.stop();
     void audioCtx.close().catch(() => {});
+    release();
   }
 
   return {

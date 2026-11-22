@@ -1,8 +1,12 @@
 package dev.patchhq.app
 
 import android.media.AudioAttributes
+import android.content.Context
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.util.Base64
 import android.util.Log
 import com.facebook.react.bridge.Promise
@@ -44,6 +48,60 @@ class PatchVoiceTtsModule(private val ctx: ReactApplicationContext) :
   @Volatile private var running = false
   @Volatile private var wroteFirst = false
   private var writer: Thread? = null
+  private var focusRequest: AudioFocusRequest? = null
+  private var focusGranted = false
+
+  /**
+   * Take transient-exclusive audio focus while speech plays, so a podcast or
+   * music pauses for the message and resumes by itself when focus is
+   * abandoned. An AudioTrack alone never asks for focus, so a spoken alert
+   * would otherwise play over the top of whatever is already playing.
+   */
+  private fun requestFocus() {
+    if (focusGranted) return
+    val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val result: Int
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val request =
+        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+          .setAudioAttributes(
+            AudioAttributes.Builder()
+              .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+              .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+              .build(),
+          )
+          .setWillPauseWhenDucked(false)
+          .build()
+      result = manager.requestAudioFocus(request)
+      if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusRequest = request
+    } else {
+      @Suppress("DEPRECATION")
+      result =
+        manager.requestAudioFocus(
+          null,
+          AudioManager.STREAM_VOICE_CALL,
+          AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
+        )
+    }
+    if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+      Log.w(TAG, "native tts: audio focus not granted (result=$result)")
+      return
+    }
+    focusGranted = true
+  }
+
+  private fun abandonFocus() {
+    if (!focusGranted) return
+    focusGranted = false
+    val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val request = focusRequest
+    focusRequest = null
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && request != null) {
+      manager.abandonAudioFocusRequest(request)
+    } else {
+      @Suppress("DEPRECATION") manager.abandonAudioFocus(null)
+    }
+  }
   private val queue = LinkedBlockingQueue<ByteArray>()
 
   override fun getName(): String = "PatchVoiceTts"
@@ -97,6 +155,7 @@ class PatchVoiceTtsModule(private val ctx: ReactApplicationContext) :
       running = true
       wroteFirst = false
       queue.clear()
+      requestFocus()
       t.play()
       Log.i(TAG, "native tts: AudioTrack started (24kHz mono PCM16, MODE_STREAM, VOICE_COMMUNICATION)")
       val w = Thread({ writeLoop(t) }, "patch-voice-tts")
@@ -105,6 +164,7 @@ class PatchVoiceTtsModule(private val ctx: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: Throwable) {
       running = false
+      abandonFocus()
       track?.release()
       track = null
       Log.e(TAG, "native tts: start failed: ${e.message}")
@@ -187,6 +247,7 @@ class PatchVoiceTtsModule(private val ctx: ReactApplicationContext) :
     }
     track?.release()
     track = null
+    abandonFocus()
     promise.resolve(null)
   }
 
@@ -200,6 +261,7 @@ class PatchVoiceTtsModule(private val ctx: ReactApplicationContext) :
     }
     track?.release()
     track = null
+    abandonFocus()
     super.invalidate()
   }
 }

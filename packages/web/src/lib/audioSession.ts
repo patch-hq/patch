@@ -22,6 +22,7 @@ import {
 import { api } from '../api/rest.js';
 import { loadCredential, decodeSurfaceClaims } from './credential.js';
 import { createPcm16Downsampler, MIC_SAMPLE_RATE } from './pcmDownsample.js';
+import { holdAudio } from './audioHold.js';
 import { silentAudioContext } from './silentAudioContext.js';
 
 export { MIC_SAMPLE_RATE };
@@ -170,8 +171,17 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
   // 3. Mic capture — skipped entirely for a play-only session, which must not
   // hold the microphone (spec/07 § Speaking with no session open).
   const withMic = opts.withMic !== false;
-  const stream = withMic ? await getMedia({ audio: true }) : null;
   const silent = opts.silent === true;
+  // A session that listens or speaks pauses other audio for its length. A
+  // silent, mic-less one (a preview fed by a recorder that already holds) does neither.
+  const release = withMic || !silent ? holdAudio() : () => {};
+  let stream: MediaStream | null;
+  try {
+    stream = withMic ? await getMedia({ audio: true }) : null;
+  } catch (e) {
+    release();
+    throw e;
+  }
   const audioCtx = silent ? silentAudioContext(AudioCtx) : new AudioCtx();
   // A fresh AudioContext starts `suspended` unless created inside a user-gesture
   // handler. The voice gestures (press-and-hold / tap-toggle / hotkey) ARE user
@@ -246,6 +256,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
   function cleanup(): void {
     if (closed) return;
     closed = true;
+    release();
     try {
       processor?.disconnect();
       source?.disconnect();
