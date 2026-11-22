@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   existsSync,
@@ -52,6 +53,41 @@ describe('sweepUpdateWorkDirs', () => {
     expect(errors).toEqual(['patch-update-dangling']);
     expect(existsSync(join(root, 'patch-update-old'))).toBe(false);
   });
+});
+
+describe('sweepUpdateWorkDirs when a removal is refused', () => {
+  // root ignores permission bits, so the refusal cannot be provoked there.
+  it.skipIf(process.getuid?.() === 0)(
+    'reports a folder it may not remove and still sweeps the others',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'sweep-test-'));
+      roots.push(root);
+      makeDir(root, 'patch-update-a-old', 60 * 60_000);
+      makeDir(root, 'patch-update-b-locked', 60 * 60_000);
+      makeDir(root, 'patch-update-c-old', 60 * 60_000);
+      // A read-only subfolder holding a file: unlinking the file gives EACCES.
+      const locked = join(root, 'patch-update-b-locked', 'inner');
+      mkdirSync(locked);
+      writeFileSync(join(locked, 'f'), 'x');
+      chmodSync(locked, 0o555);
+      const old = (Date.now() - 60 * 60_000) / 1000;
+      utimesSync(join(root, 'patch-update-b-locked'), old, old);
+      const errors: { name: string; code: unknown }[] = [];
+      try {
+        const removed = sweepUpdateWorkDirs(root, Date.now(), 15 * 60_000, (name, err) =>
+          errors.push({ name, code: (err as NodeJS.ErrnoException).code }),
+        );
+        expect(removed.sort()).toEqual(['patch-update-a-old', 'patch-update-c-old']);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].name).toBe('patch-update-b-locked');
+        expect(['EACCES', 'EPERM']).toContain(errors[0].code);
+        expect(existsSync(join(root, 'patch-update-a-old'))).toBe(false);
+        expect(existsSync(join(root, 'patch-update-c-old'))).toBe(false);
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+    },
+  );
 });
 
 describe('update work folder', () => {
