@@ -26,6 +26,7 @@ vi.mock('../src/api/rest', () => ({
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     deleteChat: vi.fn(),
     pinChat: vi.fn(),
+    getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
     continueChat: continueSpy,
   },
   ApiError: class ApiError extends Error {},
