@@ -4070,6 +4070,7 @@ function recordingHandlers(): ShortcutHandlers {
       if (!chatId) return;
       useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId });
     },
+    onCaptureScreen: record('captureScreen'),
     onToggleTerminal: () => {
       record('toggleTerminal')();
       const chatId = useChatStore.getState().activeChatId;

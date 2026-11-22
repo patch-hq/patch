@@ -43,6 +43,7 @@ function makeHandlers(): ShortcutHandlers {
     onCheatSheet: vi.fn(),
     onToggleEditor: vi.fn(),
     onToggleTerminal: vi.fn(),
+    onCaptureScreen: vi.fn(),
     onCloseTab: vi.fn(),
     onPrevTab: vi.fn(),
     onNextTab: vi.fn(),
@@ -711,6 +712,14 @@ describe('useShortcuts — quote / voice / editor chords', () => {
     for (const fn of Object.values(handlers)) {
       expect(fn).not.toHaveBeenCalled();
     }
+  });
+
+  it('⌘⇧K captures the screen for agents; ⌘K alone still searches', () => {
+    const h = makeHandlers();
+    render(<Harness handlers={h} />);
+    press({ key: 'K', metaKey: true, shiftKey: true });
+    expect(h.onCaptureScreen).toHaveBeenCalledTimes(1);
+    expect(h.onSearch).not.toHaveBeenCalled();
   });
 
   it('⌃` toggles the terminal drawer (spec/14 § Terminal)', () => {

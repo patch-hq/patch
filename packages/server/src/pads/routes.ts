@@ -34,6 +34,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { CaptureError, type CaptureStore } from '../captures.js';
 import { PatchPadRequestEvent, type WireEvent } from '@patch/wire';
 import type { HostLink } from '../host-link.js';
 import type { Registry } from '../registry.js';
@@ -80,6 +81,8 @@ const TYPES: Record<string, string> = {
 };
 
 export interface PadRoutesDeps {
+  /** Where `patch_capture_screen` reads the user's captured screens from. */
+  captures: CaptureStore;
   logger: Logger;
   hostLink: HostLink;
   registry: Registry;
@@ -888,6 +891,13 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
         };
       case 'collect':
         return collect(owned(req.padId, req.chatId));
+      case 'capture':
+        try {
+          return deps.captures.latest(req.surface);
+        } catch (err) {
+          if (err instanceof CaptureError) throw new PadError(404, err.message);
+          throw err;
+        }
     }
   }
 

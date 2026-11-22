@@ -422,6 +422,13 @@ export const api = {
   /** The voices the voice devices heard lately, for enrolment. */
   recentVoices: () => request<{ recent: RecentVoice[] }>('/api/voice/recent-voices'),
   issueReporting: () => request<IssueReportingStatus>('/api/issue-reporting'),
+  // POST /api/captures — file the screen on show for agents to read.
+  captureScreen: (body: {
+    surface: 'web' | 'phone';
+    route: string;
+    viewport: { width: number; height: number };
+    html: string;
+  }) => request<{ id: string }>('/api/captures', { method: 'POST', body }),
   setIssueReporting: (enabled: boolean) =>
     request<IssueReportingStatus>('/api/issue-reporting', { method: 'PUT', body: { enabled } }),
   reportBug: (report: ManualIssueReport) =>

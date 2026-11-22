@@ -64,6 +64,7 @@ import { SidebarWindowRoute } from './routes/SidebarWindowRoute.js';
 import { TabWindowRoute } from './routes/TabWindowRoute.js';
 import { focusPageSearch } from './lib/searchTarget.js';
 import { useShortcuts, isChatViewPath } from './lib/shortcuts.js';
+import { captureScreenForAgents } from './lib/captureScreen.js';
 import { useShiftClickGuard } from './lib/shiftClickGuard.js';
 import { useResponsiveShell } from './lib/responsiveShell.js';
 import { useSectionCounts } from './lib/sectionCounts.js';
@@ -615,6 +616,14 @@ export function AppShell(): JSX.Element {
         // already the focused tab) rather than a docked rail.
         if (!activeChatId) return;
         useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: activeChatId });
+      },
+      onCaptureScreen: () => {
+        const ui = useUiStore.getState();
+        captureScreenForAgents(location.pathname)
+          .then(() => ui.pushNotice('Screen captured for agents'))
+          .catch((err: unknown) =>
+            ui.pushError('Could not capture this screen', undefined, (err as Error).message),
+          );
       },
       onToggleTerminal: () => {
         if (!experimentalOn()) return;

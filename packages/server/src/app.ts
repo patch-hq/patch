@@ -141,6 +141,7 @@ import { registerVoiceNoteRoute } from './voice/note.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerArtifactRoutes } from './artifacts.js';
 import { registerPadRoutes } from './pads/routes.js';
+import { CaptureStore, registerCaptureRoutes } from './captures.js';
 import { registerBlobRoutes } from './blob-routes.js';
 import {
   registerDevDiagRoutes,
@@ -2471,7 +2472,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // ---- pads (spec/14 § Pads) ----
   // Design spaces the agents start and the user edits; `<dataDir>/pads` (override
   // with PATCH_PADS_DIR). Signed links share the artifacts' secret.
+  const captureStore = new CaptureStore(join(accountDir, 'captures'));
+  registerCaptureRoutes(app, { registry, store: captureStore });
   registerPadRoutes(app, {
+    captures: captureStore,
     logger: log.child({ component: 'pads' }),
     hostLink,
     registry,

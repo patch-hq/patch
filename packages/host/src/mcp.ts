@@ -1586,6 +1586,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   );
 
   server.registerTool(
+    'patch_capture_screen',
+    {
+      description:
+        'Read the screen of the REAL Patch app that the user captured with "Capture this screen" (web: ⌘⇧K), so you can see what they see instead of guessing. Writes the newest capture into this chat folder under captures/<id>/ — page.html (web: the real screen as one self-contained file — real markup, styles and fonts inlined; open it with Playwright to see it, or start a Pad from it) and/or screen.png (open with Read) — and returns { id, surface, route, viewport, takenAt, dir, files }. Build any Patch design from the captured page, not a lookalike. `surface` picks web or phone; default is the newest of either. Fails with a clear message when nothing has been captured: ask the user to run the capture action and call again.',
+      inputSchema: {
+        surface: z.enum(['web', 'phone']).optional(),
+      },
+    },
+    async ({ surface }) => padCall({ op: 'capture', ...(surface ? { surface } : {}) }),
+  );
+
+  server.registerTool(
     'patch_pad_list',
     {
       description:
