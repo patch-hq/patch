@@ -56,6 +56,7 @@ export interface ManagerSweeperDeps {
     messagesPerChat: number;
     prompt: string;
     model: string;
+    speak: boolean;
   }) => void;
   /**
    * Tell the Manager host the sweep is switched off, so it abandons a run in
@@ -188,6 +189,7 @@ export class ManagerSweeper {
       messagesPerChat: settings.sweepMessagesPerChat,
       prompt: settings.sweepPrompt,
       model: settings.sweepModel,
+      speak: settings.sweepSpeak,
     });
     this.deps.logger.info({ runId, chats: candidates.length }, 'manager-sweep: run requested');
     return true;

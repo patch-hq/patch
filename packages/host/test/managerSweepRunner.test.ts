@@ -489,3 +489,96 @@ describe('runManagerSweep', () => {
     expect(sendToRemoteChat).not.toHaveBeenCalled();
   });
 });
+
+// spec/06 § The feed — with the feed on, each chat's summary line and any open
+// question are spoken as one message after the run; off, nothing is spoken.
+describe('runManagerSweep — the spoken feed', () => {
+  const managerNotes = (events: WireEvent[]): string[] =>
+    events.flatMap((e) =>
+      e.type === 'chat.message' && e.chatId === SPECIAL_THREAD_IDS.manager && e.role === 'system'
+        ? [e.content]
+        : [],
+    );
+  const feedReq = (candidates: ManagerSweepCandidate[], speak: boolean) => ({
+    runId: 'r-feed',
+    candidates,
+    messagesPerChat: 1,
+    prompt: 'decide',
+    model: 'claude-sonnet-5',
+    speak,
+  });
+
+  it('speaks every summary and each open question, in order, as one message', async () => {
+    const decide = vi.fn(async () =>
+      result([
+        { chatId: 'chat-a', action: 'leave', summary: 'Forage deployed the map fix.' },
+        {
+          chatId: 'chat-b',
+          action: 'digest',
+          question: 'Ship it to production?',
+          reason: 'needs a person',
+          summary: 'Bcyc finished the statement draft.',
+        },
+      ]),
+    );
+    const speakFeed = vi.fn();
+    const { daemon, folder, events } = setupWithManager(decide, { speakFeed });
+    await daemon.spawnChat({ folder }); // the Manager
+    const out = await daemon.runManagerSweep(
+      feedReq(
+        [
+          candidate({ chatId: 'chat-a', hostId: 'd2', folder: '/a' }),
+          candidate({ chatId: 'chat-b', hostId: 'd2', folder: '/b' }),
+        ],
+        true,
+      ),
+    );
+    expect(out.error).toBeUndefined();
+    expect(speakFeed).toHaveBeenCalledTimes(1);
+    expect(speakFeed).toHaveBeenCalledWith(
+      'Forage deployed the map fix. Bcyc finished the statement draft. It asks: Ship it to production?',
+    );
+    // What was said is on the Manager thread too.
+    expect(managerNotes(events).some((n) => n.startsWith('[sweep] Spoken: Forage'))).toBe(true);
+  });
+
+  it('asks the decider for a summary line only when the feed is on', async () => {
+    const digests: string[] = [];
+    const decide = vi.fn(async (input: { digest: string }) => {
+      digests.push(input.digest);
+      return result([{ chatId: 'chat-a', action: 'leave' }]);
+    });
+    const { daemon, folder } = setupWithManager(decide, { speakFeed: vi.fn() });
+    await daemon.spawnChat({ folder });
+    const c = [candidate({ chatId: 'chat-a', hostId: 'd2', folder: '/a' })];
+    await daemon.runManagerSweep(feedReq(c, false));
+    await daemon.runManagerSweep(feedReq(c, true));
+    expect(digests[0]).not.toContain('"summary"');
+    expect(digests[1]).toContain('"summary"');
+  });
+
+  it('off: speaks nothing even when the decider returns summaries', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-a', action: 'leave', summary: 'Forage deployed.' }]),
+    );
+    const speakFeed = vi.fn();
+    const { daemon, folder } = setupWithManager(decide, { speakFeed });
+    await daemon.spawnChat({ folder });
+    await daemon.runManagerSweep(
+      feedReq([candidate({ chatId: 'chat-a', hostId: 'd2', folder: '/a' })], false),
+    );
+    expect(speakFeed).not.toHaveBeenCalled();
+  });
+
+  it('on, with no way to speak: the run reports the failure instead of going quiet (NO FALLBACK)', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-a', action: 'leave', summary: 'Forage deployed.' }]),
+    );
+    const { daemon, folder } = setupWithManager(decide);
+    await daemon.spawnChat({ folder });
+    const out = await daemon.runManagerSweep(
+      feedReq([candidate({ chatId: 'chat-a', hostId: 'd2', folder: '/a' })], true),
+    );
+    expect(out.error).toMatch(/cannot speak/);
+  });
+});

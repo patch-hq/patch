@@ -91,6 +91,14 @@ export function ManagerPage(): JSX.Element {
             onCommit={(next) => write({ sweepIntervalMinutes: next })}
           />
         </Row>
+        <Row title="Speak finishes">
+          <Toggle
+            checked={preferences.sweepSpeak}
+            disabled={!loaded}
+            onChange={(next) => write({ sweepSpeak: next })}
+            testid="sweep-speak"
+          />
+        </Row>
         <Row title="Messages per chat">
           <PositiveNumberInput
             ariaLabel="Messages read per chat"

@@ -358,6 +358,48 @@ describe('CallOrchestrator — reach (spec/09 § Reaching the user)', () => {
     expect(wsHub.delivered.map((d) => d.event.type)).not.toContain('chat.speak');
   });
 
+  it('speak-only (the feed) is spoken under auto-notify', async () => {
+    const dir = tmpDir();
+    const wsHub = makeFakeWsHub();
+    const orch = new CallOrchestrator({
+      logger: silent,
+      wsHub: wsHub as never,
+      router: makeRouter(dir),
+      idGenerator: () => 'call-feed-auto',
+      reach: () => 'auto-notify',
+    });
+    await orch.startCall({
+      type: 'patch.call',
+      chatId: 'c1',
+      message: 'Forage finished.',
+      speakOnly: true,
+    });
+    expect(wsHub.delivered.map((d) => d.event.type)).toEqual(['chat.speak']);
+  });
+
+  it('speak-only (the feed) never rings under notify — nothing goes out at all', async () => {
+    const dir = tmpDir();
+    const wsHub = makeFakeWsHub();
+    const router = makeRouter(dir);
+    const routeSpy = vi.spyOn(router, 'route');
+    const orch = new CallOrchestrator({
+      logger: silent,
+      wsHub: wsHub as never,
+      router,
+      idGenerator: () => 'call-feed-notify',
+      timeoutMs: 60_000,
+      reach: () => 'notify',
+    });
+    await orch.startCall({
+      type: 'patch.call',
+      chatId: 'c1',
+      message: 'Forage finished.',
+      speakOnly: true,
+    });
+    expect(wsHub.delivered).toEqual([]);
+    expect(routeSpy).not.toHaveBeenCalled();
+  });
+
   it('a call with no message still rings under auto-notify — there is nothing to speak', async () => {
     const dir = tmpDir();
     const wsHub = makeFakeWsHub();

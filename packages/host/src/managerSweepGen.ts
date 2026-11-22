@@ -30,6 +30,8 @@ export interface SweepDecision {
   reason?: string;
   /** The target chat's folder, echoed back; delivery checks it matches. */
   folder?: string;
+  /** One spoken sentence on what the chat just did — asked for only when the feed is on (spec/06 § The feed). */
+  summary?: string;
 }
 
 export interface SweepDecisionResult {
@@ -77,13 +79,17 @@ export function parseSweepDecisions(raw: string): SweepDecision[] | null {
   const VALID_ACTIONS = new Set(['answer', 'digest', 'leave']);
   for (const d of raw_decisions) {
     if (typeof d !== 'object' || d === null) return null;
-    const { chatId, action, message, question, reason, folder } = d as Record<string, unknown>;
+    const { chatId, action, message, question, reason, folder, summary } = d as Record<
+      string,
+      unknown
+    >;
     if (typeof chatId !== 'string' || chatId === '') return null;
     if (typeof action !== 'string' || !VALID_ACTIONS.has(action)) return null;
     if (message !== undefined && typeof message !== 'string') return null;
     if (question !== undefined && typeof question !== 'string') return null;
     if (reason !== undefined && typeof reason !== 'string') return null;
     if (folder !== undefined && typeof folder !== 'string') return null;
+    if (summary !== undefined && typeof summary !== 'string') return null;
     out.push({
       chatId,
       action: action as SweepDecision['action'],
@@ -91,6 +97,7 @@ export function parseSweepDecisions(raw: string): SweepDecision[] | null {
       ...(typeof question === 'string' ? { question } : {}),
       ...(typeof reason === 'string' ? { reason } : {}),
       ...(typeof folder === 'string' ? { folder } : {}),
+      ...(typeof summary === 'string' ? { summary } : {}),
     });
   }
   return out;

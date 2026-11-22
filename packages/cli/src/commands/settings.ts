@@ -285,6 +285,7 @@ const SETTING_KEYS: Record<string, string> = {
   'voice-device-prompt': 'voiceDevicePrompt',
   'manager-voice-prompt': 'managerVoicePrompt',
   'voice-match-threshold': 'voiceMatchThreshold',
+  'sweep-speak': 'sweepSpeak',
 };
 
 /** A value as typed: JSON where it parses (true, 60, "x"), else the text itself. */
