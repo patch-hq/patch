@@ -47,7 +47,14 @@ export function formatTokenCount(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }
 
-export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
+export function GoalBanner({
+  row,
+  onDone,
+}: {
+  row: ChatRow;
+  /** The user says they have done what the goal was waiting on: the goal resumes. Absent: no button. */
+  onDone?: () => void;
+}): JSX.Element | null {
   const setGoal = useChatStore((s) => s.setGoal);
   const pushError = useUiStore((s) => s.pushError);
   const [now, setNow] = useState(() => Date.now());
@@ -113,7 +120,7 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
             {archived
               ? 'This chat is archived. Unarchive it to resume.'
               : waiting
-                ? `Needs you: ${progress?.lastReason ?? 'the agent is blocked'}. Reply to continue.`
+                ? `Needs you: ${progress?.lastReason ?? 'the agent is blocked'}.`
                 : 'You stopped the chat. Send a message to resume.'}
           </div>
         )}
@@ -160,15 +167,22 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
         meta={meta}
         sub={sub}
         action={
-          <button
-            type="button"
-            data-testid="goal-clear-btn"
-            aria-label="Clear goal"
-            title="Clear goal"
-            onClick={() => void writeGoal(null)}
-          >
-            <X size={16} aria-hidden />
-          </button>
+          <>
+            {waiting && onDone && (
+              <button type="button" data-testid="goal-done-btn" onClick={onDone}>
+                I've done it
+              </button>
+            )}
+            <button
+              type="button"
+              data-testid="goal-clear-btn"
+              aria-label="Clear goal"
+              title="Clear goal"
+              onClick={() => void writeGoal(null)}
+            >
+              <X size={16} aria-hidden />
+            </button>
+          </>
         }
       >
         <StatusPill

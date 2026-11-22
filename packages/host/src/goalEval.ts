@@ -74,6 +74,12 @@ export interface GoalEvalInput {
    * never on a paid one the user did not choose (spec/02 § Provider adapters).
    */
   chatModel?: string;
+  /**
+   * Second opinion on an "impossible" verdict: the reason it was given. The
+   * reply is `blocked` when the only obstacle is something the user must do or
+   * supply (or time passing), `impossible` when no one could ever meet the goal.
+   */
+  reviewImpossible?: { reason: string };
 }
 
 export interface GoalJudgeSettings {
@@ -154,7 +160,41 @@ function stringencySection(level: GoalStringency): string[] {
   return [];
 }
 
+export const IMPOSSIBLE_REVIEW_PROMPT = `A previous judge ruled a stated GOAL impossible and gave a reason. Check that reason.
+Decide exactly one of:
+- "blocked" — the only thing stopping the goal is something the user must do or supply
+  (a decision, a credential, access, a physical action, a change to their own
+  settings or hours) or a point in time that will pass. The goal is achievable once
+  they act or the time comes. Name exactly what the user needs to do or supply.
+- "impossible" — no one could ever satisfy the goal: it contradicts itself, depends on
+  something that no longer exists, or is out of reach even with the user's help.
+When in doubt between the two, answer "blocked": a goal must never be ended just
+because it was waiting on the user.`;
+
+function buildReviewPrompt(input: GoalEvalInput, reason: string): string {
+  return [
+    IMPOSSIBLE_REVIEW_PROMPT,
+    '',
+    `GOAL: ${input.condition}`,
+    '',
+    `REASON GIVEN FOR "impossible": ${reason}`,
+    '',
+    'WHAT THE USER ASKED FOR:',
+    input.userScope,
+    '',
+    "THE AGENT'S LATEST MESSAGE:",
+    input.agentStatement,
+    '',
+    'CONVERSATION SO FAR (oldest first):',
+    input.transcript,
+    '',
+    'Reply with ONLY a JSON object of the shape {"verdict":"blocked"|"impossible","reason":"..."}. ' +
+      'For "blocked" the reason says what the user needs to do or supply, as an instruction. No prose outside the JSON.',
+  ].join('\n');
+}
+
 function buildPrompt(input: GoalEvalInput, instructions: string, level: GoalStringency): string {
+  if (input.reviewImpossible) return buildReviewPrompt(input, input.reviewImpossible.reason);
   return [
     instructions.trim(),
     '',

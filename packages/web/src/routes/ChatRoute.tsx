@@ -2494,7 +2494,12 @@ export function ChatRoute({
         <ParentChatBar chatId={row.chatId} parentChatId={row.parentChatId} />
       ) : null}
       <div className="status-list" data-testid="status-list">
-        <GoalBanner row={row} />
+        <GoalBanner
+          row={row}
+          onDone={() =>
+            void handleSend('I have done what the goal was waiting on. Carry on with the goal.')
+          }
+        />
         <FinishedGoalBanner
           row={row}
           onReset={(condition) => void handleSend(`/goal ${condition}`)}
