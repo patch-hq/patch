@@ -614,6 +614,8 @@ export interface HostOptions {
     checkIn?: boolean;
     /** The chat's own model: a chat on a model endpoint is judged on it. */
     chatModel?: string;
+    /** Second opinion on an "impossible" verdict (spec/04 § Goals — impossible). */
+    reviewImpossible?: { reason: string };
   }) => Promise<{
     verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
@@ -5626,8 +5628,7 @@ export class Daemon {
       };
     }
     const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
-    const result = await evaluator({
-      chatId,
+    const claimBase = {
       condition,
       transcript: renderGoalTranscript(state.lastMessages),
       turnsEvaluated,
@@ -5640,11 +5641,22 @@ export class Daemon {
         'The transcript may not yet include its latest tool calls. Judge the claim yourself: ' +
         `answer "${claimed}" only if it is really true, otherwise answer not_met.\n\n` +
         renderAgentStatement(state.lastMessages),
-    });
+    };
+    const first = await evaluator({ chatId, ...claimBase });
+    const result = first ? await this.reviewImpossibleVerdict(chatId, first, claimBase) : null;
     if (result === null) {
       return {
         accepted: false,
         reason: 'The goal judge gave no answer, so the goal was not ended. Try again.',
+      };
+    }
+    if (claimed === 'impossible' && result.verdict === 'blocked') {
+      // Not ended: the goal waits for the user, who is shown what they need to do.
+      this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
+      return {
+        accepted: false,
+        verdict: 'blocked',
+        reason: `The goal is not impossible, it is waiting on the user: ${result.reason}`,
       };
     }
     if (result.verdict !== claimed) {
@@ -12166,12 +12178,62 @@ export class Daemon {
           ...(checkIn ? { checkIn: true } : {}),
           ...(chatModel ? { chatModel } : {}),
         });
-        this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
+        const reviewed = result
+          ? await this.reviewImpossibleVerdict(chatId, result, {
+              condition,
+              transcript,
+              turnsEvaluated,
+              folder,
+              background,
+              userScope,
+              agentStatement,
+              ...(chatModel ? { chatModel } : {}),
+            })
+          : null;
+        this.settleGoalEvaluation(chatId, condition, turnsEvaluated, reviewed);
       } catch (err) {
         this.opts.logger.warn({ chatId, err }, 'goal evaluation failed');
         this.noteGoalEvalFailure(chatId, err instanceof Error ? err.message : String(err));
       }
     })();
+  }
+
+  /**
+   * spec/04 § Goals — impossible. An "impossible" verdict is checked a second
+   * time before it can end a goal: when the only obstacle is something the user
+   * must do or supply, it becomes `blocked` (the goal waits for them). Returns
+   * the result to act on, or null when the review gave no answer (NO FALLBACK:
+   * the goal is not ended on an unreviewed "impossible").
+   */
+  private async reviewImpossibleVerdict<
+    R extends { verdict: string; reason: string; onTrack?: unknown; onTrackReason?: unknown },
+  >(
+    chatId: string,
+    result: R,
+    base: {
+      condition: string;
+      transcript: string;
+      turnsEvaluated: number;
+      folder: string;
+      background: string;
+      userScope: string;
+      agentStatement: string;
+      chatModel?: string;
+    },
+  ): Promise<R | null> {
+    if (result.verdict !== 'impossible') return result;
+    const evaluator = this.opts.evaluateGoal;
+    if (!evaluator) return result;
+    const review = await evaluator({
+      chatId,
+      ...base,
+      ...(base.chatModel ? { chatModel: base.chatModel } : {}),
+      reviewImpossible: { reason: result.reason },
+    });
+    if (review === null) return null;
+    if (review.verdict === 'blocked')
+      return { ...result, verdict: 'blocked', reason: review.reason };
+    return result;
   }
 
   /** Consecutive goal-judge failures per chat; reset by any real verdict. */

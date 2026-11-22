@@ -137,9 +137,22 @@ describe('ChatRoute — /goal command + goal banner', () => {
     renderChat();
     expect(screen.getByTestId('goal-banner')).toHaveAttribute('data-paused', 'true');
     expect(screen.getByTestId('goal-banner-paused-note')).toHaveTextContent(
-      'Needs you: Needs the prod password. Reply to continue.',
+      'Needs you: Needs the prod password.',
     );
     expect(screen.getByTestId('goal-pill')).toHaveTextContent('Needs you');
+    expect(screen.getByTestId('goal-done-btn')).toHaveTextContent("I've done it");
+  });
+
+  it('shows no done button unless the goal is waiting on the user', () => {
+    seed('Ship the release', {
+      startedAt: Date.now(),
+      turnsEvaluated: 1,
+      tokensSpent: 0,
+      lastVerdict: null,
+      lastReason: null,
+    });
+    renderChat();
+    expect(screen.queryByTestId('goal-done-btn')).not.toBeInTheDocument();
   });
 
   it('never shows the goal as working when the chat is archived', () => {

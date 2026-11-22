@@ -315,6 +315,54 @@ describe('maybeEvaluateGoal — relentless until met, stopped only by a deadlock
     expect(daemon.chatState.get(chatId)?.goalProgress ?? null).toBeNull();
   });
 
+  it('an impossible verdict whose blocker is only the user is turned into waiting on the user', async () => {
+    const evaluateGoal: EvaluateGoal = async (input) =>
+      input.reviewImpossible
+        ? { verdict: 'blocked', reason: 'Wait until the Mac is outside Nightlock hours' }
+        : { verdict: 'impossible', reason: 'The Mac is inside Nightlock hours' };
+    const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('cannot') });
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Test on the Mac');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+    const state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBe('Test on the Mac');
+    expect(state?.lastGoal ?? null).toBeNull();
+    expect(state?.goalProgress?.waitingOnUser).toBe(true);
+    expect(state?.declaredStatus?.text).toContain('Nightlock');
+  });
+
+  it('a genuinely impossible goal still ends as impossible after the review', async () => {
+    const evaluateGoal: EvaluateGoal = async (input) =>
+      input.reviewImpossible
+        ? { verdict: 'impossible', reason: 'confirmed' }
+        : { verdict: 'impossible', reason: 'The service was shut down' };
+    const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('cannot') });
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Use the old service');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+    const state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBeNull();
+    expect(state?.lastGoal?.outcome).toBe('impossible');
+  });
+
+  it('an impossible verdict is not acted on when the review gives no answer', async () => {
+    const evaluateGoal: EvaluateGoal = async (input) =>
+      input.reviewImpossible ? null : { verdict: 'impossible', reason: 'nope' };
+    const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('cannot') });
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Do it');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+    const state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBe('Do it');
+    expect(state?.lastGoal ?? null).toBeNull();
+  });
+
   it('presses on after the first two refusals, resubmitting the reason as guidance', async () => {
     let n = 0;
     const evaluateGoal: EvaluateGoal = async () => {
