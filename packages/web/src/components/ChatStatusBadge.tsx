@@ -8,6 +8,7 @@
 // thread and batch panels showed a different status for the same chat. Every
 // surface calls this one hook so they cannot disagree.
 
+import { formatWhen } from '../lib/formatDateTime.js';
 import type { JSX } from 'react';
 import type { PendingWake } from '@patch/wire';
 import { deriveBadge } from '../stores/chatStore.js';
@@ -52,11 +53,7 @@ export function badgeDetail(badge: DisplayBadge, row: ChatRow): string | null {
   const status = row.chatStatus;
   if (badge === 'errored') return status?.message ?? row.lastError?.message ?? null;
   if (badge === 'paused' && status?.resetsAt !== undefined) {
-    const at = new Date(status.resetsAt).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    return `Paused until ${at}`;
+    return `Paused until ${formatWhen(status.resetsAt)}`;
   }
   if (badge === 'away') {
     if (status?.state === 'host_restarting') return 'Host restarting';

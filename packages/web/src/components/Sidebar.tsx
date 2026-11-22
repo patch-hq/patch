@@ -11,6 +11,7 @@
 // The + New chat button leads the fixed top band, directly under the brand row
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
+import { formatDateTime } from '../lib/formatDateTime.js';
 import type { DragEvent, JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -3016,10 +3017,7 @@ const ChatRowView = memo(function ChatRowView({
 // would read as the chat's age. Say what it is, with the absolute time.
 function formatArchivedAt(ms: number): string {
   if (!ms) return '';
-  const d = new Date(ms);
-  const day = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-  return `Archived ${day}, ${time}`;
+  return `Archived ${formatDateTime(ms)}`;
 }
 
 function formatWhen(ms: number): string {

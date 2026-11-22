@@ -72,7 +72,7 @@ describe('ChatRoute — job bar', () => {
     expect(screen.getByTestId('job-bar')).toBeInTheDocument();
     expect(screen.getByTestId('job-bar-link')).toBeInTheDocument();
     expect(
-      await screen.findByText(/Run by "bus check" job · 21 Oct, \d{2}:\d{2}/),
+      await screen.findByText(/Run by "bus check" job · 21 Oct \d{2}:\d{2}/),
     ).toBeInTheDocument();
   });
 

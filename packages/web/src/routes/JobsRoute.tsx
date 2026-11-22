@@ -12,6 +12,7 @@
 // (reversible — it stops firing and folds into the archived section) and
 // delete (permanent, behind a confirmation).
 
+import { formatDateTime } from '../lib/formatDateTime.js';
 import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
 import { loadCachedJobs, saveCachedJobs } from '../lib/jobsCache.js';
@@ -744,7 +745,7 @@ function InlineRuns({ jobId }: { jobId: string }): JSX.Element {
         <ul>
           {data.runs.map((r, i) => (
             <li key={`${r.ts}-${i}`} className="run-entry">
-              <span className="run-when">{new Date(r.ts).toLocaleString()}</span>
+              <span className="run-when">{formatDateTime(r.ts)}</span>
               <span className={`run-status status-${r.status}`}>{r.status}</span>
               {r.action?.chatId ? (
                 <OpenableLink

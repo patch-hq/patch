@@ -88,7 +88,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'AI accounts',
       'Hosts',
       'Linked devices',
-      'Service keys',
+      'Connected services',
       'Notifications',
       'Agent',
       'Chats',

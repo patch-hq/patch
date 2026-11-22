@@ -5,6 +5,7 @@
 // then what was just said. The transcript is the other view. Pure view of the
 // host's MeetingState; every control goes through lib/meetingControl.
 
+import { formatDay } from '../lib/formatDateTime.js';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
@@ -473,7 +474,7 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
 /** Copies the write-up as plain text, for sending on to the group. */
 function CopyWriteup({ meeting }: { meeting: MeetingState }) {
   const [copied, setCopied] = useState(false);
-  const meta = `${new Date(meeting.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${Math.max(1, Math.round(meeting.elapsedBaseMs / 60_000))} min`;
+  const meta = `${formatDay(meeting.startedAt)} · ${Math.max(1, Math.round(meeting.elapsedBaseMs / 60_000))} min`;
   return (
     <button
       type="button"

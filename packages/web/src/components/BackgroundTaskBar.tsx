@@ -23,6 +23,7 @@
 // link is on: a bar that keeps a finished task reads as work that is stuck,
 // which is the one thing this readout must never say by accident.
 
+import { formatClock } from '../lib/formatDateTime.js';
 import { Fragment, useEffect, useRef, useState, type JSX } from 'react';
 import { LoaderCircle, X } from 'lucide-react';
 import type { WatchTaskRow } from '@patch/wire';
@@ -64,11 +65,6 @@ const LIST_POLL_MS = 3_000;
 
 /** How often running rows recompute their elapsed-time clock. */
 const CLOCK_TICK_MS = 1_000;
-
-/** Local HH:MM for a check-in time. */
-function formatClock(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
 
 /** The task's last output line. Quiet is normal for a waiter, so silence is never flagged. */
 function ProgressLine({ task }: { task: WatchTaskRow }): JSX.Element | null {

@@ -1,3 +1,4 @@
+import { formatWhen } from './formatDateTime.js';
 import type { ConnectionState, HostPresence } from '../stores/presenceStore.js';
 import { hostLabel, sortHosts } from '../routes/settings/hostScope.js';
 
@@ -15,13 +16,7 @@ export function hostsDown(hosts: Record<string, HostPresence>): HostPresence[] {
 
 function lastSeen(h: HostPresence): string {
   if (h.online || h.lastSeenAt === null) return '';
-  const d = new Date(h.lastSeenAt);
-  const hhmm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  const today = d.toDateString() === new Date().toDateString();
-  const when = today
-    ? hhmm
-    : `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${hhmm}`;
-  return `, last seen ${when}`;
+  return `, last seen ${formatWhen(h.lastSeenAt)}`;
 }
 
 /**
@@ -40,6 +35,9 @@ export function connectionSummary(
     `Server: ${connection === 'connected' ? 'reachable' : SERVER_STATE[connection]}`,
     ...(list.length === 0
       ? ['Hosts: none registered']
-      : list.map((h) => `Host ${h.registeredName ?? hostLabel(h)}: ${h.online ? 'online' : 'offline'}${lastSeen(h)}`)),
+      : list.map(
+          (h) =>
+            `Host ${h.registeredName ?? hostLabel(h)}: ${h.online ? 'online' : 'offline'}${lastSeen(h)}`,
+        )),
   ].join('\n');
 }

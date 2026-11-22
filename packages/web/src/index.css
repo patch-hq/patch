@@ -1759,9 +1759,15 @@ body {
    apart as the sidebar widened. */
 .folder-head-actions {
   margin-left: auto;
-  display: inline-flex;
+  /* Not in flow until the header is hovered or focused: three invisible 22px
+     buttons at rest took ~70px and truncated every project name. */
+  display: none;
   align-items: center;
   gap: 2px;
+}
+.sb-folder:hover .folder-head-actions,
+.folder-head:focus-within .folder-head-actions {
+  display: inline-flex;
 }
 .folder-head-actions .folder-archive-btn {
   margin-left: 0;
@@ -3164,6 +3170,23 @@ button.nav-row {
   justify-content: safe center;
   gap: 12px;
 }
+/* On a window too short for the drawing AND the setup AND the usage cards, the
+   drawing goes: the usage block is the last thing on the screen and must not
+   end up under the message box. */
+@media (max-height: 900px) {
+  .new-chat-intro .empty-chat-art {
+    display: none;
+  }
+  .new-chat-intro {
+    gap: 8px;
+  }
+  .new-chat-setup {
+    gap: 12px;
+  }
+  .new-chat-usage {
+    padding-top: 10px;
+  }
+}
 .chat-stream-content:has(> .new-chat-intro) {
   justify-content: flex-start;
 }
@@ -3301,7 +3324,7 @@ button.nav-row {
 }
 .new-chat-usage-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
 }
 .new-chat-usage-card {
@@ -19517,4 +19540,18 @@ a.drop-target,
   padding: 0 12px;
   font-size: 18px;
   font-weight: 600;
+}
+
+/* Short window: the first-run checklist goes two-up so the new-chat usage block
+   above the message box is not pushed under it. */
+@media (max-height: 900px) {
+  .first-run-intro {
+    margin-top: 8px;
+    max-width: 520px;
+  }
+  .first-run-intro ul {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    column-gap: 24px;
+  }
 }

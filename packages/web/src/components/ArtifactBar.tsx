@@ -11,6 +11,7 @@
 // link (or the "N published" pill) opens one child row per artifact with its
 // publish time.
 
+import { formatClock } from '../lib/formatDateTime.js';
 import { Fragment, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { LayoutTemplate } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
@@ -18,10 +19,6 @@ import { useUiStore } from '../stores/uiStore.js';
 import { deriveArtifacts, type ArtifactRow } from '../lib/artifacts.js';
 import { openArtifact } from '../lib/openArtifact.js';
 import { StatusPill, StatusRow } from './StatusRow.js';
-
-function formatClock(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
 
 /**
  * How many of the links fit on the row's single line. Every link is laid out

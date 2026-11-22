@@ -1749,7 +1749,7 @@ describe('Sidebar', () => {
     renderInRouter();
     fireEvent.click(screen.getByTestId('archived-toggle'));
     const when = screen.getByTestId('row-when-a-when');
-    expect(when.querySelector('.when-time')?.textContent).toBe('Archived 12 Oct, 10:05');
+    expect(when.querySelector('.when-time')?.textContent).toBe('Archived 12 Oct 10:05');
   });
 
   it('strips markdown syntax from titles/previews so the sidebar shows plain text', () => {

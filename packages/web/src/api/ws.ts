@@ -1006,6 +1006,13 @@ export class PatchWs {
       // into an account-wide slot is what let a logged-out host block sending
       // in a chat pinned to a host whose credential was fine.
       usePresenceStore.getState().setHostAccount(event);
+      // A sign-in finishes in the user's browser, which is then frontmost. Bring
+      // the desktop app back so they land where they left off. Only a change
+      // from signed-out to signed-in on a host already known: the first report
+      // after connecting is not a sign-in.
+      if (previous !== undefined && previous.connected !== true && event.connected === true) {
+        getDesktopBridge()?.requestRaise?.();
+      }
       return;
     }
     // spec/04 § Folders — that host's designated roots + recently-used folders,

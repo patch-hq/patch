@@ -15,6 +15,7 @@
 // not a constant to hard-code, either: British Summer Time ends on Sunday 25
 // October 2026, after which the two agree.)
 
+import { formatDateTime, formatWhen } from './formatDateTime.js';
 import { refusingRateLimitScope, type ChatContextUsage, type RateLimitWindow } from '@patch/wire';
 
 export type UsageScope = 'session' | 'week' | 'overage';
@@ -42,59 +43,19 @@ export function formatUtilization(win: RateLimitWindow | undefined): string {
   return `${Math.round(win.utilization * 100)}%`;
 }
 
-/**
- * A reset instant in the reader's own zone, with the date when it is not
- * today — `10:40`, or `Tue, 3 Nov 15:00`. A bare weekday read as the one just gone.
- */
+/** A reset instant: the time alone today, otherwise `17 Dec 10:16`. */
 export function formatReset(at: number, now: number = Date.now()): string {
-  const d = new Date(at);
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  if (new Date(now).toDateString() === d.toDateString()) return time;
-  const day = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-  return `${day} ${time}`;
+  return formatWhen(at, now);
 }
 
-/**
- * An instant with its full date, in the reader's own zone and no other:
- * `Thu 17 Dec, 10:16` (the year joins it only when it is not this one).
- * Tooltips and sentences use it so a reset 26 days away never reads as "Thu".
- */
+/** An instant with its full date, for tooltips and sentences: `17 Dec 10:16`. */
 export function formatResetDetail(at: number, now: number = Date.now()): string {
-  const d = new Date(at);
-  const sameYear = new Date(now).getFullYear() === d.getFullYear();
-  const date = d.toLocaleDateString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    ...(sameYear ? {} : { year: 'numeric' }),
-  });
-  const time = d.toLocaleTimeString('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  });
-  return `${date}, ${time}`;
+  return formatDateTime(at, now);
 }
 
-/**
- * Compact local reset: the time alone today, otherwise the date and time
- * (`17 Dec 10:16`). One clock, the reader's; no zone name to disagree with it.
- */
+/** Compact local reset: the time alone today, otherwise `17 Dec 10:16`. */
 export function formatResetLocal(at: number, now: number = Date.now()): string {
-  const d = new Date(at);
-  const time = d.toLocaleTimeString('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  });
-  if (new Date(now).toDateString() === d.toDateString()) return time;
-  const sameYear = new Date(now).getFullYear() === d.getFullYear();
-  const date = d.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    ...(sameYear ? {} : { year: 'numeric' }),
-  });
-  return `${date} ${time}`;
+  return formatWhen(at, now);
 }
 
 /** Plain words for a window that has stopped work: no provider status codes. */
@@ -242,7 +203,7 @@ export function summariseUsage(
               : ' · blocked';
       const reset =
         w.resetsAt !== undefined ? ` · resets ${formatResetLocal(w.resetsAt, now)}` : '';
-      return `${SCOPE_LABEL[s]} ${formatUtilization(w)}${state}${reset}`;
+      return `${SCOPE_LABEL[s]} ${formatUtilization(w)} used${state}${reset}`;
     })
     .join('\n');
 
@@ -269,7 +230,7 @@ export function summariseUsage(
   const w = usage[worst]!;
   const level = warned.length > 0 || (w.utilization ?? 0) >= 0.8 ? 'warn' : 'ok';
   return {
-    text: `${SCOPE_LABEL[worst]} ${formatUtilization(w)}`,
+    text: `${SCOPE_LABEL[worst]} ${formatUtilization(w)} used`,
     title: detail,
     level,
     fraction: w.utilization ?? 0,

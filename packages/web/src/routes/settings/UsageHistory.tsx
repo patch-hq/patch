@@ -4,6 +4,7 @@
 // page; a custom range is read live through every online host
 // (GET /api/usage-report).
 
+import { formatDateTime } from '../../lib/formatDateTime.js';
 import { useState, type JSX } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/rest.js';
@@ -70,12 +71,7 @@ function Burndown({
           fill="currentColor"
           textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}
         >
-          {new Date(ts).toLocaleString(undefined, {
-            day: 'numeric',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
+          {formatDateTime(ts)}
         </text>
       ))}
       {series.map((s, i) => (

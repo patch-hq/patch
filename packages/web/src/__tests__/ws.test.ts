@@ -998,6 +998,25 @@ describe('PatchWs dispatch — host presence', () => {
     expect(usePresenceStore.getState().hostOnline).toBe(false);
   });
 
+  it('brings the desktop app forward when a host account goes from signed out to signed in', async () => {
+    const requestRaise = vi.fn();
+    (window as unknown as { patch?: unknown }).patch = { requestRaise };
+    const { fake } = await connectAndOpen();
+    const account = (connected: boolean): Record<string, unknown> => ({
+      type: 'host.account',
+      hostId: 'd1',
+      backendId: 'claude-code',
+      connected,
+    });
+    fake.receive(account(false));
+    expect(requestRaise).not.toHaveBeenCalled();
+    fake.receive(account(true));
+    expect(requestRaise).toHaveBeenCalledTimes(1);
+    fake.receive(account(true));
+    expect(requestRaise).toHaveBeenCalledTimes(1);
+    delete (window as unknown as { patch?: unknown }).patch;
+  });
+
   it('host.account updates that host+backend, and the account summary', async () => {
     const { fake } = await connectAndOpen();
     fake.receive({
