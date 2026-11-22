@@ -443,11 +443,16 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await expect(welcome.getByTestId('welcome-open-at-login').locator('input')).toBeChecked();
   await expect(welcome.getByTestId('welcome-keep-awake').locator('input')).toBeChecked();
   await shot(welcome, 'keep-running');
-  expect(JSON.parse(readFileSync(join(computer.userData, 'keep-running.json'), 'utf8'))).toEqual({
-    openAtLogin: true,
-    keepAwake: true,
-  });
+  // Nothing is saved, and no login item registered, until Continue.
+  expect(existsSync(join(computer.userData, 'keep-running.json'))).toBe(false);
   await welcome.getByTestId('welcome-next').click();
+  await expect
+    .poll(() =>
+      existsSync(join(computer.userData, 'keep-running.json'))
+        ? JSON.parse(readFileSync(join(computer.userData, 'keep-running.json'), 'utf8'))
+        : null,
+    )
+    .toEqual({ openAtLogin: true, keepAwake: true });
   await phone(welcome);
   await firstChat(welcome);
   await newcomerSidebar(welcome);

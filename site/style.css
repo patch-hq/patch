@@ -985,7 +985,7 @@ kbd {
 
 .choices {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 24px;
   margin-top: 20px;
 }
@@ -1017,6 +1017,16 @@ kbd {
 .choice .next,
 .choice .detected {
   margin: 12px 0 0;
+}
+
+.server-install {
+  margin-top: 24px;
+}
+
+.server-install .server-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 650;
 }
 
 .choice-meta {

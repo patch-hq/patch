@@ -4,7 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { KeepRunningGroup } from '../routes/settings/KeepRunningGroup.js';
 
-const state = { openAtLogin: true, keepAwake: true, holdingAwake: false, canOpenAtLogin: true };
+const state = {
+  openAtLogin: true,
+  keepAwake: true,
+  holdingAwake: false,
+  canOpenAtLogin: true,
+  chosen: true,
+};
 
 function withBridge(bridge: unknown): void {
   (window as unknown as { patch?: unknown }).patch = bridge;
