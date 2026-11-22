@@ -18,6 +18,7 @@ See `principles.md` for each in full.
 - Agent-neutral. Every provider is an adapter; Patch's own features never depend on one provider's internals, and the chat core never branches on a provider by name.
 - The server holds the record and decides status, each chat's host is its one writer, and surfaces display what the server sends.
 - Copy from Happy where it works. Wire protocol, voice architecture, QR-code auth linking, host model.
+- All surfaces together. Every change is made for all surfaces (phone, web, voice) in parallel, never for one only.
 - No fallbacks. Failures surface immediately; we don't paper over them (portfolio repo convention).
 
 ## Component map
