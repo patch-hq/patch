@@ -49,6 +49,7 @@ export type ActionId =
   | 'diffViewer'
   | 'fileBrowser'
   | 'toggleTerminal'
+  | 'captureScreen'
   | 'toggleEditor'
   | 'globalVoice'
   | 'prevTab'
@@ -120,6 +121,7 @@ export const ACTIONS: ActionDef[] = [
   def('diffViewer', 'Open diff for last edit', "⌘'"),
   def('toggleEditor', 'Toggle editor rail', '⌥E'),
   def('toggleTerminal', 'Toggle terminal', '⌃`'),
+  def('captureScreen', 'Capture this screen for agents', '⌘⇧K'),
   def('closeTab', 'Close tab', '⌘W'),
   def('prevTab', 'Previous tab', '⌘⌥←'),
   def('nextTab', 'Next tab', '⌘⌥→'),

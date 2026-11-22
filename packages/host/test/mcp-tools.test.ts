@@ -123,6 +123,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_ask_human',
         'patch_browser_open',
         'patch_call',
+        'patch_capture_screen',
         'patch_cancel_wake',
         'patch_wake_status',
         'patch_doc_comment',

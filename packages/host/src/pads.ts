@@ -8,7 +8,7 @@
 // folder, a downed link or a server-side refusal all raise; nothing pretends.
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { WireEvent } from '@patch/wire';
 import { PatchPadResponseEvent } from '@patch/wire';
@@ -80,7 +80,7 @@ export function bundleDir(folder: string, dir: string): PadBundleFile[] {
 }
 
 export interface PadRequestInput {
-  op: 'create' | 'update' | 'reply' | 'list' | 'collect';
+  op: 'create' | 'update' | 'reply' | 'list' | 'collect' | 'capture';
   chatId: string;
   padId?: string;
   name?: string;
@@ -88,6 +88,7 @@ export interface PadRequestInput {
   device?: 'desktop' | 'phone';
   files?: PadBundleFile[];
   text?: string;
+  surface?: 'web' | 'phone';
 }
 
 /** What `control.ts` calls; resolves with the server's `result`. */
@@ -147,4 +148,41 @@ export class PadClient {
       this.emit({ type: 'patch.pad.request', requestId, ...input } as WireEvent);
     });
   };
+}
+
+export interface SavedCapture {
+  id: string;
+  surface: string;
+  route: string;
+  viewport: { width: number; height: number };
+  takenAt: number;
+  /** Chat-folder-relative folder the files were written to. */
+  dir: string;
+  /** Chat-folder-relative path of each file. */
+  files: string[];
+}
+
+/**
+ * Write a capture the server returned (`{ meta, files }`) into the chat folder
+ * under `captures/<id>/`, so the agent can open the screenshot and build a
+ * design from the real markup and stylesheet.
+ */
+export function saveCapture(folder: string, result: unknown): SavedCapture {
+  const r = result as {
+    meta?: Omit<SavedCapture, 'dir' | 'files'> & { id: string };
+    files?: PadBundleFile[];
+  };
+  if (!r?.meta || !Array.isArray(r.files)) throw new Error('capture: the server sent no capture');
+  const dir = join('captures', r.meta.id);
+  mkdirSync(join(folder, dir), { recursive: true });
+  const files = r.files.map((f) => {
+    const rel = join(dir, f.path);
+    if (escapesFolder(relative(resolve(folder), resolve(folder, rel)))) {
+      throw new Error(`capture: refusing file path ${f.path}`);
+    }
+    writeFileSync(join(folder, rel), Buffer.from(f.base64, 'base64'));
+    return rel;
+  });
+  const { id, surface, route, viewport, takenAt } = r.meta;
+  return { id, surface, route, viewport, takenAt, dir, files };
 }

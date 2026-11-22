@@ -78,6 +78,8 @@ export interface ShortcutHandlers {
   onToggleEditor(): void;
   /** ⌃` toggles the chat's terminal drawer (spec/14 § Terminal). */
   onToggleTerminal(): void;
+  /** ⌘⇧K — send what is on screen to the server for agents to read. */
+  onCaptureScreen(): void;
   /** ⌘W — close the active pane's active tab (spec/14 § Panes and tabs). */
   onCloseTab(): void;
   /** ⌘⌥←/→ — switch tabs within the active pane. */
@@ -254,6 +256,12 @@ export const SHORTCUT_TABLE: ShortcutEntry[] = [
     scope: other('Chat focused'),
   },
   { keys: '⌃ `', ids: ['toggleTerminal'], action: 'Toggle terminal', scope: other('Chat focused') },
+  {
+    keys: '⌘ ⇧ K',
+    ids: ['captureScreen'],
+    action: 'Capture this screen for agents',
+    scope: ANYWHERE,
+  },
   { keys: '⌘ W', ids: ['closeTab'], action: 'Close tab', scope: ANYWHERE },
   {
     keys: '⌘ ⌥ ← / ⌘ ⌥ →',
@@ -502,6 +510,11 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       if (is('toggleTerminal')) {
         e.preventDefault();
         handlers.onToggleTerminal();
+        return;
+      }
+      if (is('captureScreen')) {
+        e.preventDefault();
+        handlers.onCaptureScreen();
         return;
       }
       if (is('toggleEditor')) {

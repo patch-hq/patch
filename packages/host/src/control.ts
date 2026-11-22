@@ -72,7 +72,7 @@ import {
 } from './artifacts.js';
 import { buildPreviewHtml, previewable } from './viewFilePreview.js';
 import type { ServerEventsClient } from './serverEventsClient.js';
-import { PadInputError, bundleDir, type PadRequest } from './pads.js';
+import { PadInputError, bundleDir, saveCapture, type PadRequest } from './pads.js';
 import {
   AccountRefError,
   AccountsRpcError,
@@ -1006,7 +1006,8 @@ const CallBody = z
 // resolver rejects escapes and non-HTML files.
 const PadBody = z
   .object({
-    op: z.enum(['create', 'update', 'reply', 'list', 'collect']),
+    op: z.enum(['create', 'update', 'reply', 'list', 'collect', 'capture']),
+    surface: z.enum(['web', 'phone']).optional(),
     callerChatId: z.string().min(1),
     /** Chat-folder-relative folder holding the Pad's screens (create/update). */
     dir: z.string().min(1).optional(),
@@ -3768,7 +3769,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { op, callerChatId, dir, padId, name, app: appName, device, text } = parsed.data;
+    const { op, callerChatId, dir, padId, name, app: appName, device, text, surface } = parsed.data;
     const state = opts.daemon!.chatState.get(callerChatId);
     if (!state) {
       return reply.code(404).send({
@@ -3799,7 +3800,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(device !== undefined ? { device } : {}),
         ...(files !== undefined ? { files } : {}),
         ...(text !== undefined ? { text } : {}),
+        ...(surface !== undefined ? { surface } : {}),
       });
+      if (op === 'capture') result = saveCapture(state.folder, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const input = err instanceof PadInputError;

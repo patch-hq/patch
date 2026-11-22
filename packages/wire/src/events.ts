@@ -9689,7 +9689,7 @@ export const PatchPadRequestEvent = z
   .object({
     type: z.literal('patch.pad.request'),
     requestId: z.string().min(1),
-    op: z.enum(['create', 'update', 'reply', 'list', 'collect']),
+    op: z.enum(['create', 'update', 'reply', 'list', 'collect', 'capture']),
     /** The chat the agent is calling from — the owner of a created Pad. */
     chatId: z.string().min(1),
     padId: z.string().min(1).optional(),
@@ -9701,6 +9701,8 @@ export const PatchPadRequestEvent = z
     files: z.array(PadFileEntry).optional(),
     /** The reply text (reply). */
     text: z.string().min(1).optional(),
+    /** Which surface's capture to read (capture); newest of any when absent. */
+    surface: z.enum(['web', 'phone']).optional(),
   })
   .strict();
 export type PatchPadRequestEvent = z.infer<typeof PatchPadRequestEvent>;

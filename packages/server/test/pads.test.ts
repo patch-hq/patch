@@ -605,4 +605,53 @@ describe('pads', () => {
       await built.app.close();
     }
   }, 30_000);
+  it('a captured screen is stored and an agent reads the newest back; none is an error', async () => {
+    const { built, auth, ask } = await makeApp();
+    try {
+      const none = await ask('c1', { op: 'capture' });
+      expect(none.ok).toBe(false);
+      expect(none.error?.message).toContain('no capture yet');
+
+      const bad = await built.app.inject({
+        method: 'POST',
+        url: '/api/captures',
+        headers: auth,
+        payload: { surface: 'web', route: '/', viewport: { width: 10, height: 10 } },
+      });
+      expect(bad.statusCode).toBe(400);
+      const anon = await built.app.inject({ method: 'POST', url: '/api/captures', payload: {} });
+      expect(anon.statusCode).toBe(401);
+
+      const ok = await built.app.inject({
+        method: 'POST',
+        url: '/api/captures',
+        headers: auth,
+        payload: {
+          surface: 'web',
+          route: '/chat/c1',
+          viewport: { width: 1200, height: 800 },
+          html: '<h1>Real</h1>',
+          css: 'h1{color:red}',
+        },
+      });
+      expect(ok.statusCode).toBe(200);
+
+      const res = await ask('c1', { op: 'capture', surface: 'web' });
+      expect(res.ok, JSON.stringify(res.error)).toBe(true);
+      const r = res.result as {
+        meta: { id: string; route: string };
+        files: { path: string; base64: string }[];
+      };
+      expect(r.meta.route).toBe('/chat/c1');
+      expect(r.files.map((f) => f.path).sort()).toEqual(['page.html', 'real.css']);
+      expect(
+        Buffer.from(r.files.find((f) => f.path === 'real.css')!.base64, 'base64').toString(),
+      ).toBe('h1{color:red}');
+
+      const phone = await ask('c1', { op: 'capture', surface: 'phone' });
+      expect(phone.ok).toBe(false);
+    } finally {
+      await built.app.close();
+    }
+  }, 30_000);
 });
