@@ -335,6 +335,13 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('manager-row-empty')).toBeInTheDocument();
   });
 
+  it('draws the Manager slot above the search header', () => {
+    renderInRouter();
+    const manager = screen.getByTestId('manager-row-empty');
+    const header = screen.getByTestId('sb-header');
+    expect(manager.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders the Manager chat row exactly once when present (matched by chatId)', () => {
     // The host emits the special thread with a lowercase folder-NAME as
     // `name` and a full filesystem path as `folder`; detection must key off
@@ -995,22 +1002,20 @@ describe('Sidebar', () => {
   });
 
   it('within a folder, a merely-working chat does NOT rank above an idle one — the badge shows it, position does not move', () => {
-    useChatStore
-      .getState()
-      .hydrate([
-        rowFixture({
-          chatId: 'idle2',
-          folder: '~/wk',
-          lastUpdated: 300,
-          chatStatus: { state: 'idle', since: 0 },
-        }),
-        rowFixture({
-          chatId: 'work2',
-          folder: '~/wk',
-          lastUpdated: 1,
-          chatStatus: { state: 'running', since: 0 },
-        }),
-      ]);
+    useChatStore.getState().hydrate([
+      rowFixture({
+        chatId: 'idle2',
+        folder: '~/wk',
+        lastUpdated: 300,
+        chatStatus: { state: 'idle', since: 0 },
+      }),
+      rowFixture({
+        chatId: 'work2',
+        folder: '~/wk',
+        lastUpdated: 1,
+        chatStatus: { state: 'running', since: 0 },
+      }),
+    ]);
     renderInRouter();
     const rows = Array.from(document.querySelectorAll('[data-testid^="chat-row-"]')).map((el) =>
       el.getAttribute('data-testid'),
@@ -1022,22 +1027,20 @@ describe('Sidebar', () => {
   });
 
   it('within a folder, a permission request does NOT rank the chat above an older idle one — the badge shows it, position does not move', () => {
-    useChatStore
-      .getState()
-      .hydrate([
-        rowFixture({
-          chatId: 'idle1',
-          folder: '~/proj',
-          lastUpdated: 300,
-          chatStatus: { state: 'idle', since: 0 },
-        }),
-        rowFixture({
-          chatId: 'work1',
-          folder: '~/proj',
-          lastUpdated: 1,
-          chatStatus: { state: 'running', since: 0 },
-        }),
-      ]);
+    useChatStore.getState().hydrate([
+      rowFixture({
+        chatId: 'idle1',
+        folder: '~/proj',
+        lastUpdated: 300,
+        chatStatus: { state: 'idle', since: 0 },
+      }),
+      rowFixture({
+        chatId: 'work1',
+        folder: '~/proj',
+        lastUpdated: 1,
+        chatStatus: { state: 'running', since: 0 },
+      }),
+    ]);
     useChatStore.getState().applyEvent({
       type: 'chat.permission_request',
       chatId: 'work1',
@@ -2751,17 +2754,15 @@ describe('Sidebar', () => {
     afterEach(() => useUiStore.setState({ grouping: 'project' }));
 
     it('lists status headings with the project on each row, and collapses', () => {
-      useChatStore
-        .getState()
-        .hydrate([
-          rowFixture({
-            chatId: 'g-work',
-            name: 'Busy',
-            folder: '/p/alpha',
-            chatStatus: { state: 'running', since: 0 },
-          }),
-          rowFixture({ chatId: 'g-idle', name: 'Idle', folder: '/p/beta', lastUpdated: 5 }),
-        ]);
+      useChatStore.getState().hydrate([
+        rowFixture({
+          chatId: 'g-work',
+          name: 'Busy',
+          folder: '/p/alpha',
+          chatStatus: { state: 'running', since: 0 },
+        }),
+        rowFixture({ chatId: 'g-idle', name: 'Idle', folder: '/p/beta', lastUpdated: 5 }),
+      ]);
       renderInRouter();
       expect(screen.getByTestId('folder-collapse-/p/alpha')).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('sidebar-grouping-status'));
@@ -2781,16 +2782,14 @@ describe('Sidebar', () => {
     });
 
     it("keeps a group's status badge out of the toggle, at the right of the heading", () => {
-      useChatStore
-        .getState()
-        .hydrate([
-          rowFixture({
-            chatId: 'g-work',
-            name: 'Busy',
-            folder: '/p/alpha',
-            chatStatus: { state: 'running', since: 0 },
-          }),
-        ]);
+      useChatStore.getState().hydrate([
+        rowFixture({
+          chatId: 'g-work',
+          name: 'Busy',
+          folder: '/p/alpha',
+          chatStatus: { state: 'running', since: 0 },
+        }),
+      ]);
       renderInRouter();
       fireEvent.click(screen.getByTestId('sidebar-grouping-status'));
       const badge = screen.getByTestId('status-badge-status:working');

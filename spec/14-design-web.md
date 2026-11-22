@@ -183,7 +183,7 @@ The trigger reads `All chats` at rest and the chosen option's own label otherwis
 
 Scroll regions. The sidebar's chrome is fixed and always on screen; only the chat list scrolls. The `aside` itself is fixed. Three bands:
 
-- Fixed top — brand row, the `+ New chat` button, the view dropdown (§1b), the chat search field (§ Chat search), the Manager row, and the selection bar while a selection exists (§ Selecting multiple rows (shift-click)).
+- Fixed top — brand row, the `+ New chat` button, the Manager row, the view dropdown (§1b), the chat search field (§ Chat search), and the selection bar while a selection exists (§ Selecting multiple rows (shift-click)).
 - Scrolling middle — pinned chats, Drafts, Folders, Recent projects and Channels. This is the only region with `overflow-y: auto`; it takes all the leftover height and shrinks as the fixed bands need room.
 - Fixed bottom — the Archived, Snoozed, Deleted and Automations lifecycle controls and the bottom nav (`Jobs`, `Settings`).
 

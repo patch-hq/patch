@@ -735,6 +735,12 @@ function RegularSidebar({
   const hasChats = useChatStore((s) => Object.keys(s.chats).length > 0);
   return (
     <>
+      {/* Manager — always-visible top slot. Not in a lifecycle view, which is
+          its own list. */}
+      {openKind === null && experimental ? (
+        <ManagerRow row={grouped.manager} active={activeChatId} />
+      ) : null}
+
       {/* The chat search field (spec/14 § Chat search). Filtering to only
           chats needing attention is the sidebar view dropdown's Unread option
           now (spec/14 § Sidebar §1b) — the `attentionOnly` prop threaded
@@ -759,12 +765,6 @@ function RegularSidebar({
           </div>
         ) : null}
       </div>
-
-      {/* Manager — always-visible top slot. Not in a lifecycle view, which is
-          its own list. */}
-      {openKind === null && experimental ? (
-        <ManagerRow row={grouped.manager} active={activeChatId} />
-      ) : null}
 
       {/* Bulk actions for a shift-click selection (spec/14 § Sidebar →
           Selecting multiple rows). Absent while nothing is selected. Part of
