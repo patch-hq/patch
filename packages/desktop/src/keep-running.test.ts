@@ -35,18 +35,27 @@ function fakeHost(battery = false, canOpenAtLogin = true) {
 }
 const file = () => join(mkdtempSync(join(tmpdir(), 'patch-keep-')), 'keep-running.json');
 
-test('first start: both on, saved, login item set, awake held on mains', () => {
+test('first start: no login item and nothing saved until the user chooses; awake held on mains', () => {
   const f = file();
   const { host, log } = fakeHost(false);
-  const state = new KeepRunning(f, host).start();
-  assert.deepEqual(state, {
-    openAtLogin: true,
+  const k = new KeepRunning(f, host);
+  assert.deepEqual(k.start(), {
+    openAtLogin: false,
     keepAwake: true,
     holdingAwake: true,
     canOpenAtLogin: true,
+    chosen: false,
   });
-  assert.deepEqual(log, ['login:true', 'hold']);
+  assert.deepEqual(log, ['hold']);
+  assert.equal(existsSync(f), false);
+  // The choice (Continue on the welcome step) saves and registers it.
+  assert.equal(k.set({ openAtLogin: true, keepAwake: true }).chosen, true);
+  assert.deepEqual(log, ['hold', 'login:true']);
   assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), { openAtLogin: true, keepAwake: true });
+  // A later launch applies what was chosen.
+  const later = fakeHost(false);
+  assert.equal(new KeepRunning(f, later.host).start().openAtLogin, true);
+  assert.deepEqual(later.log, ['login:true', 'hold']);
 });
 
 test('follows the power source: released on battery, held again on mains', () => {
@@ -57,7 +66,7 @@ test('follows the power source: released on battery, held again on mains', () =>
   assert.equal(k.state().holdingAwake, false);
   flip(false);
   assert.equal(k.state().holdingAwake, true);
-  assert.deepEqual(log, ['login:true', 'hold', 'release:1', 'hold']);
+  assert.deepEqual(log, ['hold', 'release:1', 'hold']);
 });
 
 test('turning things off is remembered and applied at once', () => {
@@ -66,13 +75,14 @@ test('turning things off is remembered and applied at once', () => {
   const k = new KeepRunning(f, host);
   k.start();
   k.set({ keepAwake: false, openAtLogin: false });
-  assert.deepEqual(log.slice(2), ['login:false', 'release:1']);
+  assert.deepEqual(log.slice(1), ['login:false', 'release:1']);
   const again = fakeHost(false);
   assert.deepEqual(new KeepRunning(f, again.host).start(), {
     openAtLogin: false,
     keepAwake: false,
     holdingAwake: false,
     canOpenAtLogin: true,
+    chosen: true,
   });
   assert.deepEqual(again.log, ['login:false']);
 });
@@ -80,7 +90,7 @@ test('turning things off is remembered and applied at once', () => {
 test('on battery at start, nothing is held', () => {
   const { host, log } = fakeHost(true);
   new KeepRunning(file(), host).start();
-  assert.deepEqual(log, ['login:true']);
+  assert.deepEqual(log, []);
 });
 
 test('stop lets the computer sleep', () => {
@@ -88,7 +98,7 @@ test('stop lets the computer sleep', () => {
   const k = new KeepRunning(file(), host);
   k.start();
   k.stop();
-  assert.deepEqual(log, ['login:true', 'hold', 'release:1']);
+  assert.deepEqual(log, ['hold', 'release:1']);
 });
 
 test('a damaged file is an error, not a silent return to "on"', () => {
@@ -114,6 +124,7 @@ test('where nothing can start the app at login, the switch is neither shown on n
     keepAwake: true,
     holdingAwake: true,
     canOpenAtLogin: false,
+    chosen: false,
   });
   assert.deepEqual(log, ['hold']);
   assert.throws(() => k.set({ openAtLogin: true }), /cannot open at login/);

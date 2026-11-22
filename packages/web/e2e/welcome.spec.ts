@@ -22,7 +22,13 @@ async function shot(page: Page, name: string): Promise<void> {
 /** A desktop shell that runs Patch on this computer: the keep-running bridge. */
 async function localShell(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const state = { openAtLogin: true, keepAwake: true, holdingAwake: true, canOpenAtLogin: true };
+    const state = {
+      openAtLogin: true,
+      keepAwake: true,
+      holdingAwake: true,
+      canOpenAtLogin: true,
+      chosen: false,
+    };
     const calls: unknown[] = [];
     (window as unknown as { __keepCalls: unknown[] }).__keepCalls = calls;
     (window as unknown as { patch: unknown }).patch = {
@@ -115,11 +121,13 @@ test('this computer: every step, each choice written where Settings writes it', 
   // The recommended model is already selected, not the dearest; Continue saves it.
   await expect(page.getByTestId('welcome-model-claude-sonnet-5').locator('input')).toBeChecked();
   await page.getByTestId('welcome-next').click();
-  await expect.poll(() => server.patches).toContainEqual({
-    defaultModel: 'claude-sonnet-5',
-    jobDefaultModel: 'claude-sonnet-5',
-    specialThreadModel: 'claude-sonnet-5',
-  });
+  await expect
+    .poll(() => server.patches)
+    .toContainEqual({
+      defaultModel: 'claude-sonnet-5',
+      jobDefaultModel: 'claude-sonnet-5',
+      specialThreadModel: 'claude-sonnet-5',
+    });
 
   // 4. Keep running — on by default; turning one off reaches the shell.
   await expect(page.getByTestId('welcome-keep-running')).toBeVisible();
@@ -127,10 +135,14 @@ test('this computer: every step, each choice written where Settings writes it', 
   await expect(page.getByTestId('welcome-keep-awake').locator('input')).toBeChecked();
   await shot(page, '5-keep-running');
   await page.getByTestId('welcome-keep-awake').click();
+  // Nothing reaches the shell (so no login item) until Continue.
+  expect(
+    await page.evaluate(() => (window as unknown as { __keepCalls: unknown[] }).__keepCalls),
+  ).toEqual([]);
+  await page.getByTestId('welcome-next').click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __keepCalls: unknown[] }).__keepCalls))
-    .toEqual([{ keepAwake: false }]);
-  await page.getByTestId('welcome-next').click();
+    .toEqual([{ openAtLogin: true, keepAwake: false }]);
 
   // 5. The phone: first a QR that opens the app download on the phone, then,
   // on its own, the pairing QR — never both on screen to be scanned wrongly.

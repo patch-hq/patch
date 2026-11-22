@@ -303,6 +303,8 @@ export interface KeepRunningState {
   holdingAwake: boolean;
   /** False where nothing can start the app at login (a Linux run not from its AppImage). */
   canOpenAtLogin: boolean;
+  /** False until the person has made these choices; nothing is registered before then. */
+  chosen: boolean;
 }
 
 export function getDesktopBridge(): PatchDesktopBridge | undefined {

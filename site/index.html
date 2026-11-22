@@ -694,7 +694,7 @@
         <ol class="steps">
           <li class="step-choose">
             <span class="num">1</span>
-            <h3>Choose where Patch runs</h3>
+            <h3>Download Patch</h3>
             <div class="choices">
               <div class="choice" data-choice="computer">
                 <h4>On this computer</h4>
@@ -718,15 +718,6 @@
                   </li>
                 </ul>
               </div>
-              <div class="choice" data-choice="server">
-                <h4>On your own server</h4>
-                <p>One command on a Linux box with systemd installs the server with HTTPS and prints a code to pair. Then sign in from the desktop app or a browser.</p>
-                <div class="cmd">
-                  <code id="install-cmd">curl -fsSL https://github.com/patch-hq/patch/releases/latest/download/install.sh | sudo sh</code>
-                  <button class="copy" type="button" data-copy="install-cmd">Copy</button>
-                </div>
-                <p class="choice-meta">Needs ports 80 and 443.</p>
-              </div>
             </div>
           </li>
           <li>
@@ -744,6 +735,15 @@
             </p>
           </li>
         </ol>
+        <div class="choice server-install" id="server" data-choice="server">
+          <h3 class="server-title">Linux / server</h3>
+          <p>One command on a Linux box with systemd installs the server with HTTPS and prints a code to pair. Then sign in from the desktop app or a browser.</p>
+          <div class="cmd">
+            <code id="install-cmd">curl -fsSL https://github.com/patch-hq/patch/releases/latest/download/install.sh | sudo sh</code>
+            <button class="copy" type="button" data-copy="install-cmd">Copy</button>
+          </div>
+          <p class="choice-meta">Needs ports 80 and 443.</p>
+        </div>
       </section>
     </main>
 

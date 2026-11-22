@@ -30,6 +30,12 @@ export interface KeepRunningState extends KeepRunningPrefs {
    * (app-location.ts).
    */
   canOpenAtLogin: boolean;
+  /**
+   * Whether the user has ever made these choices (the prefs file exists). Until
+   * they have, nothing is registered as a login item: the welcome step asks
+   * first, so macOS never announces a login item the user did not agree to.
+   */
+  chosen: boolean;
 }
 
 export const KEEP_RUNNING_DEFAULTS: KeepRunningPrefs = { openAtLogin: true, keepAwake: true };
@@ -80,18 +86,23 @@ export interface KeepRunningHost {
 export class KeepRunning {
   private prefs: KeepRunningPrefs;
   private blocker: number | null = null;
+  private chosen: boolean;
 
   constructor(
     private readonly file: string,
     private readonly host: KeepRunningHost,
   ) {
     this.prefs = readPrefs(file);
+    this.chosen = existsSync(file);
   }
 
-  /** Apply the saved choices (or the defaults, which are then saved) and follow the power source. */
+  /**
+   * Apply the saved choices and follow the power source. With no saved choices
+   * the login item is left alone until the user decides (set); keeping awake
+   * runs on its default meanwhile, as it asks nothing of the system.
+   */
   start(): KeepRunningState {
-    if (!existsSync(this.file)) writePrefs(this.file, this.prefs);
-    if (this.host.canOpenAtLogin) this.host.setOpenAtLogin(this.prefs.openAtLogin);
+    if (this.chosen && this.host.canOpenAtLogin) this.host.setOpenAtLogin(this.prefs.openAtLogin);
     this.host.onPowerSourceChange(() => this.applyAwake());
     this.applyAwake();
     return this.state();
@@ -101,9 +112,10 @@ export class KeepRunning {
     return {
       ...this.prefs,
       // Never reported on where it cannot be: that would be a switch that does nothing.
-      openAtLogin: this.host.canOpenAtLogin && this.prefs.openAtLogin,
+      openAtLogin: this.host.canOpenAtLogin && this.chosen && this.prefs.openAtLogin,
       holdingAwake: this.blocker !== null,
       canOpenAtLogin: this.host.canOpenAtLogin,
+      chosen: this.chosen,
     };
   }
 
@@ -118,6 +130,7 @@ export class KeepRunning {
       this.prefs[k] = v;
     }
     writePrefs(this.file, this.prefs);
+    this.chosen = true;
     if (patch.openAtLogin !== undefined) this.host.setOpenAtLogin(this.prefs.openAtLogin);
     this.applyAwake();
     return this.state();

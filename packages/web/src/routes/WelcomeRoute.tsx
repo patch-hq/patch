@@ -515,17 +515,28 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
 function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
   const bridge = getDesktopBridge()?.keepRunning;
   const [state, setState] = useState<KeepRunningState | null>(null);
+  // What the switches show before anything is saved: both on, but only Continue
+  // saves them, so the login item is registered after the person has seen this.
+  const [draft, setDraft] = useState<{ openAtLogin: boolean; keepAwake: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     void bridge
       ?.get()
-      .then(setState)
+      .then((s) => {
+        setState(s);
+        setDraft(
+          s.chosen
+            ? { openAtLogin: s.openAtLogin, keepAwake: s.keepAwake }
+            : { openAtLogin: true, keepAwake: s.keepAwake },
+        );
+      })
       .catch((e: Error) => setError(e.message));
   }, [bridge]);
-  const set = (patch: Partial<Pick<KeepRunningState, 'openAtLogin' | 'keepAwake'>>): void => {
+  const confirm = (): void => {
+    if (!bridge || !draft || !state) return;
     void bridge
-      ?.set(patch)
-      .then(setState)
+      .set(state.canOpenAtLogin ? draft : { keepAwake: draft.keepAwake })
+      .then(onNext)
       .catch((e: Error) => setError(e.message));
   };
   return (
@@ -536,18 +547,19 @@ function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
           <Toggle
             id="welcome-open-at-login"
             title="Open at login"
-            checked={state?.openAtLogin ?? false}
-            disabled={state === null}
-            onChange={(v) => set({ openAtLogin: v })}
+            hint="Adds Patch to your login items, so it starts again after a restart."
+            checked={draft?.openAtLogin ?? false}
+            disabled={draft === null}
+            onChange={(v) => setDraft((d) => d && { ...d, openAtLogin: v })}
           />
         )}
         <Toggle
           id="welcome-keep-awake"
           title="Keep this computer awake while plugged in"
           hint="So your phone can reach it. The display still sleeps."
-          checked={state?.keepAwake ?? false}
-          disabled={state === null}
-          onChange={(v) => set({ keepAwake: v })}
+          checked={draft?.keepAwake ?? false}
+          disabled={draft === null}
+          onChange={(v) => setDraft((d) => d && { ...d, keepAwake: v })}
         />
       </div>
       {error ? (
@@ -555,7 +567,7 @@ function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
           {error}
         </p>
       ) : null}
-      <Footer onNext={onNext} ready={state !== null} />
+      <Footer onNext={confirm} ready={draft !== null} />
     </section>
   );
 }

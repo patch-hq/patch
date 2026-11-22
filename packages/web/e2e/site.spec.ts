@@ -84,7 +84,7 @@ for (const viewport of [
       );
 
       await expect(page.locator('.steps h3')).toHaveText([
-        'Choose where Patch runs',
+        'Download Patch',
         'Connect your AI accounts',
         'Add your phone and other machines',
       ]);
@@ -251,5 +251,22 @@ test('after Download, one line says what to do with the disk image', async ({ pa
   await expect(next).toBeVisible();
   if (process.env['PATCH_SITE_SHOTS']) {
     await page.screenshot({ path: `${process.env['PATCH_SITE_SHOTS']}/site-download-next.png` });
+  }
+});
+
+test('the server install command sits under its own Linux / server heading, apart from the downloads', async ({
+  page,
+}) => {
+  await stubRelease(page, ASSETS);
+  await page.goto(SITE);
+  const server = page.locator('#server');
+  await expect(server.getByRole('heading', { name: 'Linux / server' })).toBeVisible();
+  await expect(server.locator('#install-cmd')).toContainText('sudo sh');
+  await expect(page.locator('.choice[data-choice="computer"] #install-cmd')).toHaveCount(0);
+  await expect(page.locator('.choice[data-choice="computer"]')).not.toContainText('sudo');
+  if (process.env['PATCH_SITE_SHOTS']) {
+    await page
+      .locator('#start')
+      .screenshot({ path: `${process.env['PATCH_SITE_SHOTS']}/site-start.png` });
   }
 });
