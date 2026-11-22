@@ -49,13 +49,19 @@ vi.mock('../src/lib/voiceTts', () => ({
   flushTtsPlayback: vi.fn(async () => undefined),
   stopTtsPlayback: stopTtsPlaybackMock,
 }));
-const { cueMock } = vi.hoisted(() => ({ cueMock: vi.fn(async () => undefined) }));
+const { cueMock, playCueMock } = vi.hoisted(() => ({
+  cueMock: vi.fn(async () => undefined),
+  playCueMock: vi.fn(async (_cue: string) => undefined),
+}));
 const { ringStart, ringStop } = vi.hoisted(() => ({
   ringStart: vi.fn(async () => undefined),
   ringStop: vi.fn(async () => undefined),
 }));
 vi.mock('../src/lib/voiceRingback', () => ({ startRingback: ringStart, stopRingback: ringStop }));
-vi.mock('../src/lib/voiceLiveCue', () => ({ playVoiceLiveCue: cueMock }));
+vi.mock('../src/lib/voiceLiveCue', () => ({
+  playVoiceLiveCue: cueMock,
+  playVoiceCue: playCueMock,
+}));
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => prefs.addressWord,
   voiceConfigOrNull: () => null,
@@ -179,6 +185,38 @@ describe('connecting → failed after the timeout', () => {
     sock.emitMessage(stateFrame('listening'));
     sock.emitMessage(stateFrame('thinking'));
     expect(cueMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('plays the error cue once when the call fails, and the ended cue only for a clean hang-up', async () => {
+    playCueMock.mockClear();
+    startVoiceCall('c1');
+    await flush();
+    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    await flush();
+    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['error']);
+    await endVoiceCall();
+    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['error']);
+
+    playCueMock.mockClear();
+    startVoiceCall('c1');
+    await flush();
+    FakeWebSocket.last().emitOpen();
+    await flush();
+    FakeWebSocket.last().emitMessage(stateFrame('listening'));
+    await endVoiceCall();
+    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['ended']);
+  });
+
+  it('a dropped call that redials does not play the error cue', async () => {
+    playCueMock.mockClear();
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    sock.emitMessage(stateFrame('listening'));
+    sock.emitClose(1006);
+    expect(playCueMock).not.toHaveBeenCalledWith('error');
   });
 
   it('a setup failure already on screen is not overwritten by the timeout', async () => {
