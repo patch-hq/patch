@@ -3212,6 +3212,23 @@ const archiveSize = Number(new URLSearchParams(window.location.search).get('arch
   }) as typeof window.fetch;
 }
 
+// The artifact bar asks the server for a chat's full artifact list
+// (`GET /api/chats/:id/artifacts`); the harness has no server, and the
+// transcript it seeds already carries every artifact, so the list is empty.
+{
+  const prevFetch = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!/\/api\/chats\/[^/?]+\/artifacts(?:\?|$)/.test(url)) return prevFetch(input, init);
+    return Promise.resolve(
+      new Response(JSON.stringify({ artifacts: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }) as typeof window.fetch;
+}
+
 if (archiveSize > 0) {
   const prevFetch = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
