@@ -78,54 +78,92 @@ function decodeBase64(s: string): Uint8Array {
 }
 
 let _sub: { remove: () => void } | null = null;
+let _watchdog: ReturnType<typeof setTimeout> | null = null;
+
+/** How long an opened microphone may stay silent of frames before it is reported dead. */
+export const MIC_FIRST_FRAME_TIMEOUT_MS = 3000;
+
+function clearWatchdog(): void {
+  if (_watchdog !== null) clearTimeout(_watchdog);
+  _watchdog = null;
+}
+
+// The native recorder is a single shared instance: `start` while it runs is a
+// no-op and `stop` kills whatever is running. A stop still in flight from one
+// dictation could therefore land after the next dictation's start, leaving the
+// new session subscribed to a recorder that is already gone (green mic pill,
+// zero frames). Every start and stop runs one at a time, in call order.
+let _queue: Promise<unknown> = Promise.resolve();
+function serial<T>(op: () => Promise<T>): Promise<T> {
+  const run = _queue.then(op, op);
+  _queue = run.catch(() => undefined);
+  return run;
+}
 
 /**
  * Start capturing mic PCM16 @ 16 kHz. Each native frame is decoded to an
  * Int16Array (little-endian, matching the host's wire order) and handed to
- * `onFrame`. A mid-stream native failure calls `onError` (the caller ends the
- * call and surfaces it — NO FALLBACK). No-op on non-Android.
+ * `onFrame`. A mid-stream native failure, or a recorder that opens but never
+ * delivers a frame, calls `onError` (the caller ends the call and surfaces it —
+ * NO FALLBACK). No-op on non-Android.
  */
-export async function startMicCapture(
+export function startMicCapture(
   onFrame: (pcm: Int16Array) => void,
   onError: (message: string) => void,
 ): Promise<void> {
-  const m = getModule();
-  if (!m) return;
-  const emitter = new NativeEventEmitter(m as unknown as never);
-  // A capture still holding the subscription would be orphaned by this one and
-  // go on delivering frames to a caller that has moved on.
-  _sub?.remove();
-  const mine = emitter.addListener(EVENT, (ev: MicFrameEvent) => {
-    if (ev.error) {
-      onError(ev.error);
-      return;
+  return serial(async () => {
+    const m = getModule();
+    if (!m) return;
+    const emitter = new NativeEventEmitter(m as unknown as never);
+    // A capture still holding the subscription would be orphaned by this one and
+    // go on delivering frames to a caller that has moved on.
+    _sub?.remove();
+    clearWatchdog();
+    const mine = emitter.addListener(EVENT, (ev: MicFrameEvent) => {
+      if (ev.error) {
+        onError(ev.error);
+        return;
+      }
+      if (!ev.base64) return;
+      if (_sub === mine) clearWatchdog();
+      const bytes = decodeBase64(ev.base64);
+      // `bytes` is a fresh 0-offset buffer, so this Int16Array view is 2-byte
+      // aligned and spans the whole buffer — safe to forward as `.buffer`.
+      const pcm = new Int16Array(bytes.buffer, 0, bytes.byteLength >>> 1);
+      useMicLevelStore.getState().push(pcm);
+      onFrame(pcm);
+    });
+    _sub = mine;
+    try {
+      await m.start();
+    } catch (e) {
+      // Nothing is capturing, so nobody will call stop: drop the subscription now
+      // — this attempt's own, not a newer capture's that has replaced it since.
+      mine.remove();
+      if (_sub === mine) _sub = null;
+      throw e;
     }
-    if (!ev.base64) return;
-    const bytes = decodeBase64(ev.base64);
-    // `bytes` is a fresh 0-offset buffer, so this Int16Array view is 2-byte
-    // aligned and spans the whole buffer — safe to forward as `.buffer`.
-    const pcm = new Int16Array(bytes.buffer, 0, bytes.byteLength >>> 1);
-    useMicLevelStore.getState().push(pcm);
-    onFrame(pcm);
+    _watchdog = setTimeout(() => {
+      _watchdog = null;
+      if (_sub === mine)
+        onError(
+          `the microphone opened but delivered no audio in ${MIC_FIRST_FRAME_TIMEOUT_MS / 1000}s`,
+        );
+    }, MIC_FIRST_FRAME_TIMEOUT_MS);
   });
-  _sub = mine;
-  try {
-    await m.start();
-  } catch (e) {
-    // Nothing is capturing, so nobody will call stop: drop the subscription now
-    // — this attempt's own, not a newer capture's that has replaced it since.
-    mine.remove();
-    if (_sub === mine) _sub = null;
-    throw e;
-  }
 }
 
 /** Stop mic capture and drop the frame subscription. Idempotent. No-op on non-Android. */
-export async function stopMicCapture(): Promise<void> {
+export function stopMicCapture(): Promise<void> {
+  // Detach synchronously so a frame arriving while the stop waits its turn
+  // cannot reach a caller that has already moved on.
   _sub?.remove();
   _sub = null;
+  clearWatchdog();
   useMicLevelStore.getState().reset();
-  const m = getModule();
-  if (!m) return;
-  await m.stop();
+  return serial(async () => {
+    const m = getModule();
+    if (!m) return;
+    await m.stop();
+  });
 }
