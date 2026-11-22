@@ -610,7 +610,12 @@ function ThisMac(): JSX.Element | null {
   const [failure, setFailure] = useState<string | null>(null);
   // The name step: null until Install is pressed, then the editable name.
   const [name, setName] = useState<string | null>(null);
-  if (!bridge || !status.data || status.data.installed) return null;
+  // A host that is connected right now is this Mac running chats, however it was
+  // started; offering to install one would contradict the list below.
+  const running = usePresenceStore((s) =>
+    status.data?.hostId ? (s.hosts[status.data.hostId]?.online ?? false) : false,
+  );
+  if (!bridge || !status.data || status.data.installed || running) return null;
 
   async function askName(): Promise<void> {
     setFailure(null);
@@ -642,7 +647,10 @@ function ThisMac(): JSX.Element | null {
         <div className="set-row-head">
           <div className="set-row-text">
             <span className="set-row-title">Host</span>
-            <span className="set-sub">Not installed</span>
+            <span className="set-sub">
+              Not installed. Install runs chats on this Mac and keeps them going when Patch is
+              closed.
+            </span>
           </div>
           {name === null ? (
             <button

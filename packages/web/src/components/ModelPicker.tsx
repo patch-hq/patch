@@ -241,47 +241,63 @@ export function ModelPicker({
           Loading models…
         </div>
       ) : null}
-      {groups.map((g) => (
-        <div key={g.providerId} data-testid={`model-group-${g.providerId}`}>
-          {groups.length > 1 ? <div className="model-group-label">{g.label}</div> : null}
-          <ul className="model-popup-list">
-            {g.models.map((m) => {
-              const reason = modelSpentReason(m.id, credit.rows, credit.apiKeyProviders);
-              const spent = reason !== null;
-              return (
-                <li key={m.id}>
-                  <button
-                    type="button"
-                    className={`model-option ${m.id === selected ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
-                    data-testid={`model-option-${m.id}`}
-                    role="option"
-                    aria-selected={m.id === selected}
-                    aria-disabled={spent}
-                    disabled={spent}
-                    title={reason ?? undefined}
-                    onClick={() => onSelect(m.id)}
-                  >
-                    <span className="model-option-name">{m.label}</span>
-                    {reason !== null ? (
-                      <span
-                        className="model-option-reason"
-                        data-testid={`model-option-reason-${m.id}`}
+      {groups.map((g) => {
+        // A provider with no usage left says so once, not on every model.
+        const reasons = g.models.map((m) =>
+          modelSpentReason(m.id, credit.rows, credit.apiKeyProviders),
+        );
+        const groupReason =
+          reasons.length > 0 && reasons[0] !== null && reasons.every((r) => r === reasons[0])
+            ? reasons[0]
+            : null;
+        return (
+          <div key={g.providerId} data-testid={`model-group-${g.providerId}`}>
+            {groups.length > 1 ? <div className="model-group-label">{g.label}</div> : null}
+            {groupReason !== null ? (
+              <div className="model-popup-status" data-testid={`model-group-${g.providerId}-limit`}>
+                {groupReason}
+              </div>
+            ) : (
+              <ul className="model-popup-list">
+                {g.models.map((m) => {
+                  const reason = modelSpentReason(m.id, credit.rows, credit.apiKeyProviders);
+                  const spent = reason !== null;
+                  return (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        className={`model-option ${m.id === selected ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
+                        data-testid={`model-option-${m.id}`}
+                        role="option"
+                        aria-selected={m.id === selected}
+                        aria-disabled={spent}
+                        disabled={spent}
+                        title={reason ?? undefined}
+                        onClick={() => onSelect(m.id)}
                       >
-                        {reason}
-                      </span>
-                    ) : null}
-                    {m.id === selected ? (
-                      <span className="model-option-check" aria-hidden>
-                        ✓
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+                        <span className="model-option-name">{m.label}</span>
+                        {reason !== null ? (
+                          <span
+                            className="model-option-reason"
+                            data-testid={`model-option-reason-${m.id}`}
+                          >
+                            {reason}
+                          </span>
+                        ) : null}
+                        {m.id === selected ? (
+                          <span className="model-option-check" aria-hidden>
+                            ✓
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -338,6 +354,23 @@ function groupByProvider(models: readonly ModelOption[]): {
   return order.map((id) => ({
     providerId: id,
     label: id === 'codex' ? 'ChatGPT' : providerDescriptor(id).label,
-    models: byId.get(id)!,
+    models: [...byId.get(id)!].sort(newestFirst),
   }));
+}
+
+/** "Opus 5.5" gives [5, 5]; a label with no number sorts after every numbered one. */
+function versionOf(label: string): number[] {
+  const m = /\d+(?:\.\d+)*/.exec(label);
+  return m ? m[0].split('.').map(Number) : [];
+}
+
+function newestFirst(a: { label: string }, b: { label: string }): number {
+  const x = versionOf(a.label);
+  const y = versionOf(b.label);
+  if (x.length === 0 || y.length === 0) return x.length === y.length ? 0 : x.length === 0 ? 1 : -1;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (y[i] ?? 0) - (x[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
 }
