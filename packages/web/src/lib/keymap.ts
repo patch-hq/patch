@@ -33,6 +33,7 @@ export type ActionId =
   | 'search'
   | 'searchFind'
   | 'toggleSidebar'
+  | 'toggleZen'
   | 'newChat'
   | 'newChatPicker'
   | 'prevChat'
@@ -104,6 +105,7 @@ export const ACTIONS: ActionDef[] = [
   def('search', 'Focus search', '⌘K'),
   def('searchFind', 'Focus the page search', '⌘F'),
   def('toggleSidebar', 'Toggle sidebar', '⌘/'),
+  def('toggleZen', 'Zen mode', '⌘.'),
   def('newChat', 'New chat', '⌘N'),
   def('newChatPicker', 'New chat with folder picker', '⌘⇧N'),
   def('prevChat', 'Previous chat', '⌘↑'),

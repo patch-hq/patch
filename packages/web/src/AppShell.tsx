@@ -67,6 +67,7 @@ import { useShortcuts, isChatViewPath } from './lib/shortcuts.js';
 import { captureScreenForAgents } from './lib/captureScreen.js';
 import { useShiftClickGuard } from './lib/shiftClickGuard.js';
 import { useResponsiveShell } from './lib/responsiveShell.js';
+import { useZenMode } from './lib/zenMode.js';
 import { useSectionCounts } from './lib/sectionCounts.js';
 import { useDocumentTitleSync } from './lib/documentTitle.js';
 import { useFrontChatReport } from './lib/frontChat.js';
@@ -122,6 +123,7 @@ export function AppShell(): JSX.Element {
   // editor rail below their breakpoints so the shell never grows a
   // page-level horizontal scrollbar.
   useResponsiveShell();
+  const zen = useZenMode();
   // A provider's CLI goes onto a host once the user has connected that provider.
   useInstallPickedProviders();
   const wsRef = useRef<PatchWs | null>(null);
@@ -308,6 +310,11 @@ export function AppShell(): JSX.Element {
   // across navigations until manually dismissed. Toasts also auto-expire on a timer (uiStore) as a backstop.
   useEffect(() => {
     useUiStore.getState().clearToasts();
+    // Zen is one open chat: landing anywhere else (a notification, a link)
+    // leaves it rather than stranding a page with no navigation.
+    if (!/^\/chats\/(?!new$)[^/]+$/.test(location.pathname)) {
+      useUiStore.getState().setZenMode(false);
+    }
   }, [location.pathname]);
 
   // Open the WS once.
@@ -595,6 +602,13 @@ export function AppShell(): JSX.Element {
         releaseVoiceNoteHold(heldMs);
       },
       onToggleSidebar: () => setSidebarCollapsed(!sidebarCollapsed),
+      onToggleZen: () => {
+        const ui = useUiStore.getState();
+        // Zen is one open chat: only a chat can enter it, any page can leave it.
+        if (ui.zenMode || /^\/chats\/(?!new$)[^/]+$/.test(location.pathname)) {
+          ui.setZenMode(!ui.zenMode);
+        }
+      },
       onToggleChannels: () => {
         const cur = useUiStore.getState().channelsOpen;
         setChannelsOpen(!cur);
@@ -603,8 +617,12 @@ export function AppShell(): JSX.Element {
         const cur = useUiStore.getState().archivedOpen;
         setArchivedOpen(!cur);
       },
-      onPrevChat: () => navigateChat(-1, location, navigate),
-      onNextChat: () => navigateChat(1, location, navigate),
+      onPrevChat: () => {
+        if (!useUiStore.getState().zenMode) navigateChat(-1, location, navigate);
+      },
+      onNextChat: () => {
+        if (!useUiStore.getState().zenMode) navigateChat(1, location, navigate);
+      },
       onCheatSheet: () => {
         const cur = useUiStore.getState().cheatSheetOpen;
         setCheatSheetOpen(!cur);
@@ -713,7 +731,7 @@ export function AppShell(): JSX.Element {
   }
 
   return (
-    <div className="app-shell" data-testid="app-shell">
+    <div className={`app-shell${zen ? ' zen' : ''}`} data-testid="app-shell">
       <OfflineBanner />
       <ViewPositionSync ws={wsRef.current} />
       {/* App-level, not per-chat: the WS can be connected while every daemon
@@ -733,9 +751,9 @@ export function AppShell(): JSX.Element {
           modes). */}
       <VoiceBar />
       <div className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        {sidebarCollapsed ? null : sidebarMini ? <MiniSidebar /> : <Sidebar />}
+        {sidebarCollapsed || zen ? null : sidebarMini ? <MiniSidebar /> : <Sidebar />}
         <SidebarBackdrop />
-        {sidebarCollapsed ? null : (
+        {sidebarCollapsed || zen ? null : (
           <ColumnDivider
             side="left"
             width={sidebarMini ? SIDEBAR_MINI_WIDTH : sidebarWidth}
@@ -769,15 +787,15 @@ export function AppShell(): JSX.Element {
             comes before the drag rect it sits in is painted over by it, and
             the click starts a window move instead (spec/05 § Window chrome;
             desktop scripts/smoke-drag-regions.cjs). */}
-        <SidebarExpandButton />
+        {zen ? null : <SidebarExpandButton />}
         {/* The Tools sidebar's own column. It renders null unless a chat has
             it open, so it costs nothing the rest of the time. */}
-        <ToolsPanel />
+        {zen ? null : <ToolsPanel />}
         {/* spec/14 § Side threads panel — docked panels live inside their
             chat's tab (PaneArea); this arms new-thread opening and hosts the
             popped-out floating window. */}
         <SideThreadsReconciler />
-        <SideThreadsPanel floating />
+        {zen ? null : <SideThreadsPanel floating />}
       </div>
       {/* The web panel is a native Electron view outside this DOM (spec/14 §
           Links and the web panel), so its divider can't be a flex sibling like

@@ -13368,7 +13368,8 @@ main.empty-state p {
   display: block;
 }
 
-/* ============================================================================
+/* =====================================================================}
+
    Desktop review 2026-07-14 — appended block (C2/C3/F1/F2)
    Kept together at the end for merge-conflict hygiene. See DESKTOP-REVIEW-*.md.
    ============================================================================ */
@@ -19691,4 +19692,34 @@ a.drop-target,
     grid-template-columns: repeat(2, max-content);
     column-gap: 24px;
   }
+=======
+/* Zen mode — one chat, full screen, nothing else. Everything below is what a
+   chat shows that is not the conversation itself or the box to answer it. The
+   shell leaves out the sidebar, tools and side panels in JSX; the rest is
+   hidden here so a chat's own state (permission and question cards, the
+   transcript, the composer's text box and Send) is untouched. */
+.zen .group-row > .group-card:not(.group-card-focused),
+.zen .pane-split-child:not(:has(.pane-focused)),
+.zen .pane:not(.pane-focused),
+.zen .pane-tab-bar,
+.zen .group-head,
+.zen .chat-head-left,
+.zen .chat-head-actions,
+.zen .chat-title-open-window,
+.zen .job-tick-bar,
+.zen .archived-banner,
+.zen .status-list,
+.zen .reminder-banner,
+.zen .wake-bar,
+.zen .threads-strip,
+.zen .composer-actions .composer-tools,
+.zen .composer-actions .composer-settings,
+.zen .composer-actions-end .context-ring {
+  display: none;
+}
+.zen .chat-head {
+  justify-content: center;
+}
+.zen .chat-title-zen {
+  opacity: 0.5;
 }

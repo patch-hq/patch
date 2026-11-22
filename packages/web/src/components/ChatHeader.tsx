@@ -48,6 +48,8 @@ import {
   X,
   Volume2,
   Clock,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
 import { JobTickChip } from './JobTickBar.js';
@@ -184,6 +186,8 @@ export function ChatHeader({
   const setGoal = useChatStore((s) => s.setGoal);
   const [goalOpen, setGoalOpen] = useState(false);
   const pushError = useUiStore((s) => s.pushError);
+  const zen = useUiStore((s) => s.zenMode);
+  const setZenMode = useUiStore((s) => s.setZenMode);
   const setToolsPanelChatId = useUiStore((s) => s.setToolsPanelChatId);
   const setTaskAddChatId = useUiStore((s) => s.setTaskAddChatId);
   const navigate = useNavigate();
@@ -515,6 +519,16 @@ export function ChatHeader({
               onClick={() => openChatInNewWindow(row.chatId, location.search)}
             >
               <ExternalLink size={16} aria-hidden />
+            </button>
+            <button
+              type="button"
+              className="head-action chat-title-zen"
+              data-testid="action-zen"
+              aria-label={zen ? 'Leave zen mode' : 'Zen mode'}
+              title={zen ? 'Leave zen mode (Esc)' : 'Zen mode'}
+              onClick={() => setZenMode(!zen)}
+            >
+              {zen ? <Minimize2 size={16} aria-hidden /> : <Maximize2 size={16} aria-hidden />}
             </button>
           </div>
         </div>

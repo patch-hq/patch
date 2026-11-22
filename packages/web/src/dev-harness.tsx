@@ -71,6 +71,7 @@ import { setActiveWs, type PatchWs } from './api/ws.js';
 import { setModelCatalog } from './lib/models.js';
 import type { WireEvent } from '@patch/wire';
 import { focusPageSearch } from './lib/searchTarget.js';
+import { useZenMode } from './lib/zenMode.js';
 import { useShortcuts, isChatViewPath, type ShortcutHandlers } from './lib/shortcuts.js';
 import { composerHotkeyDown, composerHotkeyUp } from './lib/composerMic.js';
 import { useShiftClickGuard } from './lib/shiftClickGuard.js';
@@ -4072,6 +4073,13 @@ function recordingHandlers(): ShortcutHandlers {
     onGlobalVoiceStart: record('globalVoiceStart'),
     onGlobalVoiceEnd: record('globalVoiceEnd'),
     onToggleSidebar: record('toggleSidebar'),
+    onToggleZen: () => {
+      record('toggleZen')();
+      const ui = useUiStore.getState();
+      if (ui.zenMode || useChatStore.getState().activeChatId) {
+        ui.setZenMode(!ui.zenMode);
+      }
+    },
     onToggleChannels: record('toggleChannels'),
     onToggleArchived: record('toggleArchived'),
     onPrevChat: record('prevChat'),
@@ -4221,6 +4229,7 @@ function Harness(): JSX.Element {
   // workspace I am in somewhere"), so an e2e spec can assert on `document.title`
   // against the real hook rather than a stand-in.
   useDocumentTitleSync();
+  const zen = useZenMode();
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const sidebarMini = useUiStore((s) => s.sidebarMini);
@@ -4261,7 +4270,7 @@ function Harness(): JSX.Element {
   }
   const columns = (
     <div
-      className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
+      className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}${zen ? ' zen' : ''}`}
       style={!shellParam ? { height: '100vh' } : { flex: '1 1 auto', minHeight: 0 }}
     >
       <MemoryRouter initialEntries={[initialRoute]}>
@@ -4269,13 +4278,13 @@ function Harness(): JSX.Element {
         <DesktopNavigationBridge />
         {/* Mirrors AppShell: a new chat left empty is deleted on leaving it. */}
         <DiscardUnsentNewChats />
-        {sidebarCollapsed ? null : sidebarMini ? <MiniSidebar /> : <Sidebar />}
+        {sidebarCollapsed || zen ? null : sidebarMini ? <MiniSidebar /> : <Sidebar />}
         <SidebarBackdrop />
         {/* AppShell's sidebar divider. Mirrored here so the narrow-width specs
             can see that the drawer drops it — without it in the harness, an
             "is not drawn" assertion passes against an element that never
             existed. */}
-        {sidebarCollapsed ? null : (
+        {sidebarCollapsed || zen ? null : (
           <ColumnDivider
             side="left"
             width={sidebarMini ? SIDEBAR_MINI_WIDTH : sidebarWidth}
@@ -4306,8 +4315,8 @@ function Harness(): JSX.Element {
         {params.get('viewsync') === '1' ? <ViewPositionSync ws={harnessWs} /> : null}
         {/* Mirrors AppShell: after the routes, so its no-drag hole is folded
             in after `.chat-head`'s drag region (spec/05 § Window chrome). */}
-        <SidebarExpandButton />
-        <ToolsPanel />
+        {zen ? null : <SidebarExpandButton />}
+        {zen ? null : <ToolsPanel />}
         <SideThreadsReconciler />
         <SideThreadsPanel floating />
         <ConfirmModal />

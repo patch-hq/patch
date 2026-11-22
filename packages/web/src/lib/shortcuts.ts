@@ -69,6 +69,7 @@ export interface ShortcutHandlers {
   onGlobalVoiceStart(): void;
   onGlobalVoiceEnd(heldMs: number): void;
   onToggleSidebar(): void;
+  onToggleZen(): void;
   onToggleChannels(): void;
   onToggleArchived(): void;
   onPrevChat(): void;
@@ -213,6 +214,7 @@ export const SHORTCUT_TABLE: ShortcutEntry[] = [
     scope: other('Page with a search field'),
   },
   { keys: '⌘ /', ids: ['toggleSidebar'], action: 'Toggle sidebar', scope: ANYWHERE },
+  { keys: '⌘ .', ids: ['toggleZen'], action: 'Zen mode', scope: ANYWHERE },
   { keys: '⌘ N', ids: ['newChat'], action: 'New chat', scope: ANYWHERE },
   { keys: '⌘ ⇧ N', ids: ['newChatPicker'], action: 'New chat with folder picker', scope: ANYWHERE },
   {
@@ -411,6 +413,11 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
       if (is('searchInFiles')) {
         e.preventDefault();
         handlers.onSearchInFiles();
+        return;
+      }
+      if (is('toggleZen')) {
+        e.preventDefault();
+        handlers.onToggleZen();
         return;
       }
       if (is('toggleSidebar')) {
