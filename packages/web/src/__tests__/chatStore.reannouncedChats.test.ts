@@ -83,3 +83,29 @@ describe('a re-announced chat this surface has not seen', () => {
     expect(drawn()).toEqual(['snap']);
   });
 });
+
+// A chat unarchived on another device: the server's index sends its entry
+// (with its feed position) to every device, and that alone puts it back in the
+// list here. A frame without one — a host's replay — still creates nothing.
+describe('a chat the server’s index names that this surface does not list', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+    useChatStore.getState().hydrate([]);
+  });
+
+  it('is drawn when the index says it is active again', () => {
+    useChatStore.getState().applyEvents([state('back', { status: 'active', feedPos: 4 })]);
+    expect(drawn()).toEqual(['back']);
+  });
+
+  it('is not drawn from a frame without a feed position, nor one saying it is archived', () => {
+    useChatStore
+      .getState()
+      .applyEvents([
+        state('replayed', { status: 'active' }),
+        state('archived', { status: 'archived', feedPos: 5 }),
+      ]);
+    expect(useChatStore.getState().chats['replayed']).toBeUndefined();
+    expect(useChatStore.getState().chats['archived']).toBeUndefined();
+  });
+});

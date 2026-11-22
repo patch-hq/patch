@@ -44,6 +44,27 @@ describe('chatStore frames for chats outside the roster', () => {
     expect(useChatStore.getState().chats['old-archived']).toBeUndefined();
   });
 
+  it('the server’s index naming an unrostered chat active brings it into the list (unarchived elsewhere)', () => {
+    useChatStore.getState().hydrate([row('a')]);
+    useChatStore
+      .getState()
+      .applyEvent({ ...(stateFrame('back') as object), status: 'active', feedPos: 9 } as never);
+    expect(useChatStore.getState().chats['back']?.status).toBe('active');
+    // A later frame without a feed position updates it like any listed chat.
+    useChatStore
+      .getState()
+      .applyEvent({ ...(stateFrame('back') as object), lastUpdated: 7 } as never);
+    expect(useChatStore.getState().chats['back']?.lastUpdated).toBe(7);
+  });
+
+  it('the server’s index naming an unrostered chat archived does not list it', () => {
+    useChatStore.getState().hydrate([row('a')]);
+    useChatStore
+      .getState()
+      .applyEvent({ ...(stateFrame('still') as object), status: 'archived', feedPos: 9 } as never);
+    expect(useChatStore.getState().chats['still']).toBeUndefined();
+  });
+
   it('a chat.error for an unrostered chat does not create a row', () => {
     useChatStore.getState().hydrate([row('a')]);
     useChatStore.getState().applyEvent({

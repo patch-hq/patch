@@ -1780,7 +1780,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         !rosteredChatIds.has(event.chatId) &&
         chats[event.chatId] === undefined
       ) {
-        continue;
+        // An entry of the server's chat index — it carries its feed position —
+        // naming the chat active is the account's word that the chat is in the
+        // list: one unarchived on another device comes back this way (spec/03
+        // § Account feed). A host's replay carries none and stays ignored.
+        if (event.feedPos === undefined || event.status !== 'active') continue;
+        rosteredChatIds.add(event.chatId);
       }
       // Any other chat-scoped frame is likewise evidence about an existing chat,
       // never a chat-creation event: after a host restart it replays events for
