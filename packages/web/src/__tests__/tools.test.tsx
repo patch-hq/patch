@@ -131,6 +131,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_artifact',
   'patch_pad_collect',
   'patch_pad_create',
+  'patch_capture_screen',
   'patch_pad_list',
   'patch_pad_reply',
   'patch_pad_update',
