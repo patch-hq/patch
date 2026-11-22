@@ -1577,7 +1577,8 @@ body {
      then landed in the narrow tools column and truncated ("…Ma…"). */
   grid-template-columns: 18px 1fr auto;
   font-weight: 600;
-  margin: 8px var(--sb-inset-right) 4px var(--sb-inset);
+  /* No bottom margin: the search header below owns the gap above it. */
+  margin: 8px var(--sb-inset-right) 0 var(--sb-inset);
   /* Distinct special-status treatment (todo: "Manager needs a more distinct
      design"): reads as an accent-tinted card with an accent border so a new
      user can tell the meta-operator apart from ordinary chats at a glance. */
