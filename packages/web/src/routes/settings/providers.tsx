@@ -14,13 +14,19 @@ import {
   accountsForBackend,
   accountsKeyForBackend,
   type AccountState,
+  type ClaudeBedrock,
   type ProviderAccountsKey,
 } from '@patch/wire';
 import type { SharedBackendId, SharedState } from '../../api/rest.js';
 import { EXTRA_USAGE_URL, type UsageScope } from '../../lib/usage.js';
 import { ChatGPTSignIn } from '../../components/ChatGPTSignIn.js';
 import { ClaudeSignIn } from '../../components/ClaudeSignIn.js';
-import { AddChatGPTAccount, AddClaudeAccount, WelcomeClaudeControls } from './SharedAccounts.js';
+import {
+  AddChatGPTAccount,
+  AddClaudeAccount,
+  ClaudeListFoot,
+  WelcomeClaudeControls,
+} from './SharedAccounts.js';
 
 /** One account as the server stores it, whichever provider it is for. */
 export interface SharedRow {
@@ -32,6 +38,10 @@ export interface SharedRow {
   kind?: 'chatgpt' | 'apiKey';
   /** The account's one state, from the server (spec/10 § Account states). */
   state?: AccountState;
+  /** In the order (spec/10 § Choosing an account); absent reads as on. */
+  auto?: boolean;
+  /** A Claude on Amazon Bedrock account. */
+  bedrock?: ClaudeBedrock;
 }
 
 /** What a provider entry says; the rest is derived from the wire table. */
@@ -49,7 +59,11 @@ interface ProviderEntry {
   /** The sign-in drawn under an account row being signed in again. */
   SignIn: (props: { accountId: string; onDone: () => void }) => JSX.Element;
   /** The control(s) that add an account, drawn under the provider's card. */
-  AddAccount: () => JSX.Element;
+  AddAccount: () => JSX.Element | null;
+  /** Whether each account carries an Auto checkbox: in the order or only when chosen. */
+  autoFlag: boolean;
+  /** Drawn in the card under the list: an add or edit form the add control opened. */
+  ListFoot?: () => JSX.Element | null;
   /** The provider's card on the welcome step and the Connect page. */
   welcome: {
     name: string;
@@ -87,6 +101,8 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signInDetail: 'Sign in with Claude in your browser',
     SignIn: ClaudeSignIn,
     AddAccount: AddClaudeAccount,
+    autoFlag: true,
+    ListFoot: ClaudeListFoot,
     welcome: {
       name: 'Claude',
       testId: 'claude',
@@ -103,6 +119,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signInDetail: 'Sign in with ChatGPT using a code you approve on any device',
     SignIn: ChatGPTSignIn,
     AddAccount: AddChatGPTAccount,
+    autoFlag: false,
     welcome: {
       name: 'ChatGPT and OpenAI',
       testId: 'chatgpt',

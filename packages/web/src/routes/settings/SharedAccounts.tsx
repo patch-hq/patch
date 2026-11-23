@@ -8,7 +8,7 @@
 // because an account belongs to nobody's host.
 
 import type { JSX, ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   accountStateRunnable,
   describeAccountState,
@@ -26,6 +26,14 @@ import { writeShared } from './sharedWrite.js';
 import { AccountRow, RankedList, UsageBars, type MenuItem } from './accountList.js';
 import { Note, Pills, Row } from './ui.js';
 import type { ProviderSpec, SharedRow } from './providers.js';
+import {
+  BedrockForm,
+  BedrockLines,
+  addBedrock,
+  editBedrock,
+  useClaudeAddStore,
+  type BedrockFormValues,
+} from './bedrockAccounts.js';
 
 export const STRATEGIES: readonly AccountStrategy[] = [
   'priority',
@@ -68,6 +76,12 @@ export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.El
   if (shared === null) return <Note testid={`accounts-loading-${backendId}`}>Loading…</Note>;
   const rows = provider.rows(shared.secrets);
   const name = provider.name;
+  // Accounts out of the order sit after it, with no handle or position; a
+  // reorder still names every account, those last (spec/10 § Choosing an account).
+  const inOrder = (a: SharedRow): boolean => !provider.autoFlag || a.auto !== false;
+  const ranked = rows.filter(inOrder);
+  const unranked = rows.filter((a) => !inOrder(a));
+  const ListFoot = provider.ListFoot;
 
   return (
     <div data-testid={`accounts-${backendId}`}>
@@ -87,22 +101,37 @@ export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.El
           />
         </Row>
       ) : null}
+      {rows.length > 0 && provider.autoFlag ? (
+        <div className="acct-head" data-testid={`accounts-head-${backendId}`}>
+          <span>Auto</span>
+          <span>Account</span>
+        </div>
+      ) : null}
       {rows.length === 0 ? (
         <Note testid={`accounts-empty-${backendId}`}>No {name} accounts yet</Note>
       ) : (
         <RankedList
           testid={`accounts-rank-${backendId}`}
           onCommit={(next) =>
-            writeShared(`${name} order`, () => api.orderAccounts(backendId, next))
+            writeShared(`${name} order`, () =>
+              api.orderAccounts(backendId, [...next, ...unranked.map((a) => a.id)]),
+            )
           }
-          items={rows.map((a) => ({
+          items={ranked.map((a) => ({
             id: a.id,
             render: (handle: ReactNode, rank: number) => (
               <AccountEntry provider={provider} row={a} rows={rows} handle={handle} rank={rank} />
             ),
           }))}
+          unranked={unranked.map((a) => ({
+            id: a.id,
+            render: () => (
+              <AccountEntry provider={provider} row={a} rows={rows} handle={null} rank={null} />
+            ),
+          }))}
         />
       )}
+      {ListFoot ? <ListFoot /> : null}
     </div>
   );
 }
@@ -118,7 +147,7 @@ function AccountEntry({
   row: SharedRow;
   rows: SharedRow[];
   handle: ReactNode;
-  rank: number;
+  rank: number | null;
 }): JSX.Element {
   const backendId = provider.id;
   const reading = useReading(backendId, row.id);
@@ -138,6 +167,76 @@ function AccountEntry({
   const sub = [email, row.kind === 'apiKey' ? 'API key' : null].filter(
     (x): x is string => x !== null,
   );
+
+  const autoBox = provider.autoFlag ? (
+    <input
+      type="checkbox"
+      className="acct-auto"
+      aria-label="Switch to automatically"
+      title="Switch to automatically"
+      checked={row.auto !== false}
+      data-testid={`account-auto-${id}`}
+      onChange={(e) => {
+        const auto = e.target.checked;
+        void writeShared(auto ? 'switch to automatically' : 'stop switching to', () =>
+          api.updateAccount(backendId, row.id, { auto }),
+        );
+      }}
+    />
+  ) : undefined;
+
+  const remove: MenuItem = {
+    label: 'Remove',
+    ...(row.bedrock ? {} : { detail: 'Forget this account everywhere' }),
+    danger: true,
+    testid: `account-remove-${id}`,
+    onSelect: () =>
+      void (async () => {
+        const ok = await useUiStore.getState().confirm({
+          title: `Remove ${row.label}`,
+          message: `Remove ${row.label} from every host? Its row goes too.`,
+          confirmLabel: 'Remove',
+          danger: true,
+        });
+        if (ok) await writeShared('remove', () => api.removeAccount(backendId, row.id));
+      })(),
+  };
+
+  if (row.bedrock) {
+    // A Bedrock account has no sign-in of Patch's: the host reports its AWS
+    // profile signed out, and signing in again is AWS's own.
+    const signedOut = !row.connected || reading?.connected === false;
+    return (
+      <AccountRow
+        auto={autoBox}
+        handle={handle}
+        rank={rank}
+        active={false}
+        testid={`account-${id}`}
+        menuLabel={row.label}
+        menuTestid={`account-menu-${id}`}
+        menu={[
+          {
+            label: 'Edit',
+            testid: `account-edit-${id}`,
+            onSelect: () =>
+              useClaudeAddStore.getState().setAdding({ kind: 'bedrock-edit', accountId: row.id }),
+          },
+          remove,
+        ]}
+      >
+        <span className="set-row-title">
+          {row.label}
+          <span className="acct-kind">Bedrock</span>
+        </span>
+        <BedrockLines
+          bedrock={row.bedrock}
+          signedOut={signedOut}
+          testid={`account-bedrock-${id}`}
+        />
+      </AccountRow>
+    );
+  }
 
   const pasteToken = (title: string, verb: string): void =>
     void (async () => {
@@ -245,26 +344,12 @@ function AccountEntry({
           },
         ]
       : []),
-    {
-      label: 'Remove',
-      detail: 'Forget this account everywhere',
-      danger: true,
-      testid: `account-remove-${id}`,
-      onSelect: () =>
-        void (async () => {
-          const ok = await useUiStore.getState().confirm({
-            title: `Remove ${row.label}`,
-            message: `Remove ${row.label} from every host? Its row goes too.`,
-            confirmLabel: 'Remove',
-            danger: true,
-          });
-          if (ok) await writeShared('remove', () => api.removeAccount(backendId, row.id));
-        })(),
-    },
+    remove,
   ];
 
   return (
     <AccountRow
+      auto={autoBox}
       handle={handle}
       rank={rank}
       active={false}
@@ -346,14 +431,125 @@ export function WelcomeClaudeControls(): JSX.Element {
   return <ClaudeSignIn primary apiKey={<AddClaudeApiKey />} />;
 }
 
-export function AddClaudeAccount(): JSX.Element {
+/**
+ * Add a Claude account: one Add account control opening a menu of the two
+ * kinds (spec/14 § Credit sources). Claude subscription draws the sign-in and
+ * setup-token controls; Amazon Bedrock opens its form in the card.
+ */
+export function AddClaudeAccount(): JSX.Element | null {
+  const adding = useClaudeAddStore((s) => s.adding);
+  const setAdding = useClaudeAddStore((s) => s.setAdding);
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  // Leaving the page closes whatever was opened to add or edit an account.
+  useEffect(() => () => setAdding(null), [setAdding]);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent): void => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open]);
+  // The form is in the card; while it is open there is nothing more to add.
+  if (adding?.kind === 'bedrock' || adding?.kind === 'bedrock-edit') return null;
+  if (adding?.kind === 'subscription') return <AddClaudeSubscription />;
+  const choose = (next: ClaudeAddKind): void => {
+    setOpen(false);
+    setAdding({ kind: next });
+  };
   return (
     <div className="set-inline set-add-bar start">
-      <ClaudeSignIn apiKey={<AddClaudeApiKey />} />
+      <div className="set-acct-more bedrock-add" ref={wrap}>
+        <button
+          type="button"
+          className="set-btn"
+          aria-expanded={open}
+          aria-haspopup="menu"
+          data-testid="add-claude-account"
+          onClick={() => setOpen((v) => !v)}
+        >
+          Add account
+        </button>
+        {open ? (
+          <div className="set-acct-menu bedrock-add-menu" role="menu" data-testid="add-claude-menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="set-acct-menu-item"
+              data-testid="add-claude-subscription"
+              onClick={() => choose('subscription')}
+            >
+              <span className="set-acct-menu-label">Claude subscription</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="set-acct-menu-item"
+              data-testid="add-claude-bedrock"
+              onClick={() => choose('bedrock')}
+            >
+              <span className="set-acct-menu-label">Amazon Bedrock</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+type ClaudeAddKind = 'subscription' | 'bedrock';
+
+/** The Bedrock add or edit form, in the Claude card under the list. */
+export function ClaudeListFoot(): JSX.Element | null {
+  const adding = useClaudeAddStore((s) => s.adding);
+  const setAdding = useClaudeAddStore((s) => s.setAdding);
+  const rows = usePreferencesStore((s) => s.shared?.secrets.claude);
+  const close = (): void => setAdding(null);
+  if (adding?.kind === 'bedrock') {
+    return <BedrockForm onSubmit={addBedrock} onCancel={close} />;
+  }
+  if (adding?.kind === 'bedrock-edit') {
+    const row = rows?.find((r) => r.id === adding.accountId);
+    if (!row?.bedrock) return null;
+    const before: BedrockFormValues = {
+      label: row.label,
+      hostId: row.bedrock.hostId,
+      awsProfile: row.bedrock.awsProfile,
+      awsRegion: row.bedrock.awsRegion,
+      regionPrefix: row.bedrock.regionPrefix,
+      monthlyCapUsd: row.bedrock.monthlyCapUsd,
+      auto: row.auto !== false,
+    };
+    return (
+      <BedrockForm
+        key={row.id}
+        initial={before}
+        onSubmit={(after) => editBedrock(row.id, before, after)}
+        onCancel={close}
+      />
+    );
+  }
+  return null;
+}
+
+/** A Claude subscription: sign in in the browser, an API key, or a pasted setup token. */
+function AddClaudeSubscription(): JSX.Element {
+  const close = (): void => useClaudeAddStore.getState().setAdding(null);
+  return (
+    <div className="set-inline set-add-bar start">
+      <ClaudeSignIn apiKey={<AddClaudeApiKey />} onDone={close} />
       <button
         type="button"
         className="set-btn ghost"
-        data-testid="add-claude-account"
+        data-testid="add-claude-setup-token"
         onClick={() =>
           void (async () => {
             const token = await useUiStore.getState().prompt({
@@ -363,13 +559,22 @@ export function AddClaudeAccount(): JSX.Element {
               confirmLabel: 'Add',
             });
             if (token === null || token.trim() === '') return;
-            await writeShared('add account', () =>
+            const ok = await writeShared('add account', () =>
               api.addAccount('claude-code', { token: token.trim() }),
             );
+            if (ok) close();
           })()
         }
       >
         Use a setup token
+      </button>
+      <button
+        type="button"
+        className="set-btn ghost"
+        data-testid="add-claude-cancel"
+        onClick={close}
+      >
+        Cancel
       </button>
     </div>
   );

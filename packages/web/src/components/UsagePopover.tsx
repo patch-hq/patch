@@ -18,10 +18,16 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { ACCOUNT_PROVIDERS, type ChatContextUsage, type ProviderId } from '@patch/wire';
+import {
+  ACCOUNT_PROVIDERS,
+  type ChatContextUsage,
+  type ClaudeBedrock,
+  type ProviderId,
+} from '@patch/wire';
 import { usePresenceStore, type HostAccount } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { UsageBars } from '../routes/settings/accountList.js';
+import { bedrockSpendText } from '../routes/settings/bedrockAccounts.js';
 import { formatReadAt, summariseContext } from '../lib/usage.js';
 
 export interface AccountUsageRow {
@@ -38,6 +44,8 @@ export interface AccountUsageRow {
   email?: string;
   title: string;
   usage: HostAccount['usage'];
+  /** A Claude on Amazon Bedrock account: its spend against its cap is its usage. */
+  bedrock?: ClaudeBedrock;
 }
 
 /** Each shared subscription account once; hosts only supply its usage readings. */
@@ -71,6 +79,7 @@ export function accountRows(
         ...(account.email ? { email: account.email } : {}),
         title: account.label,
         usage,
+        ...('bedrock' in account && account.bedrock ? { bedrock: account.bedrock } : {}),
       });
     }
   }
@@ -172,13 +181,21 @@ export function UsagePopover({
         return (
           <section className="usage-pop-section" key={r.key} data-testid="usage-pop-account">
             <h4>{r.title}</h4>
-            {readAt ? <span className="set-sub usage-pop-read-at">{readAt}</span> : null}
-            <UsageBars
-              usage={r.usage}
-              showReadAt={false}
-              testId={`usage-pop-bars-${r.key}`}
-              testIdFor={(scope) => `usage-pop-${scope}-${r.key}`}
-            />
+            {r.bedrock ? (
+              <span className="set-sub" data-testid={`usage-pop-bedrock-${r.key}`}>
+                {bedrockSpendText(r.bedrock)} this month · estimated
+              </span>
+            ) : (
+              <>
+                {readAt ? <span className="set-sub usage-pop-read-at">{readAt}</span> : null}
+                <UsageBars
+                  usage={r.usage}
+                  showReadAt={false}
+                  testId={`usage-pop-bars-${r.key}`}
+                  testIdFor={(scope) => `usage-pop-${scope}-${r.key}`}
+                />
+              </>
+            )}
           </section>
         );
       })}

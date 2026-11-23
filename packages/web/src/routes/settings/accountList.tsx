@@ -27,17 +27,27 @@ export interface RankedItem {
   render: (handle: ReactNode, rank: number) => ReactNode;
 }
 
+/** A row out of the order: drawn after the ranked ones, with no handle or position. */
+export interface UnrankedItem {
+  id: string;
+  render: () => ReactNode;
+}
+
 /**
  * A list whose order is the accounts' priority. `onCommit` writes a new order
  * and resolves once the server has answered, whatever it said; the list then
- * shows the committed order.
+ * shows the committed order. `unranked` rows sit after it and take no part in
+ * a drag: an account out of the order has no position (spec/10 § Choosing an
+ * account).
  */
 export function RankedList({
   items,
+  unranked = [],
   testid,
   onCommit,
 }: {
   items: RankedItem[];
+  unranked?: UnrankedItem[];
   testid: string;
   onCommit: (next: string[]) => Promise<boolean>;
 }): JSX.Element {
@@ -133,17 +143,24 @@ export function RankedList({
           </div>
         );
       })}
+      {unranked.map((item) => (
+        <div key={item.id} className="set-ranked-item" data-testid={`${testid}-item-${item.id}`}>
+          {item.render()}
+        </div>
+      ))}
     </div>
   );
 }
 
 /**
- * One account row: handle, rank, body, and a ⋯ that opens the row's actions
- * in a small panel beside it. The panel floats over whatever is below rather
- * than pushing it down, so the list never jumps; it closes on a choice, a
- * click elsewhere, or Escape.
+ * One account row: its Auto checkbox where the provider has one, handle, rank,
+ * body, and a ⋯ that opens the row's actions in a small panel beside it. A row
+ * out of the order has no handle or rank (`rank` null). The panel floats over
+ * whatever is below rather than pushing it down, so the list never jumps; it
+ * closes on a choice, a click elsewhere, or Escape.
  */
 export function AccountRow({
+  auto,
   handle,
   rank,
   active,
@@ -153,8 +170,10 @@ export function AccountRow({
   menuTestid,
   testid,
 }: {
+  /** The row's Auto checkbox; absent for a provider whose accounts are all in the order. */
+  auto?: ReactNode;
   handle: ReactNode;
-  rank: number;
+  rank: number | null;
   active: boolean;
   children: ReactNode;
   menu: MenuItem[];
@@ -180,11 +199,24 @@ export function AccountRow({
     };
   }, [open]);
   return (
-    <div className={`set-acct${active ? ' active' : ''}`} data-testid={testid}>
-      {handle}
-      <span className="set-rank" aria-label={active ? `rank ${rank}, in use` : `rank ${rank}`}>
-        {rank}
-      </span>
+    <div
+      className={`set-acct${auto !== undefined ? ' with-auto' : ''}${active ? ' active' : ''}`}
+      data-testid={testid}
+    >
+      {auto}
+      {rank === null ? (
+        <>
+          <span />
+          <span />
+        </>
+      ) : (
+        <>
+          {handle}
+          <span className="set-rank" aria-label={active ? `rank ${rank}, in use` : `rank ${rank}`}>
+            {rank}
+          </span>
+        </>
+      )}
       <div className="set-acct-body">{children}</div>
       {menu.length > 0 ? (
         <div className="set-acct-more" ref={wrap}>

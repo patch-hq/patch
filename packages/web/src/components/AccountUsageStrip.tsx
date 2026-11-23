@@ -14,11 +14,12 @@
 // height however many accounts are connected.
 
 import { Fragment, useState, type JSX, type KeyboardEvent } from 'react';
-import { rateLimitWindowState, type ProviderId } from '@patch/wire';
+import { bedrockAtCap, rateLimitWindowState, type ProviderId } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { accountRows, type AccountUsageRow } from './UsagePopover.js';
 import { formatReset } from '../lib/usage.js';
+import { bedrockSpendText } from '../routes/settings/bedrockAccounts.js';
 
 /** How many accounts show at once; the rest are a page away. */
 export const USAGE_PAGE_SIZE = 4;
@@ -31,6 +32,8 @@ const METERS: { scope: 'session' | 'week'; label: string }[] = [
 export interface AccountUsageStripProps {
   /** The backend the new chat's model runs on; only its accounts can be picked. */
   providerId: ProviderId;
+  /** The host the chat will run on: a Bedrock account shows only for its own host. */
+  hostId?: string | null;
   /** The account the chat will start on — chosen, or the strategy's pick. */
   usedAccountId: string | null;
   /** Called with the account id when a usable card is clicked. */
@@ -39,6 +42,7 @@ export interface AccountUsageStripProps {
 
 /** An account is unusable while any of its windows is blocked. */
 function rowBlocked(row: AccountUsageRow): boolean {
+  if (row.bedrock) return bedrockAtCap(row.bedrock, Date.now());
   return (['session', 'week'] as const).some((scope) => {
     const win = row.usage?.[scope];
     return win !== undefined && rateLimitWindowState(scope, win) === 'blocked';
@@ -47,12 +51,15 @@ function rowBlocked(row: AccountUsageRow): boolean {
 
 export function AccountUsageStrip({
   providerId,
+  hostId = null,
   usedAccountId,
   onSelect,
 }: AccountUsageStripProps): JSX.Element | null {
   const hosts = usePresenceStore((s) => s.hosts);
   const shared = usePreferencesStore((s) => s.shared);
-  const rows = accountRows(hosts, shared);
+  const rows = accountRows(hosts, shared).filter(
+    (r) => r.bedrock === undefined || r.bedrock.hostId === hostId,
+  );
   const [page, setPage] = useState(0);
   if (rows.length === 0) return null;
   const pages = Math.ceil(rows.length / USAGE_PAGE_SIZE);
@@ -108,6 +115,7 @@ export function AccountUsageStrip({
 
 /** What sits beside the account name: its email, or the backend when that adds something. */
 export function usageCardSubtitle(row: AccountUsageRow): string | undefined {
+  if (row.bedrock) return 'Bedrock';
   if (row.email && row.email !== row.label) return row.email;
   return row.label === row.backend ? undefined : row.backend;
 }
@@ -153,7 +161,11 @@ function UsageCard({
           <span className="new-chat-usage-backend">{usageCardSubtitle(row)}</span>
         ) : null}
       </div>
-      {row.usage === undefined ? (
+      {row.bedrock ? (
+        <p className="new-chat-usage-empty" data-testid={`new-chat-usage-${row.key}-spend`}>
+          {bedrockSpendText(row.bedrock)} this month · estimated
+        </p>
+      ) : row.usage === undefined ? (
         <p className="new-chat-usage-empty">not read yet</p>
       ) : (
         <div className="new-chat-usage-meters">

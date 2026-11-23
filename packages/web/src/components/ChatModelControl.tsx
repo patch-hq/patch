@@ -66,7 +66,8 @@ export function AccountControl({
     (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim(),
   );
   const shared = usePreferencesStore((s) => s.shared?.secrets);
-  const accounts = lockableAccounts(shared, row.model);
+  // A Bedrock account runs only on its own host, so it is offered only there.
+  const accounts = lockableAccounts(shared, row.model, row.hostId);
   const choices = accounts.filter((a) => a.connected);
   // `undefined` is "no change pending"; null is a pending "by strategy".
   const [pending, setPending] = useState<string | null | undefined>(undefined);
@@ -130,12 +131,14 @@ export function AccountControl({
         {
           value: '',
           label: 'Switch automatically',
-          description:
-            row.account && settled === null
-              ? `Now on ${row.account.label}. Moves to another account when one runs out.`
-              : 'Moves to another account when one runs out.',
+          ...(row.account && settled === null
+            ? { description: `Current: ${row.account.label}` }
+            : {}),
         },
-        ...choices.map((a) => ({ value: a.id, label: `Always ${a.label}` })),
+        ...choices.map((a) => ({
+          value: a.id,
+          label: a.bedrock ? `Always ${a.label} (pay per use)` : `Always ${a.label}`,
+        })),
       ]}
     />
   );
