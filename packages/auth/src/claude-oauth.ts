@@ -42,6 +42,7 @@ import { homedir, platform } from 'node:os';
 import { join, dirname } from 'node:path';
 import { ClaudeOAuthMissingError, ClaudeOAuthMalformedError } from './errors.js';
 import { ORGANIZATION_HEADER, anthropicAuthHeaders } from './claude-usage.js';
+import { ClaudeBedrock } from '@patch/wire';
 
 /**
  * Which physical store the credential came from. Needed so a refresh writes the
@@ -313,6 +314,10 @@ export interface ClaudeStoredAccount {
   id: string;
   label: string;
   credential: PatchStoredCredential | null;
+  /** In the order (spec/10 § Choosing an account). Absent reads as on. */
+  auto?: boolean;
+  /** A Claude on Amazon Bedrock account: an AWS profile on this host, no credential. */
+  bedrock?: ClaudeBedrock;
 }
 
 /**
@@ -422,6 +427,20 @@ export function readPatchStore(opts: LoadClaudeOAuthOptions = {}): PatchStoreCon
       if (typeof e['label'] !== 'string' || e['label'].length === 0) {
         throw new ClaudeOAuthMalformedError(path, `accounts[${i}].label missing`);
       }
+      let bedrock: ClaudeBedrock | undefined;
+      if (e['bedrock'] !== undefined) {
+        const parsedBedrock = ClaudeBedrock.safeParse(e['bedrock']);
+        if (!parsedBedrock.success) {
+          throw new ClaudeOAuthMalformedError(
+            path,
+            `accounts[${i}].bedrock invalid: ${parsedBedrock.error.message}`,
+          );
+        }
+        bedrock = parsedBedrock.data;
+      }
+      if (e['auto'] !== undefined && typeof e['auto'] !== 'boolean') {
+        throw new ClaudeOAuthMalformedError(path, `accounts[${i}].auto is not a boolean`);
+      }
       return {
         id: e['id'],
         label: e['label'],
@@ -429,6 +448,8 @@ export function readPatchStore(opts: LoadClaudeOAuthOptions = {}): PatchStoreCon
           e['credential'] === null || e['credential'] === undefined
             ? null
             : parseStoredCredential(e['credential'], path),
+        ...(typeof e['auto'] === 'boolean' ? { auto: e['auto'] } : {}),
+        ...(bedrock !== undefined ? { bedrock } : {}),
       };
     });
     const activeAccountId =

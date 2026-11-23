@@ -8,6 +8,7 @@
 // all of them, so a retired or overloaded model is changed in one place.
 //
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import type { BedrockRun } from './sdkBackend.js';
 
 // This is a model failover, separate from account failover (accountFailover.ts):
 // the account gate picks the credential, this picks the model on that
@@ -57,13 +58,13 @@ export function runSmallJob<T>(
     logger?: { warn: (obj: object, msg: string) => void } | undefined;
   },
   label: string,
-  run: (accessToken: string, model: string) => Promise<T>,
+  run: (accessToken: string, model: string, bedrock?: BedrockRun) => Promise<T>,
 ): Promise<T | null> {
-  return opts.runOnAccountWithCredit(label, (accessToken) =>
+  return opts.runOnAccountWithCredit(label, (accessToken, bedrock) =>
     runWithSmallJobModels(
       opts.smallJobModels(),
       label,
-      (model) => run(accessToken, model),
+      (model) => run(accessToken, model, bedrock),
       opts.logger,
     ),
   );

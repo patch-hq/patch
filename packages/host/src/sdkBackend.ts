@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import {
   isAnthropicApiKey,
   taskNotificationSummary,
+  type BedrockRegionPrefix,
   type EffortLevel,
   type MessageCompaction,
   type RateLimitWindow,
@@ -186,8 +187,20 @@ export interface SdkRunOptions {
    */
   newSessionId?: string | undefined;
   abortController: AbortController;
-  /** Caller-provided OAuth access token, baked into env. */
+  /** Caller-provided OAuth access token, baked into env. `''` for a Bedrock account. */
   oauthAccessToken: string;
+  /**
+   * The turn runs on a Claude on Amazon Bedrock account (spec/10 § Backend
+   * credentials): Claude Code is pointed at Bedrock with this AWS profile and
+   * no Claude credential. Mutually exclusive with a token and a model endpoint.
+   */
+  bedrock?: BedrockRun | undefined;
+  /**
+   * Told what Claude Code says the run cost (`total_cost_usd` on its `result`),
+   * including a result that reports an error. How a Bedrock account's spend is
+   * counted (spec/10 § Spending caps).
+   */
+  onResultCost?: ((costUsd: number) => void) | undefined;
   /** Resolved credit source for this turn. */
   accountId?: string;
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
@@ -963,6 +976,9 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
         if (runOpts.abortController.signal.aborted) return;
         // Yield asynchronously so consumers see real microtask boundaries.
         await Promise.resolve();
+        // A scripted result carrying the SDK's `total_cost_usd` reports it as the real loops do.
+        const cost = resultCostUsd(ev.raw);
+        if (cost !== undefined) runOpts.onResultCost?.(cost);
         // Stamp the (stable) sessionId onto the result so the host captures
         // it and resumes into the SAME transcript next turn.
         const nativeId = entryIds.get(ev);
@@ -1046,6 +1062,60 @@ const IDLE_COMPACT_NEVER_TOKENS = 1_000_000_000;
  */
 export const ENDPOINT_NO_KEY = 'no-key';
 
+/** Where a Bedrock account runs: its AWS profile on this host (spec/10 § Backend credentials). */
+export interface BedrockRun {
+  /** The Patch account, so its spend is reported against it. */
+  accountId: string;
+  awsProfile: string;
+  awsRegion: string;
+  regionPrefix: BedrockRegionPrefix;
+}
+
+/**
+ * Credentials a Bedrock run must not inherit from the host's own environment:
+ * any of them would be used instead of the profile the account names.
+ */
+export const BEDROCK_STRIPPED_ENV = [
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+] as const;
+
+/** What Claude Code is told to run on Bedrock with this profile. */
+export function bedrockSdkEnv(run: BedrockRun): Record<string, string> {
+  return {
+    CLAUDE_CODE_USE_BEDROCK: '1',
+    AWS_PROFILE: run.awsProfile,
+    AWS_REGION: run.awsRegion,
+    // `auto` leaves the cross-region prefix to Claude Code, which derives it from the region.
+    ...(run.regionPrefix !== 'auto' ? { ANTHROPIC_BEDROCK_REGION_PREFIX: run.regionPrefix } : {}),
+    // A model the account cannot reach is an error, not a quiet move to another model.
+    CLAUDE_CODE_DISABLE_MODEL_ACCESS_FALLBACK: '1',
+  };
+}
+
+/** The SDK options for a resolved Claude credential: a token, or a Bedrock profile. */
+export function sdkCredential(auth: {
+  accessToken: string;
+  bedrock?: BedrockRun | undefined;
+}): Pick<SdkRunOptions, 'oauthAccessToken' | 'bedrock'> {
+  return auth.bedrock !== undefined
+    ? { oauthAccessToken: '', bedrock: auth.bedrock }
+    : { oauthAccessToken: auth.accessToken };
+}
+
+/** `total_cost_usd` on a Claude Code `result` message, when it carries one. */
+export function resultCostUsd(msg: unknown): number | undefined {
+  if (typeof msg !== 'object' || msg === null) return undefined;
+  const m = msg as Record<string, unknown>;
+  if (m['type'] !== 'result') return undefined;
+  const cost = m['total_cost_usd'];
+  return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : undefined;
+}
+
 /**
  * SDK env (OAuth, never an API key per spec/10) + the stdio MCP servers this
  * chat gets: `patch` (this host's own tools) always and first, then
@@ -1070,7 +1140,17 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   // environment holds never reaches the SDK (spec/10 § Backend credentials).
   delete env['ANTHROPIC_API_KEY'];
   delete env['CLAUDE_CODE_OAUTH_TOKEN'];
-  if (opts.modelEndpoint) {
+  if (opts.bedrock) {
+    if (opts.modelEndpoint || opts.oauthAccessToken !== '') {
+      throw new Error(
+        'buildSdkEnv: a Bedrock run carries no Claude credential and no model endpoint',
+      );
+    }
+    for (const name of BEDROCK_STRIPPED_ENV) delete env[name];
+    // `auto` means Claude Code derives the prefix: not one the host happens to have set.
+    delete env['ANTHROPIC_BEDROCK_REGION_PREFIX'];
+    Object.assign(env, bedrockSdkEnv(opts.bedrock));
+  } else if (opts.modelEndpoint) {
     // A model endpoint: the endpoint's key, sent as a bearer token, and no
     // Claude credential at all — nor any token of the host's own.
     env['ANTHROPIC_BASE_URL'] = opts.modelEndpoint.baseUrl;
@@ -2076,6 +2156,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       const envs = translateSdkMessage(msg, toolNames);
       skippedResult = skippedResult ?? handledResultToReplay(envs, plan.skip);
       if (plan.skip === -1) continue;
+      // Counted before an error result throws: a failed run still cost what it cost.
+      const cost = resultCostUsd(msg);
+      if (cost !== undefined) opts.onResultCost?.(cost);
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
       if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
@@ -2421,6 +2504,8 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
       const msg: unknown = next.value;
       lastStopReason = noteStopReason(msg, lastStopReason);
       const requestedMode = opts.permissionMode ?? 'auto';
+      const cost = resultCostUsd(msg);
+      if (cost !== undefined) opts.onResultCost?.(cost);
       limitEvents.note(msg);
       const mismatch = permissionModeMismatch(msg, requestedMode);
       limitEvents.assertNotAnError(msg);

@@ -11,7 +11,7 @@
 // reply — THROWS, and the host stamps the failure itself, so the surface marks
 // the run as unsummarised instead of quietly showing something else.
 
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
@@ -174,7 +174,7 @@ export function makeToolRunSummarizer(
       const summary = await runSmallJob(
         opts,
         `tool run summary ${input.chatId}`,
-        async (accessToken, model) => {
+        async (accessToken, model, bedrock) => {
           const abortController = new AbortController();
           const timer = setTimeout(() => abortController.abort(), TOOL_RUN_TIMEOUT_MS);
           try {
@@ -186,7 +186,7 @@ export function makeToolRunSummarizer(
               cwd: input.folder,
               resumeSessionId: undefined,
               abortController,
-              oauthAccessToken: accessToken,
+              ...sdkCredential({ accessToken, bedrock }),
               model,
               permissionMode: 'bypassPermissions',
             })) {

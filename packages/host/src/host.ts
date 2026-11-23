@@ -16,6 +16,7 @@ import type { ElevenLabsTtsModel } from './audio/elevenlabs.js';
 import { platform, arch } from 'node:os';
 import { CLAUDE_BACKEND_ID } from '@patch/wire';
 import type {
+  AwsProfileInfo,
   HostInfoEvent,
   HostBackend,
   HostComponent,
@@ -134,6 +135,8 @@ export interface HostDescriptionInput {
   harnessClaudeMdEnabled: boolean;
   /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
   lastDisconnect?: LinkDrop | undefined;
+  /** The AWS profiles this host has, names and regions only (spec/10 § Backend credentials). */
+  awsProfiles?: AwsProfileInfo[] | undefined;
 }
 
 /** Assemble this host's `host.host` self-description. */
@@ -210,6 +213,8 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
     ...(input.lastDisconnect !== undefined ? { lastDisconnect: input.lastDisconnect } : {}),
+    // Present, even empty, says this host runs Claude on Amazon Bedrock accounts.
+    ...(input.awsProfiles !== undefined ? { awsProfiles: input.awsProfiles } : {}),
   };
 }
 

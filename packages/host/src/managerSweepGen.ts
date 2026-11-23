@@ -10,7 +10,7 @@
 // reply — resolves to null, and the sweep records the run as a failure
 // rather than guessing at actions.
 
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import type { Logger } from 'pino';
 
@@ -113,7 +113,7 @@ export function makeSweepDecider(
   return async function generateSweepDecisions(
     input: GenerateSweepDecisionsInput,
   ): Promise<SweepDecisionResult | null> {
-    return await opts.runOnAccountWithCredit('manager sweep', async (accessToken) => {
+    return await opts.runOnAccountWithCredit('manager sweep', async (accessToken, bedrock) => {
       const abortController = new AbortController();
       const timer = setTimeout(() => abortController.abort(), SWEEP_TIMEOUT_MS);
       const fullPrompt = `${input.prompt}\n\n${input.digest}`;
@@ -128,7 +128,7 @@ export function makeSweepDecider(
           cwd: process.cwd(),
           resumeSessionId: undefined,
           abortController,
-          oauthAccessToken: accessToken,
+          ...sdkCredential({ accessToken, bedrock }),
           model: input.model,
           permissionMode: 'bypassPermissions',
         })) {

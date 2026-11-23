@@ -8,7 +8,7 @@
 // timeout, empty reply — resolves to null, and the host leaves the chat
 // unnamed (client shows folder / "New chat"), logged.
 
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type BedrockRun, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { OAuthCheckResult } from './chatRunner.js';
@@ -105,6 +105,7 @@ function buildPrompt(input: GenerateTitleInput): string {
 async function runTitleQuery(
   sdkBackend: SdkBackend,
   accessToken: string,
+  bedrock: BedrockRun | undefined,
   model: string,
   input: GenerateTitleInput,
 ): Promise<string | null> {
@@ -122,7 +123,7 @@ async function runTitleQuery(
       cwd: input.folder,
       resumeSessionId: undefined,
       abortController,
-      oauthAccessToken: accessToken,
+      ...sdkCredential({ accessToken, bedrock }),
       model,
       permissionMode: 'bypassPermissions',
     })) {
@@ -184,10 +185,10 @@ export function makeTitleGenerator(
         );
         return null;
       }
-      return await runTitleQuery(own.dep.sdkBackend, auth.accessToken, model, input);
+      return await runTitleQuery(own.dep.sdkBackend, auth.accessToken, auth.bedrock, model, input);
     }
-    return await runSmallJob(opts, `title gen ${input.chatId}`, (accessToken, model) =>
-      runTitleQuery(opts.sdkBackend, accessToken, model, input),
+    return await runSmallJob(opts, `title gen ${input.chatId}`, (accessToken, model, bedrock) =>
+      runTitleQuery(opts.sdkBackend, accessToken, bedrock, model, input),
     );
   };
 }
