@@ -60,6 +60,14 @@ import {
   resolveAcpAgents,
   type AcpAgentConfig,
   type SharedAcpAccount,
+  type AwsProfileInfo,
+  type BedrockRegionPrefix,
+  type ClaudeBedrock,
+  type PatchAwsProfileCheckResponseEvent,
+  BACKGROUND_ACCOUNT_AUTO,
+  bedrockAtCap,
+  bedrockCapResetsAt,
+  bedrockMonth,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { AccountStateTracker } from './account-states.js';
@@ -201,7 +209,33 @@ export interface SharedSettingsOptions {
   logger?: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** The clock account states are derived against (tests). */
   now?: () => number;
+  /** How long a host has to answer an AWS profile check (tests shorten it). */
+  profileCheckTimeoutMs?: number;
 }
+
+/** A new Claude on Amazon Bedrock account, as Settings sends it (spec/10 § Signing in). */
+export interface BedrockAccountInput {
+  label: string;
+  hostId: string;
+  awsProfile: string;
+  awsRegion: string;
+  regionPrefix: BedrockRegionPrefix;
+  monthlyCapUsd: number;
+  auto?: boolean | undefined;
+}
+
+/** A change to a Claude account's row: `auto` on any, the rest on a Bedrock account only. */
+export interface ClaudeAccountEdit {
+  auto?: boolean | undefined;
+  hostId?: string | undefined;
+  awsProfile?: string | undefined;
+  awsRegion?: string | undefined;
+  regionPrefix?: BedrockRegionPrefix | undefined;
+  monthlyCapUsd?: number | undefined;
+}
+
+/** How a Bedrock account a host reports signed out reads (spec/10 § Settings). */
+export const AWS_SIGNED_OUT_MESSAGE = 'AWS sign-in expired';
 
 interface PendingAdopt {
   hostId: string;
@@ -236,6 +270,25 @@ export class SharedSettingsService {
   private sentStates = new Map<string, string>();
   /** Why the stored secrets cannot be used, when they cannot (see header). */
   private problem: string | undefined;
+  /**
+   * Each host's AWS profiles from its latest `host.host`; a host is here only
+   * when it reported them, which is what says it runs Bedrock accounts.
+   */
+  private readonly awsProfiles = new Map<string, AwsProfileInfo[]>();
+  /**
+   * Bedrock accounts whose host last said their profile is not signed in. In
+   * memory: the host restates it on connect and every check after.
+   */
+  private readonly bedrockSignedOut = new Set<string>();
+  private readonly profileChecks = new Map<
+    string,
+    {
+      hostId: string;
+      resolve: (e: PatchAwsProfileCheckResponseEvent) => void;
+      reject: (err: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
 
   constructor(private readonly opts: SharedSettingsOptions) {
     this.settingsPath = join(opts.dataDir, 'settings.json');
@@ -441,13 +494,16 @@ export class SharedSettingsService {
       claude: this.secrets.claude.map((a) => ({
         id: a.id,
         label: a.label,
-        connected: a.credential !== null,
+        // A Bedrock account holds no credential; it is connected while its profile is signed in.
+        connected: a.bedrock ? !this.bedrockSignedOut.has(a.id) : a.credential !== null,
         ...(a.credential?.email ? { email: a.credential.email } : {}),
         ...(a.credential && isAnthropicApiKey(a.credential.accessToken)
           ? { kind: 'apiKey' as const }
           : {}),
         ...(a.credential?.organizationId ? { organizationId: a.credential.organizationId } : {}),
         state: this.stateOf(a),
+        ...(a.auto !== undefined ? { auto: a.auto } : {}),
+        ...(a.bedrock ? { bedrock: { ...a.bedrock } } : {}),
       })),
       codex: this.secrets.codex.map((a) => ({
         id: a.id,
@@ -498,6 +554,7 @@ export class SharedSettingsService {
   }
 
   private stateOf(a: SharedClaudeAccount | SharedCodexAccount): AccountState {
+    if ('bedrock' in a && a.bedrock) return this.bedrockStateOf(a.id, a.bedrock);
     const hasCredential = 'credential' in a ? a.credential !== null : a.authJson !== null;
     const apiKey =
       'credential' in a
@@ -511,7 +568,23 @@ export class SharedSettingsService {
     });
   }
 
-  /** An ACP account is an API key: it has no subscription windows to read. */
+  /**
+   * A Bedrock account's state (spec/10 § Spending caps): signed out when its
+   * host says the profile is, limited until the first of next month (UTC) once
+   * the month's spend reaches the cap, otherwise what its host reported.
+   */
+  private bedrockStateOf(id: string, bedrock: ClaudeBedrock): AccountState {
+    const reported = this.accountStates.stateFor(id, {
+      hasCredential: !this.bedrockSignedOut.has(id),
+      // Like an API key it has no subscription windows: no reading is about it.
+      apiKey: true,
+    });
+    if (reported.state === 'signed_out' || reported.state === 'out') return reported;
+    const now = (this.opts.now ?? Date.now)();
+    if (bedrockAtCap(bedrock, now)) return { state: 'limited', until: bedrockCapResetsAt(now) };
+    return reported;
+  }
+
   /**
    * An ACP account's state, from what its agent said on each host (decision
    * 24): a refused key or missing sign-in is signed out, a limit is limited.
@@ -702,12 +775,21 @@ export class SharedSettingsService {
 
   private snapshotFor(hostId: string): WireEvent {
     const { webBotAuthKey: _serverOnlyIdentity, ...sharedSecrets } = this.secrets;
+    // A Bedrock account runs on its own host only, and only on a host that
+    // says it can run one; no other host ever sees it (spec/10 § Backend credentials).
+    const capable = this.awsProfiles.has(hostId);
+    const forHost = {
+      ...sharedSecrets,
+      claude: sharedSecrets.claude.filter(
+        (a) => !a.bedrock || (capable && a.bedrock.hostId === hostId),
+      ),
+    };
     return {
       type: 'settings.snapshot',
       hostId,
       version: this.version,
       settings: this.current(),
-      secrets: hostSecrets(sharedSecrets),
+      secrets: hostSecrets(forHost),
     };
   }
 
@@ -763,6 +845,16 @@ export class SharedSettingsService {
       this.pending.delete(requestId);
       p.reject(new Error(`${hostId} went offline`));
     }
+    for (const [requestId, p] of this.profileChecks) {
+      if (p.hostId !== hostId) continue;
+      clearTimeout(p.timer);
+      this.profileChecks.delete(requestId);
+      p.reject(new SettingsError(409, 'host_offline', `${this.hostLabel(hostId)} went offline`));
+    }
+  }
+
+  private hostLabel(hostId: string): string {
+    return this.opts.hostName?.(hostId) ?? hostId;
   }
 
   /** Fold one host's pre-sharing settings and secrets in (spec/01 § Settings). */
@@ -880,7 +972,22 @@ export class SharedSettingsService {
         return;
       }
       case 'host.account':
+        this.observeBedrockSignIn(event);
         this.accountStates.observe(event);
+        return;
+      case 'host.host':
+        this.observeAwsProfiles(event.hostId, event.awsProfiles);
+        return;
+      case 'patch.aws_profile_check.response': {
+        const p = this.profileChecks.get(event.requestId);
+        if (!p || p.hostId !== event.hostId) return;
+        clearTimeout(p.timer);
+        this.profileChecks.delete(event.requestId);
+        p.resolve(event);
+        return;
+      }
+      case 'host.account_spend':
+        this.addBedrockSpend(event);
         return;
       case 'settings.secret_update':
         this.secretUpdate(event.hostId, event.update);
@@ -894,6 +1001,259 @@ export class SharedSettingsService {
       default:
         return;
     }
+  }
+
+  /**
+   * A host's AWS profiles. Whether it reports them at all is whether it can
+   * run a Bedrock account, so a host that gains or loses that is sent a fresh
+   * snapshot with or without its Bedrock accounts.
+   */
+  private observeAwsProfiles(hostId: string, profiles: AwsProfileInfo[] | undefined): void {
+    const before = this.awsProfiles.has(hostId);
+    if (profiles) this.awsProfiles.set(hostId, profiles);
+    else this.awsProfiles.delete(hostId);
+    if (before === (profiles !== undefined)) return;
+    if (!this.secrets.claude.some((a) => a.bedrock?.hostId === hostId)) return;
+    if (
+      this.syncing &&
+      this.importedHosts.has(hostId) &&
+      this.opts.onlineHostIds().includes(hostId)
+    ) {
+      this.opts.sendToHost(hostId, this.snapshotFor(hostId));
+    }
+  }
+
+  /** A Bedrock account's host says whether its profile is signed in (`connected`). Only its own host is heard. */
+  private observeBedrockSignIn(event: Extract<WireEvent, { type: 'host.account' }>): void {
+    for (const summary of event.accounts ?? []) {
+      const account = this.secrets.claude.find((a) => a.id === summary.id);
+      if (!account?.bedrock || account.bedrock.hostId !== event.hostId) continue;
+      if (summary.connected) this.bedrockSignedOut.delete(account.id);
+      else this.bedrockSignedOut.add(account.id);
+    }
+  }
+
+  /**
+   * What a turn or one-shot call on a Bedrock account cost (spec/10 § Spending
+   * caps): added to the month it ran in, a new month starting from nothing.
+   * Persisted and pushed, so a restart never forgets it and the host sees the cap.
+   */
+  private addBedrockSpend(event: Extract<WireEvent, { type: 'host.account_spend' }>): void {
+    const account = this.secrets.claude.find((a) => a.id === event.accountId);
+    if (!account?.bedrock) {
+      this.opts.logger?.warn(
+        { hostId: event.hostId, accountId: event.accountId },
+        'shared settings: spend reported for an account that is not a Bedrock account — ignored',
+      );
+      return;
+    }
+    if (account.bedrock.hostId !== event.hostId) {
+      this.opts.logger?.warn(
+        { hostId: event.hostId, accountId: event.accountId, owner: account.bedrock.hostId },
+        'shared settings: spend reported by a host the Bedrock account is not on — ignored',
+      );
+      return;
+    }
+    if (this.problem !== undefined) {
+      this.opts.logger?.error(
+        { accountId: event.accountId, costUsd: event.costUsd },
+        'shared settings: Bedrock spend not recorded — the secrets cannot be written',
+      );
+      return;
+    }
+    const month = bedrockMonth(event.at);
+    const b = account.bedrock;
+    if (month < b.spentMonth) {
+      this.opts.logger?.warn(
+        { accountId: event.accountId, month, current: b.spentMonth, costUsd: event.costUsd },
+        'shared settings: Bedrock spend for a month already closed — not counted',
+      );
+      return;
+    }
+    if (event.costUsd === 0 && month === b.spentMonth) return;
+    account.bedrock = {
+      ...b,
+      spentUsd: (month === b.spentMonth ? b.spentUsd : 0) + event.costUsd,
+      spentMonth: month,
+    };
+    this.commit({ secrets: true });
+  }
+
+  /**
+   * Ask a host whether an AWS profile exists there and is signed in. Nothing
+   * can be checked on a host that is offline or cannot run Bedrock accounts.
+   */
+  private async checkAwsProfile(
+    hostId: string,
+    awsProfile: string,
+  ): Promise<PatchAwsProfileCheckResponseEvent> {
+    const name = this.hostLabel(hostId);
+    if (!this.opts.onlineHostIds().includes(hostId)) {
+      throw new SettingsError(409, 'host_offline', `${name} is offline`);
+    }
+    if (!this.awsProfiles.has(hostId)) {
+      throw new SettingsError(
+        409,
+        'bedrock_unsupported',
+        `${name} cannot run Amazon Bedrock accounts; update Patch on it first`,
+      );
+    }
+    const requestId = randomUUID();
+    const answer = await new Promise<PatchAwsProfileCheckResponseEvent>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.profileChecks.delete(requestId);
+        reject(new SettingsError(504, 'daemon_timeout', `${name} did not answer`));
+      }, this.opts.profileCheckTimeoutMs ?? 20_000);
+      this.profileChecks.set(requestId, { hostId, resolve, reject, timer });
+      this.opts.sendToHost(hostId, {
+        type: 'patch.aws_profile_check.request',
+        requestId,
+        hostId,
+        awsProfile,
+      });
+    });
+    if (!answer.exists) {
+      throw new SettingsError(
+        400,
+        'profile_not_found',
+        `${name} has no AWS profile ${awsProfile}${answer.error ? `: ${answer.error}` : ''}`,
+      );
+    }
+    return answer;
+  }
+
+  /** The row already using this host's profile, other than `exceptId`. */
+  private bedrockClash(hostId: string, awsProfile: string, exceptId?: string) {
+    return this.secrets.claude.find(
+      (a) =>
+        a.id !== exceptId && a.bedrock?.hostId === hostId && a.bedrock.awsProfile === awsProfile,
+    );
+  }
+
+  private refuseBedrockClash(hostId: string, awsProfile: string, exceptId?: string): void {
+    const clash = this.bedrockClash(hostId, awsProfile, exceptId);
+    if (clash) {
+      throw new SettingsError(
+        409,
+        'duplicate_account',
+        `${this.hostLabel(hostId)}'s AWS profile ${awsProfile} is already ${clash.label}`,
+      );
+    }
+  }
+
+  /** Signed in, signed out, or not known (no AWS CLI on the host): only `false` marks it. */
+  private recordProfileCheck(accountId: string, answer: PatchAwsProfileCheckResponseEvent): void {
+    if (answer.signedIn === false) this.bedrockSignedOut.add(accountId);
+    else this.bedrockSignedOut.delete(accountId);
+  }
+
+  /**
+   * Add a Claude on Amazon Bedrock account (spec/10 § Signing in): its host
+   * checks the profile first. Missing → refused; signed out → stored signed
+   * out; host offline → nothing stored. Off the order unless sent `auto`.
+   */
+  async addBedrock(input: BedrockAccountInput): Promise<SharedClaudeAccount> {
+    this.requireSecrets();
+    const label = input.label.trim();
+    if (!label) throw new SettingsError(400, 'invalid_input', 'A name cannot be empty');
+    this.refuseBedrockClash(input.hostId, input.awsProfile);
+    const answer = await this.checkAwsProfile(input.hostId, input.awsProfile);
+    // Checked again: the same profile may have been added while the host answered.
+    this.refuseBedrockClash(input.hostId, input.awsProfile);
+    const now = (this.opts.now ?? Date.now)();
+    const account: SharedClaudeAccount = {
+      id: randomUUID(),
+      label,
+      credential: null,
+      auto: input.auto ?? false,
+      bedrock: {
+        hostId: input.hostId,
+        awsProfile: input.awsProfile,
+        awsRegion: input.awsRegion,
+        regionPrefix: input.regionPrefix,
+        monthlyCapUsd: input.monthlyCapUsd,
+        spentUsd: 0,
+        spentMonth: bedrockMonth(now),
+      },
+    };
+    this.recordProfileCheck(account.id, answer);
+    this.secrets.claude.push(account);
+    this.placeByAuto(account);
+    this.opts.logger?.info(
+      { accountId: account.id, hostId: input.hostId, signedIn: answer.signedIn },
+      'shared settings: Bedrock account added',
+    );
+    this.commit({ secrets: true });
+    return account;
+  }
+
+  /**
+   * Change a Claude account's row: `auto` on any; host, profile, region,
+   * where requests run and the cap on a Bedrock account. A new host or
+   * profile is checked first, as an add is.
+   */
+  async editClaude(accountId: string, edit: ClaudeAccountEdit): Promise<void> {
+    this.requireSecrets();
+    const found = this.secrets.claude.find((a) => a.id === accountId);
+    if (!found) throw new SettingsError(404, 'account_not_found', `No Claude account ${accountId}`);
+    const { auto, ...bedrockEdit } = edit;
+    const touchesBedrock = Object.values(bedrockEdit).some((v) => v !== undefined);
+    if (touchesBedrock && !found.bedrock) {
+      throw new SettingsError(
+        400,
+        'invalid_input',
+        `${found.label} is not an Amazon Bedrock account`,
+      );
+    }
+    let answer: PatchAwsProfileCheckResponseEvent | undefined;
+    if (found.bedrock) {
+      const hostId = edit.hostId ?? found.bedrock.hostId;
+      const awsProfile = edit.awsProfile ?? found.bedrock.awsProfile;
+      if (hostId !== found.bedrock.hostId || awsProfile !== found.bedrock.awsProfile) {
+        this.refuseBedrockClash(hostId, awsProfile, accountId);
+        answer = await this.checkAwsProfile(hostId, awsProfile);
+        this.refuseBedrockClash(hostId, awsProfile, accountId);
+      }
+    }
+    // Looked up again: the account may have gone while the host answered.
+    const account = this.secrets.claude.find((a) => a.id === accountId);
+    if (!account)
+      throw new SettingsError(404, 'account_not_found', `No Claude account ${accountId}`);
+    if (account.bedrock) {
+      account.bedrock = {
+        ...account.bedrock,
+        ...(edit.hostId !== undefined ? { hostId: edit.hostId } : {}),
+        ...(edit.awsProfile !== undefined ? { awsProfile: edit.awsProfile } : {}),
+        ...(edit.awsRegion !== undefined ? { awsRegion: edit.awsRegion } : {}),
+        ...(edit.regionPrefix !== undefined ? { regionPrefix: edit.regionPrefix } : {}),
+        ...(edit.monthlyCapUsd !== undefined ? { monthlyCapUsd: edit.monthlyCapUsd } : {}),
+      };
+      if (answer) {
+        // A new profile: what was said about the old one no longer holds.
+        this.recordProfileCheck(account.id, answer);
+        this.accountStates.credentialReplaced(account.id);
+      }
+    }
+    if (auto !== undefined && auto !== (account.auto ?? true)) {
+      account.auto = auto;
+      this.placeByAuto(account);
+    }
+    this.commit({ secrets: true });
+  }
+
+  /**
+   * Keep accounts in the order first and those out of it after (spec/10 §
+   * Choosing an account): one ticked goes last in the order, one unticked
+   * goes after every account in it.
+   */
+  private placeByAuto(account: SharedClaudeAccount): void {
+    const rest = this.secrets.claude.filter((a) => a !== account);
+    const inOrder = rest.filter((a) => a.auto !== false);
+    const outOfOrder = rest.filter((a) => a.auto === false);
+    this.secrets.claude =
+      account.auto === false
+        ? [...inOrder, ...outOfOrder, account]
+        : [...inOrder, account, ...outOfOrder];
   }
 
   private secretUpdate(
@@ -997,6 +1357,14 @@ export class SharedSettingsService {
         const problem = invalidOwnSettingValue(setting, value);
         if (problem !== null) throw new SettingsError(400, 'invalid_input', problem);
       }
+    }
+    const background = parsed.data.backgroundAccount;
+    if (
+      background !== undefined &&
+      background !== BACKGROUND_ACCOUNT_AUTO &&
+      !this.secrets.claude.some((a) => a.id === background)
+    ) {
+      throw new SettingsError(400, 'invalid_input', `No Claude account ${background}`);
     }
     // An endpoint taken out takes its key with it.
     const keptKeys = parsed.data.modelEndpoints
@@ -1114,6 +1482,13 @@ export class SharedSettingsService {
     const account = this.secrets.claude.find((a) => a.id === accountId);
     if (!account)
       throw new SettingsError(404, 'account_not_found', `No Claude account ${accountId}`);
+    if (account.bedrock) {
+      throw new SettingsError(
+        400,
+        'invalid_input',
+        `${account.label} is an Amazon Bedrock account; it takes no token`,
+      );
+    }
     const { organizationId } = await this.validatedClaude(token.trim());
     const clash = this.claudeClash(organizationId, accountId);
     if (clash) {
@@ -1233,6 +1608,13 @@ export class SharedSettingsService {
   disconnect(backendId: BackendId, accountId: string): void {
     this.requireSecrets();
     const account = this.find(backendId, accountId);
+    if ('bedrock' in account && account.bedrock) {
+      throw new SettingsError(
+        400,
+        'invalid_input',
+        `${account.label} signs in with AWS on its host; Patch holds no sign-in to forget`,
+      );
+    }
     if ('credential' in account) account.credential = null;
     else account.authJson = null;
     this.accountStates.credentialReplaced(accountId);
@@ -1252,7 +1634,12 @@ export class SharedSettingsService {
     const key = accountsKeyForBackend(backendId);
     this.secrets[key] = this.secrets[key].filter((a) => a.id !== accountId) as never;
     this.renewalErrors.delete(accountId);
+    this.bedrockSignedOut.delete(accountId);
     this.accountStates.forget(accountId);
+    // Titles and status named this account: they choose for themselves again.
+    if (this.settings.backgroundAccount === accountId) {
+      this.settings = { ...this.settings, backgroundAccount: BACKGROUND_ACCOUNT_AUTO };
+    }
     this.commit({ secrets: true });
   }
 

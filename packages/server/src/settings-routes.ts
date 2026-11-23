@@ -2,8 +2,10 @@
 //
 // Every write is committed by the server and answered with the committed
 // result; none asks a host, so none waits for one or fails because one is
-// offline. Hosts learn of it from the snapshot that follows. The one exception
-// is an ACP agent's own sign-in, which runs on the host it is for.
+// offline. Hosts learn of it from the snapshot that follows. The exceptions
+// are an ACP agent's own sign-in, which runs on the host it is for, and adding
+// or re-pointing an Amazon Bedrock account, whose host checks the AWS profile
+// first (spec/10 § Signing in).
 
 import type { AcpLogins, AcpLoginView } from './acp-logins.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -12,6 +14,7 @@ import { z } from 'zod';
 import {
   AccountStrategy,
   BACKEND_IDS,
+  BedrockRegionPrefix,
   ProviderKeyId,
   providerForBackendId,
   resolveAcpAgents,
@@ -65,15 +68,38 @@ export const CHATGPT_SIGNIN_TTL_MS = 15 * 60_000;
 const CLAUDE_SIGNIN_MAX = 20;
 
 const Backend = z.enum(BACKEND_IDS);
+/** A Claude on Amazon Bedrock account (spec/10 § Signing in): no secret, a host's AWS profile. */
+const BedrockFields = {
+  hostId: z.string().min(1),
+  awsProfile: z.string().trim().min(1),
+  awsRegion: z.string().trim().min(1),
+  regionPrefix: BedrockRegionPrefix,
+  monthlyCapUsd: z.number().positive().finite(),
+};
 const AddBody = z
   .object({
     token: z.string().min(1).optional(),
     apiKey: z.string().min(1).optional(),
     label: z.string().min(1).optional(),
+    bedrock: z
+      .object({ label: z.string().trim().min(1), ...BedrockFields, auto: z.boolean().optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 const PatchBody = z
-  .object({ label: z.string().min(1).optional(), token: z.string().min(1).optional() })
+  .object({
+    label: z.string().min(1).optional(),
+    token: z.string().min(1).optional(),
+    /** In the order or not (spec/10 § Choosing an account); any Claude account. */
+    auto: z.boolean().optional(),
+    // A Bedrock account's own fields; a new host or profile is checked again.
+    hostId: BedrockFields.hostId.optional(),
+    awsProfile: BedrockFields.awsProfile.optional(),
+    awsRegion: BedrockFields.awsRegion.optional(),
+    regionPrefix: BedrockFields.regionPrefix.optional(),
+    monthlyCapUsd: BedrockFields.monthlyCapUsd.optional(),
+  })
   .strict();
 const OrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).strict();
 const StrategyBody = z.object({ strategy: AccountStrategy }).strict();
@@ -169,13 +195,25 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/accounts/:backendId',
     handle(AddBody, async (req, body) => {
       const backend = backendOf(req);
-      if (backend === 'claude-code') {
+      if (backend === 'claude-code' && body.bedrock) {
+        if (body.apiKey ?? body.token ?? body.label) {
+          throw new SettingsError(
+            400,
+            'invalid_input',
+            'A Bedrock account takes no token, API key or separate label',
+          );
+        }
+        await shared.addBedrock(body.bedrock);
+      } else if (backend === 'claude-code') {
         const credential = body.apiKey ?? body.token;
         if (!credential) {
           throw new SettingsError(400, 'invalid_input', 'A token or an API key is required');
         }
         await shared.addClaude(credential, body.label);
       } else {
+        if (body.bedrock) {
+          throw new SettingsError(400, 'invalid_input', 'Amazon Bedrock runs Claude accounts only');
+        }
         if (!body.apiKey) {
           throw new SettingsError(
             400,
@@ -486,6 +524,25 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/accounts/:backendId/:accountId',
     handle(PatchBody, async (req, body) => {
       const backend = backendOf(req);
+      const edit = {
+        auto: body.auto,
+        hostId: body.hostId,
+        awsProfile: body.awsProfile,
+        awsRegion: body.awsRegion,
+        regionPrefix: body.regionPrefix,
+        monthlyCapUsd: body.monthlyCapUsd,
+      };
+      const editing = Object.values(edit).some((v) => v !== undefined);
+      if (editing) {
+        if (backend !== 'claude-code') {
+          throw new SettingsError(
+            400,
+            'invalid_input',
+            'Only a Claude account has auto and Amazon Bedrock settings',
+          );
+        }
+        await shared.editClaude(accountOf(req), edit);
+      }
       if (body.token !== undefined) {
         if (backend !== 'claude-code') {
           throw new SettingsError(
