@@ -1123,6 +1123,103 @@ export function bedrockSdkEnv(run: BedrockRun): Record<string, string> {
   };
 }
 
+/**
+ * Variables a Bedrock run needs absent. Patch strips them from the process
+ * environment, but a Claude Code settings file's `env` block would put them
+ * back, and an empty value is not reliably "unset" to Claude Code and the AWS
+ * SDK, so a settings file that sets one refuses the run (`sdkFlagSettings`).
+ */
+const BEDROCK_ABSENT_ENV = [
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+] as const;
+
+/**
+ * Where Claude Code is told to run, as values for the settings flag layer.
+ * Claude Code applies each settings file's `env` over the process environment,
+ * so a `CLAUDE_CODE_USE_BEDROCK` or `AWS_PROFILE` in `~/.claude/settings.json`
+ * or a project's settings would beat what `buildSdkEnv` set. The flag layer
+ * outranks every settings file, so Patch's choice is restated there, with an
+ * explicit off for every switch a run does not use.
+ */
+export function cloudSettingsEnv(opts: Pick<SdkRunOptions, 'bedrock'>): Record<string, string> {
+  const off = {
+    CLAUDE_CODE_USE_BEDROCK: '0',
+    CLAUDE_CODE_USE_VERTEX: '0',
+    CLAUDE_CODE_USE_MANTLE: '0',
+    CLAUDE_CODE_SKIP_BEDROCK_AUTH: '0',
+  };
+  return opts.bedrock === undefined ? off : { ...off, ...bedrockSdkEnv(opts.bedrock) };
+}
+
+/** The settings files Claude Code loads for this run, with their `env` blocks. */
+function loadedSettingsEnv(
+  opts: Pick<SdkRunOptions, 'cwd' | 'configDir' | 'settingSources' | 'inferenceProfile'>,
+): { path: string; env: Record<string, unknown> }[] {
+  // The bare profiles load no settings files (`inferenceProfileOptions`).
+  const sources: readonly SettingSource[] =
+    opts.inferenceProfile !== undefined
+      ? []
+      : (opts.settingSources ?? ['user', 'project', 'local']);
+  const configDir =
+    opts.configDir ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude');
+  const paths: string[] = [];
+  if (sources.includes('user')) paths.push(join(configDir, 'settings.json'));
+  if (sources.includes('project')) paths.push(join(opts.cwd, '.claude', 'settings.json'));
+  if (sources.includes('local')) paths.push(join(opts.cwd, '.claude', 'settings.local.json'));
+  const found: { path: string; env: Record<string, unknown> }[] = [];
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+      // Claude Code does not load a file it cannot parse either.
+      continue;
+    }
+    const env = (parsed as { env?: unknown } | null)?.env;
+    if (typeof env === 'object' && env !== null) {
+      found.push({ path, env: env as Record<string, unknown> });
+    }
+  }
+  return found;
+}
+
+/**
+ * The SDK's `settings` (flag layer) for a run: Patch's cloud choice
+ * (`cloudSettingsEnv`) and the chat's memory setting. A Bedrock run whose
+ * loaded settings files set a variable it needs absent is refused, naming the
+ * file and the variable (spec/10 § Backend credentials).
+ */
+export function sdkFlagSettings(
+  opts: Pick<
+    SdkRunOptions,
+    'bedrock' | 'cwd' | 'configDir' | 'settingSources' | 'inferenceProfile' | 'memoryEnabled'
+  >,
+): { env: Record<string, string>; autoMemoryEnabled?: boolean } {
+  const env = cloudSettingsEnv(opts);
+  if (opts.bedrock !== undefined) {
+    const absent: string[] = [...BEDROCK_ABSENT_ENV];
+    if (opts.bedrock.regionPrefix === 'auto') absent.push('ANTHROPIC_BEDROCK_REGION_PREFIX');
+    for (const file of loadedSettingsEnv(opts)) {
+      const name = absent.find((n) => file.env[n] !== undefined);
+      if (name !== undefined) {
+        throw new Error(
+          `${file.path} sets ${name} in its env, which would override the Amazon Bedrock account's AWS profile. Remove it from that file to run on this account.`,
+        );
+      }
+    }
+  }
+  return {
+    env,
+    ...(opts.memoryEnabled !== undefined ? { autoMemoryEnabled: opts.memoryEnabled } : {}),
+  };
+}
+
 /** The SDK options for a resolved Claude credential: a token, or a Bedrock profile. */
 export function sdkCredential(auth: {
   accessToken: string;
@@ -2134,6 +2231,8 @@ export function skillsMissingFromInit(msg: unknown, cwd: string): string[] {
 async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { query } = await loadSdk();
   const { env, mcpServers } = buildSdkEnv(opts);
+  // Before anything starts: a settings file that would override the account refuses the run.
+  const settings = sdkFlagSettings(opts);
   const durable = opts.durableTurn ? new DurableTurn(opts.durableTurn) : undefined;
   const sup = mcpServers === undefined ? undefined : new McpSupervisor({});
   let claudeExit: ProcessExit | undefined;
@@ -2180,9 +2279,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       mcpServers,
       ...systemPromptOption(opts),
       ...(opts.skills !== undefined ? { skills: opts.skills } : {}),
-      ...(opts.memoryEnabled !== undefined
-        ? { settings: { autoMemoryEnabled: opts.memoryEnabled } }
-        : {}),
+      settings,
       ...(opts.settingSources !== undefined ? { settingSources: opts.settingSources } : {}),
       ...inferenceProfileOptions(opts),
     },
@@ -2457,6 +2554,8 @@ const persistSessions = new Map<string, PersistSession>();
 
 function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): PersistSession {
   const { env, mcpServers } = buildSdkEnv(opts);
+  // Before anything starts: a settings file that would override the account refuses the run.
+  const settings = sdkFlagSettings(opts);
   const sup = mcpServers === undefined ? undefined : new McpSupervisor({});
   const inbox: SDKUserMessage[] = [];
   let notify: (() => void) | null = null;
@@ -2517,9 +2616,7 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       mcpServers,
       ...systemPromptOption(opts),
       ...(opts.skills !== undefined ? { skills: opts.skills } : {}),
-      ...(opts.memoryEnabled !== undefined
-        ? { settings: { autoMemoryEnabled: opts.memoryEnabled } }
-        : {}),
+      settings,
       ...(opts.settingSources !== undefined ? { settingSources: opts.settingSources } : {}),
     },
   });

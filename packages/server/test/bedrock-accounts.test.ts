@@ -288,6 +288,59 @@ describe('Bedrock accounts in the shared settings', () => {
     expect(row(svc, id)?.bedrock).toMatchObject({ spentUsd: 2.5, spentMonth: '2026-12' });
   });
 
+  it('a restarted server still sends a host its own Bedrock account before that host reports again', async () => {
+    const svc = await ready();
+    const account = await svc.addBedrock(WORK);
+    // The server restarts; the Mac reconnects and is sent a snapshot before
+    // its `host.host` arrives.
+    sent = [];
+    const restarted = make();
+    restarted.hostOnline('mac');
+    expect(snapshotTo('mac')?.secrets.claude.map((a) => a.id)).toEqual([account.id]);
+    expect(snapshotTo('mac')?.claudeHeldElsewhere).toBeUndefined();
+    // Only a `host.host` without profiles takes it off, and that too survives a restart.
+    restarted.handleHostEvent(hostInfo('mac'));
+    expect(snapshotTo('mac')?.secrets.claude).toEqual([]);
+    sent = [];
+    make().hostOnline('mac');
+    expect(snapshotTo('mac')?.claudeHeldElsewhere).toEqual([{ id: account.id, label: 'Work AWS' }]);
+  });
+
+  it('adds each spendId once, across a restart; equal spends at one instant are both counted', async () => {
+    const svc = await ready();
+    const { id } = await svc.addBedrock(WORK);
+    const tagged = (s: SharedSettingsService, spendId: string, costUsd: number) =>
+      s.handleHostEvent({
+        type: 'host.account_spend',
+        hostId: 'mac',
+        accountId: id,
+        costUsd,
+        at: now,
+        spendId,
+      });
+    tagged(svc, 's1', 2);
+    tagged(svc, 's2', 2);
+    expect(row(svc, id)?.bedrock?.spentUsd).toBe(4);
+    // The host is told which spends its figure holds; surfaces are not.
+    expect(snapshotTo('mac')?.secrets.claude.find((a) => a.id === id)?.bedrock?.spendIds).toEqual([
+      's1',
+      's2',
+    ]);
+    expect(row(svc, id)?.bedrock).not.toHaveProperty('spendIds');
+    // A resend after a restart is not added again.
+    const restarted = make();
+    tagged(restarted, 's2', 2);
+    expect(row(restarted, id)?.bedrock?.spentUsd).toBe(4);
+    // A new month starts the ids afresh.
+    now = DEC_2;
+    tagged(restarted, 's3', 1);
+    expect(snapshotTo('mac')?.secrets.claude.find((a) => a.id === id)?.bedrock).toMatchObject({
+      spentUsd: 1,
+      spentMonth: '2026-12',
+      spendIds: ['s3'],
+    });
+  });
+
   it('ignores spend from another host or for an account that is not Bedrock', async () => {
     const svc = await ready();
     const { id } = await svc.addBedrock(WORK);

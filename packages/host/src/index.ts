@@ -761,7 +761,14 @@ async function startHost(
   // reports what it cost; the server keeps the month's spend.
   const sdkBackend: SdkBackend = withBedrockSpend(rawSdkBackend, (accountId, costUsd) => {
     // `emit` is declared further down; nothing runs a turn before it is.
-    emit({ type: 'host.account_spend', hostId: selfHostId, accountId, costUsd, at: Date.now() });
+    emit({
+      type: 'host.account_spend',
+      hostId: selfHostId,
+      accountId,
+      costUsd,
+      at: Date.now(),
+      spendId: randomUUID(),
+    });
     // The spend is owed to the server until it acknowledges it, and counted
     // against the cap meanwhile: the next turn must not start past it.
     syncBedrockCaps(sharedClaude);
@@ -2620,7 +2627,11 @@ async function startHost(
     now: number,
   ): boolean =>
     a.bedrock !== undefined &&
-    bedrockCappedWith(a.bedrock, pendingBedrockSpendUsd(hostOutbox.pending(), a.id, now), now);
+    bedrockCappedWith(
+      a.bedrock,
+      pendingBedrockSpendUsd(hostOutbox.pending(), a.id, now, a.bedrock.spendIds),
+      now,
+    );
   const syncBedrockCaps = (accounts: readonly SharedSecrets['claude'][number][]): void => {
     const now = Date.now();
     let changed = false;
@@ -3053,7 +3064,12 @@ async function startHost(
   sendAcpReport = () => link.send(acpAccounts.report(selfHostId, ACP_BACKEND_ID));
   // Transcript events and Bedrock spend wait here until the server acknowledges
   // them; the spend still owed counts against the cap (`bedrockAtCap`).
-  const hostOutbox = new Outbox({ path: join(config.patchHome, 'outbox.jsonl'), logger });
+  const hostOutbox = new Outbox({
+    path: join(config.patchHome, 'outbox.jsonl'),
+    logger,
+    // A spend acknowledged is no longer owed: a cap counted with it may lift.
+    onAck: () => syncBedrockCaps(sharedClaude),
+  });
   const link = createServerLink({
     url: config.serverWsUrl,
     daemonKey,
@@ -5035,6 +5051,18 @@ async function startHost(
           reason: 'No account is set to switch to automatically',
         };
       }
+      // What is left: every account this turn could run on is signed out.
+      // Named by the first of them; never the store's default, which may be
+      // one nobody chose.
+      const first = store.accounts.find((a) => a.id === ordered[0]!.id)!;
+      return {
+        ok: false,
+        code: 'claude_oauth_missing',
+        reason:
+          first.bedrock !== undefined
+            ? `${first.label}: ${bedrockSignIn.error(first.id) ?? AWS_SIGN_IN_EXPIRED}`
+            : `${first.label} is signed out. Sign in again in Settings > Usage.`,
+      };
     }
     const effectiveAccount =
       effective !== undefined ? store.accounts.find((a) => a.id === effective) : undefined;

@@ -239,11 +239,15 @@ export function pendingBedrockSpendUsd(
   owed: readonly { event: WireEvent }[],
   accountId: string,
   now: number,
+  applied: readonly string[] = [],
 ): number {
   const month = bedrockMonth(now);
   let total = 0;
   for (const { event } of owed) {
     if (event.type !== 'host.account_spend' || event.accountId !== accountId) continue;
+    // Already in the server's figure: it committed and pushed the spend
+    // before its acknowledgement reached this host.
+    if (event.spendId !== undefined && applied.includes(event.spendId)) continue;
     if (bedrockMonth(event.at) === month) total += event.costUsd;
   }
   return total;
@@ -267,20 +271,24 @@ export function bedrockCappedWith(
  * Bedrock account, the host and profile it runs as. Nothing else — a label,
  * the `auto` flag, a region, a prefix, a cap or the month's spend changing is
  * not new keys, so it must not drop what is known about every other account's
- * credit (`syncBedrockCaps` handles a cap reached or lifted).
+ * credit (`syncBedrockCaps` handles a cap reached or lifted). Nor is the
+ * order: compared as a set, so reordering (or `auto` moving a row) is not
+ * new keys either.
  */
 export function claudeAccountsIdentity(
   accounts: readonly Pick<ClaudeStoredAccount, 'id' | 'credential' | 'bedrock'>[],
 ): string {
   return JSON.stringify(
-    accounts.map((a) => ({
-      id: a.id,
-      credential: a.credential ?? null,
-      bedrock:
-        a.bedrock === undefined
-          ? null
-          : { hostId: a.bedrock.hostId, awsProfile: a.bedrock.awsProfile },
-    })),
+    [...accounts]
+      .sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+      .map((a) => ({
+        id: a.id,
+        credential: a.credential ?? null,
+        bedrock:
+          a.bedrock === undefined
+            ? null
+            : { hostId: a.bedrock.hostId, awsProfile: a.bedrock.awsProfile },
+      })),
   );
 }
 
@@ -305,6 +313,7 @@ export class BedrockSignIn {
   private readonly state = new Map<string, AwsProfileCheck & { awsProfile: string }>();
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<void> | undefined;
+  private queued: Promise<void> | undefined;
 
   constructor(
     private readonly deps: {
@@ -334,9 +343,20 @@ export class BedrockSignIn {
     return s.signedIn === false ? AWS_SIGN_IN_EXPIRED : undefined;
   }
 
-  /** Check every held Bedrock account now. Concurrent calls share one pass. */
+  /**
+   * Check every held Bedrock account now. A call while a pass runs is answered
+   * by one more pass after it, which reads the held accounts afresh: the one
+   * running may have read them before an account was added.
+   */
   checkAll(): Promise<void> {
-    this.running ??= this.pass().finally(() => {
+    if (this.running !== undefined) {
+      this.queued ??= this.running.then(() => {
+        this.queued = undefined;
+        return this.checkAll();
+      });
+      return this.queued;
+    }
+    this.running = this.pass().finally(() => {
       this.running = undefined;
     });
     return this.running;

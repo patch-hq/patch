@@ -116,7 +116,9 @@ describe('a warm Claude Code process on a Bedrock account', () => {
     expect(processes[0]!.env['AWS_PROFILE']).toBe('work');
     expect(processes[1]!.env['AWS_PROFILE']).toBe('other');
     expect(processes[2]!.env['ANTHROPIC_BEDROCK_REGION_PREFIX']).toBe('us');
-    expect('AWS_PROFILE' in processes[3]!.env).toBe(false);
+    // A token run keeps the host's own profile (for the agent's shell), never the last Bedrock run's.
+    expect(processes[3]!.env['AWS_PROFILE']).toBe(process.env['AWS_PROFILE']);
+    expect(processes[3]!.env['CLAUDE_CODE_USE_BEDROCK']).toBeUndefined();
     expect(processes[3]!.env['CLAUDE_CODE_OAUTH_TOKEN']).toBe('tok');
     // Every new process's first reading is its own total.
     expect(costs.map((c) => Math.round(c * 100) / 100)).toEqual([0.1, 0.1, 0.1, 0.1]);

@@ -248,3 +248,86 @@ describe('withBedrockSpend', () => {
     expect(spent).toEqual([]);
   });
 });
+
+// Claude Code applies a settings file's `env` over the process environment, so
+// Patch restates its cloud choice in the flag layer, which outranks them all.
+describe('settings files cannot move a run to another cloud', () => {
+  let dir: string;
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    dir = mkdtempSync(`${tmpdir()}/patch-flag-settings-`);
+  });
+  afterEach(async () => {
+    const { rmSync } = await import('node:fs');
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const writeSettings = async (rel: string, env: Record<string, string>) => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { dirname, join } = await import('node:path');
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), JSON.stringify({ env }));
+  };
+
+  it('passes explicit switches in the flag layer: off for a token run, the account for Bedrock', async () => {
+    queryCalls.length = 0;
+    // The user's own settings say Bedrock on another profile; the project's says Vertex.
+    await writeSettings('config/settings.json', {
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_PROFILE: 'personal',
+    });
+    await writeSettings('project/.claude/settings.json', { CLAUDE_CODE_USE_VERTEX: '1' });
+    const { createRealSdkBackend } = await import('../src/sdkBackend.js');
+    const drain = async (opts: Record<string, unknown>) => {
+      for await (const _ of createRealSdkBackend().run({
+        prompt: 'hello',
+        cwd: `${dir}/project`,
+        configDir: `${dir}/config`,
+        abortController: new AbortController(),
+        ...opts,
+      } as never))
+        void _;
+    };
+    await drain({ oauthAccessToken: 'tok' });
+    await drain({ oauthAccessToken: '', bedrock, memoryEnabled: false });
+    const flag = (i: number) =>
+      queryCalls[i]!.options.settings as {
+        env: Record<string, string>;
+        autoMemoryEnabled?: boolean;
+      };
+    expect(flag(0).env).toEqual({
+      CLAUDE_CODE_USE_BEDROCK: '0',
+      CLAUDE_CODE_USE_VERTEX: '0',
+      CLAUDE_CODE_USE_MANTLE: '0',
+      CLAUDE_CODE_SKIP_BEDROCK_AUTH: '0',
+    });
+    expect(flag(1).env).toMatchObject({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      CLAUDE_CODE_USE_VERTEX: '0',
+      AWS_PROFILE: 'work',
+      AWS_REGION: 'eu-west-2',
+      ANTHROPIC_BEDROCK_REGION_PREFIX: 'eu',
+    });
+    expect(flag(1).autoMemoryEnabled).toBe(false);
+  });
+
+  it('refuses a Bedrock run whose settings file sets a variable it needs absent, naming both', async () => {
+    queryCalls.length = 0;
+    await writeSettings('project/.claude/settings.local.json', { AWS_ACCESS_KEY_ID: 'AKIA...' });
+    const { createRealSdkBackend } = await import('../src/sdkBackend.js');
+    const stream = createRealSdkBackend().run({
+      prompt: 'hello',
+      cwd: `${dir}/project`,
+      configDir: `${dir}/config`,
+      abortController: new AbortController(),
+      oauthAccessToken: '',
+      bedrock,
+    });
+    await expect(
+      (async () => {
+        for await (const _ of stream) void _;
+      })(),
+    ).rejects.toThrow(/settings\.local\.json sets AWS_ACCESS_KEY_ID/);
+    expect(queryCalls).toHaveLength(0);
+  });
+});
