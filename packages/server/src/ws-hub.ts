@@ -2167,6 +2167,9 @@ export class WsHub {
       // Replacing a host: answered to the route that asked (spec/11 § Replacing a host).
       event.type === 'patch.folders_check.response' ||
       event.type === 'patch.chat_adopt.response' ||
+      // Bedrock (spec/10): a profile check answers the route that asked; spend is the server's to keep.
+      event.type === 'patch.aws_profile_check.response' ||
+      event.type === 'host.account_spend' ||
       // A host's question to the server-run queue is answered by the server alone.
       event.type === 'patch.queue_pull.request' ||
       // History the record lacked, sent once: kept, never shown as new.
