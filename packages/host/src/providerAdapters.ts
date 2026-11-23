@@ -19,6 +19,8 @@ export interface TurnAccountHint {
   chatId: string;
   preferredAccountId?: string;
   sessionAccountId?: string;
+  /** The user asked this chat to run now: its lock does not hold it to a spent account. */
+  anyAccount?: boolean;
 }
 
 export interface ProviderAdapter {
