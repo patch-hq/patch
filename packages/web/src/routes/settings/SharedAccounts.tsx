@@ -10,7 +10,7 @@
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import {
-  accountsForBackend,
+  accountsKeyForBackend,
   accountStateRunnable,
   describeAccountState,
   type AccountStrategy,
@@ -513,8 +513,9 @@ export function ClaudeListFoot(): JSX.Element | null {
   const adding = useClaudeAddStore((s) => s.adding);
   const setAdding = useClaudeAddStore((s) => s.setAdding);
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  type ClaudeRow = NonNullable<typeof secrets>['claude'][number];
   const rows = secrets
-    ? accountsForBackend<NonNullable<typeof secrets>['claude'][number]>(secrets, 'claude-code')
+    ? (secrets[accountsKeyForBackend('claude-code')] as readonly ClaudeRow[])
     : undefined;
   const close = (): void => setAdding(null);
   if (adding?.kind === 'bedrock') {
