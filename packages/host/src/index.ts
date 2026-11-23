@@ -4632,6 +4632,7 @@ async function startHost(
     store: NonNullable<ReturnType<typeof readPatchStore>>,
     preferredAccountId?: string,
     sessionAccountId?: string,
+    anyAccount?: boolean,
   ): { accounts: FailoverAccount[]; route: RouteOptions } => ({
     accounts: store.accounts.map((a) => ({
       id: a.id,
@@ -4646,7 +4647,7 @@ async function startHost(
       ...(sessionAccountId !== undefined ? { sessionAccount: sessionAccountId } : {}),
       // A chat locked to one account may run elsewhere while it is spent only
       // when the user chose to continue on another account.
-      resumeOnAnyAccount: limitBehaviour === 'other_account',
+      resumeOnAnyAccount: limitBehaviour === 'other_account' || anyAccount === true,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
@@ -4671,6 +4672,8 @@ async function startHost(
     const { accounts, route } = claudeRoute(
       store,
       daemon.chatState.get(chatId)?.preferredAccountId,
+      undefined,
+      daemon.runsOnAnyAccount(chatId),
     );
     if (failed !== undefined) {
       // Siblings sharing this account's organisation are marked with it. They
@@ -4774,6 +4777,7 @@ async function startHost(
       store,
       turn?.preferredAccountId,
       turn?.sessionAccountId,
+      turn?.anyAccount,
     );
     // Read before `startTurn`, which moves a round-robin on.
     const first = accountRotation.order(accounts, route)[0]?.id;
@@ -5272,6 +5276,8 @@ async function startHost(
       const { accounts, route } = claudeRoute(
         store,
         chatId === undefined ? undefined : daemon.chatState.get(chatId)?.preferredAccountId,
+        undefined,
+        chatId === undefined ? undefined : daemon.runsOnAnyAccount(chatId),
       );
       return accountRotation.usableAccount(accounts, route) === undefined;
     },

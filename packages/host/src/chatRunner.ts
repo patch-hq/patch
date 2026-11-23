@@ -355,7 +355,12 @@ export interface HostOptions {
      * a check that runs nothing (a spawn's credential check), which must not
      * spend a place in the rotation.
      */
-    turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
+    turn?: {
+      chatId: string;
+      preferredAccountId?: string;
+      sessionAccountId?: string;
+      anyAccount?: boolean;
+    },
   ) => OAuthCheckResult | Promise<OAuthCheckResult>;
   /**
    * A turn just failed because ITS ACCOUNT has no credit left. Return the next
@@ -2676,6 +2681,7 @@ export class Daemon {
     // asserting the situation changed, and the alternative — refusing to try
     // the only account there is — is how this gets stuck.
     this.failoverTriedAccounts.delete(chatId);
+    this.anyAccountChats.add(chatId);
     // Before the re-send, not after it and not only on the empty path: a
     // `sendInput` that re-acks a duplicate localId emits no state, and the pause
     // is over either way.
@@ -3109,6 +3115,20 @@ export class Daemon {
    * that waits for the reset.
    */
   private readonly failoverTriedAccounts = new Map<string, Set<string>>();
+
+  /**
+   * Chats the user told to run now. A chat locked to an account (a child agent
+   * inherits its parent's) stays on it through a pause, so resuming it would
+   * re-run on the spent key and park again. Resuming by hand lifts the lock for
+   * this turn: it runs on the first account in the order that has credit. The
+   * lock itself is untouched. Cleared when the turn settles or is stopped.
+   */
+  private readonly anyAccountChats = new Set<string>();
+
+  /** Is this chat running past its account lock because it was resumed by hand? */
+  runsOnAnyAccount(chatId: string): boolean {
+    return this.anyAccountChats.has(chatId);
+  }
 
   /**
    * Chats whose turn is being re-run on another account. The chat sits idle for
@@ -5956,6 +5976,7 @@ export class Daemon {
     // was bounced would still be marked as tried.
     this.overloadRetryCount.delete(chatId);
     this.failoverTriedAccounts.delete(chatId);
+    this.anyAccountChats.delete(chatId);
     this.failoverRerunPending.delete(chatId);
     const goalPoll = this.goalWatchPollTimers.get(chatId);
     if (goalPoll !== undefined) clearTimeout(goalPoll);
@@ -10467,6 +10488,7 @@ export class Daemon {
       ...(state.sessionId !== undefined && state.sessionAccountId !== undefined
         ? { sessionAccountId: state.sessionAccountId }
         : {}),
+      ...(this.anyAccountChats.has(chatId) ? { anyAccount: true } : {}),
     });
     // Which key this turn is actually spending, for as long as it runs. Not a
     // preference and never persisted — it is re-decided next turn — but a
@@ -11052,6 +11074,7 @@ export class Daemon {
         // A turn that got through owes nothing to the accounts it was bounced
         // between: the next turn starts with every account eligible again.
         this.failoverTriedAccounts.delete(chatId);
+        this.anyAccountChats.delete(chatId);
         this.unparkTurn(chatId);
         // spec/04 § Message queueing — a turn that settles with more turns still
         // queued behind it has NOT finished the chat's work: `drainQueue` starts
