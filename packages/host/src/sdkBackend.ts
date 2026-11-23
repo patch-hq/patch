@@ -1087,8 +1087,8 @@ export const BEDROCK_STRIPPED_ENV = [
 /**
  * Variables that would point Claude Code at a cloud provider other than the one
  * a run chose, or at a Bedrock endpoint or auth Patch did not set. A
- * subscription, API-key or endpoint run strips them and every AWS variable, so
- * it cannot quietly run on the host's own AWS; a Bedrock run strips them before
+ * subscription, API-key or endpoint run strips them, so it cannot quietly run
+ * on the host's own AWS; a Bedrock run strips them before
  * setting its own (spec/10 § Backend credentials).
  */
 export const CLOUD_PROVIDER_ENV = [
@@ -1101,25 +1101,13 @@ export const CLOUD_PROVIDER_ENV = [
 ] as const;
 
 /**
- * The host's own AWS profile, region and credentials and Bedrock settings,
- * which a run that is not on Bedrock never sees: with them Claude Code could be
- * pointed at the host's AWS by a variable Patch did not set.
+ * Bedrock settings a run that is not on Bedrock never sees. With the switches
+ * in CLOUD_PROVIDER_ENV gone Claude Code does not use AWS at all, so the host's
+ * own AWS profile, region and credentials stay in the environment: the agent's
+ * shell keeps working with the `aws` CLI as it did before.
  */
-const HOST_AWS_ENV = [
-  'AWS_PROFILE',
-  'AWS_DEFAULT_PROFILE',
-  'AWS_REGION',
-  'AWS_DEFAULT_REGION',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
-  'AWS_BEARER_TOKEN_BEDROCK',
-] as const;
-
-function isAwsOrBedrockEnv(name: string): boolean {
-  return (
-    (HOST_AWS_ENV as readonly string[]).includes(name) || name.startsWith('ANTHROPIC_BEDROCK_')
-  );
+function isBedrockEnv(name: string): boolean {
+  return name === 'AWS_BEARER_TOKEN_BEDROCK' || name.startsWith('ANTHROPIC_BEDROCK_');
 }
 
 /** What Claude Code is told to run on Bedrock with this profile. */
@@ -1202,8 +1190,8 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   delete env['CLAUDE_CODE_OAUTH_TOKEN'];
   for (const name of CLOUD_PROVIDER_ENV) delete env[name];
   if (!opts.bedrock) {
-    // Not a Bedrock run: nothing of the host's own AWS may reach Claude Code.
-    for (const name of Object.keys(env)) if (isAwsOrBedrockEnv(name)) delete env[name];
+    // Not a Bedrock run: no Bedrock setting of the host's own reaches Claude Code.
+    for (const name of Object.keys(env)) if (isBedrockEnv(name)) delete env[name];
   }
   if (opts.bedrock) {
     if (opts.modelEndpoint || opts.oauthAccessToken !== '') {

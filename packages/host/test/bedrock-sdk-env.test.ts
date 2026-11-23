@@ -108,7 +108,7 @@ describe('buildSdkEnv on a Bedrock account', () => {
       { oauthAccessToken: '', modelEndpoint: { baseUrl: 'http://127.0.0.1:4000' } },
     ],
   ] as const) {
-    it(`a run on ${what} carries none of the host's AWS or Bedrock settings`, async () => {
+    it(`a run on ${what} carries none of the host's Bedrock settings, and keeps its AWS profile for the agent's shell`, async () => {
       const { buildSdkEnv } = await import('../src/sdkBackend.js');
       const { env } = buildSdkEnv({
         prompt: 'x',
@@ -124,15 +124,13 @@ describe('buildSdkEnv on a Bedrock account', () => {
         'ANTHROPIC_BEDROCK_BASE_URL',
         'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
         'ANTHROPIC_BEDROCK_REGION_PREFIX',
-        'AWS_PROFILE',
-        'AWS_REGION',
         'AWS_BEARER_TOKEN_BEDROCK',
-        'AWS_ACCESS_KEY_ID',
-        'AWS_SECRET_ACCESS_KEY',
-        'AWS_SESSION_TOKEN',
       ]) {
         expect(name in env, name).toBe(false);
       }
+      expect(env['AWS_PROFILE']).toBe('host-profile');
+      expect(env['AWS_REGION']).toBe('us-east-1');
+      expect(env['AWS_ACCESS_KEY_ID']).toBe('AKIAHOST');
     });
   }
 
