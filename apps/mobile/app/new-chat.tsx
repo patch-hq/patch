@@ -178,8 +178,9 @@ export default function NewChat(): React.ReactElement {
   const experimental = useExperimentalFeatures();
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
   const preferable = React.useMemo(() => {
-    return lockableAccounts(sharedSecrets, effectiveModel).filter((a) => a.connected);
-  }, [sharedSecrets, effectiveModel]);
+    // A Bedrock account runs only on its own host, so a host change can rule one out.
+    return lockableAccounts(sharedSecrets, effectiveModel, hostId).filter((a) => a.connected);
+  }, [sharedSecrets, effectiveModel, hostId]);
   React.useEffect(() => {
     if (preferredAccountId !== null && !preferable.some((a) => a.id === preferredAccountId)) {
       setPreferredAccountId(null);

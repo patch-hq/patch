@@ -4,7 +4,12 @@
 // menu is open, so merely having a composer never asks a host for usage.
 
 import React from 'react';
-import { ACCOUNT_PROVIDERS, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
+import {
+  ACCOUNT_PROVIDERS,
+  rateLimitWindowState,
+  type ClaudeBedrock,
+  type RateLimitWindow,
+} from '@patch/wire';
 import { getWs } from '../api/ws';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
@@ -19,6 +24,8 @@ export interface AccountUsageRow {
   /** The backend ("claude", "codex") the account belongs to. */
   backendId: string;
   usage: Usage;
+  /** A Claude on Amazon Bedrock account: its host and the month's spend, never probed. */
+  bedrock?: ClaudeBedrock | undefined;
 }
 
 export function useAccountUsage(): AccountUsageRow[] {
@@ -39,12 +46,16 @@ export function useAccountUsage(): AccountUsageRow[] {
           readAt = u.at ?? 0;
         }
       }
-      rows.push({ id: a.id, label: a.label, backendId, usage });
+      const bedrock = 'bedrock' in a ? a.bedrock : undefined;
+      rows.push({ id: a.id, label: a.label, backendId, usage, ...(bedrock ? { bedrock } : {}) });
     }
   }
   // An account no host has a reading for yet makes every online host read its
   // backend now, once per (host, backend), rather than waiting for the poll.
-  const unread = rows.filter((r) => r.usage === undefined).map((r) => r.backendId);
+  // A Bedrock account is never probed (a probe would be a paid call), so it is never asked for.
+  const unread = rows
+    .filter((r) => r.usage === undefined && r.bedrock === undefined)
+    .map((r) => r.backendId);
   const wanted = [...new Set(unread)].flatMap((backendId) =>
     Object.values(hosts)
       .filter((h) => h.online)

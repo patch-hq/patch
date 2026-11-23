@@ -51,6 +51,7 @@ describe('the account menu on an ACP chat', () => {
         visible
         backendId="acp"
         model="acp/gemini/auto"
+        hostId={null}
         selectedId="g1"
         strategySelected={false}
         onSelect={onSelect}

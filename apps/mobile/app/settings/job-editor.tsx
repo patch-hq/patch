@@ -483,14 +483,15 @@ export default function JobEditor(): React.ReactElement {
   // The shared accounts the job's chat could start on, for its model's backend.
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
   const accountOptions = React.useMemo(() => {
-    const list = lockableAccounts(sharedSecrets, form.spawnModel);
+    // A Bedrock account is offered only when the job's chat starts on its host.
+    const list = lockableAccounts(sharedSecrets, form.spawnModel, form.spawnHostId || null);
     const held = list.map((a) => ({ id: a.id, label: a.label }));
     const extra =
       form.spawnAccount && !held.some((a) => a.id === form.spawnAccount)
         ? [{ id: form.spawnAccount, label: `${form.spawnAccount} (not held)` }]
         : [];
     return [{ id: '', label: 'By strategy' }, ...extra, ...held];
-  }, [sharedSecrets, form.spawnModel, form.spawnAccount]);
+  }, [sharedSecrets, form.spawnModel, form.spawnAccount, form.spawnHostId]);
   const modelOptions: Array<{ id: string; label: string }> = [
     { id: '', label: 'Host default' },
     ...(form.spawnModel && !availableModels.some((m) => m.id === form.spawnModel)

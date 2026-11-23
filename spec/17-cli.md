@@ -53,8 +53,10 @@ patch voice enrol <name> <recentId>... [--access owner|household|guest] [--conte
 patch voice remove <name>                 # forget a person
 patch settings provider [<provider>]          # each provider's own settings (session retention and the like): value and where it comes from
 patch settings provider-set <provider> <key> <value>  # a number (days, MB), or on/off; written on every host (10-auth.md § Settings)
-patch accounts [<backend>]                # the shared backend accounts, in order
+patch accounts [<backend>]                # the shared backend accounts, in order; auto-off accounts last, unnumbered; a Bedrock row adds host, profile, region and the month's estimated spend
 patch accounts add <backend> --token T [--label L]
+patch accounts add-bedrock --host H --profile P --region R --cap USD --label L [--prefix auto|us|eu|apac|jp|au|global] [--auto]   # a Claude on Amazon Bedrock account; the host checks the profile first (10-auth.md § Signing in)
+patch accounts set <backend> <accountId> [--auto on|off] [--label L] [--cap USD] [--region R] [--prefix X]   # --auto on any account; cap, region and prefix on a Bedrock one
 patch accounts sign-in <backend>                   # sign in through the server: prints the address and code to open on any device (10-auth.md § Signing in)
 patch accounts connect <backend> <accountId> --token T
 patch accounts disconnect <backend> <accountId>        # confirmed; takes it out of every host's sequence

@@ -11,7 +11,7 @@
 
 import React from 'react';
 import { Alert, View } from 'react-native';
-import { describeAccountState, type HostAccountSummary } from '@patch/wire';
+import { describeAccountState, type ClaudeBedrock, type HostAccountSummary } from '@patch/wire';
 import { api, type SharedBackendId } from '../../api/rest';
 import { space } from '../../lib/theme';
 import { formatReset } from '../../lib/usage';
@@ -35,6 +35,7 @@ import { NoticeRow } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
 import { UsageHistorySection } from './UsageHistorySection';
 import { AcpAccountsSections } from './AcpAccountsSection';
+import { AutoCheckbox, BedrockForm, BedrockLines, BedrockTag } from './bedrock';
 import { PROVIDERS, type ProviderSpec, type SharedRow } from './providers';
 import { writeShared } from './sharedWrite';
 import { Chips, ErrorLine, Muted, Row } from './ui';
@@ -99,17 +100,21 @@ function Accounts({
   );
   const [moving, setMoving] = React.useState(false);
   const name = provider.name;
+  // Accounts with auto off sit after the others with no position in the order
+  // (spec/10 § Choosing an account); only the ranked ones move.
+  const ranked = rows.filter((r) => !isOutOfOrder(provider, r));
+  const unranked = rows.filter((r) => isOutOfOrder(provider, r));
   const move = (index: number, dir: -1 | 1): void => {
     setMoving(true);
     void writeShared('Reorder', () =>
-      api.orderAccounts(
-        backendId,
-        moveAccount(
-          rows.map((r) => r.id),
+      api.orderAccounts(backendId, [
+        ...moveAccount(
+          ranked.map((r) => r.id),
           index,
           dir,
         ),
-      ),
+        ...unranked.map((r) => r.id),
+      ]),
     ).finally(() => setMoving(false));
   };
   return (
@@ -130,19 +135,58 @@ function Accounts({
       {rows.length === 0 ? (
         <NoticeRow testID={`accounts-empty-${backendId}`} text={`No ${name} accounts yet`} />
       ) : (
-        rows.map((row, i) => (
-          <AccountRow
-            key={row.id}
-            provider={provider}
-            row={row}
-            rows={rows}
-            rank={i + 1}
-            moving={moving}
-            onMove={(dir) => move(i, dir)}
-          />
-        ))
+        <>
+          {provider.autoFlag ? <AutoHeader testID={`accounts-header-${backendId}`} /> : null}
+          {ranked.map((row, i) => (
+            <AccountRow
+              key={row.id}
+              provider={provider}
+              row={row}
+              rows={rows}
+              rank={i + 1}
+              rankedCount={ranked.length}
+              moving={moving}
+              onMove={(dir) => move(i, dir)}
+            />
+          ))}
+          {unranked.map((row) => (
+            <AccountRow
+              key={row.id}
+              provider={provider}
+              row={row}
+              rows={rows}
+              rank={null}
+              rankedCount={ranked.length}
+              moving={moving}
+              onMove={() => undefined}
+            />
+          ))}
+        </>
       )}
     </SettingsSection>
+  );
+}
+
+/** Whether a row sits out of the order: its provider carries `auto` and it is off. */
+function isOutOfOrder(provider: ProviderSpec, row: SharedRow): boolean {
+  return provider.autoFlag && 'auto' in row && row.auto === false;
+}
+
+/** The header over a list whose rows start with their Auto checkbox. */
+function AutoHeader({ testID }: { testID: string }): React.ReactElement {
+  return (
+    <View
+      testID={testID}
+      style={{
+        flexDirection: 'row',
+        gap: space.md,
+        paddingHorizontal: space.md + 2,
+        paddingTop: space.sm,
+      }}
+    >
+      <Muted>Auto</Muted>
+      <Muted>Account</Muted>
+    </View>
   );
 }
 
@@ -151,13 +195,16 @@ function AccountRow({
   row,
   rows,
   rank,
+  rankedCount,
   moving,
   onMove,
 }: {
   provider: ProviderSpec;
   row: SharedRow;
   rows: readonly SharedRow[];
-  rank: number;
+  /** Its place in the order; null for an account with auto off. */
+  rank: number | null;
+  rankedCount: number;
   moving: boolean;
   onMove: (dir: -1 | 1) => void;
 }): React.ReactElement {
@@ -165,7 +212,24 @@ function AccountRow({
   const reading = useReading(backendId, row.id);
   const [connecting, setConnecting] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
   const id = `${backendId}-${row.id}`;
+  const bedrock = 'bedrock' in row ? row.bedrock : undefined;
+  if (bedrock) {
+    return (
+      <BedrockRow
+        row={row}
+        bedrock={bedrock}
+        id={id}
+        rank={rank}
+        rankedCount={rankedCount}
+        moving={moving}
+        onMove={onMove}
+        editing={editing}
+        setEditing={setEditing}
+      />
+    );
+  }
   const organizationId = 'organizationId' in row ? row.organizationId : undefined;
   // Two rows on one Claude organisation are one pool of credit under two labels.
   const twin =
@@ -183,7 +247,7 @@ function AccountRow({
     .join(' · ');
 
   const items: AnchoredMenuItem[] = [
-    ...moveItems(`account-${id}`, rank - 1, rows.length, moving),
+    ...(rank === null ? [] : moveItems(`account-${id}`, rank - 1, rankedCount, moving)),
     {
       id: 'rename',
       label: 'Rename',
@@ -270,7 +334,7 @@ function AccountRow({
       <Row
         title={row.label}
         subtitle={subtitle === '' ? undefined : subtitle}
-        leading={<Rank n={rank} active={false} />}
+        leading={<Leading provider={provider} row={row} id={id} rank={rank} />}
         right={
           <RowMenu
             testID={`account-${id}-menu`}
@@ -330,6 +394,136 @@ function AccountRow({
           }}
         />
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * What a row starts with: on a provider whose accounts carry `auto`, the Auto
+ * checkbox, then its rank while it is in the order (an account with auto off
+ * has none).
+ */
+function Leading({
+  provider,
+  row,
+  id,
+  rank,
+}: {
+  provider: ProviderSpec;
+  row: SharedRow;
+  id: string;
+  rank: number | null;
+}): React.ReactElement {
+  if (!provider.autoFlag) return <Rank n={rank ?? 0} active={false} />;
+  const auto = !('auto' in row && row.auto === false);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+      <AutoCheckbox
+        testID={`account-${id}-auto`}
+        label={`Switch to ${row.label} automatically`}
+        checked={auto}
+        onChange={(next) =>
+          void writeShared('Auto', () => api.updateAccount(provider.id, row.id, { auto: next }))
+        }
+      />
+      {rank === null ? <View style={{ width: 22 }} /> : <Rank n={rank} active={false} />}
+    </View>
+  );
+}
+
+/**
+ * A Claude on Amazon Bedrock row (spec/10 § Settings): its label with a
+ * `Bedrock` tag, the labelled Host / AWS profile / Region / Monthly / Spent
+ * lines, and a ⋯ of Edit and Remove. Patch has no sign-in for it: signing in
+ * to the profile is AWS's own.
+ */
+function BedrockRow({
+  row,
+  bedrock,
+  id,
+  rank,
+  rankedCount,
+  moving,
+  onMove,
+  editing,
+  setEditing,
+}: {
+  row: SharedRow;
+  bedrock: ClaudeBedrock;
+  id: string;
+  rank: number | null;
+  rankedCount: number;
+  moving: boolean;
+  onMove: (dir: -1 | 1) => void;
+  editing: boolean;
+  setEditing: (on: boolean) => void;
+}): React.ReactElement {
+  const provider = PROVIDERS.find((p) => p.id === 'claude-code')!;
+  const signedOut = !row.connected;
+  // Signed out has its own Status line; any other state but Ready is said under the label.
+  const state =
+    row.state && row.state.state !== 'ready' && row.state.state !== 'signed_out'
+      ? describeAccountState(row.state, formatReset)
+      : undefined;
+  const items: AnchoredMenuItem[] = [
+    ...(rank === null ? [] : moveItems(`account-${id}`, rank - 1, rankedCount, moving)),
+    { id: 'edit', label: 'Edit', testID: `account-${id}-edit` },
+    { id: 'remove', label: 'Remove', testID: `account-${id}-remove`, destructive: true },
+  ];
+  const onSelect = (action: string): void => {
+    if (action === 'up') onMove(-1);
+    else if (action === 'down') onMove(1);
+    else if (action === 'edit') setEditing(true);
+    else if (action === 'remove') {
+      Alert.alert(`Remove ${row.label}?`, 'The account is forgotten everywhere.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => void writeShared('Remove', () => api.removeAccount('claude-code', row.id)),
+        },
+      ]);
+    }
+  };
+  return (
+    <View testID={`account-${id}`} style={{ paddingVertical: space.xs }}>
+      <Row
+        title={row.label}
+        subtitle={state}
+        leading={<Leading provider={provider} row={row} id={id} rank={rank} />}
+        right={
+          <>
+            <BedrockTag testID={`account-${id}-tag`} />
+            <RowMenu
+              testID={`account-${id}-menu`}
+              label={row.label}
+              items={items}
+              onSelect={onSelect}
+            />
+          </>
+        }
+      />
+      <View style={{ paddingHorizontal: space.md + 2 }}>
+        <BedrockLines bedrock={bedrock} signedOut={signedOut} testID={`account-${id}-bedrock`} />
+        {editing ? (
+          <BedrockForm
+            testID={`account-${id}-form`}
+            editing={{
+              accountId: row.id,
+              initial: {
+                label: row.label,
+                auto: !('auto' in row && row.auto === false),
+                hostId: bedrock.hostId,
+                awsProfile: bedrock.awsProfile,
+                awsRegion: bedrock.awsRegion,
+                regionPrefix: bedrock.regionPrefix,
+                monthlyCapUsd: bedrock.monthlyCapUsd,
+              },
+            }}
+            onDone={() => setEditing(false)}
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
