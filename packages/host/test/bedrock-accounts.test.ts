@@ -215,6 +215,35 @@ describe('BedrockSignIn', () => {
     await monitor.checkAll();
     expect(changes).toBe(2); // no change, no report
   });
+
+  it('checks an account added while a pass is running', async () => {
+    const accounts: ClaudeStoredAccount[] = [
+      { id: 'b1', label: 'Work AWS', credential: null, bedrock: bedrockFields },
+    ];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const monitor = new BedrockSignIn({
+      accounts: () => accounts,
+      check: async (profile) => {
+        if (profile === 'work') await gate;
+        return profile === 'gone'
+          ? { exists: false, signedIn: null, error: 'not in the config' }
+          : { exists: true, signedIn: true };
+      },
+      onChange: () => undefined,
+    });
+    const first = monitor.checkAll();
+    accounts.push({
+      id: 'b2',
+      label: 'Gone AWS',
+      credential: null,
+      bedrock: { ...bedrockFields, awsProfile: 'gone' },
+    });
+    const second = monitor.checkAll();
+    release();
+    await Promise.all([first, second]);
+    expect(monitor.signedOut('b2')).toBe(true);
+  });
 });
 
 describe('AccountRotation.order and auto', () => {
@@ -308,6 +337,19 @@ describe('Bedrock cap', () => {
         { id: 'c1', credential: { accessToken: 'tok-1' }, auto: false } as never,
       ]),
     ).toBe(claudeAccountsIdentity(sub));
+  });
+
+  it('toggling Auto on one of three accounts reorders them but is not new keys', () => {
+    const three = [
+      { id: 'c2', credential: { accessToken: 'tok-2' }, auto: true },
+      { id: 'c1', credential: { accessToken: 'tok-1' }, auto: true },
+      { id: 'b1', credential: null, auto: true, bedrock: bedrockFields },
+    ];
+    // Unticking `c2` moves it after the others (the server's `placeByAuto`).
+    const toggled = [three[1]!, three[2]!, { ...three[0]!, auto: false }];
+    expect(claudeAccountsIdentity(toggled)).toBe(claudeAccountsIdentity(three));
+    // Removing one still is.
+    expect(claudeAccountsIdentity(toggled.slice(1))).not.toBe(claudeAccountsIdentity(three));
   });
 });
 

@@ -3008,8 +3008,17 @@ export const ClaudeBedrock = z
     monthlyCapUsd: z.number().positive(),
     spentUsd: z.number().nonnegative(),
     spentMonth: z.string().regex(/^\d{4}-\d{2}$/),
+    /**
+     * The `spendId`s of `host.account_spend` frames already in `spentUsd`,
+     * newest last, at most `BEDROCK_SPEND_IDS_KEPT`, cleared when the month
+     * turns. A host subtracts none of these from the spend it still owes, and
+     * the server adds none of them twice. Server-maintained; absent = none.
+     */
+    spendIds: z.array(z.string().min(1)).optional(),
   })
   .strict();
+/** How many applied spend ids a Bedrock account keeps (`ClaudeBedrock.spendIds`). */
+export const BEDROCK_SPEND_IDS_KEPT = 500;
 export type ClaudeBedrock = z.infer<typeof ClaudeBedrock>;
 
 export const SharedClaudeAccount = z
@@ -9143,6 +9152,12 @@ export const HostAccountSpendEvent = z
     costUsd: z.number().nonnegative(),
     /** When the turn or call ended, ms-epoch: the month it counts in. */
     at: z.number(),
+    /**
+     * Unique per spend, so a resend is added once and the host can tell which
+     * of its owed spends the server's figure already holds. Optional for
+     * hosts that predate it.
+     */
+    spendId: z.string().min(1).optional(),
   })
   .strict();
 export type HostAccountSpendEvent = z.infer<typeof HostAccountSpendEvent>;

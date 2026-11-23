@@ -250,7 +250,10 @@ A host runs Claude on Amazon Bedrock accounts and says so by reporting
 `awsProfiles` in `host.host`: the profiles named in its AWS config
 (`[default]`, `[profile x]`) and shared credentials (`[x]`), read from
 `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` where set and `~/.aws`
-otherwise, with each one's `region`. No other key is read. A
+otherwise, with each one's `region`. No other key is read. The server remembers, across
+its own restarts, which hosts have said so, and forgets a host only when its
+`host.host` comes without `awsProfiles`, so a snapshot sent before a
+reconnecting host has reported again still carries its Bedrock accounts. A
 `patch.aws_profile_check.request` is answered from the same list and, for a
 profile there, `aws configure export-credentials --profile <name> --format
 process` run without the host's own AWS variables: success with an expiry still
@@ -269,7 +272,10 @@ ended in an error result, the host sends `host.account_spend` with the
 Claude Code process reported (the figure is the process's running total). It
 goes through the host outbox, so a dropped link or a restart loses none, and
 until the server acknowledges it the host adds it to the server's spend when it
-checks the cap. A turn that would start on a capped account does not start: it
+checks the cap. Each spend carries a `spendId`; the server adds each id once,
+even across its own restart, and lists the month's applied ids in the
+account's `spendIds`, so the host does not add a spend the server's figure
+already holds. An acknowledgement checks the cap again. A turn that would start on a capped account does not start: it
 pauses as a limit until the first of next month, like one the provider refused.
 A chat locked to a Bedrock account on another host (the snapshot names those,
 id and label only, in `claudeHeldElsewhere`) is refused naming it, never run on

@@ -143,4 +143,31 @@ describe('spend the server has not acknowledged', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('does not count a spend the server has already added, and says when an acknowledgement lands', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-bedrock-applied-'));
+    const logger = { warn: () => {}, error: () => {} };
+    let acks = 0;
+    try {
+      const outbox = new Outbox({
+        path: join(dir, 'outbox.jsonl'),
+        logger,
+        onAck: () => (acks += 1),
+      });
+      outbox.append({ ...spendEvent(3), spendId: 'a' });
+      outbox.append({ ...spendEvent(3), spendId: 'b' });
+      // The server committed `a` (95 already includes it) and pushed its
+      // snapshot before the acknowledgement arrived: only `b` is still owed.
+      const applied = ['a'];
+      expect(pendingBedrockSpendUsd(outbox.pending(), 'bed', NOW, applied)).toBe(3);
+      expect(bedrockCappedWith({ ...bedrock, spentUsd: 96 }, 3, NOW)).toBe(false);
+      outbox.ack(outbox.pending()[0]!.position);
+      expect(acks).toBe(1);
+      // An acknowledgement that drops nothing new is not news.
+      outbox.ack(outbox.pending()[0]!.position - 1);
+      expect(acks).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

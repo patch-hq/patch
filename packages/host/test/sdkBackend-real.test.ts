@@ -701,7 +701,8 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     await drain(
       backend.run({ prompt: 'a', cwd: '/tmp', abortController: ac, oauthAccessToken: 'tok' }),
     );
-    expect('settings' in calls[0]!.options).toBe(false);
+    // No Memory choice: the flag layer carries only the cloud switches.
+    expect(calls[0]!.options['settings']).not.toHaveProperty('autoMemoryEnabled');
 
     await drain(
       backend.run({
@@ -712,7 +713,7 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
         memoryEnabled: false,
       }),
     );
-    expect(calls[1]!.options['settings']).toEqual({
+    expect(calls[1]!.options['settings']).toMatchObject({
       autoMemoryEnabled: false,
     });
   });

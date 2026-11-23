@@ -68,6 +68,7 @@ import {
   bedrockAtCap,
   bedrockCapResetsAt,
   bedrockMonth,
+  BEDROCK_SPEND_IDS_KEPT,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { AccountStateTracker } from './account-states.js';
@@ -248,6 +249,11 @@ interface PendingAdopt {
 /** How often saved provider keys are checked again. */
 const KEY_RECHECK_MS = 60 * 60_000;
 
+/** A Bedrock account as surfaces see it: the applied spend ids are for its host only. */
+function withoutSpendIds({ spendIds: _forHost, ...bedrock }: ClaudeBedrock): ClaudeBedrock {
+  return bedrock;
+}
+
 export class SharedSettingsService {
   private settings: SharedSettings;
   private secrets: StoredSecrets = structuredClone(EMPTY_SHARED_SECRETS);
@@ -275,8 +281,13 @@ export class SharedSettingsService {
    * when it reported them, which is what says it runs Bedrock accounts.
    */
   private readonly awsProfiles = new Map<string, AwsProfileInfo[]>();
-  /** Bedrock spends already added, so an outbox resend is not counted twice. */
-  private readonly spendSeen = new Set<string>();
+  /**
+   * Hosts that run Bedrock accounts: added when a host reports `awsProfiles`,
+   * removed only when it reports `host.host` without them. Persisted, so the
+   * first snapshot after a restart, which may go out before the host's
+   * `host.host`, still carries the host's own Bedrock accounts.
+   */
+  private bedrockHosts = new Set<string>();
   /**
    * Bedrock accounts whose host last said their profile is not signed in. In
    * memory: the host restates it on connect and every check after.
@@ -303,8 +314,10 @@ export class SharedSettingsService {
         version?: number;
         importedHosts?: string[];
         keysImportedHosts?: string[];
+        bedrockHosts?: string[];
       };
       this.version = state.version ?? 0;
+      this.bedrockHosts = new Set(state.bedrockHosts ?? []);
       this.importedHosts = new Set(state.importedHosts ?? []);
       this.keysImportedHosts = new Set(state.keysImportedHosts ?? []);
     }
@@ -468,6 +481,7 @@ export class SharedSettingsService {
           version: this.version,
           importedHosts: [...this.importedHosts],
           keysImportedHosts: [...this.keysImportedHosts],
+          bedrockHosts: [...this.bedrockHosts],
         },
         null,
         2,
@@ -505,7 +519,7 @@ export class SharedSettingsService {
         ...(a.credential?.organizationId ? { organizationId: a.credential.organizationId } : {}),
         state: this.stateOf(a),
         ...(a.auto !== undefined ? { auto: a.auto } : {}),
-        ...(a.bedrock ? { bedrock: { ...a.bedrock } } : {}),
+        ...(a.bedrock ? { bedrock: withoutSpendIds(a.bedrock) } : {}),
       })),
       codex: this.secrets.codex.map((a) => ({
         id: a.id,
@@ -779,7 +793,7 @@ export class SharedSettingsService {
     const { webBotAuthKey: _serverOnlyIdentity, ...sharedSecrets } = this.secrets;
     // A Bedrock account runs on its own host only, and only on a host that
     // says it can run one; no other host ever sees it (spec/10 § Backend credentials).
-    const capable = this.awsProfiles.has(hostId);
+    const capable = this.bedrockHosts.has(hostId);
     const forHost = {
       ...sharedSecrets,
       claude: sharedSecrets.claude.filter(
@@ -1015,10 +1029,16 @@ export class SharedSettingsService {
    * snapshot with or without its Bedrock accounts.
    */
   private observeAwsProfiles(hostId: string, profiles: AwsProfileInfo[] | undefined): void {
-    const before = this.awsProfiles.has(hostId);
-    if (profiles) this.awsProfiles.set(hostId, profiles);
-    else this.awsProfiles.delete(hostId);
+    const before = this.bedrockHosts.has(hostId);
+    if (profiles) {
+      this.awsProfiles.set(hostId, profiles);
+      this.bedrockHosts.add(hostId);
+    } else {
+      this.awsProfiles.delete(hostId);
+      this.bedrockHosts.delete(hostId);
+    }
     if (before === (profiles !== undefined)) return;
+    this.persist({ secrets: false });
     if (!this.secrets.claude.some((a) => a.bedrock?.hostId === hostId)) return;
     if (
       this.syncing &&
@@ -1078,18 +1098,19 @@ export class SharedSettingsService {
     }
     if (event.costUsd === 0 && month === b.spentMonth) return;
     // A spend comes through the host's outbox, which resends whatever was not
-    // acknowledged: one already added (its acknowledgement lost with the link)
-    // is not added twice.
-    const key = `${event.hostId}|${event.accountId}|${event.at}|${event.costUsd}`;
-    if (this.spendSeen.has(key)) return;
-    this.spendSeen.add(key);
-    if (this.spendSeen.size > 1000) {
-      this.spendSeen.delete(this.spendSeen.values().next().value as string);
-    }
+    // acknowledged: one already added (its acknowledgement lost with the link,
+    // or the server restarted) is not added twice. Ids are kept with the
+    // spend, so this holds across a restart; a host from before `spendId` is
+    // told apart by when and what it spent.
+    const spendId = event.spendId ?? `legacy:${event.at}:${event.costUsd}`;
+    const sameMonth = month === b.spentMonth;
+    const applied = sameMonth ? (b.spendIds ?? []) : [];
+    if (applied.includes(spendId)) return;
     account.bedrock = {
       ...b,
-      spentUsd: (month === b.spentMonth ? b.spentUsd : 0) + event.costUsd,
+      spentUsd: (sameMonth ? b.spentUsd : 0) + event.costUsd,
       spentMonth: month,
+      spendIds: [...applied, spendId].slice(-BEDROCK_SPEND_IDS_KEPT),
     };
     this.commit({ secrets: true });
   }

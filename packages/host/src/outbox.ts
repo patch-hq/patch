@@ -33,6 +33,8 @@ export interface OutboxOptions {
     'existsSync' | 'readFileSync' | 'appendFileSync' | 'writeFileSync' | 'renameSync' | 'mkdirSync'
   >;
   compactAfter?: number;
+  /** Called after an acknowledgement drops entries. */
+  onAck?: () => void;
 }
 
 export class Outbox {
@@ -70,6 +72,7 @@ export class Outbox {
     this.deadLines += dropped + 1;
     if (this.deadLines >= this.compactAfter) this.compact();
     else this.write(`${JSON.stringify({ ack: this.acked })}\n`);
+    if (dropped > 0) this.opts.onAck?.();
   }
 
   /** Everything not yet acknowledged, oldest first. */

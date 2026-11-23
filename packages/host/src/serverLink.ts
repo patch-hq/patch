@@ -364,8 +364,10 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     if (outboxed.type === 'host.delegate_entry') {
       if (!serverKeepsDelegates) return;
     } else if (
-      // Bedrock spend is for any server that takes the outbox: one that cannot
-      // read it never acknowledges it, so it stays owed (and counted) here.
+      // Bedrock spend is for any server that takes the outbox. One too old to
+      // read it does not count it, but its acknowledgement of a later
+      // position covers this one (acknowledgements are cumulative), so it
+      // leaves the outbox uncounted rather than staying owed here.
       outboxed.type !== 'host.account_spend' &&
       !serverAnswersReads &&
       HOST_OUTBOX_EVENT_TYPES.has(outboxed.type)

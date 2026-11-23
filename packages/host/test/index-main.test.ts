@@ -3238,6 +3238,46 @@ describe('src/index.ts main() — full host boot', () => {
 
       // None of them reached the model.
       expect(mockSdk.lastOptions()).toBeUndefined();
+
+      // The only account in the order is a Bedrock account whose profile is
+      // not there (signed out). The store's default, its first account, has
+      // `auto` off (a subscription would be the same, but a token account
+      // here would let the model catalogue reach Anthropic). The turn is
+      // refused naming the signed-out account, never run on the default.
+      boot.fakeServer.send(
+        snapshot(2, [
+          capped,
+          {
+            ...capped,
+            id: 'b2',
+            label: 'Spare AWS',
+            bedrock: { ...capped.bedrock, awsProfile: 'spare', spentUsd: 0 },
+          },
+          {
+            ...capped,
+            id: 'b3',
+            label: 'Gone AWS',
+            auto: true,
+            bedrock: { ...capped.bedrock, awsProfile: 'gone', spentUsd: 0 },
+          },
+        ]),
+      );
+      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 2);
+      // The new account's profile check (local: the profile is not in the config).
+      await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'host.account' &&
+          (e.accounts ?? []).some((a) => a.id === 'b3' && a.connected === false),
+      );
+      spawn('chat-signed-out');
+      const signedOut = (await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'chat.error' && e.chatId === 'chat-signed-out',
+      )) as { error: { message: string } };
+      expect(signedOut.error.message).toContain('Gone AWS');
+      // It never reached the model. (The capped chat, whose limit behaviour
+      // lets it move to an account in the order, may have moved onto the new
+      // one before its check: that is not this chat.)
+      expect(mockSdk.lastOptions()?.chatId).not.toBe('chat-signed-out');
     } finally {
       await boot.cleanup();
       rmSync(awsDir, { recursive: true, force: true });
