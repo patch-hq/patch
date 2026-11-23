@@ -175,3 +175,61 @@ test('a turn that moved account because the last ran out says so, in local time'
   // Rendered from the instant, never the raw epoch.
   await expect(line).not.toContainText(String(until));
 });
+
+const BEDROCK = (id: string, label: string, hostId: string) => ({
+  id,
+  label,
+  connected: true,
+  auto: false,
+  bedrock: {
+    hostId,
+    awsProfile: 'work-bedrock',
+    awsRegion: 'eu-west-2',
+    regionPrefix: 'auto',
+    monthlyCapUsd: 100,
+    spentUsd: 18.42,
+    spentMonth: new Date().toISOString().slice(0, 7),
+  },
+});
+
+test('the chat’s account list offers a Bedrock account only on its own host, as pay per use', async ({
+  page,
+}) => {
+  await stubSettingsApi(page, {
+    secrets: {
+      claude: [
+        ...TWO_ACCOUNTS.claude,
+        BEDROCK('b1', 'Work Bedrock', 'd1'),
+        BEDROCK('b2', 'Client X', 'd2'),
+      ],
+    },
+  });
+  await page.goto('/app/dev-harness.html?chat=chat_bus');
+  await page.evaluate(async () => {
+    const res = await fetch('/api/settings/shared');
+    const state = await res.json();
+    (
+      window as unknown as { __preferencesStore: { getState(): { apply(s: unknown): void } } }
+    ).__preferencesStore
+      .getState()
+      .apply(state);
+  });
+  await applyEvent(page, {
+    type: 'chat.state',
+    chatId: 'chat_bus',
+    chatStatus: { state: 'idle', since: 0 },
+    lastUpdated: Date.now(),
+    permissionMode: 'auto',
+    account: { id: 'a1', label: 'work' },
+    preferredAccountId: null,
+  });
+  const select = page.getByTestId('chat-account');
+  await select.click();
+  const list = page.getByTestId('chat-account-list');
+  await expect(list.getByRole('option')).toHaveText([
+    /^Switch automaticallyCurrent: work/,
+    'Always work',
+    'Always personal',
+    'Always Work Bedrock (pay per use)',
+  ]);
+});

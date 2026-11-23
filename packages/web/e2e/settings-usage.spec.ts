@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { settingsUrl, stubSettingsApi } from './settingsHarness.js';
+import {
+  addSecondHost,
+  reportHost,
+  setHostAccount,
+  settingsUrl,
+  stubSettingsApi,
+} from './settingsHarness.js';
 
 // spec/10 § Surface in Settings — Usage. One row per shared Claude account
 // (spec/01 § Settings); its bars are the freshest reading any host has taken,
@@ -229,5 +235,249 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
       /blocked/i,
     );
     await expect(page.getByTestId('account-usage-week-claude-code-a1')).toHaveCount(0);
+  });
+});
+
+// Claude on Amazon Bedrock and the Auto column (spec/10 § Choosing an account,
+// § Settings; spec/14 § Credit sources).
+test.describe('settings — Auto and Amazon Bedrock accounts', () => {
+  const month = new Date().toISOString().slice(0, 7);
+  const bedrock = (hostId: string, awsProfile: string, awsRegion: string) => ({
+    hostId,
+    awsProfile,
+    awsRegion,
+    regionPrefix: 'auto',
+    monthlyCapUsd: 100,
+    spentUsd: 18.42,
+    spentMonth: month,
+  });
+  const ACCOUNTS = {
+    claude: [
+      { id: 'a1', label: 'Personal', connected: true, email: 'me@example.com' },
+      { id: 'a2', label: 'Max', connected: true, email: 'max@example.com' },
+      {
+        id: 'b1',
+        label: 'Work Bedrock',
+        connected: true,
+        auto: false,
+        bedrock: bedrock('d1', 'work-bedrock', 'eu-west-2'),
+      },
+      {
+        id: 'b2',
+        label: 'Client X',
+        connected: false,
+        auto: false,
+        bedrock: bedrock('d2', 'client-x', 'us-east-1'),
+      },
+    ],
+  };
+  async function hosts(page: import('@playwright/test').Page): Promise<void> {
+    await reportHost(page, {
+      hostName: 'mac-mini',
+      awsProfiles: [
+        { name: 'default' },
+        { name: 'work-bedrock', region: 'eu-west-2' },
+        { name: 'client-x', region: 'us-east-1' },
+      ],
+    });
+    await addSecondHost(page, { hostName: 'hetzner', awsProfiles: [] });
+  }
+
+  test('one list: Auto | Account, Bedrock rows last with their host, profile, region and spend', async ({
+    page,
+  }) => {
+    await stubSettingsApi(page, { secrets: ACCOUNTS });
+    await page.goto(SETTINGS);
+    await hosts(page);
+    await expect(page.getByTestId('accounts-head-claude-code')).toHaveText('AutoAccount');
+    const rows = page.locator('[data-testid^="accounts-rank-claude-code-item-"]');
+    await expect(rows).toHaveCount(4);
+    await expect(page.getByTestId('account-auto-claude-code-a1')).toBeChecked();
+    await expect(page.getByTestId('account-auto-claude-code-b1')).not.toBeChecked();
+    await expect(page.getByTestId('accounts-rank-claude-code-handle-b1')).toHaveCount(0);
+    await expect(page.getByTestId('account-claude-code-b1').locator('.set-rank')).toHaveCount(0);
+    await expect(page.getByTestId('account-bedrock-claude-code-b1-host')).toHaveText(
+      'Hostmac-mini',
+    );
+    await expect(page.getByTestId('account-bedrock-claude-code-b1-spent')).toHaveText(
+      'Spent$18.42 of $100 cap · estimated',
+    );
+    await expect(page.getByTestId('account-bedrock-claude-code-b1-monthly')).toContainText('18%');
+    await expect(page.getByTestId('account-bedrock-claude-code-b2-status')).toHaveText(
+      'StatusAWS sign-in expired',
+    );
+    // The value column lines up with the bar, past the label column.
+    const label = (await page
+      .getByTestId('account-bedrock-claude-code-b1-host')
+      .locator('.set-bar-label')
+      .boundingBox())!;
+    const value = (await page
+      .getByTestId('account-bedrock-claude-code-b1-host')
+      .locator('.acct-val')
+      .boundingBox())!;
+    expect(value.x).toBeGreaterThan(label.x + label.width);
+    expect(Math.abs(value.y - label.y)).toBeLessThan(3);
+  });
+
+  test('a host reporting the profile signed out shows it expired', async ({ page }) => {
+    await stubSettingsApi(page, { secrets: ACCOUNTS });
+    await page.goto(SETTINGS);
+    await hosts(page);
+    await expect(page.getByTestId('account-bedrock-claude-code-b1-spent')).toBeVisible();
+    await setHostAccount(page, {
+      hostId: 'd1',
+      backendId: 'claude-code',
+      connected: false,
+      accounts: [
+        { id: 'b1', label: 'Work Bedrock', connected: false, error: 'AWS sign-in expired' },
+      ],
+    });
+    await expect(page.getByTestId('account-bedrock-claude-code-b1-status')).toHaveText(
+      'StatusAWS sign-in expired',
+    );
+  });
+
+  test('ticking Auto writes auto for the account', async ({ page }) => {
+    const server = await stubSettingsApi(page, { secrets: ACCOUNTS });
+    await page.goto(SETTINGS);
+    // The box follows the committed state, so a click is a write, not a toggle.
+    await page.getByTestId('account-auto-claude-code-b1').click();
+    await expect
+      .poll(() => server.writes.find((w) => w.method === 'PATCH'))
+      .toEqual({ method: 'PATCH', path: '/api/accounts/claude-code/b1', body: { auto: true } });
+  });
+
+  test('Add account → Amazon Bedrock: the form adds the account on the chosen host', async ({
+    page,
+  }) => {
+    const server = await stubSettingsApi(page, { secrets: ACCOUNTS });
+    await page.goto(SETTINGS);
+    await hosts(page);
+    await page.getByTestId('add-claude-account').click();
+    await expect(page.getByTestId('add-claude-menu').getByRole('menuitem')).toHaveText([
+      'Claude subscription',
+      'Amazon Bedrock',
+    ]);
+    await page.getByTestId('add-claude-bedrock').click();
+    const form = page.getByTestId('bedrock-form');
+    await expect(form).toBeVisible();
+    await expect(page.getByTestId('add-claude-account')).toHaveCount(0);
+    await page.getByTestId('bedrock-name').fill('Team Bedrock');
+    await page.getByTestId('bedrock-host-d1').click();
+    await expect(page.getByTestId('bedrock-profile').getByRole('button')).toHaveText([
+      'default',
+      'work-bedrock',
+      'client-x',
+    ]);
+    await page.getByTestId('bedrock-profile-client-x').click();
+    await expect(page.getByTestId('bedrock-region')).toHaveValue('us-east-1');
+    await expect(page.getByTestId('bedrock-prefix').getByRole('button')).toHaveText([
+      'Auto (US)',
+      'EU',
+      'US',
+      'APAC',
+      'Japan',
+      'Australia',
+      'Global',
+    ]);
+    await page.getByTestId('bedrock-cap').fill('$40');
+    await page.getByTestId('bedrock-submit').click();
+    await expect
+      .poll(() => server.writes.find((w) => w.method === 'POST'))
+      .toEqual({
+        method: 'POST',
+        path: '/api/accounts/claude-code',
+        body: {
+          bedrock: {
+            label: 'Team Bedrock',
+            hostId: 'd1',
+            awsProfile: 'client-x',
+            awsRegion: 'us-east-1',
+            regionPrefix: 'auto',
+            monthlyCapUsd: 40,
+            auto: false,
+          },
+        },
+      });
+    await expect(form).toHaveCount(0);
+    await expect(page.getByTestId('add-claude-account')).toBeVisible();
+  });
+
+  test('a refused add keeps the form and says the server’s words', async ({ page }) => {
+    await stubSettingsApi(page, {
+      secrets: ACCOUNTS,
+      answer: (w) =>
+        w.method === 'POST'
+          ? { status: 409, body: { error: 'host_offline', message: 'mac-mini is offline' } }
+          : undefined,
+    });
+    await page.goto(SETTINGS);
+    await hosts(page);
+    await page.getByTestId('add-claude-account').click();
+    await page.getByTestId('add-claude-bedrock').click();
+    await page.getByTestId('bedrock-name').fill('Team');
+    await page.getByTestId('bedrock-host-d1').click();
+    await page.getByTestId('bedrock-profile-default').click();
+    await page.getByTestId('bedrock-region').fill('eu-west-1');
+    await page.getByTestId('bedrock-cap').fill('10');
+    await page.getByTestId('bedrock-submit').click();
+    await expect(page.getByText(/mac-mini is offline/)).toBeVisible();
+    await expect(page.getByTestId('bedrock-form')).toBeVisible();
+  });
+
+  test('⋯ → Edit opens the form filled in; Save sends only the change', async ({ page }) => {
+    const server = await stubSettingsApi(page, { secrets: ACCOUNTS });
+    await page.goto(SETTINGS);
+    await hosts(page);
+    await page.getByTestId('account-menu-claude-code-b1').click();
+    await expect(
+      page.getByTestId('account-menu-claude-code-b1-open').getByRole('menuitem'),
+    ).toHaveText(['Edit', 'Remove']);
+    await page.getByTestId('account-edit-claude-code-b1').click();
+    await expect(page.getByTestId('bedrock-name')).toHaveValue('Work Bedrock');
+    await expect(page.getByTestId('bedrock-cap')).toHaveValue('$100');
+    await page.getByTestId('bedrock-cap').fill('150');
+    await page.getByTestId('bedrock-submit').click();
+    await expect
+      .poll(() => server.writes.find((w) => w.method === 'PATCH'))
+      .toEqual({
+        method: 'PATCH',
+        path: '/api/accounts/claude-code/b1',
+        body: { monthlyCapUsd: 150 },
+      });
+  });
+
+  test('Add account → Claude subscription offers the sign-in and the setup token', async ({
+    page,
+  }) => {
+    await stubSettingsApi(page, { secrets: ACCOUNTS });
+    await page.goto(SETTINGS);
+    await page.getByTestId('add-claude-account').click();
+    await page.getByTestId('add-claude-subscription').click();
+    await expect(page.getByTestId('claude-signin-start')).toBeVisible();
+    await expect(page.getByTestId('add-claude-setup-token')).toBeVisible();
+    await page.getByTestId('add-claude-cancel').click();
+    await expect(page.getByTestId('add-claude-account')).toBeVisible();
+  });
+});
+
+test.describe('settings — Chats: account for titles and status', () => {
+  test('Automatic and every Claude account; the choice is written as backgroundAccount', async ({
+    page,
+  }) => {
+    const server = await stubSettingsApi(page, {
+      secrets: {
+        claude: [
+          { id: 'a1', label: 'Personal', connected: true },
+          { id: 'a2', label: 'Max', connected: true },
+        ],
+      },
+    });
+    await page.goto(settingsUrl('chats'));
+    const select = page.getByTestId('background-account-select');
+    await expect(select.locator('option')).toHaveText(['Automatic', 'Personal', 'Max']);
+    await expect(select).toHaveValue('auto');
+    await select.selectOption('a2');
+    await expect.poll(() => server.patches).toContainEqual({ backgroundAccount: 'a2' });
   });
 });

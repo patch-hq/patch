@@ -1411,7 +1411,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
    * past. Fixed when the chat is created, like the model.
    */
   function accountField(): JSX.Element | null {
-    const accounts = lockableAccounts(sharedAccounts, form.spawnModel);
+    const accounts = lockableAccounts(sharedAccounts, form.spawnModel, form.spawnHostId);
     const value = form.spawnAccount;
     const extra =
       value && !accounts.some((a) => a.id === value)

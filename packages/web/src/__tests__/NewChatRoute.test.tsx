@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Link } from 'react-router-dom';
-import { compactModelLabel } from '@patch/wire';
+import { bedrockMonth, compactModelLabel } from '@patch/wire';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { NewChatRoute } from '../routes/NewChatRoute.js';
@@ -1698,6 +1698,60 @@ describe('/chats/new', () => {
     expect(card('c1').dataset.used).toBe('true');
     expect(card('c0').dataset.used).toBe('false');
     expect(screen.getByTestId('new-chat-account-c1').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('offers a Bedrock account only for its own host, with its spend on the usage card', async () => {
+    usePresenceStore.getState().setHostOnline('d2', true);
+    reportHost('d2', { hostName: 'mac-mini', awsProfiles: [{ name: 'work-bedrock' }] });
+    useChatStore.setState({
+      chats: {
+        c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1'),
+        c2: makeRow('c2', '/srv/bravo', 200, 'd2'),
+      },
+    });
+    setSharedAccounts({
+      claude: [
+        { connected: true },
+        { connected: true },
+        {
+          id: 'b1',
+          label: 'Work Bedrock',
+          connected: true,
+          auto: false,
+          bedrock: {
+            hostId: 'd2',
+            awsProfile: 'work-bedrock',
+            awsRegion: 'eu-west-2',
+            regionPrefix: 'auto',
+            monthlyCapUsd: 100,
+            spentUsd: 18.42,
+            spentMonth: bedrockMonth(Date.now()),
+          },
+        },
+      ],
+    });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd1');
+    await screen.findByTestId('new-chat-account');
+    expect(screen.queryByTestId('new-chat-account-b1')).toBeNull();
+    expect(screen.queryByTestId('new-chat-usage-claude-code:b1')).toBeNull();
+
+    chooseHost('d2');
+    expect(await screen.findByTestId('new-chat-account-b1')).toHaveTextContent('Work Bedrock');
+    const card = screen.getByTestId('new-chat-usage-claude-code:b1');
+    expect(card).toHaveTextContent('Work BedrockBedrock');
+    expect(screen.getByTestId('new-chat-usage-claude-code:b1-spend')).toHaveTextContent(
+      '$18.42 of $100 this month · estimated',
+    );
+    fireEvent.click(card);
+    expect(screen.getByTestId('new-chat-account-b1')).toHaveAttribute('aria-checked', 'true');
+
+    // Back on d1 the Bedrock choice goes: it cannot run there.
+    chooseHost('d1');
+    await waitFor(() => expect(screen.queryByTestId('new-chat-account-b1')).toBeNull());
+    expect(screen.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'true');
   });
 
   it('defaults to the account that is in credit when the first one is spent, and keeps a later choice', async () => {

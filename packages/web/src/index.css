@@ -10422,6 +10422,69 @@ button.set-row-open:focus-visible {
   padding: 14px 16px;
   background: var(--bg-elevated);
 }
+/* Claude accounts lead with their Auto box: ticked, the account is in the
+   order "Pick the account by" walks; unticked, it runs only when a chat picks
+   it, so it has no handle or rank (spec/10 § Choosing an account). */
+.set-acct.with-auto {
+  grid-template-columns: 16px 18px 24px minmax(0, 1fr) auto;
+}
+.acct-auto {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.acct-head {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 12px;
+  padding: 8px 16px 6px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.acct-head span:nth-child(2) {
+  padding-left: 66px;
+}
+.acct-kind {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  font-weight: 500;
+}
+/* A Bedrock row's labelled lines: the value spans the bar columns. */
+.acct-val {
+  grid-column: 2 / -1;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.acct-val.set-error {
+  color: var(--danger);
+}
+.acct-auto-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+.bedrock-cap {
+  max-width: 160px;
+}
+.bedrock-form-title {
+  font-weight: 600;
+}
+.bedrock-add-menu {
+  left: 0;
+  right: auto;
+  top: calc(100% + 4px);
+}
 .set-acct-body {
   min-width: 0;
   display: flex;
@@ -10585,7 +10648,8 @@ button.set-row-open:focus-visible {
 }
 .set-bars-empty,
 .set-bars-reason,
-.set-bars-read-at {
+.set-bars-read-at,
+.set-bars > .set-sub {
   grid-column: 1 / -1;
 }
 .set-bars-read-at {

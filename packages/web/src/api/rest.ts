@@ -17,6 +17,7 @@ import type {
   SettingsChangedEvent,
   AcpLoginStatus,
   SharedSettings,
+  BedrockRegionPrefix,
   TodoItem,
   ToolLogEntry,
   UsageSample,
@@ -271,6 +272,17 @@ async function uploadMultipart(
  * host, and the same on every surface.
  */
 export type AccountPreferences = SharedSettings;
+
+/** A Claude on Amazon Bedrock account as it is added (spec/10 § Signing in). */
+export interface BedrockAccountInput {
+  label: string;
+  hostId: string;
+  awsProfile: string;
+  awsRegion: string;
+  regionPrefix: BedrockRegionPrefix;
+  monthlyCapUsd: number;
+  auto?: boolean;
+}
 
 /** What a settings write answers with: the committed shared state. */
 export type SharedState = Omit<SettingsChangedEvent, 'type'>;
@@ -1144,7 +1156,7 @@ export const api = {
     }),
   addAccount: (
     backendId: SharedBackendId,
-    body: { token?: string; apiKey?: string; label?: string },
+    body: { token?: string; apiKey?: string; label?: string; bedrock?: BedrockAccountInput },
   ) => request<SharedState>(`/api/accounts/${backendId}`, { method: 'POST', body }),
   /** Start signing in to Claude in the browser (spec/10 § Signing in to Claude). */
   claudeSignInStart: (body: { label?: string; accountId?: string } = {}) =>
@@ -1181,7 +1193,12 @@ export const api = {
   updateAccount: (
     backendId: SharedBackendId,
     accountId: string,
-    body: { token?: string; label?: string },
+    body: {
+      token?: string;
+      label?: string;
+      /** In the order or not (spec/10 § Choosing an account); Claude accounts. */
+      auto?: boolean;
+    } & Partial<Omit<BedrockAccountInput, 'label' | 'auto'>>,
   ) =>
     request<SharedState>(`/api/accounts/${backendId}/${encodeURIComponent(accountId)}`, {
       method: 'PATCH',

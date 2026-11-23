@@ -7,6 +7,7 @@
 
 import {
   CLAUDE_BACKEND_ID,
+  type ClaudeBedrock,
   type ClaudeMemoryEntry,
   type HostAccountEvent,
   type HostAccountSummary,
@@ -147,7 +148,13 @@ export function reportCredentialError(
 
 /** Seed the server's shared provider accounts, as the settings state delivers them. */
 export function setSharedAccounts(accounts: {
-  claude?: { connected: boolean }[];
+  claude?: {
+    connected: boolean;
+    id?: string;
+    label?: string;
+    auto?: boolean;
+    bedrock?: ClaudeBedrock;
+  }[];
   codex?: { connected: boolean; kind?: 'chatgpt' | 'apiKey' }[];
 }): void {
   usePreferencesStore.setState({

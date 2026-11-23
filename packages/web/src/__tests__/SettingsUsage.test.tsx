@@ -21,6 +21,7 @@ import {
   resetSettingsState,
 } from './settingsHarness.js';
 import { loadShared, sharedState } from './sharedHelpers.js';
+import { bedrockMonth } from '@patch/wire';
 
 const errors = (): string[] => useUiStore.getState().errors.map((e) => e.message);
 
@@ -28,6 +29,12 @@ const errors = (): string[] => useUiStore.getState().errors.map((e) => e.message
 function action(menu: string, item: string): HTMLElement {
   if (!screen.queryByTestId(item)) fireEvent.click(screen.getByTestId(menu));
   return screen.getByTestId(item);
+}
+
+/** Add account → Claude subscription: the sign-in and setup-token controls. */
+function addSubscription(): void {
+  fireEvent.click(screen.getByTestId('add-claude-account'));
+  fireEvent.click(screen.getByTestId('add-claude-subscription'));
 }
 
 /** The order a ranked list is drawn in, by account id. */
@@ -199,7 +206,8 @@ describe('Settings → Usage → changing accounts', () => {
       .spyOn(api, 'addAccount')
       .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK] } }));
     renderSettings('/settings/usage');
-    fireEvent.click(screen.getByTestId('add-claude-account'));
+    addSubscription();
+    fireEvent.click(screen.getByTestId('add-claude-setup-token'));
     await waitFor(() => expect(useUiStore.getState().promptDialog).not.toBeNull());
     useUiStore.getState().resolvePrompt('  sk-ant-oat01-fake  ');
     await waitFor(() =>
@@ -222,6 +230,7 @@ describe('Settings → Usage → changing accounts', () => {
       .spyOn(api, 'claudeSignInComplete')
       .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK] } }));
     renderSettings('/settings/usage');
+    addSubscription();
     fireEvent.click(screen.getByTestId('claude-signin-start'));
     await waitFor(() =>
       expect(open).toHaveBeenCalledWith(
@@ -261,6 +270,7 @@ describe('Settings → Usage → changing accounts', () => {
       sharedState({ version: 2, secrets: { claude: [WORK] } }),
     );
     renderSettings('/settings/usage');
+    addSubscription();
     fireEvent.click(screen.getByTestId('claude-signin-start'));
     expect(await screen.findByTestId('claude-signin-wait')).toBeInTheDocument();
     expect(screen.queryByTestId('claude-signin-code')).toBeNull();
@@ -285,6 +295,7 @@ describe('Settings → Usage → changing accounts', () => {
       }),
     );
     renderSettings('/settings/usage');
+    addSubscription();
     fireEvent.click(screen.getByTestId('claude-signin-start'));
     fireEvent.change(await screen.findByTestId('claude-signin-code'), { target: { value: 'c' } });
     fireEvent.click(screen.getByTestId('claude-signin-finish'));
@@ -301,7 +312,8 @@ describe('Settings → Usage → changing accounts', () => {
       }),
     );
     renderSettings('/settings/usage');
-    fireEvent.click(screen.getByTestId('add-claude-account'));
+    addSubscription();
+    fireEvent.click(screen.getByTestId('add-claude-setup-token'));
     await waitFor(() => expect(useUiStore.getState().promptDialog).not.toBeNull());
     useUiStore.getState().resolvePrompt('sk-ant-oat01-bad');
     await waitFor(() =>
@@ -558,5 +570,242 @@ describe('Settings → Account → sync position', () => {
     expect(toggle).toBeChecked();
     fireEvent.click(toggle);
     await waitFor(() => expect(server.writes).toContainEqual({ syncPosition: false }));
+  });
+});
+
+describe('Settings → Usage → Auto and Amazon Bedrock accounts', () => {
+  const month = bedrockMonth(Date.now());
+  const WORK_BEDROCK = {
+    id: 'b1',
+    label: 'Work Bedrock',
+    connected: true,
+    auto: false,
+    state: { state: 'ready' as const },
+    bedrock: {
+      hostId: 'd1',
+      awsProfile: 'work-bedrock',
+      awsRegion: 'eu-west-2',
+      regionPrefix: 'auto' as const,
+      monthlyCapUsd: 100,
+      spentUsd: 18.42,
+      spentMonth: month,
+    },
+  };
+  const CLIENT_X = {
+    ...WORK_BEDROCK,
+    id: 'b2',
+    label: 'Client X',
+    connected: false,
+    bedrock: {
+      ...WORK_BEDROCK.bedrock,
+      hostId: 'd2',
+      awsProfile: 'client-x',
+      awsRegion: 'us-east-1',
+    },
+  };
+  function hosts(): void {
+    reportHost('d1', {
+      hostName: 'mac-mini',
+      awsProfiles: [
+        { name: 'default' },
+        { name: 'work-bedrock', region: 'eu-west-2' },
+        { name: 'client-x', region: 'us-east-1' },
+      ],
+    });
+    reportHost('d2', { hostName: 'hetzner', awsProfiles: [] });
+    reportHost('d3', { hostName: 'laptop' });
+  }
+
+  it('heads the list Auto | Account; unticked accounts sit last with no handle or rank', () => {
+    loadShared({ secrets: { claude: [WORK, { ...PERSONAL, auto: false }] } });
+    renderSettings('/settings/usage');
+    expect(screen.getByTestId('accounts-head-claude-code')).toHaveTextContent('AutoAccount');
+    expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
+    expect(screen.getByTestId('account-auto-claude-code-acct-a')).toBeChecked();
+    expect(screen.getByTestId('account-auto-claude-code-acct-b')).not.toBeChecked();
+    expect(screen.getByTestId('accounts-rank-claude-code-handle-acct-a')).toBeInTheDocument();
+    expect(screen.queryByTestId('accounts-rank-claude-code-handle-acct-b')).toBeNull();
+    const off = screen.getByTestId('account-claude-code-acct-b');
+    expect(off.querySelector('.set-rank')).toBeNull();
+    // ChatGPT accounts are all in the order: no checkbox, no header.
+    expect(screen.queryByTestId('accounts-head-codex')).toBeNull();
+  });
+
+  it('ticking or unticking Auto writes `auto` for that account', async () => {
+    loadShared({ secrets: TWO });
+    const update = vi
+      .spyOn(api, 'updateAccount')
+      .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK, PERSONAL] } }));
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('account-auto-claude-code-acct-a'));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith('claude-code', 'acct-a', { auto: false }),
+    );
+  });
+
+  it('a reorder names the accounts out of the order last', async () => {
+    loadShared({ secrets: { claude: [WORK, PERSONAL, WORK_BEDROCK] } });
+    const put = vi
+      .spyOn(api, 'orderAccounts')
+      .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK, PERSONAL] } }));
+    renderSettings('/settings/usage');
+    fireEvent.keyDown(screen.getByTestId('accounts-rank-claude-code-handle-acct-b'), {
+      key: 'ArrowUp',
+    });
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith('claude-code', ['acct-b', 'acct-a', 'b1']),
+    );
+  });
+
+  it('a Bedrock row names its host, profile, region and the month’s spend against the cap', () => {
+    hosts();
+    loadShared({ secrets: { claude: [WORK, WORK_BEDROCK] } });
+    renderSettings('/settings/usage');
+    const row = screen.getByTestId('account-claude-code-b1');
+    expect(row).toHaveTextContent('Work BedrockBedrock');
+    expect(screen.getByTestId('account-bedrock-claude-code-b1-host')).toHaveTextContent(
+      'Hostmac-mini',
+    );
+    expect(screen.getByTestId('account-bedrock-claude-code-b1-profile')).toHaveTextContent(
+      'AWS profilework-bedrock',
+    );
+    expect(screen.getByTestId('account-bedrock-claude-code-b1-region')).toHaveTextContent(
+      'Regioneu-west-2',
+    );
+    expect(screen.getByTestId('account-bedrock-claude-code-b1-monthly')).toHaveTextContent(
+      /Monthly18%resets [A-Z][a-z]{2} 1$/,
+    );
+    expect(screen.getByTestId('account-bedrock-claude-code-b1-spent')).toHaveTextContent(
+      'Spent$18.42 of $100 cap · estimated',
+    );
+    expect(screen.getByTestId('account-auto-claude-code-b1')).not.toBeChecked();
+  });
+
+  it('a signed-out Bedrock profile says so in place of the spend', () => {
+    hosts();
+    loadShared({ secrets: { claude: [WORK, CLIENT_X] } });
+    renderSettings('/settings/usage');
+    expect(screen.getByTestId('account-bedrock-claude-code-b2-status')).toHaveTextContent(
+      'StatusAWS sign-in expired',
+    );
+    expect(screen.queryByTestId('account-bedrock-claude-code-b2-spent')).toBeNull();
+    expect(screen.queryByTestId('account-bedrock-claude-code-b2-monthly')).toBeNull();
+  });
+
+  it('a Bedrock row’s ⋯ offers Edit and Remove, with no detail lines', () => {
+    hosts();
+    loadShared({ secrets: { claude: [WORK, WORK_BEDROCK] } });
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('account-menu-claude-code-b1'));
+    const menu = screen.getByTestId('account-menu-claude-code-b1-open');
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((b) => b.textContent)).toEqual([
+      'Edit',
+      'Remove',
+    ]);
+    expect(menu.querySelector('.set-acct-menu-detail')).toBeNull();
+  });
+
+  it('Add account opens a menu: Claude subscription or Amazon Bedrock', () => {
+    loadShared({ secrets: TWO });
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('add-claude-account'));
+    expect(screen.getByTestId('add-claude-menu')).toHaveTextContent(
+      'Claude subscriptionAmazon Bedrock',
+    );
+    fireEvent.click(screen.getByTestId('add-claude-subscription'));
+    expect(screen.getByTestId('claude-signin-start')).toBeInTheDocument();
+    expect(screen.getByTestId('add-claude-setup-token')).toBeInTheDocument();
+  });
+
+  it('adds a Bedrock account: hosts with AWS profiles, that host’s profiles, region from the profile', async () => {
+    hosts();
+    loadShared({ secrets: TWO });
+    const add = vi
+      .spyOn(api, 'addAccount')
+      .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK, WORK_BEDROCK] } }));
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('add-claude-account'));
+    fireEvent.click(screen.getByTestId('add-claude-bedrock'));
+    const form = screen.getByTestId('bedrock-form');
+    expect(form).toHaveTextContent('Add Amazon Bedrock account');
+    expect(screen.queryByTestId('add-claude-account')).toBeNull();
+    // Only the hosts that report AWS profiles.
+    expect(screen.getByTestId('bedrock-host-d1')).toHaveTextContent('mac-mini');
+    expect(screen.getByTestId('bedrock-host-d2')).toHaveTextContent('hetzner');
+    expect(screen.queryByTestId('bedrock-host-d3')).toBeNull();
+    expect(screen.getByTestId('bedrock-submit')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('bedrock-name'), { target: { value: 'Work Bedrock' } });
+    fireEvent.click(screen.getByTestId('bedrock-host-d1'));
+    fireEvent.click(screen.getByTestId('bedrock-profile-work-bedrock'));
+    expect(screen.getByTestId('bedrock-region')).toHaveValue('eu-west-2');
+    expect(screen.getByTestId('bedrock-prefix-auto')).toHaveTextContent('Auto (EU)');
+    expect(screen.getByTestId('bedrock-prefix-auto')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(screen.getByTestId('bedrock-cap'), { target: { value: '$100' } });
+    expect(screen.getByTestId('bedrock-auto')).not.toBeChecked();
+    fireEvent.click(screen.getByTestId('bedrock-submit'));
+    await waitFor(() =>
+      expect(add).toHaveBeenCalledWith('claude-code', {
+        bedrock: {
+          label: 'Work Bedrock',
+          hostId: 'd1',
+          awsProfile: 'work-bedrock',
+          awsRegion: 'eu-west-2',
+          regionPrefix: 'auto',
+          monthlyCapUsd: 100,
+          auto: false,
+        },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId('bedrock-form')).toBeNull());
+    expect(screen.getByTestId('account-claude-code-b1')).toBeInTheDocument();
+  });
+
+  it('keeps the form open and says why when the server refuses the profile', async () => {
+    hosts();
+    loadShared({ secrets: TWO });
+    vi.spyOn(api, 'addAccount').mockRejectedValue(
+      new ApiError(409, 'host_offline', { error: 'host_offline', message: 'mac-mini is offline' }),
+    );
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('add-claude-account'));
+    fireEvent.click(screen.getByTestId('add-claude-bedrock'));
+    fireEvent.change(screen.getByTestId('bedrock-name'), { target: { value: 'Work' } });
+    // It starts on the first host with a profile; one with none says so.
+    expect(screen.getByTestId('bedrock-host-d1')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('bedrock-host-d2'));
+    expect(screen.getByTestId('bedrock-no-profiles')).toHaveTextContent(
+      'hetzner has no AWS profiles',
+    );
+    fireEvent.click(screen.getByTestId('bedrock-host-d1'));
+    fireEvent.click(screen.getByTestId('bedrock-profile-work-bedrock'));
+    fireEvent.change(screen.getByTestId('bedrock-cap'), { target: { value: '50' } });
+    fireEvent.click(screen.getByTestId('bedrock-submit'));
+    await waitFor(() => expect(errors().some((e) => e.includes('mac-mini is offline'))).toBe(true));
+    expect(screen.getByTestId('bedrock-form')).toBeInTheDocument();
+  });
+
+  it('Edit opens the form filled in and writes only what changed', async () => {
+    hosts();
+    loadShared({ secrets: { claude: [WORK, WORK_BEDROCK] } });
+    const update = vi
+      .spyOn(api, 'updateAccount')
+      .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK, WORK_BEDROCK] } }));
+    renderSettings('/settings/usage');
+    fireEvent.click(action('account-menu-claude-code-b1', 'account-edit-claude-code-b1'));
+    expect(screen.getByTestId('bedrock-name')).toHaveValue('Work Bedrock');
+    expect(screen.getByTestId('bedrock-profile-work-bedrock')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByTestId('bedrock-cap')).toHaveValue('$100');
+    fireEvent.change(screen.getByTestId('bedrock-cap'), { target: { value: '250' } });
+    fireEvent.click(screen.getByTestId('bedrock-prefix-eu'));
+    fireEvent.click(screen.getByTestId('bedrock-submit'));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith('claude-code', 'b1', {
+        regionPrefix: 'eu',
+        monthlyCapUsd: 250,
+      }),
+    );
   });
 });

@@ -48,10 +48,45 @@ describe('AccountControl', () => {
     fireEvent.click(screen.getByTestId('chat-account'));
     const options = screen.getAllByRole('option');
     expect(options[0]).toHaveTextContent('Switch automatically');
-    expect(options[0]).toHaveTextContent(
-      'Now on Default. Moves to another account when one runs out.',
-    );
+    expect(options[0]).toHaveTextContent('Current: Default');
     expect(options.slice(1).every((o) => o.textContent?.startsWith('Always '))).toBe(true);
+  });
+
+  it('offers a Bedrock account only for a chat on its own host, as pay per use', () => {
+    const bedrock = (hostId: string) => ({
+      hostId,
+      awsProfile: 'work-bedrock',
+      awsRegion: 'eu-west-2',
+      regionPrefix: 'auto',
+      monthlyCapUsd: 100,
+      spentUsd: 0,
+      spentMonth: '2026-11',
+    });
+    usePreferencesStore.setState({
+      shared: {
+        secrets: {
+          claude: [
+            { id: 'a1', label: 'Default', connected: true },
+            { id: 'a2', label: 'work', connected: true },
+            {
+              id: 'b1',
+              label: 'Work Bedrock',
+              connected: true,
+              auto: false,
+              bedrock: bedrock('d1'),
+            },
+            { id: 'b2', label: 'Client X', connected: true, auto: false, bedrock: bedrock('d2') },
+          ],
+          codex: [],
+        },
+      },
+    } as unknown as Parameters<typeof usePreferencesStore.setState>[0]);
+    render(<AccountControl chatId="c1" />);
+    fireEvent.click(screen.getByTestId('chat-account'));
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels).toContain('Always Work Bedrock (pay per use)');
+    expect(labels.some((l) => l?.includes('Client X'))).toBe(false);
+    expect(labels).toContain('Always work');
   });
 
   it('offers an ACP agent’s own accounts for a chat on that agent, so it can be locked', () => {

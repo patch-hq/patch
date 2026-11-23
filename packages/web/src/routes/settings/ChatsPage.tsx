@@ -8,7 +8,7 @@ import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { CHAT_SORTS, type GroupSort } from '../../lib/chatGroups.js';
-import { DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
+import { BACKGROUND_ACCOUNT_AUTO, DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
 import { patchShared } from './sharedWrite.js';
 import { hourLabel } from '../../lib/snoozePresets.js';
 import { Group, Row, SettingsPage } from './ui.js';
@@ -21,6 +21,8 @@ export function ChatsPage(): JSX.Element {
   const morning = usePreferencesStore((s) => s.preferences.snoozeMorningHour);
   const evening = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
   const cleanupDays = usePreferencesStore((s) => s.preferences.cleanupPeriodDays);
+  const backgroundAccount = usePreferencesStore((s) => s.preferences.backgroundAccount);
+  const claudeAccounts = usePreferencesStore((s) => s.shared?.secrets.claude);
   const loaded = usePreferencesStore((s) => s.loaded);
   const groupSort = useUiStore((s) => s.groupSort);
   const setGroupSort = useUiStore((s) => s.setGroupSort);
@@ -50,6 +52,27 @@ export function ChatsPage(): JSX.Element {
             }
             testid="status-generation-toggle"
           />
+        </Row>
+        {/* Which Claude account titles and status run on (spec/10 § Choosing an account). */}
+        <Row title="Account for titles and status" testid="background-account">
+          <select
+            aria-label="Account for titles and status"
+            value={backgroundAccount}
+            disabled={!loaded}
+            data-testid="background-account-select"
+            onChange={(e) =>
+              void patchShared('account for titles and status', {
+                backgroundAccount: e.target.value,
+              })
+            }
+          >
+            <option value={BACKGROUND_ACCOUNT_AUTO}>Automatic</option>
+            {(claudeAccounts ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label}
+              </option>
+            ))}
+          </select>
         </Row>
       </Group>
       <Group label="Cleanup" testid="settings-cleanup">

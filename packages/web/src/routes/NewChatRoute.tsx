@@ -596,11 +596,12 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // one, else the account default (which is what omitting `model` selects).
   const effectiveModel = model ?? hostModel;
   // The accounts a chat on this model could start on: the shared Claude or
-  // ChatGPT list, whichever backend the model runs on.
+  // ChatGPT list, whichever backend the model runs on. A Bedrock account runs
+  // only on its own host, so it is offered only when that host is chosen.
   const sharedSecrets = usePreferencesStore((st) => st.shared?.secrets);
   const preferableAccounts = useMemo(() => {
-    return lockableAccounts(sharedSecrets, effectiveModel).filter((a) => a.connected);
-  }, [sharedSecrets, effectiveModel]);
+    return lockableAccounts(sharedSecrets, effectiveModel, pickerHostId).filter((a) => a.connected);
+  }, [sharedSecrets, effectiveModel, pickerHostId]);
   // Default to an account that is in credit: when one of the model's accounts
   // is spent and another is not, the chat is pinned to the one that is not
   // until the user chooses, so it never starts on a spent one. Auto stays one click
@@ -1682,6 +1683,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           control. */}
       <AccountUsageStrip
         providerId={providerForModel(effectiveModel)}
+        hostId={pickerHostId}
         usedAccountId={preferredAccountId ?? chosenAccount?.activeAccountId ?? null}
         onSelect={chooseAccount}
       />
