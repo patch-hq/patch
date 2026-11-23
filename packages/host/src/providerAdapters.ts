@@ -19,7 +19,12 @@ export type CredentialResult =
       ok: false;
       reason: string;
       code?: ChatErrorCode;
-      limit?: { accountId: string; resetsAt: number };
+      limit?: {
+        accountId: string;
+        resetsAt?: number;
+        kind?: 'limit' | 'out';
+        rateLimitType?: string;
+      };
     };
 
 export interface TurnAccountHint {

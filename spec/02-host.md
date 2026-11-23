@@ -94,7 +94,10 @@ or whose provider process finished while no host was attached, is reattached:
 everything the provider said meanwhile is read back, what the previous host had
 already recorded is skipped, and a permission the turn was waiting on is asked
 again. A directory belonging to no owed turn is ended and removed, and a finished
-turn's directory is removed. A runner with no host attached whose provider has
+turn's directory is removed. Until the host has done this for a chat (start-up
+work waits for the server's `host.reconciled`), a message, wake or job reaching
+that chat is queued behind the turn being reattached and runs after it; it never
+starts over it, since starting a turn retires whatever runner the chat has on disk. A runner with no host attached whose provider has
 been silent for 30 minutes ends it, so an orphaned turn finishes as failed
 instead of holding its chat running. An install never prunes a version folder a
 live runner started from.

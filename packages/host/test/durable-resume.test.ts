@@ -78,6 +78,8 @@ async function interruptedChat(
   state: 'live' | 'exited' | 'lost',
   beforeSecondHost?: (cfg: DurableTurnConfig, chatId: string) => void,
   logger: pino.Logger = silent,
+  /** Hold start-up work for `host.reconciled`, as a real host does. */
+  inWindow?: (daemon: Daemon, chatId: string, seen: SdkRunOptions[]) => Promise<void>,
 ) {
   const home = mkdtempSync(join(tmpdir(), 'patch-dres-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-dresf-')));
@@ -113,7 +115,13 @@ async function interruptedChat(
   const secondEvents: unknown[] = [];
   beforeSecondHost?.(cfg, chatId);
   const second = host(home, secondBackend, cfg, secondEvents, logger);
-  second.daemon.hydrate();
+  if (inWindow) {
+    second.daemon.hydrate({ deferWorkUntilReconciled: true });
+    await inWindow(second.daemon, chatId, seen);
+    second.daemon.resumeAfterReconciliation();
+  } else {
+    second.daemon.hydrate();
+  }
   await tick(60);
   return { seen, dir, chatId, cfg, secondEvents };
 }
@@ -209,6 +217,30 @@ describe('resuming a turn that outlived the host', () => {
     expect(seen[0]?.durableTurn?.config).toBe(cfg);
     expect(seen.length).toBe(2);
     expect(seen[1]?.prompt).toContain('check in');
+  });
+
+  // 2026-11-23, a self-update: a message the server held across the restart
+  // arrived after auth but before `host.reconciled`. It started a turn at
+  // once, which retired the surviving runner on disk and SIGTERMed its claude.
+  it('queues a message that arrives before start-up reattaches the live turn, then runs it after', async () => {
+    let seenInWindow = -1;
+    const { seen, chatId } = await interruptedChat('live', undefined, silent, async (d, id, s) => {
+      await d.sendInput({ chatId: id, message: 'sent during the restart', localId: 'L2' });
+      await tick();
+      seenInWindow = s.length;
+    });
+    // Nothing started while the host had not yet reattached.
+    expect(seenInWindow).toBe(0);
+    // The surviving turn is reattached, not replaced, and the message runs after it.
+    expect(seen[0]?.prompt).toBe('running');
+    expect(seen[0]?.durableTurn).toMatchObject({
+      chatId,
+      localId: 'L1',
+      attach: { consumed: { offset: 42, envelopes: 2 } },
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.prompt).toContain('sent during the restart');
+    expect(seen[1]?.durableTurn?.attach).toBeUndefined();
   });
 
   it('cuts a turn off when its runner is gone, and clears the directory', async () => {

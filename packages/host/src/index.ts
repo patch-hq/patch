@@ -246,6 +246,7 @@ import { updateClaudeCli } from './claudeCliUpdate.js';
 import {
   AccountRotation,
   parseLimitResetsAt,
+  spentRefusal,
   type FailoverAccount,
   type RouteOptions,
   type RunOnAccountWithCredit,
@@ -4831,6 +4832,18 @@ async function startHost(
    * `preferredAccountId` is the chat's, when the question is about a chat that
    * named one.
    */
+  /**
+   * A current usage reading that says this account is at a limit (spec/10 §
+   * Account states), so routing skips it before any turn is refused on it. No
+   * reading is no limit.
+   */
+  const usageLimited = (accountId: string): { limited?: { resetsAt?: number } } => {
+    const reading = accountUsage?.get(accountId)?.reading;
+    if (reading?.blocked !== true) return {};
+    const scope = refusingRateLimitScope(reading.windows);
+    const resetsAt = scope !== undefined ? reading.windows[scope]?.resetsAt : undefined;
+    return { limited: resetsAt !== undefined ? { resetsAt } : {} };
+  };
   const claudeRoute = (
     store: NonNullable<ReturnType<typeof readPatchStore>>,
     preferredAccountId?: string,
@@ -4843,6 +4856,7 @@ async function startHost(
       connected: a.bedrock !== undefined ? !bedrockSignIn.signedOut(a.id) : a.credential !== null,
       ...(a.auto !== undefined ? { auto: a.auto } : {}),
       ...(bedrockAtCap(a, Date.now()) ? { capped: true } : {}),
+      ...usageLimited(a.id),
       ...(a.credential?.organizationId !== undefined
         ? { organizationId: a.credential.organizationId }
         : {}),
@@ -4885,7 +4899,14 @@ async function startHost(
       undefined,
       daemon.runsOnAnyAccount(chatId),
     );
-    if (failed !== undefined) {
+    // A turn refused before it started, because its account was already known
+    // to be spent, has taught nothing new: the record (and when it was made,
+    // which a later reading is judged against) stays as it was.
+    const alreadyKnown =
+      failed !== undefined &&
+      accountRotation.isExhausted(failed) &&
+      (limit?.resetsAt === undefined || limit.resetsAt === accountRotation.exhaustedUntil(failed));
+    if (failed !== undefined && !alreadyKnown) {
       // Siblings sharing this account's organisation are marked with it. They
       // share its pool, so they have nothing of their own left to try, and
       // walking onto one is how a single spent account came to be reported as
@@ -4919,11 +4940,7 @@ async function startHost(
       // when, and it works on an account too spent to run anything.
       void accountUsage?.refresh(failed, true);
     }
-    // A key that actually HAS credit, or nothing. `effectiveAccount` would
-    // always name one — that is its job, so a turn can fail with the provider's
-    // own message — and reading it here as "there is somewhere to move to" is
-    // exactly how a host with every key spent re-ran the same turn for hours.
-    // Peeked with the chat's own route, so it names where the re-run will
+    // A key that actually HAS credit, or nothing. Peeked with the chat's own route, so it names where the re-run will
     // actually start — the re-run's resolution is what moves a round-robin on.
     const next = accountRotation.usableAccount(accounts, route);
     if (next === undefined) {
@@ -5020,19 +5037,35 @@ async function startHost(
         };
       }
       const locked = store.accounts.find((a) => a.id === route.preferred);
-      // spec/10 § Spending caps: a turn that would start on a capped account
-      // does not; it is limited until the first of next month, UTC.
-      // The lock if it is capped; otherwise the first capped account this
-      // turn could have run on.
       const ordered = accountRotation.order(accounts, route);
-      const cappedId = ordered.find((a) => a.connected && a.capped === true)?.id;
-      const capped = store.accounts.find((a) => a.id === cappedId);
-      if (capped !== undefined) {
-        const now = Date.now();
+      // spec/10 § Limits: every account this turn may use is known to have no
+      // credit — recorded spent, at a usage reading's limit, or at a Bedrock
+      // cap (§ Spending caps). The turn does not start on any of them: it
+      // meets the limit without asking a model and pauses until the earliest
+      // reset, or stops and asks when none states one.
+      const now = Date.now();
+      const spent = accountRotation
+        .spentInRoute(accounts, route)
+        .map((s) =>
+          s.capped ? { ...s, kind: 'limit' as const, resetsAt: bedrockCapResetsAt(now) } : s,
+        );
+      if (spent.length > 0) {
+        const soonest = spent
+          .filter((s) => s.resetsAt !== undefined)
+          .sort((x, y) => x.resetsAt! - y.resetsAt!)[0];
+        const blame = soonest ?? spent[0]!;
+        const label = store.accounts.find((a) => a.id === blame.accountId)?.label ?? 'An account';
         return {
           ok: false,
-          reason: bedrockCapRefusal(capped.label, now),
-          limit: { accountId: capped.id, resetsAt: bedrockCapResetsAt(now) },
+          reason: blame.capped
+            ? bedrockCapRefusal(label, now)
+            : spentRefusal(label, blame.kind, blame.resetsAt),
+          limit: {
+            accountId: blame.accountId,
+            ...(blame.resetsAt !== undefined ? { resetsAt: blame.resetsAt } : {}),
+            ...(blame.resetsAt === undefined ? { kind: blame.kind } : {}),
+            ...(blame.capped ? { rateLimitType: 'monthly_spending_cap' } : {}),
+          },
         };
       }
       // A chat locked to a Bedrock account whose profile is signed out.

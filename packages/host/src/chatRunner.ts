@@ -262,12 +262,21 @@ export type OAuthCheckResult =
        */
       code?: ChatErrorCode;
       /**
-       * The turn would start on an account at a limit Patch enforces itself (a
-       * Bedrock account's monthly cap, spec/10 § Spending caps). It does not
-       * start; it meets the limit as if the provider had refused it, so it
-       * pauses until `resetsAt` or moves on as the user's limit behaviour says.
+       * Every account the turn may use is already known to have no credit:
+       * recorded spent, at a usage reading's limit, or at a limit Patch
+       * enforces itself (a Bedrock account's monthly cap, spec/10 § Spending
+       * caps). It does not start; it meets the limit as if the provider had
+       * refused it on `accountId`, so it pauses until `resetsAt` or moves on as
+       * the user's limit behaviour says. No `resetsAt`: nothing states one, and
+       * `kind` says whether it is a limit or out of credit. `rateLimitType`
+       * names the window where it is known (`monthly_spending_cap`).
        */
-      limit?: { accountId: string; resetsAt: number };
+      limit?: {
+        accountId: string;
+        resetsAt?: number;
+        kind?: 'limit' | 'out';
+        rateLimitType?: string;
+      };
     };
 
 export interface HostOptions {
@@ -1090,22 +1099,30 @@ export interface GoalPlan {
 }
 
 /**
- * The run of a turn refused before it started because its account is at a cap
- * Patch enforces (spec/10 § Spending caps): it asks no model and fails as a
- * limit the provider stated, with the cap's reset, so the turn takes the same
- * limit path as one the provider refused.
+ * The run of a turn refused before it started because every account it may use
+ * is already known to have no credit (spec/10 § Limits), a Bedrock cap among
+ * them (§ Spending caps): it asks no model and fails as a limit the provider
+ * stated, with the reset where one is known, so the turn takes the same limit
+ * path as one the provider refused.
  */
 // eslint-disable-next-line require-yield
 async function* refusedRun(refusal: {
   reason: string;
-  resetsAt: number;
+  resetsAt?: number;
+  kind?: 'limit' | 'out';
+  rateLimitType?: string;
 }): AsyncGenerator<SdkEnvelope> {
-  throw new TurnFailedError(refusal.reason, {
-    kind: 'rate_limit',
-    status: 'rejected',
-    rateLimitType: 'monthly_spending_cap',
-    resetsAt: refusal.resetsAt,
-  });
+  throw new TurnFailedError(
+    refusal.reason,
+    refusal.kind === 'out'
+      ? { kind: 'billing_error', status: 'rejected' }
+      : {
+          kind: 'rate_limit',
+          status: 'rejected',
+          ...(refusal.rateLimitType !== undefined ? { rateLimitType: refusal.rateLimitType } : {}),
+          ...(refusal.resetsAt !== undefined ? { resetsAt: refusal.resetsAt } : {}),
+        },
+  );
 }
 
 function sameQueue(a: string[], b: string[]): boolean {
@@ -2298,6 +2315,16 @@ export class Daemon {
    * being the chat.
    */
   private readonly movingOut = new Set<string>();
+  /**
+   * Chats with a turn the previous host left (a runner on disk, or an owed
+   * turn) while start-up work waits for `host.reconciled` (spec/02 § Host
+   * restarts). A message, wake or job reaching one of them in that window is
+   * queued behind the turn the host is about to reattach, never started over
+   * it: a turn starting on a chat whose runner is still on disk retires that
+   * runner, which SIGTERMs a turn that survived the restart (2026-11-23, a
+   * message held by the server across a self-update).
+   */
+  private readonly awaitingRecovery = new Set<string>();
   private deferredStartupWork:
     | {
         metas: ChatMeta[];
@@ -3369,6 +3396,12 @@ export class Daemon {
     // deliveries resolve against in-memory state.
     if (options.deferWorkUntilReconciled) {
       this.deferredStartupWork = { metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId };
+      const onDisk = new Set(this.opts.durableTurns ? listTurnDirs(this.opts.durableTurns) : []);
+      for (const m of metas) {
+        if (onDisk.has(m.chatId) || (m.pendingTurns?.length ?? 0) > 0) {
+          this.awaitingRecovery.add(m.chatId);
+        }
+      }
     } else {
       this.startHydratedWork(metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     }
@@ -3620,7 +3653,12 @@ export class Daemon {
     // turn ends. Loaded first, the wake's own turn started ahead of the resend,
     // took the reattach marker for itself and killed the surviving runner
     // (2026-11-12, Mac restart).
+    // Held chats are released first so the resend below is not itself held;
+    // what was queued meanwhile then runs behind the reattached turn.
+    const held = onDemand ? [] : [...this.awaitingRecovery];
+    if (!onDemand) this.awaitingRecovery.clear();
     this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId, !onDemand);
+    for (const chatId of held) this.runHeldHead(chatId, 'startup recovery');
     const ownedIds = owned.map((m) => m.chatId);
     this.wake.loadAll(ownedIds);
     this.watch.loadAll(ownedIds);
@@ -7700,6 +7738,29 @@ export class Daemon {
       // (`chat.resume_now_request`) is how someone who knows better lifts it.
       return;
     }
+    // Start-up has not reattached this chat's surviving turn yet: queue behind
+    // it (`awaitingRecovery`), and start-up runs it once the turn is back.
+    if (this.awaitingRecovery.has(req.chatId)) {
+      this.opts.logger.info(
+        { chatId: req.chatId, localId: req.localId },
+        'restart: a turn arrived before start-up reattached this chat — queued behind it',
+      );
+      this.enqueueQueued(
+        req.chatId,
+        message,
+        req.localId,
+        req.fork,
+        req.origin,
+        req.retryOfSeq,
+        req.jobTrigger,
+        req.hookTrigger,
+        req.goalTrigger,
+        { text: req.message, ...(compose ? { compose } : {}) },
+        req.nudge,
+        req.afterTurn,
+      );
+      return;
+    }
     // The host is too short of memory to start more work: queue the turn (the
     // surface shows it as waiting) and let `releaseHeldTurns` run it. A chat
     // already holding turns keeps queueing so they run in the order they came.
@@ -7961,26 +8022,38 @@ export class Daemon {
     for (const chatId of [...this.memoryHeld]) {
       if (this.pumping.has(chatId)) continue; // its running pump drains the queue itself
       this.memoryHeld.delete(chatId);
-      const item = this.turnQueues.get(chatId)?.shift();
-      if (!item) continue;
-      this.emit({ type: 'chat.dequeued', chatId, localId: item.localId, reason: 'running' });
-      this.runTurnsFrom(
-        chatId,
-        item.message,
-        item.fork,
-        item.localId,
-        item.origin,
-        item.retryOfSeq,
-        item.jobTrigger,
-        item.hookTrigger,
-        item.goalTrigger,
-      ).catch((err: unknown) => {
-        this.opts.logger.error(
-          { chatId, err: err instanceof Error ? err.message : String(err) },
-          'releaseHeldTurns: the held turn failed',
-        );
-      });
+      this.runHeldHead(chatId, 'memory');
     }
+  }
+
+  /**
+   * Start the first turn queued on a chat that nothing is running, after a hold
+   * on it has lifted. A chat already running, parked for credit or still held
+   * for memory drains its queue itself when that ends.
+   */
+  private runHeldHead(chatId: string, hold: string): void {
+    if (!this.chatState.loaded(chatId)) return;
+    if (this.pumping.has(chatId) || this.creditParked(chatId)) return;
+    if (hold !== 'memory' && this.memoryHeld.has(chatId)) return;
+    const item = this.turnQueues.get(chatId)?.shift();
+    if (!item) return;
+    this.emit({ type: 'chat.dequeued', chatId, localId: item.localId, reason: 'running' });
+    this.runTurnsFrom(
+      chatId,
+      item.message,
+      item.fork,
+      item.localId,
+      item.origin,
+      item.retryOfSeq,
+      item.jobTrigger,
+      item.hookTrigger,
+      item.goalTrigger,
+    ).catch((err: unknown) => {
+      this.opts.logger.error(
+        { chatId, hold, err: err instanceof Error ? err.message : String(err) },
+        'a held turn failed',
+      );
+    });
   }
 
   /**

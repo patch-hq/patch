@@ -444,22 +444,21 @@ describe('effectiveAccount — one failure teaches, nothing else limps', () => {
     expect(r.effectiveAccount(accounts)).toBe('a1');
   });
 
-  it('skips a disconnected key entirely', () => {
+  it('skips a disconnected key entirely, and does not fall back to a spent one', () => {
     const r = new AccountRotation();
     r.markExhausted('a1', 'spend limit');
-    expect(r.effectiveAccount([accounts[0]!, { id: 'a2', connected: false }])).toBe('a1');
+    expect(r.effectiveAccount([accounts[0]!, { id: 'a2', connected: false }])).toBeUndefined();
   });
 
-  it('names a key even when NOTHING has credit, so the turn fails honestly', () => {
-    // Not undefined: the turn must be attempted and fail with the provider's own
-    // message. Silently running on no account, or pretending one is fine, is how
-    // a spend limit became a fake success in the first place. Asking whether any
-    // key HAS credit is `usableAccount`, and that one does answer no.
+  it('names no key when NOTHING has credit, and says what it waits on', () => {
+    // spec/10 § Limits: a turn on an account already known to be spent asks a
+    // model for nothing. The caller pauses it as a limit from `spentInRoute`.
     const r = new AccountRotation();
     r.markExhausted('a1', 'x');
     r.markExhausted('a2', 'x');
-    expect(r.effectiveAccount(accounts)).toBe('a1');
+    expect(r.effectiveAccount(accounts)).toBeUndefined();
     expect(r.usableAccount(accounts)).toBeUndefined();
+    expect(r.spentInRoute(accounts).map((s) => s.accountId)).toEqual(['a1', 'a2']);
   });
 });
 
@@ -604,8 +603,9 @@ describe('AccountRotation — strategies (spec/10 § Backend credentials — acc
     // Nothing usable: the caller waits or shows the limit card, it does not move on.
     expect(r.usableAccount([A, B, C], route)).toBeUndefined();
     expect(r.usableAccounts([A, B, C], route)).toEqual([]);
-    // The turn still resolves to the locked key so it fails with the provider's own words.
-    expect(r.startTurn([A, B, C], route)).toBe('c');
+    // The turn does not start on the spent lock: it waits on it.
+    expect(r.startTurn([A, B, C], route)).toBeUndefined();
+    expect(r.spentInRoute([A, B, C], route).map((s) => s.accountId)).toEqual(['c']);
     // Automatic (no preference) still moves between accounts.
     expect(r.startTurn([A, B, C], { strategy: 'priority' })).toBe('a');
   });

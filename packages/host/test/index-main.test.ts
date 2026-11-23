@@ -452,6 +452,8 @@ async function bootMain(
     hostJson?: Record<string, unknown>;
     /** Written to `<PATCH_HOME>/claude-oauth.json` before boot — the Claude account store. */
     claudeStore?: Record<string, unknown>;
+    /** Further files written under `<PATCH_HOME>` before boot, by name. */
+    homeFiles?: Record<string, string>;
     /** Receives the host's log lines instead of stdout. */
     logStream?: NonNullable<MainTestHooks['logStream']>;
     /**
@@ -477,6 +479,9 @@ async function bootMain(
     writeFileSync(join(home, 'claude-oauth.json'), JSON.stringify(opts.claudeStore), {
       mode: 0o600,
     });
+  }
+  for (const [name, content] of Object.entries(opts.homeFiles ?? {})) {
+    writeFileSync(join(home, name), content, { mode: 0o600 });
   }
   const hostCwd = mkdtempSync(join(tmpdir(), 'patch-main-cwd-'));
   const fakeServer = await startFakeServer();
@@ -3281,6 +3286,73 @@ describe('src/index.ts main() — full host boot', () => {
     } finally {
       await boot.cleanup();
       rmSync(awsDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  // spec/10 § Choosing an account, § Limits — every account the host holds is
+  // already known to be limited (a restart reads that from disk). The turn is
+  // not started on any of them: it pauses until the earliest reset and no
+  // model is asked. The tokens are fakes the mock backend never sends.
+  it('parks a turn without running it when every account is already known to be limited', async () => {
+    const now = Date.now();
+    const boot = await bootMain(
+      {},
+      {
+        claudeStore: {
+          accounts: [
+            { id: 'acct-a', label: 'A', credential: { accessToken: 'tok-a' } },
+            { id: 'acct-b', label: 'B', credential: { accessToken: 'tok-b' } },
+          ],
+          activeAccountId: 'acct-a',
+        },
+        homeFiles: {
+          'account-availability.json': JSON.stringify([
+            {
+              accountId: 'acct-a',
+              until: now + 5 * 3_600_000,
+              reason: 'weekly',
+              kind: 'limit',
+              at: now,
+            },
+            {
+              accountId: 'acct-b',
+              until: now + 2 * 3_600_000,
+              reason: 'session',
+              kind: 'limit',
+              at: now,
+            },
+          ]),
+        },
+      },
+    );
+    const mockSdk = boot.ready.sdkBackend as unknown as {
+      lastOptions(): { accountId?: string } | undefined;
+    };
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      boot.fakeServer.send({
+        type: 'chat.spawn_request',
+        hostId: 'd1',
+        folder: realpathSync(mkdtempSync(join(tmpdir(), 'patch-main-spent-'))),
+        model: 'claude-opus-5',
+        prompt: 'go',
+        chatId: 'chat-spent',
+      } as WireEvent);
+      const paused = (await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'chat.state' &&
+          e.chatId === 'chat-spent' &&
+          (e as { limitBlock?: { accountId?: string } | null }).limitBlock?.accountId !== undefined,
+      )) as { limitBlock: { accountId?: string; resetsAt?: number; raw?: string } };
+      expect(paused.limitBlock.accountId).toBe('acct-b');
+      expect(paused.limitBlock.resetsAt).toBe(now + 2 * 3_600_000);
+      expect(paused.limitBlock.raw).toContain('No account this chat may use has credit');
+      // Neither the turn nor its title reached the model.
+      await new Promise((r) => setTimeout(r, 200));
+      expect(mockSdk.lastOptions()).toBeUndefined();
+    } finally {
+      await boot.cleanup();
     }
   }, 30_000);
 

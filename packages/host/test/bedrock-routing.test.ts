@@ -20,7 +20,7 @@ import { Outbox } from '../src/outbox.js';
 const NOW = Date.UTC(2026, 10, 23, 12);
 
 describe('a capped Bedrock account', () => {
-  it('is not run for a chat locked to it, even as the fallback', () => {
+  it('is not run for a chat locked to it', () => {
     const r = new AccountRotation(() => NOW);
     const accounts: FailoverAccount[] = [
       { id: 'oauth', connected: true, auto: false },
@@ -40,7 +40,7 @@ describe('a capped Bedrock account', () => {
     expect(r.effectiveAccount(accounts)).toBeUndefined();
   });
 
-  it('with every subscription spent, an Automatic turn goes to a spent subscription, never the capped account', () => {
+  it('with every subscription spent, an Automatic turn runs nowhere, waiting on both', () => {
     const r = new AccountRotation(() => NOW);
     const accounts: FailoverAccount[] = [
       { id: 'bed', connected: true, capped: true },
@@ -48,9 +48,13 @@ describe('a capped Bedrock account', () => {
     ];
     r.markExhausted('bed', BEDROCK_CAP_REACHED, Date.UTC(2026, 11, 1), undefined, 'limit');
     r.markExhausted('oauth', 'limit', NOW + 3_600_000, undefined, 'limit');
-    // The subscription refuses it in its own words and the chat pauses as a limit.
-    expect(r.effectiveAccount(accounts)).toBe('oauth');
+    // Neither is run: the turn pauses as a limit until the earliest reset.
+    expect(r.effectiveAccount(accounts)).toBeUndefined();
     expect(r.usableAccounts(accounts)).toEqual([]);
+    expect(r.spentInRoute(accounts)).toMatchObject([
+      { accountId: 'bed', capped: true },
+      { accountId: 'oauth', resetsAt: NOW + 3_600_000 },
+    ]);
   });
 
   it('with only capped accounts left, an Automatic turn has nowhere to run', () => {
