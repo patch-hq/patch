@@ -606,7 +606,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // is spent and another is not, the chat is pinned to the one that is not
   // until the user chooses, so it never starts on a spent one. Auto stays one click
   // away, and a choice the user made is never overridden.
-  const credit = useCredit(pickerHostId);
+  const credit = useCredit(pickerHostId, preferredAccountId);
   const accountTouched = useRef(false);
   const effectiveProvider = providerForModel(effectiveModel);
   const defaultAccountId = creditDefaultAccountId(credit.rows, effectiveProvider);
@@ -1614,6 +1614,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               ) : null}
               <ModelPicker
                 selected={effectiveModel}
+                lockedAccountId={preferredAccountId}
                 onSelect={chooseModel}
                 open={modelOpen}
                 onToggle={() => setOpenPicker((v) => (v === 'model' ? null : 'model'))}

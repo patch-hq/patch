@@ -252,6 +252,7 @@ export function ModelControl({
     <>
       <ModelPicker
         selected={pendingModel ?? shownModel}
+        lockedAccountId={row.preferredAccountId ?? null}
         pending={pendingModel !== null}
         onSelect={chooseModel}
         open={modelOpen}

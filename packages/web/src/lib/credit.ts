@@ -136,7 +136,30 @@ export function modelSpentReason(
  * The account rows a chat on `hostId` could be routed to (`routableRows`) and
  * the API-key providers, read from the stores.
  */
-export function useCredit(hostId: string | null | undefined): {
+/**
+ * The rows credit is judged on. A chat that names an account runs only on it,
+ * whatever its `auto` (spec/10 § Choosing an account), so its credit is that
+ * account's alone; otherwise the accounts the strategy could pick.
+ */
+export function creditRows(
+  rows: readonly AccountUsageRow[],
+  hostId: string | null | undefined,
+  lockedAccountId: string | null | undefined,
+  now: number = Date.now(),
+): AccountUsageRow[] {
+  if (lockedAccountId) {
+    const locked = rows.find((r) => r.accountId === lockedAccountId);
+    if (locked && (locked.bedrock === undefined || locked.bedrock.hostId === hostId)) {
+      return [{ ...locked, auto: true }];
+    }
+  }
+  return routableRows(rows, hostId, now);
+}
+
+export function useCredit(
+  hostId: string | null | undefined,
+  lockedAccountId?: string | null,
+): {
   rows: AccountUsageRow[];
   apiKeyProviders: ApiKeyProviders;
 } {
@@ -155,6 +178,9 @@ export function useCredit(hostId: string | null | undefined): {
         }
       }
     }
-    return { rows: routableRows(accountRows(hosts, shared), hostId), apiKeyProviders };
-  }, [hosts, shared, hostId]);
+    return {
+      rows: creditRows(accountRows(hosts, shared), hostId, lockedAccountId),
+      apiKeyProviders,
+    };
+  }, [hosts, shared, hostId, lockedAccountId]);
 }

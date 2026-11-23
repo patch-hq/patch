@@ -68,3 +68,13 @@ describe('isSessionAbort', () => {
     expect(isSessionAbort(new Error('fetch failed'), 'fetch failed')).toBe(false);
   });
 });
+
+describe('a Bedrock profile that is signed out', () => {
+  it('is permanent, not retried', async () => {
+    const { classifyFailure } = await import('../src/errorClass.js');
+    const c = classifyFailure(
+      "Claude Code returned an error result: API Error: Could not load AWS credentials · Token is expired. To refresh this SSO session run 'aws sso login' with the corresponding profile.",
+    );
+    expect(c).toMatchObject({ kind: 'permanent', reason: 'aws_sign_in' });
+  });
+});
