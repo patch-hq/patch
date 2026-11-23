@@ -4764,6 +4764,7 @@ async function startHost(
     chatId: string;
     preferredAccountId?: string;
     sessionAccountId?: string;
+    anyAccount?: boolean;
   }): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {
