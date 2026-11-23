@@ -24,7 +24,7 @@ import {
   type ProviderId,
 } from '@patch/wire';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
-import { useModelCatalog, type ModelOption } from '../lib/models.js';
+import { modelCatalogHostId, useModelCatalog, type ModelOption } from '../lib/models.js';
 import { modelSpentReason, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
@@ -119,7 +119,8 @@ export function ModelPicker({
   // reads the backend's model list. NO baked-in array — that is what let the
   // picker go stale.
   const catalog = useModelCatalog();
-  const credit = useCredit();
+  // Credit as a chat on the catalogue's host would be routed (its Bedrock accounts only).
+  const credit = useCredit(modelCatalogHostId());
   // A failed load carries the host's code (`oauth_unavailable`, `upstream`).
   // The pop-up reads the sentence; the code stays one click down.
   const problem = humaniseError({ code: catalog.error }, 'models');

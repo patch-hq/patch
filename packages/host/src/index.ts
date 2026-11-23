@@ -6,7 +6,11 @@ import { applyOwnSettings, ownConfigFile, type OwnConfigFile } from './providerS
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { HARNESS_TRAITS } from './harnesses.js';
-import { adapterForModel, type ProviderAdapters } from './providerAdapters.js';
+import {
+  adapterForModel,
+  type ProviderAdapters,
+  type TurnAccountHint,
+} from './providerAdapters.js';
 import { ACP_BACKEND_ID, AcpRegistry } from './acpRegistry.js';
 import { AcpAccounts, type AcpRoute } from './acpAccounts.js';
 import type { AcpLogin } from './acpLogin.js';
@@ -75,7 +79,6 @@ import type {
 } from '@patch/wire';
 import {
   BACKGROUND_ACCOUNT_AUTO,
-  bedrockAtCap,
   bedrockCapResetsAt,
   limitBehaviourFromAutoResume,
   providerForSessionId,
@@ -180,7 +183,10 @@ import {
   AWS_SIGN_IN_EXPIRED,
   BEDROCK_CAP_REACHED,
   BedrockSignIn,
+  bedrockCapRefusal,
+  bedrockCappedWith,
   bedrockRunOf,
+  pendingBedrockSpendUsd,
   checkAwsProfile,
   claudeAccountsIdentity,
   readAwsProfiles,
@@ -756,6 +762,9 @@ async function startHost(
   const sdkBackend: SdkBackend = withBedrockSpend(rawSdkBackend, (accountId, costUsd) => {
     // `emit` is declared further down; nothing runs a turn before it is.
     emit({ type: 'host.account_spend', hostId: selfHostId, accountId, costUsd, at: Date.now() });
+    // The spend is owed to the server until it acknowledges it, and counted
+    // against the cap meanwhile: the next turn must not start past it.
+    syncBedrockCaps(sharedClaude);
   });
 
   // 3. Host registration: dial-in needs an EdDSA-JWT daemonKey. If absent,
@@ -2600,16 +2609,36 @@ async function startHost(
    * spend is ready at once. Read from the spend the server keeps, on every
    * snapshot.
    */
+  /** Bedrock accounts this host has recorded as at their cap. */
+  const capMarked = new Set<string>();
+  /**
+   * Is this Bedrock account at its cap, counting what this host has spent on it
+   * that the server has not acknowledged (`pendingBedrockSpendUsd`)?
+   */
+  const bedrockAtCap = (
+    a: { id: string; bedrock?: SharedSecrets['claude'][number]['bedrock'] },
+    now: number,
+  ): boolean =>
+    a.bedrock !== undefined &&
+    bedrockCappedWith(a.bedrock, pendingBedrockSpendUsd(hostOutbox.pending(), a.id, now), now);
   const syncBedrockCaps = (accounts: readonly SharedSecrets['claude'][number][]): void => {
     const now = Date.now();
     let changed = false;
     let lifted = false;
     for (const a of accounts) {
       if (a.bedrock === undefined) continue;
-      const capped = bedrockAtCap(a.bedrock, now);
+      const capped = bedrockAtCap(a, now);
+      // A refused turn re-records the account with its own words, which name
+      // the cap; a record from before a restart is found by those words too.
       const marked =
-        accountRotation.snapshot().find((e) => e.accountId === a.id)?.reason ===
-        BEDROCK_CAP_REACHED;
+        capMarked.has(a.id) ||
+        (accountRotation
+          .snapshot()
+          .find((e) => e.accountId === a.id)
+          ?.reason.includes(BEDROCK_CAP_REACHED) ??
+          false);
+      if (capped) capMarked.add(a.id);
+      else capMarked.delete(a.id);
       if (capped && !marked) {
         accountRotation.markExhausted(
           a.id,
@@ -2634,6 +2663,12 @@ async function startHost(
 
   /** The last snapshot's Claude accounts, to tell a refresh on this host from the server's. */
   let sharedClaude: SharedSecrets['claude'] = [];
+  /**
+   * Claude accounts in the shared settings this host is not sent — Bedrock
+   * accounts on another host (`settings.snapshot.claudeHeldElsewhere`). A chat
+   * locked to one is refused here, not moved onto this host's accounts.
+   */
+  let claudeHeldElsewhere: NonNullable<SettingsSnapshotEvent['claudeHeldElsewhere']> = [];
 
   /**
    * Apply one `settings.snapshot`. Each part is applied on its own: a part that
@@ -2758,6 +2793,7 @@ async function startHost(
       if (acpAccounts.apply(snapshot.secrets.acp ?? [])) onAcpChange();
     });
     await part('settings', () => applySharedHostSettings(snapshot.settings));
+    claudeHeldElsewhere = snapshot.claudeHeldElsewhere ?? [];
     // Each provider with accounts takes its own list, through its entry in
     // `sharedAccountStores`; the loop names no provider.
     const applyAccounts = <K extends ProviderAccountsKey>(key: K): void | Promise<void> =>
@@ -3015,10 +3051,13 @@ async function startHost(
   // outbox, the local file handed over once.
   const toolLogSink = new ToolLogSink(config.patchHome, (event) => link.send(event));
   sendAcpReport = () => link.send(acpAccounts.report(selfHostId, ACP_BACKEND_ID));
+  // Transcript events and Bedrock spend wait here until the server acknowledges
+  // them; the spend still owed counts against the cap (`bedrockAtCap`).
+  const hostOutbox = new Outbox({ path: join(config.patchHome, 'outbox.jsonl'), logger });
   const link = createServerLink({
     url: config.serverWsUrl,
     daemonKey,
-    outbox: new Outbox({ path: join(config.patchHome, 'outbox.jsonl'), logger }),
+    outbox: hostOutbox,
     clientVersion: VERSION,
     clientGitSha: GIT_SHA,
     clientBuiltAt: BUILT_AT,
@@ -4787,6 +4826,7 @@ async function startHost(
       // A Bedrock account has no credential: it can run while its profile is signed in.
       connected: a.bedrock !== undefined ? !bedrockSignIn.signedOut(a.id) : a.credential !== null,
       ...(a.auto !== undefined ? { auto: a.auto } : {}),
+      ...(bedrockAtCap(a, Date.now()) ? { capped: true } : {}),
       ...(a.credential?.organizationId !== undefined
         ? { organizationId: a.credential.organizationId }
         : {}),
@@ -4794,6 +4834,10 @@ async function startHost(
     route: {
       strategy: accountStrategy.claude,
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
+      ...(preferredAccountId !== undefined &&
+      claudeHeldElsewhere.some((a) => a.id === preferredAccountId)
+        ? { preferredHeldElsewhere: true }
+        : {}),
       ...(sessionAccountId !== undefined ? { sessionAccount: sessionAccountId } : {}),
       // A chat locked to one account may run elsewhere while it is spent only
       // when the user chose to continue on another account.
@@ -4915,6 +4959,7 @@ async function startHost(
     preferredAccountId?: string;
     sessionAccountId?: string;
     anyAccount?: boolean;
+    check?: boolean;
   }): Promise<OAuthCheckResult> => {
     const store = readPatchStore(oauthOpts);
     if (!store || store.accounts.length === 0) {
@@ -4931,9 +4976,10 @@ async function startHost(
     // Read before `startTurn`, which moves a round-robin on.
     const first = accountRotation.order(accounts, route)[0]?.id;
     // Only a starting turn moves the rotation; a credential check peeks.
-    const effective = turn
-      ? accountRotation.startTurn(accounts, route)
-      : accountRotation.effectiveAccount(accounts, route);
+    const effective =
+      turn !== undefined && turn.check !== true
+        ? accountRotation.startTurn(accounts, route)
+        : accountRotation.effectiveAccount(accounts, route);
     if (effective !== undefined && effective !== first) {
       logger.info(
         {
@@ -4946,13 +4992,47 @@ async function startHost(
       );
     }
     if (effective === undefined) {
-      // A chat locked to a Bedrock account whose profile is signed out has
-      // nowhere to run: say so, rather than resolving the host's default token.
+      // Nowhere this turn may run. Each case says why, rather than resolving
+      // the store's default account, which would run on an account nobody
+      // chose — one with `auto` off, at its cap, or not the chat's lock.
+      const elsewhere = claudeHeldElsewhere.find((a) => a.id === route.preferred);
+      if (route.preferredHeldElsewhere === true && elsewhere !== undefined) {
+        return {
+          ok: false,
+          code: 'account_not_found',
+          reason: `This chat is set to ${elsewhere.label}, an Amazon Bedrock account on another host, so it cannot run here. Choose another account for the chat.`,
+        };
+      }
       const locked = store.accounts.find((a) => a.id === route.preferred);
+      // spec/10 § Spending caps: a turn that would start on a capped account
+      // does not; it is limited until the first of next month, UTC.
+      // The lock if it is capped; otherwise the first capped account this
+      // turn could have run on.
+      const ordered = accountRotation.order(accounts, route);
+      const cappedId = ordered.find((a) => a.connected && a.capped === true)?.id;
+      const capped = store.accounts.find((a) => a.id === cappedId);
+      if (capped !== undefined) {
+        const now = Date.now();
+        return {
+          ok: false,
+          reason: bedrockCapRefusal(capped.label, now),
+          limit: { accountId: capped.id, resetsAt: bedrockCapResetsAt(now) },
+        };
+      }
+      // A chat locked to a Bedrock account whose profile is signed out.
       if (locked?.bedrock !== undefined) {
         return {
           ok: false,
+          code: 'claude_oauth_missing',
           reason: `${locked.label}: ${bedrockSignIn.error(locked.id) ?? AWS_SIGN_IN_EXPIRED}`,
+        };
+      }
+      // Every account has `auto` off and the chat names none of them.
+      if (ordered.length === 0) {
+        return {
+          ok: false,
+          code: 'claude_oauth_missing',
+          reason: 'No account is set to switch to automatically',
         };
       }
     }
@@ -5137,7 +5217,7 @@ async function startHost(
    */
   const resolveModelOAuth = async (
     model?: string,
-    turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
+    turn?: TurnAccountHint,
   ): Promise<OAuthCheckResult> => {
     return adapterForModel(providerAdapters, model).resolveCredential(model, turn);
   };
@@ -8416,8 +8496,26 @@ export async function handleServerEvent(
         // a `claude login` since boot must be picked up without a restart.
         // Which key answers is the host's business — the first stored one with
         // credit (spec/10 § Backend credentials); a spawn cannot name one.
-        const spawnAuth = await daemon.backendCredential(event.model);
-        if (!spawnAuth.ok) {
+        const spawnAuth = await daemon.backendCredential(event.model, event.preferredAccountId);
+        // Refused for a reason that is not a sign-in — no account may run it,
+        // or the one it names is on another host: said in those words, and the
+        // host is not reported as signed out.
+        if (!spawnAuth.ok && spawnAuth.code !== undefined && spawnAuth.limit === undefined) {
+          logger.warn(
+            { op, folder: event.folder, reason: spawnAuth.reason },
+            'chat.spawn_request refused',
+          );
+          sender({
+            type: 'chat.error',
+            chatId: event.chatId ?? 'pending-spawn',
+            error: { code: spawnAuth.code, message: spawnAuth.reason },
+            seq: OUT_OF_BAND_SEQ,
+          });
+          return;
+        }
+        // An account at its cap is not a missing credential: the chat is made
+        // and its first turn pauses on the cap like any other (spec/10 § Spending caps).
+        if (!spawnAuth.ok && spawnAuth.limit === undefined) {
           const spawnProvider = providerDescriptor(providerForModel(event.model));
           const host = daemon.hostId;
           sender({

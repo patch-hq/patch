@@ -3219,6 +3219,16 @@ export const SettingsSnapshotEvent = z
     version: z.number().int().nonnegative(),
     settings: SharedSettings,
     secrets: SharedSecrets,
+    /**
+     * Claude accounts in the shared settings that this host is not sent: Amazon
+     * Bedrock accounts on another host. Id and label only. A chat locked to one
+     * is refused here rather than run on this host's accounts (spec/10 §
+     * Choosing an account). Absent from an older server: every unknown lock
+     * then reads as an account since removed.
+     */
+    claudeHeldElsewhere: z
+      .array(z.object({ id: z.string().min(1), label: z.string() }).strict())
+      .optional(),
   })
   .strict();
 export type SettingsSnapshotEvent = z.infer<typeof SettingsSnapshotEvent>;

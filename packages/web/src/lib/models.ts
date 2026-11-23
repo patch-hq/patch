@@ -63,6 +63,11 @@ export function getModelCatalog(): ModelCatalog {
   return catalog;
 }
 
+/** The host whose catalogue is loaded, or null before any load. */
+export function modelCatalogHostId(): string | null {
+  return loadedFor;
+}
+
 /** Replace the catalogue (used by `loadModels`, and by tests to seed a state). */
 export function setModelCatalog(next: {
   models?: readonly ModelOption[];

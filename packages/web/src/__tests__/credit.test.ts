@@ -5,6 +5,7 @@ import {
   firstInCreditAccountId,
   modelSpent,
   providerSpent,
+  routableRows,
 } from '../lib/credit.js';
 
 const NOW = 1_000_000;
@@ -67,5 +68,69 @@ describe('credit', () => {
     const healthy = [row('claude', 'a', open), row('claude', 'b', open)];
     expect(creditDefaultAccountId(healthy, 'claude', NOW)).toBeNull();
     expect(creditDefaultAccountId([row('claude', 'a', blocked)], 'claude', NOW)).toBeNull();
+  });
+});
+
+// spec/10 § Choosing an account, § Spending caps — the default and the
+// "provider spent" greying count only accounts the strategy could pick for a
+// chat on this host.
+describe('credit with Bedrock accounts and auto off', () => {
+  // 23 Nov 2026, inside the month the spend is for.
+  const T = Date.UTC(2026, 10, 23, 12);
+  const bedrock = (hostId: string, spentUsd: number) => ({
+    hostId,
+    awsProfile: 'work',
+    awsRegion: 'eu-west-2',
+    regionPrefix: 'eu' as const,
+    monthlyCapUsd: 100,
+    spentUsd,
+    spentMonth: '2026-11',
+  });
+  const r = (
+    accountId: string,
+    usage: AccountUsageRow['usage'],
+    extra: Partial<AccountUsageRow> = {},
+  ): AccountUsageRow => ({ ...row('claude', accountId, usage), ...extra });
+  const spentSub = r('sub', { session: { status: 'rejected' as const, resetsAt: T + 60_000 } });
+
+  it('never defaults to an account with auto off', () => {
+    const rows = [spentSub, r('manual', undefined, { auto: false })];
+    expect(creditDefaultAccountId(rows, 'claude', T)).toBeNull();
+    expect(firstInCreditAccountId(rows, 'claude', T)).toBeNull();
+  });
+
+  it('an account with auto off does not keep the provider in credit', () => {
+    const rows = [spentSub, r('manual', undefined, { auto: false })];
+    expect(providerSpent(rows, 'claude', new Set(), T)).toBe(true);
+  });
+
+  it('never defaults to a Bedrock account at its cap, and counts it as spent', () => {
+    const rows = [spentSub, r('aws', undefined, { bedrock: bedrock('h1', 100) })];
+    expect(creditDefaultAccountId(rows, 'claude', T)).toBeNull();
+    expect(providerSpent(rows, 'claude', new Set(), T)).toBe(true);
+    const under = [spentSub, r('aws', undefined, { bedrock: bedrock('h1', 40) })];
+    expect(creditDefaultAccountId(under, 'claude', T)).toBe('aws');
+    expect(providerSpent(under, 'claude', new Set(), T)).toBe(false);
+  });
+
+  it('counts a Bedrock account only for a chat on its own host', () => {
+    const rows = [spentSub, r('aws', undefined, { bedrock: bedrock('h1', 0) })];
+    expect(routableRows(rows, 'h1', T).map((x) => x.accountId)).toEqual(['sub', 'aws']);
+    // On another host, or none chosen, it is not there to run on.
+    for (const host of ['h2', null]) {
+      const routable = routableRows(rows, host, T);
+      expect(routable.map((x) => x.accountId)).toEqual(['sub']);
+      expect(creditDefaultAccountId(routable, 'claude', T)).toBeNull();
+      expect(providerSpent(routable, 'claude', new Set(), T)).toBe(true);
+    }
+  });
+
+  it('leaves out auto-off and capped rows when routing', () => {
+    const rows = [
+      r('a', undefined),
+      r('off', undefined, { auto: false }),
+      r('capped', undefined, { bedrock: bedrock('h1', 100) }),
+    ];
+    expect(routableRows(rows, 'h1', T).map((x) => x.accountId)).toEqual(['a']);
   });
 });

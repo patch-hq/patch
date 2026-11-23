@@ -252,7 +252,23 @@ import { prefixKeepingCommandFirst } from './leadCommand.js';
 export type OAuthCheckResult =
   /** `bedrock` set: a Claude on Amazon Bedrock account, `accessToken` `''`. */
   | { ok: true; accessToken: string; accountId?: string; bedrock?: BedrockRun }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * Not a sign-in failure: the chat is told `reason` in these words under
+       * this code, and no host-wide "signed out" is reported. Absent: the
+       * provider's signed-out handling.
+       */
+      code?: ChatErrorCode;
+      /**
+       * The turn would start on an account at a limit Patch enforces itself (a
+       * Bedrock account's monthly cap, spec/10 § Spending caps). It does not
+       * start; it meets the limit as if the provider had refused it, so it
+       * pauses until `resetsAt` or moves on as the user's limit behaviour says.
+       */
+      limit?: { accountId: string; resetsAt: number };
+    };
 
 export interface HostOptions {
   /**
@@ -363,6 +379,8 @@ export interface HostOptions {
       preferredAccountId?: string;
       sessionAccountId?: string;
       anyAccount?: boolean;
+      /** Only asking where this chat would run (a spawn naming an account): nothing moves on. */
+      check?: boolean;
     },
   ) => OAuthCheckResult | Promise<OAuthCheckResult>;
   /**
@@ -1069,6 +1087,25 @@ export interface GoalPlan {
   then?: string[];
   remindEvery?: ReminderEvery | null;
   checkInEvery?: ReminderEvery | null;
+}
+
+/**
+ * The run of a turn refused before it started because its account is at a cap
+ * Patch enforces (spec/10 § Spending caps): it asks no model and fails as a
+ * limit the provider stated, with the cap's reset, so the turn takes the same
+ * limit path as one the provider refused.
+ */
+// eslint-disable-next-line require-yield
+async function* refusedRun(refusal: {
+  reason: string;
+  resetsAt: number;
+}): AsyncGenerator<SdkEnvelope> {
+  throw new TurnFailedError(refusal.reason, {
+    kind: 'rate_limit',
+    status: 'rejected',
+    rateLimitType: 'monthly_spending_cap',
+    resetsAt: refusal.resetsAt,
+  });
 }
 
 function sameQueue(a: string[], b: string[]): boolean {
@@ -10482,7 +10519,7 @@ export class Daemon {
     // runs `claude login` the next message just works. The account is the
     // host's business, not the chat's: this resolves the stored keys in order
     // and takes the first with credit (spec/10 § Backend credentials).
-    const oauth = await this.resolveOAuth(state.model, {
+    const credential = await this.resolveOAuth(state.model, {
       chatId,
       ...(state.preferredAccountId !== undefined
         ? { preferredAccountId: state.preferredAccountId }
@@ -10493,6 +10530,18 @@ export class Daemon {
         : {}),
       ...(this.anyAccountChats.has(chatId) ? { anyAccount: true } : {}),
     });
+    // spec/10 § Spending caps — the turn would start on an account at a cap
+    // Patch enforces. It does not start: no model is asked and nothing is
+    // spent. It meets the limit below exactly as if the provider had refused
+    // it, so it pauses until the reset or moves on as the limit behaviour says.
+    const refusedAtLimit =
+      !credential.ok && credential.limit !== undefined
+        ? { ...credential.limit, reason: credential.reason }
+        : undefined;
+    const oauth: OAuthCheckResult =
+      refusedAtLimit !== undefined
+        ? { ok: true, accessToken: '', accountId: refusedAtLimit.accountId }
+        : credential;
     // Which key this turn is actually spending, for as long as it runs. Not a
     // preference and never persisted — it is re-decided next turn — but a
     // failure has to name the key that spent, or a host whose first key is out
@@ -10511,6 +10560,7 @@ export class Daemon {
       else this.runningOnAccount.set(chatId, oauth.accountId);
       if (
         carriedOn === undefined &&
+        refusedAtLimit === undefined &&
         previous !== undefined &&
         oauth.accountId !== undefined &&
         previous !== oauth.accountId
@@ -10528,6 +10578,18 @@ export class Daemon {
       // resolving its credential) is mid-drain, not the end of it. Hold
       // `running` so the drain reports one settle at its true end.
       if (this.hasQueuedTurns(chatId)) return false;
+      this.chatState.setActivity(chatId, 'idle');
+      this.emitState(chatId);
+      return false;
+    }
+    if (!oauth.ok && oauth.code !== undefined) {
+      // Refused for a reason that is not a sign-in (no account may run it, or
+      // its account is on another host): said in the chat in those words.
+      this.aborters.delete(chatId);
+      this.opts.logger.warn({ chatId, reason: oauth.reason }, 'runQuery refused');
+      const refusal = { code: oauth.code, message: oauth.reason };
+      this.emit({ type: 'chat.error', chatId, error: refusal, seq: OUT_OF_BAND_SEQ });
+      this.recordRefusedTurn(chatId, refusal);
       this.chatState.setActivity(chatId, 'idle');
       this.emitState(chatId);
       return false;
@@ -11012,7 +11074,12 @@ export class Daemon {
     const run = (async (): Promise<boolean> => {
       try {
         for await (const env of untilAborted(
-          withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
+          withLimitStall(
+            refusedAtLimit !== undefined
+              ? refusedRun(refusedAtLimit)
+              : this.opts.sdkBackend.run(sdkOpts),
+            this.opts.limitStallGraceMs,
+          ),
           abortController.signal,
           (env) => env.type === 'tool_result',
         )) {
@@ -16058,8 +16125,15 @@ export class Daemon {
     return this.runningOnAccount.get(chatId);
   }
 
-  async backendCredential(model?: string): Promise<OAuthCheckResult> {
-    return await this.resolveOAuth(model ?? this.opts.defaultModel?.());
+  async backendCredential(model?: string, preferredAccountId?: string): Promise<OAuthCheckResult> {
+    // A chat that names an account is checked against that account: one with
+    // `auto` off runs for the chat locked to it whatever the order holds.
+    return await this.resolveOAuth(
+      model ?? this.opts.defaultModel?.(),
+      preferredAccountId !== undefined
+        ? { chatId: 'pending-spawn', preferredAccountId, check: true }
+        : undefined,
+    );
   }
 
   /**
@@ -16555,7 +16629,12 @@ export class Daemon {
       // mirroring it onto chat_state, where it could drift.
       pendingWake: toPendingWake(this.wake.peek(chatId)),
       folder: s.folder,
-      lastError: s.lastError,
+      // The wire's shape only: `outOfCredit` is the host's own note (meta.json)
+      // and a frame carrying it fails the server's decode and is dropped.
+      lastError:
+        s.lastError === null
+          ? null
+          : { code: s.lastError.code, message: s.lastError.message, at: s.lastError.at },
       rateLimitResumingAt,
       ...(resumeKind !== undefined ? { resumeKind } : {}),
       waitingForWakeSince: this.waitingForWakeSince.get(chatId) ?? null,

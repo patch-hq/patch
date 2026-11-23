@@ -3132,6 +3132,118 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
+  // spec/10 § Spending caps, § Choosing an account — a turn that may not run
+  // anywhere does not run anywhere. No AWS config, no AWS CLI, no model: each
+  // refusal happens before the SDK would be asked.
+  it('refuses a turn on a capped Bedrock lock, with no auto account, or locked to another host’s account', async () => {
+    // A fake AWS config, and a fake `aws` first on the PATH that says every
+    // profile is signed in: the real AWS CLI is never run.
+    const awsDir = mkdtempSync(join(tmpdir(), 'patch-main-aws-'));
+    writeFileSync(join(awsDir, 'config'), '[profile work]\n[profile spare]\n');
+    writeFileSync(join(awsDir, 'aws'), '#!/bin/sh\necho \'{"Version":1}\'\n', { mode: 0o755 });
+    const boot = await bootMain({
+      AWS_CONFIG_FILE: join(awsDir, 'config'),
+      AWS_SHARED_CREDENTIALS_FILE: join(awsDir, 'credentials'),
+      PATH: `${awsDir}:${process.env['PATH'] ?? ''}`,
+    });
+    const mockSdk = boot.ready.sdkBackend as unknown as {
+      lastOptions(): { chatId?: string; accountId?: string } | undefined;
+    };
+    const d = new Date();
+    const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const reset = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+    const snapshot = (version: number, claude: unknown[], extra: Record<string, unknown> = {}) =>
+      ({
+        type: 'settings.snapshot',
+        hostId: 'd1',
+        version,
+        settings: DEFAULT_SHARED_SETTINGS,
+        secrets: { claude, codex: [], providerKeys: {} },
+        ...extra,
+      }) as WireEvent;
+    const capped = {
+      id: 'b1',
+      label: 'Work AWS',
+      credential: null,
+      auto: false,
+      bedrock: {
+        hostId: 'd1',
+        awsProfile: 'work',
+        awsRegion: 'eu-west-2',
+        regionPrefix: 'eu',
+        monthlyCapUsd: 100,
+        spentUsd: 100,
+        spentMonth: month,
+      },
+    };
+    const spawn = (chatId: string, preferredAccountId?: string) =>
+      boot.fakeServer.send({
+        type: 'chat.spawn_request',
+        hostId: 'd1',
+        folder: realpathSync(mkdtempSync(join(tmpdir(), 'patch-main-refuse-'))),
+        model: 'claude-opus-5',
+        prompt: 'go',
+        chatId,
+        ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
+      } as WireEvent);
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      // Only Bedrock accounts (no token, so nothing here can reach Anthropic),
+      // all with `auto` off, and one more that lives on another host.
+      boot.fakeServer.send(
+        snapshot(
+          1,
+          [
+            capped,
+            {
+              ...capped,
+              id: 'b2',
+              label: 'Spare AWS',
+              bedrock: { ...capped.bedrock, awsProfile: 'spare', spentUsd: 0 },
+            },
+          ],
+          { claudeHeldElsewhere: [{ id: 'b-mini', label: 'Mini AWS' }] },
+        ),
+      );
+      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
+
+      // Locked to the capped account: the turn does not start, and pauses as a
+      // limit on that account until the first of next month.
+      spawn('chat-capped', 'b1');
+      const paused = (await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'chat.state' &&
+          e.chatId === 'chat-capped' &&
+          (e as { limitBlock?: { accountId?: string } }).limitBlock?.accountId === 'b1',
+      )) as { limitBlock: { resetsAt?: number; raw?: string } };
+      expect(paused.limitBlock.resetsAt).toBe(reset.getTime());
+      expect(paused.limitBlock.raw).toContain('Work AWS: Monthly spending cap reached');
+
+      // No lock, and no account set to switch to automatically.
+      spawn('chat-no-auto');
+      const noAuto = (await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'chat.error' && e.chatId === 'chat-no-auto',
+      )) as { error: { message: string } };
+      expect(noAuto.error.message).toBe('No account is set to switch to automatically');
+
+      // Locked to a Bedrock account on another host: refused, naming it, not
+      // moved onto this host's accounts.
+      spawn('chat-elsewhere', 'b-mini');
+      const elsewhere = (await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'chat.error' && e.chatId === 'chat-elsewhere',
+      )) as { error: { code: string; message: string } };
+      expect(elsewhere.error.code).toBe('account_not_found');
+      expect(elsewhere.error.message).toContain('Mini AWS');
+
+      // None of them reached the model.
+      expect(mockSdk.lastOptions()).toBeUndefined();
+    } finally {
+      await boot.cleanup();
+      rmSync(awsDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   // spec/01 § Settings — values that start on a host: what it held before
   // settings were shared goes up once, and a key in its environment on request.
   it('answers the server’s import with what it held, and adopts a key from its environment', async () => {

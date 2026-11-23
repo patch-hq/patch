@@ -168,6 +168,10 @@ describe('Bedrock accounts in the shared settings', () => {
     const account = await svc.addBedrock(WORK);
     expect(snapshotTo('mac')?.secrets.claude.map((a) => a.id)).toContain(account.id);
     expect(snapshotTo('box')?.secrets.claude.map((a) => a.label)).toEqual(['Max']);
+    // The box is told the account exists elsewhere (id and label only), so a
+    // chat locked to it there is refused rather than moved onto Max.
+    expect(snapshotTo('box')?.claudeHeldElsewhere).toEqual([{ id: account.id, label: 'Work AWS' }]);
+    expect(snapshotTo('mac')?.claudeHeldElsewhere).toBeUndefined();
 
     // The Mac reconnects as an older build that reports no profiles: it loses the account …
     svc.handleHostEvent(hostInfo('mac'));
@@ -254,6 +258,8 @@ describe('Bedrock accounts in the shared settings', () => {
     const svc = await ready();
     const { id } = await svc.addBedrock(WORK);
     spend(svc, id, 18.42);
+    spend(svc, id, 1.58);
+    // The outbox resending one whose acknowledgement was lost: counted once.
     spend(svc, id, 1.58);
     expect(row(svc, id)?.bedrock).toMatchObject({ spentUsd: 20, spentMonth: '2026-11' });
     // Pushed to the host, which checks the cap before a turn.

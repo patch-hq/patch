@@ -46,6 +46,8 @@ export interface AccountUsageRow {
   usage: HostAccount['usage'];
   /** A Claude on Amazon Bedrock account: its spend against its cap is its usage. */
   bedrock?: ClaudeBedrock;
+  /** In the order (spec/10 § Choosing an account); absent reads as on. */
+  auto?: boolean;
 }
 
 /** Each shared subscription account once; hosts only supply its usage readings. */
@@ -80,6 +82,7 @@ export function accountRows(
         title: account.label,
         usage,
         ...('bedrock' in account && account.bedrock ? { bedrock: account.bedrock } : {}),
+        ...('auto' in account && account.auto !== undefined ? { auto: account.auto } : {}),
       });
     }
   }

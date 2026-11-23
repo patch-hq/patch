@@ -1084,6 +1084,44 @@ export const BEDROCK_STRIPPED_ENV = [
   'AWS_SESSION_TOKEN',
 ] as const;
 
+/**
+ * Variables that would point Claude Code at a cloud provider other than the one
+ * a run chose, or at a Bedrock endpoint or auth Patch did not set. A
+ * subscription, API-key or endpoint run strips them and every AWS variable, so
+ * it cannot quietly run on the host's own AWS; a Bedrock run strips them before
+ * setting its own (spec/10 § Backend credentials).
+ */
+export const CLOUD_PROVIDER_ENV = [
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_MANTLE',
+  'CLAUDE_CODE_SKIP_BEDROCK_AUTH',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+] as const;
+
+/**
+ * The host's own AWS profile, region and credentials and Bedrock settings,
+ * which a run that is not on Bedrock never sees: with them Claude Code could be
+ * pointed at the host's AWS by a variable Patch did not set.
+ */
+const HOST_AWS_ENV = [
+  'AWS_PROFILE',
+  'AWS_DEFAULT_PROFILE',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_BEARER_TOKEN_BEDROCK',
+] as const;
+
+function isAwsOrBedrockEnv(name: string): boolean {
+  return (
+    (HOST_AWS_ENV as readonly string[]).includes(name) || name.startsWith('ANTHROPIC_BEDROCK_')
+  );
+}
+
 /** What Claude Code is told to run on Bedrock with this profile. */
 export function bedrockSdkEnv(run: BedrockRun): Record<string, string> {
   return {
@@ -1117,6 +1155,28 @@ export function resultCostUsd(msg: unknown): number | undefined {
 }
 
 /**
+ * What each `result` in one Claude Code process cost on its own.
+ *
+ * `total_cost_usd` is the process's running total, not the turn's: a process
+ * that answers two prompts reports the first's cost again inside the second's.
+ * Counting each reading whole charged a Bedrock account for every earlier turn
+ * of a warm session again on every turn. One tracker per process (per query):
+ * its first reading is that reading; each later one is what it adds. A total
+ * that went DOWN is a process this tracker has not seen before, so it is
+ * counted whole rather than as nothing.
+ */
+export function createResultCostDelta(): (msg: unknown) => number | undefined {
+  let last: number | undefined;
+  return (msg) => {
+    const total = resultCostUsd(msg);
+    if (total === undefined) return undefined;
+    const delta = last === undefined || total < last ? total : total - last;
+    last = total;
+    return delta;
+  };
+}
+
+/**
  * SDK env (OAuth, never an API key per spec/10) + the stdio MCP servers this
  * chat gets: `patch` (this host's own tools) always and first, then
  * `opts.extraMcpServers` in list order — the caller (`chatRunner.ts`) has
@@ -1140,6 +1200,11 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   // environment holds never reaches the SDK (spec/10 § Backend credentials).
   delete env['ANTHROPIC_API_KEY'];
   delete env['CLAUDE_CODE_OAUTH_TOKEN'];
+  for (const name of CLOUD_PROVIDER_ENV) delete env[name];
+  if (!opts.bedrock) {
+    // Not a Bedrock run: nothing of the host's own AWS may reach Claude Code.
+    for (const name of Object.keys(env)) if (isAwsOrBedrockEnv(name)) delete env[name];
+  }
   if (opts.bedrock) {
     if (opts.modelEndpoint || opts.oauthAccessToken !== '') {
       throw new Error(
@@ -2143,6 +2208,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   let lastStopReason: string | undefined;
   let sessionId: string | undefined;
   let skippedResult: SdkEnvelope | undefined;
+  const costDelta = createResultCostDelta();
   try {
     for await (const msg of q) {
       if ((msg as { type?: unknown } | null)?.type === 'result') sawResult = true;
@@ -2155,9 +2221,11 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       limitEvents.note(msg);
       const envs = translateSdkMessage(msg, toolNames);
       skippedResult = skippedResult ?? handledResultToReplay(envs, plan.skip);
+      // Read even on a replayed result the previous host already reported, so
+      // a later result in this same process counts only what it added.
+      const cost = costDelta(msg);
       if (plan.skip === -1) continue;
       // Counted before an error result throws: a failed run still cost what it cost.
-      const cost = resultCostUsd(msg);
       if (cost !== undefined) opts.onResultCost?.(cost);
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
@@ -2368,7 +2436,33 @@ interface PersistSession {
   push: (prompt: string, uuid?: string) => void;
   end: () => void;
   cwd: string;
+  /** Which account (and Bedrock profile) the process was started on: `persistCredentialKey`. */
+  credentialKey: string;
+  /** Turns this process's running `total_cost_usd` into each result's own cost. */
+  costDelta: (msg: unknown) => number | undefined;
   idle?: ReturnType<typeof setTimeout> | undefined;
+}
+
+/**
+ * The account a warm process runs on. Its environment is fixed when it starts,
+ * so a turn on another account (or another Bedrock profile, region or prefix,
+ * or another endpoint) needs a process of its own: reusing it would spend the
+ * old account and charge the new one.
+ */
+export function persistCredentialKey(opts: SdkRunOptions): string {
+  return JSON.stringify({
+    accountId: opts.accountId ?? null,
+    bedrock:
+      opts.bedrock === undefined
+        ? null
+        : {
+            accountId: opts.bedrock.accountId,
+            awsProfile: opts.bedrock.awsProfile,
+            awsRegion: opts.bedrock.awsRegion,
+            regionPrefix: opts.bedrock.regionPrefix,
+          },
+    endpoint: opts.modelEndpoint?.baseUrl ?? null,
+  });
 }
 const PERSIST_IDLE_MS = 120_000;
 const persistSessions = new Map<string, PersistSession>();
@@ -2442,7 +2536,14 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
     },
   });
   sup?.bind(q);
-  return { query: q, push, end, cwd: opts.cwd };
+  return {
+    query: q,
+    push,
+    end,
+    cwd: opts.cwd,
+    credentialKey: persistCredentialKey(opts),
+    costDelta: createResultCostDelta(),
+  };
 }
 
 /**
@@ -2464,15 +2565,19 @@ function systemPromptOption(opts: SdkRunOptions): { systemPrompt?: SdkSystemProm
 }
 
 // Kept while persistent session ownership is being moved into the turn lifecycle.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
+export async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { query } = await loadSdk();
   const chatId = opts.chatId as string;
   let session = persistSessions.get(chatId);
-  // Re-open if absent or the working dir changed (a different cwd is a different
-  // context — never reuse). The host serializes turns per chat, so a session
-  // is never mid-turn when the next turn arrives.
-  if (!session || session.cwd !== opts.cwd) {
+  // Re-open if absent, the working dir changed (a different cwd is a different
+  // context — never reuse) or the turn runs on another account. The host
+  // serializes turns per chat, so a session is never mid-turn when the next
+  // turn arrives.
+  if (
+    !session ||
+    session.cwd !== opts.cwd ||
+    session.credentialKey !== persistCredentialKey(opts)
+  ) {
     if (session) session.end();
     session = openPersistSession(opts, query);
     persistSessions.set(chatId, session);
@@ -2504,7 +2609,8 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
       const msg: unknown = next.value;
       lastStopReason = noteStopReason(msg, lastStopReason);
       const requestedMode = opts.permissionMode ?? 'auto';
-      const cost = resultCostUsd(msg);
+      // The process's running total less what its earlier results reported.
+      const cost = s.costDelta(msg);
       if (cost !== undefined) opts.onResultCost?.(cost);
       limitEvents.note(msg);
       const mismatch = permissionModeMismatch(msg, requestedMode);
