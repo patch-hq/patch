@@ -120,6 +120,7 @@ describe('no surface-local model default', () => {
     expect(Object.keys(models).sort()).toEqual([
       'getModelCatalog',
       'loadModels',
+      'modelCatalogHostId',
       'refreshModelsForHost',
       'resetModelCatalog',
       'setModelCatalog',
