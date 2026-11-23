@@ -13,7 +13,7 @@ import type { Logger } from 'pino';
 import type { HookCheckRequestEvent, WireEvent } from '@patch/wire';
 import { HookCheckOutcome } from '@patch/wire/hooks';
 import { expandHome } from './expandHome.js';
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { OAuthCheckResult } from './chatRunner.js';
 
 /** Keep stdout/stderr from growing unbounded in the reply. */
@@ -211,7 +211,7 @@ async function runPromptHook(
       cwd: expandHome(event.context.folder),
       resumeSessionId: undefined,
       abortController,
-      oauthAccessToken: auth.accessToken,
+      ...sdkCredential(auth),
       model: prompt.model,
       permissionMode: 'bypassPermissions',
     })) {

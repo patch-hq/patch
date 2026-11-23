@@ -309,11 +309,18 @@ export function parseLimitResetsAt(message: string, now: number): number | undef
 }
 
 import type { AccountStrategy } from '@patch/wire';
+import type { BedrockRun } from './sdkBackend.js';
 
 /** One account as failover sees it: its id, and whether it has a credential at all. */
 export interface FailoverAccount {
   id: string;
   connected: boolean;
+  /**
+   * In the order at all (spec/10 § Choosing an account). `false`: never chosen
+   * by the strategy, by another account running out or by a one-shot call; it
+   * runs only for the chat locked to it. Absent reads as in.
+   */
+  auto?: boolean;
   /**
    * Which Anthropic organisation the account's token authenticates as.
    *
@@ -627,8 +634,11 @@ export class AccountRotation {
    * and a spent key is stepped over rather than stalling the rotation.
    * Soonest-reset sorts by weekly reset, earliest first; least-used by
    * utilisation, lowest first. Ties and unread keys keep their stored order.
+   *
+   * An account with `auto` off is left out, unless it is the lock (`preferred`).
    */
-  order(accounts: readonly FailoverAccount[], route: RouteOptions = {}): FailoverAccount[] {
+  order(allAccounts: readonly FailoverAccount[], route: RouteOptions = {}): FailoverAccount[] {
+    const accounts = allAccounts.filter((a) => a.auto !== false || a.id === route.preferred);
     let ordered: FailoverAccount[];
     switch (route.strategy ?? 'priority') {
       case 'priority':
@@ -737,8 +747,11 @@ export class AccountRotation {
  * Resolves to `null` when no account could complete the call, so the caller's
  * existing "no result, leave things unchanged" path handles an exhausted host
  * without a second failure mode to write.
+ *
+ * On a Claude on Amazon Bedrock account `accessToken` is `''` and `bedrock`
+ * names the profile; `sdkCredential` turns the pair into the SDK's options.
  */
 export type RunOnAccountWithCredit = <T>(
   label: string,
-  run: (accessToken: string) => Promise<T>,
+  run: (accessToken: string, bedrock?: BedrockRun) => Promise<T>,
 ) => Promise<T | null>;

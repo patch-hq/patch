@@ -6,7 +6,7 @@
 // NO FALLBACK: an OAuth miss, SDK error, timeout or empty reply is a thrown
 // error / null the handler turns into `ok:false` — never an empty summary.
 
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 
@@ -35,7 +35,7 @@ export function makeLinkSummariser(opts: {
     return await runSmallJob(
       opts,
       `link summary ${input.requestId}`,
-      async (accessToken, model) => {
+      async (accessToken, model, bedrock) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), LINK_SUMMARY_TIMEOUT_MS);
         try {
@@ -47,7 +47,7 @@ export function makeLinkSummariser(opts: {
             cwd: input.folder,
             resumeSessionId: undefined,
             abortController,
-            oauthAccessToken: accessToken,
+            ...sdkCredential({ accessToken, bedrock }),
             model,
             permissionMode: 'bypassPermissions',
           })) {

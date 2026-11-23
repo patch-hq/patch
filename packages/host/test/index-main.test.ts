@@ -3033,6 +3033,105 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
+  // spec/10 § Backend credentials — Claude on Amazon Bedrock. A fake AWS
+  // config in a temp dir (never the real ~/.aws), and no AWS CLI is run: the
+  // profile asked about is one the host does not have.
+  it('reports its AWS profiles, checks a profile, and reports the spend of a turn on a Bedrock account', async () => {
+    const awsDir = mkdtempSync(join(tmpdir(), 'patch-main-aws-'));
+    writeFileSync(join(awsDir, 'config'), '[profile work]\nregion = eu-west-2\n');
+    const boot = await bootMain({
+      AWS_CONFIG_FILE: join(awsDir, 'config'),
+      AWS_SHARED_CREDENTIALS_FILE: join(awsDir, 'credentials'),
+    });
+    const mockSdk = boot.ready.sdkBackend as unknown as {
+      enqueue(events: Array<Record<string, unknown>>): void;
+      lastOptions(): { accountId?: string; bedrock?: { awsProfile: string } } | undefined;
+    };
+    const costed = (content: string, cost: number): Array<Record<string, unknown>> => [
+      { type: 'assistant', content },
+      { type: 'result', raw: { type: 'result', subtype: 'success', total_cost_usd: cost } },
+    ];
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      const described = await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'host.host' && e.awsProfiles !== undefined,
+      );
+      expect((described as { awsProfiles?: unknown }).awsProfiles).toEqual([
+        { name: 'work', region: 'eu-west-2' },
+      ]);
+
+      boot.fakeServer.send({
+        type: 'patch.aws_profile_check.request',
+        requestId: 'apc-1',
+        hostId: 'd1',
+        awsProfile: 'nope',
+      } as WireEvent);
+      const answer = await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'patch.aws_profile_check.response' && e.requestId === 'apc-1',
+      );
+      expect(answer).toMatchObject({ exists: false, signedIn: null });
+
+      boot.fakeServer.send({
+        type: 'settings.snapshot',
+        hostId: 'd1',
+        version: 1,
+        settings: DEFAULT_SHARED_SETTINGS,
+        secrets: {
+          // No token account: nothing here may reach Anthropic, and the model
+          // catalogue is never asked without a token.
+          claude: [
+            {
+              id: 'b1',
+              label: 'Work AWS',
+              credential: null,
+              auto: false,
+              bedrock: {
+                hostId: 'd1',
+                awsProfile: 'work',
+                awsRegion: 'eu-west-2',
+                regionPrefix: 'eu',
+                monthlyCapUsd: 100,
+                spentUsd: 0,
+                spentMonth: '2026-11',
+              },
+            },
+          ],
+          codex: [],
+          providerKeys: {},
+        },
+      } as WireEvent);
+      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
+
+      // A chat locked to the Bedrock account runs on its profile; the turn's
+      // cost goes to the server against that account.
+      mockSdk.enqueue(costed('hi', 0.42));
+      mockSdk.enqueue(costed('Title', 0.01));
+      boot.fakeServer.send({
+        type: 'chat.spawn_request',
+        hostId: 'd1',
+        folder: realpathSync(mkdtempSync(join(tmpdir(), 'patch-main-bedrock-'))),
+        model: 'claude-opus-5',
+        prompt: 'go',
+        chatId: 'chat-bedrock',
+        preferredAccountId: 'b1',
+      } as WireEvent);
+      const spend = await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'host.account_spend' && e.accountId === 'b1',
+      );
+      expect(spend).toMatchObject({ hostId: 'd1', accountId: 'b1' });
+      expect([0.42, 0.01]).toContain((spend as { costUsd: number }).costUsd);
+      // The title had no account in the order to run on, and never runs on
+      // the one with auto off.
+      await new Promise((r) => setTimeout(r, 200));
+      const spends = boot.fakeServer.received.filter((e) => e.type === 'host.account_spend');
+      expect(spends).toHaveLength(1);
+    } finally {
+      await boot.cleanup();
+      rmSync(awsDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   // spec/01 § Settings — values that start on a host: what it held before
   // settings were shared goes up once, and a key in its environment on request.
   it('answers the server’s import with what it held, and adopts a key from its environment', async () => {

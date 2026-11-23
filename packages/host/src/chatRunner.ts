@@ -124,6 +124,8 @@ import {
 import { type MetaStore, ChatMeta, type UnreadableChat } from './meta.js';
 import {
   PermissionModeDowngradedError,
+  sdkCredential,
+  type BedrockRun,
   type ExtraMcpServer,
   type SdkBackend,
   type SdkEnvelope,
@@ -248,7 +250,8 @@ import { prefixKeepingCommandFirst } from './leadCommand.js';
  * to the key that actually spent, and never stored on the chat.
  */
 export type OAuthCheckResult =
-  | { ok: true; accessToken: string; accountId?: string }
+  /** `bedrock` set: a Claude on Amazon Bedrock account, `accessToken` `''`. */
+  | { ok: true; accessToken: string; accountId?: string; bedrock?: BedrockRun }
   | { ok: false; reason: string };
 
 export interface HostOptions {
@@ -9557,7 +9560,7 @@ export class Daemon {
       ...(sideIds ? { promptId: sideIds.promptId } : {}),
       ...(sideIds?.newSessionId !== undefined ? { newSessionId: sideIds.newSessionId } : {}),
       abortController,
-      oauthAccessToken: oauth.accessToken,
+      ...sdkCredential(oauth),
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),
@@ -10911,7 +10914,7 @@ export class Daemon {
       ...(turnIds ? { promptId: turnIds.promptId } : {}),
       ...(turnIds?.newSessionId !== undefined ? { newSessionId: turnIds.newSessionId } : {}),
       abortController,
-      oauthAccessToken: oauth.accessToken,
+      ...sdkCredential(oauth),
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),

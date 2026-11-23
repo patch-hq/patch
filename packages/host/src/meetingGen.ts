@@ -4,7 +4,7 @@
 // statusGen.ts, except a failure THROWS: the manager puts it on the panel.
 
 import { z } from 'zod';
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import {
   DEFAULT_MEETING_MODEL,
@@ -173,7 +173,7 @@ export function makeMeetingAnalyser(opts: {
   return async function analyse(input) {
     const result = await opts.runOnAccountWithCredit(
       `meeting ${input.chatId}`,
-      async (accessToken) => {
+      async (accessToken, bedrock) => {
         const abortController = new AbortController();
         const timer = setTimeout(
           () => abortController.abort(),
@@ -188,7 +188,7 @@ export function makeMeetingAnalyser(opts: {
             cwd: opts.cwd,
             resumeSessionId: undefined,
             abortController,
-            oauthAccessToken: accessToken,
+            ...sdkCredential({ accessToken, bedrock }),
             model: opts.model(),
             permissionMode: 'bypassPermissions',
           })) {
@@ -251,7 +251,7 @@ export function makeMeetingCorrector(opts: {
   return async function correct(input) {
     const result = await opts.runOnAccountWithCredit(
       `meeting correct ${input.chatId}`,
-      async (accessToken) => {
+      async (accessToken, bedrock) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), MEETING_TIMEOUT_MS);
         try {
@@ -263,7 +263,7 @@ export function makeMeetingCorrector(opts: {
             cwd: opts.cwd,
             resumeSessionId: undefined,
             abortController,
-            oauthAccessToken: accessToken,
+            ...sdkCredential({ accessToken, bedrock }),
             model: opts.model(),
             permissionMode: 'bypassPermissions',
           })) {
@@ -323,7 +323,7 @@ export function makeMeetingResearcher(opts: {
   return async function research(input) {
     const result = await opts.runOnAccountWithCredit(
       `meeting research ${input.chatId}`,
-      async (accessToken) => {
+      async (accessToken, bedrock) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), RESEARCH_TIMEOUT_MS);
         try {
@@ -335,7 +335,7 @@ export function makeMeetingResearcher(opts: {
             cwd: opts.cwd,
             resumeSessionId: undefined,
             abortController,
-            oauthAccessToken: accessToken,
+            ...sdkCredential({ accessToken, bedrock }),
             model: opts.model(),
             permissionMode: 'bypassPermissions',
           })) {
@@ -394,7 +394,7 @@ export function makeMeetingWriteup(opts: {
   return async function writeup(input) {
     const result = await opts.runOnAccountWithCredit(
       `meeting write-up ${input.chatId}`,
-      async (accessToken) => {
+      async (accessToken, bedrock) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), WRITEUP_TIMEOUT_MS);
         try {
@@ -406,7 +406,7 @@ export function makeMeetingWriteup(opts: {
             cwd: opts.cwd,
             resumeSessionId: undefined,
             abortController,
-            oauthAccessToken: accessToken,
+            ...sdkCredential({ accessToken, bedrock }),
             model: opts.model(),
             permissionMode: 'bypassPermissions',
           })) {

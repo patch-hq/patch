@@ -24,7 +24,7 @@ import {
   tailCodePoints,
 } from '@patch/wire';
 import type { GoalStringency } from '@patch/wire';
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { OAuthCheckResult } from './chatRunner.js';
 import type { Logger } from 'pino';
 import { cutAt } from './textClean.js';
@@ -274,7 +274,7 @@ export function makeGoalEvaluator(
         cwd: input.folder,
         resumeSessionId: undefined,
         abortController,
-        oauthAccessToken: auth.accessToken,
+        ...sdkCredential(auth),
         model,
         permissionMode: 'bypassPermissions',
       })) {

@@ -238,7 +238,39 @@ Two providers have direct adapters because they expose more than ACP does:
 
 - Claude Code runs through the Claude Agent SDK against the host's own
   installation. It offers a per-chat thinking-effort override
-  (`04-chats-and-folders.md` § Effort).
+  (`04-chats-and-folders.md` § Effort). A turn or one-shot call on a Claude on
+  Amazon Bedrock account runs it with the environment `10-auth.md` § Backend
+  credentials names (`CLAUDE_CODE_USE_BEDROCK`, the profile and region, the
+  prefix unless `auto`, no model-access fallback) and none of the host's own
+  Claude or AWS credentials, a region prefix the host set included.
+
+### Bedrock accounts
+
+A host runs Claude on Amazon Bedrock accounts and says so by reporting
+`awsProfiles` in `host.host`: the profiles named in its AWS config
+(`[default]`, `[profile x]`) and shared credentials (`[x]`), read from
+`AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` where set and `~/.aws`
+otherwise, with each one's `region`. No other key is read. A
+`patch.aws_profile_check.request` is answered from the same list and, for a
+profile there, `aws configure export-credentials --profile <name> --format
+process` run without the host's own AWS variables: success with an expiry still
+ahead is signed in, a refusal or a past expiry is signed out with the CLI's words,
+and no AWS CLI (or no answer in 30 s) is `signedIn: null`. Only the expiry is read
+from what it prints; the rest is discarded and never logged or sent. Held
+Bedrock accounts are checked the same way every 10 minutes and whenever the held
+accounts change; a signed-out profile is reported in `host.account` as
+`connected: false` with `error: 'AWS sign-in expired'` (or the missing profile
+named), is out of the order, and refuses a turn locked to it. A Bedrock account
+is never usage-probed.
+
+After every turn and one-shot call on a Bedrock account, including one that
+ended in an error result, the host sends `host.account_spend` with the
+`total_cost_usd` Claude Code reported. The server keeps the month's spend; from
+each snapshot the host records an account whose spend has reached its cap as
+limited until the first of next month, UTC, and drops that record when the cap
+is raised above the spend. A snapshot that changes only spend is not new
+accounts and clears nothing else.
+
 - Codex runs through a managed, version-pinned Codex app-server process, with an
   isolated credential profile per account. The pinned Codex is downloaded from
   the npm registry, checked against the registry's own integrity, and runs as its
@@ -394,7 +426,7 @@ unprovisioned keeps running chats on the others.
 
 Chat titles, status lines, tool-run labels, branch send-back summaries, link summaries and recurrence translation are small one-shot model queries. They share one ordered model list: the first entry is the set model, and each later entry is tried in order when the one before it fails. The default is `claude-haiku-4-5-20251001` then `claude-sonnet-4-5`. The list is the shared setting `smallJobModels` (`01-server.md` § Settings), changed with `patch settings set small-job-models a,b` (set model first), and applies to every host from its next job. An empty list, an empty entry or a model named twice is refused when the setting is written. `PATCH_SMALL_JOB_MODELS` is not read.
 
-This is separate from account choice (`10-auth.md` § Choosing an account): the account is chosen first, then the models are walked on it. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps) and Codex chats, which run on their own model, are not part of this list.
+This is separate from account choice (`10-auth.md` § Choosing an account): the account is chosen first, then the models are walked on it. Titles and status lines take the account the shared `backgroundAccount` names, that one alone (an account this host does not hold, or one spent, leaves them unchanged), or the order when it is `auto`; the other jobs always take the order. On a Bedrock account the same model ids are used and Claude Code maps them. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps) and Codex chats, which run on their own model, are not part of this list.
 
 ## Permission mode
 
@@ -1532,7 +1564,7 @@ re-reading a provider's models endpoint whenever that entry is older than its TT
 after the last deploy is selectable and a retired one stops being offered. A
 chat's chosen model determines which provider runs it.
 
-A missing or expired credential, or a non-2xx from a provider, is returned as an error against that provider, and the surface shows that error in the picker (`14-design-web.md` § Model selector) while models from the providers that answered stay selectable. A cached catalogue is served for its TTL even if a later refresh fails.
+The Claude entry is read with a subscription or API-key account only; a Bedrock account has no token, so Anthropic is never asked with none, and a host whose only Claude accounts are on Bedrock has no Claude catalogue. A missing or expired credential, or a non-2xx from a provider, is returned as an error against that provider, and the surface shows that error in the picker (`14-design-web.md` § Model selector) while models from the providers that answered stay selectable. A cached catalogue is served for its TTL even if a later refresh fails.
 
 ## Self-upgrade
 

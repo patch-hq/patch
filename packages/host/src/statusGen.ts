@@ -13,7 +13,7 @@
 // (the row just shows no nested summary), logged.
 
 import type { StatusKind } from '@patch/wire';
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
@@ -141,40 +141,44 @@ export function makeStatusGenerator(
   return async function generateStatus(
     input: GenerateStatusInput,
   ): Promise<ChatStatusSummary | null> {
-    return await runSmallJob(opts, `status gen ${input.chatId}`, async (accessToken, model) => {
-      const abortController = new AbortController();
-      const timer = setTimeout(() => abortController.abort(), STATUS_TIMEOUT_MS);
-      try {
-        // The real SDK streams a turn twice (deltas + a final assistant message).
-        // Prefer the authoritative final message; fall back to assembled deltas
-        // for a delta-only backend. Same pattern as `titleGen`.
-        let finalText = '';
-        let deltaText = '';
-        for await (const env of opts.sdkBackend.run({
-          prompt: buildPrompt(input),
-          inferenceProfile: 'classifier',
-          cwd: input.folder,
-          resumeSessionId: undefined,
-          abortController,
-          oauthAccessToken: accessToken,
-          model,
-          permissionMode: 'bypassPermissions',
-        })) {
-          if (env.type === 'assistant' && env.content) finalText += env.content;
-          else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
-          else if (env.type === 'error') {
-            // Thrown, not returned: the runner reads the provider's own words to
-            // tell "this account is spent" (try the next one) from a real error.
-            throw new Error(env.errorMessage ?? 'status gen: SDK error envelope');
+    return await runSmallJob(
+      opts,
+      `status gen ${input.chatId}`,
+      async (accessToken, model, bedrock) => {
+        const abortController = new AbortController();
+        const timer = setTimeout(() => abortController.abort(), STATUS_TIMEOUT_MS);
+        try {
+          // The real SDK streams a turn twice (deltas + a final assistant message).
+          // Prefer the authoritative final message; fall back to assembled deltas
+          // for a delta-only backend. Same pattern as `titleGen`.
+          let finalText = '';
+          let deltaText = '';
+          for await (const env of opts.sdkBackend.run({
+            prompt: buildPrompt(input),
+            inferenceProfile: 'classifier',
+            cwd: input.folder,
+            resumeSessionId: undefined,
+            abortController,
+            ...sdkCredential({ accessToken, bedrock }),
+            model,
+            permissionMode: 'bypassPermissions',
+          })) {
+            if (env.type === 'assistant' && env.content) finalText += env.content;
+            else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
+            else if (env.type === 'error') {
+              // Thrown, not returned: the runner reads the provider's own words to
+              // tell "this account is spent" (try the next one) from a real error.
+              throw new Error(env.errorMessage ?? 'status gen: SDK error envelope');
+            }
           }
+          return parseStatus(finalText !== '' ? finalText : deltaText);
+          // No catch: a failure belongs to the runner, which decides from the
+          // provider's message whether another account is worth trying. Swallowing
+          // it here is what made a spent account look like an empty answer.
+        } finally {
+          clearTimeout(timer);
         }
-        return parseStatus(finalText !== '' ? finalText : deltaText);
-        // No catch: a failure belongs to the runner, which decides from the
-        // provider's message whether another account is worth trying. Swallowing
-        // it here is what made a spent account look like an empty answer.
-      } finally {
-        clearTimeout(timer);
-      }
-    });
+      },
+    );
   };
 }

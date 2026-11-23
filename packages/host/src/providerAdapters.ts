@@ -8,11 +8,12 @@
 
 import type { AccountStrategy, HarnessId } from '@patch/wire';
 import { providerForModel } from '@patch/wire';
-import type { SdkBackend } from './sdkBackend.js';
+import type { BedrockRun, SdkBackend } from './sdkBackend.js';
 import type { OwnConfigFile } from './providerSettings.js';
 
 export type CredentialResult =
-  | { ok: true; accessToken: string; accountId?: string }
+  /** `bedrock` set: a Claude on Amazon Bedrock account, `accessToken` `''`. */
+  | { ok: true; accessToken: string; accountId?: string; bedrock?: BedrockRun }
   | { ok: false; reason: string };
 
 export interface TurnAccountHint {

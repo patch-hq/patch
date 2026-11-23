@@ -11,7 +11,7 @@
 // records the attempt, with the failure as the text, rather than silently
 // saying nothing — principles.md § no invisible injection applies here too).
 
-import type { SdkBackend } from './sdkBackend.js';
+import { sdkCredential, type SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
@@ -84,7 +84,7 @@ export function makeBranchSendBackSummarizer(
     const summary = await runSmallJob(
       opts,
       `branch send-back ${input.chatId}/${input.branchId}`,
-      async (accessToken, model) => {
+      async (accessToken, model, bedrock) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), SEND_BACK_TIMEOUT_MS);
         try {
@@ -96,7 +96,7 @@ export function makeBranchSendBackSummarizer(
             cwd: input.folder,
             resumeSessionId: undefined,
             abortController,
-            oauthAccessToken: accessToken,
+            ...sdkCredential({ accessToken, bedrock }),
             model,
             permissionMode: 'bypassPermissions',
           })) {

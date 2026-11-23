@@ -55,6 +55,7 @@ import {
   NoModelCatalogueError,
   ChatNotFoundError,
   AttachmentChatNotFoundError,
+  type OAuthCheckResult,
 } from './chatRunner.js';
 import { ChatMoveError } from './chatMove.js';
 import { expandHome } from './expandHome.js';
@@ -72,7 +73,13 @@ import type {
   ProviderId,
   LimitBehaviour,
 } from '@patch/wire';
-import { limitBehaviourFromAutoResume, providerForSessionId } from '@patch/wire';
+import {
+  BACKGROUND_ACCOUNT_AUTO,
+  bedrockAtCap,
+  bedrockCapResetsAt,
+  limitBehaviourFromAutoResume,
+  providerForSessionId,
+} from '@patch/wire';
 import {
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
@@ -166,10 +173,20 @@ import {
   createRealSdkBackend,
   forgetClaudeExecutable,
   setClaudeInstallGate,
-  type LimitFacts,
   type SdkBackend,
 } from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
+import {
+  AWS_SIGN_IN_EXPIRED,
+  BEDROCK_CAP_REACHED,
+  BedrockSignIn,
+  bedrockRunOf,
+  checkAwsProfile,
+  claudeAccountsIdentity,
+  readAwsProfiles,
+  withBedrockSpend,
+} from './bedrockAccounts.js';
+import { runClaudeOneShot, type ClaudeOneShotDeps } from './claudeOneShot.js';
 import { makeStatusGenerator } from './statusGen.js';
 import { MeetingManager, MeetingNotice, type MeetingPrompts } from './meeting.js';
 import {
@@ -222,7 +239,6 @@ import {
 import { updateClaudeCli } from './claudeCliUpdate.js';
 import {
   AccountRotation,
-  isAccountExhausted,
   parseLimitResetsAt,
   type FailoverAccount,
   type RouteOptions,
@@ -720,7 +736,7 @@ async function startHost(
   // 2. SDK backend selection. The mock writes a real JSONL transcript into the
   // SAME projects root the host's HistoryReader reads, so patch_history
   // paginates genuine persisted older events on the live stack.
-  const sdkBackend: SdkBackend =
+  const rawSdkBackend: SdkBackend =
     config.sdkBackend === 'real'
       ? createRealSdkBackend()
       : createMockSdkBackend({
@@ -735,6 +751,12 @@ async function startHost(
               : 2_500,
         });
   logger.info({ backend: config.sdkBackend }, 'patch-daemon: SDK backend selected');
+  // spec/10 § Spending caps: every run on a Bedrock account, turn or one-shot,
+  // reports what it cost; the server keeps the month's spend.
+  const sdkBackend: SdkBackend = withBedrockSpend(rawSdkBackend, (accountId, costUsd) => {
+    // `emit` is declared further down; nothing runs a turn before it is.
+    emit({ type: 'host.account_spend', hostId: selfHostId, accountId, costUsd, at: Date.now() });
+  });
 
   // 3. Host registration: dial-in needs an EdDSA-JWT daemonKey. If absent,
   //    run the QR pairing flow (spec/10-auth.md "Host registration") and
@@ -1337,6 +1359,28 @@ async function startHost(
     };
   };
 
+  /**
+   * The AWS profiles this host has, for `host.host` (spec/10 § Backend
+   * credentials). A config the host cannot read is logged and reported as no
+   * profiles, so the rest of the description still goes out.
+   */
+  const awsProfilesNow = (): import('@patch/wire').AwsProfileInfo[] => {
+    try {
+      return readAwsProfiles();
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, 'could not read the AWS profiles on this host');
+      return [];
+    }
+  };
+  /** Whether each held Bedrock account's AWS profile is signed in (checked every 10 minutes). */
+  const bedrockSignIn = new BedrockSignIn({
+    accounts: () => readPatchStore(oauthOpts)?.accounts ?? [],
+    check: (awsProfile) => checkAwsProfile(awsProfile, { profiles: awsProfilesNow }),
+    onChange: () => emit(buildAccountReport()),
+    logger,
+  });
+  if (config.sdkBackend === 'real') bedrockSignIn.start();
+
   const buildAccountReport = (
     activeOverride?: { connected: boolean },
     credentialError?: NonNullable<HostAccountEvent['credentialError']>,
@@ -1356,6 +1400,29 @@ async function startHost(
       accounts: store.accounts.map((a) => {
         const usage = usageFor(a.id);
         const spent = accountRotation.snapshot().find((e) => e.accountId === a.id);
+        if (a.bedrock !== undefined) {
+          // Never probed (a probe would be a paid call): its spend against the
+          // cap is the server's, so only the profile's sign-in and a refusal
+          // are this host's to report.
+          const error = bedrockSignIn.error(a.id);
+          return {
+            id: a.id,
+            label: a.label,
+            connected: error === undefined,
+            ...(error !== undefined ? { error } : {}),
+            accountEmail: null,
+            ...(spent
+              ? {
+                  refusal: {
+                    kind: spent.kind,
+                    ...(spent.until !== undefined ? { until: spent.until } : {}),
+                    message: spent.reason || 'refused',
+                    at: spent.at,
+                  },
+                }
+              : {}),
+          };
+        }
         return {
           id: a.id,
           label: a.label,
@@ -1406,6 +1473,7 @@ async function startHost(
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
       ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
+      awsProfiles: awsProfilesNow(),
       hostId: selfHostId,
       hostName,
       hostVersion: VERSION,
@@ -2244,6 +2312,9 @@ async function startHost(
    * credentials — account strategy). Priority until the first snapshot says.
    */
   let accountStrategy: SharedSettings['accountStrategy'] = DEFAULT_SHARED_SETTINGS.accountStrategy;
+  /** The Claude account titles and status summaries run on, or `auto` (spec/10 § Choosing an account). */
+  let backgroundAccount: SharedSettings['backgroundAccount'] =
+    DEFAULT_SHARED_SETTINGS.backgroundAccount;
   let webBotAuthEnabled = false;
 
   // The account's Manager and Speakers model (Settings → Manager). Undefined
@@ -2519,7 +2590,46 @@ async function startHost(
       }
     }
     accountStrategy = shared.accountStrategy;
+    backgroundAccount = shared.backgroundAccount;
     acpStrategy = shared.accountStrategy.acp ?? 'priority';
+  };
+
+  /**
+   * A Bedrock account at its monthly cap is limited until the first of next
+   * month, UTC (spec/10 § Spending caps); one whose cap was raised above its
+   * spend is ready at once. Read from the spend the server keeps, on every
+   * snapshot.
+   */
+  const syncBedrockCaps = (accounts: readonly SharedSecrets['claude'][number][]): void => {
+    const now = Date.now();
+    let changed = false;
+    let lifted = false;
+    for (const a of accounts) {
+      if (a.bedrock === undefined) continue;
+      const capped = bedrockAtCap(a.bedrock, now);
+      const marked =
+        accountRotation.snapshot().find((e) => e.accountId === a.id)?.reason ===
+        BEDROCK_CAP_REACHED;
+      if (capped && !marked) {
+        accountRotation.markExhausted(
+          a.id,
+          BEDROCK_CAP_REACHED,
+          bedrockCapResetsAt(now),
+          undefined,
+          'limit',
+        );
+        changed = true;
+      } else if (!capped && marked) {
+        accountRotation.clear(a.id);
+        changed = true;
+        lifted = true;
+      }
+    }
+    if (!changed) return;
+    // The cap's reset is a known instant: arm for it, as for any stated reset.
+    creditResume.arm();
+    if (lifted) creditResume.credentialChanged('a Bedrock cap was raised above its spend');
+    emit(buildAccountReport());
   };
 
   /** The last snapshot's Claude accounts, to tell a refresh on this host from the server's. */
@@ -2547,10 +2657,16 @@ async function startHost(
     [K in ProviderAccountsKey]: (accounts: SharedSecrets[K]) => void | Promise<void>;
   } = {
     claude: (accounts) => {
-      const before = JSON.stringify(readPatchStore(oauthOpts)?.accounts ?? []);
-      writePatchStore({ accounts, activeAccountId: accounts[0]?.id ?? null }, oauthOpts);
+      const before = claudeAccountsIdentity(readPatchStore(oauthOpts)?.accounts ?? []);
+      // The active account (what a check with no account resolves) is a token
+      // account where there is one: a Bedrock profile has no token.
+      const active = accounts.find((a) => a.bedrock === undefined) ?? accounts[0];
+      writePatchStore({ accounts, activeAccountId: active?.id ?? null }, oauthOpts);
       sharedClaude = accounts;
-      if (JSON.stringify(accounts) !== before) {
+      // A Bedrock account's spend moves with every turn; that alone is not new
+      // keys, only (perhaps) a cap reached or lifted.
+      if (claudeAccountsIdentity(accounts) !== before) {
+        void bedrockSignIn.checkAll();
         // The keys changed: every out-of-credit reading is about keys that may
         // no longer be the ones held, so it is dropped and read afresh.
         accountRotation.clearAll();
@@ -2558,6 +2674,7 @@ async function startHost(
         creditResume.credentialChanged('shared accounts changed');
         void refreshCredentialState();
       }
+      syncBedrockCaps(accounts);
     },
     codex: (accounts) => codexAccounts.applyShared(accounts),
   };
@@ -3367,6 +3484,37 @@ async function startHost(
         // spec/11 § Replacing a host — take over the old host's chats.
         if (!isForThisHost(event.hostId, event.type)) return;
         sender(answerChatAdopt(event, daemon, logger, selfHostId));
+        return;
+      }
+      if (event.type === 'patch.aws_profile_check.request') {
+        // spec/10 § Signing in — Amazon Bedrock: the server checks a profile
+        // here before it stores or re-points an account. Names and a yes/no
+        // go back; never a credential.
+        if (!isForThisHost(event.hostId, event.type)) return;
+        void checkAwsProfile(event.awsProfile, { profiles: awsProfilesNow }).then(
+          (result) => {
+            sender({
+              type: 'patch.aws_profile_check.response',
+              requestId: event.requestId,
+              hostId: selfHostId,
+              ...result,
+            });
+          },
+          (err: unknown) => {
+            logger.error(
+              { awsProfile: event.awsProfile, err: (err as Error).message },
+              'AWS profile check failed',
+            );
+            sender({
+              type: 'patch.aws_profile_check.response',
+              requestId: event.requestId,
+              hostId: selfHostId,
+              exists: false,
+              signedIn: null,
+              error: `The check failed on this host: ${(err as Error).message}`,
+            });
+          },
+        );
         return;
       }
       if (event.type === 'patch.host_files.request') {
@@ -4636,7 +4784,9 @@ async function startHost(
   ): { accounts: FailoverAccount[]; route: RouteOptions } => ({
     accounts: store.accounts.map((a) => ({
       id: a.id,
-      connected: a.credential !== null,
+      // A Bedrock account has no credential: it can run while its profile is signed in.
+      connected: a.bedrock !== undefined ? !bedrockSignIn.signedOut(a.id) : a.credential !== null,
+      ...(a.auto !== undefined ? { auto: a.auto } : {}),
       ...(a.credential?.organizationId !== undefined
         ? { organizationId: a.credential.organizationId }
         : {}),
@@ -4765,9 +4915,7 @@ async function startHost(
     preferredAccountId?: string;
     sessionAccountId?: string;
     anyAccount?: boolean;
-  }): Promise<
-    { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
-  > => {
+  }): Promise<OAuthCheckResult> => {
     const store = readPatchStore(oauthOpts);
     if (!store || store.accounts.length === 0) {
       // No store wiring at all (the mock backend in tests): there is no key to
@@ -4796,6 +4944,23 @@ async function startHost(
         },
         'account routing: the first key has no credit — running this turn on the next one',
       );
+    }
+    if (effective === undefined) {
+      // A chat locked to a Bedrock account whose profile is signed out has
+      // nowhere to run: say so, rather than resolving the host's default token.
+      const locked = store.accounts.find((a) => a.id === route.preferred);
+      if (locked?.bedrock !== undefined) {
+        return {
+          ok: false,
+          reason: `${locked.label}: ${bedrockSignIn.error(locked.id) ?? AWS_SIGN_IN_EXPIRED}`,
+        };
+      }
+    }
+    const effectiveAccount =
+      effective !== undefined ? store.accounts.find((a) => a.id === effective) : undefined;
+    const bedrock = effectiveAccount !== undefined ? bedrockRunOf(effectiveAccount) : undefined;
+    if (bedrock !== undefined) {
+      return { ok: true, accessToken: '', accountId: bedrock.accountId, bedrock };
     }
     const result = await resolveOAuth(effective);
     return result.ok && effective !== undefined ? { ...result, accountId: effective } : result;
@@ -4973,9 +5138,7 @@ async function startHost(
   const resolveModelOAuth = async (
     model?: string,
     turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
-  ): Promise<
-    { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
-  > => {
+  ): Promise<OAuthCheckResult> => {
     return adapterForModel(providerAdapters, model).resolveCredential(model, turn);
   };
 
@@ -4997,76 +5160,37 @@ async function startHost(
    * way on every account, and retrying it across all of them turns one failed
    * call into N.
    */
-  const runOnAccountWithCredit: RunOnAccountWithCredit = async <T>(
-    label: string,
-    run: (accessToken: string) => Promise<T>,
-  ): Promise<T | null> => {
-    const store = readPatchStore(oauthOpts);
-    if (!store || store.accounts.length === 0) {
-      // No store wiring at all (the mock backend in tests): resolve the way
-      // everything else does when there is no account list to walk.
-      const resolved = await resolveOAuth();
-      if (!resolved.ok) {
-        logger.warn({ label, reason: resolved.reason }, 'ai call: OAuth unavailable');
-        return null;
-      }
-      return await run(resolved.accessToken);
-    }
-    const { accounts, route } = claudeRoute(store);
-    const order = accountRotation.usableAccounts(accounts, route);
-    if (order.length === 0) {
-      logger.warn(
-        { label, sidelined: accountRotation.snapshot() },
-        'ai call: every account is out of credit',
-      );
-      return null;
-    }
-    for (const accountId of order) {
-      const resolved = await resolveOAuth(accountId);
-      if (!resolved.ok) {
-        logger.warn(
-          { label, accountId, reason: resolved.reason },
-          'ai call: account has no usable credential — trying the next',
-        );
-        continue;
-      }
-      try {
-        return await run(resolved.accessToken);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const probeWindows = accountUsage?.get(accountId)?.reading.windows;
-        if (
-          !isAccountExhausted((err as { limit?: LimitFacts }).limit, {
-            probeBlocked: rejectedRateLimitScope(probeWindows) !== undefined,
-          })
-        ) {
-          // Not an account problem, so no other account would answer
-          // differently. Rethrown rather than folded into the same `null` an
-          // exhausted host returns: the caller's own handler gets the
-          // provider's words, and a real failure never disguises itself as an
-          // empty answer.
-          logger.warn({ label, accountId, err }, 'ai call: failed');
-          throw err;
-        }
-        const marked = accountRotation.markExhaustedWithSiblings(
-          accounts,
-          accountId,
-          message.slice(0, 200),
-          parseLimitResetsAt(message, Date.now()),
-        );
-        logger.info(
-          { label, accountId, alsoSidelined: marked.slice(1) },
-          'ai call: account out of credit — trying the next',
-        );
-        emit(buildAccountReport());
-      }
-    }
-    logger.warn(
-      { label, tried: order, sidelined: accountRotation.snapshot() },
-      'ai call: every account is out of credit',
-    );
-    return null;
+  const claudeOneShot: ClaudeOneShotDeps = {
+    accounts: () => {
+      const store = readPatchStore(oauthOpts);
+      return store ? store.accounts : null;
+    },
+    rotation: accountRotation,
+    route: (preferred) => {
+      const store = readPatchStore(oauthOpts) ?? { accounts: [], activeAccountId: null };
+      return claudeRoute(store, preferred);
+    },
+    resolveOAuth: (accountId) => resolveOAuth(accountId),
+    probeBlocked: (accountId) =>
+      rejectedRateLimitScope(accountUsage?.get(accountId)?.reading.windows) !== undefined,
+    onMarked: () => emit(buildAccountReport()),
+    logger,
   };
+  const runOnAccountWithCredit: RunOnAccountWithCredit = (label, run) =>
+    runClaudeOneShot(claudeOneShot, label, run);
+  /**
+   * Chat titles and status summaries (spec/10 § Choosing an account): on the
+   * account the shared `backgroundAccount` names, or the way any one-shot
+   * chooses when it is `auto`. Naming one is how such a call runs on an
+   * account with `auto` off.
+   */
+  const runOnBackgroundAccount: RunOnAccountWithCredit = (label, run) =>
+    runClaudeOneShot(
+      claudeOneShot,
+      label,
+      run,
+      backgroundAccount === BACKGROUND_ACCOUNT_AUTO ? undefined : backgroundAccount,
+    );
 
   /**
    * For calls that spend no credit — the model catalogue is an auth-only
@@ -5113,7 +5237,8 @@ async function startHost(
    * token per account and `emit` to publish what it finds.
    */
   accountUsage = new AccountUsageTracker({
-    accounts: () => readPatchStore(oauthOpts)?.accounts ?? [],
+    // Never a Bedrock account: its probe would be a paid call (spec/10 § Usage).
+    accounts: () => (readPatchStore(oauthOpts)?.accounts ?? []).filter((a) => !a.bedrock),
     tokenFor: async (accountId) => {
       const resolved = await resolveOAuth(accountId);
       return resolved.ok ? resolved.accessToken : undefined;
@@ -5327,7 +5452,8 @@ async function startHost(
     // + non-blocking inside the host; a failure leaves the chat unnamed.
     generateTitle: makeTitleGenerator({
       sdkBackend,
-      runOnAccountWithCredit,
+      // On the shared `backgroundAccount` (spec/10 § Choosing an account).
+      runOnAccountWithCredit: runOnBackgroundAccount,
       smallJobModels: () => smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
@@ -5340,7 +5466,7 @@ async function startHost(
     // non-blocking; a failure leaves the previous status unchanged.
     generateStatus: makeStatusGenerator({
       sdkBackend,
-      runOnAccountWithCredit,
+      runOnAccountWithCredit: runOnBackgroundAccount,
       smallJobModels: () => smallJobModels,
       logger,
     }),
@@ -5870,9 +5996,16 @@ async function startHost(
    * and hourly; the spawn gate corrects it immediately on a real failure.
    */
   const refreshCredentialState = async (): Promise<void> => {
-    const result = await resolveOAuth();
-    if (result.ok === credentialOk) return;
-    credentialOk = result.ok;
+    // A host whose only Claude accounts are on Bedrock has no token to resolve:
+    // its active account is a profile, connected while it is signed in.
+    const store = readPatchStore(oauthOpts);
+    const active = store?.accounts.find((a) => a.id === store.activeAccountId);
+    const ok =
+      active?.bedrock !== undefined
+        ? !bedrockSignIn.signedOut(active.id)
+        : (await resolveOAuth()).ok;
+    if (ok === credentialOk) return;
+    credentialOk = ok;
     logger.info({ credentialOk }, 'backend credential state changed');
     emit(buildAccountReport());
     emit(describeHost());
@@ -7009,7 +7142,8 @@ async function startHost(
     folderRegistry,
     secretsStore,
     app,
-    sdkBackend,
+    // The unwrapped backend: a test enqueues scripted runs on the mock.
+    sdkBackend: rawSdkBackend,
   });
 }
 
