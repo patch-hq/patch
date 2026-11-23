@@ -814,7 +814,7 @@ async function startHost(
     onSignedIn: (requestId, account) =>
       link.send({ type: 'settings.account_signed_in', hostId: selfHostId, requestId, account }),
   });
-  const codexSessions = new CodexSessions(join(config.patchHome, 'openai-history'));
+  const codexSessions = new CodexSessions(join(config.patchHome, 'openai-history'), logger);
   // spec/02 § Provider adapters — local models and routers are endpoints
   // inside Codex and Claude Code, set once for the account.
   const modelEndpoints = new ModelEndpointRegistry();

@@ -1,3 +1,4 @@
+import pino from 'pino';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -38,7 +39,7 @@ describe('Codex fork', () => {
   it('forks the prior thread through the turn holding the recorded entry', async () => {
     const root = mkdtempSync(join(tmpdir(), 'patch-codex-fork-'));
     try {
-      const sessions = new CodexSessions(root);
+      const sessions = new CodexSessions(root, pino({ level: 'silent' }));
       sessions.begin('codex-parent', '/codex/parent.jsonl');
       const calls: { method: string; params: any }[] = [];
       let listener: ((m: any) => void) | undefined;

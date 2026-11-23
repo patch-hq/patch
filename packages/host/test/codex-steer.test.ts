@@ -1,3 +1,4 @@
+import pino from 'pino';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,7 @@ import type { SdkEnvelope } from '../src/sdkBackend.js';
 // next tool call finishes, not after the whole turn.
 function harness(opts: { steerFails?: boolean; waiting?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-steer-'));
-  const history = new CodexSessions(root);
+  const history = new CodexSessions(root, pino({ level: 'silent' }));
   const calls: { method: string; params: any }[] = [];
   let listener: ((m: any) => void) | undefined;
   const emit = (method: string, params: object): void =>

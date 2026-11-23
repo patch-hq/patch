@@ -9,12 +9,18 @@
 // threads still resume. Older hosts also wrote `<sessionId>.jsonl`, a copy of
 // each thread's events; nothing reads or writes those any more.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Logger } from 'pino';
 import type { SessionProbe } from './history.js';
 
+let tmpCounter = 0;
+
 export class CodexSessions implements SessionProbe {
-  constructor(private readonly root: string) {
+  constructor(
+    private readonly root: string,
+    private readonly logger: Logger,
+  ) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
   }
 
@@ -39,13 +45,23 @@ export class CodexSessions implements SessionProbe {
 
   pending(id: string): { id: string; prompt: string } | null {
     const path = this.path(id) + '.pending';
-    return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+    if (!existsSync(path)) return null;
+    try {
+      return JSON.parse(readFileSync(path, 'utf8'));
+    } catch (err) {
+      // The marker is re-derivable: an unreadable one means no pending turn.
+      // Log it and remove it so it cannot wedge every later turn of the chat.
+      this.logger.error({ err, sessionId: id, path }, 'corrupt codex pending marker, discarding');
+      rmSync(path, { force: true });
+      return null;
+    }
   }
 
   setPending(id: string, value: { id: string; prompt: string } | null): void {
     const path = this.path(id) + '.pending';
-    writeFileSync(path + '.new', JSON.stringify(value), { mode: 0o600, flush: true });
-    renameSync(path + '.new', path);
+    const tmp = `${path}.${process.pid}.${tmpCounter++}.new`;
+    writeFileSync(tmp, JSON.stringify(value), { mode: 0o600, flush: true });
+    renameSync(tmp, path);
   }
 
   hasSession(opts: { sessionId: string }): boolean {

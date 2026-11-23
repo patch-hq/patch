@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import pino from 'pino';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -8,12 +9,13 @@ import type { SdkEnvelope } from '../src/sdkBackend.js';
 
 // A Codex process that died before recording a turn leaves a pending marker
 // that no thread turn carries. That must not wedge the chat.
-function harness(threadTurns: unknown[], readFails = false) {
+function harness(threadTurns: unknown[], readFails = false, corrupt = false) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-pending-'));
-  const history = new CodexSessions(root);
+  const history = new CodexSessions(root, pino({ level: 'silent' }));
   const sid = 'codex-thread1';
   history.begin(sid);
   history.setPending(sid, { id: 'lost-client-id', prompt: 'build it' });
+  if (corrupt) writeFileSync(join(root, `${sid}.jsonl.pending`), '{"id": "trunc');
   const calls: { method: string; params: any }[] = [];
   let listener: ((m: any) => void) | undefined;
   const client = {
@@ -71,6 +73,18 @@ function harness(threadTurns: unknown[], readFails = false) {
 }
 
 describe('Codex pending-turn recovery', () => {
+  it('starts a turn normally when the marker is corrupt', async () => {
+    const h = harness([], false, true);
+    try {
+      const events = await h.run();
+      expect(events.at(-1)?.type).toBe('result');
+      expect(h.calls.filter((c) => c.method === 'turn/start')).toHaveLength(1);
+      expect(h.history.pending(h.sid)).toBeNull();
+    } finally {
+      rmSync(h.root, { recursive: true, force: true });
+    }
+  });
+
   it('clears the marker and resends when the thread has no record of the turn', async () => {
     const h = harness([]);
     try {

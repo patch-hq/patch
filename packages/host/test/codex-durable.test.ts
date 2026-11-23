@@ -1,3 +1,4 @@
+import pino from 'pino';
 // Codex turns outlive the host (spec/02 § Host restarts): a real turn runner,
 // a fake `codex app-server`, and a second backend run standing in for the host
 // that comes up after a restart.
@@ -39,7 +40,7 @@ function setup() {
       args: ['--import', tsx, resolve(here, '../src/bin/turn-runner.ts')],
     },
   };
-  const history = new CodexSessions(root);
+  const history = new CodexSessions(root, pino({ level: 'silent' }));
   const clients: CodexClient[] = [];
   const accounts: any = {
     resolveChosen: async () => ({ accountId: 'a' }),
