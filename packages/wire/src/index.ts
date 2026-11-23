@@ -187,6 +187,8 @@ export * from './usageWindows.js';
 export * from './availableModel.js';
 export * from './backendStatus.js';
 export * from './accountState.js';
+// Claude on Amazon Bedrock: spend month and cap (spec/10 § Spending caps).
+export * from './bedrock.js';
 export * from './codec.js';
 export * from './host-health.js';
 export * from './codepoints.js';

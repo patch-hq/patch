@@ -1494,6 +1494,26 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     hostId: 'host-b',
     missing: ['/srv/work/b'],
   },
+  'patch.aws_profile_check.request': {
+    type: 'patch.aws_profile_check.request',
+    requestId: 'ap1',
+    hostId: 'host-b',
+    awsProfile: 'work',
+  },
+  'patch.aws_profile_check.response': {
+    type: 'patch.aws_profile_check.response',
+    requestId: 'ap1',
+    hostId: 'host-b',
+    exists: true,
+    signedIn: null,
+  },
+  'host.account_spend': {
+    type: 'host.account_spend',
+    hostId: 'host-b',
+    accountId: 'acc-1',
+    costUsd: 0.42,
+    at: 1_700_000_000_000,
+  },
   'patch.chat_adopt.request': {
     type: 'patch.chat_adopt.request',
     requestId: 'ca1',
