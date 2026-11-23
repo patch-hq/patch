@@ -80,6 +80,7 @@ import type {
 import {
   BACKGROUND_ACCOUNT_AUTO,
   bedrockCapResetsAt,
+  bedrockSpentThisMonth,
   limitBehaviourFromAutoResume,
   providerForSessionId,
 } from '@patch/wire';
@@ -760,20 +761,30 @@ async function startHost(
   logger.info({ backend: config.sdkBackend }, 'patch-daemon: SDK backend selected');
   // spec/10 § Spending caps: every run on a Bedrock account, turn or one-shot,
   // reports what it cost; the server keeps the month's spend.
-  const sdkBackend: SdkBackend = withBedrockSpend(rawSdkBackend, (accountId, costUsd) => {
-    // `emit` is declared further down; nothing runs a turn before it is.
-    emit({
-      type: 'host.account_spend',
-      hostId: selfHostId,
-      accountId,
-      costUsd,
-      at: Date.now(),
-      spendId: randomUUID(),
-    });
-    // The spend is owed to the server until it acknowledges it, and counted
-    // against the cap meanwhile: the next turn must not start past it.
-    syncBedrockCaps(sharedClaude);
-  });
+  const sdkBackend: SdkBackend = withBedrockSpend(
+    rawSdkBackend,
+    (accountId, costUsd) => {
+      // `emit` is declared further down; nothing runs a turn before it is.
+      emit({
+        type: 'host.account_spend',
+        hostId: selfHostId,
+        accountId,
+        costUsd,
+        at: Date.now(),
+        spendId: randomUUID(),
+      });
+      // The spend is owed to the server until it acknowledges it, and counted
+      // against the cap meanwhile: the next turn must not start past it.
+      syncBedrockCaps(sharedClaude);
+    },
+    (accountId) => {
+      const a = sharedClaude.find((x) => x.id === accountId);
+      if (a?.bedrock === undefined) return undefined;
+      const now = Date.now();
+      const pending = pendingBedrockSpendUsd(hostOutbox.pending(), a.id, now, a.bedrock.spendIds);
+      return a.bedrock.monthlyCapUsd - bedrockSpentThisMonth(a.bedrock, now) - pending;
+    },
+  );
 
   // 3. Host registration: dial-in needs an EdDSA-JWT daemonKey. If absent,
   //    run the QR pairing flow (spec/10-auth.md "Host registration") and

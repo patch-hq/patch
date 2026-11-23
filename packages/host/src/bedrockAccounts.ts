@@ -401,27 +401,69 @@ export class BedrockSignIn {
   }
 }
 
+/** Below this a Bedrock account has nothing left to give a run. */
+export const BEDROCK_MIN_BUDGET_USD = 0.01;
+
 /**
- * Every run on a Bedrock account reports what it cost (spec/10 § Spending
- * caps): turns and one-shot calls alike go through the backend, so this is the
- * one place that sees them all.
+ * Every run on a Bedrock account reports what it cost, and runs inside a
+ * budget (spec/10 § Spending caps): turns and one-shot calls alike go through
+ * the backend, so this is the one place that sees them all.
+ *
+ * A run is given half of what is left of the month's cap once the budgets of
+ * the runs already going are set aside, and Claude Code stops it when that is
+ * spent. Halving keeps every run, however many run at once, inside the cap
+ * together, while a second chat started beside a long one still gets work done.
+ * `remaining` is the cap less the month's spend, the server's figure plus what
+ * this host has not had acknowledged; `undefined` when the account is unknown.
  */
+/** A run that fails as it starts, the way a backend's own refusal does. */
+function refused(message: string): AsyncIterable<never> {
+  return (async function* () {
+    throw new Error(message);
+  })();
+}
+
 export function withBedrockSpend(
   backend: SdkBackend,
   report: (accountId: string, costUsd: number) => void,
+  remaining: (accountId: string) => number | undefined,
 ): SdkBackend {
+  const held = new Map<string, Set<{ usd: number }>>();
   return {
     run(opts) {
       const bedrock = opts.bedrock;
       if (bedrock === undefined) return backend.run(opts);
+      const left = remaining(bedrock.accountId);
+      if (left === undefined) {
+        return refused(`Bedrock account ${bedrock.accountId} is not held on this host`);
+      }
+      const running = held.get(bedrock.accountId) ?? new Set<{ usd: number }>();
+      let reserved = 0;
+      for (const r of running) reserved += r.usd;
+      const free = left - reserved;
+      if (free < BEDROCK_MIN_BUDGET_USD * 2) {
+        return refused(`${BEDROCK_CAP_REACHED} (Bedrock account ${bedrock.accountId})`);
+      }
+      const grant = { usd: free / 2 };
+      running.add(grant);
+      held.set(bedrock.accountId, running);
       const own = opts.onResultCost;
-      return backend.run({
+      const inner = backend.run({
         ...opts,
+        maxBudgetUsd:
+          opts.maxBudgetUsd === undefined ? grant.usd : Math.min(opts.maxBudgetUsd, grant.usd),
         onResultCost: (costUsd) => {
           own?.(costUsd);
           report(bedrock.accountId, costUsd);
         },
       });
+      return (async function* () {
+        try {
+          yield* inner;
+        } finally {
+          running.delete(grant);
+        }
+      })();
     },
   };
 }
