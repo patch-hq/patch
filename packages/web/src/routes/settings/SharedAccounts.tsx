@@ -10,6 +10,7 @@
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import {
+  accountsForBackend,
   accountStateRunnable,
   describeAccountState,
   type AccountStrategy,
@@ -511,7 +512,8 @@ type ClaudeAddKind = 'subscription' | 'bedrock';
 export function ClaudeListFoot(): JSX.Element | null {
   const adding = useClaudeAddStore((s) => s.adding);
   const setAdding = useClaudeAddStore((s) => s.setAdding);
-  const rows = usePreferencesStore((s) => s.shared?.secrets.claude);
+  const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  const rows = secrets ? accountsForBackend(secrets, 'claude-code') : undefined;
   const close = (): void => setAdding(null);
   if (adding?.kind === 'bedrock') {
     return <BedrockForm onSubmit={addBedrock} onCancel={close} />;

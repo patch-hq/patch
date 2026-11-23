@@ -8,7 +8,7 @@ import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { CHAT_SORTS, type GroupSort } from '../../lib/chatGroups.js';
-import { BACKGROUND_ACCOUNT_AUTO, DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
+import { accountsForBackend, BACKGROUND_ACCOUNT_AUTO, DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
 import { patchShared } from './sharedWrite.js';
 import { hourLabel } from '../../lib/snoozePresets.js';
 import { Group, Row, SettingsPage } from './ui.js';
@@ -22,7 +22,8 @@ export function ChatsPage(): JSX.Element {
   const evening = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
   const cleanupDays = usePreferencesStore((s) => s.preferences.cleanupPeriodDays);
   const backgroundAccount = usePreferencesStore((s) => s.preferences.backgroundAccount);
-  const claudeAccounts = usePreferencesStore((s) => s.shared?.secrets.claude);
+  const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  const claudeAccounts = accountsForBackend(secrets, 'claude-code');
   const loaded = usePreferencesStore((s) => s.loaded);
   const groupSort = useUiStore((s) => s.groupSort);
   const setGroupSort = useUiStore((s) => s.setGroupSort);
