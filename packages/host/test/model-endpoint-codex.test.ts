@@ -1,3 +1,4 @@
+import pino from 'pino';
 // Local models and routers run through Codex as a model endpoint (spec/02 §
 // Provider adapters), not on an agent loop of Patch's own.
 //
@@ -52,7 +53,7 @@ function setup(executable: string, baseUrl = 'http://127.0.0.1:11434/v1') {
     ],
     { ollama: 'sk-endpoint-key-1234' },
   );
-  const history = new CodexSessions(join(root, 'history'));
+  const history = new CodexSessions(join(root, 'history'), pino({ level: 'silent' }));
   const backend = new CodexBackend(accounts, history, endpoints);
   const collect = async (
     over: Partial<SdkRunOptions> & { model: string; prompt: string },

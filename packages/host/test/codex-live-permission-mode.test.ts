@@ -1,3 +1,4 @@
+import pino from 'pino';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,7 @@ async function runWithApproval(
   startMode: 'default' | 'plan' = 'default',
 ) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-live-mode-'));
-  const history = new CodexSessions(root);
+  const history = new CodexSessions(root, pino({ level: 'silent' }));
   let listener: ((m: any) => void) | undefined;
   const responses: any[] = [];
   const asked: any[] = [];

@@ -1,3 +1,4 @@
+import pino from 'pino';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ describe('real OpenAI backend', () => {
         executable: process.env['PATCH_CODEX_EXECUTABLE'] ?? 'codex',
         onChange: () => {},
       });
-      const history = new CodexSessions(join(root, 'history'));
+      const history = new CodexSessions(join(root, 'history'), pino({ level: 'silent' }));
       try {
         // This host's own Codex login, as the server would send it back (spec/01 § Settings).
         await accounts.applyShared([await accounts.exportHostLogin()]);
@@ -106,7 +107,10 @@ it.skipIf(process.env['PATCH_REAL_CODEX'] !== '1')(
       await accounts.applyShared([await accounts.exportHostLogin()]);
       const models = await accounts.models();
       const model = models.find((m) => /mini|luna/.test(m.id)) ?? models[0]!;
-      const backend = new CodexBackend(accounts, new CodexSessions(join(root, 'history')));
+      const backend = new CodexBackend(
+        accounts,
+        new CodexSessions(join(root, 'history'), pino({ level: 'silent' })),
+      );
       let toolSeen = false;
       let failure = '';
       try {

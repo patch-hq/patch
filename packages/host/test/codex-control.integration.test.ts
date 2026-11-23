@@ -56,7 +56,7 @@ it.skipIf(process.env['PATCH_REAL_CODEX'] !== '1')(
       expect((await client.request('account/read')).account.type).toBe('chatgpt');
       const models = await accounts.models();
       const model = models.find((m) => /mini|luna/.test(m.id)) ?? models[0]!;
-      const history = new CodexSessions(join(root, 'history'));
+      const history = new CodexSessions(join(root, 'history'), pino({ level: 'silent' }));
       const events: WireEvent[] = [];
       const daemon = new Daemon({
         hostId: 'test',
