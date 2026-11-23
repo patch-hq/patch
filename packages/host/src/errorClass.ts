@@ -39,6 +39,13 @@ const RULES: readonly Rule[] = [
     test: /authentication_error|api error: 401|\b401 unauthorized|invalid (x-)?api[- ]key|invalid bearer token/i,
   },
   {
+    // A Bedrock account whose AWS profile is signed out (spec/10 § Backend
+    // credentials): fails the same way until someone runs the profile's sign-in.
+    reason: 'aws_sign_in',
+    kind: 'permanent',
+    test: /could not load aws credentials|aws sso login|sso session.{0,40}(expired|invalid)|expiredtoken/i,
+  },
+  {
     reason: 'permission',
     kind: 'permanent',
     test: /permission_error|api error: 403|\b403 forbidden/i,
@@ -67,8 +74,7 @@ const RULES: readonly Rule[] = [
   {
     reason: 'claude_missing',
     kind: 'permanent',
-    test:
-      /claude code (executable|native binary) not found|native cli binary for .{1,40} not found|spawn claude ENOENT/i,
+    test: /claude code (executable|native binary) not found|native cli binary for .{1,40} not found|spawn claude ENOENT/i,
   },
   // The kernel OOM killer SIGKILLs the child (exit 137). Running the same turn
   // again re-grows the same memory, so it settles errored at once, not laddered.

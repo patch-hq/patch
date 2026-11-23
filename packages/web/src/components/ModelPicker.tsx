@@ -35,6 +35,8 @@ export interface ModelPickerProps {
    * then reads `placeholder` rather than inventing an id.
    */
   selected: string | null;
+  /** The account the chat is locked to: credit is judged on it alone. */
+  lockedAccountId?: string | null;
   onSelect: (modelId: string) => void;
   open: boolean;
   onToggle: () => void;
@@ -114,13 +116,14 @@ export function ModelPicker({
   icon,
   active = false,
   compact = false,
+  lockedAccountId = null,
 }: ModelPickerProps): JSX.Element {
   // The selectable models are LIVE: loaded from the host's catalogue, which
   // reads the backend's model list. NO baked-in array — that is what let the
   // picker go stale.
   const catalog = useModelCatalog();
   // Credit as a chat on the catalogue's host would be routed (its Bedrock accounts only).
-  const credit = useCredit(modelCatalogHostId());
+  const credit = useCredit(modelCatalogHostId(), lockedAccountId);
   // A failed load carries the host's code (`oauth_unavailable`, `upstream`).
   // The pop-up reads the sentence; the code stays one click down.
   const problem = humaniseError({ code: catalog.error }, 'models');

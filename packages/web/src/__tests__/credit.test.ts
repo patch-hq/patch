@@ -134,3 +134,44 @@ describe('credit with Bedrock accounts and auto off', () => {
     expect(routableRows(rows, 'h1', T).map((x) => x.accountId)).toEqual(['a']);
   });
 });
+
+describe('creditRows: a chat locked to an account', () => {
+  it('judges credit on the locked account alone, even with auto off', async () => {
+    const { creditRows, providerSpent } = await import('../lib/credit.js');
+    const now = Date.UTC(2026, 10, 23, 12);
+    const spent = {
+      accountId: 'sub',
+      providerId: 'claude',
+      backend: 'Claude',
+      usage: { at: now, week: { status: 'rejected', utilization: 1, resetsAt: now + 86_400_000 } },
+    } as never;
+    const bedrock = {
+      accountId: 'aws',
+      providerId: 'claude',
+      backend: 'Claude',
+      auto: false,
+      bedrock: {
+        hostId: 'mac',
+        awsProfile: 'dev',
+        awsRegion: 'eu-west-1',
+        regionPrefix: 'eu',
+        monthlyCapUsd: 100,
+        spentUsd: 1,
+        spentMonth: '2026-11',
+      },
+    } as never;
+    const none = new Set<never>();
+    expect(providerSpent(creditRows([spent, bedrock], 'mac', null, now), 'claude', none, now)).toBe(
+      true,
+    );
+    expect(
+      providerSpent(creditRows([spent, bedrock], 'mac', 'aws', now), 'claude', none, now),
+    ).toBe(false);
+    // On another host the Bedrock lock is not this chat's account.
+    expect(
+      creditRows([spent, bedrock], 'box', 'aws', now).map(
+        (r) => (r as { accountId: string }).accountId,
+      ),
+    ).toEqual(['sub']);
+  });
+});
