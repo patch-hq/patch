@@ -35,6 +35,15 @@ const HOST_SECRETS = {
   AWS_SECRET_ACCESS_KEY: 'host-secret',
   AWS_SESSION_TOKEN: 'host-session',
   ANTHROPIC_BEDROCK_REGION_PREFIX: 'us',
+  // The host's own cloud routing: none of it may decide where a run goes.
+  CLAUDE_CODE_USE_BEDROCK: '1',
+  CLAUDE_CODE_USE_VERTEX: '1',
+  CLAUDE_CODE_USE_MANTLE: '1',
+  CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+  ANTHROPIC_BEDROCK_BASE_URL: 'https://bedrock.host.example',
+  ANTHROPIC_BEDROCK_MANTLE_BASE_URL: 'https://mantle.host.example',
+  AWS_PROFILE: 'host-profile',
+  AWS_REGION: 'us-east-1',
 };
 
 describe('buildSdkEnv on a Bedrock account', () => {
@@ -76,9 +85,56 @@ describe('buildSdkEnv on a Bedrock account', () => {
     ]) {
       expect(name in env, name).toBe(false);
     }
+    // The host's own Bedrock endpoint, auth skip and other clouds never reach a Bedrock run.
+    for (const name of [
+      'ANTHROPIC_BEDROCK_BASE_URL',
+      'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+      'CLAUDE_CODE_SKIP_BEDROCK_AUTH',
+      'CLAUDE_CODE_USE_VERTEX',
+      'CLAUDE_CODE_USE_MANTLE',
+    ]) {
+      expect(name in env, name).toBe(false);
+    }
     // The strip is on the copy only.
     expect(process.env['AWS_ACCESS_KEY_ID']).toBe('AKIAHOST');
   });
+
+  // A subscription, API-key or endpoint turn cannot silently run on the host's AWS.
+  for (const [what, extra] of [
+    ['a subscription token', { oauthAccessToken: 'tok' }],
+    ['an API key', { oauthAccessToken: 'sk-ant-api03-key' }],
+    [
+      'a model endpoint',
+      { oauthAccessToken: '', modelEndpoint: { baseUrl: 'http://127.0.0.1:4000' } },
+    ],
+  ] as const) {
+    it(`a run on ${what} carries none of the host's AWS or Bedrock settings`, async () => {
+      const { buildSdkEnv } = await import('../src/sdkBackend.js');
+      const { env } = buildSdkEnv({
+        prompt: 'x',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        ...extra,
+      });
+      for (const name of [
+        'CLAUDE_CODE_USE_BEDROCK',
+        'CLAUDE_CODE_USE_VERTEX',
+        'CLAUDE_CODE_USE_MANTLE',
+        'CLAUDE_CODE_SKIP_BEDROCK_AUTH',
+        'ANTHROPIC_BEDROCK_BASE_URL',
+        'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+        'ANTHROPIC_BEDROCK_REGION_PREFIX',
+        'AWS_PROFILE',
+        'AWS_REGION',
+        'AWS_BEARER_TOKEN_BEDROCK',
+        'AWS_ACCESS_KEY_ID',
+        'AWS_SECRET_ACCESS_KEY',
+        'AWS_SESSION_TOKEN',
+      ]) {
+        expect(name in env, name).toBe(false);
+      }
+    });
+  }
 
   it('leaves the prefix to Claude Code for auto, even one the host set', async () => {
     const { buildSdkEnv } = await import('../src/sdkBackend.js');

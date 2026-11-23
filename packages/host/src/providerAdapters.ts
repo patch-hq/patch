@@ -6,7 +6,7 @@
 // wiring never asks "is this Codex?". Adding a provider is adding an entry here;
 // `adapterForModel` is the only lookup.
 
-import type { AccountStrategy, HarnessId } from '@patch/wire';
+import type { AccountStrategy, ChatErrorCode, HarnessId } from '@patch/wire';
 import { providerForModel } from '@patch/wire';
 import type { BedrockRun, SdkBackend } from './sdkBackend.js';
 import type { OwnConfigFile } from './providerSettings.js';
@@ -14,12 +14,20 @@ import type { OwnConfigFile } from './providerSettings.js';
 export type CredentialResult =
   /** `bedrock` set: a Claude on Amazon Bedrock account, `accessToken` `''`. */
   | { ok: true; accessToken: string; accountId?: string; bedrock?: BedrockRun }
-  | { ok: false; reason: string };
+  /** `code` and `limit`: as `OAuthCheckResult` (chatRunner.ts). */
+  | {
+      ok: false;
+      reason: string;
+      code?: ChatErrorCode;
+      limit?: { accountId: string; resetsAt: number };
+    };
 
 export interface TurnAccountHint {
   chatId: string;
   preferredAccountId?: string;
   sessionAccountId?: string;
+  /** Only asking where this chat would run (a spawn's check): no round-robin moves on. */
+  check?: boolean;
   /** The user asked this chat to run now: its lock does not hold it to a spent account. */
   anyAccount?: boolean;
 }

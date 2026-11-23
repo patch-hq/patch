@@ -265,7 +265,15 @@ is never usage-probed.
 
 After every turn and one-shot call on a Bedrock account, including one that
 ended in an error result, the host sends `host.account_spend` with the
-`total_cost_usd` Claude Code reported. The server keeps the month's spend; from
+`total_cost_usd` Claude Code reported, less what earlier results of the same
+Claude Code process reported (the figure is the process's running total). It
+goes through the host outbox, so a dropped link or a restart loses none, and
+until the server acknowledges it the host adds it to the server's spend when it
+checks the cap. A turn that would start on a capped account does not start: it
+pauses as a limit until the first of next month, like one the provider refused.
+A chat locked to a Bedrock account on another host (the snapshot names those,
+id and label only, in `claudeHeldElsewhere`) is refused naming it, never run on
+this host's accounts. The server keeps the month's spend; from
 each snapshot the host records an account whose spend has reached its cap as
 limited until the first of next month, UTC, and drops that record when the cap
 is raised above the spend. A snapshot that changes only spend is not new
@@ -1564,7 +1572,7 @@ re-reading a provider's models endpoint whenever that entry is older than its TT
 after the last deploy is selectable and a retired one stops being offered. A
 chat's chosen model determines which provider runs it.
 
-The Claude entry is read with a subscription or API-key account only; a Bedrock account has no token, so Anthropic is never asked with none, and a host whose only Claude accounts are on Bedrock has no Claude catalogue. A missing or expired credential, or a non-2xx from a provider, is returned as an error against that provider, and the surface shows that error in the picker (`14-design-web.md` § Model selector) while models from the providers that answered stay selectable. A cached catalogue is served for its TTL even if a later refresh fails.
+The Claude entry is read with a subscription or API-key account only; a Bedrock account has no token, so Anthropic is never asked with none, and a host whose only Claude accounts are on Bedrock has no Claude catalogue and says so: its Claude entry is the error that no account can read it, never an empty list or a built-in one. A missing or expired credential, or a non-2xx from a provider, is returned as an error against that provider, and the surface shows that error in the picker (`14-design-web.md` § Model selector) while models from the providers that answered stay selectable. A cached catalogue is served for its TTL even if a later refresh fails.
 
 ## Self-upgrade
 

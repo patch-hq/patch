@@ -11,7 +11,14 @@ import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AwsProfileInfo } from '@patch/wire';
+import {
+  bedrockCapResetsAt,
+  bedrockMonth,
+  bedrockSpentThisMonth,
+  type AwsProfileInfo,
+  type ClaudeBedrock,
+  type WireEvent,
+} from '@patch/wire';
 import type { ClaudeStoredAccount } from '@patch/auth';
 import { BEDROCK_STRIPPED_ENV, type BedrockRun, type SdkBackend } from './sdkBackend.js';
 
@@ -215,19 +222,65 @@ export async function checkAwsProfile(
 /** The refusal a Bedrock account at its monthly cap is recorded with (spec/10 § Spending caps). */
 export const BEDROCK_CAP_REACHED = 'Monthly spending cap reached';
 
+/** What a chat is told when a turn would start on a Bedrock account at its cap. */
+export function bedrockCapRefusal(label: string, now: number): string {
+  const until = new Date(bedrockCapResetsAt(now)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  return `${label}: ${BEDROCK_CAP_REACHED}. It is limited until ${until}.`;
+}
+
 /**
- * The held Claude accounts as keys, for telling new keys from a snapshot that
- * only moved a Bedrock account's spend.
+ * Spend this host has reported for an account in the month `now` falls in and
+ * the server has not yet acknowledged: the `host.account_spend` frames still
+ * in the outbox. The outbox is on disk, so a restart while offline keeps them,
+ * and an acknowledgement — which the server sends only after it has added the
+ * spend and pushed the snapshot carrying it — drops them.
+ */
+export function pendingBedrockSpendUsd(
+  owed: readonly { event: WireEvent }[],
+  accountId: string,
+  now: number,
+): number {
+  const month = bedrockMonth(now);
+  let total = 0;
+  for (const { event } of owed) {
+    if (event.type !== 'host.account_spend' || event.accountId !== accountId) continue;
+    if (bedrockMonth(event.at) === month) total += event.costUsd;
+  }
+  return total;
+}
+
+/**
+ * Has this month's spend reached the cap, counting spend the server has not
+ * acknowledged yet? The server's figure alone would let turns run past the
+ * cap for as long as the link is down.
+ */
+export function bedrockCappedWith(
+  bedrock: Pick<ClaudeBedrock, 'spentUsd' | 'spentMonth' | 'monthlyCapUsd'>,
+  pendingUsd: number,
+  now: number,
+): boolean {
+  return bedrockSpentThisMonth(bedrock, now) + pendingUsd >= bedrock.monthlyCapUsd;
+}
+
+/**
+ * The held Claude accounts as keys: each account's id, credential and, for a
+ * Bedrock account, the host and profile it runs as. Nothing else — a label,
+ * the `auto` flag, a region, a prefix, a cap or the month's spend changing is
+ * not new keys, so it must not drop what is known about every other account's
+ * credit (`syncBedrockCaps` handles a cap reached or lifted).
  */
 export function claudeAccountsIdentity(
-  accounts: readonly Pick<ClaudeStoredAccount, 'id' | 'bedrock'>[],
+  accounts: readonly Pick<ClaudeStoredAccount, 'id' | 'credential' | 'bedrock'>[],
 ): string {
   return JSON.stringify(
-    accounts.map((a) => {
-      if (a.bedrock === undefined) return a;
-      const { spentUsd: _spent, spentMonth: _month, ...where } = a.bedrock;
-      return { ...a, bedrock: where };
-    }),
+    accounts.map((a) => ({
+      id: a.id,
+      credential: a.credential ?? null,
+      bedrock:
+        a.bedrock === undefined
+          ? null
+          : { hostId: a.bedrock.hostId, awsProfile: a.bedrock.awsProfile },
+    })),
   );
 }
 

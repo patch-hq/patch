@@ -82,6 +82,7 @@ function windowWords(rateLimitType: string | undefined): string | undefined {
   const t = rateLimitType.toLowerCase();
   if (t.includes('five_hour') || t.includes('session')) return 'session window';
   if (t.includes('seven_day') || t.includes('week')) return 'weekly window';
+  if (t.includes('monthly_spending_cap')) return 'monthly spending cap';
   return undefined;
 }
 

@@ -322,6 +322,14 @@ export interface FailoverAccount {
    */
   auto?: boolean;
   /**
+   * At a cap Patch enforces itself (a Bedrock account's monthly spending cap,
+   * spec/10 § Spending caps). No provider refusal would stop a turn on it — the
+   * provider would simply run and bill it — so it is never handed out: not by
+   * the strategy, not as a lock, and not as the "let the provider say no"
+   * account `effectiveAccount` falls back to.
+   */
+  capped?: boolean;
+  /**
    * Which Anthropic organisation the account's token authenticates as.
    *
    * TWO ACCOUNTS SHARING AN ORGANISATION SHARE A POOL. They have one 5-hour
@@ -370,6 +378,14 @@ export interface RouteOptions {
    * than on nothing.
    */
   preferred?: string;
+  /**
+   * The lock names an account that exists in the shared settings but that this
+   * host does not hold — a Bedrock account on another host. The chat is
+   * refused rather than moved onto this host's accounts: the user chose to pay
+   * for those turns with that account. (A lock to an account REMOVED from the
+   * settings is the other case: ignored, and the chat follows the strategy.)
+   */
+  preferredHeldElsewhere?: boolean;
   /**
    * Auto-resume is on, so a lock does not hold a turn back while its key is
    * spent: the chat runs on whichever other key has credit now, rather than
@@ -585,7 +601,7 @@ export class AccountRotation {
    *
    * Everything exhausted hands back the first connected key rather than
    * undefined, so the turn is attempted and fails with the provider's own
-   * message. Running on no account would be worse, and pretending a key is fine
+   * message — never a `capped` one, which no provider would refuse. Running on no account would be worse, and pretending a key is fine
    * is how a spend limit became a fake success in the first place. Asking
    * whether any key actually HAS credit is a different question, and has its
    * own method — see `usableAccount`.
@@ -596,7 +612,7 @@ export class AccountRotation {
   ): string | undefined {
     return (
       this.usableAccount(accounts, route) ??
-      this.order(accounts, route).find((a) => a.connected)?.id
+      this.order(accounts, route).find((a) => a.connected && a.capped !== true)?.id
     );
   }
 
@@ -636,8 +652,17 @@ export class AccountRotation {
    * utilisation, lowest first. Ties and unread keys keep their stored order.
    *
    * An account with `auto` off is left out, unless it is the lock (`preferred`).
+   * A lock to an account held on another host (`preferredHeldElsewhere`)
+   * orders nothing: the chat may not run here.
    */
   order(allAccounts: readonly FailoverAccount[], route: RouteOptions = {}): FailoverAccount[] {
+    if (
+      route.preferred !== undefined &&
+      route.preferredHeldElsewhere === true &&
+      !allAccounts.some((a) => a.id === route.preferred)
+    ) {
+      return [];
+    }
     const accounts = allAccounts.filter((a) => a.auto !== false || a.id === route.preferred);
     let ordered: FailoverAccount[];
     switch (route.strategy ?? 'priority') {
@@ -673,7 +698,10 @@ export class AccountRotation {
     }
     const locked = ordered.find((a) => a.id === route.preferred);
     if (!locked) return ordered;
-    if (route.resumeOnAnyAccount === true && this.isExhausted(locked.id)) {
+    if (
+      route.resumeOnAnyAccount === true &&
+      (this.isExhausted(locked.id) || locked.capped === true)
+    ) {
       // Locked key first, so a host with nothing spendable still fails with the
       // locked key's own message; the usable lookups skip it while it is spent.
       return [locked, ...ordered.filter((a) => a.id !== locked.id)];
@@ -695,7 +723,7 @@ export class AccountRotation {
     accounts: readonly FailoverAccount[],
     route: RouteOptions = {},
   ): string | undefined {
-    return this.order(accounts, route).find((a) => a.connected && !this.isExhausted(a.id))?.id;
+    return this.order(accounts, route).find((a) => this.spendable(a))?.id;
   }
 
   /**
@@ -711,8 +739,13 @@ export class AccountRotation {
    */
   usableAccounts(accounts: readonly FailoverAccount[], route: RouteOptions = {}): string[] {
     return this.order(accounts, route)
-      .filter((a) => a.connected && !this.isExhausted(a.id))
+      .filter((a) => this.spendable(a))
       .map((a) => a.id);
+  }
+
+  /** Connected, not known to be spent, and not at a cap Patch enforces. */
+  private spendable(a: FailoverAccount): boolean {
+    return a.connected && a.capped !== true && !this.isExhausted(a.id);
   }
 
   /** For logs and the host report: what is currently sidelined and why. */

@@ -266,14 +266,48 @@ describe('Bedrock cap', () => {
     expect(rotation.usableAccount(accounts)).toBe('b1');
   });
 
-  it('spend alone is not new keys; the profile or cap is', () => {
-    const a = [{ id: 'b1', bedrock: bedrockFields }];
+  it('spend, cap, auto, region, prefix and label are not new keys; the credential, host or profile is', () => {
+    const a = [{ id: 'b1', credential: null, bedrock: bedrockFields }];
+    for (const edited of [
+      { ...bedrockFields, spentUsd: 42 },
+      { ...bedrockFields, monthlyCapUsd: 500 },
+      { ...bedrockFields, awsRegion: 'us-east-1' },
+      { ...bedrockFields, regionPrefix: 'global' as const },
+    ]) {
+      expect(claudeAccountsIdentity([{ id: 'b1', credential: null, bedrock: edited }])).toBe(
+        claudeAccountsIdentity(a),
+      );
+    }
     expect(
-      claudeAccountsIdentity([{ id: 'b1', bedrock: { ...bedrockFields, spentUsd: 42 } }]),
+      claudeAccountsIdentity([
+        {
+          id: 'b1',
+          credential: null,
+          auto: true,
+          label: 'Renamed',
+          bedrock: bedrockFields,
+        } as never,
+      ]),
     ).toBe(claudeAccountsIdentity(a));
     expect(
-      claudeAccountsIdentity([{ id: 'b1', bedrock: { ...bedrockFields, awsProfile: 'other' } }]),
+      claudeAccountsIdentity([
+        { id: 'b1', credential: null, bedrock: { ...bedrockFields, awsProfile: 'other' } },
+      ]),
     ).not.toBe(claudeAccountsIdentity(a));
+    expect(
+      claudeAccountsIdentity([
+        { id: 'b1', credential: null, bedrock: { ...bedrockFields, hostId: 'h2' } },
+      ]),
+    ).not.toBe(claudeAccountsIdentity(a));
+    const sub = [{ id: 'c1', credential: { accessToken: 'tok-1' } }];
+    expect(claudeAccountsIdentity([{ id: 'c1', credential: { accessToken: 'tok-2' } }])).not.toBe(
+      claudeAccountsIdentity(sub),
+    );
+    expect(
+      claudeAccountsIdentity([
+        { id: 'c1', credential: { accessToken: 'tok-1' }, auto: false } as never,
+      ]),
+    ).toBe(claudeAccountsIdentity(sub));
   });
 });
 

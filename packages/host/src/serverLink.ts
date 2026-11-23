@@ -363,7 +363,14 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     // Nor tool-log entries or subagent entries to a server that does not keep them.
     if (outboxed.type === 'host.delegate_entry') {
       if (!serverKeepsDelegates) return;
-    } else if (!serverAnswersReads && HOST_OUTBOX_EVENT_TYPES.has(outboxed.type)) return;
+    } else if (
+      // Bedrock spend is for any server that takes the outbox: one that cannot
+      // read it never acknowledges it, so it stays owed (and counted) here.
+      outboxed.type !== 'host.account_spend' &&
+      !serverAnswersReads &&
+      HOST_OUTBOX_EVENT_TYPES.has(outboxed.type)
+    )
+      return;
     const event = forServer(outboxed);
     rawSend({ type: 'host.outbox', position, event });
   }

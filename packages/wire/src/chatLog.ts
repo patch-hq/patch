@@ -239,6 +239,8 @@ export function isOutboxEvent(event: { type: string }): boolean {
 export const HOST_OUTBOX_EVENT_TYPES: ReadonlySet<string> = new Set([
   'patch.tool_log.entry',
   'host.delegate_entry',
+  // What a run on a Bedrock account cost: lost, the cap would let turns past it.
+  'host.account_spend',
 ]);
 
 /** The turn boundaries a host reports (spec/01 § Chat record). */

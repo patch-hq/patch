@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import {
   ACCOUNT_PROVIDERS,
+  bedrockAtCap,
   providerForModel,
   rateLimitWindowBlocks,
   type ProviderId,
@@ -23,13 +24,39 @@ import { formatResetLocal, isBlocked } from './usage.js';
 /** The connected API-key accounts per provider, which `accountRows` leaves out. */
 export type ApiKeyProviders = ReadonlySet<ProviderId>;
 
+/**
+ * The accounts a chat on `hostId` could be routed to without naming one: in
+ * the order (`auto` on), and, for a Bedrock account, on that host and under
+ * its monthly cap. A Bedrock account on another host never runs there, and one
+ * at its cap is limited, so neither may be chosen as the default or counted as
+ * credit left. With no host known, no Bedrock account counts.
+ */
+export function routableRows(
+  rows: readonly AccountUsageRow[],
+  hostId: string | null | undefined,
+  now: number = Date.now(),
+): AccountUsageRow[] {
+  return rows.filter(
+    (r) =>
+      r.auto !== false &&
+      (r.bedrock === undefined || (r.bedrock.hostId === hostId && !bedrockAtCap(r.bedrock, now))),
+  );
+}
+
+/** Spent: a refusing usage reading, or a Bedrock account at its monthly cap. */
+function rowSpent(r: AccountUsageRow, now: number): boolean {
+  return isBlocked(r.usage, now) || (r.bedrock !== undefined && bedrockAtCap(r.bedrock, now));
+}
+
 /** The first account of `providerId` that is not refusing work, or null. */
 export function firstInCreditAccountId(
   rows: readonly AccountUsageRow[],
   providerId: ProviderId,
   now: number = Date.now(),
 ): string | null {
-  const row = rows.find((r) => r.providerId === providerId && !isBlocked(r.usage, now));
+  const row = rows.find(
+    (r) => r.providerId === providerId && r.auto !== false && !rowSpent(r, now),
+  );
   return row?.accountId ?? null;
 }
 
@@ -44,8 +71,10 @@ export function creditDefaultAccountId(
   providerId: ProviderId,
   now: number = Date.now(),
 ): string | null {
-  const own = rows.filter((r) => r.providerId === providerId);
-  if (!own.some((r) => isBlocked(r.usage, now))) return null;
+  // Only accounts the strategy could pick: one with `auto` off is never a
+  // default, and its being spent is nothing to steer around.
+  const own = rows.filter((r) => r.providerId === providerId && r.auto !== false);
+  if (!own.some((r) => rowSpent(r, now))) return null;
   return firstInCreditAccountId(own, providerId, now);
 }
 
@@ -61,8 +90,8 @@ export function providerSpent(
   now: number = Date.now(),
 ): boolean {
   if (apiKeyProviders.has(providerId)) return false;
-  const own = rows.filter((r) => r.providerId === providerId);
-  return own.length > 0 && own.every((r) => isBlocked(r.usage, now));
+  const own = rows.filter((r) => r.providerId === providerId && r.auto !== false);
+  return own.length > 0 && own.every((r) => rowSpent(r, now));
 }
 
 /** True when a model's provider has no usage left. */
@@ -88,7 +117,7 @@ export function modelSpentReason(
 ): string | null {
   const providerId = providerForModel(modelId);
   if (!providerSpent(rows, providerId, apiKeyProviders, now)) return null;
-  const own = rows.filter((r) => r.providerId === providerId);
+  const own = rows.filter((r) => r.providerId === providerId && r.auto !== false);
   const name = own[0]!.backend;
   // An account is back when its last blocked window resets; the provider is
   // back when its soonest account is. Any account with no stated reset makes
@@ -103,8 +132,14 @@ export function modelSpentReason(
   return `${name} limit reached until ${formatResetLocal(Math.min(...(backAt as number[])), now)}`;
 }
 
-/** The rate-limited account rows and the API-key providers, read from the stores. */
-export function useCredit(): { rows: AccountUsageRow[]; apiKeyProviders: ApiKeyProviders } {
+/**
+ * The account rows a chat on `hostId` could be routed to (`routableRows`) and
+ * the API-key providers, read from the stores.
+ */
+export function useCredit(hostId: string | null | undefined): {
+  rows: AccountUsageRow[];
+  apiKeyProviders: ApiKeyProviders;
+} {
   const hosts = usePresenceStore((s) => s.hosts);
   const shared = usePreferencesStore((s) => s.shared);
   return useMemo(() => {
@@ -120,6 +155,6 @@ export function useCredit(): { rows: AccountUsageRow[]; apiKeyProviders: ApiKeyP
         }
       }
     }
-    return { rows: accountRows(hosts, shared), apiKeyProviders };
-  }, [hosts, shared]);
+    return { rows: routableRows(accountRows(hosts, shared), hostId), apiKeyProviders };
+  }, [hosts, shared, hostId]);
 }

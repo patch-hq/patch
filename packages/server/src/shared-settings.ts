@@ -275,6 +275,8 @@ export class SharedSettingsService {
    * when it reported them, which is what says it runs Bedrock accounts.
    */
   private readonly awsProfiles = new Map<string, AwsProfileInfo[]>();
+  /** Bedrock spends already added, so an outbox resend is not counted twice. */
+  private readonly spendSeen = new Set<string>();
   /**
    * Bedrock accounts whose host last said their profile is not signed in. In
    * memory: the host restates it on connect and every check after.
@@ -784,12 +786,16 @@ export class SharedSettingsService {
         (a) => !a.bedrock || (capable && a.bedrock.hostId === hostId),
       ),
     };
+    const elsewhere = sharedSecrets.claude.filter((a) => !forHost.claude.includes(a));
     return {
       type: 'settings.snapshot',
       hostId,
       version: this.version,
       settings: this.current(),
       secrets: hostSecrets(forHost),
+      ...(elsewhere.length > 0
+        ? { claudeHeldElsewhere: elsewhere.map((a) => ({ id: a.id, label: a.label })) }
+        : {}),
     };
   }
 
@@ -1071,6 +1077,15 @@ export class SharedSettingsService {
       return;
     }
     if (event.costUsd === 0 && month === b.spentMonth) return;
+    // A spend comes through the host's outbox, which resends whatever was not
+    // acknowledged: one already added (its acknowledgement lost with the link)
+    // is not added twice.
+    const key = `${event.hostId}|${event.accountId}|${event.at}|${event.costUsd}`;
+    if (this.spendSeen.has(key)) return;
+    this.spendSeen.add(key);
+    if (this.spendSeen.size > 1000) {
+      this.spendSeen.delete(this.spendSeen.values().next().value as string);
+    }
     account.bedrock = {
       ...b,
       spentUsd: (month === b.spentMonth ? b.spentUsd : 0) + event.costUsd,
