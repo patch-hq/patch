@@ -108,9 +108,14 @@ export class AcpAccounts {
     const list = this.failoverList(agentId);
     if (list.length === 0) return undefined;
     const rotation = this.rotation(agentId);
-    const id = starting
-      ? rotation.startTurn(list, this.routeOf(route))
-      : rotation.effectiveAccount(list, this.routeOf(route));
+    const acpRoute = this.routeOf(route);
+    // spec/10 § Backend credentials: an ACP limit states no reset and an ACP
+    // account is never probed, so a turn the agent completes is the only
+    // reading that can lift one. With every account refused, the first is
+    // tried again and the turn fails with the agent's own refusal.
+    const id =
+      (starting ? rotation.startTurn(list, acpRoute) : rotation.effectiveAccount(list, acpRoute)) ??
+      rotation.order(list, acpRoute).find((a) => a.connected && a.capped !== true)?.id;
     return id !== undefined ? this.get(id) : undefined;
   }
 

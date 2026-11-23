@@ -82,9 +82,12 @@ describe('markExhaustedWithSiblings', () => {
     expect(rotation.usableAccount(twoTokensOneAccount)).toBe('default');
   });
 
-  it("still names an account to run on when everything is spent — the turn must fail with the provider's own message", () => {
+  it('names no account to run on when the shared pool is spent, and waits on both', () => {
     const rotation = new AccountRotation(() => 0);
     rotation.markExhaustedWithSiblings(twoTokensOneAccount, 'default', 'spend limit', 5_000);
-    expect(rotation.effectiveAccount(twoTokensOneAccount)).toBe('default');
+    expect(rotation.effectiveAccount(twoTokensOneAccount)).toBeUndefined();
+    expect(rotation.spentInRoute(twoTokensOneAccount).map((s) => s.resetsAt)).toEqual([
+      5_000, 5_000,
+    ]);
   });
 });

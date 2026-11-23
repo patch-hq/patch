@@ -48,7 +48,7 @@ A chat's model selects its provider; changing an account never changes a chat's 
 
 ### Choosing an account
 
-Every turn orders the provider's accounts by the provider's account strategy and runs on the first that is ready or near limit. A limited account is skipped, not retried; it is first in the order again when it returns.
+Every turn orders the provider's accounts by the provider's account strategy and runs on the first that is ready or near limit. A limited account is skipped, not retried; it is first in the order again when it returns. An account is known to be limited from a refusal on it or from its latest usage reading, and either is enough: a turn never starts on an account known to be limited, out or at its cap, even when no other is left, since the provider would only refuse it (§ Limits).
 
 - `priority` — the stored order, first to last.
 - `round-robin` — each turn starts on the account after the one the last turn started on. Asking where a turn would start does not move it on; only a turn starting does.
@@ -67,7 +67,7 @@ Chat titles and status summaries run on the account the shared setting `backgrou
 
 ### Limits
 
-A turn pauses only when no account it may use has credit: every account of the provider for an Automatic chat, its own account for a locked one. The pause is visible, with the reset time, as the chat status paused until a reset (`12-error-and-offline.md`). The user's chosen behaviour then applies, a shared setting (Settings → Agent behaviour) that each pause also offers as actions for that chat:
+A turn pauses only when no account it may use has credit: every account of the provider for an Automatic chat, its own account for a locked one. It pauses without being started on any of them and without asking a model, naming the account it waits on and the earliest reset any of them states; where none states one it is out (below). Where nothing it may use is limited but every one is signed out or out of the order, it is refused with that reason instead. The pause is visible, with the reset time, as the chat status paused until a reset (`12-error-and-offline.md`). The user's chosen behaviour then applies, a shared setting (Settings → Agent behaviour) that each pause also offers as actions for that chat:
 
 - Resume at reset — the owed turn runs when an account it may use has credit again, whichever account and however it returned: a stated reset passing, an account added or signed in again, or a reading finding credit. When many chats are released at once their turns start staggered, in the order they were parked: the next starts once the one in front has got past the provider's limit check (its first model output, its end, or 30 seconds with no refusal), never once its whole turn has finished, so every released chat is running within seconds. If the one in front is refused again, the rest stay parked and the next credit event carries on from the front.
 - Another account of the same provider — a locked chat runs this turn on another ready account and returns to its own when that resets; the lock is not rewritten. Offered only where another account is ready, and only for providers whose adapter can resume the session on another account.

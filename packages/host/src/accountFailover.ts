@@ -311,6 +311,25 @@ export function parseLimitResetsAt(message: string, now: number): number | undef
 import type { AccountStrategy } from '@patch/wire';
 import type { BedrockRun } from './sdkBackend.js';
 
+/**
+ * What a chat is told when every account it may use is already known to have
+ * no credit and its turn is not started: the account it waits on and, where
+ * one is stated, when that account returns (spec/10 § Limits).
+ */
+export function spentRefusal(
+  label: string,
+  kind: 'limit' | 'out',
+  resetsAt: number | undefined,
+): string {
+  if (resetsAt !== undefined) {
+    const at = new Date(resetsAt).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    return `No account this chat may use has credit. ${label} is limited until ${at}.`;
+  }
+  return kind === 'out'
+    ? `No account this chat may use has credit. ${label} is out of credit.`
+    : `No account this chat may use has credit. ${label} is limited and states no reset.`;
+}
+
 /** One account as failover sees it: its id, and whether it has a credential at all. */
 export interface FailoverAccount {
   id: string;
@@ -325,10 +344,16 @@ export interface FailoverAccount {
    * At a cap Patch enforces itself (a Bedrock account's monthly spending cap,
    * spec/10 § Spending caps). No provider refusal would stop a turn on it — the
    * provider would simply run and bill it — so it is never handed out: not by
-   * the strategy, not as a lock, and not as the "let the provider say no"
-   * account `effectiveAccount` falls back to.
+   * the strategy and not as a lock.
    */
   capped?: boolean;
+  /**
+   * A current usage reading says this account is at a limit (spec/10 § Account
+   * states), with the reset it states if any. Known limited even though no turn
+   * has been refused on it yet, so it is never handed out either. Absent means
+   * no reading says so — unknown usage is not a limit.
+   */
+  limited?: { resetsAt?: number };
   /**
    * Which Anthropic organisation the account's token authenticates as.
    *
@@ -586,7 +611,7 @@ export class AccountRotation {
 
   /**
    * The account a turn should run on: the FIRST key in the route's order that
-   * is connected and not known-exhausted.
+   * is connected and has credit, or undefined when none does.
    *
    * Not an "active account", which is an account-management idea and has never
    * been about turns. The sequence is the host's, and the same question
@@ -596,24 +621,53 @@ export class AccountRotation {
    *
    * Nothing has to move anything back, either. When key 1's limit resets it is
    * simply first again, because the answer is recomputed from the order every
-   * time. A design that had MOVED the chats onto key 2 would have left them
-   * there, spending the wrong key indefinitely.
+   * time.
    *
-   * Everything exhausted hands back the first connected key rather than
-   * undefined, so the turn is attempted and fails with the provider's own
-   * message — never a `capped` one, which no provider would refuse. Running on no account would be worse, and pretending a key is fine
-   * is how a spend limit became a fake success in the first place. Asking
-   * whether any key actually HAS credit is a different question, and has its
-   * own method — see `usableAccount`.
+   * Everything spent is undefined, never "the first connected key so the
+   * provider can refuse it" (spec/10 § Choosing an account): a turn on an
+   * account already known to be limited costs a model start and teaches
+   * nothing. The caller says why nothing may run (`spentInRoute`) and the turn
+   * pauses as a limit without asking any model.
    */
   effectiveAccount(
     accounts: readonly FailoverAccount[],
     route: RouteOptions = {},
   ): string | undefined {
-    return (
-      this.usableAccount(accounts, route) ??
-      this.order(accounts, route).find((a) => a.connected && a.capped !== true)?.id
-    );
+    return this.usableAccount(accounts, route);
+  }
+
+  /**
+   * The accounts this route may use that are connected but known to have no
+   * credit, in the route's order: recorded spent, at a usage reading's limit,
+   * or at a cap Patch enforces. What a turn with nowhere to run is waiting for.
+   * `resetsAt` is when that account is expected back, where anything states it.
+   */
+  spentInRoute(
+    accounts: readonly FailoverAccount[],
+    route: RouteOptions = {},
+  ): {
+    accountId: string;
+    capped: boolean;
+    kind: 'limit' | 'out';
+    reason?: string;
+    resetsAt?: number;
+  }[] {
+    const now = this.now();
+    return this.order(accounts, route)
+      .filter((a) => a.connected && !this.spendable(a))
+      .map((a) => {
+        const recorded = this.isExhausted(a.id) ? this.exhausted.get(a.id) : undefined;
+        const resets = [recorded?.until, a.limited?.resetsAt].filter(
+          (t): t is number => t !== undefined && t > now,
+        );
+        return {
+          accountId: a.id,
+          capped: a.capped === true,
+          kind: recorded?.kind ?? 'limit',
+          ...(recorded !== undefined ? { reason: recorded.reason } : {}),
+          ...(resets.length > 0 ? { resetsAt: Math.min(...resets) } : {}),
+        };
+      });
   }
 
   /**
@@ -693,17 +747,14 @@ export class AccountRotation {
       route.strategy !== undefined && route.strategy !== 'priority'
         ? ordered.find((a) => a.id === route.sessionAccount)
         : undefined;
-    if (session && session.connected && !this.isExhausted(session.id)) {
+    if (session && this.spendable(session)) {
       ordered = [session, ...ordered.filter((a) => a.id !== session.id)];
     }
     const locked = ordered.find((a) => a.id === route.preferred);
     if (!locked) return ordered;
-    if (
-      route.resumeOnAnyAccount === true &&
-      (this.isExhausted(locked.id) || locked.capped === true)
-    ) {
-      // Locked key first, so a host with nothing spendable still fails with the
-      // locked key's own message; the usable lookups skip it while it is spent.
+    if (route.resumeOnAnyAccount === true && locked.connected && !this.spendable(locked)) {
+      // Locked key first, so a host with nothing spendable names the locked
+      // key's limit first; the usable lookups skip it while it is spent.
       return [locked, ...ordered.filter((a) => a.id !== locked.id)];
     }
     return [locked];
@@ -713,11 +764,9 @@ export class AccountRotation {
    * The first key that is connected and has credit, or undefined when NONE
    * does.
    *
-   * The distinction from `effectiveAccount` is the whole of the loop that ran
-   * for hours on 2026-09-07: "which key do I run on" always has an answer, and
-   * "is there a key worth retrying on" must be allowed to answer no. Answering
-   * the second with the first is what made a host with every key spent retry
-   * for ever instead of waiting for a reset.
+   * "Is there a key worth retrying on" must be allowed to answer no: a host
+   * that always named a key re-ran the same turn for hours on 2026-09-07
+   * instead of waiting for a reset.
    */
   usableAccount(
     accounts: readonly FailoverAccount[],
@@ -743,9 +792,9 @@ export class AccountRotation {
       .map((a) => a.id);
   }
 
-  /** Connected, not known to be spent, and not at a cap Patch enforces. */
+  /** Connected, not known to be spent or limited, and not at a cap Patch enforces. */
   private spendable(a: FailoverAccount): boolean {
-    return a.connected && a.capped !== true && !this.isExhausted(a.id);
+    return a.connected && a.capped !== true && a.limited === undefined && !this.isExhausted(a.id);
   }
 
   /** For logs and the host report: what is currently sidelined and why. */
