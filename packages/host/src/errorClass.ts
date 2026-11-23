@@ -39,6 +39,13 @@ const RULES: readonly Rule[] = [
     test: /authentication_error|api error: 401|\b401 unauthorized|invalid (x-)?api[- ]key|invalid bearer token/i,
   },
   {
+    // A Bedrock run stopped at, or refused for, the monthly cap: running it
+    // again only spends past what the user set (spec/10 § Spending caps).
+    reason: 'spending_cap',
+    kind: 'permanent',
+    test: /monthly spending cap|error_max_budget_usd/i,
+  },
+  {
     // A Bedrock account whose AWS profile is signed out (spec/10 § Backend
     // credentials): fails the same way until someone runs the profile's sign-in.
     reason: 'aws_sign_in',

@@ -78,3 +78,11 @@ describe('a Bedrock profile that is signed out', () => {
     expect(c).toMatchObject({ kind: 'permanent', reason: 'aws_sign_in' });
   });
 });
+
+describe('the Bedrock spending cap', () => {
+  it('is permanent, so a stopped turn is not run again past the cap', () => {
+    expect(
+      classifyFailure("Stopped at this turn's share of the Bedrock monthly spending cap"),
+    ).toMatchObject({ kind: 'permanent', reason: 'spending_cap' });
+  });
+});

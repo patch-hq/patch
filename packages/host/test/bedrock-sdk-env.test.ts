@@ -218,7 +218,11 @@ describe('withBedrockSpend', () => {
     const { withBedrockSpend } = await import('../src/bedrockAccounts.js');
     const mock = createMockSdkBackend({ turnDelayMs: 0 });
     const spent: Array<[string, number]> = [];
-    const backend = withBedrockSpend(mock, (id, c) => spent.push([id, c]));
+    const backend = withBedrockSpend(
+      mock,
+      (id, c) => spent.push([id, c]),
+      () => 100,
+    );
     mock.enqueue([{ type: 'assistant', content: 'hi' }, result(0.0123)]);
     for await (const _ of backend.run({
       prompt: 'p',
@@ -231,12 +235,78 @@ describe('withBedrockSpend', () => {
     expect(spent).toEqual([['b1', 0.0123]]);
   });
 
+  it('gives every Bedrock run a budget, and runs at once stay inside the cap together', async () => {
+    const { withBedrockSpend } = await import('../src/bedrockAccounts.js');
+    const budgets: Array<number | undefined> = [];
+    const releases: Array<() => void> = [];
+    const fake = {
+      run(opts: { maxBudgetUsd?: number }) {
+        budgets.push(opts.maxBudgetUsd);
+        return (async function* () {
+          await new Promise<void>((r) => releases.push(r));
+        })();
+      },
+    } as never;
+    const backend = withBedrockSpend(
+      fake,
+      () => {},
+      () => 100,
+    );
+    const start = () =>
+      backend
+        .run({
+          prompt: 'p',
+          cwd: '/tmp',
+          abortController: new AbortController(),
+          oauthAccessToken: '',
+          bedrock,
+        })
+        [Symbol.asyncIterator]();
+    const runs = [start(), start(), start()];
+    const pending = runs.map((it) => it.next());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budgets).toEqual([50, 25, 12.5]);
+    expect(budgets.reduce((a, b) => a! + b!, 0)).toBeLessThan(100);
+    for (const r of releases) r();
+    await Promise.all(pending);
+    // Once they finish their budgets are free again.
+    start().next();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(budgets[3]).toBe(50);
+  });
+
+  it('refuses a Bedrock run when nothing is left of the cap', async () => {
+    const { createMockSdkBackend } = await import('../src/sdkBackend.js');
+    const { withBedrockSpend } = await import('../src/bedrockAccounts.js');
+    const mock = createMockSdkBackend({ turnDelayMs: 0 });
+    const backend = withBedrockSpend(
+      mock,
+      () => {},
+      () => 0,
+    );
+    const it = backend
+      .run({
+        prompt: 'p',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: '',
+        bedrock,
+      })
+      [Symbol.asyncIterator]();
+    await expect(it.next()).rejects.toThrow(/Monthly spending cap reached/);
+    expect(mock.lastOptions()).toBeUndefined();
+  });
+
   it('reports nothing for a run on a token', async () => {
     const { createMockSdkBackend } = await import('../src/sdkBackend.js');
     const { withBedrockSpend } = await import('../src/bedrockAccounts.js');
     const mock = createMockSdkBackend({ turnDelayMs: 0 });
     const spent: unknown[] = [];
-    const backend = withBedrockSpend(mock, (id, c) => spent.push([id, c]));
+    const backend = withBedrockSpend(
+      mock,
+      (id, c) => spent.push([id, c]),
+      () => 100,
+    );
     mock.enqueue([result(0.5)]);
     for await (const _ of backend.run({
       prompt: 'p',

@@ -83,7 +83,7 @@ When every account of a provider is limited, every chat on that provider shows a
 
 ### Spending caps
 
-A Bedrock account has a monthly cap. Its spend is the sum of the cost Claude Code reports for each turn and one-shot call that ran on it (`total_cost_usd`) in the current calendar month, UTC, an estimate from Anthropic's list prices and not AWS's bill; every surface that shows it says estimated. When the spend reaches the cap the account is limited until the first of the next month (§ Limits): a turn that would start on it does not, and a turn running when it is reached finishes. Raising the cap above the spend makes it ready at once. The server keeps the spend, adding each turn's cost as the host reports it, so a restart never forgets it.
+A Bedrock account has a monthly cap. Its spend is the sum of the cost Claude Code reports for each turn and one-shot call that ran on it (`total_cost_usd`) in the current calendar month, UTC, an estimate from Anthropic's list prices and not AWS's bill; every surface that shows it says estimated. When the spend reaches the cap the account is limited until the first of the next month (§ Limits): a turn that would start on it does not. Every run on a Bedrock account is also given a budget, half of what is left of the cap once the budgets of the runs already going are set aside, and Claude Code stops the run when it is spent (`maxBudgetUsd`), so turns running together cannot pass the cap. A run stopped that way says so and is not retried. Raising the cap above the spend makes it ready at once. The server keeps the spend, adding each turn's cost as the host reports it, so a restart never forgets it.
 
 ### Signing in
 

@@ -201,6 +201,12 @@ export interface SdkRunOptions {
    * counted (spec/10 § Spending caps).
    */
   onResultCost?: ((costUsd: number) => void) | undefined;
+  /**
+   * The most this run may spend, in US dollars: Claude Code stops the query
+   * when it is exceeded (`error_max_budget_usd`). Set on every Bedrock run, so
+   * a monthly cap holds while turns are running (spec/10 § Spending caps).
+   */
+  maxBudgetUsd?: number | undefined;
   /** Resolved credit source for this turn. */
   accountId?: string;
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
@@ -1877,6 +1883,10 @@ export function resultErrorText(msg: unknown): string | undefined {
   const subtype = typeof m['subtype'] === 'string' ? m['subtype'] : undefined;
   const isError = m['is_error'] === true;
   if (!isError && (subtype === undefined || subtype === 'success')) return undefined;
+  // A Bedrock run stopped at its share of the monthly cap (spec/10 § Spending caps).
+  if (subtype === 'error_max_budget_usd') {
+    return "Stopped at this turn's share of the Bedrock monthly spending cap";
+  }
   // Prefer the specific text over the subtype label: "You've hit your monthly
   // spend limit · resets 8pm" is what the rate-limit and account-failover
   // predicates match on, and what a person needs to read.
@@ -2262,6 +2272,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       resume: opts.resumeSessionId,
       ...forkOptsFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.maxBudgetUsd !== undefined ? { maxBudgetUsd: opts.maxBudgetUsd } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: live.mode,
       ...(opts.onPermissionRequest
@@ -2597,6 +2608,7 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       resume: opts.resumeSessionId,
       ...forkOptsFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.maxBudgetUsd !== undefined ? { maxBudgetUsd: opts.maxBudgetUsd } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: opts.permissionMode ?? 'auto',
       ...(opts.onPermissionRequest
