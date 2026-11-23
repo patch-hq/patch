@@ -513,7 +513,9 @@ export function ClaudeListFoot(): JSX.Element | null {
   const adding = useClaudeAddStore((s) => s.adding);
   const setAdding = useClaudeAddStore((s) => s.setAdding);
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
-  const rows = secrets ? accountsForBackend(secrets, 'claude-code') : undefined;
+  const rows = secrets
+    ? accountsForBackend<NonNullable<typeof secrets>['claude'][number]>(secrets, 'claude-code')
+    : undefined;
   const close = (): void => setAdding(null);
   if (adding?.kind === 'bedrock') {
     return <BedrockForm onSubmit={addBedrock} onCancel={close} />;

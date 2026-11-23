@@ -23,7 +23,7 @@ export function ChatsPage(): JSX.Element {
   const cleanupDays = usePreferencesStore((s) => s.preferences.cleanupPeriodDays);
   const backgroundAccount = usePreferencesStore((s) => s.preferences.backgroundAccount);
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
-  const claudeAccounts = accountsForBackend(secrets, 'claude-code');
+  const claudeAccounts = accountsForBackend<{ id: string; label: string }>(secrets, 'claude-code');
   const loaded = usePreferencesStore((s) => s.loaded);
   const groupSort = useUiStore((s) => s.groupSort);
   const setGroupSort = useUiStore((s) => s.setGroupSort);
