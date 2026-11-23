@@ -106,7 +106,7 @@ export function ChatsPage(): React.ReactElement {
             />
             <BackgroundAccountRow
               selected={data.preferences.backgroundAccount}
-              accounts={accountsForBackend(data.shared?.secrets, 'claude-code')}
+              accounts={accountsForBackend<{ id: string; label: string }>(data.shared?.secrets, 'claude-code')}
             />
             <Row
               title="Snooze morning hour"
