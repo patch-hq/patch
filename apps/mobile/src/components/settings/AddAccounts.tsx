@@ -7,12 +7,17 @@ import { api } from '../../api/rest';
 import { space } from '../../lib/theme';
 import { ChatGPTSignInFlow, ClaudeSignInFlow } from './SignInFlows';
 import { TokenEntry } from './accountRows';
+import { BedrockForm } from './bedrock';
 import { writeShared } from './sharedWrite';
 import { ButtonRow, SettingsButton } from './ui';
 
-/** Add a Claude account from a pasted token. */
+/**
+ * Add a Claude account: a Claude subscription (sign in, or paste a token), or
+ * a Claude on Amazon Bedrock account from a host's AWS profile.
+ */
 export function AddClaude(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  const [bedrock, setBedrock] = React.useState(false);
   return (
     <View style={{ gap: space.sm }}>
       <ClaudeSignInFlow />
@@ -23,7 +28,14 @@ export function AddClaude(): React.ReactElement {
           variant="quiet"
           onPress={() => setOpen(true)}
         />
+        <SettingsButton
+          testID="add-bedrock-account"
+          label="Amazon Bedrock"
+          variant="quiet"
+          onPress={() => setBedrock(true)}
+        />
       </ButtonRow>
+      {bedrock ? <BedrockForm onDone={() => setBedrock(false)} /> : null}
       {open ? (
         <TokenEntry
           testID="add-claude"

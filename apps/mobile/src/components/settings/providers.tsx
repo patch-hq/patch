@@ -27,6 +27,11 @@ interface ProviderEntry {
   extraUsageUrl?: string;
   /** Whether an account's login can be replaced by pasting a token here. */
   pasteToken: boolean;
+  /**
+   * Whether each account carries `auto`, in the order or not (spec/10 §
+   * Choosing an account): every row starts with its checkbox.
+   */
+  autoFlag: boolean;
   /** What the account menu's Sign in item says, for a provider with no token to paste. */
   signInDetail: string;
   /** The sign-in drawn under an account row being signed in again. */
@@ -55,6 +60,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     windows: ['session', 'week', 'overage'],
     extraUsageUrl: EXTRA_USAGE_URL,
     pasteToken: true,
+    autoFlag: true,
     signInDetail: 'Sign in with Claude in your browser',
     SignInFlow: ClaudeSignInFlow,
     AddAccount: AddClaude,
@@ -64,6 +70,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     name: 'Codex',
     windows: ['session', 'week'],
     pasteToken: false,
+    autoFlag: false,
     signInDetail: 'Sign in with ChatGPT using a code you approve on any device',
     SignInFlow: ChatGPTSignInFlow,
     AddAccount: AddChatGPT,

@@ -13,6 +13,9 @@ import {
   ownSettingsGroups,
   type OwnSetting,
   accountsKeyForBackend,
+  BedrockRegionPrefix,
+  bedrockSpentThisMonth,
+  type ClaudeBedrock,
   providerByName,
   providerDescriptor,
   PROVIDERS,
@@ -28,13 +31,25 @@ interface SharedState {
     accountStrategy: { claude: string; codex: string; acp?: string };
   };
   secrets: {
-    claude: Array<{ id: string; label: string; connected: boolean; email?: string }>;
+    claude: ClaudeAccountRow[];
     codex: Array<{ id: string; label: string; kind: string; connected: boolean; email?: string }>;
     providerKeys: Array<{ id: string; set: boolean; last4?: string }>;
     acp?: AcpAccountView[];
   };
   hosts: Array<{ hostId: string; appliedVersion?: number; error?: string }>;
   problem?: string;
+}
+
+/** One shared Claude account as the server summarises it: never the token. */
+interface ClaudeAccountRow {
+  id: string;
+  label: string;
+  connected: boolean;
+  email?: string;
+  /** In the order (spec/10 § Choosing an account); absent reads as on. */
+  auto?: boolean;
+  /** A Claude on Amazon Bedrock account: its host's AWS profile and the month's spend. */
+  bedrock?: ClaudeBedrock;
 }
 
 /** One ACP agent's account, as the server summarises it: never the key. */
@@ -332,8 +347,8 @@ function backendOf(name: string): ProviderBackendId {
 /** The shared accounts in order, as `patch accounts` shows and `--json` returns them. */
 interface AccountsView {
   strategy: { claude: string; codex: string };
-  claude: Array<{ id: string; label: string; connected: boolean; email?: string }>;
-  codex: Array<{ id: string; label: string; connected: boolean; email?: string }>;
+  claude: ClaudeAccountRow[];
+  codex: Array<{ id: string; label: string; connected: boolean; email?: string; auto?: boolean }>;
 }
 
 const viewOf = (state: SharedState): AccountsView => ({
@@ -367,17 +382,110 @@ const accountsApi = (opts: CommonOpts) => {
   };
 };
 
+/** `$18.42`, or `$100` for whole dollars. */
+const usd = (n: number): string => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+
+/**
+ * One backend's accounts as lines: those in the order numbered, then those
+ * with auto off, unnumbered (spec/10 § Choosing an account). A Bedrock account
+ * adds its host, profile, region and the month's estimated spend.
+ */
+export function accountLines(
+  list: readonly ClaudeAccountRow[],
+  now: number = Date.now(),
+): string[] {
+  if (list.length === 0) return ['  (no accounts)'];
+  const ordered = [
+    ...list.filter((a) => a.auto !== false),
+    ...list.filter((a) => a.auto === false),
+  ];
+  const lines: string[] = [];
+  let rank = 0;
+  for (const a of ordered) {
+    const inOrder = a.auto !== false;
+    const bedrock = a.bedrock;
+    const lead = inOrder ? `${++rank}.` : '-';
+    const status = a.connected ? '' : bedrock ? '  [AWS sign-in expired]' : '  [not connected]';
+    lines.push(
+      `  ${lead} ${a.label}${bedrock ? ' (Bedrock)' : ''}${a.email ? ` <${a.email}>` : ''}${status}${inOrder ? '' : '  [auto off]'}  ${a.id}`,
+    );
+    if (bedrock) {
+      const runsIn = bedrock.regionPrefix === 'auto' ? '' : `, runs in ${bedrock.regionPrefix}`;
+      lines.push(
+        `     host ${bedrock.hostId} · profile ${bedrock.awsProfile} · region ${bedrock.awsRegion}${runsIn} · ${usd(bedrockSpentThisMonth(bedrock, now))} of ${usd(bedrock.monthlyCapUsd)} cap this month · estimated`,
+      );
+    }
+  }
+  return lines;
+}
+
 function printAccounts(view: AccountsView, backend: ProviderBackendId): void {
   const key = accountsKeyForBackend(backend);
-  const list = view[key];
   const strategy = view.strategy[key];
   emitText(`${providerDescriptor(providerByName(backend)).label} — strategy: ${strategy}`);
-  if (list.length === 0) emitText('  (no accounts)');
-  list.forEach((a, i) =>
-    emitText(
-      `  ${i + 1}. ${a.label}${a.email ? ` <${a.email}>` : ''}${a.connected ? '' : '  [not connected]'}  ${a.id}`,
-    ),
-  );
+  for (const line of accountLines(view[key])) emitText(line);
+}
+
+/** A monthly cap in US dollars: a number above 0 (`100`, `$100`, `25.5`). */
+export function parseCap(raw: string): number {
+  const n = Number(raw.trim().replace(/^\$/, ''));
+  if (raw.trim() === '' || !Number.isFinite(n) || n <= 0) {
+    throw new Error(`--cap is a number of dollars above 0 — got "${raw}"`);
+  }
+  return n;
+}
+
+/** Where a Bedrock account's requests run (`--prefix`). */
+export function parsePrefix(raw: string): BedrockRegionPrefix {
+  const r = BedrockRegionPrefix.safeParse(raw.trim().toLowerCase());
+  if (!r.success) {
+    throw new Error(`--prefix is one of ${BedrockRegionPrefix.options.join(', ')} — got "${raw}"`);
+  }
+  return r.data;
+}
+
+/** The body of `POST /api/accounts/claude-code` for a Bedrock account (spec/10 § Signing in). */
+export function bedrockAddBody(args: {
+  label: string;
+  hostId: string;
+  profile: string;
+  region: string;
+  prefix?: string | undefined;
+  cap: string;
+  auto?: boolean | undefined;
+}): { bedrock: Record<string, unknown> } {
+  return {
+    bedrock: {
+      label: args.label,
+      hostId: args.hostId,
+      awsProfile: args.profile,
+      awsRegion: args.region,
+      regionPrefix: parsePrefix(args.prefix ?? 'auto'),
+      monthlyCapUsd: parseCap(args.cap),
+      auto: args.auto === true,
+    },
+  };
+}
+
+/** The body of `PATCH /api/accounts/<backend>/<id>` for `accounts set`: at least one change. */
+export function accountEditBody(args: {
+  auto?: string | undefined;
+  label?: string | undefined;
+  cap?: string | undefined;
+  region?: string | undefined;
+  prefix?: string | undefined;
+}): Record<string, unknown> {
+  const body = {
+    ...(args.auto !== undefined ? { auto: parseBooleanValue('--auto', args.auto) } : {}),
+    ...(args.label !== undefined ? { label: args.label } : {}),
+    ...(args.cap !== undefined ? { monthlyCapUsd: parseCap(args.cap) } : {}),
+    ...(args.region !== undefined ? { awsRegion: args.region } : {}),
+    ...(args.prefix !== undefined ? { regionPrefix: parsePrefix(args.prefix) } : {}),
+  };
+  if (Object.keys(body).length === 0) {
+    throw new Error('nothing to change — give --auto, --label, --cap, --region or --prefix');
+  }
+  return body;
 }
 
 export function registerSettingsCommands(program: Command): void {
@@ -517,6 +625,78 @@ export function registerSettingsCommands(program: Command): void {
             ...(opts.label ? { label: opts.label } : {}),
           };
           const state = await server(opts).post<SharedState>(`/api/accounts/${id}`, body);
+          if (opts.json) emitJson(state);
+          else printAccounts(viewOf(state), id);
+        });
+      },
+    );
+
+  accounts
+    .command('add-bedrock')
+    .description(
+      'Add a Claude on Amazon Bedrock account: an AWS profile on one host, checked there first',
+    )
+    .requiredOption('--host <h>', 'the host whose AWS profile it runs on (name or hostId prefix)')
+    .requiredOption('--profile <p>', 'the AWS profile on that host')
+    .requiredOption('--region <r>', 'the AWS region, e.g. eu-west-2')
+    .requiredOption('--cap <usd>', 'the monthly spending cap in US dollars')
+    .requiredOption('--label <l>', 'a name for it')
+    .option('--prefix <p>', `where requests run: ${BedrockRegionPrefix.options.join(', ')}`, 'auto')
+    .option('--auto', 'switch to it automatically (off unless given)')
+    .option('--json', 'JSON output')
+    .action(
+      async (
+        opts: CommonOpts & {
+          host: string;
+          profile: string;
+          region: string;
+          cap: string;
+          label: string;
+          prefix: string;
+          auto?: boolean;
+        },
+      ) => {
+        await run(opts, async () => {
+          const body = bedrockAddBody({ ...opts, hostId: await resolveHost(opts) });
+          const state = await server(opts).post<SharedState>('/api/accounts/claude-code', body);
+          if (opts.json) emitJson(state);
+          else printAccounts(viewOf(state), 'claude-code');
+        });
+      },
+    );
+
+  accounts
+    .command('set <backend> <accountId>')
+    .description(
+      "Change an account: whether it is switched to automatically, its name, and a Bedrock account's cap, region and prefix",
+    )
+    .option('--auto <on|off>', 'switch to it automatically')
+    .option('--label <l>', 'a new name')
+    .option('--cap <usd>', 'Bedrock: the monthly spending cap in US dollars')
+    .option('--region <r>', 'Bedrock: the AWS region')
+    .option(
+      '--prefix <p>',
+      `Bedrock: where requests run (${BedrockRegionPrefix.options.join(', ')})`,
+    )
+    .option('--json', 'JSON output')
+    .action(
+      async (
+        backend: string,
+        accountId: string,
+        opts: CommonOpts & {
+          auto?: string;
+          label?: string;
+          cap?: string;
+          region?: string;
+          prefix?: string;
+        },
+      ) => {
+        await run(opts, async () => {
+          const id = backendOf(backend);
+          const state = await server(opts).patch<SharedState>(
+            `/api/accounts/${id}/${encodeURIComponent(accountId)}`,
+            accountEditBody(opts),
+          );
           if (opts.json) emitJson(state);
           else printAccounts(viewOf(state), id);
         });

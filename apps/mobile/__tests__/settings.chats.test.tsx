@@ -9,6 +9,7 @@ import { ChatsPage } from '../src/components/settings/ChatsSection';
 import { renderRN, findHost, byTestId, actAsync, flush } from './testUtils/render';
 import { api } from '../src/api/rest';
 import { resetHosts, seedSettings } from './testUtils/settingsFixtures';
+import { useSettingsStore } from '../src/stores/settingsStore';
 
 vi.mock('../src/api/rest', () => ({ api: { setPreferences: vi.fn() } }));
 
@@ -65,5 +66,53 @@ describe('mobile Settings → Chats', () => {
       await flush();
     });
     expect(api.setPreferences).toHaveBeenCalledWith({ snoozeMorningHour: 7 });
+  });
+});
+
+describe('mobile Settings → Chats — Account for titles and status', () => {
+  it('offers Automatic and every Claude account by label, and writes backgroundAccount', async () => {
+    seedSettings({
+      shared: {
+        version: 1,
+        hosts: [],
+        secrets: {
+          claude: [
+            { id: 'c1', label: 'Personal', connected: true },
+            { id: 'c2', label: 'Max', connected: true },
+          ],
+          codex: [],
+          providerKeys: [],
+        },
+      },
+    });
+    vi.mocked(api.setPreferences).mockImplementation(async (patch) => ({
+      preferences: { ...DEFAULT_SHARED_SETTINGS, ...patch },
+    }));
+    const r = renderRN(<ChatsPage />);
+    mounted.push(r);
+    await flush();
+    const get = (id: string) => findHost(r.root, byTestId(id));
+    expect(get('background-account-auto').props.accessibilityState.selected).toBe(true);
+    expect(get('background-account-auto').props.accessibilityLabel).toContain('Automatic');
+    expect(get('background-account-c2').props.accessibilityLabel).toContain('Max');
+    await actAsync(async () => {
+      get('background-account-c2').props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ backgroundAccount: 'c2' });
+    expect(get('background-account-c2').props.accessibilityState.selected).toBe(true);
+  });
+
+  it('shows an account it no longer holds as it is, never as Automatic', async () => {
+    const data = seedSettings();
+    useSettingsStore.setState({
+      data: { ...data, preferences: { ...data.preferences, backgroundAccount: 'gone' } },
+    });
+    const r = renderRN(<ChatsPage />);
+    mounted.push(r);
+    await flush();
+    const gone = findHost(r.root, byTestId('background-account-gone'));
+    expect(gone.props.accessibilityState.selected).toBe(true);
+    expect(gone.props.accessibilityLabel).toContain('gone (not held)');
   });
 });

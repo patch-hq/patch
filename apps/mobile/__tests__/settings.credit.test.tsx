@@ -8,7 +8,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { act } from 'react-test-renderer';
-import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { bedrockMonth, DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import { STRATEGY_HINT, UsagePage } from '../src/components/settings/CreditSourcesSection';
 import { PROVIDERS } from '../src/components/settings/providers';
 import {
@@ -32,6 +32,7 @@ vi.mock('../src/api/rest', () => ({
   api: {
     setPreferences: vi.fn(),
     addAccount: vi.fn(),
+    addBedrockAccount: vi.fn(),
     updateAccount: vi.fn(),
     disconnectAccount: vi.fn(),
     removeAccount: vi.fn(),
@@ -331,5 +332,198 @@ describe('mobile Settings → Usage — the shared accounts', () => {
     const r = await render();
     expect(query(r, 'title-generation')).toBeNull();
     expect(query(r, 'status-generation')).toBeNull();
+  });
+});
+
+// Claude on Amazon Bedrock accounts and the Auto flag (spec/10 § Settings,
+// § Choosing an account; design/bedrock-accounts).
+
+const BEDROCK = {
+  hostId: 'h1',
+  awsProfile: 'work-bedrock',
+  awsRegion: 'eu-west-2',
+  regionPrefix: 'eu' as const,
+  monthlyCapUsd: 100,
+  spentUsd: 18.42,
+  spentMonth: bedrockMonth(Date.now()),
+};
+const WORK_AWS = {
+  id: 'w',
+  label: 'Work Bedrock',
+  connected: true,
+  auto: false,
+  state: { state: 'ready' as const },
+  bedrock: BEDROCK,
+};
+const CLIENT_AWS = {
+  id: 'x',
+  label: 'Client X',
+  connected: false,
+  auto: false,
+  state: { state: 'signed_out' as const },
+  bedrock: { ...BEDROCK, hostId: 'h2', awsProfile: 'client-x', awsRegion: 'us-east-1' },
+};
+
+function seedClaude(claude: unknown[]): void {
+  seedSettings({
+    shared: {
+      version: 1,
+      secrets: { claude: claude as never, codex: [], providerKeys: [] },
+      hosts: [],
+    },
+  });
+}
+
+describe('mobile Settings → Usage — Bedrock accounts and Auto', () => {
+  it('draws a Bedrock row with its tag and labelled Host, AWS profile, Region, Monthly and Spent lines', async () => {
+    reportHost('h1', { hostName: 'mac-mini', awsProfiles: [] });
+    seedClaude([WORK, WORK_AWS]);
+    const r = await render();
+    expect(textOf(get(r, 'account-claude-code-w-tag'))).toBe('Bedrock');
+    const lines = (id: string) => textOf(get(r, `account-claude-code-w-bedrock-${id}`));
+    expect(lines('host')).toBe('Hostmac-mini');
+    expect(lines('profile')).toBe('AWS profilework-bedrock');
+    expect(lines('region')).toContain('eu-west-2');
+    expect(lines('monthly')).toMatch(/Monthly18% · resets [A-Z][a-z]{2} 1$/);
+    expect(lines('spent')).toBe('Spent$18.42 of $100 cap · estimated');
+    // Never a subscription's usage bars or a probe's "not read yet".
+    expect(query(r, 'account-claude-code-w-usage')).toBeNull();
+  });
+
+  it('a signed-out profile reads AWS sign-in expired in place of the spend lines', async () => {
+    seedClaude([WORK, CLIENT_AWS]);
+    const r = await render();
+    expect(textOf(get(r, 'account-claude-code-x-bedrock-status'))).toBe(
+      'StatusAWS sign-in expired',
+    );
+    expect(query(r, 'account-claude-code-x-bedrock-monthly')).toBeNull();
+    expect(query(r, 'account-claude-code-x-bedrock-spent')).toBeNull();
+  });
+
+  it('a Bedrock row’s ⋯ offers Edit and Remove with no detail lines, and no sign-in', async () => {
+    seedClaude([WORK, WORK_AWS]);
+    const r = await render();
+    await actAsync(() => get(r, 'account-claude-code-w-menu').props.onPress());
+    expect(textOf(get(r, 'account-claude-code-w-edit'))).toBe('Edit');
+    expect(textOf(get(r, 'account-claude-code-w-remove'))).toBe('Remove');
+    expect(query(r, 'account-claude-code-w-connect')).toBeNull();
+    expect(query(r, 'account-claude-code-w-rename')).toBeNull();
+    // Out of the order: no rank to move.
+    expect(query(r, 'account-claude-code-w-up')).toBeNull();
+  });
+
+  it('every Claude row starts with its Auto box; unticked rows sit last, unranked', async () => {
+    seedClaude([WORK_AWS, WORK, PERSONAL]);
+    const r = await render();
+    expect(textOf(get(r, 'accounts-header-claude-code'))).toBe('AutoAccount');
+    const order = r.root
+      .findAll(
+        (i) =>
+          typeof i.type === 'string' && /^account-claude-code-[a-z]$/.test(i.props.testID ?? ''),
+      )
+      .map((i) => i.props.testID);
+    expect(order).toEqual([
+      'account-claude-code-a',
+      'account-claude-code-b',
+      'account-claude-code-w',
+    ]);
+    expect(get(r, 'account-claude-code-a-auto').props.accessibilityState.checked).toBe(true);
+    expect(get(r, 'account-claude-code-w-auto').props.accessibilityState.checked).toBe(false);
+    // ChatGPT accounts carry no Auto flag.
+    expect(query(r, 'accounts-header-codex')).toBeNull();
+  });
+
+  it('ticking Auto writes it to the server', async () => {
+    vi.mocked(api.updateAccount).mockResolvedValue(shared([WORK, { ...PERSONAL, auto: false }]));
+    const r = await render();
+    await actAsync(async () => {
+      get(r, 'account-claude-code-b-auto').props.onPress();
+      await flush();
+    });
+    expect(api.updateAccount).toHaveBeenCalledWith('claude-code', 'b', { auto: false });
+  });
+
+  it('moving a ranked account sends every account, the unranked ones last', async () => {
+    vi.mocked(api.orderAccounts).mockResolvedValue(shared([PERSONAL, WORK]));
+    seedClaude([WORK_AWS, WORK, PERSONAL]);
+    const r = await render();
+    await pressMenuItem(r.root, 'account-claude-code-a-menu', 'account-claude-code-a-down');
+    await flush();
+    expect(api.orderAccounts).toHaveBeenCalledWith('claude-code', ['b', 'a', 'w']);
+  });
+
+  it('adds a Bedrock account: host and profile pills, the profile’s region, auto off', async () => {
+    reportHost('h1', {
+      hostName: 'mac-mini',
+      awsProfiles: [{ name: 'default' }, { name: 'work-bedrock', region: 'eu-west-2' }],
+    });
+    reportHost('h2', { hostName: 'old-host' }); // reports no awsProfiles: runs no Bedrock
+    vi.mocked(api.addBedrockAccount).mockResolvedValue(shared([WORK, PERSONAL]));
+    const r = await render();
+    await actAsync(() => get(r, 'add-bedrock-account').props.onPress());
+    expect(query(r, 'bedrock-form-host-h2')).toBeNull();
+    // The one host that runs Bedrock is chosen already.
+    expect(get(r, 'bedrock-form-host-h1').props.accessibilityState.selected).toBe(true);
+    expect(get(r, 'bedrock-form-submit').props.disabled).toBe(true);
+    await actAsync(() => get(r, 'bedrock-form-name').props.onChangeText('Work Bedrock'));
+    await actAsync(() => get(r, 'bedrock-form-profile-work-bedrock').props.onPress());
+    expect(get(r, 'bedrock-form-region').props.value).toBe('eu-west-2');
+    expect(textOf(get(r, 'bedrock-form-prefix-auto'))).toBe('Auto (EU)');
+    expect(textOf(get(r, 'bedrock-form-prefix-jp'))).toBe('Japan');
+    expect(get(r, 'bedrock-form-auto').props.accessibilityState.checked).toBe(false);
+    await actAsync(() => get(r, 'bedrock-form-cap').props.onChangeText('100'));
+    await actAsync(async () => {
+      get(r, 'bedrock-form-submit').props.onPress();
+      await flush();
+    });
+    expect(api.addBedrockAccount).toHaveBeenCalledWith({
+      label: 'Work Bedrock',
+      hostId: 'h1',
+      awsProfile: 'work-bedrock',
+      awsRegion: 'eu-west-2',
+      regionPrefix: 'auto',
+      monthlyCapUsd: 100,
+      auto: false,
+    });
+    expect(query(r, 'bedrock-form')).toBeNull();
+  });
+
+  it('says a refused Bedrock account in the server’s words and keeps the form', async () => {
+    reportHost('h1', {
+      hostName: 'mac-mini',
+      awsProfiles: [{ name: 'work', region: 'eu-west-2' }],
+    });
+    vi.mocked(api.addBedrockAccount).mockRejectedValue(
+      Object.assign(new Error('HTTP 409'), { body: { message: 'mac-mini is offline' } }),
+    );
+    const r = await render();
+    await actAsync(() => get(r, 'add-bedrock-account').props.onPress());
+    await actAsync(() => get(r, 'bedrock-form-name').props.onChangeText('Work'));
+    await actAsync(() => get(r, 'bedrock-form-profile-work').props.onPress());
+    await actAsync(() => get(r, 'bedrock-form-cap').props.onChangeText('$50'));
+    await actAsync(async () => {
+      get(r, 'bedrock-form-submit').props.onPress();
+      await flush();
+    });
+    expect(__getLastAlert()?.message).toBe('mac-mini is offline');
+    expect(query(r, 'bedrock-form')).not.toBeNull();
+  });
+
+  it('Edit opens the form filled in and sends only what changed', async () => {
+    reportHost('h1', { hostName: 'mac-mini', awsProfiles: [{ name: 'work-bedrock' }] });
+    seedClaude([WORK, WORK_AWS]);
+    vi.mocked(api.updateAccount).mockResolvedValue(shared([WORK]));
+    const r = await render();
+    await pressMenuItem(r.root, 'account-claude-code-w-menu', 'account-claude-code-w-edit');
+    const form = 'account-claude-code-w-form';
+    expect(get(r, `${form}-name`).props.value).toBe('Work Bedrock');
+    expect(get(r, `${form}-cap`).props.value).toBe('100');
+    expect(get(r, `${form}-prefix-eu`).props.accessibilityState.selected).toBe(true);
+    await actAsync(() => get(r, `${form}-cap`).props.onChangeText('250'));
+    await actAsync(async () => {
+      get(r, `${form}-submit`).props.onPress();
+      await flush();
+    });
+    expect(api.updateAccount).toHaveBeenCalledWith('claude-code', 'w', { monthlyCapUsd: 250 });
   });
 });

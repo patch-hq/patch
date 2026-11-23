@@ -25,6 +25,7 @@ import type {
   StrayProcessRow,
   UsageSample,
   ChatTokenUsage,
+  BedrockRegionPrefix,
 } from '@patch/wire';
 import type { Hook, HookCreateBody, HookPatchBody } from '@patch/wire/hooks';
 import { loadCredential } from '../lib/credential';
@@ -268,6 +269,15 @@ export interface WebBotAuthStatus {
   agentUrl: string;
   directoryUrl: string;
   keyId: string;
+}
+
+/** What a Claude on Amazon Bedrock account is set up with (spec/10 § Backend credentials). */
+export interface BedrockAccountFields {
+  hostId: string;
+  awsProfile: string;
+  awsRegion: string;
+  regionPrefix: BedrockRegionPrefix;
+  monthlyCapUsd: number;
 }
 
 /** The backends whose accounts are shared settings. */
@@ -1132,6 +1142,9 @@ export const api = {
     backendId: SharedBackendId,
     body: { token?: string; apiKey?: string; label?: string },
   ) => request<SharedState>(`/api/accounts/${backendId}`, { method: 'POST', body }),
+  /** Add a Claude on Amazon Bedrock account; its host checks the profile first (spec/10 § Signing in). */
+  addBedrockAccount: (bedrock: BedrockAccountFields & { label: string; auto: boolean }) =>
+    request<SharedState>('/api/accounts/claude-code', { method: 'POST', body: { bedrock } }),
   /** Start a Claude sign-in; the server keeps the secret (spec/10 § Signing in). */
   claudeSignInStart: () =>
     request<{ signInId: string; url: string }>('/api/accounts/claude-code/signin', {
@@ -1155,7 +1168,8 @@ export const api = {
   updateAccount: (
     backendId: SharedBackendId,
     accountId: string,
-    body: { token?: string; label?: string },
+    /** `auto` on any Claude account; the Bedrock fields on a Bedrock one. */
+    body: { token?: string; label?: string; auto?: boolean } & Partial<BedrockAccountFields>,
   ) =>
     request<SharedState>(`/api/accounts/${backendId}/${encodeURIComponent(accountId)}`, {
       method: 'PATCH',

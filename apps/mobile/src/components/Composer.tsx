@@ -2664,6 +2664,7 @@ export function Composer({
         visible={accountMenuOpen}
         backendId={accountBackend}
         model={chatModel}
+        hostId={usageHostId}
         selectedId={accountSelected}
         strategySelected={setup ? setup.accountId === null : false}
         onSelect={onAccountSelect}

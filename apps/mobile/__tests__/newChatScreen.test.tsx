@@ -1066,6 +1066,54 @@ describe('NewChat — account menu', () => {
     expect(api.createChat.mock.calls[0]![0]).not.toHaveProperty('preferredAccountId');
   });
 
+  it('offers a Bedrock account only on its own host, with the month’s spend in place of usage', async () => {
+    const d = new Date();
+    const spentMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const bedrock = (hostId: string) => ({
+      hostId,
+      awsProfile: 'work',
+      awsRegion: 'eu-west-2',
+      regionPrefix: 'eu',
+      monthlyCapUsd: 100,
+      spentUsd: 18.42,
+      spentMonth,
+    });
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: [
+              { id: 'c0', label: 'Work', connected: true },
+              { id: 'b1', label: 'Here AWS', connected: true, bedrock: bedrock(HOST) },
+              { id: 'b2', label: 'There AWS', connected: true, bedrock: bedrock(OTHER) },
+            ],
+            codex: [],
+            providerKeys: [],
+          },
+          hosts: [],
+        },
+      } as never,
+    });
+    usePresenceStore.setState({ hosts: { [HOST]: host(HOST), [OTHER]: host(OTHER) } });
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'chat-account');
+    expect(textOf(findHost(r.root, byTestId('account-option-b1')))).toContain(
+      '$18.42 of $100 this month · estimated',
+    );
+    expect(findAllHost(r.root, byTestId('account-option-b2'))).toHaveLength(0);
+    await press(r, 'account-option-b1');
+    typeText(r, 'go');
+    await send(r);
+    expect(api.createChat).toHaveBeenCalledWith({
+      hostId: HOST,
+      folder: '/p/one',
+      preferredAccountId: 'b1',
+    });
+  });
+
   it('asks the online hosts to read usage when an account has no reading, once per backend, only when the menu opens', async () => {
     useSettingsStore.setState({
       data: {
