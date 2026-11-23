@@ -2618,6 +2618,9 @@ export function limitBehaviourFromAutoResume(autoResume: boolean): LimitBehaviou
   return autoResume ? 'other_account' : 'switch_provider';
 }
 
+/** `SharedSettings.backgroundAccount` when no account is named. */
+export const BACKGROUND_ACCOUNT_AUTO = 'auto';
+
 export const SharedSettings = z
   .object({
     /** Whether half-finished features (the Manager, Batch, Meeting mode) are shown. Off by default; Settings → Experimental features. */
@@ -2857,6 +2860,12 @@ export const SharedSettings = z
     accountStrategy: z
       .object({ claude: AccountStrategy, codex: AccountStrategy, acp: AccountStrategy.optional() })
       .strict(),
+    /**
+     * The Claude account chat titles and status summaries run on (spec/10 §
+     * Choosing an account): an account id, or `auto` to choose the way a turn
+     * does. Absent from an older server's settings, so it reads as `auto`.
+     */
+    backgroundAccount: z.string().min(1).default(BACKGROUND_ACCOUNT_AUTO),
   })
   .strict();
 export type SharedSettings = z.infer<typeof SharedSettings>;
@@ -2956,6 +2965,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   harnessSkills: null,
   harnessMemoryEnabled: false,
   accountStrategy: { claude: 'priority', codex: 'priority' },
+  backgroundAccount: BACKGROUND_ACCOUNT_AUTO,
   jobAutonomyPrompt: DEFAULT_JOB_AUTONOMY_PROMPT,
 };
 
@@ -2975,12 +2985,47 @@ export const ClaudeCredential = z
   .strict();
 export type ClaudeCredential = z.infer<typeof ClaudeCredential>;
 
+/**
+ * Where a Bedrock account's requests run: Claude Code's cross-region inference
+ * prefix (`ANTHROPIC_BEDROCK_REGION_PREFIX`). `auto` leaves it to Claude Code,
+ * which derives it from the region.
+ */
+export const BedrockRegionPrefix = z.enum(['auto', 'us', 'eu', 'apac', 'jp', 'au', 'global']);
+export type BedrockRegionPrefix = z.infer<typeof BedrockRegionPrefix>;
+
+/**
+ * A Claude on Amazon Bedrock account (spec/10 § Backend credentials): an AWS
+ * profile on one host. Patch holds no AWS secret. `spentUsd` is the estimated
+ * spend in `spentMonth` (`YYYY-MM`, UTC), kept by the server from each
+ * `host.account_spend`; a month other than the current one reads as 0.
+ */
+export const ClaudeBedrock = z
+  .object({
+    hostId: z.string().min(1),
+    awsProfile: z.string().min(1),
+    awsRegion: z.string().min(1),
+    regionPrefix: BedrockRegionPrefix,
+    monthlyCapUsd: z.number().positive(),
+    spentUsd: z.number().nonnegative(),
+    spentMonth: z.string().regex(/^\d{4}-\d{2}$/),
+  })
+  .strict();
+export type ClaudeBedrock = z.infer<typeof ClaudeBedrock>;
+
 export const SharedClaudeAccount = z
   .object({
     id: z.string().min(1),
     label: z.string().min(1),
-    /** `null` = disconnected: the row stays, nothing resolves against it. */
+    /** `null` = disconnected: the row stays, nothing resolves against it. Always `null` for Bedrock. */
     credential: ClaudeCredential.nullable(),
+    /**
+     * Whether the account is in the order at all (spec/10 § Choosing an
+     * account). Off: it runs only for a chat locked to it, or as the named
+     * `backgroundAccount`. Absent reads as on.
+     */
+    auto: z.boolean().optional(),
+    /** Set for a Claude on Amazon Bedrock account, which has no credential. */
+    bedrock: ClaudeBedrock.optional(),
   })
   .strict();
 export type SharedClaudeAccount = z.infer<typeof SharedClaudeAccount>;
@@ -3060,6 +3105,10 @@ export const SharedSecretsSummary = z
           organizationId: z.string().min(1).optional(),
           /** The account's one state, derived by the server (spec/10 § Account states). */
           state: AccountState.optional(),
+          /** In the order (spec/10 § Choosing an account). Absent reads as on. */
+          auto: z.boolean().optional(),
+          /** A Claude on Amazon Bedrock account: where it runs and its spend. */
+          bedrock: ClaudeBedrock.optional(),
         })
         .strict(),
     ),
@@ -3126,6 +3175,8 @@ export interface LockableAccount {
   email?: string | undefined;
   kind?: 'chatgpt' | 'apiKey' | undefined;
   state?: AccountState | undefined;
+  auto?: boolean | undefined;
+  bedrock?: ClaudeBedrock | undefined;
 }
 
 /**
@@ -3133,10 +3184,13 @@ export interface LockableAccount {
  * Choosing an account): its provider's shared list, or for an ACP agent that
  * agent's own accounts. Empty for a model with no accounts. Every surface's
  * account picker reads this, so a chat on any provider can be locked the same way.
+ * A Bedrock account runs on one host only, so it is listed only when `hostId`
+ * (the chat's host) is that host.
  */
 export function lockableAccounts(
   secrets: Partial<Pick<SharedSecretsSummary, 'claude' | 'codex' | 'acp'>> | undefined,
   model: string | null | undefined,
+  hostId?: string | null | undefined,
 ): LockableAccount[] {
   if (!secrets) return [];
   const acp = parseAcpModel(model);
@@ -3152,7 +3206,9 @@ export function lockableAccounts(
       }));
   }
   const key = accountsKeyForModel(model);
-  return key !== null ? [...(secrets[key] ?? [])] : [];
+  if (key === null) return [];
+  const held: LockableAccount[] = [...(secrets[key] ?? [])];
+  return held.filter((a) => a.bedrock === undefined || a.bedrock.hostId === hostId);
 }
 
 /** Server → host: every shared setting and secret (spec/03 § Settings). */
@@ -3391,6 +3447,12 @@ export const SettingsAccountSignedInEvent = z
   })
   .strict();
 export type SettingsAccountSignedInEvent = z.infer<typeof SettingsAccountSignedInEvent>;
+
+/** One AWS profile a host has (`HostInfoEvent.awsProfiles`). */
+export const AwsProfileInfo = z
+  .object({ name: z.string().min(1), region: z.string().min(1).optional() })
+  .strict();
+export type AwsProfileInfo = z.infer<typeof AwsProfileInfo>;
 
 /**
  * A host's self-description (spec/03 § Session events → `host.host`,
@@ -3641,6 +3703,13 @@ export const HostInfoEvent = z
      * current host states `true`; absent means the host predates it.
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
+    /**
+     * The AWS profiles this host's `~/.aws/config` and `~/.aws/credentials`
+     * name, with each one's own `region` where it sets one: names only, never
+     * a secret. Present (even empty) means the host runs Claude on Amazon
+     * Bedrock accounts (spec/10 § Backend credentials); absent, it does not.
+     */
+    awsProfiles: z.array(AwsProfileInfo).optional(),
     /** Deprecated, ignored: hosts no longer report battery. Accepted so an older host's description still validates. */
     power: z
       .object({
@@ -9019,6 +9088,56 @@ export const PatchChatAdoptResponseEvent = z
 export type PatchChatAdoptResponseEvent = z.infer<typeof PatchChatAdoptResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// Claude on Amazon Bedrock (spec/10 § Backend credentials, § Spending caps)
+//
+// Before storing or re-pointing a Bedrock account the server asks its host to
+// check the AWS profile (`patch.aws_profile_check`): it must exist there, and
+// where the AWS CLI is installed the host asks it for the profile's current
+// credentials, which costs nothing and reaches no model. After every turn and
+// one-shot call on a Bedrock account the host reports what it cost
+// (`host.account_spend`); the server keeps the month's spend.
+
+/** Server → host: does this AWS profile exist here, and is it signed in? */
+export const PatchAwsProfileCheckRequestEvent = z
+  .object({
+    type: z.literal('patch.aws_profile_check.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    awsProfile: z.string().min(1),
+  })
+  .strict();
+export type PatchAwsProfileCheckRequestEvent = z.infer<typeof PatchAwsProfileCheckRequestEvent>;
+
+/** Host → server: the answer. */
+export const PatchAwsProfileCheckResponseEvent = z
+  .object({
+    type: z.literal('patch.aws_profile_check.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The profile is named in the host's AWS config or credentials. */
+    exists: z.boolean(),
+    /** Its credentials are current; `null` when the host could not ask (no AWS CLI). */
+    signedIn: z.boolean().nullable(),
+    /** What the check said, when it failed or found the profile signed out. */
+    error: z.string().min(1).optional(),
+  })
+  .strict();
+export type PatchAwsProfileCheckResponseEvent = z.infer<typeof PatchAwsProfileCheckResponseEvent>;
+
+/** Host → server: what one turn or one-shot call on a Bedrock account cost (`total_cost_usd`). */
+export const HostAccountSpendEvent = z
+  .object({
+    type: z.literal('host.account_spend'),
+    ...hostIdField,
+    accountId: z.string().min(1),
+    costUsd: z.number().nonnegative(),
+    /** When the turn or call ended, ms-epoch: the month it counts in. */
+    at: z.number(),
+  })
+  .strict();
+export type HostAccountSpendEvent = z.infer<typeof HostAccountSpendEvent>;
+
+// ---------------------------------------------------------------------------
 // Chat search (spec/03 § Chat search, spec/04 § Search)
 //
 // `GET /api/chats/search?q=` searches every chat on every host — names, the
@@ -10762,6 +10881,9 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchFoldersCheckResponseEvent,
   PatchChatAdoptRequestEvent,
   PatchChatAdoptResponseEvent,
+  PatchAwsProfileCheckRequestEvent,
+  PatchAwsProfileCheckResponseEvent,
+  HostAccountSpendEvent,
   // Terminal sessions
   PatchTerminalOpenEvent,
   PatchTerminalInputEvent,
@@ -11100,6 +11222,9 @@ export const EVENT_SCHEMAS = {
   'patch.folders_check.response': PatchFoldersCheckResponseEvent,
   'patch.chat_adopt.request': PatchChatAdoptRequestEvent,
   'patch.chat_adopt.response': PatchChatAdoptResponseEvent,
+  'patch.aws_profile_check.request': PatchAwsProfileCheckRequestEvent,
+  'patch.aws_profile_check.response': PatchAwsProfileCheckResponseEvent,
+  'host.account_spend': HostAccountSpendEvent,
   'patch.terminal.open': PatchTerminalOpenEvent,
   'patch.terminal.input': PatchTerminalInputEvent,
   'patch.terminal.signal': PatchTerminalSignalEvent,
