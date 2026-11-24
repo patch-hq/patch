@@ -256,4 +256,26 @@ describe('Artifact bar', () => {
     expect(chips).toHaveLength(1);
     expect(hasText(chips[0]!, 'Bristol bus times v2')).toBe(true);
   });
+
+  it('caps the strip at the newest three and opens a searchable vertical list from "All"', () => {
+    for (let i = 1; i <= 8; i++) {
+      useChatStore
+        .getState()
+        .applyEvent(artifactEvent(`a${i}`, `Plan ${i}${i === 2 ? ' special' : ''}`, i));
+    }
+    const r = renderRN(<ChatDetailScreen />);
+    const chips = findAllHost(r.root, byTestId('artifact-bar-chip'));
+    expect(chips).toHaveLength(3);
+    expect(hasText(chips[0]!, 'Plan 8')).toBe(true);
+    actSync(() => findHost(r.root, byTestId('artifact-bar-all')).props.onPress());
+    expect(findAllHost(r.root, byTestId('artifact-list-row'))).toHaveLength(8);
+    actSync(() => findHost(r.root, byTestId('artifact-list-search')).props.onChangeText('special'));
+    const rows = findAllHost(r.root, byTestId('artifact-list-row'));
+    expect(rows).toHaveLength(1);
+    actSync(() => rows[0]!.props.onPress());
+    expect(queryHost(r.root, byTestId('artifact-list'))).toBeNull();
+    expect(findHost(r.root, byTestId('artifact-viewer-webview')).props.source.uri).toBe(
+      `${DEFAULT_SERVER_URL}/api/chats/c1/artifact/a2`,
+    );
+  });
 });
