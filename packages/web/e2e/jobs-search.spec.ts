@@ -64,7 +64,7 @@ test.describe('jobs search', () => {
     await expect(page.getByTestId('job-bus')).toBeVisible();
   });
 
-  test('the field sits on the head row beside New job, and is a real text field', async ({
+  test('the field sits on the head row with New job, and is a real text field', async ({
     page,
   }) => {
     const search = page.getByTestId('jobs-search');
@@ -81,8 +81,8 @@ test.describe('jobs search', () => {
     // It reads as an editable field, not as paper: white fill and a border.
     const border = await search.evaluate((el) => getComputedStyle(el).borderBottomWidth);
     expect(parseFloat(border)).toBeGreaterThan(0);
-    // Sits left of the New job button, not overlapping it.
-    expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(newBox.x + 1);
+    // New job sits beside the title, so the field is clear of it, to its right.
+    expect(searchBox.x).toBeGreaterThanOrEqual(newBox.x + newBox.width - 1);
   });
 
   test('typing narrows the list by name, by trigger and by action target', async ({ page }) => {
