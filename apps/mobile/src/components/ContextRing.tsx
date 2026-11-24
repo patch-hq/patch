@@ -63,9 +63,6 @@ export function ContextRing({
             transform="rotate(-90 11 11)"
           />
         </Svg>
-        <Text testID="context-ring-label" style={{ ...typography.secondary, color: colors.ink3 }}>
-          {ctx.percent}
-        </Text>
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable
