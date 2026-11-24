@@ -432,7 +432,7 @@
     // would miss (notes vanish) or match the wrong screen (notes jump).
     if (!frameReady) return;
     var notes = live().filter(function (c) { return c.kind === 'note'; });
-    var keep = {};
+    var keep = {}, lostRow = 0;
     notes.forEach(function (c) {
       keep[c.id] = true;
       var n = noteEls[c.id];
@@ -449,16 +449,24 @@
       n.querySelector('.x').style.display = c.status === 'pending' ? '' : 'none';
       var b = n.querySelector('.body'); if (b.textContent !== c.text && !n.querySelector('textarea')) b.textContent = c.text;
       var anchor = find(c.target.selector);
-      // Anchored to something this view isn't showing (another tab of a JS
-      // design): hide it rather than pin it somewhere it doesn't belong.
-      n.style.display = anchor ? '' : 'none';
+      // An anchor this view can't find (the design was edited, or the note is
+      // for another tab of a JS design) must not make the note vanish: show it
+      // stacked at the top, marked as having lost its place.
+      n.classList.toggle('lost', !anchor);
+      n.title = anchor ? '' : 'The element this note was pinned to is not on this screen';
       var ar = anchor ? anchor.getBoundingClientRect() : { left: 0, top: 0 };
       if (!(drag && drag.note === n)) {
         // Keep the whole note on screen: one pinned near the right edge used to
         // shrink to a column one word wide.
         var room = layer.clientWidth - n.offsetWidth - 4;
-        n.style.left = Math.max(4, Math.min(ar.left + c.offset.x, room)) + 'px';
-        n.style.top = (ar.top + c.offset.y) + 'px';
+        if (anchor) {
+          n.style.left = Math.max(4, Math.min(ar.left + c.offset.x, room)) + 'px';
+          n.style.top = (ar.top + c.offset.y) + 'px';
+        } else {
+          n.style.left = '4px';
+          n.style.top = (4 + lostRow * 34) + 'px';
+          lostRow++;
+        }
       }
     });
     Object.keys(noteEls).forEach(function (id) {

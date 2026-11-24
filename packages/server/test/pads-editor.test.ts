@@ -509,6 +509,25 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   }, 30_000);
 
+  it('a note whose anchor is gone stays visible, marked as lost', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#b').waitFor();
+    await page.keyboard.press('n');
+    const bb = (await design.locator('#b').boundingBox())!;
+    await page.mouse.click(bb.x + 5, bb.y + 5);
+    await page.keyboard.type('orphan me');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).length).toBe(1);
+    await design.locator('#b').evaluate((b) => b.remove());
+    await expect.poll(() => page.locator('.note.lost').count()).toBe(1);
+    expect(await page.locator('.note.lost').isVisible()).toBe(true);
+    await ctx.close();
+  }, 30_000);
+
   it('notes of a screen are not drawn over the previous screen while the new one loads', async () => {
     const frameUrl = await newPad();
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
