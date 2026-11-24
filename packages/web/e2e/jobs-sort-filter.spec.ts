@@ -96,11 +96,12 @@ test.describe('jobs sort and filter', () => {
     let left = (await page.getByTestId('jobs-search').boundingBox())!.x;
     for (const control of [sort, status, trigger]) {
       const box = (await control.boundingBox())!;
-      // On the head's own row, in order, and clear of the primary action.
+      // On the head's own row, in order, and clear of the primary action (which
+      // sits beside the title, before the search and the controls).
       expect(box.y).toBeGreaterThanOrEqual(headBox.y);
       expect(box.y + box.height).toBeLessThanOrEqual(headBox.y + headBox.height + 1);
       expect(box.x).toBeGreaterThan(left);
-      expect(box.x + box.width).toBeLessThanOrEqual(newBox.x + 1);
+      expect(box.x).toBeGreaterThanOrEqual(newBox.x + newBox.width - 1);
       left = box.x;
     }
     // No caption or helper text anywhere in the head.
