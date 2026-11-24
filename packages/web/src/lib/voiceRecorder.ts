@@ -18,6 +18,7 @@
 import { createPcm16Downsampler } from './pcmDownsample.js';
 import { holdAudio } from './audioHold.js';
 import { silentAudioContext } from './silentAudioContext.js';
+import { micConstraints } from './micDevice.js';
 
 /** Test seam: inject a mic-stream factory + an AudioContext implementation. */
 export interface VoiceRecorderDeps {
@@ -60,7 +61,7 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
   const release = holdAudio();
   let stream: MediaStream;
   try {
-    stream = await getMedia({ audio: true });
+    stream = await getMedia(micConstraints());
   } catch (e) {
     release();
     throw e;
