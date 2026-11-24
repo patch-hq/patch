@@ -117,6 +117,7 @@ export function hostTurnFailureReport(event: WireEvent, from: string | null): Is
   if (code !== 'sdk_error' || !message) return null;
   if (/usage limit|rate limit|out of credit/i.test(message)) return null;
   if (/terminated by signal SIG(TERM|INT|HUP)\b/.test(message)) return null;
+  if (/Could not load AWS credentials|Token is expired|aws sso login/i.test(message)) return null;
   return { kind: 'server-error', message, surface: 'host' };
 }
 

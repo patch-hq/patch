@@ -180,6 +180,15 @@ describe('hostTurnFailureReport', () => {
     ).toBeNull();
     expect(
       hostTurnFailureReport(
+        err(
+          'sdk_error',
+          "Claude Code returned an error result: API Error: Could not load AWS credentials · Token is expired. To refresh this SSO session run 'aws sso login'",
+        ),
+        'host-1',
+      ),
+    ).toBeNull();
+    expect(
+      hostTurnFailureReport(
         err('sdk_error', 'Claude Code process terminated by signal SIGSEGV'),
         'host-1',
       ),
