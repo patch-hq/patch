@@ -81,6 +81,7 @@ import { windowChrome } from './window-chrome';
 import { parseSavedPlacement, resolvePlacement, type DisplayInfo } from './window-bounds';
 import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
+import { askNotificationPermissionOnce } from './notificationPrompt';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
 import { MOUNT_DEADLINE_MS, MOUNT_PROBE, blankWindowPage } from './blank-window';
 import { readHostLink, serverLostText, watchServerLink } from './server-watch';
@@ -2554,6 +2555,17 @@ export function bootstrap(): void {
     // Moving to Applications quits this run and opens the moved copy; an error
     // that stops the start has already been shown and the app is exiting.
     if ((await resolveServer()) === 'stop') return;
+    if (!QUIET) {
+      askNotificationPermissionOnce({
+        platform: process.platform,
+        file: join(app.getPath('userData'), 'notification-permission-asked.json'),
+        show: () =>
+          new Notification({
+            title: 'Patch notifications are on',
+            body: 'You will be told here when a chat needs you.',
+          }).show(),
+      });
+    }
     // Reload has to exist. The UI is a remote page, so when the window and the
     // deployed SPA disagree there is otherwise no way back — see app-menu.ts.
     Menu.setApplicationMenu(

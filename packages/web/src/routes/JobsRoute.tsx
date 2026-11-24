@@ -222,6 +222,9 @@ export function JobsRoute(): JSX.Element {
         <div className="route-head-title">
           <NavHistoryControls />
         </div>
+        <Link to="/jobs/new" className="primary-btn pads-new" data-testid="jobs-new">
+          <Plus size={16} aria-hidden /> New job
+        </Link>
         {!isLoading && jobs.length > 0 ? (
           <>
             <input
@@ -245,9 +248,6 @@ export function JobsRoute(): JSX.Element {
             />
           </>
         ) : null}
-        <Link to="/jobs/new" className="primary-btn pads-new" data-testid="jobs-new">
-          <Plus size={16} aria-hidden /> New job
-        </Link>
       </header>
       {isLoading || jobs.length > 0 ? <JobDefaults /> : null}
       {isLoading ? (

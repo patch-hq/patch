@@ -23,6 +23,14 @@ describe('ShortcutCheatSheet', () => {
     expect(screen.getAllByRole('row')).toHaveLength(SHORTCUT_TABLE.length + 1);
   });
 
+  it('carries a Claude Code install troubleshooting section', () => {
+    useUiStore.getState().setCheatSheetOpen(true);
+    render(<ShortcutCheatSheet />);
+    expect(screen.getByTestId('cheat-sheet-troubleshooting').textContent).toContain(
+      'Claude Code won',
+    );
+  });
+
   it('closes on Escape', () => {
     useUiStore.getState().setCheatSheetOpen(true);
     render(<ShortcutCheatSheet />);

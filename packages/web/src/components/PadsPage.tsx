@@ -96,6 +96,14 @@ export function PadsPage(): JSX.Element {
         <div className="route-head-title">
           <NavHistoryControls />
         </div>
+        <button
+          type="button"
+          className="primary-btn pads-new"
+          data-testid="pads-new"
+          onClick={() => openTab({ kind: 'page', page: 'new-pad' })}
+        >
+          <Plus size={16} aria-hidden /> New Pad
+        </button>
         {pads !== null && pads.length > 0 ? (
           <input
             type="search"
@@ -108,14 +116,6 @@ export function PadsPage(): JSX.Element {
             onChange={(e) => setQuery(e.target.value)}
           />
         ) : null}
-        <button
-          type="button"
-          className="primary-btn pads-new"
-          data-testid="pads-new"
-          onClick={() => openTab({ kind: 'page', page: 'new-pad' })}
-        >
-          <Plus size={16} aria-hidden /> New Pad
-        </button>
       </header>
       {pads === null ? null : groups.length === 0 ? (
         query ? (

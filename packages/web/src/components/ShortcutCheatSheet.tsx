@@ -67,6 +67,22 @@ export function ShortcutCheatSheet(): JSX.Element | null {
             ))}
           </tbody>
         </table>
+        <section className="cheat-sheet-trouble" data-testid="cheat-sheet-troubleshooting">
+          <h3>Troubleshooting</h3>
+          <h4>Claude Code won't install</h4>
+          <ul>
+            <li>Use Retry install on the provider card, or restart Patch to try again.</li>
+            <li>The installer needs a network connection that can reach claude.ai.</li>
+            <li>
+              To install by hand, run <code>curl -fsSL https://claude.ai/install.sh | bash</code> in
+              a terminal, then restart Patch.
+            </li>
+            <li>
+              The installer's own error is shown on the card; Patch's update log is at{' '}
+              <code>~/.patch/logs/self-update.log</code>.
+            </li>
+          </ul>
+        </section>
       </div>
     </div>
   );
