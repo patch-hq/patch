@@ -2434,6 +2434,26 @@ describe('Composer', () => {
       return screen.getByTestId('voice-note-btn');
     }
 
+    it('scrolls the input to the bottom as live dictation words arrive', async () => {
+      const rec = makeRec();
+      const mic = renderDictating({ rec, transcribeClip: async () => ({ transcript: 'x' }) });
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(preview.opened()).toBe(1));
+      // jsdom has no layout: give the box a content taller than its view.
+      Object.defineProperty(input(), 'scrollHeight', { configurable: true, value: 900 });
+      let top = 0;
+      Object.defineProperty(input(), 'scrollTop', {
+        configurable: true,
+        get: () => top,
+        set: (v: number) => {
+          top = v;
+        },
+      });
+      preview.emit('a long run of words');
+      await waitFor(() => expect(input().scrollTop).toBe(900));
+    });
+
     it('send while dictating stops the mic and sends the transcript', async () => {
       const rec = makeRec();
       const onSend = vi.fn();
