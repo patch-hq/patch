@@ -13,6 +13,7 @@
 import React from 'react';
 import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { PINCH_ZOOM_JS } from '../lib/pinchZoom';
 import { ExternalLink, X } from 'lucide-react-native';
 import { create } from 'zustand';
 import { space, typography, useTheme } from '../lib/theme';
@@ -164,6 +165,9 @@ function ArtifactBody({
       source={{ uri: shown }}
       originWhitelist={['*']}
       allowFileAccess
+      scalesPageToFit
+      injectedJavaScriptBeforeContentLoaded={PINCH_ZOOM_JS}
+      injectedJavaScript={PINCH_ZOOM_JS}
       startInLoadingState
       renderLoading={() => <Loading />}
       onError={(e) => setLoadError(e.nativeEvent.description)}
