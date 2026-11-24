@@ -28,6 +28,16 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
   const offlineReason = usePresenceStore((s) =>
     hostId === undefined ? undefined : (s.hosts[hostId]?.offlineReason ?? undefined),
   );
+  const offlineAt = usePresenceStore((s) =>
+    hostId === undefined ? null : (s.hosts[hostId]?.offlineAt ?? null),
+  );
+  // Re-render so a busy host turns into "offline" once it has been gone long enough.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (offlineAt === null) return;
+    const t = setInterval(() => setNow(Date.now()), 10_000);
+    return () => clearInterval(t);
+  }, [offlineAt]);
   const updatingTo = usePresenceStore((s) =>
     hostId === undefined ? undefined : s.hostsUpdating[hostId],
   );
@@ -49,7 +59,7 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
           ? `${hostName} is being updated to ${updatingTo}. Messages to this chat are queued and sent when it is back.`
           : hostId === undefined
             ? 'No host is online. Messages are queued and sent when one reconnects. If the host runs on this computer, restart it.'
-            : `${describeHostOffline(hostName, offlineReason)}. Messages to this chat are queued and sent when it reconnects.`}
+            : `${describeHostOffline(hostName, offlineReason, offlineAt === null ? undefined : now - offlineAt)}. Messages to this chat are queued and sent when it reconnects.`}
       </span>
       {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
           overlay (spec/12 § Connection diagnostics screen). The app stays

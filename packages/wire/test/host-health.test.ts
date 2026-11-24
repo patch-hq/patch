@@ -53,5 +53,9 @@ describe('offline wording', () => {
     expect(describeHostOffline('Mac', 'asleep')).toBe('Mac went to sleep');
     expect(describeHostOffline('Mac', 'unresponsive')).toBe('Mac stopped responding');
     expect(describeHostOffline('Mac', undefined)).toBe('Mac is offline');
+    expect(describeHostOffline('Mac', 'busy:load', 5_000)).toBe(
+      'Mac is busy (heavy CPU load), retrying',
+    );
+    expect(describeHostOffline('Mac', 'busy:load', 600_000)).toBe('Mac is offline');
   });
 });
