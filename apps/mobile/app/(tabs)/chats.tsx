@@ -9,6 +9,7 @@ import React from 'react';
 import { withoutContinued } from '../../src/lib/chatThreads';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
+import { useFrozenWhenBlurred } from '../../src/lib/useFrozenWhenBlurred';
 import {
   AlarmClock,
   Archive,
@@ -945,7 +946,7 @@ function SearchResults({ query }: { query: string }): React.ReactElement {
 export default function ChatsScreen(): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
-  const chats = useChatStore((s) => s.chats);
+  const chats = useFrozenWhenBlurred(useChatStore((s) => s.chats));
   // Channels is EXPANDED by default when it has a channel in it (spec/15 §4),
   // and CLOSED by default while it is empty — an open section with nothing in
   // it is just a gap. Hidden, Snoozed and Archived are COLLAPSED by default

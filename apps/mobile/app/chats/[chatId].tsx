@@ -4,6 +4,7 @@ import { isDictatedSend } from '../../src/lib/dictatedSends';
 import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { formatElapsed as formatToolElapsed, turnStartOf } from '../../src/lib/backgroundTasks';
 import {
   ActivityIndicator,
@@ -1088,8 +1089,9 @@ function ChatDetailBody(): React.ReactElement {
   // previous / next buttons. Derived from the store's chat map so it follows
   // the list as it changes; null at an end, or when this chat is outside the
   // live list (archived, snoozed, hidden, a channel).
-  const chatsById = useChatStore((s) => s.chats);
-  const neighbours = React.useMemo(() => swipeNeighbours(chatsById, chatId), [chatsById, chatId]);
+  // Selected as the two ids, not the whole map, so a streamed event that only
+  // moves a preview or a sequence number does not re-render the chat screen.
+  const neighbours = useChatStore(useShallow((s) => swipeNeighbours(s.chats, chatId)));
 
   return (
     <View testID="chat-surface" style={{ flex: 1, backgroundColor: colors.paper }}>
