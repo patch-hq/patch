@@ -13,8 +13,13 @@ import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { sendToHost } from '../routes/settings/hostWrite.js';
 
-export function requestInstall(host: HostPresence, backendId: string): boolean {
-  return sendToHost(host, { type: 'host.backend_install', hostId: host.hostId, backendId });
+export function requestInstall(host: HostPresence, backendId: string, reinstall = false): boolean {
+  return sendToHost(host, {
+    type: 'host.backend_install',
+    hostId: host.hostId,
+    backendId,
+    ...(reinstall ? { reinstall: true } : {}),
+  });
 }
 
 export function useInstallPickedProviders(): void {

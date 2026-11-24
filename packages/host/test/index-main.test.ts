@@ -456,6 +456,7 @@ async function bootMain(
     homeFiles?: Record<string, string>;
     /** Receives the host's log lines instead of stdout. */
     logStream?: NonNullable<MainTestHooks['logStream']>;
+    claudeRetryDelaysMs?: number[];
     /**
      * Served from `fakeServer`'s HTTP port BEFORE `main()` boots, so the
      * host's own on-boot self-update check (spec/02 § Installation) sees it
@@ -567,6 +568,7 @@ async function bootMain(
           return { ok: false, exitCode: 1, output: 'stand-in installer (test)' };
         },
         ...(opts.logStream ? { logStream: opts.logStream } : {}),
+        ...(opts.claudeRetryDelaysMs ? { claudeRetryDelaysMs: opts.claudeRetryDelaysMs } : {}),
       }).catch(reject);
     },
   );
@@ -1740,6 +1742,27 @@ describe('src/index.ts main() — full host boot', () => {
     // It installs once a surface says the user picked Claude.
     boot.fakeServer.send({ type: 'host.backend_install', hostId: 'd1', backendId: 'claude-code' });
     await vi.waitFor(() => expect(claudeInstalls.length - before).toBe(has === undefined ? 1 : 0));
+    await boot.cleanup();
+  });
+
+  it('a failed Claude Code install says so in plain words and tries again by itself', async () => {
+    const { resolveClaudeExecutable } = await import('../src/claudeExecutable.js');
+    if (resolveClaudeExecutable({ home: homedir(), pathEnv: process.env['PATH'] ?? '' })) return;
+    const before = claudeInstalls.length;
+    const boot = await bootMain(
+      { SDK_BACKEND: 'real', CLAUDE_CODE_PATH: undefined },
+      { claudeRetryDelaysMs: [30] },
+    );
+    await boot.fakeServer.waitForAuthed();
+    boot.fakeServer.send({ type: 'host.backend_install', hostId: 'd1', backendId: 'claude-code' });
+    await vi.waitFor(() => expect(claudeInstalls.length - before).toBeGreaterThanOrEqual(3));
+    const hostFrames = boot.fakeServer.received.filter((e) => e.type === 'host.host');
+    const last = hostFrames[hostFrames.length - 1] as unknown as {
+      backends: { id: string; state: string; error?: string }[];
+    };
+    const claude = last.backends.find((b) => b.id === 'claude-code')!;
+    expect(claude.error ?? '').not.toMatch(/curl|stand-in/);
+    expect(claude.error ?? '').toContain('try again automatically');
     await boot.cleanup();
   });
 

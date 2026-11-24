@@ -10,6 +10,7 @@ import { UsageHistory } from './UsageHistory.js';
 import { PROVIDERS } from './providers.js';
 import { SharedAccounts } from './SharedAccounts.js';
 import { AcpAccounts } from './AcpAccounts.js';
+import { ClaudeCodeInstall } from './ClaudeCodeInstall.js';
 
 export function UsagePage(): JSX.Element {
   return (
@@ -26,6 +27,7 @@ export function UsagePage(): JSX.Element {
           after={<p.AddAccount />}
         >
           <SharedAccounts provider={p} />
+          {p.id === 'claude-code' ? <ClaudeCodeInstall /> : null}
         </Group>
       ))}
       <AcpAccounts />

@@ -177,6 +177,7 @@ import {
   createRealSdkBackend,
   forgetClaudeExecutable,
   setClaudeInstallGate,
+  setClaudeEnsure,
   type SdkBackend,
 } from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
@@ -440,6 +441,8 @@ export interface MainTestHooks {
    * downloads and installs Claude Code onto the machine running the tests.
    */
   installClaudeCode?: (home: string) => Promise<import('./claudeInstall.js').ClaudeInstallResult>;
+  /** Shortens the wait between automatic Claude Code install retries. */
+  claudeRetryDelaysMs?: number[];
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
 }
@@ -3895,7 +3898,7 @@ async function startHost(
             logger.error({ err }, 'codex-install: failed');
           });
         } else if (event.backendId === CLAUDE_BACKEND_ID) {
-          await installClaudeOnRequest();
+          await installClaudeOnRequest(event.reinstall === true);
         } else {
           refuseUnknownBackend(event.type, event.backendId, sender);
         }
@@ -6248,21 +6251,39 @@ async function startHost(
   // Installed only when a surface asks (`host.backend_install`), which it does
   // once the user has picked Claude: a host never installs a provider nobody
   // chose. Without a request an absent CLI stays absent and is reported so.
-  const installClaudeOnRequest = async (): Promise<void> => {
+  const installClaudeOnRequest = async (reinstall = false): Promise<void> => {
+    if (reinstall && config.sdkBackend !== 'mock') {
+      await refreshClaudeCli(true, true);
+      return;
+    }
     if (resolveClaude() !== undefined) {
       void refreshClaudeCli();
       return;
     }
     await refreshClaudeCli(true);
   };
-  const refreshClaudeCli = async (install = false): Promise<void> => {
+  // A failed install tries again by itself, on a widening delay, until it works:
+  // the usual cause is a network that was down for a minute. A surface's Retry,
+  // and a Claude turn that finds no Claude Code, each try at once as well.
+  const CLAUDE_RETRY_DELAYS_MS = testHooks?.claudeRetryDelaysMs ?? [
+    30_000, 60_000, 120_000, 300_000, 600_000,
+  ];
+  let claudeRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let claudeAttempts = 0;
+  const refreshClaudeCli = async (install = false, force = false): Promise<void> => {
     const executable = resolveClaude();
-    if (executable === undefined) {
+    if (executable === undefined || force) {
       if (!install || config.sdkBackend === 'mock' || claudeProvision.state === 'installing')
         return;
+      if (claudeRetryTimer) clearTimeout(claudeRetryTimer);
+      claudeRetryTimer = undefined;
+      claudeAttempts += 1;
       claudeProvision = { state: 'installing' };
       emit(describeHost());
-      logger.info('claude-install: this host has no Claude Code; installing it');
+      logger.info(
+        { attempt: claudeAttempts },
+        'claude-install: this host has no Claude Code; installing it',
+      );
       const installing = testHooks?.installClaudeCode
         ? testHooks.installClaudeCode(homedir())
         : installClaudeCode({ home: homedir() });
@@ -6275,15 +6296,31 @@ async function startHost(
       const result = await installing.finally(() => setClaudeInstallGate(undefined));
       const installed = result.ok ? resolveClaude() : undefined;
       if (installed === undefined) {
-        const error = result.ok
-          ? `The Claude Code installer finished but no claude executable appeared (looked in ~/.local/bin and PATH)`
+        const cause = result.ok
+          ? "Claude Code couldn't be installed on this computer."
           : installFailure(result);
-        claudeProvision = { state: 'failed', error };
-        logger.error({ exitCode: result.exitCode, output: result.output.slice(-4000) }, error);
+        const delay =
+          CLAUDE_RETRY_DELAYS_MS[Math.min(claudeAttempts - 1, CLAUDE_RETRY_DELAYS_MS.length - 1)]!;
+        claudeProvision = {
+          state: 'failed',
+          error: `${cause} Patch will try again automatically.`,
+        };
+        // The installer's own words belong here, not on a surface.
+        logger.error(
+          { exitCode: result.exitCode, output: result.output.slice(-4000), retryInMs: delay },
+          'claude-install: failed',
+        );
+        claudeRetryTimer = setTimeout(() => {
+          void refreshClaudeCli(true).catch((err: unknown) => {
+            logger.warn({ err }, 'claude-install: retry failed');
+          });
+        }, delay);
+        claudeRetryTimer.unref?.();
       } else {
         // The SDK path is resolved once per process; it resolved to nothing.
         forgetClaudeExecutable();
         claudeProvision = { state: 'present' };
+        claudeAttempts = 0;
         logger.info({ executable: installed }, 'claude-install: installed');
       }
       emit(describeHost());
@@ -6296,6 +6333,16 @@ async function startHost(
     }
     await updateClaudeCli({ executable, logger });
   };
+  // Before a Claude turn: install now if it is missing, and say plainly if it
+  // still is. Only a host running Claude turns for real has anything to install.
+  setClaudeEnsure(async () => {
+    if (config.sdkBackend === 'mock' || resolveClaude() !== undefined) return undefined;
+    await refreshClaudeCli(true);
+    if (resolveClaude() !== undefined) return undefined;
+    return claudeProvision.state === 'failed' && claudeProvision.error
+      ? claudeProvision.error
+      : "Claude Code couldn't be installed on this computer.";
+  });
   void refreshClaudeCli().catch((err: unknown) => {
     logger.warn({ err }, 'claude-cli-update: initial update failed');
   });

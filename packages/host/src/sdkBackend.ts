@@ -1578,6 +1578,15 @@ export function forgetClaudeExecutable(): void {
  * the gate too: the turn then runs and reports the SDK's own error.
  */
 let claudeInstallGate: Promise<void> | undefined;
+/**
+ * Run before every Claude turn: makes sure Claude Code is on this host, and
+ * returns what to tell the user when it is not (a plain sentence), or
+ * `undefined` when it is there. Set by the host, which owns the installer.
+ */
+let claudeEnsure: (() => Promise<string | undefined>) | undefined;
+export function setClaudeEnsure(fn: (() => Promise<string | undefined>) | undefined): void {
+  claudeEnsure = fn;
+}
 export function setClaudeInstallGate(gate: Promise<void> | undefined): void {
   claudeInstallGate = gate;
 }
@@ -2747,6 +2756,10 @@ async function* realRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   if (claudeInstallGate) {
     await claudeInstallGate;
     forgetClaudeExecutable();
+  }
+  if (claudeEnsure) {
+    const problem = await claudeEnsure();
+    if (problem !== undefined) throw new Error(problem);
   }
   yield* oneShotRun(opts);
 }

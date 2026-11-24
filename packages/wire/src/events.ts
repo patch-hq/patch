@@ -6043,6 +6043,8 @@ export const HostBackendInstallEvent = z
     type: z.literal('host.backend_install'),
     ...hostIdField,
     backendId: z.string().min(1),
+    /** Run the installer even though the CLI is already there (Settings → Reinstall). */
+    reinstall: z.boolean().optional(),
   })
   .strict();
 export type HostBackendInstallEvent = z.infer<typeof HostBackendInstallEvent>;

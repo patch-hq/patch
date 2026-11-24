@@ -1,8 +1,9 @@
 // Live first-run progress, so the guide ticks off what the user has really done.
-import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { CLAUDE_BACKEND_ID, SPECIAL_THREAD_IDS, backendHasConnectedAccount } from '@patch/wire';
 import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useChatStore, type ChatEventEntry } from '../stores/chatStore.js';
 import { useAllAccountsLimit } from './accountLimits.js';
+import { useClaudeCodeMissing } from './claudeCodeStatus.js';
 import type { GuideProgress } from './guide.js';
 
 const SPECIAL = new Set<string>(Object.values(SPECIAL_THREAD_IDS));
@@ -22,5 +23,8 @@ export function useGuideProgress(): GuideProgress {
   const connected = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
   const hasChat = useChatStore((s) => hasFirstReply(s.timelines));
   const limited = useAllAccountsLimit();
-  return { connected, limited, hasChat };
+  const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  const claudeCodeMissing =
+    useClaudeCodeMissing() && backendHasConnectedAccount(secrets, CLAUDE_BACKEND_ID);
+  return { connected, limited, hasChat, claudeCodeMissing };
 }
