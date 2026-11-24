@@ -22,6 +22,8 @@ async function seedUsage(page: Page): Promise<void> {
       backendId: 'claude-code',
       connected: true,
       accountEmail: 'dev@example.com',
+      // The new-chat crumb reads the account the chat will use: the host's active one.
+      activeAccountId: 'a1',
       usage: {
         session: { status: 'allowed', utilization: 0.42, resetsAt: Date.now() + 3_600_000 },
       },
