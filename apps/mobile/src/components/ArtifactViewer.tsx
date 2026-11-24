@@ -11,7 +11,17 @@
 // both triggers share one modal instance).
 
 import React from 'react';
-import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { QuickMessageBox } from './QuickMessageBox';
 import { WebView } from 'react-native-webview';
 import { PINCH_ZOOM_JS } from '../lib/pinchZoom';
 import { ExternalLink, X } from 'lucide-react-native';
@@ -68,7 +78,8 @@ export function __resetArtifactViewer(): void {
   useArtifactViewerStore.setState({ artifact: null, rev: 0 });
 }
 
-export function ArtifactViewerHost(): React.ReactElement | null {
+/** `chatId` is the chat the viewer was opened from: messages typed under the page go there. */
+export function ArtifactViewerHost({ chatId }: { chatId: string }): React.ReactElement | null {
   const colors = useTheme();
   const artifact = useArtifactViewerStore((s) => s.artifact);
   const close = useArtifactViewerStore((s) => s.close);
@@ -78,7 +89,8 @@ export function ArtifactViewerHost(): React.ReactElement | null {
 
   return (
     <Modal testID="artifact-viewer" visible animationType="slide" onRequestClose={close}>
-      <View style={{ flex: 1, backgroundColor: colors.paper }}>
+      {/* A Modal is its own window, so the keyboard does not resize it: pad past it. */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: colors.paper }}>
         <View
           style={{
             flexDirection: 'row',
@@ -120,7 +132,8 @@ export function ArtifactViewerHost(): React.ReactElement | null {
           </Pressable>
         </View>
         <ArtifactBody key={`${artifact.url}#${rev}`} shown={shown} error={error} rev={rev} />
-      </View>
+        <QuickMessageBox chatId={chatId} />
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

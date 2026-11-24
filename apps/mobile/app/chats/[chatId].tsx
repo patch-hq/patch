@@ -1530,7 +1530,7 @@ function ChatDetailBody(): React.ReactElement {
       </KeyboardAvoidingView>
       {managerTab === 'chats' ? <ManagerChatsList /> : null}
       <MessageActionsHost />
-      <ArtifactViewerHost />
+      <ArtifactViewerHost chatId={chatId} />
       <Modal
         testID="chat-title-modal"
         visible={titleModalOpen}
