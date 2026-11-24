@@ -156,7 +156,7 @@ test.describe('usage popover', () => {
     );
     await ring.click();
     await expect(page.getByTestId('usage-popover')).toBeVisible();
-    await expect(page.getByTestId('usage-pop-context')).toHaveCount(0);
+    await expect(page.getByTestId('usage-pop-context')).toContainText('Not measured yet');
   });
 
   // spec/14 § Chat panel header — the header's usage bar is gone; the

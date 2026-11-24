@@ -633,12 +633,12 @@ test.describe('new chat header', () => {
     await expect(crumb).toHaveAttribute('aria-label', '5-hour 42% used');
     await expect(crumb.locator('.chat-usage-bar i')).toHaveAttribute('style', /width: 42%/);
 
-    // Opens the same popover a live chat's crumb does, with no context section
-    // (there is no chat, so nothing has been measured).
+    // Opens the same popover a live chat's crumb does; its context section says
+    // nothing has been measured (there is no chat yet).
     await crumb.click();
     const pop = page.getByTestId('usage-popover');
     await expect(pop).toBeVisible();
-    await expect(page.getByTestId('usage-pop-context')).toHaveCount(0);
+    await expect(page.getByTestId('usage-pop-context')).toContainText('Not measured yet');
     await expect(page.getByTestId('usage-pop-account')).toContainText('42%');
   });
 
