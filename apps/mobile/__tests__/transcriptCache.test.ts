@@ -130,3 +130,36 @@ describe('transcriptCache', () => {
     expect(store().getString('patch.transcript.synced.v1')).toBeUndefined();
   });
 });
+
+describe('heldCursor cost', () => {
+  it('reads a stored cursor without parsing the transcript', () => {
+    save('fast', 1, 2, 9);
+    const parse = vi.spyOn(JSON, 'parse');
+    expect(heldCursor('fast')).toBe(9);
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+  });
+
+  it('derives the cursor once for a blob written before cursors were kept', async () => {
+    const { store } = await import('../src/lib/credential');
+    store().set(
+      'patch.transcript.v1.legacy',
+      JSON.stringify({
+        branchId: null,
+        events: [ev('legacy', 3), ev('legacy', 7)],
+        resolutions: {},
+      }),
+    );
+    expect(heldCursor('legacy')).toBe(7);
+    const parse = vi.spyOn(JSON, 'parse');
+    expect(heldCursor('legacy')).toBe(7);
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+  });
+
+  it('forgets the cursor with the transcript', () => {
+    save('gone', 4);
+    pruneTranscripts(new Set());
+    expect(heldCursor('gone')).toBe(-1);
+  });
+});
