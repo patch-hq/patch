@@ -248,11 +248,16 @@
   // sideways rather than letting the design reflow into a different layout.
   // When the stage is narrower than that (a phone), the whole screen is scaled
   // down to fit instead, as a picture viewer would; pinching the page zooms in.
+  var zoom = 1, zoomScreen = null;
   function applyWidth() {
     var w = screen && screen.width;
     var fixed = w && !wrap.classList.contains('phone');
     var avail = $('stage').clientWidth;
-    scale = fixed && avail > 0 && avail < w ? avail / w : 1;
+    var fit = fixed && avail > 0 && avail < w ? avail / w : 1;
+    if (screen && screen.id !== zoomScreen) { zoom = 1; zoomScreen = screen.id; }
+    // Pinching zooms in from the fitted size up to the design's real size.
+    zoom = Math.min(Math.max(zoom, 1), 1 / fit);
+    scale = fit * zoom;
     if (scale < 1) {
       wrap.style.width = w + 'px';
       wrap.style.minWidth = '';
@@ -555,7 +560,35 @@
     return one ? { x: +one[1], y: 0 } : { x: 0, y: 0 };
   }
 
+  // Two fingers on a scaled-down screen zoom and pan it; one finger still edits.
+  var touches = {}, pinch = null;
+  function touchList() { return Object.keys(touches).map(function (k) { return touches[k]; }); }
+  function pinchGeometry() {
+    var t = touchList();
+    return { d: Math.hypot(t[0].x - t[1].x, t[0].y - t[1].y) || 1, x: (t[0].x + t[1].x) / 2, y: (t[0].y + t[1].y) / 2 };
+  }
+  function startPinch() {
+    var g = pinchGeometry(), st = $('stage').getBoundingClientRect(), sc = scrollerFor(null);
+    pinch = { d: g.d, zoom: zoom, x: g.x, y: g.y, cx: ($('stage').scrollLeft + g.x - st.left) / scale, cy: sc.scrollTop + (g.y - st.top) / scale };
+  }
+  function movePinch() {
+    var g = pinchGeometry(), st = $('stage').getBoundingClientRect(), sc = scrollerFor(null);
+    zoom = pinch.zoom * g.d / pinch.d;
+    applyWidth(); fitLayer();
+    $('stage').scrollLeft = pinch.cx * scale - (g.x - st.left);
+    sc.scrollTop = pinch.cy - (g.y - st.top) / scale;
+    draw();
+  }
   layer.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch') {
+      touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+      if (touchList().length === 2 && !(drag && (drag.stroke || drag.note || drag.resize))) {
+        drag = null; marquee.style.display = 'none';
+        startPinch();
+        return;
+      }
+    }
+    if (pinch) return;
     if (tool === 'interact' || e.button > 0) return;
     lastPointer = e.pointerType;
     if (e.target.closest('.note, .handle, .del')) return;
@@ -575,6 +608,8 @@
     layer.setPointerCapture(e.pointerId);
   });
   layer.addEventListener('pointermove', function (e) {
+    if (touches[e.pointerId]) touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (pinch) { if (touchList().length === 2) movePinch(); return; }
     if (tool === 'interact' || (drag && drag.stroke)) return;
     if (!drag) {
       if (e.pointerType === 'mouse' && tool === 'select') { hoverEl = pick(local(e)); draw(); }
@@ -594,6 +629,7 @@
       draw();
     } else if (drag.mode === 'pan') {
       drag.scroller.scrollBy((drag.lx - e.clientX) / scale, (drag.ly - e.clientY) / scale);
+      $('stage').scrollLeft += drag.lx - e.clientX;
       drag.lx = e.clientX; drag.ly = e.clientY;
     }
   });
@@ -636,7 +672,12 @@
     while (common && common !== d.body && !top.every(function (n) { return common.contains(n); })) common = common.parentElement;
     return common && common !== d.body ? common : null;
   }
-  layer.addEventListener('pointerup', endPointer);
+  function releaseTouch(e) {
+    delete touches[e.pointerId];
+    if (pinch && touchList().length < 2) pinch = null;
+  }
+  layer.addEventListener('pointerup', function (e) { var was = pinch; releaseTouch(e); if (!was) endPointer(e); });
+  layer.addEventListener('pointercancel', function (e) { releaseTouch(e); });
   layer.addEventListener('pointercancel', function () { if (drag && drag.stroke) return; drag = null; marquee.style.display = 'none'; draw(); });
   layer.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse' && !drag) { hoverEl = null; draw(); } });
   layer.addEventListener('wheel', function (e) {

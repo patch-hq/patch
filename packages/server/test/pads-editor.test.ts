@@ -243,6 +243,48 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('phone: pinching a scaled-down desktop screen zooms it toward real size and back', async () => {
+    const manifest = { screens: [{ id: 'wide', name: 'Wide', path: 'index.html', width: 1440 }] };
+    const frameUrl = await newPad([
+      { path: 'pad.json', base64: Buffer.from(JSON.stringify(manifest)).toString('base64') },
+    ]);
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#t').waitFor();
+    const fit = 390 / 1440;
+    const fire = (type: string, id: number, x: number, y: number) =>
+      page.evaluate(
+        ([t, i, px, py]) =>
+          document.getElementById('layer')!.dispatchEvent(
+            new PointerEvent(t as string, {
+              pointerId: i as number,
+              pointerType: 'touch',
+              clientX: px as number,
+              clientY: py as number,
+              bubbles: true,
+            }),
+          ),
+        [type, id, x, y],
+      );
+    await fire('pointerdown', 1, 150, 300);
+    await fire('pointerdown', 2, 250, 300);
+    await fire('pointermove', 2, 350, 300);
+    await fire('pointermove', 1, 50, 300);
+    const zoomed = Number(await page.locator('#wrap').getAttribute('data-scale'));
+    expect(zoomed).toBeGreaterThan(fit * 2);
+    expect(zoomed).toBeLessThanOrEqual(1);
+    expect(
+      await page.evaluate(() => document.getElementById('stage')!.scrollWidth > innerWidth),
+    ).toBe(true);
+    await fire('pointermove', 1, 190, 300);
+    await fire('pointermove', 2, 210, 300);
+    expect(Number(await page.locator('#wrap').getAttribute('data-scale'))).toBe(fit);
+    await fire('pointerup', 1, 190, 300);
+    await fire('pointerup', 2, 210, 300);
+    await ctx.close();
+  });
+
   it('a tall page scrolls by the wheel delta and its scrollbar is left uncovered by the edit layer', async () => {
     const frameUrl = await newPad();
     // Playwright hides scrollbars by default; a real browser shows one.
@@ -251,9 +293,12 @@ describe('pad editor in a browser', () => {
     const page = await ctx.newPage();
     await page.goto(frameUrl);
     await page.frameLocator('#frame').locator('#t').waitFor();
-    await page.frameLocator('#frame').locator('body').evaluate((b) => {
-      b.style.height = '6000px';
-    });
+    await page
+      .frameLocator('#frame')
+      .locator('body')
+      .evaluate((b) => {
+        b.style.height = '6000px';
+      });
     await expect
       .poll(() =>
         page.evaluate(() => {
@@ -267,7 +312,9 @@ describe('pad editor in a browser', () => {
     await expect
       .poll(() =>
         page.evaluate(
-          () => (document.getElementById('frame') as HTMLIFrameElement).contentDocument!.documentElement.scrollTop,
+          () =>
+            (document.getElementById('frame') as HTMLIFrameElement).contentDocument!.documentElement
+              .scrollTop,
         ),
       )
       .toBe(300);
