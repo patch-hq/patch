@@ -422,6 +422,43 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   }, 30_000);
 
+  it('a note box has a mic: it asks the host page to record, keeps focus, and drops the words in', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#p').waitFor();
+    // Standalone, the editor is its own parent, so it hears what it asks for.
+    await page.evaluate(() => {
+      const got: string[] = [];
+      window.addEventListener('message', (e) => {
+        if (e.data?.type === 'pad:dictate') got.push(e.data.action);
+      });
+      (window as unknown as { __got: string[] }).__got = got;
+    });
+    await page.keyboard.press('n');
+    const pbox = (await design.locator('#p').boundingBox())!;
+    await page.mouse.click(pbox.x + 40, pbox.y + 5);
+    await page.keyboard.type('Bigger');
+    await page.locator('.note.draft .mic').click();
+    await expect.poll(() => page.locator('.note.draft .mic.rec').count()).toBe(1);
+    // The box is still open and focused: the click did not blur (and so end) the note.
+    expect(await page.locator('.note.draft textarea').count()).toBe(1);
+    await page.evaluate(() =>
+      window.postMessage({ type: 'pad:dictation', status: 'done', text: 'and bolder' }, '*'),
+    );
+    await expect
+      .poll(() => page.locator('.note.draft textarea').inputValue())
+      .toBe('Bigger and bolder');
+    expect(await page.evaluate(() => (window as unknown as { __got: string[] }).__got)).toEqual([
+      'start',
+    ]);
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await pending(frameUrl)).map((c) => c.kind)).toEqual(['note']);
+    await ctx.close();
+  });
+
   it('View mode: a note over the design does not block clicks on what is underneath', async () => {
     const frameUrl = await newPad();
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });

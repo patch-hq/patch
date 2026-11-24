@@ -18,6 +18,7 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { failed } from '../lib/errorCopy.js';
+import { startRecording, type VoiceRecording } from '../lib/voiceRecorder.js';
 import { InlineEditText } from './InlineEditText.js';
 import { PadBadge } from './PadsPage.js';
 import { usePadsStore } from '../stores/padsStore.js';
@@ -50,6 +51,54 @@ export function PadPane({ padId }: { padId: string }): JSX.Element {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [padId, qc]);
+
+  // Dictation for the note boxes in the frame (public/editor.js addMic). The
+  // frame asks; this page records and transcribes, as the composer's mic does,
+  // and answers with the words — or the error, never a silent nothing.
+  useEffect(() => {
+    let rec: VoiceRecording | null = null;
+    let starting = false;
+    const reply = (m: { status: 'done'; text: string } | { status: 'error'; message: string }) =>
+      frameRef.current?.contentWindow?.postMessage({ type: 'pad:dictation', ...m }, '*');
+    const fail = (e: unknown) => {
+      const message = (e as Error).message;
+      pushError(failed('dictate'), undefined, message);
+      reply({ status: 'error', message });
+    };
+    function onMessage(e: MessageEvent): void {
+      if (e.source !== frameRef.current?.contentWindow) return;
+      const d = e.data as { type?: string; action?: string };
+      if (d?.type !== 'pad:dictate') return;
+      if (d.action === 'start') {
+        if (rec || starting) return;
+        starting = true;
+        startRecording()
+          .then((r) => {
+            rec = r;
+          })
+          .catch(fail)
+          .finally(() => {
+            starting = false;
+          });
+      } else if (d.action === 'stop') {
+        const r = rec;
+        rec = null;
+        if (!r) return;
+        r.stop()
+          .then((clip) => api.voiceTranscribe(clip))
+          .then((res) => reply({ status: 'done', text: res.transcript.trim() }))
+          .catch(fail);
+      } else if (d.action === 'cancel') {
+        rec?.cancel();
+        rec = null;
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      rec?.cancel();
+    };
+  }, [pushError]);
 
   const [sharing, setSharing] = useState(false);
   const share = useMutation({

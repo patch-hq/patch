@@ -14,6 +14,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { PadsPage } from '../components/PadsPage.js';
 import { PadCard, padIdOfArtifact } from '../components/PadCard.js';
 import { PadPane } from '../components/PadPane.js';
+import * as recorder from '../lib/voiceRecorder.js';
 import { NewPadPage } from '../components/NewPadPage.js';
 import { openPadBesideChat } from '../lib/openPad.js';
 import { openArtifact } from '../lib/openArtifact.js';
@@ -185,6 +186,53 @@ describe('PadPane', () => {
     expect(frame).toHaveAttribute('src', '/api/padx/care/sig/');
     expect(screen.getByText('Dog Log')).toBeInTheDocument();
     expect(screen.getByText('Working')).toBeInTheDocument();
+  });
+  it('dictates for the frame: records on start, transcribes on stop, answers with the words', async () => {
+    vi.spyOn(api, 'getPad').mockResolvedValue(pad());
+    const clip = new Blob(['x']);
+    const stop = vi.fn().mockResolvedValue(clip);
+    vi.spyOn(recorder, 'startRecording').mockResolvedValue({
+      stop,
+      cancel: vi.fn(),
+      onLevel: vi.fn(),
+      onPcm: vi.fn(),
+    });
+    const tx = vi.spyOn(api, 'voiceTranscribe').mockResolvedValue({ ok: true, transcript: ' make it bigger ' });
+    wrap(<PadPane padId="care" />);
+    const frame = (await screen.findByTestId('pad-frame')) as HTMLIFrameElement;
+    const win = frame.contentWindow!;
+    const sent = vi.spyOn(win, 'postMessage');
+    const say = (action: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', { data: { type: 'pad:dictate', action }, source: win }),
+      );
+    say('start');
+    await waitFor(() => expect(recorder.startRecording).toHaveBeenCalled());
+    say('stop');
+    await waitFor(() =>
+      expect(sent).toHaveBeenCalledWith(
+        { type: 'pad:dictation', status: 'done', text: 'make it bigger' },
+        '*',
+      ),
+    );
+    expect(tx).toHaveBeenCalledWith(clip);
+  });
+  it('tells the frame when dictation fails, instead of leaving the mic spinning', async () => {
+    vi.spyOn(api, 'getPad').mockResolvedValue(pad());
+    vi.spyOn(recorder, 'startRecording').mockRejectedValue(new Error('mic denied'));
+    wrap(<PadPane padId="care" />);
+    const frame = (await screen.findByTestId('pad-frame')) as HTMLIFrameElement;
+    const win = frame.contentWindow!;
+    const sent = vi.spyOn(win, 'postMessage');
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'pad:dictate', action: 'start' }, source: win }),
+    );
+    await waitFor(() =>
+      expect(sent).toHaveBeenCalledWith(
+        { type: 'pad:dictation', status: 'error', message: 'mic denied' },
+        '*',
+      ),
+    );
   });
   it('says why when the pad’s screens cannot be read, instead of a blank frame', async () => {
     vi.spyOn(api, 'getPad').mockResolvedValue(pad({ screensError: 'pad.json is not valid JSON' }));
