@@ -23,17 +23,26 @@ export interface GuideProgress {
   /** Set when every connected account is out of usage, with when that ends. */
   limited?: { until: number | null } | null;
   hasChat: boolean;
+  /** Signed in, but no online host has Claude Code to run a chat. */
+  claudeCodeMissing?: boolean;
 }
 
 export function isGuideItemDone(id: string, progress: GuideProgress): boolean {
   // Connected but out of usage is not ready: the step stays open.
-  if (id === 'connect') return progress.connected && !progress.limited;
+  if (id === 'connect')
+    return progress.connected && !progress.limited && !progress.claudeCodeMissing;
   if (id === 'chat') return progress.hasChat;
   return false;
 }
 
 /** What the connect step says when it is done, honest about a spent account. */
 export function connectDoneText(progress: GuideProgress): { title: string; line: string } {
+  if (progress.claudeCodeMissing && !progress.limited) {
+    return {
+      title: 'AI connected, but Claude Code is not ready',
+      line: 'Patch is setting up Claude Code on this computer and will keep trying. Check Settings → AI accounts.',
+    };
+  }
   if (progress.limited) {
     const until =
       progress.limited.until === null ? '' : ` until ${formatReset(progress.limited.until)}`;
@@ -50,7 +59,11 @@ export function guideItemText(
   item: GuideItem,
   progress: GuideProgress,
 ): { title: string; line: string } {
-  if (item.id === 'connect' && progress.connected && progress.limited) {
+  if (
+    item.id === 'connect' &&
+    progress.connected &&
+    (progress.limited || progress.claudeCodeMissing)
+  ) {
     return connectDoneText(progress);
   }
   return item;

@@ -77,8 +77,24 @@ export function installClaudeCode(opts: ClaudeInstallOptions): Promise<ClaudeIns
   });
 }
 
-/** The last lines of an installer's output, for a one-line error on a surface. */
-export function installFailure(result: ClaudeInstallResult, lines = 6): string {
-  const tail = result.output.trim().split('\n').slice(-lines).join('\n').trim();
-  return `Installing Claude Code failed (${result.exitCode ?? 'did not run'})${tail ? `: ${tail}` : ''}`;
+/**
+ * What a person is told when the install fails. The installer's own output
+ * (curl codes, shell errors) goes to the host log, never to a surface.
+ * A download that could not start or finish says so and says what to check; any
+ * other failure says it plainly without guessing at a cause.
+ */
+export function installFailure(result: ClaudeInstallResult): string {
+  const network =
+    result.exitCode === 6 ||
+    result.exitCode === 7 ||
+    result.exitCode === 28 ||
+    result.exitCode === 35 ||
+    result.exitCode === 52 ||
+    result.exitCode === 56 ||
+    /could not resolve host|failed to connect|timed out|connection (reset|refused)|ssl connect/i.test(
+      result.output,
+    );
+  return network
+    ? "Couldn't download Claude Code. Check your internet connection."
+    : "Claude Code couldn't be installed on this computer.";
 }

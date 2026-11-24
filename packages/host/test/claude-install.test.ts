@@ -39,7 +39,7 @@ describe('installClaudeCode', () => {
     expect(calls[0]!.env['HOME']).toBe('/home/x');
   });
 
-  it('reports a failed install with the installer’s own last lines', async () => {
+  it('says a failed download in plain words, with no curl in it', async () => {
     const { impl } = fakeSpawn((c) => {
       c.stderr.write('curl: (6) Could not resolve host: claude.ai\n');
       c.emit('close', 6);
@@ -47,15 +47,16 @@ describe('installClaudeCode', () => {
     const r = await installClaudeCode({ home: '/h', spawnImpl: impl });
     expect(r.ok).toBe(false);
     expect(installFailure(r)).toBe(
-      'Installing Claude Code failed (6): curl: (6) Could not resolve host: claude.ai',
+      "Couldn't download Claude Code. Check your internet connection.",
     );
+    expect(installFailure(r)).not.toMatch(/curl|\(6\)/);
   });
 
   it('says so when the installer cannot start at all', async () => {
     const { impl } = fakeSpawn((c) => c.emit('error', new Error('spawn /bin/sh ENOENT')));
     const r = await installClaudeCode({ home: '/h', spawnImpl: impl });
     expect(r).toMatchObject({ ok: false, exitCode: null });
-    expect(installFailure(r)).toContain('did not run');
+    expect(installFailure(r)).toBe("Claude Code couldn't be installed on this computer.");
   });
 });
 
