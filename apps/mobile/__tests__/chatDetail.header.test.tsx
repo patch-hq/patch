@@ -28,7 +28,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { __pressBack } from './stubs/react-native';
 import { __resetRouterMock, __setLocalSearchParams, routerMock } from './stubs/expo-router';
 
-const apiMocks = {
+const apiMocks = vi.hoisted(() => ({
   getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
   deleteChat: vi.fn(async () => ({ ok: true as const })),
   pinChat: vi.fn(async () => undefined),
@@ -42,7 +42,7 @@ const apiMocks = {
     status: 'pending' as const,
   })),
   markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
-};
+}));
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
 const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };

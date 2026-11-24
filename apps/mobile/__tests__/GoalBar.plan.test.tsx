@@ -8,7 +8,7 @@ import { renderRN, findHost, queryHost, byTestId, hasText, actSync } from './tes
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 
-const apiMocks = { setGoal: vi.fn(async (..._a: unknown[]) => undefined) };
+const apiMocks = vi.hoisted(() => ({ setGoal: vi.fn(async (..._a: unknown[]) => undefined) }));
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
 const { GoalBar } = await import('../src/components/chatBars/GoalBar');

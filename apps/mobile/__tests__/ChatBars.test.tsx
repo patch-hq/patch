@@ -23,7 +23,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { routerMock } from './stubs/expo-router';
 
-const apiMocks = {
+const apiMocks = vi.hoisted(() => ({
   setGoal: vi.fn(async () => undefined),
   setReminder: vi.fn(async () => undefined),
   setTodos: vi.fn(async () => undefined),
@@ -31,7 +31,7 @@ const apiMocks = {
   hideChat: vi.fn(async (): Promise<unknown> => undefined),
   watchList: vi.fn(async () => ({ tasks: [] })),
   getChatArtifacts: vi.fn(async () => ({ artifacts: [] })),
-};
+}));
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
 const { ChatBars } = await import('../src/components/ChatBars');
