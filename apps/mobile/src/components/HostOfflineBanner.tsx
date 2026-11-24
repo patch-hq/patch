@@ -3,7 +3,7 @@
 // states). Distinct from the WS `reconnecting` banner: the server can be
 // reachable while the host is down. Taps through to Settings → Hosts.
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { describeHostOffline } from '@patch/wire';
@@ -16,6 +16,11 @@ import { radii, space, textMin, typography, useTheme } from '../lib/theme';
 export function HostOfflineBanner(): React.ReactElement | null {
   const colors = useTheme();
   const router = useRouter();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10_000);
+    return () => clearInterval(t);
+  }, []);
   const daemon = usePresenceStore((s) => s.daemon);
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
   // Why each host dropped off, where the server could tell from its last heartbeat.
@@ -23,7 +28,11 @@ export function HostOfflineBanner(): React.ReactElement | null {
     Object.values(s.hosts)
       .filter((h) => !h.online && h.offlineReason)
       .map((h) =>
-        describeHostOffline((h.host?.hostName ?? h.hostId).trim(), h.offlineReason ?? undefined),
+        describeHostOffline(
+          (h.host?.hostName ?? h.hostId).trim(),
+          h.offlineReason ?? undefined,
+          h.offlineAt == null ? undefined : now - h.offlineAt,
+        ),
       )
       .join('. '),
   );

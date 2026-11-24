@@ -59,6 +59,13 @@ describe('HostHealthTracker', () => {
       expect(tracker.offlineReason('h1')).toBe('unresponsive');
     });
 
+    it('says busy when its last report showed it struggling', () => {
+      const { tracker } = setup();
+      tracker.observe(report({ load1: 40, cpuCount: 4 }));
+      tracker.observe({ type: 'host.offline', hostId: 'h1' });
+      expect(tracker.offlineReason('h1')).toBe('busy:load');
+    });
+
     it('has no reason for a host that never reported', () => {
       const { tracker } = setup();
       tracker.observe({ type: 'host.offline', hostId: 'h2' });

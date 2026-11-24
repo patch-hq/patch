@@ -54,9 +54,38 @@ export function assessHostHealth(
   return { reasons, critical };
 }
 
-/** Why a host dropped off, in a sentence fragment: "Mac went to sleep". */
-export function describeHostOffline(hostName: string, reason: string | undefined): string {
+/** How long a host that looked strained when it dropped is called busy before it reads as offline. */
+export const HOST_BUSY_WINDOW_MS = 120_000;
+
+const BUSY_PREFIX = 'busy:';
+const BUSY_WHY: Record<HostReason, string> = {
+  memory: 'low memory',
+  load: 'heavy CPU load',
+  lag: 'a stalled process',
+};
+
+/** The offline reason for a host whose last report showed it struggling: `busy:load`. */
+export function busyOfflineReason(reasons: HostReason[]): string | undefined {
+  const first = reasons[0];
+  return first === undefined ? undefined : `${BUSY_PREFIX}${first}`;
+}
+
+/**
+ * Why a host dropped off, in a sentence fragment: "Mac went to sleep". A host that was
+ * struggling when it went quiet reads as busy until it has been gone for HOST_BUSY_WINDOW_MS.
+ */
+export function describeHostOffline(
+  hostName: string,
+  reason: string | undefined,
+  offlineForMs?: number,
+): string {
   if (reason === 'asleep') return `${hostName} went to sleep`;
+  if (reason?.startsWith(BUSY_PREFIX)) {
+    const why = BUSY_WHY[reason.slice(BUSY_PREFIX.length) as HostReason];
+    const recent = offlineForMs === undefined || offlineForMs < HOST_BUSY_WINDOW_MS;
+    if (why !== undefined && recent) return `${hostName} is busy (${why}), retrying`;
+    return `${hostName} is offline`;
+  }
   if (reason === 'unresponsive') return `${hostName} stopped responding`;
   return `${hostName} is offline`;
 }

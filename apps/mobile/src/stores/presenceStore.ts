@@ -63,6 +63,8 @@ export interface HostPresence {
   claudeSettings?: { settingsJson: string; memories: ClaudeMemoryEntry[] } | null;
   /** Why the host dropped off, when the server could tell (`host.offline` reason). */
   offlineReason?: string | null;
+  /** When it dropped off (ms), so a busy host can read as offline once it has been gone a while. */
+  offlineAt?: number | null;
 }
 
 /**
@@ -282,8 +284,11 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
           ...prev,
           online,
           ...(online
-            ? { lastSeenAt: Date.now(), offlineReason: null }
-            : { offlineReason: offlineReason ?? null }),
+            ? { lastSeenAt: Date.now(), offlineReason: null, offlineAt: null }
+            : {
+                offlineReason: offlineReason ?? null,
+                offlineAt: prev.online ? Date.now() : (prev.offlineAt ?? Date.now()),
+              }),
         },
       };
       const hostsUpdating = { ...s.hostsUpdating };
