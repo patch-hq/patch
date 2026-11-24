@@ -30,3 +30,29 @@ for (const [name, size] of [
     await expect(page.locator('[data-testid="header-workers"]')).toHaveCount(0);
   });
 }
+
+test('an overspilling status list scrolls inside itself and leaves the transcript room', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 600 });
+  await page.goto('/app/dev-harness.html?chat=chat_status');
+  const list = page.locator('[data-testid="status-list"]');
+  await expect(list).toBeVisible();
+  await list.evaluate((el) => {
+    for (let i = 0; i < 60; i++) {
+      const row = document.createElement('div');
+      row.style.minHeight = '32px';
+      row.textContent = `row ${i}`;
+      el.appendChild(row);
+    }
+  });
+  const m = await list.evaluate((el) => ({
+    scrollable: el.scrollHeight > el.clientHeight,
+    overflowY: getComputedStyle(el).overflowY,
+    height: el.getBoundingClientRect().height,
+  }));
+  expect(m.overflowY).toBe('auto');
+  expect(m.scrollable).toBe(true);
+  expect(m.height).toBeLessThan(600 * 0.5);
+  await expect(page.locator('[data-testid="chat-stream"]')).toBeVisible();
+});

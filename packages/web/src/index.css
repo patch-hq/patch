@@ -18217,6 +18217,12 @@ select.permission-mode.is-pending {
   font-size: 14px;
   line-height: 20px;
   color: var(--ink);
+  /* An opened Artifacts or Agents list can run to dozens of rows: cap it so the
+     transcript keeps room, and scroll inside it rather than overflowing. */
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .status-list:empty {
   display: none;
