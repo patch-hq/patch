@@ -115,6 +115,26 @@ describe('pads', () => {
     }
   });
 
+  it('has no size cap: a Pad over the old 40 MB limit is created', async () => {
+    const { built, ask } = await makeApp();
+    try {
+      const filler = Buffer.alloc(41 * 1024 * 1024, 1).toString('base64');
+      const res = await ask('c1', {
+        op: 'create',
+        name: 'Big review',
+        app: 'Dog Log',
+        device: 'phone',
+        files: [
+          { path: 'index.html', base64: b64(PAGE) },
+          { path: 'big.bin', base64: filler },
+        ],
+      });
+      expect(res.ok, JSON.stringify(res.error)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('flags a Patch Pad that carries no real-app reference', async () => {
     const { built, ask } = await makeApp();
     try {

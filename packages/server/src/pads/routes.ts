@@ -57,8 +57,6 @@ import {
 const BRIDGE_SURFACE_ID = 'pads-bridge';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, 'public');
-/** A Pad's whole file set, as shipped by an agent or captured by the web UI. */
-const MAX_PAD_BYTES = 40 * 1024 * 1024;
 const MAX_THUMBS = 40;
 
 const TYPES: Record<string, string> = {
@@ -227,10 +225,6 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
 
   /** Replace (or add to) a Pad's files. `replace` removes what is not in `files`. */
   function writeFiles(id: string, files: FileInput[], replace: boolean): void {
-    let total = 0;
-    for (const f of files) total += f.data.length;
-    if (total > MAX_PAD_BYTES)
-      throw new PadError(413, `pad files are ${total} bytes; the limit is ${MAX_PAD_BYTES}`);
     const root = store.filesDir(id);
     // Resolve every destination BEFORE touching the disk: a bad path halfway
     // through must not leave the Pad with its old files gone or half replaced.
@@ -478,7 +472,8 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
 
   // ------------------------------------------------- 1. Patch UI (bearer) --
 
-  const BIG = { bodyLimit: MAX_PAD_BYTES };
+  // A Pad has no size cap: a plan review can hold dozens of screens.
+  const BIG = { bodyLimit: Number.MAX_SAFE_INTEGER };
 
   app.get('/api/pads', async (req, reply) => {
     if (!(await authed(req, reply))) return;
