@@ -14,9 +14,6 @@ import type { WireEvent } from '@patch/wire';
 import { PatchPadResponseEvent } from '@patch/wire';
 import { escapesFolder } from './pathEscape.js';
 
-/** A Pad's files, raw. The server caps the whole bundle too. */
-export const MAX_PAD_BYTES = 25 * 1024 * 1024;
-
 export class PadInputError extends Error {
   override readonly name = 'PadInputError';
 }
@@ -48,7 +45,6 @@ export function bundleDir(folder: string, dir: string): PadBundleFile[] {
   }
   if (!st.isDirectory()) throw new PadInputError(`not a folder: ${dir}`);
   const files: PadBundleFile[] = [];
-  let total = 0;
   const walk = (d: string): void => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       if (e.name.startsWith('.') || e.name === 'node_modules') continue;
@@ -59,12 +55,6 @@ export function bundleDir(folder: string, dir: string): PadBundleFile[] {
       }
       if (!e.isFile()) continue;
       const data = readFileSync(p);
-      total += data.length;
-      if (total > MAX_PAD_BYTES) {
-        throw new PadInputError(
-          `the folder is over ${MAX_PAD_BYTES} bytes — a Pad holds screens, not a whole project`,
-        );
-      }
       files.push({
         path: relative(root, p).split('\\').join('/'),
         base64: data.toString('base64'),
