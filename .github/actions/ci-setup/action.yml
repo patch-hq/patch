@@ -43,11 +43,12 @@ runs:
       if: inputs.system-deps == 'true'
       shell: bash
       run: |
+        # kernel.org is last: on 2026-11-24 it passed the probe, then failed the amd64v3 .debs apt fetched.
         # Probe: one mirror is sometimes unreachable from a runner (kernel.org timed
         # out on every connection on 2026-11-12), so use the first that answers.
         codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
         mirror=
-        for m in https://mirrors.edge.kernel.org/ubuntu/ https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/; do
+        for m in https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/; do
           # InRelease alone is not enough: a mirror has answered it while failing every
           # .deb download (kernel.org, 2026-11-15), so also fetch a real package file.
           # Download to a file first: piping into awk-with-exit makes zcat die of
