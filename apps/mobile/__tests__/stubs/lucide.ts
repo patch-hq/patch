@@ -45,6 +45,7 @@ export const SquareTerminal = icon('SquareTerminal');
 export const RotateCcw = icon('RotateCcw');
 export const Image = icon('Image');
 export const KeyRound = icon('KeyRound');
+export const List = icon('List');
 export const ListChecks = icon('ListChecks');
 export const MessageCircle = icon('MessageCircle');
 export const MessageCirclePlus = icon('MessageCirclePlus');
