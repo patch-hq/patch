@@ -178,6 +178,11 @@ export function UsagePopover({
             </div>
           </div>
         </section>
+      ) : context !== undefined ? (
+        <section className="usage-pop-section" data-testid="usage-pop-context">
+          <h4>Context</h4>
+          <span className="set-sub">Not measured yet</span>
+        </section>
       ) : null}
       {rows.map((r) => {
         const readAt = formatReadAt(r.usage?.at);

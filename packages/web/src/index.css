@@ -14780,10 +14780,6 @@ button.chat-usage-crumb:hover {
 .composer-actions .context-ring + .send-btn {
   margin-left: 0;
 }
-.context-ring-label {
-  line-height: 1;
-  white-space: nowrap;
-}
 .context-ring-track {
   fill: none;
   stroke: var(--line);

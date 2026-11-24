@@ -43,14 +43,14 @@ describe('context ring', () => {
     expect(queryHost(r.root, byTestId('context-ring'))).toBeNull();
   });
 
-  it('shows the percentage and opens a sheet with the figures and a way to Usage', () => {
+  it('shows only the ring and opens a sheet with the figures and a way to Usage', () => {
     useChatStore
       .getState()
       .hydrate([{ ...row, context: { usedTokens: 84_000, windowTokens: 200_000, at: 1 } }]);
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const ring = findHost(r.root, byTestId('context-ring'));
     expect(ring.props['accessibilityLabel']).toBe('Context 42%');
-    expect(hasText(findHost(r.root, byTestId('context-ring-label')), '42%')).toBe(true);
+    expect(queryHost(r.root, byTestId('context-ring-label'))).toBeNull();
     actSync(() => ring.props['onPress']());
     expect(hasText(findHost(r.root, byTestId('context-sheet-figures')), '42% · 84k / 200k')).toBe(
       true,
