@@ -1754,6 +1754,36 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'true');
   });
 
+  it("the usage crumb reads the account the chat will use, not the host's spent active one", async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    reportAccounts(
+      'd1',
+      [
+        {
+          id: 'c0',
+          label: 'Claude 0',
+          connected: true,
+          usage: { week: { status: 'rejected', utilization: 1, resetsAt: Date.now() + 3_600_000 } },
+        },
+        {
+          id: 'c1',
+          label: 'Claude 1',
+          connected: true,
+          usage: { week: { status: 'allowed', utilization: 0.12 } },
+        },
+      ],
+      'c0',
+    );
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    await screen.findByTestId('new-chat-usage');
+    // The in-credit account is the default pick, so the crumb must not say the week is spent.
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-usage').getAttribute('aria-label')).toBe('Weekly 12%'),
+    );
+  });
+
   it('defaults to the account that is in credit when the first one is spent, and keeps a later choice', async () => {
     setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
     reportAccounts('d1', [

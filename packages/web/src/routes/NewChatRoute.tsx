@@ -61,6 +61,7 @@ import { EmptyChat } from '../components/EmptyChat.js';
 import { FirstRunIntro } from '../components/FirstRunIntro.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { UsageCrumb } from '../components/UsageCrumb.js';
+import { accountRows } from '../components/UsagePopover.js';
 import { Edit3 } from 'lucide-react';
 import { loadModels, useModelCatalog } from '../lib/models.js';
 import { creditDefaultAccountId, modelSpent, modelSpentReason, useCredit } from '../lib/credit.js';
@@ -636,8 +637,19 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // elsewhere). It is the one usage readout left on this header: a live
   // chat's header carries none at all now (its composer's context ring covers
   // it instead), but there is no chat yet here for a ring to measure.
+  //
+  // The reading is the one for the account the chat will draw on — the one
+  // picked, else the host's active one — read from the shared account rows,
+  // the same source the usage cards beneath use. The host-level `usage` is
+  // only whichever account the host happens to have active, so a spent
+  // account there showed "weekly limit" while the account picked had headroom.
+  const sharedForUsage = usePreferencesStore((st) => st.shared);
+  const usedAccountId = preferredAccountId ?? chosenAccount?.activeAccountId ?? null;
+  const usedRow = accountRows(presenceHosts, sharedForUsage).find(
+    (r) => r.providerId === effectiveProvider && r.accountId === usedAccountId,
+  );
   const usageSummary = summariseUsage(
-    accountKindForModel(effectiveModel) === 'apiKey' ? undefined : chosenAccount?.usage,
+    accountKindForModel(effectiveModel) === 'apiKey' ? undefined : usedRow?.usage,
   );
   // The models offered as chips in the Model row (spec/14 §8): the account
   // default first — marked as such — then the head of the catalogue
@@ -1685,7 +1697,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       <AccountUsageStrip
         providerId={providerForModel(effectiveModel)}
         hostId={pickerHostId}
-        usedAccountId={preferredAccountId ?? chosenAccount?.activeAccountId ?? null}
+        usedAccountId={usedAccountId}
         onSelect={chooseAccount}
       />
     </div>
