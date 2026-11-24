@@ -5,7 +5,6 @@ import { PINCH_ZOOM_JS } from '../src/lib/pinchZoom';
 describe('PINCH_ZOOM_JS', () => {
   it('replaces a locked viewport with a zoomable one', () => {
     document.head.innerHTML = '<meta name="viewport" content="width=device-width, user-scalable=no">';
-    // eslint-disable-next-line no-eval
     eval(PINCH_ZOOM_JS);
     const c = document.querySelector('meta[name="viewport"]')!.getAttribute('content')!;
     expect(c).toContain('user-scalable=yes');
