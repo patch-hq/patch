@@ -114,7 +114,7 @@ describe('useLocalUri', () => {
 
 describe('the artifact viewer', () => {
   it('opens the server URL in the WebView and offers the browser, on a direct route', () => {
-    const r = renderRN(<ArtifactViewerHost />);
+    const r = renderRN(<ArtifactViewerHost chatId="c1" />);
     return actAsync(async () => openArtifactViewer('https://patch.test/a', 'A')).then(() => {
       expect(findHost(r.root, byTestId('artifact-viewer-webview')).props.source.uri).toBe(
         'https://patch.test/a',
@@ -125,7 +125,7 @@ describe('the artifact viewer', () => {
 
   it('shows the local copy and offers no browser on a relayed route', async () => {
     setRoute(RELAY);
-    const r = renderRN(<ArtifactViewerHost />);
+    const r = renderRN(<ArtifactViewerHost chatId="c1" />);
     await actAsync(async () => openArtifactViewer(URL_ON_RELAY, 'Bus times'));
     await actAsync(flush);
     expect(findHost(r.root, byTestId('artifact-viewer-webview')).props.source.uri).toMatch(
@@ -137,7 +137,7 @@ describe('the artifact viewer', () => {
   it('says so when the file cannot be fetched', async () => {
     setRoute(RELAY);
     fetchMock.mockResolvedValue(new Response('gone', { status: 410 }));
-    const r = renderRN(<ArtifactViewerHost />);
+    const r = renderRN(<ArtifactViewerHost chatId="c1" />);
     await actAsync(async () => openArtifactViewer(URL_ON_RELAY, 'Bus times'));
     await actAsync(flush);
     expect(textOf(findHost(r.root, byTestId('artifact-viewer-error')))).toMatch(/HTTP 410/);
@@ -152,7 +152,7 @@ describe('openServed', () => {
 
   it('opens the in-app viewer instead on a relayed route', async () => {
     setRoute(RELAY);
-    const r = renderRN(<ArtifactViewerHost />);
+    const r = renderRN(<ArtifactViewerHost chatId="c1" />);
     await actAsync(async () => openServed(URL_ON_RELAY, 'f.pdf'));
     expect(findHost(r.root, byTestId('artifact-viewer-title'))).toBeTruthy();
     expect(__getLinkingOpenedUrls()).toEqual([]);

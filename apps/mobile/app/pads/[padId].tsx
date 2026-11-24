@@ -9,7 +9,15 @@
 // WebView to load, and the screen says so rather than showing a blank frame.
 
 import React from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { PINCH_ZOOM_JS } from '../../src/lib/pinchZoom';
@@ -20,6 +28,7 @@ import { isRelayed } from '../../src/lib/servedFile';
 import { useChatStore } from '../../src/stores/chatStore';
 import { useUiStore } from '../../src/stores/uiStore';
 import { useGoBack } from '../../src/lib/goBack';
+import { QuickMessageBox } from '../../src/components/QuickMessageBox';
 import { padBadge } from '../../src/lib/pads';
 import { space, textMin, typography, useTheme } from '../../src/lib/theme';
 
@@ -101,7 +110,11 @@ export default function PadScreen(): React.ReactElement {
 
   const badge = padBadge(pad);
   return (
-    <View testID="pad-screen" style={{ flex: 1, backgroundColor: colors.paper }}>
+    <KeyboardAvoidingView
+      testID="pad-screen"
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={{ flex: 1, backgroundColor: colors.paper }}
+    >
       <View
         style={{
           flexDirection: 'row',
@@ -205,6 +218,7 @@ export default function PadScreen(): React.ReactElement {
           style={{ flex: 1 }}
         />
       )}
-    </View>
+      <QuickMessageBox chatId={pad.chatId} />
+    </KeyboardAvoidingView>
   );
 }
