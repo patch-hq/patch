@@ -2417,7 +2417,7 @@ describe('Composer', () => {
     // (plus anything typed) as one turn. ----
 
     function renderDictating(opts: {
-      onSend: Mock;
+      onSend?: Mock;
       transcribeClip: (clip: Blob) => Promise<{ transcript: string }>;
       rec: Rec;
     }): HTMLElement {
@@ -2425,7 +2425,7 @@ describe('Composer', () => {
         <Composer
           chatId="c1"
           hostId="d1"
-          onSend={opts.onSend}
+          onSend={opts.onSend ?? (() => {})}
           previewFactory={preview.factory}
           recorderFactory={async () => opts.rec as unknown as VoiceRecording}
           transcribeClip={opts.transcribeClip}
