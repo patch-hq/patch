@@ -129,6 +129,7 @@ import {
   type DictationPreviewCallbacks,
 } from '../lib/dictationPreview.js';
 import { registerComposerMic } from '../lib/composerMic.js';
+import { listMics, loadMicDeviceId, saveMicDeviceId, type MicDevice } from '../lib/micDevice.js';
 import { startDictationMode, type DictationMode } from '../lib/dictationMode.js';
 import {
   LOCAL_ENGINE_DESKTOP_ONLY,
@@ -1920,7 +1921,34 @@ export const Composer = forwardRef(function Composer(
   const sendMenu = useContextMenu();
   // Right-click the mic: the ways to dictate beyond a plain click.
   const micMenu = useContextMenu();
+  // Refreshed each time the menu opens: devices come and go, and their labels
+  // only appear once mic permission has been granted.
+  const [mics, setMics] = useState<MicDevice[]>([]);
+  const [micId, setMicId] = useState(loadMicDeviceId);
+  useEffect(() => {
+    if (!micMenu.anchor) return;
+    setMicId(loadMicDeviceId());
+    listMics().then(setMics, (err: Error) =>
+      useUiStore.getState().pushError(failed('list microphones'), undefined, err.message),
+    );
+  }, [micMenu.anchor]);
+  const pickMic = (id: string): void => {
+    saveMicDeviceId(id);
+    setMicId(id);
+  };
   const micMenuItems: ContextMenuItem[] = [
+    {
+      id: 'microphone',
+      label: 'Microphone',
+      icon: <Mic size={14} aria-hidden />,
+      run: () => undefined,
+      submenu: [{ id: '', label: 'System default' }, ...mics].map((m) => ({
+        id: `mic-${m.id || 'default'}`,
+        label: `${m.id === micId ? '✓ ' : ''}${m.label}`,
+        icon: <span aria-hidden />,
+        run: () => pickMic(m.id),
+      })),
+    },
     {
       id: 'keep-dictating',
       label: 'Keep dictating',
