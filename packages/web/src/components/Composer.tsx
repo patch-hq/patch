@@ -1359,6 +1359,11 @@ export const Composer = forwardRef(function Composer(
     el.style.height = `${dictCap !== null ? cap : Math.min(contentHeight, cap)}px`;
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
     el.scrollTop = scrollTop;
+    // Dictating at the end of the draft: follow the words as they arrive, so
+    // the newest are always in view. Mid-text dictation keeps its position.
+    if (livePartial !== '' && cursorPos >= body.length) {
+      el.scrollTop = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0);
+    }
     syncMirrors(el);
   }, [value, shownBody, showLivePreview, livePartial, dictCap]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is
