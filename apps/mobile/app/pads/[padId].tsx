@@ -12,6 +12,7 @@ import React from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { WebView } from 'react-native-webview';
+import { PINCH_ZOOM_JS } from '../../src/lib/pinchZoom';
 import { ArrowLeft, MessageSquare, Trash2 } from 'lucide-react-native';
 import { api, type PadView } from '../../src/api/rest';
 import { apiUrl } from '../../src/config';
@@ -193,6 +194,9 @@ export default function PadScreen(): React.ReactElement {
           originWhitelist={['*']}
           javaScriptEnabled
           domStorageEnabled
+          scalesPageToFit
+          injectedJavaScriptBeforeContentLoaded={PINCH_ZOOM_JS}
+          injectedJavaScript={PINCH_ZOOM_JS}
           onError={(e) => setFrameError(e.nativeEvent.description)}
           onHttpError={(e) =>
             setFrameError(`HTTP ${e.nativeEvent.statusCode} from ${e.nativeEvent.url}`)
