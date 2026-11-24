@@ -859,16 +859,55 @@
     post({ kind: 'delete', target: t });
   }
 
+  // ---------- dictation ----------
+  // The mic on a note box. Recording and transcription live in Patch's own page
+  // (PadPane), which owns the mic permission and the API credential; this frame
+  // only asks it to start and stop and drops the words it sends back into the
+  // box. pointerdown is cancelled so the box keeps focus: a blur ends the note.
+  var dict = null;
+  function addMic(host, ta) {
+    var b = el('button', 'mic', host); b.type = 'button'; b.title = 'Dictate'; b.setAttribute('aria-label', 'Dictate');
+    b.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+    b.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); });
+    b.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      if (dict && dict.ta === ta && dict.state === 'recording') { dict.state = 'transcribing'; b.className = 'mic busy'; window.parent.postMessage({ type: 'pad:dictate', action: 'stop' }, '*'); return; }
+      if (dict) return;
+      dict = { ta: ta, btn: b, state: 'recording' }; b.className = 'mic rec';
+      window.parent.postMessage({ type: 'pad:dictate', action: 'start' }, '*');
+      ta.focus();
+    });
+    return b;
+  }
+  function micOff() {
+    if (!dict) return;
+    window.parent.postMessage({ type: 'pad:dictate', action: 'cancel' }, '*');
+    dict.btn.className = 'mic'; dict = null;
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (e.source !== window.parent || !d || d.type !== 'pad:dictation' || !dict) return;
+    var cur = dict; dict = null; cur.btn.className = 'mic';
+    if (d.status === 'error') { cur.btn.title = 'Dictation failed: ' + d.message; cur.btn.className = 'mic err'; return; }
+    var ta = cur.ta, t = d.text || '';
+    if (!t || !ta.isConnected) return;
+    var a = ta.selectionStart, z = ta.selectionEnd, v = ta.value;
+    var lead = a > 0 && !/\s$/.test(v.slice(0, a)) ? ' ' : '';
+    ta.value = v.slice(0, a) + lead + t + v.slice(z);
+    ta.selectionStart = ta.selectionEnd = a + lead.length + t.length;
+    ta.focus();
+  });
+
   // ---------- notes ----------
   function startNote(pt) {
     var anchor = hit(pt) || doc().body;
     var ar = anchor.getBoundingClientRect();
     var n = el('div', 'note draft', notesLayer);
     n.style.left = pt.x + 'px'; n.style.top = pt.y + 'px';
-    var ta = el('textarea', 'note-draft', n); ta.placeholder = 'Write a note';
+    var ta = el('textarea', 'note-draft', n); ta.placeholder = 'Write a note'; addMic(n, ta);
     var done = false;
     var finish = function (save) {
-      if (done) return; done = true;
+      if (done) return; done = true; micOff();
       var text = ta.value.trim(); n.remove();
       if (save && text) {
         post({ kind: 'note', target: target(anchor), text: text, offset: { x: Math.round(pt.x - ar.left), y: Math.round(pt.y - ar.top) } });
@@ -917,11 +956,11 @@
   function editNote(n, c) {
     var body = n.querySelector('.body');
     var ta = el('textarea', 'note-draft'); ta.value = c.text;
-    body.textContent = ''; body.appendChild(ta);
+    body.textContent = ''; body.appendChild(ta); addMic(body, ta);
     ta.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
     var done = false;
     var finish = function (save) {
-      if (done) return; done = true;
+      if (done) return; done = true; micOff();
       var text = ta.value.trim(); ta.remove(); body.textContent = c.text;
       if (save && text && text !== c.text) { c.text = text; body.textContent = text; ownPending = true; api('PATCH', '/changes/' + c.id, { text: text }).then(function () { return refresh(); }).catch(fail); }
     };
@@ -978,10 +1017,10 @@
     var anchor = hit(pt) || doc().body;
     var n = el('div', 'note draft', notesLayer);
     n.style.left = pt.x + 'px'; n.style.top = pt.y + 'px';
-    var ta = el('textarea', 'note-draft', n); ta.placeholder = 'Type new text';
+    var ta = el('textarea', 'note-draft', n); ta.placeholder = 'Type new text'; addMic(n, ta);
     var done = false;
     var finish = function (save) {
-      if (done) return; done = true;
+      if (done) return; done = true; micOff();
       var text = ta.value.trim(); n.remove();
       if (save && text) post({ kind: 'add', target: target(anchor), text: text });
       setTool('select');
