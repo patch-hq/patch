@@ -1780,7 +1780,7 @@ describe('/chats/new', () => {
     await screen.findByTestId('new-chat-usage');
     // The in-credit account is the default pick, so the crumb must not say the week is spent.
     await waitFor(() =>
-      expect(screen.getByTestId('chat-usage').getAttribute('aria-label')).toBe('Weekly 12%'),
+      expect(screen.getByTestId('chat-usage').getAttribute('aria-label')).toBe('Weekly 12% used'),
     );
   });
 
