@@ -69,6 +69,7 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
+import { filesFromDataTransfer } from './Composer.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { connectionSummary, hostsDown } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
@@ -2641,36 +2642,52 @@ const ChatRowView = memo(function ChatRowView({
   const [dropOver, setDropOver] = useState(false);
   // Any chat row can be dragged onto a group or into the gap between groups
   // (spec/14 § Groups); a manually sorted row also takes drops from its siblings.
+  // A file dragged from the desktop onto a row attaches to that chat's draft
+  // without opening it (same upload path as the composer's own drop).
+  const fileDroppable = !special && !deleted && !to;
   const dragProps = {
     draggable: true,
     onDragStart: (e: DragEvent) => {
       e.dataTransfer.setData('application/x-patch-chat', row.chatId);
       e.dataTransfer.effectAllowed = 'move';
     },
-    ...(reorderable
-      ? {
-          onDragOver: (e: DragEvent) => {
-            if (!e.dataTransfer.types.includes('application/x-patch-chat')) return;
-            e.preventDefault();
-            setDropOver(true);
-          },
-          onDragLeave: () => setDropOver(false),
-          onDrop: (e: DragEvent) => {
-            e.preventDefault();
-            setDropOver(false);
-            const dragId = e.dataTransfer.getData('application/x-patch-chat');
-            if (dragId === '' || dragId === row.chatId) return;
-            const section = (e.currentTarget as HTMLElement).closest('.sb-folder');
-            if (section === null)
-              throw new Error('manual reorder: row is outside a project section');
-            const siblings = Array.from(section.querySelectorAll('[data-testid^="chat-row-"]')).map(
-              (el) => (el.getAttribute('data-testid') as string).slice('chat-row-'.length),
-            );
-            if (!siblings.includes(dragId)) return; // dragged in from another project
-            useUiStore.getState().moveChatManual(siblings, dragId, row.chatId);
-          },
-        }
-      : {}),
+    onDragOver: (e: DragEvent) => {
+      if (fileDroppable && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setDropOver(true);
+        return;
+      }
+      if (!reorderable || !e.dataTransfer.types.includes('application/x-patch-chat')) return;
+      e.preventDefault();
+      setDropOver(true);
+    },
+    onDragLeave: () => setDropOver(false),
+    onDrop: (e: DragEvent) => {
+      if (fileDroppable && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        setDropOver(false);
+        void filesFromDataTransfer(e.dataTransfer).then((files) => {
+          if (files.length === 0) return;
+          useComposerAttachmentStore
+            .getState()
+            .attach(row.chatId, { kind: 'chat', chatId: row.chatId }, files);
+        });
+        return;
+      }
+      if (!reorderable) return;
+      e.preventDefault();
+      setDropOver(false);
+      const dragId = e.dataTransfer.getData('application/x-patch-chat');
+      if (dragId === '' || dragId === row.chatId) return;
+      const section = (e.currentTarget as HTMLElement).closest('.sb-folder');
+      if (section === null) throw new Error('manual reorder: row is outside a project section');
+      const siblings = Array.from(section.querySelectorAll('[data-testid^="chat-row-"]')).map(
+        (el) => (el.getAttribute('data-testid') as string).slice('chat-row-'.length),
+      );
+      if (!siblings.includes(dragId)) return; // dragged in from another project
+      useUiStore.getState().moveChatManual(siblings, dragId, row.chatId);
+    },
   };
   return (
     <>
