@@ -121,6 +121,41 @@ describe('dictation mode', () => {
     expect(r.cancel).toHaveBeenCalledOnce();
   });
 
+  it('stop() sends the speech still being said, and cancel() drops it', async () => {
+    for (const keep of [true, false]) {
+      const r = fakeRecorder();
+      const texts: string[] = [];
+      const transcribe = vi.fn(async () => ({ transcript: ' still talking ' }));
+      const mode = startDictationMode(
+        { recorderFactory: r.factory, transcribe },
+        { onText: (t) => texts.push(t), onBusy: () => {}, onError: () => {} },
+      );
+      await mode.ready;
+      r.feed(speech, 800);
+      if (keep) mode.stop();
+      else mode.cancel();
+      await flush();
+      expect(r.cancel).toHaveBeenCalledOnce();
+      expect(texts).toEqual(keep ? ['still talking'] : []);
+    }
+  });
+
+  it('stop() still delivers an utterance already being transcribed', async () => {
+    const r = fakeRecorder();
+    const texts: string[] = [];
+    const transcribe = vi.fn(async () => ({ transcript: ' hello there ' }));
+    const mode = startDictationMode(
+      { recorderFactory: r.factory, transcribe },
+      { onText: (t) => texts.push(t), onBusy: () => {}, onError: () => {} },
+    );
+    await mode.ready;
+    r.feed(speech, 800);
+    r.feed(quiet, 3200);
+    mode.stop();
+    await flush();
+    expect(texts).toEqual(['hello there']);
+  });
+
   it('uploads a wav of the utterance', async () => {
     const r = fakeRecorder();
     const transcribe = vi.fn(async (_c: Blob) => ({ transcript: 'x' }));

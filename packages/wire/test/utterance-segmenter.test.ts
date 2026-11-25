@@ -31,6 +31,16 @@ describe('utterance segmenter', () => {
     expect(frameRms(new Int16Array(0))).toBe(0);
   });
 
+  it('flush returns speech still in progress, and nothing when idle or only a click', () => {
+    const seg = createUtteranceSegmenter({});
+    expect(seg.flush()).toBeNull();
+    for (let i = 0; i < 20; i++) seg.push(speech());
+    expect(seg.flush()?.length).toBe(20 * FRAME);
+    expect(seg.speaking).toBe(false);
+    seg.push(speech());
+    expect(seg.flush()).toBeNull();
+  });
+
   it('emits one utterance after the silence window, not before', () => {
     const seg = createUtteranceSegmenter();
     expect(feed(seg, speech, 1000)).toHaveLength(0);
