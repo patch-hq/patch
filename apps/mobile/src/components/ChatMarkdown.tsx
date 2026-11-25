@@ -23,6 +23,7 @@ import { fenceBoxDrawing } from '../lib/boxDrawing';
 import { useRouter } from 'expo-router';
 import { chatLinkRoute } from '../lib/deepLink';
 import { LinkPreview } from './LinkPreview';
+import { copyMessageText } from './MessageActions';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 // A link to another chat opens it inside the app (spec/14 § Message links).
@@ -116,7 +117,11 @@ function leafRules(selectable: boolean): RenderRules {
       const flat = StyleSheet.flatten(styles['link']) as { color: string };
       return (
         <Text key={node.key}>
-          <Text style={styles['link']} onPress={() => void Linking.openURL(href)}>
+          <Text
+            style={styles['link']}
+            onPress={() => void Linking.openURL(href)}
+            onLongPress={() => void copyMessageText(href)}
+          >
             {children}
           </Text>
           <LinkPreview url={href} color={flat.color} />

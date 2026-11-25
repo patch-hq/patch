@@ -14,8 +14,9 @@
 import React from 'react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Text } from 'react-native';
-import { renderRN, hasText, findAllHost, byTestId } from './testUtils/render';
+import { renderRN, actAsync, hasText, findAllHost, byTestId } from './testUtils/render';
 import { ChatMarkdown } from '../src/components/ChatMarkdown';
+import { __lastCopied } from './stubs/expo-clipboard';
 import { routerMock } from './stubs/expo-router';
 import { __parseCallCount, __resetParseCallCount, __lastRenderer } from './stubs/markdown-display';
 
@@ -104,6 +105,24 @@ describe('ChatMarkdown — link previews', () => {
     const mail = link('mailto:a@b.c');
     expect(hasText(mail.root, 'label')).toBe(true);
     expect(findAllHost(mail.root, byTestId('link-summary-toggle')).length).toBe(0);
+  });
+});
+
+describe('ChatMarkdown — long-press a link copies it', () => {
+  it('long-pressing an http link puts its URL on the clipboard', async () => {
+    renderRN(<ChatMarkdown content="x" color="#111" />);
+    const { rules, style } = __lastRenderer();
+    const r = renderRN(
+      rules['link']!(
+        { key: 'l', type: 'link', attributes: { href: 'https://example.com/a?b=1' } } as never,
+        [<Text key="t">label</Text>],
+        [],
+        style as never,
+      ) as React.ReactElement,
+    );
+    const label = findAllHost(r.root, (n) => typeof n.props.onLongPress === 'function')[0]!;
+    await actAsync(() => label.props.onLongPress());
+    expect(__lastCopied()).toBe('https://example.com/a?b=1');
   });
 });
 
