@@ -21,6 +21,8 @@ export function useModelOptions(value: string): {
   options: { id: string; label: string }[];
   /** Why the list may be incomplete, or null when it is the host's real list. */
   problem: ModelListProblem | null;
+  /** True while the host's list is still on its way; `options` then holds only a stand-in for `value`. */
+  loading: boolean;
 } {
   const hosts = usePresenceStore((s) => s.hosts);
   // With no AI connected there is no list to load, and the host's refusal
@@ -37,6 +39,10 @@ export function useModelOptions(value: string): {
   const ids = catalogue.models.map((m) => m.id);
   const extra = value && !ids.includes(value) ? [{ id: value, label: value }] : [];
   return {
+    loading:
+      !noProvider &&
+      catalogueHost !== null &&
+      (catalogue.status === 'idle' || catalogue.status === 'loading'),
     options: [...extra, ...catalogue.models],
     problem: noProvider
       ? { kind: 'no-provider', text: 'Models appear once you connect an AI.' }
