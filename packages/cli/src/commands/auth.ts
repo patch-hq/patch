@@ -1,18 +1,12 @@
-// `patch auth *` — QR pairing bootstrap and revoke.
+// `patch auth *` — sign-in by approval, bootstrap and revoke.
 //
-// Flow per spec/10-auth.md and testing/qr-pairing.md:
-//   1. Generate (or load) a fresh keypair.
-//   2. POST /api/auth/pair/start { surfacePublicKey } → server returns
-//      { type: 'pairing.nonce', nonce, surfacePublicKey, expiresAt }.
-//   3. Encode { nonce, surfacePublicKey } as a QR + display ASCII to stdout.
-//   4. Existing surface scans, signs, posts to /api/auth/pair/complete.
-//   5. We poll /api/auth/me with a candidate JWT? Simpler: the existing
-//      surface relays the credential back over /ws to the new surface.
-//      For tests we accept --nonce <nonce> + --credential <jwt> to skip
-//      the pairing dance entirely (per testing/qr-pairing.md).
+// `login` asks the server for a sign-in request (no bearer needed, so it works
+// with an expired credential), a signed-in surface approves it and shows a
+// six-digit code, and typing that code here redeems a new credential.
 
 import { Command } from 'commander';
-import qrcode from 'qrcode-terminal';
+import { createInterface } from 'node:readline/promises';
+import { signInByApproval } from '../signin.js';
 import type { CommonOpts } from './_common.js';
 import { emitJson, emitText, getTransport, run } from './_common.js';
 import { credentialFilePath, identityFilePath, loadConfig } from '../config.js';
@@ -25,25 +19,16 @@ import {
 } from '../auth.js';
 import { RestClient } from '../transport/rest.js';
 import { generateUserKeypair, verifySurfaceCredential } from '@patch/auth';
-import { encodePairingUri } from '@patch/wire';
-
-interface NonceResponse {
-  type: 'pairing.nonce';
-  nonce: string;
-  surfacePublicKey: string;
-  expiresAt: number;
-}
 
 export function registerAuthCommands(program: Command): void {
   const auth = program.command('auth').description('Identity / pairing ops');
 
   auth
     .command('login')
-    .description('Pair a new surface via QR')
-    .option('--nonce <nonce>', 'Skip QR display: a paired surface will sign with this nonce')
+    .description('Sign this terminal in by approving it from a signed-in surface')
     .option('--credential <jwt>', 'Skip pairing dance: write this credential as the JWT')
     .option('--json', 'JSON output')
-    .action(async (opts: CommonOpts & { nonce?: string; credential?: string }) => {
+    .action(async (opts: CommonOpts & { credential?: string }) => {
       await run(opts, async () => {
         ensureConfigDir();
 
@@ -84,44 +69,33 @@ export function registerAuthCommands(program: Command): void {
           return;
         }
 
-        const kp = loadOrCreateIdentity();
-        writeIdentity(kp);
+        loadOrCreateIdentity();
         const config = loadConfig();
         const rest = new RestClient({ serverUrl: config.serverUrl, bearer: null });
-        const res = await rest.post<NonceResponse>('/api/auth/pair/start', {
-          surfacePublicKey: kp.publicKey,
+        const out = await signInByApproval({
+          rest,
+          label: 'patch-cli',
+          now: () => Date.now(),
+          sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+          onRequested: (r) => {
+            if (!opts.json)
+              emitText(
+                `Approve "patch-cli" on a signed-in Patch surface (expires ${new Date(r.expiresAt).toISOString()}), then type the six-digit code it shows.`,
+              );
+          },
+          readCode: async () => {
+            const rl = createInterface({ input: process.stdin, output: process.stderr });
+            try {
+              return await rl.question('Code: ');
+            } finally {
+              rl.close();
+            }
+          },
         });
-
-        // Canonical pairing-QR payload — the SAME `patch-pair://<host>?nonce=`
-        // URI every other generator emits (spec/05-surfaces.md § Canonical QR
-        // payload). The QR carries only the nonce; the scanning surface binds
-        // its own device key at /pair/complete, so no key travels in the QR.
-        const payload = encodePairingUri({ nonce: res.nonce, server: config.serverUrl });
-        if (opts.json) {
-          emitJson({
-            status: 'awaiting-pair',
-            identity: identityFilePath(),
-            accountId: kp.publicKey,
-            nonce: res.nonce,
-            expiresAt: res.expiresAt,
-            payload,
-          });
-        } else {
-          emitText('Scan with an already-linked surface to pair this terminal:');
-          emitText('');
-          await new Promise<void>((resolve) => {
-            qrcode.generate(payload, { small: true }, (qr: string) => {
-              process.stdout.write(qr + '\n');
-              resolve();
-            });
-          });
-          emitText(`nonce: ${res.nonce}`);
-          emitText(`expires: ${new Date(res.expiresAt).toISOString()}`);
-          emitText('');
-          emitText(
-            'Once approved, your credential is delivered over /ws — keep this terminal open.',
-          );
-        }
+        writeCredential(out.credential);
+        if (opts.json)
+          emitJson({ ok: true, surfaceId: out.surfaceId, credential: credentialFilePath() });
+        else emitText(`signed in — surfaceId=${out.surfaceId}`);
       });
     });
 
