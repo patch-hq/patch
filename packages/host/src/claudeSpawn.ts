@@ -3,6 +3,7 @@ import type { Readable, Writable } from 'node:stream';
 import { closeSync, existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { envWithoutGitStub } from './git-presence.js';
 import { newTurnTag, TURN_TAG_ENV, killTagged } from './turnTag.js';
 import { inWorkSlice } from './workSlice.js';
 import { claudeStderrLogPath, noteClaudeProcess, openClaudeStderrLog } from './claudeStderrLog.js';
@@ -75,7 +76,10 @@ export function spawnClaudeInGroup(
   try {
     child = spawn(launch.command, launch.args, {
       cwd: opts.cwd,
-      env: { ...opts.env, [TURN_TAG_ENV]: turnTag },
+      env: {
+        ...envWithoutGitStub(opts.env, join(homedir(), '.patch', 'no-git-shim')),
+        [TURN_TAG_ENV]: turnTag,
+      },
       stdio: ['pipe', 'pipe', stderrFd],
       detached: true,
       windowsHide: true,
