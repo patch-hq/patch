@@ -24,6 +24,7 @@ import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { formatAgo, formatResetLocal } from '../../lib/usage.js';
 import { writeShared } from './sharedWrite.js';
+import { refreshUsageOnHosts } from './hostWrite.js';
 import { AccountRow, RankedList, UsageBars, type MenuItem } from './accountList.js';
 import { Note, Pills, Row } from './ui.js';
 import type { ProviderSpec, SharedRow } from './providers.js';
@@ -104,9 +105,7 @@ export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.El
       ) : null}
       {rows.length > 0 && provider.autoFlag ? (
         <div className="acct-head" data-testid={`accounts-head-${backendId}`}>
-          <span title="Switch to this account automatically">
-            Auto
-          </span>
+          <span title="Switch to this account automatically">Auto</span>
           <span>Account</span>
         </div>
       ) : null}
@@ -256,6 +255,16 @@ function AccountEntry({
     })();
 
   const menu: MenuItem[] = [
+    ...(row.kind === 'apiKey'
+      ? []
+      : [
+          {
+            label: 'Refresh usage',
+            detail: 'Read it from the provider now, for example after a reset',
+            testid: `account-refresh-${id}`,
+            onSelect: () => void refreshUsageOnHosts(backendId),
+          },
+        ]),
     {
       label: 'Rename',
       testid: `account-rename-${id}`,

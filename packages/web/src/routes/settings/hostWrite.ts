@@ -62,6 +62,27 @@ export function sendToHost(host: HostPresence, event: WireEvent): boolean {
   }
 }
 
+/**
+ * Ask every online host that carries this backend to read its accounts' usage
+ * from the provider now, past the per-account floor. Returns how many hosts
+ * were asked; none online is reported, not hidden.
+ */
+export function refreshUsageOnHosts(backendId: string): number {
+  const { hosts } = usePresenceStore.getState();
+  const targets = Object.values(hosts).filter((h) => h.online && h.accounts[backendId] != null);
+  if (targets.length === 0) {
+    useUiStore.getState().pushError('Refresh usage: no online host has this account');
+    return 0;
+  }
+  let sent = 0;
+  for (const host of targets) {
+    if (sendToHost(host, { type: 'host.backend_usage_refresh', hostId: host.hostId, backendId })) {
+      sent += 1;
+    }
+  }
+  return sent;
+}
+
 /** `host.settings` with just the fields given. */
 export function sendHostSettings(
   host: HostPresence,
