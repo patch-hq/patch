@@ -580,11 +580,14 @@ export function AppShell(): JSX.Element {
       onVoiceHoldStart: (at) => {
         // The dictate chord dictates into the composer on screen, exactly like
         // its mic button (lib/composerMic.ts): the new-chat screen's composer is
-        // registered as 'new'. Only with a chat open and no such composer is it a
-        // press-and-hold voice note (mode 1, PTT gesture: release sends).
-        if (!composerHotkeyDown(activeChatId ?? 'new', at) && activeChatId) {
-          void startVoiceNote(activeChatId, 'ptt');
-        }
+        // registered as 'new'. With no such composer it is a press-and-hold voice
+        // note (mode 1, PTT gesture: release sends) to the open chat — or, on a
+        // page with no chat (settings, jobs, …), to Manager, so the chord works
+        // from anywhere in the app.
+        if (composerHotkeyDown(activeChatId ?? 'new', at)) return;
+        const target =
+          activeChatId ?? useChatStore.getState().chats[SPECIAL_THREAD_IDS.manager]?.chatId;
+        if (target) void startVoiceNote(target, 'ptt');
       },
       onVoiceHoldEnd: (heldMs, at) => {
         if (composerHotkeyUp(at)) return;
