@@ -30,4 +30,20 @@ describe('ContextMenu hover', () => {
     fireEvent.mouseMove(screen.getByTestId('m-c'));
     expect(document.activeElement).toBe(screen.getByTestId('m-c'));
   });
+
+  it('drops the highlight when the pointer leaves the row', () => {
+    const items = ['a', 'b'].map((id) => ({ id, label: id, icon: null, run: () => {} }));
+    render(
+      <ContextMenu
+        anchor={{ x: 10, y: 10 }}
+        items={items}
+        onClose={() => {}}
+        label="m"
+        testId="m"
+      />,
+    );
+    fireEvent.mouseMove(screen.getByTestId('m-b'));
+    fireEvent.mouseLeave(screen.getByTestId('m-b'));
+    expect(document.activeElement).toBe(screen.getByTestId('m'));
+  });
 });

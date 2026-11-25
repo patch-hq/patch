@@ -35,3 +35,15 @@ export async function listMics(): Promise<MicDevice[]> {
     )
     .map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
 }
+
+/**
+ * The device "System default" currently resolves to. Chromium lists it as a
+ * `default` entry labelled "Default - <device>"; null when the browser gives no
+ * label (permission not yet granted) — the menu then says plain "System default".
+ */
+export async function systemDefaultMicName(): Promise<string | null> {
+  const all = await navigator.mediaDevices.enumerateDevices();
+  const d = all.find((x) => x.kind === 'audioinput' && x.deviceId === 'default');
+  const name = d?.label.replace(/^default\s*-\s*/i, '').trim();
+  return name ? name : null;
+}
