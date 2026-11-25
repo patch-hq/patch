@@ -131,7 +131,6 @@ describe('Settings tab — the list', () => {
       'Meetings',
       'Tools (MCP)',
       'Hooks',
-      'Computer use',
       'Agent identity',
       'Updates',
       'Experimental features',
@@ -150,7 +149,7 @@ describe('Settings tab — the list', () => {
     ]);
     expect(inGroup('Agents')).toEqual(['Agent', 'Chats', 'Goals', 'Memories']);
     expect(inGroup('Voice')).toEqual(['Dictation', 'Meetings']);
-    expect(inGroup('Advanced')).toEqual(['Tools (MCP)', 'Hooks', 'Computer use', 'Agent identity']);
+    expect(inGroup('Advanced')).toEqual(['Tools (MCP)', 'Hooks', 'Agent identity']);
     expect(inGroup('App')).toEqual(['Updates', 'Experimental features', 'Account']);
     // Every row says what its page is for.
     expect(textOf(findHost(r.root, byTestId('settings-intro-agent')))).toMatch(/new chat/);
