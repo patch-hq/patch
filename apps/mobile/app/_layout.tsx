@@ -4,13 +4,7 @@ import { CallStrip } from '../src/components/CallStrip';
 import { RemoteCallPill } from '../src/components/RemoteCallPill';
 import React from 'react';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import {
-  Stack,
-  usePathname,
-  useRootNavigationState,
-  useRouter,
-  type ErrorBoundaryProps,
-} from 'expo-router';
+import { Stack, useRootNavigationState, useRouter, type ErrorBoundaryProps } from 'expo-router';
 import { AppErrorScreen } from '../src/components/AppErrorScreen';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
@@ -26,6 +20,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono';
 import { installRelayTransport } from '../src/lib/relayTransport';
 import { bootstrap } from '../src/lib/bootstrap';
+import { useCurrentRoute } from '../src/lib/currentRoute';
 import { useShakeToCapture } from '../src/lib/shakeToCapture';
 import { startCrashCapture } from '../src/lib/crashReport';
 import { checkForOtaUpdate, startOtaUpdatePolling } from '../src/lib/otaUpdates';
@@ -273,7 +268,7 @@ export default function RootLayout(): React.ReactElement | null {
   // dropdown has to stay live wherever the user is in the app. The check-in
   // notification itself is a real push, handled above like any other.
   useBatchWatcher();
-  useShakeToCapture(usePathname());
+  useShakeToCapture(useCurrentRoute().pathname);
 
   // An answered incoming call opens its chat (spec/15 § Manager incoming-call
   // UX): the call lives inside the chat — its stream is the transcript and its
