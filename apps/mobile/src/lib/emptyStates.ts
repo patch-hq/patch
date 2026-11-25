@@ -46,7 +46,7 @@ export const EMPTY_STATES = {
   },
   channels: {
     title: 'No channels yet',
-    body: 'Speakers appears here once connected.',
+    body: 'Connected speakers appear here.',
   },
   // The Manager chat's Chats tab (spec/15 § Voice tab (Manager)) with no active chat.
   managerChats: {

@@ -58,7 +58,8 @@ export function HostOfflineBanner(): React.ReactElement | null {
         paddingHorizontal: space.md,
         paddingVertical: space.sm,
         borderRadius: radii.md,
-        margin: space.sm,
+        marginHorizontal: space.lg,
+        marginVertical: space.sm,
       }}
     >
       <Text style={{ color: colors.waiting, ...typography.meta }}>{text}</Text>
@@ -69,9 +70,6 @@ export function HostOfflineBanner(): React.ReactElement | null {
       ) : null}
       {updating ? null : (
         <>
-          <Text style={{ color: colors.waiting, fontSize: textMin, marginTop: space.xs }}>
-            Tap for Settings → Hosts.
-          </Text>
           {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
           overlay (spec/12 § Connection diagnostics screen). The app stays
           navigable — a daemon-offline surface is never blocked. */}

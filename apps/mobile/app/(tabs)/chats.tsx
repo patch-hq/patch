@@ -1129,7 +1129,7 @@ export default function ChatsScreen(): React.ReactElement {
                   accessibilityRole={section ? 'button' : 'header'}
                   style={{
                     flexDirection: 'row',
-                    alignItems: 'baseline',
+                    alignItems: 'center',
                     paddingHorizontal: space.lg,
                     paddingTop: space.lg,
                     paddingBottom: space.sm,
@@ -1137,7 +1137,8 @@ export default function ChatsScreen(): React.ReactElement {
                 >
                   <Text
                     numberOfLines={1}
-                    style={{ ...typography.sectionHeader, flexShrink: 0, color: colors.ink3 }}
+                    ellipsizeMode="head"
+                    style={{ ...typography.sectionHeader, color: colors.ink3, flexShrink: 1 }}
                   >
                     {section ? `${item.label} ${effectiveOpen[section] ? '▾' : '▸'}` : item.label}
                   </Text>
@@ -1175,7 +1176,7 @@ export default function ChatsScreen(): React.ReactElement {
                           name: folderName(item.folder!),
                         })
                       }
-                      style={{ marginLeft: 'auto' }}
+                      style={{ marginLeft: 'auto', paddingLeft: space.sm }}
                     >
                       <AlarmClock size={16} color={colors.ink3} />
                     </Pressable>
