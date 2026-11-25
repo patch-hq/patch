@@ -1345,7 +1345,16 @@ describe('AppShell', () => {
     expect(sendVoiceNote).not.toHaveBeenCalled();
   });
 
-  it('⌘⇧D (hold) with no focused chat does not start a note', async () => {
+  it('⌘⇧D on a page with no chat starts a PTT voice note to Manager', async () => {
+    await renderShell('/', [makeRow(SPECIAL_THREAD_IDS.manager)]);
+    await waitFor(() =>
+      expect(useChatStore.getState().chats[SPECIAL_THREAD_IDS.manager]).toBeDefined(),
+    );
+    fireEvent.keyDown(window, { key: 'D', code: 'KeyD', metaKey: true, shiftKey: true });
+    expect(startVoiceNote).toHaveBeenCalledWith(SPECIAL_THREAD_IDS.manager, 'ptt');
+  });
+
+  it('⌘⇧D with no chat and no Manager does not start a note', async () => {
     await renderShell('/');
     fireEvent.keyDown(window, { key: 'D', code: 'KeyD', metaKey: true, shiftKey: true });
     expect(startVoiceNote).not.toHaveBeenCalled();
