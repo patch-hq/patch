@@ -80,23 +80,36 @@ jobs:
           superseded() {
             # The newest test.yml run for this commit was cancelled, and main has moved on.
             run=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=20" \
-              --jq '.workflow_runs | sort_by(.id) | last | if . == null then "none" else .status + "/" + (.conclusion // "") end')
+              --jq '.workflow_runs | sort_by(.id) | last | if . == null then "none" else .status + "/" + (.conclusion // "") end') || return 2
             [ "$run" = completed/cancelled ] || return 1
-            tip=$(api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+            tip=$(api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha) || return 2
             [ "$tip" != "$GITHUB_SHA" ]
           }
           while true; do
             # The newest check run named "tests" on this commit (a re-run adds a new one).
             state=$(api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
-              --jq '[.check_runs[] | select(.name == "tests")] | sort_by(.id) | last | if . == null then "missing" elif .status != "completed" then "running" else .conclusion end')
+              --jq '[.check_runs[] | select(.name == "tests")] | sort_by(.id) | last | if . == null then "missing" elif .status != "completed" then "running" else .conclusion end') || {
+              # api() already retried; a call that still fails says nothing about the
+              # tests, so ask again. A lasting outage ends at the job's timeout.
+              echo "::warning::could not read the check runs; asking again in 60s"
+              sleep 60
+              continue
+            }
             echo "tests for $GITHUB_SHA: $state"
             case "$state" in
               success) echo "publish=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
               missing|running|cancelled)
-                if superseded; then
+                rc=0
+                superseded || rc=$?
+                if [ "$rc" = 0 ]; then
                   echo "::notice::superseded: a newer commit on main is tested and released instead; nothing is published for $GITHUB_SHA"
                   echo "publish=false" >> "$GITHUB_OUTPUT"
                   exit 0
+                fi
+                if [ "$rc" = 2 ]; then
+                  echo "::warning::could not check whether main moved on; asking again in 60s"
+                  sleep 60
+                  continue
                 fi
                 if [ "$state" = cancelled ]; then
                   echo "the tests for this commit were cancelled and it is still main's tip; nothing is published" >&2
