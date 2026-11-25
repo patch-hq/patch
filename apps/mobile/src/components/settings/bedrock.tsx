@@ -276,7 +276,6 @@ export function BedrockForm({
           api.updateAccount('claude-code', editing.accountId, {
             ...changed(editing.initial, fields),
             ...(label.trim() !== editing.initial.label ? { label: label.trim() } : {}),
-            ...(auto !== editing.initial.auto ? { auto } : {}),
           }),
         )
       : writeShared('Add account', () =>
@@ -358,17 +357,21 @@ export function BedrockForm({
         keyboardType="decimal-pad"
         placeholder="100"
       />
-      <View
-        style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.md }}
-      >
-        <AutoCheckbox
-          testID={`${testID}-auto`}
-          label="Switch to automatically"
-          checked={auto}
-          onChange={setAuto}
-        />
-        <Muted>Switch to automatically</Muted>
-      </View>
+      {/* An existing account's switch is the Auto box on its row; a second
+          copy here would drift from it and overwrite it on save. */}
+      {editing ? null : (
+        <View
+          style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.md }}
+        >
+          <AutoCheckbox
+            testID={`${testID}-auto`}
+            label="Switch to automatically"
+            checked={auto}
+            onChange={setAuto}
+          />
+          <Muted>Switch to automatically</Muted>
+        </View>
+      )}
       <View style={{ marginTop: space.md }}>
         <ButtonRow>
           <SettingsButton

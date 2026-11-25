@@ -519,6 +519,8 @@ describe('mobile Settings → Usage — Bedrock accounts and Auto', () => {
     expect(get(r, `${form}-name`).props.value).toBe('Work Bedrock');
     expect(get(r, `${form}-cap`).props.value).toBe('100');
     expect(get(r, `${form}-prefix-eu`).props.accessibilityState.selected).toBe(true);
+    // Auto lives on the row only; the edit form carries no second copy.
+    expect(query(r, `${form}-auto`)).toBeNull();
     await actAsync(() => get(r, `${form}-cap`).props.onChangeText('250'));
     await actAsync(async () => {
       get(r, `${form}-submit`).props.onPress();
