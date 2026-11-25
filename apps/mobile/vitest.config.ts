@@ -86,6 +86,11 @@ export default defineConfig({
       'expo-crypto': path.resolve(__dirname, '__tests__/stubs/expo-crypto.ts'),
       'expo-clipboard': path.resolve(__dirname, '__tests__/stubs/expo-clipboard.ts'),
       'expo-speech': path.resolve(__dirname, '__tests__/stubs/expo-speech.ts'),
+      'expo-sensors': path.resolve(__dirname, '__tests__/stubs/expo-sensors.ts'),
+      'react-native-view-shot': path.resolve(
+        __dirname,
+        '__tests__/stubs/react-native-view-shot.ts',
+      ),
       'expo-image-picker': path.resolve(__dirname, '__tests__/stubs/expo-image-picker.ts'),
       'expo-document-picker': path.resolve(__dirname, '__tests__/stubs/expo-document-picker.ts'),
       'expo-image-manipulator': path.resolve(

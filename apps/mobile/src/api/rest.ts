@@ -425,6 +425,13 @@ export type ChatGPTSignInStatus =
   | { status: 'failed'; error: string; code: string };
 
 export const api = {
+  // POST /api/captures — file the screen on show for agents to read.
+  captureScreen: (body: {
+    surface: 'phone';
+    route: string;
+    viewport: { width: number; height: number };
+    png: string;
+  }) => request<{ id: string }>('/api/captures', { method: 'POST', body }),
   getNotifications: () => request<NotificationsResponse>('/api/notifications'),
   markNotificationsRead: (target: { ids: string[] } | { all: true }) =>
     request<NotificationsResponse>('/api/notifications/read', { method: 'POST', body: target }),
