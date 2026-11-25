@@ -67,17 +67,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # gh api now and then returns a truncated body ("unexpected end of JSON
+          # input"). Retry a few times; a call that keeps failing still fails the job.
+          api() {
+            for attempt in 1 2 3 4 5; do
+              gh api "$@" && return 0
+              echo "gh api failed (attempt $attempt of 5)" >&2
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
           superseded() {
             # The newest test.yml run for this commit was cancelled, and main has moved on.
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=20" \
+            run=$(api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=20" \
               --jq '.workflow_runs | sort_by(.id) | last | if . == null then "none" else .status + "/" + (.conclusion // "") end')
             [ "$run" = completed/cancelled ] || return 1
-            tip=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+            tip=$(api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
             [ "$tip" != "$GITHUB_SHA" ]
           }
           while true; do
             # The newest check run named "tests" on this commit (a re-run adds a new one).
-            state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            state=$(api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
               --jq '[.check_runs[] | select(.name == "tests")] | sort_by(.id) | last | if . == null then "missing" elif .status != "completed" then "running" else .conclusion end')
             echo "tests for $GITHUB_SHA: $state"
             case "$state" in
