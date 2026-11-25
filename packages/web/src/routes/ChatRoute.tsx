@@ -114,6 +114,7 @@ import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { copyImageToClipboard } from '../lib/copyImage.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useToolsStore } from '../stores/toolsStore.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
@@ -3999,6 +4000,28 @@ function TurnStopMarker({
   );
 }
 
+/** Copies the image at `url` to the clipboard; the outcome shows as a notice or an error. */
+function CopyImageButton({ url, className }: { url: string; className: string }): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={className}
+      data-testid="copy-image"
+      aria-label="Copy image"
+      title="Copy image"
+      onClick={(e) => {
+        e.stopPropagation();
+        copyImageToClipboard(url).then(
+          () => useUiStore.getState().pushNotice('Image copied'),
+          (err: Error) => useUiStore.getState().pushError('copy failed', undefined, err.message),
+        );
+      }}
+    >
+      <Copy size={14} aria-hidden />
+    </button>
+  );
+}
+
 function MessageCopyButton({ text }: { text: string }): JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<number | undefined>(undefined);
@@ -4263,16 +4286,18 @@ function MessageAttachments({
         if (att.kind === 'image') {
           const url = 'id' in att ? served! : att.url!;
           return (
-            <button
-              key={itemKey}
-              type="button"
-              className="msg-attachment-img-btn"
-              data-testid="msg-attachment-img"
-              aria-label={`View ${att.name}`}
-              onClick={() => setLightbox({ url, alt: att.name })}
-            >
-              <img className="msg-attachment-img" src={thumbUrl(url)} alt={att.name} />
-            </button>
+            <span key={itemKey} className="msg-attachment-img-wrap">
+              <button
+                type="button"
+                className="msg-attachment-img-btn"
+                data-testid="msg-attachment-img"
+                aria-label={`View ${att.name}`}
+                onClick={() => setLightbox({ url, alt: att.name })}
+              >
+                <img className="msg-attachment-img" src={thumbUrl(url)} alt={att.name} />
+              </button>
+              <CopyImageButton url={url} className="img-copy-overlay" />
+            </span>
           );
         }
         return (
@@ -5896,6 +5921,9 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
             {view.name}
           </button>
         )}
+        {isImage ? (
+          <CopyImageButton url={view.url} className="view-file-download view-file-copy" />
+        ) : null}
         <a
           className="view-file-open"
           href={view.url}

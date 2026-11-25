@@ -10,6 +10,7 @@ import { MemoryRouter, Routes, Route, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { api, ApiError, type ChatSummaryRow } from '../api/rest.js';
+import * as copyImage from '../lib/copyImage.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
@@ -3393,6 +3394,46 @@ describe('ChatRoute regression', () => {
     expect(lightbox.querySelector('img')?.getAttribute('src')).toBe(
       '/api/chats/c-view-file-img/artifact/abc123',
     );
+  });
+
+  it('copies a view_file image straight from the card', async () => {
+    const copy = vi.spyOn(copyImage, 'copyImageToClipboard').mockResolvedValue();
+    seedChat('c-view-file-copy', [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'v1',
+        toolArgs: { file_path: 'shot.png' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'v1',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'image',
+                url: '/api/chats/c-view-file-copy/artifact/abc123',
+                name: 'shot.png',
+              }),
+            },
+          ],
+        },
+        at: 1,
+      },
+    ]);
+    renderChat('c-view-file-copy');
+    fireEvent.click(screen.getByTestId('copy-image'));
+    await waitFor(() =>
+      expect(copy).toHaveBeenCalledWith('/api/chats/c-view-file-copy/artifact/abc123'),
+    );
+    expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument();
   });
 
   // The regression this exists to stop: agents batch their calls, so a
