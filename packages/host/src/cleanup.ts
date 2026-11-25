@@ -13,6 +13,7 @@ import { statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
+import { isInsideGitWorkTree } from './git-presence.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -42,6 +43,9 @@ export interface AgentWorktree {
  * pruned first so they do not show up as failed checks.
  */
 export async function listAgentWorktrees(folder: string): Promise<AgentWorktree[]> {
+  // Ask the disk first: on a Mac without the developer tools, running git at
+  // all raises the system install dialog.
+  if (!isInsideGitWorkTree(folder)) throw new Error('not a git work tree');
   const common = (
     await git(folder, ['rev-parse', '--path-format=absolute', '--git-common-dir'])
   ).trim();
