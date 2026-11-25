@@ -12,7 +12,14 @@ vi.mock('../api/rest.js', () => ({ api: { askDone: vi.fn(async () => ({ ok: true
 function seed(statusKind: 'question' | null, statusSummary: string | null, declared: boolean) {
   useChatStore.setState({
     chats: {
-      c1: { chatId: 'c1', statusKind, statusSummary, statusDeclared: declared },
+      c1: {
+        chatId: 'c1',
+        statusKind,
+        statusSummary,
+        statusDeclared: declared,
+        chatStatus: { state: 'waiting_for_user' },
+        pendingPermissions: [],
+      },
     } as never,
   });
 }
