@@ -426,4 +426,37 @@ describe('agent message rows', () => {
     expect(send && send.kind === 'entry' ? send.result?.seq : null).toBe(4);
     expect(rows.filter((r) => r.kind === 'entry' && r.entry.seq === 4)).toHaveLength(0);
   });
+  it('merges one message sent to several chats into a single row naming each', () => {
+    const call = (seq: number, callId: string, chatId: string): ChatEventEntry =>
+      ({
+        seq,
+        kind: 'tool_call',
+        tool: 'mcp__patch__patch_send_to',
+        callId,
+        toolArgs: { chatId, message: 'Run the batch' },
+        at: seq,
+      }) as ChatEventEntry;
+    const result = (seq: number, callId: string): ChatEventEntry =>
+      ({
+        seq,
+        kind: 'tool_result',
+        tool: 'mcp__patch__patch_send_to',
+        callId,
+        at: seq,
+      }) as ChatEventEntry;
+    const rows = groupToolRuns([
+      call(1, 'a', 'c-a'),
+      call(2, 'b', 'c-b'),
+      call(3, 'c', 'c-c'),
+      result(4, 'a'),
+      result(5, 'b'),
+      result(6, 'c'),
+    ]);
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.kind === 'entry' ? row.sendTargets?.map((t) => t.chatId) : null).toEqual([
+      'c-b',
+      'c-c',
+    ]);
+  });
 });

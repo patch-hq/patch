@@ -738,6 +738,41 @@ describe('ChatRoute regression', () => {
       );
     }
 
+    it('groups one message sent to several chats into a single card naming each', () => {
+      const call = (seq: number, id: string, chatId: string) => ({
+        seq,
+        kind: 'tool_call' as const,
+        tool: 'mcp__patch__patch_send_to',
+        callId: id,
+        toolArgs: { chatId, message: 'Run the batch' },
+        at: seq,
+      });
+      const result = (seq: number, id: string) => ({
+        seq,
+        kind: 'tool_result' as const,
+        callId: id,
+        tool: 'mcp__patch__patch_send_to',
+        toolResult: { ok: true, queued: true },
+        at: seq,
+      });
+      seedChat('c-agents', [
+        call(1, 'k1', 'c-a'),
+        call(2, 'k2', 'c-b'),
+        call(3, 'k3', 'c-c'),
+        result(4, 'k1'),
+        result(5, 'k2'),
+        result(6, 'k3'),
+      ]);
+      nameChat('c-a', 'Batch A');
+      nameChat('c-b', 'Batch B');
+      nameChat('c-c', 'Batch C');
+      renderWithChatPage('c-agents');
+      const cards = screen.getAllByTestId('agent-msg-sent');
+      expect(cards).toHaveLength(1);
+      expect(cards[0]!.textContent).toContain('Sent to 3 agents:');
+      for (const n of ['Batch A', 'Batch B', 'Batch C']) expect(cards[0]!.textContent).toContain(n);
+    });
+
     it('draws a patch_send_to as one "Sent to" card that opens the target chat', () => {
       seedChat('c-agents', [
         {

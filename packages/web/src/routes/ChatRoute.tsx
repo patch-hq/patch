@@ -2307,6 +2307,31 @@ export function ChatRoute({
       viewFileResult.set(k, found);
       usedByViewFile.add(j);
     }
+    // The same message sent to several chats is one card naming them all, not
+    // one full card per chat. Only sends separated by nothing but other sends'
+    // calls and results merge (a parallel batch); the followers' calls are
+    // skipped here and their results are already in `usedByViewFile`.
+    const mergedSends = new Set<number>();
+    const sendGroups = new Map<number, { chatId: string; failed: boolean }[]>();
+    for (let k = from; k < to; k++) {
+      const first = timeline[k];
+      if (!first || mergedSends.has(k) || paging.hidden.has(k) || !viewFileResult.has(k)) continue;
+      const head = first.kind === 'tool_call' ? sendToCall(first.tool, first.toolArgs) : null;
+      if (!head) continue;
+      const others: { chatId: string; failed: boolean }[] = [];
+      for (let j = k + 1; j < to; j++) {
+        const e = timeline[j];
+        if (!e || paging.hidden.has(j)) break;
+        if (e.kind === 'tool_result') continue;
+        const t = e.kind === 'tool_call' ? sendToCall(e.tool, e.toolArgs) : null;
+        if (!t || t.message !== head.message || !viewFileResult.has(j)) break;
+        if (t.chatId !== head.chatId && !others.some((o) => o.chatId === t.chatId)) {
+          others.push({ chatId: t.chatId, failed: viewFileResult.get(j)?.toolIsError === true });
+        }
+        mergedSends.add(j);
+      }
+      if (others.length > 0) sendGroups.set(k, others);
+    }
     let i = from;
     while (i < to) {
       const entry = timeline[i];
@@ -2337,7 +2362,7 @@ export function ChatRoute({
         }
       }
       // Already drawn inside the file's own row above.
-      if (usedByViewFile.has(i)) {
+      if (usedByViewFile.has(i) || mergedSends.has(i)) {
         i++;
         continue;
       }
@@ -2351,8 +2376,20 @@ export function ChatRoute({
       // on screen unconditionally, next to other calls or not.
       const ownResult = viewFileResult.get(i);
       if (ownResult) {
+        const group = sendGroups.get(i);
+        const head = group ? sendToCall(entry.tool, entry.toolArgs) : null;
         out.push(
-          <ToolCall key={`${entry.seq}-${i}`} entry={entry} result={ownResult} chatId={chatId} />,
+          group && head ? (
+            <SentToCard
+              key={`${entry.seq}-${i}`}
+              chatId={head.chatId}
+              message={head.message}
+              extraTargets={group}
+              {...(ownResult.toolIsError ? { failed: true } : {})}
+            />
+          ) : (
+            <ToolCall key={`${entry.seq}-${i}`} entry={entry} result={ownResult} chatId={chatId} />
+          ),
         );
         i++;
         continue;
@@ -6647,10 +6684,12 @@ function SentToCard({
   chatId,
   message,
   failed,
+  extraTargets,
 }: {
   chatId: string;
   message: string;
   failed?: boolean;
+  extraTargets?: { chatId: string; failed: boolean }[];
 }): JSX.Element {
   const name = useChatName(chatId);
   return (
@@ -6660,6 +6699,7 @@ function SentToCard({
       chatId={chatId}
       text={message}
       {...(failed ? { status: 'Not sent' } : {})}
+      {...(extraTargets ? { extraTargets } : {})}
     />
   );
 }

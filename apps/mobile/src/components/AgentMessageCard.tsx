@@ -26,6 +26,7 @@ export function AgentMessageCard({
   text,
   status,
   testID,
+  extraTargets,
 }: {
   direction: AgentMessageDirection;
   /** Who is on the other side: a chat's name, "agent", a side thread's name. */
@@ -36,9 +37,12 @@ export function AgentMessageCard({
   /** A short state beside the label ("Waiting"), when the exchange is open. */
   status?: string;
   testID?: string;
+  /** The same message went to these chats too: one card names them all. */
+  extraTargets?: { chatId: string; failed?: boolean }[];
 }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
+  const many = extraTargets !== undefined && extraTargets.length > 0;
   return (
     <View
       testID={testID ?? `agent-msg-${direction}`}
@@ -53,9 +57,13 @@ export function AgentMessageCard({
         gap: space.xs,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
         <Text style={{ fontSize: textMin, color: colors.ink3 }}>
-          {direction === 'sent' ? 'Sent to' : 'From'}
+          {many
+            ? `Sent to ${extraTargets.length + 1} agents:`
+            : direction === 'sent'
+              ? 'Sent to'
+              : 'From'}
         </Text>
         {chatId ? (
           <Pressable
@@ -86,6 +94,11 @@ export function AgentMessageCard({
             {name}
           </Text>
         )}
+        {many
+          ? extraTargets.map((t) => (
+              <ExtraTarget key={t.chatId} chatId={t.chatId} failed={t.failed === true} />
+            ))
+          : null}
         {status ? (
           <Text
             testID="agent-msg-status"
@@ -99,6 +112,29 @@ export function AgentMessageCard({
         <ChatMarkdown content={text} color={colors.ink} />
       </View>
     </View>
+  );
+}
+
+function ExtraTarget({ chatId, failed }: { chatId: string; failed: boolean }): React.ReactElement {
+  const colors = useTheme();
+  const router = useRouter();
+  const name = useChatName(chatId);
+  return (
+    <Pressable
+      testID="agent-msg-target"
+      accessibilityRole="link"
+      accessibilityLabel={`Open ${name}`}
+      onPress={() => router.push(`/chats/${chatId}` as Href)}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 1 }}
+    >
+      <Text
+        numberOfLines={1}
+        style={{ fontSize: textMin, fontWeight: '600', color: colors.leafSoft, flexShrink: 1 }}
+      >
+        {failed ? `${name} (not sent)` : name}
+      </Text>
+      <ArrowUpRight size={13} color={colors.leafSoft} />
+    </Pressable>
   );
 }
 
