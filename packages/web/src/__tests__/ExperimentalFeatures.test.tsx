@@ -33,6 +33,11 @@ describe('Experimental features — settings', () => {
     expect(visibleSettingsPages(true).map((p) => p.id)).toContain('voice');
   });
 
+  it('hides the Computer use page while off, and shows it when on', () => {
+    expect(visibleSettingsPages(false).map((p) => p.id)).not.toContain('computer');
+    expect(visibleSettingsPages(true).map((p) => p.id)).toContain('computer');
+  });
+
   it('the page toggle writes experimentalFeatures through to the server', async () => {
     const patches: unknown[] = [];
     vi.stubGlobal(
