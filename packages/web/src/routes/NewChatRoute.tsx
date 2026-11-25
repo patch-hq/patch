@@ -25,7 +25,6 @@ import {
   compactModelLabel,
   providerForModel,
   lockableAccounts,
-  accountKindForModel,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ApiError } from '../api/rest.js';
@@ -52,7 +51,6 @@ import { startMeeting } from '../lib/meetingControl.js';
 import { sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
-import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
@@ -60,8 +58,6 @@ import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { FirstRunIntro } from '../components/FirstRunIntro.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
-import { UsageCrumb } from '../components/UsageCrumb.js';
-import { accountRows } from '../components/UsagePopover.js';
 import { Edit3 } from 'lucide-react';
 import { loadModels, useModelCatalog } from '../lib/models.js';
 import { creditDefaultAccountId, modelSpent, modelSpentReason, useCredit } from '../lib/credit.js';
@@ -635,28 +631,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       setPreferredAccountId(null);
     }
   }, [preferableAccounts, preferredAccountId]);
-  // Usage crumb (spec/14 §8 New-chat setup row) — account-level, not
-  // chat-level, so it reads exactly as it will once the chat exists: the SAME
-  // account `chosenAccount` already resolved above for the sign-in check, on
-  // the backend the chosen model actually runs against. An OpenAI API key has
-  // no rate limits to draw (matches the exclusion the context ring uses
-  // elsewhere). It is the one usage readout left on this header: a live
-  // chat's header carries none at all now (its composer's context ring covers
-  // it instead), but there is no chat yet here for a ring to measure.
-  //
-  // The reading is the one for the account the chat will draw on — the one
-  // picked, else the host's active one — read from the shared account rows,
-  // the same source the usage cards beneath use. The host-level `usage` is
-  // only whichever account the host happens to have active, so a spent
-  // account there showed "weekly limit" while the account picked had headroom.
-  const sharedForUsage = usePreferencesStore((st) => st.shared);
+  // The account the chat will draw on: the one picked, else the host's active one.
   const usedAccountId = preferredAccountId ?? chosenAccount?.activeAccountId ?? null;
-  const usedRow = accountRows(presenceHosts, sharedForUsage).find(
-    (r) => r.providerId === effectiveProvider && r.accountId === usedAccountId,
-  );
-  const usageSummary = summariseUsage(
-    accountKindForModel(effectiveModel) === 'apiKey' ? undefined : usedRow?.usage,
-  );
   // The models offered as chips in the Model row (spec/14 §8): the account
   // default first — marked as such — then the head of the catalogue
   // (newest-first), in the catalogue's own order. Fixed, like the projects:
@@ -1728,7 +1704,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             it. */}
         <div className="chat-head-left">
           <NavHistoryControls />
-          {usageSummary ? <UsageCrumb summary={usageSummary} context={null} /> : null}
         </div>
         {/* Centre: the "New chat" title, on the same centred zone as a live
             chat's header. No folder/host crumb yet — the folder isn't chosen

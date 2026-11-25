@@ -69,7 +69,8 @@ export function guideItemText(
   return item;
 }
 
-export const GUIDE_PURPOSE = 'Patch runs your coding agents, on this machine or any other.';
+export const GUIDE_PURPOSE =
+  'Patch lets you work with AI assistants from your computer or your phone.';
 
 export const GUIDE_ITEMS: readonly GuideItem[] = [
   {

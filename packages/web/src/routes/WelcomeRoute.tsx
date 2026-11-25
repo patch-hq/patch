@@ -603,15 +603,10 @@ function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
     <section className="welcome-step" data-testid="welcome-keep-running">
       <h1>Keep Patch running</h1>
       <p className="welcome-lead" data-testid="welcome-keep-running-why">
-        Patch runs your agents on this computer, in the background. macOS may have just told you so
-        with an “App Background Activity” notice. That was Patch, and your phone needs it running to
-        reach this computer.
+        Patch runs your agents on this computer, in the background. macOS may show an “App
+        Background Activity” notice. That is Patch, and your phone needs it running to reach this
+        computer.
       </p>
-      {state?.canOpenAtLogin ? (
-        <p className="welcome-note" data-testid="welcome-login-notice">
-          macOS will show a notice that Patch can run in the background. That is this setting.
-        </p>
-      ) : null}
       {draft === null && !error ? (
         <p className="welcome-note" role="status" data-testid="welcome-keep-running-loading">
           Loading…
