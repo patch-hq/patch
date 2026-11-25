@@ -74,6 +74,7 @@ import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { SideThreadsPanel } from './SideThreadsPanel.js';
 import { FileEditorTab } from './FileEditorTab.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { FilesPage } from './FilesPage.js';
 import { HostFilesPage } from './HostFilesPage.js';
 import { JobsRoute } from '../routes/JobsRoute.js';
@@ -83,6 +84,7 @@ import { TerminalPanel } from './TerminalPanel.js';
 import { BrowserView } from './BrowserView.js';
 import { TriagePage } from './TriagePage.js';
 import { InboxPage } from './InboxPage.js';
+import { WaitingPage } from './WaitingPage.js';
 import { PadsPage } from './PadsPage.js';
 import { PadPane } from './PadPane.js';
 import { NewPadPage } from './NewPadPage.js';
@@ -177,6 +179,8 @@ function tabTitle(
           return 'Triage';
         case 'inbox':
           return 'Inbox';
+        case 'waiting':
+          return 'Waiting';
         case 'pad':
           return padName ?? 'Pad';
         case 'new-pad':
@@ -222,6 +226,7 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
           return <Files size={16} aria-hidden />;
         case 'triage':
         case 'inbox':
+        case 'waiting':
         case 'pads':
         case 'pad':
         case 'new-pad':
@@ -784,6 +789,8 @@ function TabContent({
           return <TriagePage ws={ws} />;
         case 'inbox':
           return <InboxPage />;
+        case 'waiting':
+          return <WaitingPage />;
         case 'pad':
           return <PadPane padId={d.padId} />;
         case 'new-pad':
@@ -1076,6 +1083,7 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
   const chats = useChatStore((s) => s.chats);
   const timeline = useChatStore((s) => (chatId ? s.timelines[chatId] : undefined));
   const pads = usePadsStore((s) => s.pads);
+  const experimental = useExperimentalFeatures();
   return useMemo(() => {
     if (!open) return [];
     const openTab = (d: TabDescriptor) => (): void => {
@@ -1099,8 +1107,12 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
       const here = chatTitle(chatId, chats[chatId]?.name);
       out.push(
         tab('new-chat', 'Chat', { kind: 'chat', chatId }, here),
-        tab('new-terminal', 'Terminal', { kind: 'terminal', chatId }, here),
-        tab('new-files', 'Files', { kind: 'page', page: 'files', chatId }, here),
+        ...(experimental
+          ? [
+              tab('new-terminal', 'Terminal', { kind: 'terminal', chatId }, here),
+              tab('new-files', 'Files', { kind: 'page', page: 'files', chatId }, here),
+            ]
+          : []),
         tab('new-browser', 'Browser', { kind: 'browser', chatId }, here),
       );
       const seen = new Set<string>();
@@ -1147,13 +1159,14 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
     }
     out.push(
       tab('new-triage', 'Triage', { kind: 'page', page: 'triage' }, 'Pages'),
+      tab('new-waiting', 'Waiting', { kind: 'page', page: 'waiting' }, 'Pages'),
       tab('new-inbox', 'Inbox', { kind: 'page', page: 'inbox' }, 'Pages'),
       tab('new-pads', 'Pads', { kind: 'page', page: 'pads' }, 'Pages'),
       tab('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }, 'Pages'),
       tab('new-settings', 'Settings', { kind: 'page', page: 'settings' }, 'Pages'),
     );
     return out;
-  }, [open, chatId, chats, timeline, pads, group.id, paneId]);
+  }, [open, chatId, chats, timeline, pads, group.id, paneId, experimental]);
 }
 
 /** A chat's status badge for a menu row. */

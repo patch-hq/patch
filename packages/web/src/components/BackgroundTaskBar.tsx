@@ -30,6 +30,7 @@ import type { WatchTaskRow } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import {
@@ -124,6 +125,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
   const showAll = useUiStore((s) => s.backgroundTasksShowAll);
   const setShowAll = useUiStore((s) => s.setBackgroundTasksShowAll);
   const queuePending = useTerminalStore((s) => s.queuePending);
+  const experimental = useExperimentalFeatures();
   const [killing, setKilling] = useState<Set<string>>(new Set());
   const [editingCheckIn, setEditingCheckIn] = useState<string | null>(null);
   const [checkInMinutes, setCheckInMinutes] = useState('60');
@@ -234,7 +236,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
           className={`${ended ? 'status-row-ended' : ''} ${nested ? '' : 'status-row-solo'}`}
           testId="background-task-bar-task"
           data-ended={ended ? 'true' : 'false'}
-          onActivate={() => showTask(task)}
+          onActivate={experimental ? () => showTask(task) : undefined}
           activateLabel={label}
           meta={
             ended ? null : (
