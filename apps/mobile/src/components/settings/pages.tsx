@@ -196,7 +196,7 @@ export function settingsPage(id: string): SettingsPageEntry | null {
 }
 
 /** Pages that only exist while Settings → Experimental features is on. */
-export const EXPERIMENTAL_PAGE_IDS: readonly string[] = ['manager', 'voice'];
+export const EXPERIMENTAL_PAGE_IDS: readonly string[] = ['manager', 'voice', 'computer'];
 
 export function visibleSettingsPages(experimental: boolean): readonly SettingsPageEntry[] {
   return SETTINGS_PAGES.filter((p) => experimental || !EXPERIMENTAL_PAGE_IDS.includes(p.id));
