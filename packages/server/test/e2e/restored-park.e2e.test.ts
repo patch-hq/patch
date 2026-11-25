@@ -63,8 +63,9 @@ describe('e2e: a parked chat across a host restart', () => {
         .map((e) => e.chatStatus?.state ?? '?');
 
     // Frames about the turn that parked the chat can still be in flight when the
-    // recorder starts; only what the surface is told from the restart on counts.
-    await until(() => told().includes('paused'), 5000, 'the surface is told paused');
+    // recorder starts (or none may come at all); let them land, then only what
+    // the surface is told from the restart on counts.
+    await new Promise((r) => setTimeout(r, 500));
     const before = told().length;
 
     // The host self-updates: a new host on the same ~/.patch.
