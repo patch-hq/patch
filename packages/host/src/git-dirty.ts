@@ -8,6 +8,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isInsideGitWorkTree } from './git-presence.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +66,7 @@ export function invalidateGitDirtyCache(root: string): void {
 
 async function computeGitDirtyPaths(root: string): Promise<Set<string>> {
   const out = new Set<string>();
+  if (!isInsideGitWorkTree(root)) return out;
   try {
     const [{ stdout: raw }, { stdout: prefixOut }] = await Promise.all([
       execFileAsync('git', ['status', '--porcelain', '-z', '--untracked-files=all'], {

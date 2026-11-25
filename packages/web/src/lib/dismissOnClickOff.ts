@@ -39,6 +39,10 @@ export function useDismissOnClickOff(
 
   useEffect(() => {
     if (!open) return;
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') latest.current.onDismiss();
+    }
+    document.addEventListener('keydown', onKeyDown);
     function onPointerDown(e: PointerEvent): void {
       // An event that reaches a listener on `document` was dispatched at a node
       // inside this document, so `target` is always a Node here — no defensive
@@ -49,6 +53,9 @@ export function useDismissOnClickOff(
       dismiss();
     }
     document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, [open]);
 }

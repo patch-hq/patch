@@ -108,6 +108,9 @@ export function TooltipHost(): JSX.Element | null {
       const el = target instanceof Element ? target : null;
       const source = el?.closest<HTMLElement>('[title]') ?? null;
       if (!source || source === sourceRef.current) return;
+      // A control whose pop-up is open owns the space beside it: a tooltip there
+      // would cover the pop-up's options.
+      if (source.getAttribute('aria-expanded') === 'true') return;
       // Moving straight from one `[title]` element into a NESTED one (e.g. a
       // sidebar row naming itself, around icon buttons that each name
       // themselves) skips the outer element's own mouseout/focusout — its
@@ -171,6 +174,9 @@ export function TooltipHost(): JSX.Element | null {
     function onKeyDown(e: KeyboardEvent): void {
       if (e.key === 'Escape') hide(sourceRef.current);
     }
+    function onPointerDown(): void {
+      hide(sourceRef.current);
+    }
 
     document.addEventListener('mouseover', onMouseOver);
     document.addEventListener('mouseout', onMouseOut);
@@ -178,6 +184,7 @@ export function TooltipHost(): JSX.Element | null {
     document.addEventListener('focusout', onFocusOut);
     document.addEventListener('scroll', onScroll, true);
     document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
     return () => {
       document.removeEventListener('mouseover', onMouseOver);
       document.removeEventListener('mouseout', onMouseOut);
@@ -185,6 +192,7 @@ export function TooltipHost(): JSX.Element | null {
       document.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
       clearTimer();
       // A control could unmount mid-hover (e.g. the row it names is removed
       // from the list); its `title` must not stay lost.
@@ -241,10 +249,15 @@ export function TooltipHost(): JSX.Element | null {
     );
     const size = bubble.getBoundingClientRect();
     setPos(
-      computeTooltipPosition(trigger, size, {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      }, windowControlsZone()),
+      computeTooltipPosition(
+        trigger,
+        size,
+        {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        },
+        windowControlsZone(),
+      ),
     );
   }, [shown]);
 

@@ -4588,13 +4588,26 @@ function ToolCall({
           <ToolFields value={entry.toolArgs} />
           {result ? (
             <div className="tool-result-inline" data-testid="tool-call-result">
-              <ToolFields value={result.toolResult} />
+              {isFileWriteTool(entry.tool) && !result.toolIsError ? (
+                // The tool's own reply is addressed to the model ("no need to
+                // Read it back"); a person gets the outcome. Errors stay raw.
+                <span className="tool-field-scalar">
+                  {typeof args['file_path'] === 'string' ? `Saved ${args['file_path']}` : 'Saved'}
+                </span>
+              ) : (
+                <ToolFields value={result.toolResult} />
+              )}
             </div>
           ) : null}
         </>
       }
     />
   );
+}
+
+/** Tools whose successful reply is an instruction to the model, not information. */
+function isFileWriteTool(tool: string | undefined): boolean {
+  return tool === 'Write' || tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit';
 }
 
 /**

@@ -241,6 +241,8 @@ describe('listFilesRecursive — git failures are not swallowed', () => {
   it('rejects when git is missing from PATH instead of walking manually', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'patch-rec-nogit-')));
     writeFileSync(join(root, 'a.ts'), 'x\n');
+    // A work tree (so git is wanted); a folder with no .git never starts git.
+    mkdirSync(join(root, '.git'));
     const oldPath = process.env.PATH;
     process.env.PATH = '';
     try {

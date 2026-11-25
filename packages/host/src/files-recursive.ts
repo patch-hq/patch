@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { isInsideGitWorkTree } from './git-presence.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -92,6 +93,7 @@ function listFilesManual(root: string, cap: number): RecursiveFileEntry[] {
  * failure mode of git itself is not swallowed here.
  */
 async function listFilesViaGit(root: string, cap: number): Promise<RecursiveFileEntry[] | null> {
+  if (!isInsideGitWorkTree(root)) return null;
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
