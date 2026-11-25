@@ -14,7 +14,12 @@ import { getDesktopBridge } from '../lib/desktopBridge.js';
 // With `hostId` the banner is scoped to that one host (a chat on it): it
 // shows whenever THAT host is down, even while another is up, and names it.
 // Without, it is the app-level banner for every host being offline.
-export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Element | null {
+// `newChat` is the new-chat screen: no chat exists yet for a message to wait in,
+// so it must not promise one is queued.
+export function HostOfflineBanner({
+  hostId,
+  newChat = false,
+}: { hostId?: string; newChat?: boolean } = {}): JSX.Element | null {
   const connection = usePresenceStore((s) => s.connection);
   const hostOnline = usePresenceStore((s) =>
     hostId === undefined ? s.hostOnline : (s.hosts[hostId]?.online ?? true),
@@ -57,9 +62,11 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
       <span>
         {updating
           ? `${hostName} is being updated to ${updatingTo}. Messages to this chat are queued and sent when it is back.`
-          : hostId === undefined
-            ? 'No host is online. Messages are queued and sent when one reconnects. If the host runs on this computer, restart it.'
-            : `${describeHostOffline(hostName, offlineReason, offlineAt === null ? undefined : now - offlineAt)}. Messages to this chat are queued and sent when it reconnects.`}
+          : hostId === undefined && newChat
+            ? 'No host is online. A new chat cannot start until one reconnects.'
+            : hostId === undefined
+              ? 'No host is online. Messages are queued and sent when one reconnects. If the host runs on this computer, restart it.'
+              : `${describeHostOffline(hostName, offlineReason, offlineAt === null ? undefined : now - offlineAt)}. Messages to this chat are queued and sent when it reconnects.`}
       </span>
       {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
           overlay (spec/12 § Connection diagnostics screen). The app stays

@@ -40,6 +40,14 @@ describe('HostOfflineBanner', () => {
     );
   });
 
+  it('on the new-chat screen does not promise a queue', () => {
+    usePresenceStore.setState({ connection: 'connected', hostOnline: false });
+    render(<HostOfflineBanner newChat />);
+    expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
+      'A new chat cannot start until one reconnects.',
+    );
+  });
+
   // spec/12 § Connection diagnostics screen: the banner offers Diagnose, and
   // the app behind it stays navigable — the screen is an overlay, not a block.
   it('Diagnose opens the connection diagnostics screen', () => {
