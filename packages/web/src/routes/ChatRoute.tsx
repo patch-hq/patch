@@ -225,6 +225,11 @@ const PendingApprovalCountContext = createContext(0);
 const BlobChatIdContext = createContext<string | null>(null);
 
 /** Where a blob's bytes are served from. Immutable — the sha is the content. */
+/** A chat's name from the store, for tool rows that name another chat. */
+function chatNameOf(chatId: string): string | undefined {
+  return useChatStore.getState().chats[chatId]?.name || undefined;
+}
+
 function blobUrl(chatId: string, sha: string): string {
   return `/api/chats/${encodeURIComponent(chatId)}/blob/${sha}`;
 }
@@ -4455,7 +4460,7 @@ function ToolCall({
     ? `Editing ${String(args.file_path)}`
     : entry.tool === 'TaskStop'
       ? `Stopping task ${String(args['task_id'] ?? args['taskId'] ?? '')}`
-      : (aiLabel ?? toolCallSummary(entry.tool, entry.toolArgs));
+      : (aiLabel ?? toolCallSummary(entry.tool, entry.toolArgs, chatNameOf));
 
   // spec/14 ## Main chat panel — the agent's plan is a checklist card with a
   // marker per step, not a "Updating the todo list" row. Args that are not a
@@ -6244,7 +6249,7 @@ const ToolGroup = memo(
           <span className="tool-summary-text">{summary}</span>
           {liveCall && !open ? (
             <span className="tool-summary-latest" data-testid="tool-group-latest">
-              {toolCallSummary(liveCall.tool, liveCall.toolArgs)}
+              {toolCallSummary(liveCall.tool, liveCall.toolArgs, chatNameOf)}
             </span>
           ) : null}
           {runningCall && !open ? (
