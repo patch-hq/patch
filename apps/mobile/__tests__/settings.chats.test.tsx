@@ -116,3 +116,43 @@ describe('mobile Settings → Chats — Account for titles and status', () => {
     expect(gone.props.accessibilityLabel).toContain('gone (not held)');
   });
 });
+
+describe('mobile Settings → Chats — Models for small jobs', () => {
+  async function mount() {
+    seedSettings({ preferences: { ...DEFAULT_SHARED_SETTINGS, smallJobModels: ['m1', 'm2'] } });
+    vi.mocked(api.setPreferences).mockImplementation(async (patch) => ({
+      preferences: { ...DEFAULT_SHARED_SETTINGS, ...patch },
+    }));
+    const r = renderRN(<ChatsPage />);
+    mounted.push(r);
+    await flush();
+    return findHost(r.root, byTestId('small-job-models-input'));
+  }
+
+  it('shows the saved order and writes an edited list on blur', async () => {
+    const field = await mount();
+    expect(field.props.value).toBe('m1, m2');
+    await actAsync(async () => {
+      field.props.onChangeText('m2, m1');
+      await flush();
+    });
+    await actAsync(async () => {
+      findHost(mounted[0]!.root, byTestId('small-job-models-input')).props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ smallJobModels: ['m2', 'm1'] });
+  });
+
+  it('refuses a repeated model and does not write', async () => {
+    const field = await mount();
+    await actAsync(async () => {
+      field.props.onChangeText('m1, m1');
+      await flush();
+    });
+    await actAsync(async () => {
+      findHost(mounted[0]!.root, byTestId('small-job-models-input')).props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).not.toHaveBeenCalled();
+  });
+});

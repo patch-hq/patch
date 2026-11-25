@@ -31,7 +31,7 @@ import {
   type DictationEngine,
   type MeetingEngine,
 } from '@patch/wire/audio';
-import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
+import { DICTATION_PAUSE_CHOICES, SpeechBackendSetting } from '@patch/wire';
 type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
 import { OptionPicker } from '../OptionPicker';
 import { SettingsSection } from '../SettingsSection';
@@ -250,11 +250,36 @@ export function voiceCellStatus(backend: VoiceBackend, layer?: VoiceLayer): stri
   return null;
 }
 
+const HOST_SPEECH_LABELS: Record<SpeechBackendSetting, string> = {
+  auto: 'Automatic',
+  off: 'Off',
+  groq: 'Groq',
+  elevenlabs: 'ElevenLabs',
+  local: 'Local',
+  parakeet: 'Parakeet',
+};
+
 export function DictationPage(): React.ReactElement {
   return (
     <SettingsPage title="Dictation" testID="settings-page-dictation">
       <SettingsSection title="Engine" testID="settings-voice-dictation-engines">
         <DictationEngines />
+      </SettingsSection>
+      <SettingsSection title="Host transcription" testID="settings-host-speech">
+        <WithSettings testID="host-speech">
+          {(data) => (
+            <Row title="Hosts transcribe with" testID="host-speech-row" stack>
+              <Chips
+                options={SpeechBackendSetting.options}
+                selected={data.preferences.speechBackend}
+                testIDPrefix="host-speech"
+                labelPrefix="Hosts transcribe with"
+                labelOf={(b) => HOST_SPEECH_LABELS[b]}
+                onSelect={(b) => void patchShared('Speech engine', { speechBackend: b })}
+              />
+            </Row>
+          )}
+        </WithSettings>
       </SettingsSection>
       <SettingsSection title="When to send" testID="settings-voice-dictation">
         <WithSettings testID="voice-dictation">

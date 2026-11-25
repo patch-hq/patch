@@ -3,15 +3,62 @@
 // is why they are switches; neither is about an account or a limit, which is
 // why they are not on Usage. Shared settings (spec/01 § Settings).
 
-import type { JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { CHAT_SORTS, type GroupSort } from '../../lib/chatGroups.js';
-import { accountsForBackend, BACKGROUND_ACCOUNT_AUTO, DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
+import {
+  accountsForBackend,
+  BACKGROUND_ACCOUNT_AUTO,
+  DEFAULT_CLEANUP_PERIOD_DAYS,
+  parseSmallJobModels,
+} from '@patch/wire';
 import { patchShared } from './sharedWrite.js';
 import { hourLabel } from '../../lib/snoozePresets.js';
 import { Group, Row, SettingsPage } from './ui.js';
+
+/**
+ * The models the small one-shot jobs run on, set model first (spec/02 § Small
+ * jobs). Committed on Enter or blur; a list the wire refuses is said and the
+ * field goes back to what is saved.
+ */
+function SmallJobModelsRow(): JSX.Element {
+  const saved = usePreferencesStore((s) => s.preferences.smallJobModels);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const pushError = useUiStore((s) => s.pushError);
+  const text = saved.join(', ');
+  const [draft, setDraft] = useState(text);
+  useEffect(() => setDraft(text), [text]);
+  function commit(): void {
+    if (draft.trim() === text) return;
+    const parsed = parseSmallJobModels(draft);
+    if ('error' in parsed) {
+      pushError(`small-job models: ${parsed.error}`);
+      setDraft(text);
+      return;
+    }
+    void patchShared('small-job models', { smallJobModels: parsed.models }).then((ok) => {
+      if (!ok) setDraft(text);
+    });
+  }
+  return (
+    <Row title="Models for small jobs" testid="small-job-models">
+      <input
+        type="text"
+        aria-label="Models for small jobs"
+        value={draft}
+        disabled={!loaded}
+        data-testid="small-job-models-input"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+      />
+    </Row>
+  );
+}
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
@@ -75,6 +122,7 @@ export function ChatsPage(): JSX.Element {
             ))}
           </select>
         </Row>
+        <SmallJobModelsRow />
       </Group>
       <Group label="Cleanup" testid="settings-cleanup">
         <Row title="Never delete chats or agent worktrees" testid="cleanup-never">
