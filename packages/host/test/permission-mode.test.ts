@@ -25,6 +25,7 @@ const silent = pino({ level: 'silent' });
 function setup(
   opts: {
     permissionModeDefault?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'auto';
+    token?: string;
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), 'patch-perm-'));
@@ -38,7 +39,7 @@ function setup(
     hostId: 'd1',
     metaStore,
     sdkBackend: sdk,
-    oauthAccessToken: 'fake-token',
+    oauthAccessToken: opts.token ?? 'fake-token',
     emit: (e) => events.push(e),
     logger: silent,
     now: () => 1_700_000_000_000,
@@ -320,6 +321,19 @@ describe('permission mode: degraded to fit the model, out loud', () => {
     const { daemon, folder } = setup({ permissionModeDefault: 'auto' });
     const chatId = await daemon.spawnChat({ folder, model: 'claude-haiku-4-5-20251001' });
     await daemon.sendInput({ chatId, message: 'go' });
+    expect(daemon.chatPermissionMode(chatId)).toBe('auto');
+  });
+
+  it('runs `auto` as `default` on an API-key account, says why, and keeps the chat on auto', async () => {
+    const { daemon, sdk, folder, events } = setup({
+      permissionModeDefault: 'auto',
+      token: 'sk-ant-api03-test',
+    });
+    const chatId = await daemon.spawnChat({ folder, model: 'claude-opus-5' });
+    await daemon.sendInput({ chatId, message: 'go' });
+    expect(sdk.lastOptions()?.permissionMode).toBe('default');
+    const notice = systemMessages(events).find((c) => c.includes('API-key'));
+    expect(notice).toBeDefined();
     expect(daemon.chatPermissionMode(chatId)).toBe('auto');
   });
 });
