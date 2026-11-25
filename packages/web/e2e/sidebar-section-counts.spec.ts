@@ -56,8 +56,12 @@ test.describe('Sidebar section counts, icon row', () => {
       // Expanding the section changes nothing about the tooltip — one server
       // total, not a locally-measured one that could jump as the list loads.
       await toggle.click();
+      // The tooltip host takes a control's title while its bubble is up; move the
+      // pointer away so the title is back to be read.
+      await page.mouse.move(0, 0);
       await expect(toggle).toHaveAttribute('title', expectedTitle(id, COUNTS[id]));
       await toggle.click();
+      await page.mouse.move(0, 0);
     }
   });
 
