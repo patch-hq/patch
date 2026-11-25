@@ -54,8 +54,8 @@ export function KeepRunningGroup(): JSX.Element | null {
       </Row>
       {server ? (
         <Row
-          title="Keep Patch running in the background"
-          sub="Your phone and other devices can still reach this computer after you close the window. Turning it off stops that until you open Patch again."
+          title="Stop Patch running in the background"
+          sub="Your phone and other devices can still reach this computer after you close the window. This stops that until you open Patch again."
         >
           <button
             type="button"
@@ -66,7 +66,7 @@ export function KeepRunningGroup(): JSX.Element | null {
               void server.turnOff().catch((e: Error) => setError(e.message));
             }}
           >
-            Turn off
+            Stop until reopened
           </button>
         </Row>
       ) : null}

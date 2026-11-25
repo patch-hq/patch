@@ -1458,11 +1458,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                           like the rows beneath it, not a heading, and saying nothing
                           the heading doesn't already say. */}
                       {browse?.dir ? (
-                        <span
-                          className="folder-browser-crumb"
-                          data-testid="folder-browser-crumb"
-                          title={browse.dir}
-                        >
+                        <span className="folder-browser-crumb" data-testid="folder-browser-crumb">
                           <span className="folder-browser-crumb-name">
                             {folderName(browse.dir)}
                           </span>

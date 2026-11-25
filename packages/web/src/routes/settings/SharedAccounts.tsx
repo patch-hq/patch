@@ -86,7 +86,7 @@ export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.El
 
   return (
     <div data-testid={`accounts-${backendId}`}>
-      {rows.length > 0 ? (
+      {rows.length > 1 ? (
         <Row title="Pick the account by" testid={`strategy-row-${backendId}`}>
           <Pills
             label={`${name} account strategy`}

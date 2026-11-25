@@ -524,11 +524,13 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
 function NotificationsStep({ onNext }: { onNext: () => void }): JSX.Element {
   const ask = getDesktopBridge()?.askNotifications;
   const [error, setError] = useState<string | null>(null);
+  const [asked, setAsked] = useState(false);
   const allow = (): void => {
     if (!ask) return;
-    // macOS shows its own permission prompt now, while this explains why.
+    // macOS shows its own permission prompt now, while this explains why. It is
+    // only a banner in the corner, so wait for the person to say they answered.
     void ask()
-      .then(onNext)
+      .then(() => setAsked(true))
       .catch((e: Error) => setError(e.message));
   };
   return (
@@ -538,12 +540,24 @@ function NotificationsStep({ onNext }: { onNext: () => void }): JSX.Element {
         Patch can notify you when an agent finishes or is waiting for an answer. macOS will ask you
         to allow this.
       </p>
+      {asked ? (
+        <p className="welcome-note" data-testid="welcome-notifications-where">
+          macOS shows the request as a banner in the top-right corner of the screen. Choose Options,
+          then Allow.
+        </p>
+      ) : null}
       {error ? (
         <p className="set-error" role="alert">
           {error}
         </p>
       ) : null}
-      <Footer onNext={allow} ready label="Turn on notifications" skip="Not now" onSkip={onNext} />
+      <Footer
+        onNext={asked ? onNext : allow}
+        ready
+        label={asked ? 'Continue' : 'Turn on notifications'}
+        skip={asked ? undefined : 'Not now'}
+        onSkip={onNext}
+      />
     </section>
   );
 }

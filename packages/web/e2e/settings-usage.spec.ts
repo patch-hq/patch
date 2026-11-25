@@ -218,7 +218,7 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     });
 
     const overage = page.getByTestId('account-usage-overage-claude-code-a1');
-    await expect(overage).toContainText('offset by your organisation');
+    await expect(overage).toContainText('not available on this plan');
     await expect(overage).not.toContainText('Turn on');
     await expect(page.getByTestId('account-extra-usage-settings')).toHaveCount(0);
   });
