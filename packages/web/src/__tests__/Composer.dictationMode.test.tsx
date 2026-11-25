@@ -13,6 +13,7 @@ import type { startDictationMode, DictationModeCallbacks } from '../lib/dictatio
 describe('composer dictation mode', () => {
   let cb: DictationModeCallbacks;
   let stop: ReturnType<typeof vi.fn>;
+  let cancel: ReturnType<typeof vi.fn>;
   let factory: ReturnType<typeof vi.fn>;
   let ready: Promise<void>;
 
@@ -22,10 +23,11 @@ describe('composer dictation mode', () => {
     reportAccount('d1', true);
     useUiStore.getState().clearToasts();
     stop = vi.fn();
+    cancel = vi.fn();
     ready = Promise.resolve();
     factory = vi.fn((_deps, callbacks: DictationModeCallbacks) => {
       cb = callbacks;
-      return { ready, stop };
+      return { ready, stop, cancel };
     });
   });
 
@@ -168,7 +170,8 @@ describe('composer dictation mode', () => {
     mount();
     keepDictating();
     fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Escape' });
-    expect(stop).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
     expect(screen.queryByTestId('dictation-mode-status')).toBeNull();
   });
 
@@ -205,7 +208,7 @@ describe('composer dictation mode', () => {
     mount();
     keepDictating();
     cleanupUnmount();
-    expect(stop).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('surfaces a mic that cannot open and turns itself off', async () => {

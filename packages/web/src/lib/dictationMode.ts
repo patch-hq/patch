@@ -58,8 +58,10 @@ export interface DictationModeCallbacks {
 export interface DictationMode {
   /** Resolves once the microphone is open; rejects if it could not be. */
   ready: Promise<void>;
-  /** Close the mic. Speech not yet cut into an utterance is dropped. */
+  /** Close the mic and keep what was said: speech not yet cut is sent, and utterances still being transcribed still land. */
   stop(): void;
+  /** Close the mic and drop everything not yet delivered. */
+  cancel(): void;
 }
 
 export function pcm16ToWavBlob(pcm: Int16Array, sampleRate = SAMPLE_RATE): Blob {
@@ -115,7 +117,8 @@ export function startDictationMode(
         }
       : {}),
   });
-  let stopped = false;
+  let stopped = false; // mic closed: no more input
+  let cancelled = false; // nothing more is delivered
   let rec: VoiceRecording | null = null;
   let pending = 0;
   let chain: Promise<void> = Promise.resolve();
@@ -135,14 +138,14 @@ export function startDictationMode(
       try {
         const { transcript } = await deps.transcribe(pcm16ToWavBlob(pcm));
         const text = transcript.trim();
-        if (!stopped && text && !isPhantomTranscript(text, speechMs(pcm, SAMPLE_RATE))) {
+        if (!cancelled && text && !isPhantomTranscript(text, speechMs(pcm, SAMPLE_RATE))) {
           cb.onText(text);
         }
       } catch (e) {
-        if (!stopped) cb.onError(`voice transcription failed: ${(e as Error).message}`);
+        if (!cancelled) cb.onError(`voice transcription failed: ${(e as Error).message}`);
       } finally {
         pending--;
-        if (!stopped) cb.onBusy(pending);
+        if (!cancelled) cb.onBusy(pending);
       }
     });
   }
@@ -179,14 +182,24 @@ export function startDictationMode(
     });
   })();
 
+  function closeMic(): void {
+    stopped = true;
+    closePreview();
+    rec?.cancel();
+    rec = null;
+  }
+
   return {
     ready,
     stop(): void {
       if (stopped) return;
-      stopped = true;
-      closePreview();
-      rec?.cancel();
-      rec = null;
+      const rest = segmenter.flush();
+      closeMic();
+      if (rest) enqueue(rest);
+    },
+    cancel(): void {
+      cancelled = true;
+      if (!stopped) closeMic();
     },
   };
 }

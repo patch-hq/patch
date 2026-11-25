@@ -1723,13 +1723,16 @@ export const Composer = forwardRef(function Composer(
   }
   const [dictPending, setDictPending] = useState(0);
   const dictModeRef = useRef<DictationMode | null>(null);
-  function stopDictationMode(): void {
+  // Ending by the mic keeps whatever has been said (sent, as it would have been
+  // a moment later); Esc and leaving the chat drop it.
+  function stopDictationMode(discard = false): void {
     const mode = dictModeRef.current;
     dictModeRef.current = null;
-    mode?.stop();
+    if (discard) mode?.cancel();
+    else mode?.stop();
     setLivePartial('');
     setDictModeOn(false);
-    setDictPending(0);
+    if (discard) setDictPending(0);
   }
   function startDictMode(): void {
     if (
@@ -1787,7 +1790,7 @@ export const Composer = forwardRef(function Composer(
     });
   }
   // Leaving the chat (or unmounting) must release the microphone.
-  useEffect(() => stopDictationMode, [chatId]);
+  useEffect(() => () => stopDictationMode(true), [chatId]);
 
   function onMicDown(at: number): void {
     if (dictModeRef.current) {
@@ -2877,7 +2880,7 @@ export const Composer = forwardRef(function Composer(
                 if (e.key === 'Escape' && dictModeRef.current) {
                   e.preventDefault();
                   e.stopPropagation();
-                  stopDictationMode();
+                  stopDictationMode(true);
                   return;
                 }
                 if (e.key === 'Escape' && !noteMode && micState !== 'idle') {

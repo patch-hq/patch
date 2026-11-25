@@ -52,6 +52,8 @@ export interface UtteranceSegmenter {
    * chop off speech that resumed while it was being worked out.
    */
   cut(seq: number): Int16Array | null;
+  /** End the utterance now whatever came before, and return it (null if it was only noise). */
+  flush(): Int16Array | null;
 }
 
 export function frameRms(pcm: Int16Array): number {
@@ -118,6 +120,9 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
     cut(seq: number): Int16Array | null {
       if (!speaking || seq !== heard) return null;
       return finish();
+    },
+    flush(): Int16Array | null {
+      return speaking ? finish() : null;
     },
     push(pcm: Int16Array): Int16Array | null {
       const rms = frameRms(pcm);
