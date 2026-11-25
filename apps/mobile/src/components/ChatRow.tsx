@@ -228,9 +228,16 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
     <View style={{ marginHorizontal: space.lg, marginBottom: space.sm }}>
       {/* Trays sit UNDER the row (rendered first) at both edges; the row on
           top only lets them show once it has slid clear. */}
-      <View
+      <Animated.View
         testID="swipe-tray-left"
+        pointerEvents="box-none"
         style={{
+          // Invisible until the row slides, so it can never show through the card.
+          opacity: translateX.interpolate({
+            inputRange: [0, 8],
+            outputRange: [0, 1],
+            extrapolate: 'clamp',
+          }),
           position: 'absolute',
           left: 0,
           top: 0,
@@ -242,10 +249,16 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
         }}
       >
         {trayButtons}
-      </View>
-      <View
+      </Animated.View>
+      <Animated.View
         testID="swipe-tray-right"
+        pointerEvents="box-none"
         style={{
+          opacity: translateX.interpolate({
+            inputRange: [-8, 0],
+            outputRange: [1, 0],
+            extrapolate: 'clamp',
+          }),
           position: 'absolute',
           right: 0,
           top: 0,
@@ -257,7 +270,7 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
         }}
       >
         {trayButtons}
-      </View>
+      </Animated.View>
       <Animated.View
         testID="chat-row-surface"
         {...panResponder.panHandlers}
@@ -272,9 +285,7 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
           backgroundColor: isActive ? colors.accentTint : colors.paperRaised,
           borderColor: isActive ? colors.accentSoft : colors.lineSoft,
           borderWidth: 1,
-          // A chat back from a snooze carries a subtle inset on its left
-          // (spec/04 § Snooze → Back).
-          ...(back ? { borderLeftWidth: 3, borderLeftColor: colors.accentSoft } : {}),
+          // A chat back from a snooze is marked by its back line, not an edge bar.
           borderRadius: radii.md,
         }}
       >
@@ -344,18 +355,20 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
                 {back.line.text}
               </Text>
             ) : null}
-            <Text
-              numberOfLines={1}
-              style={{ ...typography.meta, color: colors.ink3, marginTop: 2 }}
-            >
-              {hostLabel ? (
-                <>
-                  <Text testID={`row-host-${row.chatId}`}>{hostLabel}</Text>
-                  {' · '}
-                </>
-              ) : null}
-              {preview}
-            </Text>
+            {hostLabel || preview ? (
+              <Text
+                numberOfLines={1}
+                style={{ ...typography.meta, color: colors.ink3, marginTop: 2 }}
+              >
+                {hostLabel ? (
+                  <>
+                    <Text testID={`row-host-${row.chatId}`}>{hostLabel}</Text>
+                    {' · '}
+                  </>
+                ) : null}
+                {preview}
+              </Text>
+            ) : null}
             {matchLine ?? null}
           </View>
         </Pressable>
