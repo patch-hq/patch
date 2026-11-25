@@ -18052,7 +18052,7 @@ select.permission-mode.is-pending {
   background: var(--accent-tint);
   border: 1px solid var(--accent-soft);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   color: var(--ink);
 }
 .ask-human-icon {
@@ -18062,6 +18062,7 @@ select.permission-mode.is-pending {
 }
 .ask-human-body {
   min-width: 0;
+  padding-bottom: 2px;
 }
 .ask-human-task,
 .ask-human-why {
