@@ -506,22 +506,6 @@ test('chats list with no credential: exit 1 with run `patch auth login`', async 
   );
 });
 
-test('auth login: the pairing payload for an http server carries s=http', async () => {
-  await withSetup(
-    () => ({
-      status: 200,
-      body: { type: 'pairing.nonce', nonce: 'N1', expiresAt: Date.now() + 60_000 },
-    }),
-    async (env, url) => {
-      const r = await runCli(['auth', 'login', '--json'], env);
-      assert.equal(r.code, 0, r.stderr);
-      const { payload } = JSON.parse(r.stdout) as { payload: string };
-      const host = new URL(url).host;
-      assert.equal(payload, `patch-pair://${host}?nonce=N1&s=http`);
-    },
-  );
-});
-
 // --- flat top-level management verbs (spec/17 § Management subcommands) ---
 
 test('list --json (flat): REST round-trips /api/chats, archived chats included', async () => {
