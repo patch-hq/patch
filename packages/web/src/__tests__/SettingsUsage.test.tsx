@@ -798,6 +798,8 @@ describe('Settings → Usage → Auto and Amazon Bedrock accounts', () => {
       'true',
     );
     expect(screen.getByTestId('bedrock-cap')).toHaveValue('$100');
+    // Auto lives on the row only; the edit form carries no second copy.
+    expect(screen.queryByTestId('bedrock-auto')).toBeNull();
     fireEvent.change(screen.getByTestId('bedrock-cap'), { target: { value: '250' } });
     fireEvent.click(screen.getByTestId('bedrock-prefix-eu'));
     fireEvent.click(screen.getByTestId('bedrock-submit'));

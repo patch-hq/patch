@@ -317,16 +317,20 @@ export function BedrockForm({
           }}
         />
       </label>
-      <label className="acct-auto-label">
-        <input
-          type="checkbox"
-          className="acct-auto"
-          checked={auto}
-          data-testid="bedrock-auto"
-          onChange={(e) => setAuto(e.target.checked)}
-        />{' '}
-        Switch to automatically
-      </label>
+      {/* An existing account's switch is the Auto box on its row: a second
+          copy here would drift from it and overwrite it on save. */}
+      {initial ? null : (
+        <label className="acct-auto-label">
+          <input
+            type="checkbox"
+            className="acct-auto"
+            checked={auto}
+            data-testid="bedrock-auto"
+            onChange={(e) => setAuto(e.target.checked)}
+          />{' '}
+          Switch to automatically
+        </label>
+      )}
       <div className="set-actions">
         <span className="set-spacer" />
         <button
