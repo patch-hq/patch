@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import { useNotificationsStore } from '../stores/notificationsStore.js';
+import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { relativeTime } from '../lib/relativeTime.js';
 
 export function NotificationBell(): JSX.Element {
@@ -20,15 +21,7 @@ export function NotificationBell(): JSX.Element {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      const t = e.target as Node;
-      if (!ref.current?.contains(t) && !panelRef.current?.contains(t)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
+  useDismissOnClickOff(open, [ref, panelRef], () => setOpen(false));
 
   return (
     <span className="notif-bell" ref={ref}>

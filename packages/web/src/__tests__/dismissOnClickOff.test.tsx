@@ -41,6 +41,16 @@ function pointerDown(target: EventTarget): void {
 }
 
 describe('useDismissOnClickOff', () => {
+  it('dismisses on Escape while open, and not once closed', () => {
+    const onDismiss = vi.fn();
+    const { rerender } = render(<Harness open onDismiss={onDismiss} />);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    rerender(<Harness open={false} onDismiss={onDismiss} />);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
   it('dismisses on a pointer-down outside every region', () => {
     const onDismiss = vi.fn();
     const { getByTestId } = render(<Harness open onDismiss={onDismiss} />);

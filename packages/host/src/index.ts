@@ -64,6 +64,7 @@ import {
 import { ChatMoveError } from './chatMove.js';
 import { expandHome } from './expandHome.js';
 import { gitDirtyPaths } from './git-dirty.js';
+import { isInsideGitWorkTree } from './git-presence.js';
 import { listFilesRecursive } from './files-recursive.js';
 import { agentHeldSession, createClaudeSessionProbe, type SessionProbe } from './history.js';
 import type {
@@ -8097,6 +8098,7 @@ export async function handleFilesRequest(
       // --verify HEAD` fails on a non-git folder OR a repo with no commits yet.
       let hasHead = false;
       try {
+        if (!isInsideGitWorkTree(root)) throw new Error('not a work tree');
         execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], {
           cwd: root,
           stdio: ['ignore', 'ignore', 'ignore'],

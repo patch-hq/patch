@@ -34,6 +34,17 @@ export interface ServiceEnv {
   appId: string;
 }
 
+/**
+ * macOS lists a login agent in System Settings by the program launchd runs. Run
+ * directly, `/bin/sh` made the entry read "sh"; the app's own signed binary
+ * reads as Patch. This runs the launcher script as its child and passes its
+ * exit and stop signals through, so launchd still sees one process.
+ */
+const LAUNCH_SHIM =
+  "const c=require('node:child_process').spawn('/bin/sh',[process.argv[1]],{stdio:'inherit'});" +
+  "for(const s of['SIGTERM','SIGINT'])process.on(s,()=>c.kill(s));" +
+  "c.on('exit',(code,sig)=>process.exit(code??(sig?1:0)));";
+
 const xml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -64,7 +75,9 @@ export function serverPlist(env: ServiceEnv, userHome: string): string {
   <key>Label</key><string>${SERVER_SERVICE_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/sh</string>
+    <string>${xml(env.node.execPath)}</string>
+    <string>-e</string>
+    <string>${xml(LAUNCH_SHIM)}</string>
     <string>${xml(join(env.home, 'current', 'patch-server'))}</string>
   </array>
   <key>EnvironmentVariables</key>

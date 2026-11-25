@@ -1892,6 +1892,27 @@ const installUpdate = createInstaller({
   },
 });
 
+/**
+ * A release can carry the Mac app forward unchanged, so the app's own version
+ * may be older than the release that was downloaded. About names the server's
+ * release beside the app build when they differ, so neither is hidden.
+ */
+async function showServerVersionInAbout(origin: string): Promise<void> {
+  try {
+    const res = await fetch(`${origin}/api/healthz`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) throw new Error(`healthz answered ${res.status}`);
+    const { version } = (await res.json()) as { version?: string };
+    const appVersion = app.getVersion();
+    if (!version || version === appVersion) return;
+    app.setAboutPanelOptions({
+      applicationVersion: `${appVersion} (release ${version})`,
+      version: '',
+    });
+  } catch (err) {
+    console.warn('[patch] about: could not read the server version', err);
+  }
+}
+
 function setupAutoUpdater(): void {
   const build = readDesktopBuildInfo();
   const updateConfig = join(process.resourcesPath, 'app-update.yml');
@@ -2439,6 +2460,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
     const base = new URL(launched.appUrl);
     base.hash = '';
     SERVER_URL = base.toString();
+    void showServerVersionInAbout(serverOrigin(SERVER_URL));
   } catch (err) {
     // A remembered connection that cannot be brought up, or a damaged file: say
     // so and stop. Carrying on with no server would be a window with nothing in it.

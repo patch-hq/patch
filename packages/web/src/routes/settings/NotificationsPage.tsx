@@ -149,59 +149,63 @@ export function NotificationsPage(): JSX.Element {
           </Row>
         ))}
       </Group>
-      <Group>
-        {inDesktopApp || browserNotify === 'unsupported' ? null : (
-          <Row title="Browser notifications" testid="browser-notifications">
-            {browserNotify === 'granted' ? (
-              <span className="set-sub" data-testid="browser-notifications-granted">
-                Allowed
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="set-btn"
-                data-testid="browser-notifications-grant"
-                disabled={browserNotify === 'denied'}
-                onClick={() => void allowBrowserNotifications()}
-              >
-                {browserNotify === 'denied' ? 'Blocked in browser' : 'Allow'}
-              </button>
-            )}
-          </Row>
-        )}
-        {hasPhone ? (
-          <Row title="Send to my phone after" testid="send-to-phone-after">
-            <Pills
-              label="Send to my phone after"
-              options={OPTIONS}
-              labels={LABELS}
-              value={value}
-              disabled={!loaded}
-              testid="send-to-phone-after-pills"
-              onChange={(next) => void patchShared('send to phone', { sendToPhoneAfter: next })}
-            />
-          </Row>
-        ) : null}
-        {idle === null || idle === 'unsupported' ? null : (
-          <Row title="Idle detection" testid="idle-detection">
-            {idle === 'granted' ? (
-              <span className="set-sub" data-testid="idle-detection-granted">
-                Granted
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="set-btn"
-                data-testid="idle-detection-grant"
-                disabled={idle === 'denied'}
-                onClick={() => void grant()}
-              >
-                {idle === 'denied' ? 'Blocked in browser' : 'Allow'}
-              </button>
-            )}
-          </Row>
-        )}
-      </Group>
+      {(inDesktopApp || browserNotify === 'unsupported') &&
+      !hasPhone &&
+      (idle === null || idle === 'unsupported') ? null : (
+        <Group>
+          {inDesktopApp || browserNotify === 'unsupported' ? null : (
+            <Row title="Browser notifications" testid="browser-notifications">
+              {browserNotify === 'granted' ? (
+                <span className="set-sub" data-testid="browser-notifications-granted">
+                  Allowed
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="set-btn"
+                  data-testid="browser-notifications-grant"
+                  disabled={browserNotify === 'denied'}
+                  onClick={() => void allowBrowserNotifications()}
+                >
+                  {browserNotify === 'denied' ? 'Blocked in browser' : 'Allow'}
+                </button>
+              )}
+            </Row>
+          )}
+          {hasPhone ? (
+            <Row title="Send to my phone after" testid="send-to-phone-after">
+              <Pills
+                label="Send to my phone after"
+                options={OPTIONS}
+                labels={LABELS}
+                value={value}
+                disabled={!loaded}
+                testid="send-to-phone-after-pills"
+                onChange={(next) => void patchShared('send to phone', { sendToPhoneAfter: next })}
+              />
+            </Row>
+          ) : null}
+          {idle === null || idle === 'unsupported' ? null : (
+            <Row title="Idle detection" testid="idle-detection">
+              {idle === 'granted' ? (
+                <span className="set-sub" data-testid="idle-detection-granted">
+                  Granted
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="set-btn"
+                  data-testid="idle-detection-grant"
+                  disabled={idle === 'denied'}
+                  onClick={() => void grant()}
+                >
+                  {idle === 'denied' ? 'Blocked in browser' : 'Allow'}
+                </button>
+              )}
+            </Row>
+          )}
+        </Group>
+      )}
     </SettingsPage>
   );
 }

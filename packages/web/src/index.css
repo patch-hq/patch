@@ -13425,9 +13425,16 @@ main.empty-state p {
    graphic (which reuses the `.empty-chat` layout: flex:1 + margin:auto) can
    centre vertically as well as horizontally, matching the empty-chat state.
    The non-empty list is unaffected (it takes natural height and scrolls). */
-.jobs-route {
+.jobs-route,
+.pads-route {
   display: flex;
   flex-direction: column;
+}
+/* With nothing else in the head (an empty list has no search or filters) the
+   New button sits at the right edge on both Jobs and Pads. */
+.jobs-route .route-head > .pads-new:last-child,
+.pads-route .route-head > .pads-new:last-child {
+  margin-left: auto;
 }
 
 /* H3 — New-chat "no recent folders" empty state. A small, on-brand prompt

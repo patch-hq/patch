@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,6 +62,8 @@ test('the agent runs the launcher from the install home and comes back whenever 
   );
   assert.match(plist, new RegExp(`<key>Label</key><string>${SERVER_SERVICE_LABEL}</string>`));
   assert.match(plist, /<string>\/h\/server\/current\/patch-server<\/string>/);
+  assert.doesNotMatch(plist, /<string>\/bin\/sh<\/string>/, 'the entry must not be named sh');
+  assert.ok(plist.includes(`<string>${process.execPath}</string>`));
   assert.match(plist, /<key>RunAtLoad<\/key><true\/>/);
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
   assert.match(plist, /<key>PORT<\/key><string>21000<\/string>/);
@@ -341,4 +343,20 @@ test('until the user agrees nothing is registered with macOS; agreeing and decli
   agreed = true;
   await svc.install('<plist a/>', false);
   assert.equal(existsSync(serverPlistPath(userHome)), true);
+});
+
+test('the launch shim runs the launcher and passes its exit code through', () => {
+  const plist = serverPlist({ home: '/h', node, port: 1, appId: 'a' }, '/u');
+  const shim = /<string>(const c=[^<]*)<\/string>/
+    .exec(plist)?.[1]
+    ?.replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+  assert.ok(shim);
+  const root = scratch();
+  const script = join(root, 'l.sh');
+  writeFileSync(script, 'exit 7\n');
+  const r = spawnSync(process.execPath, ['-e', shim, script], {
+    env: { ELECTRON_RUN_AS_NODE: '1' },
+  });
+  assert.equal(r.status, 7);
 });
