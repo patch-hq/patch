@@ -13,7 +13,7 @@ import {
   type DictationConfig,
   type DictationEngine,
 } from '@patch/wire/audio';
-import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
+import { DICTATION_PAUSE_CHOICES, SpeechBackendSetting } from '@patch/wire';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
@@ -34,10 +34,41 @@ export function DictationPage(): JSX.Element {
       testid="settings-dictation"
     >
       <SpeechToTextGroup />
+      <HostSpeechGroup />
       <DictationEnginesGroup />
       <DictationGroup />
       <ShortcutGroup />
     </SettingsPage>
+  );
+}
+
+const HOST_SPEECH_LABELS: Record<SpeechBackendSetting, string> = {
+  auto: 'Automatic',
+  off: 'Off',
+  groq: 'Groq',
+  elevenlabs: 'ElevenLabs',
+  local: 'Local',
+  parakeet: 'Parakeet',
+};
+
+/** The engine every host transcribes with (spec/02 § Speech set-up). */
+function HostSpeechGroup(): JSX.Element {
+  const backend = usePreferencesStore((s) => s.preferences.speechBackend);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  return (
+    <Group label="Host transcription" testid="settings-host-speech">
+      <Row title="Hosts transcribe with" testid="host-speech-row">
+        <Pills
+          label="Hosts transcribe with"
+          options={SpeechBackendSetting.options}
+          labels={HOST_SPEECH_LABELS}
+          value={backend}
+          disabled={!loaded}
+          testid="host-speech-backend"
+          onChange={(next) => void patchShared('speech engine', { speechBackend: next })}
+        />
+      </Row>
+    </Group>
   );
 }
 

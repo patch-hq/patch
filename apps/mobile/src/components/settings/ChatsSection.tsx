@@ -8,7 +8,7 @@ import { SettingsSection } from '../SettingsSection';
 import { SettingsPage } from './SettingsPage';
 import { patchShared } from './sharedWrite';
 import { Chips, Field, Row, ToggleRow, WithSettings } from './ui';
-import { accountsForBackend, BACKGROUND_ACCOUNT_AUTO } from '@patch/wire';
+import { accountsForBackend, BACKGROUND_ACCOUNT_AUTO, parseSmallJobModels } from '@patch/wire';
 
 /** An hour of the day (0–23) that commits on blur; anything else is refused and the field reverts. */
 function HourField({
@@ -82,6 +82,37 @@ function BackgroundAccountRow({
   );
 }
 
+/** The models small one-shot jobs run on, set model first; commits on blur, a refused list reverts. */
+function SmallJobModelsRow({ saved }: { saved: readonly string[] }): React.ReactElement {
+  const text = saved.join(', ');
+  const [draft, setDraft] = React.useState(text);
+  React.useEffect(() => setDraft(text), [text]);
+  return (
+    <Row title="Models for small jobs" testID="small-job-models" stack>
+      <Field
+        testID="small-job-models-input"
+        accessibilityLabel="Models for small jobs"
+        value={draft}
+        onChangeText={setDraft}
+        onBlur={() => {
+          if (draft.trim() === text) return;
+          const parsed = parseSmallJobModels(draft);
+          if ('error' in parsed) {
+            Alert.alert('Invalid models', parsed.error);
+            setDraft(text);
+            return;
+          }
+          void patchShared('Models for small jobs', { smallJobModels: parsed.models }).then(
+            (ok) => {
+              if (!ok) setDraft(text);
+            },
+          );
+        }}
+      />
+    </Row>
+  );
+}
+
 export function ChatsPage(): React.ReactElement {
   return (
     <SettingsPage title="Chats" testID="settings-page-chats">
@@ -106,8 +137,12 @@ export function ChatsPage(): React.ReactElement {
             />
             <BackgroundAccountRow
               selected={data.preferences.backgroundAccount}
-              accounts={accountsForBackend<{ id: string; label: string }>(data.shared?.secrets, 'claude-code')}
+              accounts={accountsForBackend<{ id: string; label: string }>(
+                data.shared?.secrets,
+                'claude-code',
+              )}
             />
+            <SmallJobModelsRow saved={data.preferences.smallJobModels} />
             <Row
               title="Snooze morning hour"
               subtitle="Tomorrow and Next Monday wake at this hour (0–23)"

@@ -1246,9 +1246,15 @@ address word), says so honestly rather than being blocked. A hosted cell whose k
 host lacks names that host and the key; the line clears as soon as the host
 reports the key, which Settings → Providers sets without a restart.
 
+#### Dictation
+
+Beneath each device's Speech to text engine, Hosts transcribe with is a row of pills for the shared `speechBackend`: Automatic, Off, Groq, ElevenLabs, Local, Parakeet (`02-host.md` § Speech set-up). It applies to every host, and a refused write says why as an error toast.
+
 #### Chats
 
 Generate chat titles and Summarise chat status after each turn are switches. Beneath them, Account for titles and status is a select of Automatic and every Claude account by label, stored as the shared `backgroundAccount` (`10-auth.md` § Choosing an account).
+
+Models for small jobs is a text field holding the shared `smallJobModels` as a comma-separated list, the set model first and each later one a failover (`02-host.md` § Small jobs). It saves on Enter or when it loses focus; an empty entry or a model named twice is refused with the reason as an error toast, and the field goes back to the saved list.
 
 #### Credit sources
 

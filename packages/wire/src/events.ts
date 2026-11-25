@@ -636,6 +636,18 @@ export const DEFAULT_SMALL_JOB_MODELS: readonly string[] = [
   'claude-sonnet-4-5',
 ];
 
+/**
+ * A small-job model list as typed, comma-separated with the set model first.
+ * Says why a list is refused (an empty entry, a model named twice) rather
+ * than fixing it up.
+ */
+export function parseSmallJobModels(raw: string): { models: string[] } | { error: string } {
+  const models = raw.split(',').map((m) => m.trim());
+  if (models.some((m) => m === '')) return { error: 'Name each model, with no empty entry' };
+  if (new Set(models).size !== models.length) return { error: 'A model is named twice' };
+  return { models };
+}
+
 /** The speech-to-text engines a user can name (`auto` = follow what the host has). */
 export const SpeechBackendSetting = z.enum([
   'auto',
