@@ -69,7 +69,11 @@ function words(id: string): string {
  * names) are not. A tool with nothing to name still says what kind of thing it
  * is doing ("Reading a file"), never its bare id.
  */
-function toolCallPhrase(tool: string, args: Record<string, unknown>): string {
+function toolCallPhrase(
+  tool: string,
+  args: Record<string, unknown>,
+  chatName?: (chatId: string) => string | undefined,
+): string {
   switch (tool) {
     case 'Read': {
       const path = str(args, 'file_path');
@@ -128,6 +132,11 @@ function toolCallPhrase(tool: string, args: Record<string, unknown>): string {
     const label = str(args, 'title') ?? str(args, 'prompt');
     return label ? clip(label, MAX_DESCRIPTION) : 'Starting an agent';
   }
+  if (/^(mcp__patch__)?patch_send_to$/.test(tool)) {
+    const id = str(args, 'chatId');
+    const name = id ? chatName?.(id) : undefined;
+    return name ? `Sent to ${clip(name, MAX_DESCRIPTION)}` : 'Sent to another chat';
+  }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
   if (mcp) return `Using ${words(mcp[1] === 'patch' ? mcp[2]! : `${mcp[1]} ${mcp[2]}`)}`;
   return `Using ${words(tool)}`;
@@ -139,7 +148,11 @@ function toolCallPhrase(tool: string, args: Record<string, unknown>): string {
  * `description` (Bash, Task) win over the phrase derived from the arguments —
  * the model already wrote the readable version of what it is up to.
  */
-export function toolCallSummary(tool: string | undefined, rawArgs: unknown): string {
+export function toolCallSummary(
+  tool: string | undefined,
+  rawArgs: unknown,
+  chatName?: (chatId: string) => string | undefined,
+): string {
   const args =
     typeof rawArgs === 'object' && rawArgs !== null ? (rawArgs as Record<string, unknown>) : {};
   const described = str(args, 'description');
@@ -147,7 +160,7 @@ export function toolCallSummary(tool: string | undefined, rawArgs: unknown): str
     const line = clip(described, MAX_DESCRIPTION);
     return line.charAt(0).toUpperCase() + line.slice(1);
   }
-  return tool ? toolCallPhrase(tool, args) : 'Using a tool';
+  return tool ? toolCallPhrase(tool, args, chatName) : 'Using a tool';
 }
 
 /**
