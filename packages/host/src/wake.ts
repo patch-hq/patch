@@ -144,6 +144,14 @@ export class WakeScheduler {
     const had = this.timers.has(chatId) || existsSync(this.filePath(chatId));
     this.disarm(chatId);
     rmSync(this.filePath(chatId), { force: true });
+    // A cancelled loop must never be a silent disappearance: say that it
+    // happened and who asked (the stack names the caller).
+    if (had) {
+      this.deps.logger.info(
+        { chatId, caller: new Error('wake cancel').stack?.split('\n').slice(2, 5).join(' | ') },
+        'wake: cancelled',
+      );
+    }
     return had;
   }
 
@@ -180,7 +188,15 @@ export class WakeScheduler {
   private async fire(chatId: string, armedFor?: number): Promise<void> {
     this.timers.delete(chatId);
     const rec = this.read(chatId);
-    if (!rec) return;
+    if (!rec) {
+      // The timer went off but its record is gone — the loop ends here, so it
+      // must be loud (this used to return without a trace).
+      this.deps.logger.warn(
+        { chatId, armedFor, file: this.filePath(chatId) },
+        'wake: timer fired but wake.json is missing — wake lost',
+      );
+      return;
+    }
     if (armedFor !== undefined && rec.fireAt !== armedFor) {
       // A timer armed for a record that has since been replaced: the on-disk
       // record is not the one this timer was for, so it is not due.
@@ -244,10 +260,12 @@ export class WakeScheduler {
       const next: WakeRecord = { ...rec, fireAt: this.deps.now() + rec.every };
       this.persist(next);
       this.arm(next);
+      this.deps.logger.info({ chatId, nextFireAt: next.fireAt }, 'wake: loop fired, re-armed');
     } else {
       // One-shot: clear before delivering. The agent re-arms a fresh wake
       // (the adaptive loop) if it wants to continue, or does nothing to stop.
       rmSync(this.filePath(chatId), { force: true });
+      this.deps.logger.info({ chatId }, 'wake: one-shot fired, cleared');
     }
     try {
       await this.deps.deliver(chatId, prefixKeepingCommandFirst(`${WAKE_PREFIX} `, rec.message));
@@ -290,6 +308,7 @@ export class WakeScheduler {
     };
     this.persist(next);
     this.arm(next);
+    this.deps.logger.info({ chatId: rec.chatId, nextFireAt: next.fireAt }, 'wake: loop re-armed');
   }
 
   private read(chatId: string): WakeRecord | null {
