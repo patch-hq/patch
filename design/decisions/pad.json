@@ -1,0 +1,74 @@
+{
+ "screens": [
+  {
+   "id": "mobile-one",
+   "name": "Mobile: One decision",
+   "path": "mobile-one.html"
+  },
+  {
+   "id": "mobile-many",
+   "name": "Mobile: Several decisions",
+   "path": "mobile-many.html"
+  },
+  {
+   "id": "mobile-long",
+   "name": "Mobile: Long context, clamped",
+   "path": "mobile-long.html"
+  },
+  {
+   "id": "mobile-expanded",
+   "name": "Mobile: Long context, expanded",
+   "path": "mobile-expanded.html"
+  },
+  {
+   "id": "mobile-typing",
+   "name": "Mobile: Typing a free answer",
+   "path": "mobile-typing.html"
+  },
+  {
+   "id": "mobile-sending",
+   "name": "Mobile: Answer sending",
+   "path": "mobile-sending.html"
+  },
+  {
+   "id": "mobile-none",
+   "name": "Mobile: No decisions (panel hidden)",
+   "path": "mobile-none.html"
+  },
+  {
+   "id": "desktop-one",
+   "name": "Desktop: One decision",
+   "path": "desktop-one.html"
+  },
+  {
+   "id": "desktop-many",
+   "name": "Desktop: Several decisions",
+   "path": "desktop-many.html"
+  },
+  {
+   "id": "desktop-long",
+   "name": "Desktop: Long context, clamped",
+   "path": "desktop-long.html"
+  },
+  {
+   "id": "desktop-expanded",
+   "name": "Desktop: Long context, expanded",
+   "path": "desktop-expanded.html"
+  },
+  {
+   "id": "desktop-typing",
+   "name": "Desktop: Typing a free answer",
+   "path": "desktop-typing.html"
+  },
+  {
+   "id": "desktop-sending",
+   "name": "Desktop: Answer sending",
+   "path": "desktop-sending.html"
+  },
+  {
+   "id": "desktop-none",
+   "name": "Desktop: No decisions (panel hidden)",
+   "path": "desktop-none.html"
+  }
+ ]
+}
