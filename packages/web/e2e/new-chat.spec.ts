@@ -620,28 +620,16 @@ test.describe('new chat header', () => {
     await expect(page.getByTestId('chat-main')).toBeVisible();
   });
 
-  // Todoist "patch show usage things before chat has started" — the usage
-  // crumb is account-level, not chat-level, so it means something before the
-  // chat exists too: the one usage readout left on this header, now that a
-  // live chat's header carries none of its own (spec/14 § Chat panel header —
-  // its composer's context ring covers that case instead).
-  test('the usage crumb is shown before the chat has started', async ({ page }) => {
+  // Todoist "patch show usage things before chat has started" — account usage is
+  // shown before the chat exists, as the usage cards under the setup row: the one
+  // readout on this screen (the header carries no crumb of its own here).
+  test('usage is shown once on the new chat, in the usage cards', async ({ page }) => {
     await page.goto(NEW);
-    await expect(page.getByTestId('chat-usage')).toHaveCount(0);
+    await expect(page.getByTestId('new-chat-usage')).toHaveCount(0);
 
     await seedUsage(page);
-    const crumb = page.getByTestId('chat-usage');
-    await expect(crumb).toBeVisible();
-    await expect(crumb).toHaveAttribute('aria-label', '5-hour 42% used');
-    await expect(crumb.locator('.chat-usage-bar i')).toHaveAttribute('style', /width: 42%/);
-
-    // Opens the same popover a live chat's crumb does; its context section says
-    // nothing has been measured (there is no chat yet).
-    await crumb.click();
-    const pop = page.getByTestId('usage-popover');
-    await expect(pop).toBeVisible();
-    await expect(page.getByTestId('usage-pop-context')).toContainText('Not measured yet');
-    await expect(page.getByTestId('usage-pop-account')).toContainText('42%');
+    await expect(page.getByTestId('new-chat-usage')).toBeVisible();
+    await expect(page.getByTestId('chat-usage')).toHaveCount(0);
   });
 
   // Todoist: "patch flickers to full width for new message briefly when
