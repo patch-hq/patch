@@ -444,7 +444,7 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
   const loaded = usePreferencesStore((s) => s.loaded);
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
   const connected = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
-  const { options: all, problem } = useModelOptions(value);
+  const { options: all, problem, loading } = useModelOptions(value);
   const [more, setMore] = useState(false);
   // Only the connected providers' models: a ChatGPT user is never offered, or
   // left on, a Claude model they cannot run.
@@ -453,7 +453,9 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
     isEndpointModel(id)
       ? true
       : (secrets?.[accountsKeyForBackend(backendIdForModel(id))] ?? []).some((a) => a.connected);
-  const options = all.filter((m) => runnable(m.id));
+  // Until the host's list is known the only entry is a stand-in for the stored
+  // default, which may be a model nobody would pick: show nothing instead.
+  const options = loading ? [] : all.filter((m) => runnable(m.id));
   const { recommended, rest, def } = recommendedModels(options);
   const choose = (id: string): void => {
     // The Manager and jobs start on the model chosen here, so what is shown
@@ -498,6 +500,11 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
           />
         ))}
       </div>
+      {loading ? (
+        <div className="welcome-note" data-testid="welcome-model-loading">
+          <p>Loading models…</p>
+        </div>
+      ) : null}
       {shown.length < options.length ? (
         <button
           type="button"
@@ -516,7 +523,7 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
           ) : null}
         </div>
       ) : null}
-      <Footer onNext={advance} ready={loaded && (!connected || runnable(current))} />
+      <Footer onNext={advance} ready={loaded && !loading && (!connected || runnable(current))} />
     </section>
   );
 }

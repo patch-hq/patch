@@ -296,6 +296,29 @@ test('with an AI connected, a model list that fails says so in words, the code o
   await expect(page.getByTestId('welcome-model-problem-detail-text')).toHaveText('upstream');
 });
 
+test('model step shows no option, and Continue is disabled, until the real list loads', async ({
+  page,
+}) => {
+  await stub(page, { secrets: { claude: [{ id: 'c1', label: 'Claude 1', connected: true }] } });
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route('**/api/models*', async (r) => {
+    await gate;
+    await r.fulfill({ json: CATALOGUE });
+  });
+  await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
+  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-next').click();
+  await expect(page.getByTestId('welcome-model')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-loading')).toBeVisible();
+  await expect(page.locator('[data-testid^="welcome-model-claude"]')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-next')).toBeDisabled();
+  release();
+  await expect(page.getByTestId('welcome-model-claude-sonnet-5')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-loading')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-next')).toBeEnabled();
+});
+
 test('own server: no keep-running step, and the AI step can be skipped', async ({ page }) => {
   await stub(page, { secrets: { claude: [{ id: 'c1', label: 'Claude 1', connected: true }] } });
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
