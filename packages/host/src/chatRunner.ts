@@ -70,6 +70,7 @@ import {
   heldMessageExpiredText,
   DEFAULT_LIMIT_BEHAVIOUR,
   isOutboxEvent,
+  isAnthropicApiKey,
   type LimitBehaviour,
   type ReminderEvery,
 } from '@patch/wire';
@@ -11014,8 +11015,18 @@ export class Daemon {
       state.model === undefined || !harnessTraitsForModel(state.model).resolvesPermissionModeByModel
         ? { mode: configuredMode }
         : resolvePermissionModeForModel(configuredMode, state.model);
-    const permissionMode = resolved.mode;
-    if (resolved.degradedFrom !== undefined) {
+    // `auto` is a model classifier judging every tool call, which on an API-key
+    // account is billed usage Tom never chose. Patch must not run it there on
+    // its own: the turn runs on `default` and the chat says so.
+    const apiKeyBlocksAuto =
+      resolved.mode === 'auto' &&
+      state.model !== undefined &&
+      harnessTraitsForModel(state.model).resolvesPermissionModeByModel &&
+      isAnthropicApiKey(oauth.accessToken);
+    const permissionMode: SdkPermissionMode = apiKeyBlocksAuto ? 'default' : resolved.mode;
+    if (apiKeyBlocksAuto) {
+      this.announcePermissionModeDegrade(chatId, 'auto', 'default', state.model, 'apiKey');
+    } else if (resolved.degradedFrom !== undefined) {
       this.announcePermissionModeDegrade(
         chatId,
         resolved.degradedFrom,
@@ -15435,8 +15446,9 @@ export class Daemon {
     from: SdkPermissionMode,
     to: SdkPermissionMode,
     model: string | undefined,
+    reason: 'model' | 'apiKey' = 'model',
   ): void {
-    const key = `${chatId}:${model ?? ''}:${from}:${to}`;
+    const key = `${chatId}:${model ?? ''}:${from}:${to}:${reason}`;
     if (this.announcedModeDegrades.has(key)) return;
     this.announcedModeDegrades.add(key);
     this.opts.logger.warn(
@@ -15448,9 +15460,13 @@ export class Daemon {
       chatId,
       role: 'system',
       content:
-        `Permission mode '${from}' is not available on ${model ?? 'this model'}, ` +
-        `so this chat is running on '${to}'. Move it to a model that supports ` +
-        `'${from}', or choose a mode deliberately.`,
+        reason === 'apiKey'
+          ? `Permission mode '${from}' is not run on an API-key account, because its ` +
+            `classifier is billed per call. This chat is running on '${to}'. Use a ` +
+            `subscription account to run '${from}'.`
+          : `Permission mode '${from}' is not available on ${model ?? 'this model'}, ` +
+            `so this chat is running on '${to}'. Move it to a model that supports ` +
+            `'${from}', or choose a mode deliberately.`,
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     };

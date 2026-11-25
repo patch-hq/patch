@@ -479,6 +479,10 @@ rather than in words of its own — except `default`, which surfaces call Ask:
 it is not the default mode, and "Default" beside a preselected Auto reads as
 a contradiction.
 
+`auto` is never run on an Anthropic API-key account, whose classifier calls are
+billed: a turn on such an account runs on `default` and the chat says so once.
+The chat stays configured on `auto`, so a subscription account honours it again.
+
 Every chat carries its own mode. It is stamped at creation from the host
 default in force at that moment (a spawn request naming a mode wins over it),
 and from then on only a change made to that chat alters it. Changing the host
