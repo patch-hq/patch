@@ -16529,6 +16529,7 @@ export class Daemon {
   setChatPreferredAccount(chatId: string, accountId: string | null): void {
     const s = this.chatState.get(chatId);
     if (!s) throw new ChatNotFoundError(chatId);
+    const previous = s.preferredAccountId;
     if (accountId === null) delete s.preferredAccountId;
     else s.preferredAccountId = accountId;
     this.opts.metaStore.update(chatId, (m) => {
@@ -16536,6 +16537,15 @@ export class Daemon {
       return accountId === null ? rest : { ...rest, preferredAccountId: accountId };
     });
     this.emitState(chatId);
+    // Subagents inherit the parent's lock, so they follow it when it moves.
+    // Only those still on the old lock: one given its own account stays there.
+    if (previous !== undefined && previous !== accountId) {
+      for (const child of this.chatState.list()) {
+        if (child.subagent?.parentChatId === chatId && child.preferredAccountId === previous) {
+          this.setChatPreferredAccount(child.chatId, accountId);
+        }
+      }
+    }
     // A chat waiting out its old account's limit has a new account to try.
     if (this.creditParked(chatId)) this.resumeRateLimitedNow(chatId);
   }

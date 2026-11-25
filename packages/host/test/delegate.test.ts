@@ -94,6 +94,27 @@ describe('patch_delegate', () => {
     expect(children[1]?.preferredAccountId).toBeUndefined();
   });
 
+  it("moves a child with its parent when the parent's account changes, but not one with its own", async () => {
+    const { daemon, sdk, folder } = setup();
+    const parent = await daemon.spawnChat({ folder, preferredAccountId: 'acc-1' });
+    sdk.enqueue([{ type: 'assistant', content: 'ok' }, { type: 'result' }]);
+    const inherited = (await daemon.createDelegate({ parentChatId: parent, prompt: 'a' })).id;
+    sdk.enqueue([{ type: 'assistant', content: 'ok' }, { type: 'result' }]);
+    const own = (
+      await daemon.createDelegate({
+        parentChatId: parent,
+        prompt: 'b',
+        preferredAccountId: 'acc-3',
+      })
+    ).id;
+    daemon.setChatPreferredAccount(parent, 'acc-2');
+    expect(daemon.chatState.get(inherited)?.preferredAccountId).toBe('acc-2');
+    expect(daemon.chatState.get(own)?.preferredAccountId).toBe('acc-3');
+    daemon.setChatPreferredAccount(parent, null);
+    expect(daemon.chatState.get(inherited)?.preferredAccountId).toBeUndefined();
+    expect(daemon.chatState.get(own)?.preferredAccountId).toBe('acc-3');
+  });
+
   it("locks a child to an explicitly named account, over the parent's own", async () => {
     const { daemon, sdk, folder } = setup();
     const spawned: Array<{ preferredAccountId?: string; subagent?: unknown }> = [];
