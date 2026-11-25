@@ -660,6 +660,17 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
     ).toMatchObject({ interrupted: true });
     // The answer died with the process; a stale record would only mislead a later restart.
     expect(existsSync(decisionsFile)).toBe(false);
+    // The server holds a request open until its host resolves it, so the
+    // restart says the dead request is over — else the chat reads "waiting on
+    // you" forever.
+    const askedId = (
+      events.find((e) => e.type === 'chat.permission_request' && e.chatId === chatId) as {
+        requestId: string;
+      }
+    ).requestId;
+    expect(
+      second.events.find((e) => e.type === 'chat.permission_response' && e.chatId === chatId),
+    ).toMatchObject({ requestId: askedId, approve: false, decision: 'deny' });
   });
 
   it('a decision answered before the restart leaves nothing to resume specially', async () => {

@@ -161,6 +161,7 @@ import {
   persistPendingDecision,
   clearPendingDecision,
   clearAllPendingDecisions,
+  readPendingDecisions,
 } from './pendingDecisions.js';
 import {
   buildGoalNote,
@@ -4174,6 +4175,19 @@ export class Daemon {
             'resume: the durable turn on disk is not carried on (runner gone or another turn); it was cut off',
           );
         }
+      }
+      // A request the previous process was holding open died with it (its gate
+      // was an in-memory promise). The server keeps a request open until its
+      // host says it is resolved, so say so now: without this the chat reads
+      // "waiting on you" forever for a question nobody can answer.
+      for (const rec of readPendingDecisions(chatDir)) {
+        this.emit({
+          type: 'chat.permission_response',
+          chatId: m.chatId,
+          requestId: rec.requestId,
+          approve: false,
+          decision: 'deny',
+        });
       }
       clearAllPendingDecisions(chatDir);
       // `pending[0]` is the genuinely-interrupted head only when the chat log
