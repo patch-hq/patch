@@ -27,7 +27,7 @@ function gated() {
   return { backend, release };
 }
 
-function setup(backend: SdkBackend, home?: string) {
+function setup(backend: SdkBackend, home?: string, evaluateGoal?: unknown) {
   const h = home ?? mkdtempSync(join(tmpdir(), 'patch-snzc-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-snzc-f-')));
   mkdirSync(folder, { recursive: true });
@@ -42,6 +42,7 @@ function setup(backend: SdkBackend, home?: string) {
     logger: pino({ level: 'silent' }),
     now: () => T0,
     generateChatId: () => `chat-${++id}`,
+    ...(evaluateGoal ? { evaluateGoal: evaluateGoal as never } : {}),
   });
   return { daemon, folder, metaStore, home: h };
 }
@@ -81,6 +82,27 @@ describe('Snooze until complete', () => {
     await daemon.sendInput({ chatId: id, message: 'go', localId: 'L1', origin: 'user' });
     await sleep(80);
     expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    await daemon.setGoal(id, null);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
+
+  it('stays snoozed between goals of a sequence, wakes when the last one is met', async () => {
+    const { backend, release } = gated();
+    release();
+    const { daemon, folder } = setup(backend, undefined, async (i) =>
+      i.condition === 'Third' ? null : { verdict: 'met', reason: 'done' },
+    );
+    const id = await daemon.spawnChat({ folder });
+    await daemon.setGoal(id, 'First', { then: ['Second', 'Third'] });
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    const seen: Array<number | null> = [];
+    daemon.chatState.get(id);
+    await daemon.sendInput({ chatId: id, message: 'go', localId: 'L1', origin: 'user' });
+    await sleep(200);
+    seen.push(daemon.chatState.get(id)?.snoozedUntil ?? null);
+    expect(daemon.chatState.get(id)?.goal).toBe('Third');
+    expect(seen).toEqual([SNOOZE_UNTIL_COMPLETE]);
     await daemon.setGoal(id, null);
     expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
     daemon.shutdown();
