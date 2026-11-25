@@ -19692,3 +19692,103 @@ a.drop-target,
     column-gap: 24px;
   }
 }
+
+/* Decisions panel — parked questions pinned above the composer. */
+.decisions-panel {
+  margin: 8px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.decisions-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 4px 16px;
+  color: var(--ink);
+}
+.decisions-count {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.decisions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 8px 16px;
+}
+.decision-card {
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.decision-card:first-child {
+  border-top: none;
+}
+.decision-question {
+  margin: 0 0 4px 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+.decision-context {
+  margin: 0;
+  color: var(--ink-3);
+  white-space: pre-wrap;
+}
+.decision-context-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.decision-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+.decision-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.decision-option {
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font: inherit;
+  padding: 6px 12px;
+  min-height: 36px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.decision-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.decision-free {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.decision-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  padding: 6px 10px;
+  min-height: 36px;
+}

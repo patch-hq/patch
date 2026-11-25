@@ -29,6 +29,8 @@ import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
 import { useInboxStore } from './stores/inboxStore.js';
+import { useDecisionsStore } from './stores/decisionsStore.js';
+import type { ChatDecision } from './stores/types.js';
 import { InboxPaneRoute } from './routes/InboxPaneRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
@@ -350,6 +352,25 @@ useChatStore.getState().hydrate([
     },
     todos: [
       { text: 'read the current indexer', status: 'completed' as const },
+      { text: 'rebuild the index', status: 'in_progress' as const },
+      { text: 'schedule it nightly', status: 'pending' as const },
+    ],
+  },
+  // Decisions panel (spec/14 — Decisions): a looping chat with parked
+  // questions. Which states show is chosen by `?decisions=` below.
+  {
+    chatId: 'chat_decisions',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'nightly index loop',
+    folder: '/home/tom/projects/bus',
+    chatStatus: { state: 'running', since: 0 },
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 7,
+    todos: [
       { text: 'rebuild the index', status: 'in_progress' as const },
       { text: 'schedule it nightly', status: 'pending' as const },
     ],
@@ -4357,3 +4378,34 @@ createRoot(root).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
+// `?decisions=none|one|many|long|sending` seeds the Decisions panel states.
+{
+  const mode = new URLSearchParams(window.location.search).get('decisions');
+  const one = {
+    id: 'd1',
+    question: 'Keep the old index while the new one builds?',
+    context:
+      'Rebuilding takes about 40 minutes. Keeping the old one doubles disk use (6 GB) but search keeps working. I am carrying on with the schedule step either way.',
+    options: ['Keep both', 'Replace in place'],
+  };
+  const longOne = {
+    id: 'd2',
+    question: 'Which retention window for nightly snapshots?',
+    context:
+      'Snapshots are 1.8 GB each. 7 days is 12.6 GB, 30 days is 54 GB, and the volume has 38 GB free. The restore test I ran last night needed snapshots up to 9 days old to reproduce the corruption, so 7 days would not have caught it. Pruning runs at 03:00 after the build, so changing this later only affects future nights. I have written the prune step with the window as a single constant and will carry on with the scheduling work until you answer.',
+    options: ['7 days', '14 days', '30 days'],
+  };
+  const free = {
+    id: 'd3',
+    question: 'What should the failure alert say?',
+    context: 'The nightly job can fail in three ways; I have one message for all of them.',
+  };
+  const byMode: Record<string, ChatDecision[]> = {
+    one: [one],
+    many: [one, longOne, free],
+    long: [longOne],
+    sending: [{ ...one, sending: true }],
+  };
+  if (mode && byMode[mode]) useDecisionsStore.getState().set('chat_decisions', byMode[mode]);
+}

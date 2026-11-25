@@ -19,6 +19,17 @@ import type {
   TodoItem,
 } from '@patch/wire';
 
+/** A question a chat has parked for the user while it carries on (spec/14 — Decisions). */
+export interface ChatDecision {
+  id: string;
+  question: string;
+  /** Everything needed to answer without reading the transcript. */
+  context: string;
+  options?: string[];
+  /** The answer is in flight to the host. */
+  sending?: boolean;
+}
+
 export interface ChatRow {
   chatId: string;
   name: string | null;

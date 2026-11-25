@@ -83,6 +83,8 @@ import { HiddenBanner } from '../components/HiddenBanner.js';
 import { ParentChatBar } from '../components/ParentChatBar.js';
 import { FinishedGoalBanner, GoalBanner } from '../components/GoalBanner.js';
 import { TaskBar } from '../components/TaskBar.js';
+import { DecisionsPanel } from '../components/DecisionsPanel.js';
+import { useDecisionsStore } from '../stores/decisionsStore.js';
 import { ReminderBanner } from '../components/ReminderBanner.js';
 import { WakeBar } from '../components/WakeBar.js';
 import { JobTickBar } from '../components/JobTickBar.js';
@@ -2687,6 +2689,7 @@ export function ChatRoute({
             </section>
           </PendingApprovalCountContext.Provider>
         </BlobChatIdContext.Provider>
+        <DecisionsForChat chatId={row.chatId} />
         <TaskBar key={`tasks-${row.chatId}`} row={row} />
         {composerBlocked ? (
           <div className="composer-readonly" data-testid="composer-readonly">
@@ -7067,5 +7070,23 @@ function LoadEarlier({ chatId }: { chatId: string }): JSX.Element | null {
         </button>
       )}
     </div>
+  );
+}
+
+/** The chat's parked decisions. Answering is wired to the host in the next step. */
+function DecisionsForChat({ chatId }: { chatId: string }): JSX.Element | null {
+  const decisions = useDecisionsStore((s) => s.byChat[chatId]);
+  const setDecisions = useDecisionsStore((s) => s.set);
+  if (!decisions || decisions.length === 0) return null;
+  return (
+    <DecisionsPanel
+      decisions={decisions}
+      onAnswer={(id) =>
+        setDecisions(
+          chatId,
+          decisions.map((d) => (d.id === id ? { ...d, sending: true } : d)),
+        )
+      }
+    />
   );
 }
