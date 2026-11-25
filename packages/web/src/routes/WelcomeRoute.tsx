@@ -10,6 +10,7 @@
 
 import type { JSX } from 'react';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -502,7 +503,9 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
       </div>
       {loading ? (
         <div className="welcome-note" data-testid="welcome-model-loading">
-          <p>Loading models…</p>
+          <p>
+            <LoaderCircle className="status-spinner" size={14} aria-hidden /> Loading models…
+          </p>
         </div>
       ) : null}
       {shown.length < options.length ? (
@@ -721,7 +724,7 @@ function QrCode({
     <div className="welcome-qr" data-loading={payload === null ? 'true' : undefined}>
       {payload === null ? (
         <p className="welcome-note" role="status" data-testid={`${testId}-loading`}>
-          Making a code…
+          <LoaderCircle className="status-spinner" size={14} aria-hidden /> Making a code…
         </p>
       ) : null}
       <canvas
