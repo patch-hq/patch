@@ -5,6 +5,10 @@ import { __clearAllMmkv } from './stubs/mmkv';
 import { store } from '../src/lib/credential';
 import {
   MAX_CACHED_CHATS,
+  MAX_CACHED_EVENTS,
+  TAIL_COMPACT_AT,
+  dropTranscript,
+  setBranch,
   __resetPendingForTests,
   heldCursor,
   heldChatIds,
@@ -161,5 +165,69 @@ describe('heldCursor cost', () => {
     save('gone', 4);
     pruneTranscripts(new Set());
     expect(heldCursor('gone')).toBe(-1);
+  });
+
+  describe('live events go to a tail beside the blob', () => {
+    const blobKey = (c: string): string => `patch.transcript.v1.${c}`;
+    const tailKey = (c: string): string => `patch.transcript.tail.v1.${c}`;
+
+    it('does not rewrite the blob for a live event once one is held', () => {
+      save('t', ...Array.from({ length: 100 }, (_, i) => i));
+      const blob = store().getString(blobKey('t'));
+      save('t', 100);
+      save('t', 101);
+      expect(store().getString(blobKey('t'))).toBe(blob);
+      expect(JSON.parse(store().getString(tailKey('t'))!)).toHaveLength(2);
+      expect(
+        loadTranscript('t')!
+          .events.map((e) => (e as { seq: number }).seq)
+          .slice(-3),
+      ).toEqual([99, 100, 101]);
+      expect(heldCursor('t')).toBe(101);
+    });
+
+    it('a re-delivered event in the tail replaces the held one rather than doubling it', () => {
+      save('r', 1, 2, 3);
+      saveEvents('r', [{ ...(ev('r', 2) as object), content: 'edited' }]);
+      vi.advanceTimersByTime(1000);
+      const events = loadTranscript('r')!.events as { seq: number; content: string }[];
+      expect(events.map((e) => e.seq)).toEqual([1, 2, 3]);
+      expect(events[1]!.content).toBe('edited');
+    });
+
+    it('folds the tail into the blob once it grows, still keeping the newest events', () => {
+      save('f', ...Array.from({ length: MAX_CACHED_EVENTS }, (_, i) => i));
+      for (let i = 0; i < TAIL_COMPACT_AT; i++) save('f', MAX_CACHED_EVENTS + i);
+      expect(store().getString(tailKey('f'))).toBeUndefined();
+      const events = loadTranscript('f')!.events as { seq: number }[];
+      expect(events).toHaveLength(MAX_CACHED_EVENTS);
+      expect(events[events.length - 1]!.seq).toBe(MAX_CACHED_EVENTS + TAIL_COMPACT_AT - 1);
+      expect(heldCursor('f')).toBe(MAX_CACHED_EVENTS + TAIL_COMPACT_AT - 1);
+    });
+
+    it('drops the tail with the chat', () => {
+      save('d', 1);
+      save('d', 2);
+      dropTranscript('d');
+      expect(store().getString(tailKey('d'))).toBeUndefined();
+      expect(loadTranscript('d')).toBeNull();
+    });
+
+    it('an unreadable tail drops the whole chat, so it is refetched', () => {
+      save('u', 1);
+      save('u', 2);
+      store().set(tailKey('u'), '{not json');
+      expect(loadTranscript('u')).toBeNull();
+      expect(heldCursor('u')).toBe(-1);
+    });
+
+    it('keeps tail events when the branch or an answer rewrites the blob', () => {
+      save('b', 1);
+      save('b', 2);
+      setBranch('b', 'br1');
+      expect(store().getString(tailKey('b'))).toBeUndefined();
+      expect(loadTranscript('b')!.events).toHaveLength(2);
+      expect(loadTranscript('b')!.branchId).toBe('br1');
+    });
   });
 });
