@@ -262,6 +262,7 @@ export function ContextMenu({
       role="menu"
       aria-label={label}
       ref={menuRef}
+      tabIndex={-1}
       style={{ left: pos?.left ?? anchor.x, top: pos?.top ?? anchor.y }}
       // A second right-click inside the menu is not a request for a menu on
       // the menu, and it must not let the browser's own one through either.
@@ -310,6 +311,13 @@ export function ContextMenu({
             onMouseMove={(e) => {
               if (document.activeElement !== e.currentTarget) {
                 e.currentTarget.focus({ preventScroll: true });
+              }
+            }}
+            // Focus is the highlight, so it must leave with the pointer: otherwise
+            // the last row hovered stays lit after the mouse has gone.
+            onMouseLeave={(e) => {
+              if (document.activeElement === e.currentTarget) {
+                menuRef.current?.focus({ preventScroll: true });
               }
             }}
             onClick={(e) => {

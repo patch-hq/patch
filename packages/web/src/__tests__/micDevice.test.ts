@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { listMics, loadMicDeviceId, micConstraints, saveMicDeviceId } from '../lib/micDevice.js';
+import {
+  listMics,
+  systemDefaultMicName,
+  loadMicDeviceId,
+  micConstraints,
+  saveMicDeviceId,
+} from '../lib/micDevice.js';
 
 describe('micDevice', () => {
   beforeEach(() => localStorage.clear());
@@ -31,6 +37,22 @@ describe('micDevice', () => {
       { id: 'a', label: 'USB Mic' },
       { id: 'b', label: 'Microphone 2' },
     ]);
+    vi.unstubAllGlobals();
+  });
+
+  it('names what the system default resolves to', async () => {
+    vi.stubGlobal('navigator', {
+      mediaDevices: {
+        enumerateDevices: async () => [
+          {
+            kind: 'audioinput',
+            deviceId: 'default',
+            label: 'Default - MacBook Pro Microphone (Built-in)',
+          },
+        ],
+      },
+    });
+    expect(await systemDefaultMicName()).toBe('MacBook Pro Microphone (Built-in)');
     vi.unstubAllGlobals();
   });
 });

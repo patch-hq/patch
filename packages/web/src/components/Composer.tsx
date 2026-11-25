@@ -129,7 +129,13 @@ import {
   type DictationPreviewCallbacks,
 } from '../lib/dictationPreview.js';
 import { registerComposerMic } from '../lib/composerMic.js';
-import { listMics, loadMicDeviceId, saveMicDeviceId, type MicDevice } from '../lib/micDevice.js';
+import {
+  listMics,
+  loadMicDeviceId,
+  saveMicDeviceId,
+  systemDefaultMicName,
+  type MicDevice,
+} from '../lib/micDevice.js';
 import { startDictationMode, type DictationMode } from '../lib/dictationMode.js';
 import {
   LOCAL_ENGINE_DESKTOP_ONLY,
@@ -1930,12 +1936,14 @@ export const Composer = forwardRef(function Composer(
   // only appear once mic permission has been granted.
   const [mics, setMics] = useState<MicDevice[]>([]);
   const [micId, setMicId] = useState(loadMicDeviceId);
+  const [defaultMicName, setDefaultMicName] = useState<string | null>(null);
   useEffect(() => {
     if (!micMenu.anchor) return;
     setMicId(loadMicDeviceId());
-    listMics().then(setMics, (err: Error) =>
-      useUiStore.getState().pushError(failed('list microphones'), undefined, err.message),
-    );
+    const onErr = (err: Error): void =>
+      useUiStore.getState().pushError(failed('list microphones'), undefined, err.message);
+    listMics().then(setMics, onErr);
+    systemDefaultMicName().then(setDefaultMicName, onErr);
   }, [micMenu.anchor]);
   const pickMic = (id: string): void => {
     saveMicDeviceId(id);
@@ -1947,7 +1955,10 @@ export const Composer = forwardRef(function Composer(
       label: 'Microphone',
       icon: <Mic size={14} aria-hidden />,
       run: () => undefined,
-      submenu: [{ id: '', label: 'System default' }, ...mics].map((m) => ({
+      submenu: [
+        { id: '', label: defaultMicName ? `System default (${defaultMicName})` : 'System default' },
+        ...mics,
+      ].map((m) => ({
         id: `mic-${m.id || 'default'}`,
         label: `${m.id === micId ? '✓ ' : ''}${m.label}`,
         icon: <span aria-hidden />,
