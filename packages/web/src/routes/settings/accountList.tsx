@@ -329,7 +329,9 @@ export function UsageBars({
               <span className="set-bar-label">{SCOPE_LABELS[scope]}</span>
               <span className="set-bar" aria-hidden="true" />
               <span className="set-bar-value">–</span>
-              <span className="set-bar-reset">not reported</span>
+              <span className="set-bar-reset">
+                {usage.week !== undefined ? 'starts with your first message' : 'not reported'}
+              </span>
             </div>
           );
         }

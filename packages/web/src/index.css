@@ -10386,7 +10386,9 @@ button.set-row-open:focus-visible {
 }
 /* A host's name is often a long machine name; it gets room to show whole. */
 .set-host-name {
-  width: min(320px, 100%);
+  width: min(420px, 100%);
+  min-width: 16ch;
+  text-overflow: ellipsis;
 }
 .set-seg {
   display: inline-flex;
