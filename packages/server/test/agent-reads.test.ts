@@ -43,6 +43,45 @@ function world(messages = 5) {
   };
 }
 
+describe('a patch_agent subagent', () => {
+  function withChild() {
+    const w = world();
+    w.chatLogStore.noteParent('kid', 'c1');
+    w.chatLogStore.commit({
+      type: 'chat.message',
+      chatId: 'kid',
+      seq: 0,
+      role: 'assistant',
+      content: 'ok',
+      createdAt: 2000,
+    } as WireEvent);
+    return w;
+  }
+
+  it('peeks through its parent even though it is not in the registry', () => {
+    const out = peekChat(withChild().deps, 'kid');
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.result.chat_state).toMatchObject({
+      chatId: 'kid',
+      subagentOf: 'c1',
+      hostId: 'host-b',
+      lastMessage: 'ok',
+    });
+  });
+
+  it('reads its history', () => {
+    const out = chatHistory(withChild().deps, 'kid');
+    expect(out.ok).toBe(true);
+  });
+
+  it('is still not found when its parent is unknown', () => {
+    const w = world();
+    w.chatLogStore.noteParent('orphan', 'nope');
+    expect(peekChat(w.deps, 'orphan').ok).toBe(false);
+  });
+});
+
 describe('peekChat', () => {
   it('returns the server status and the latest entries for a chat whose host is offline', () => {
     const w = world();

@@ -40,13 +40,64 @@ function trackOf(row: NonNullable<ReturnType<ChatRegistry['get']>>): {
 const clamp = (limit: number | undefined, fallback: number): number =>
   Math.min(Math.max(Math.trunc(limit ?? fallback), 1), READ_HARD_CAP);
 
+/**
+ * A `patch_agent` subagent is never in the registry (spec/02 § Native subagent
+ * dispatch) but its record is kept against its parent. It is readable by
+ * anyone who could read the parent: the parent row must be a known chat.
+ */
+function subagentParent(
+  deps: AgentReadDeps,
+  chatId: string,
+): NonNullable<ReturnType<ChatRegistry['get']>> | undefined {
+  const parentId = deps.chatLogStore.parentOf(chatId);
+  return parentId === undefined ? undefined : deps.chatRegistry.get(parentId);
+}
+
+function peekSubagent(
+  deps: AgentReadDeps,
+  chatId: string,
+  limit?: number,
+): ReturnType<typeof peekChat> {
+  const parent = subagentParent(deps, chatId);
+  if (!parent) return notFound(chatId);
+  const page = deps.chatLogStore.page(chatId, { limit: clamp(limit, PEEK_DEFAULT_LIMIT) });
+  const track = deps.chatLogStore.entries(chatId, -1);
+  const lastMessages: { role: string; content: string; seq: number; ts: number | null }[] = [];
+  for (let i = track.length - 1; i >= 0 && lastMessages.length < LAST_MESSAGES; i--) {
+    const e = track[i]!;
+    if (e.type !== 'chat.message' || typeof e.content !== 'string' || e.content === '') continue;
+    if (e.role !== 'user' && e.role !== 'assistant') continue;
+    lastMessages.push({
+      role: e.role,
+      content: e.content,
+      seq: e.seq,
+      ts: typeof e.createdAt === 'number' ? e.createdAt : null,
+    });
+  }
+  lastMessages.reverse();
+  const chat_state: Record<string, unknown> = {
+    chatId,
+    subagentOf: parent.chatId,
+    hostId: parent.hostId,
+    hostOnline: deps.isHostOnline(parent.hostId),
+    folder: parent.folder,
+    lastMessages,
+    lastMessage: [...lastMessages].reverse().find((m) => m.role === 'assistant')?.content,
+    eventCount: page.through + 1,
+  };
+  return {
+    ok: true,
+    result: stripBinaryPayloads({ chat_state, events: page.entries, truncated: page.more }),
+  };
+}
+
 export function peekChat(
   deps: AgentReadDeps,
   chatId: string,
   limit?: number,
 ): ReadOutcome<{ chat_state: Record<string, unknown>; events: unknown[]; truncated: boolean }> {
   const row = deps.chatRegistry.get(chatId);
-  if (!row) return notFound(chatId);
+  if (!row) return peekSubagent(deps, chatId, limit);
   const page = deps.chatLogStore.page(chatId, {
     limit: clamp(limit, PEEK_DEFAULT_LIMIT),
     ...trackOf(row),
@@ -102,12 +153,12 @@ export function chatHistory(
   limit?: number,
 ): ReadOutcome<{ events: WireEvent[]; nextFromSeq?: number }> {
   const row = deps.chatRegistry.get(chatId);
-  if (!row) return notFound(chatId);
+  if (!row && !subagentParent(deps, chatId)) return notFound(chatId);
   const from = fromSeq ?? 0;
   const page = deps.chatLogStore.page(chatId, {
     after: from - 1,
     limit: clamp(limit, HISTORY_DEFAULT_LIMIT),
-    ...trackOf(row),
+    ...(row ? trackOf(row) : {}),
   });
   const result: { events: WireEvent[]; nextFromSeq?: number } = { events: page.entries };
   if (page.more) {
