@@ -23,6 +23,7 @@ function makeDir(root: string, name: string, ageMs: number): void {
   mkdirSync(dir);
   writeFileSync(join(dir, 'host.tar.gz'), 'x');
   const t = (Date.now() - ageMs) / 1000;
+  utimesSync(join(dir, 'host.tar.gz'), t, t);
   utimesSync(dir, t, t);
 }
 
@@ -55,6 +56,21 @@ describe('sweepUpdateWorkDirs', () => {
   });
 });
 
+describe('sweepUpdateWorkDirs age check', () => {
+  it('keeps a folder whose own mtime is old but has recent files inside', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sweep-test-'));
+    roots.push(root);
+    makeDir(root, 'patch-update-busy', 60 * 60_000);
+    const inner = join(root, 'patch-update-busy', 'deep');
+    mkdirSync(inner);
+    writeFileSync(join(inner, 'f'), 'x'); // fresh mtime, nested
+    const old = (Date.now() - 60 * 60_000) / 1000;
+    utimesSync(join(root, 'patch-update-busy'), old, old);
+    expect(sweepUpdateWorkDirs(root)).toEqual([]);
+    expect(existsSync(join(root, 'patch-update-busy'))).toBe(true);
+  });
+});
+
 describe('sweepUpdateWorkDirs when a removal is refused', () => {
   // root ignores permission bits, so the refusal cannot be provoked there.
   it.skipIf(process.getuid?.() === 0)(
@@ -71,6 +87,8 @@ describe('sweepUpdateWorkDirs when a removal is refused', () => {
       writeFileSync(join(locked, 'f'), 'x');
       chmodSync(locked, 0o555);
       const old = (Date.now() - 60 * 60_000) / 1000;
+      utimesSync(join(locked, 'f'), old, old);
+      utimesSync(locked, old, old);
       utimesSync(join(root, 'patch-update-b-locked'), old, old);
       const errors: { name: string; code: unknown }[] = [];
       try {

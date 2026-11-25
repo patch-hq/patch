@@ -31,6 +31,7 @@ import {
   readFileSync,
   readlinkSync,
   rmSync,
+  lstatSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -561,6 +562,27 @@ export function updateWorkRoot(patchHome: string): string {
 export const UPDATE_WORK_MAX_AGE_MS = 15 * 60_000;
 
 /**
+ * Newest mtime of a folder or anything inside it. A folder's own mtime only
+ * moves when direct children are added or removed, so an installer busy deep
+ * inside it for a long time would otherwise look abandoned.
+ */
+function newestMtimeMs(path: string, top = true): number {
+  // The folder itself is stat'd (a dangling link there is reported); what is inside is not followed.
+  const st = top ? statSync(path) : lstatSync(path);
+  let newest = st.mtimeMs;
+  if (!st.isDirectory()) return newest;
+  for (const entry of readdirSync(path)) {
+    try {
+      newest = Math.max(newest, newestMtimeMs(join(path, entry), false));
+    } catch (err) {
+      // An entry that vanished mid-walk (the installer is working) is not an error.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+  return newest;
+}
+
+/**
  * Remove `patch-update-*` work folders left in the temp dir. The installer
  * restarts the service and so kills the host before `applyUpdate`'s own cleanup
  * runs; every update otherwise leaves ~200 MB behind. Recent folders are kept —
@@ -580,7 +602,7 @@ export function sweepUpdateWorkDirs(
     // Housekeeping: one folder we cannot stat or remove (another user's, in
     // use, vanished) is reported and skipped, never allowed to block startup.
     try {
-      if (now - statSync(dir).mtimeMs < maxAgeMs) continue;
+      if (now - newestMtimeMs(dir) < maxAgeMs) continue;
       rmSync(dir, { recursive: true, force: true });
       removed.push(name);
     } catch (err) {
