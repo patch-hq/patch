@@ -722,7 +722,7 @@ export function AppShell(): JSX.Element {
           connected on main screen"). Rendering it once here, instead of inside
           ChatRoute, means it is never missing on the screens that aren't a
           chat, and never doubled on the ones that are. */}
-      <HostOfflineBanner />
+      <HostOfflineBanner newChat={location.pathname === '/chats/new'} />
       {/* The one update prompt: a newer shell build or page is ready and
           waiting to be asked. Renders nothing until one is. */}
       <UpdateBanner />
