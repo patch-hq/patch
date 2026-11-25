@@ -317,6 +317,65 @@ describe('requestUpdate: turns do not hold an install', () => {
   });
 });
 
+describe('applyUpdate when the installer fails after moving `current`', () => {
+  const logger = { info() {}, warn() {}, error() {} } as never;
+  it('reports not applied, puts `current` back and leaves no probation', async () => {
+    const { applyUpdate } = await import('../src/selfUpdate.js');
+    const fs = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { readProbation } = await import('../src/updateProbation.js');
+    const dir = fs.mkdtempSync(join(tmpdir(), 'patch-su-fail-'));
+    try {
+      const name = 'patch-host-0.2.0-linux-x64';
+      fs.mkdirSync(join(dir, name));
+      fs.writeFileSync(join(dir, name, 'install'), '#!/bin/sh\n');
+      const home = join(dir, 'home');
+      for (const v of ['0.1.0', '0.2.0']) {
+        fs.mkdirSync(join(home, 'versions', v), { recursive: true });
+        fs.writeFileSync(join(home, 'versions', v, 'install'), '#!/bin/sh\n');
+      }
+      fs.symlinkSync(join(home, 'versions', '0.1.0'), join(home, 'current'));
+      execFileSync('tar', ['-czf', join(dir, `${name}.tar.gz`), '-C', dir, name]);
+      const bytes = fs.readFileSync(join(dir, `${name}.tar.gz`));
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const { sig, publicKeyB64Url } = signDigest(digest);
+      const manifest = {
+        version: '0.2.0',
+        signingPublicKey: publicKeyB64Url,
+        artifacts: [{ target: 'linux-x64', file: `${name}.tar.gz`, sha256: digest, sig }],
+      };
+      const fetchImpl = (async (url: string) =>
+        url.endsWith('.json')
+          ? new Response(JSON.stringify(manifest))
+          : new Response(bytes)) as unknown as typeof fetch;
+      const result = await applyUpdate({
+        serverUrl: 'http://s',
+        internalToken: 'secret-internal-token',
+        currentVersion: '0.1.0',
+        target: 'linux-x64',
+        patchHome: home,
+        logger,
+        fetchImpl,
+        startWatchdog: () => {},
+        runInstaller: async () => {
+          // The installer lays the version down and repoints `current`, then dies
+          // (login-shell PATH timeout) before it restarts the service.
+          fs.rmSync(join(home, 'current'));
+          fs.symlinkSync(join(home, 'versions', '0.2.0'), join(home, 'current'));
+          throw new Error('installer exited 69');
+        },
+      });
+      expect(result.applied).toBe(false);
+      expect(fs.readlinkSync(join(home, 'current'))).toBe(join(home, 'versions', '0.1.0'));
+      expect(readProbation(home)).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // 2026-10-04/05: a deploy publishes linux-x64 first and darwin-arm64 a minute
 // later, so a Mac polling in between saw a newer version with no artifact for
 // it and toasted "did not update" on a deploy that was fine.
