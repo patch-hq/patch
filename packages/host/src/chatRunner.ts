@@ -12665,7 +12665,10 @@ export class Daemon {
       seq,
       createdAt: now,
     });
-    this.emitState(chatId);
+    // With a goal queued the next one is armed below and emits then: emitting
+    // here would show the chat with no goal for a moment, and an
+    // until-complete snooze would wake between goals of the sequence.
+    if (upcoming.length === 0) this.emitState(chatId);
     if (result.verdict === 'impossible') {
       const tail =
         unstarted > 0
