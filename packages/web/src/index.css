@@ -6561,6 +6561,37 @@ button.view-file-download {
   cursor: zoom-in;
   line-height: 0;
 }
+.msg-attachment-img-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+.img-copy-overlay {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink-2);
+  cursor: pointer;
+  opacity: 0;
+}
+.msg-attachment-img-wrap:hover .img-copy-overlay,
+.img-copy-overlay:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .img-copy-overlay {
+    opacity: 1;
+  }
+}
 .msg-attachment-img {
   max-width: 260px;
   max-height: 260px;
