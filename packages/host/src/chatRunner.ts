@@ -5952,6 +5952,65 @@ export class Daemon {
     if (!moved) this.emitState(chatId);
   }
 
+  /**
+   * spec/04 § Current status — the action a `patch_ask_human` asked for has
+   * happened. Clears the ask (the "waiting on you" mark, and the goal hold) and
+   * puts the chat back into the snooze the ask had woken it from, when that
+   * snooze is still running.
+   *
+   * `user`: the person pressed Done, so the agent is told with a short user turn
+   * "Done: <task>" (which also resumes a goal waiting on them). `agent`: the
+   * agent saw it had happened itself and is already running, so nothing is sent.
+   * Throws when nothing is outstanding (NO FALLBACK: a stale Done says so).
+   */
+  async resolveAsk(chatId: string, by: 'user' | 'agent'): Promise<void> {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    if (!this.isAskingQuestion(state) || state.declaredStatus === null) {
+      throw new Error(`resolveAsk: ${chatId} is not waiting on an action`);
+    }
+    const task = state.declaredStatus.text;
+    const restore = this.snoozeToRestore(chatId);
+    // The goal hold lifts now even when the Done turn has to queue behind a
+    // running one.
+    this.cancelGoalHoldTimer(chatId);
+    if (state.goalProgress?.waitingOnUser) {
+      state.goalProgress = { ...state.goalProgress, waitingOnUser: false };
+    }
+    if (by === 'user') {
+      await this.sendInput({ chatId, message: `Done: ${task}`, localId: randomUUID() });
+    } else {
+      state.declaredStatus = null;
+      state.statusKind = null;
+      state.statusSummary = null;
+      this.opts.metaStore.update(chatId, (m) => ({
+        ...m,
+        declaredStatus: null,
+        updatedAt: this.opts.now(),
+      }));
+      this.emitState(chatId);
+    }
+    if (restore === null) return;
+    // An until-complete snooze only makes sense while there is work to wait for.
+    if (restore.until === SNOOZE_UNTIL_COMPLETE && !this.hasWorkToComplete(chatId)) return;
+    await this.setSnoozed(chatId, restore.until, {
+      setId: restore.setId,
+      ...(restore.waitForSet ? { waitForSet: true } : {}),
+    });
+  }
+
+  /** The snooze a `patch_ask_human` ended, if it is still worth going back to. */
+  private snoozeToRestore(
+    chatId: string,
+  ): { until: number; setId: string; waitForSet: boolean } | null {
+    const state = this.chatState.get(chatId);
+    if (!state || state.snoozedUntil !== null) return null;
+    const last = state.snoozeRecords[state.snoozeRecords.length - 1];
+    if (!last || last.endedAt === null || last.outcome.kind !== 'waiting') return null;
+    if (last.until !== SNOOZE_UNTIL_COMPLETE && last.until <= this.opts.now()) return null;
+    return { until: last.until, setId: last.setId, waitForSet: last.waitForSet === true };
+  }
+
   private cancelGoalHoldTimer(chatId: string): void {
     const t = this.goalHoldTimers.get(chatId);
     if (t !== undefined) clearTimeout(t);

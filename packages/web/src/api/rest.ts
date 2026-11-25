@@ -858,6 +858,9 @@ export const api = {
   // spec/04 § Snooze → Back — the chat was opened; the host clears its whole set.
   clearSnoozeBack: (chatId: string) =>
     request<unknown>(`/api/chats/${chatId}/snooze/back-clear`, { method: 'POST' }),
+  // spec/04 § Current status — the user did what the chat's patch_ask_human asked.
+  askDone: (chatId: string) =>
+    request<unknown>(`/api/chats/${chatId}/ask-done`, { method: 'POST' }),
   // spec/04 § Hidden — `hidden: false` is Show: the chat moves into the active
   // list without anything being sent to it.
   hideChat: (chatId: string, hidden: boolean) =>

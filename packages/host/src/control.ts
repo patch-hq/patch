@@ -949,6 +949,8 @@ const NOTIFY_MESSAGE_MAX = 4096;
 /** A quick-reply button's text — short enough to read on a notification. */
 const NOTIFY_QUICK_REPLY_MAX = 40;
 
+const AskHumanDoneBody = z.object({ callerChatId: z.string().min(1) }).strict();
+
 const AskHumanBody = z
   .object({
     task: z.string().min(1),
@@ -4295,6 +4297,34 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     app.log.info({ chatId: callerChatId, task, why }, 'patch_ask_human: blocked on the user');
     toolLog({ tool: 'patch_ask_human', callerChatId, durationMs: Date.now() - start, ok: true });
     if (isSnoozedNow(state)) return NOT_DELIVERED_SNOOZED;
+    return { ok: true };
+  });
+
+  // patch_ask_human with done:true. The agent can see the action it asked for
+  // has happened, so it clears its own ask: same effect as the user's Done,
+  // minus the "Done: <task>" turn (the agent is the one running).
+  app.post('/internal/ask_human_done', async (req, reply) => {
+    const start = Date.now();
+    if (require503(reply)) return;
+    const parsed = AskHumanDoneBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const { callerChatId } = parsed.data;
+    if (!opts.daemon!.chatState.get(callerChatId)) {
+      return reply.code(404).send({
+        error: 'chat_not_found',
+        message: `chat not found: ${callerChatId}`,
+      } satisfies ErrorEnvelope);
+    }
+    try {
+      await opts.daemon!.resolveAsk(callerChatId, 'agent');
+    } catch (e) {
+      return reply
+        .code(409)
+        .send({ error: 'no_pending_ask', message: (e as Error).message } satisfies ErrorEnvelope);
+    }
+    toolLog({ tool: 'patch_ask_human', callerChatId, durationMs: Date.now() - start, ok: true });
     return { ok: true };
   });
 

@@ -734,6 +734,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     setId: 'set-1',
   },
   'chat.snooze_back_clear_request': { type: 'chat.snooze_back_clear_request', chatId: 'c1' },
+  'chat.ask_done_request': { type: 'chat.ask_done_request', chatId: 'c1' },
   'chat.delete_request': { type: 'chat.delete_request', chatId: 'c1', deleted: true },
   'chat.goal_request': {
     type: 'chat.goal_request',

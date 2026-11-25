@@ -8997,6 +8997,11 @@ export async function handleServerEvent(
         daemon.clearSnoozeBack(event.chatId);
         return;
       }
+      case 'chat.ask_done_request': {
+        // spec/04 § Current status — the user did what `patch_ask_human` asked.
+        await daemon.resolveAsk(event.chatId, 'user');
+        return;
+      }
       case 'chat.hide_request': {
         // spec/04 § Hidden — `false` is the Hidden section's Show.
         await daemon.setHidden(event.chatId, event.hidden);

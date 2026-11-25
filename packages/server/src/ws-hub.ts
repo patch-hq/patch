@@ -1884,6 +1884,7 @@ export class WsHub {
       case 'chat.archive_request':
       case 'chat.snooze_request':
       case 'chat.snooze_back_clear_request':
+      case 'chat.ask_done_request':
       case 'chat.hide_request':
       case 'file.write':
       case 'chat.settings':

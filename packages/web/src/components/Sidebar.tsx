@@ -41,6 +41,7 @@ import {
   Layers,
   Target,
   MailOpen,
+  Check,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
 import {
@@ -76,6 +77,7 @@ import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
 import { StableNavigateProvider, useStableNavigate } from '../lib/useStableNavigate.js';
+import { isAskOutstanding, pressAskDone } from '../lib/askDone.js';
 import { snoozedRowsForStore } from '../lib/snoozedRows.js';
 import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
@@ -2525,6 +2527,16 @@ const ChatRowView = memo(function ChatRowView({
               label: 'Mark as unread',
               icon: <MailOpen size={14} aria-hidden />,
               run: () => useChatStore.getState().markUnread(row.chatId),
+            },
+          ]
+        : []),
+      ...(isAskOutstanding(row)
+        ? [
+            {
+              id: 'ask-done',
+              label: 'Action done',
+              icon: <Check size={14} aria-hidden />,
+              run: () => pressAskDone(row.chatId),
             },
           ]
         : []),

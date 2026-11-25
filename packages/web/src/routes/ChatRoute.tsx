@@ -4481,7 +4481,13 @@ function ToolCall({
       ? parseAskHuman(entry.toolArgs)
       : null;
   if (askHuman)
-    return <AskHumanCard task={askHuman.task} {...(askHuman.why ? { why: askHuman.why } : {})} />;
+    return (
+      <AskHumanCard
+        task={askHuman.task}
+        chatId={chatId}
+        {...(askHuman.why ? { why: askHuman.why } : {})}
+      />
+    );
 
   // A message to another chat is one "Sent to <chat>" card: the text that
   // went, and the chat's name opening it. A refused send says so on the card.
