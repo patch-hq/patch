@@ -298,6 +298,15 @@ contextBridge.exposeInMainWorld('patch', {
     ipcRenderer.on('patch:system-away-changed', handler);
     return () => ipcRenderer.removeListener('patch:system-away-changed', handler);
   },
+  // The welcome page asks for notifications where it explains why (macOS only:
+  // it is the only platform with a prompt to show).
+  ...(process.platform === 'darwin'
+    ? {
+        askNotifications(): Promise<void> {
+          return ipcRenderer.invoke('patch:notifications:ask');
+        },
+      }
+    : {}),
   // spec/02 § Desktop app and the local host.
   // spec/05 § Keep running — only in a window of a shell that runs Patch on
   // this computer itself (main passes the flag), so the page can tell whether

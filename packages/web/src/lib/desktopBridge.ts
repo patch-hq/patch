@@ -156,6 +156,11 @@ export interface PatchDesktopBridge {
    * computer awake while plugged in, so a phone can reach the server it runs.
    * Present only in a shell that runs Patch on this computer itself.
    */
+  /**
+   * Show macOS's own notification permission prompt, once per device. Present
+   * only in a Mac shell: nothing else has a prompt to show.
+   */
+  askNotifications?(): Promise<void>;
   keepRunning?: {
     get(): Promise<KeepRunningState>;
     set(

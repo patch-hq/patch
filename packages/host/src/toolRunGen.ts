@@ -124,6 +124,8 @@ export function buildToolRunPrompt(input: GenerateToolRunSummaryInput): string {
     'e.g. "Set up the project locally", "Searched the web for Haiku pricing",',
     '"Found where tool rows are grouped", "Checked why the deploy failed".',
     'Name the subject, not the tools: never "ran commands" or "read files".',
+    'Name a file or thing by what it is, never by what was put in it: "Created hello.txt",',
+    'not "Created hello.txt with patch content".',
     'A call marked FAILED did not do its job: never say a failed call succeeded.',
     'If the batch was mostly failures, say it tried, e.g. "Tried to file a Jira ticket".',
     'Describe the action neutrally: the user owns the machine and asked for these',
