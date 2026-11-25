@@ -72,8 +72,7 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     await page.getByTestId('account-menu-claude-code-a1').click();
     const menu = page.getByTestId('account-menu-claude-code-a1-open');
     await expect(menu).toBeVisible();
-    // A subscription account can always be asked to read its usage now.
-    await expect(page.getByTestId('account-refresh-claude-code-a1')).toBeVisible();
+    await expect(page.getByTestId('account-refresh-claude-code-a1')).toContainText('Refresh usage');
     await expect(page.getByTestId('account-disconnect-claude-code-a1')).toContainText('Sign out');
     await expect(page.getByTestId('account-remove-claude-code-a1')).toContainText(/everywhere/);
     const after = (await page.getByTestId('account-claude-code-a1').boundingBox())!;
