@@ -1232,7 +1232,7 @@ async function startHost(
     // The host's own work folder, plus the system temp dir where older builds left theirs.
     const sweptWork = [updateWorkRoot(config.patchHome), tmpdir()].flatMap((root) =>
       sweepUpdateWorkDirs(root, undefined, undefined, (name, err) =>
-        logger.warn({ err, folder: name }, 'self-update: could not sweep update folder, skipped'),
+        logger.error({ err, folder: name }, 'self-update: could not sweep update folder, skipped'),
       ),
     );
     if (sweptWork.length)
