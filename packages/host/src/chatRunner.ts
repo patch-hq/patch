@@ -853,6 +853,12 @@ const SUBAGENT_DISALLOWED_PATCH_TOOLS = [
   // Only a chat the user is in starts agents: nesting is invisible to them.
   'mcp__patch__patch_agent',
   'mcp__patch__patch_spawn',
+  // A subagent's final reply IS its report: the host hands it to the parent.
+  // Offering a way to "send it to the parent" (refused: there is no side
+  // branch, and the parent is not addressable) let the child swap the report
+  // for a note about the failure.
+  'mcp__patch__patch_send_back',
+  'mcp__patch__patch_send_to',
 ];
 
 /** `patch_delegate`'s live/settled state (spec/06 § Cross-chat tools). */
