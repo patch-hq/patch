@@ -42,6 +42,20 @@ const INDEX_KEY = 'patch.transcript.index.v1';
  * whole transcript keeps launch from decoding hundreds of blobs on the JS thread.
  */
 const CURSOR_PREFIX = 'patch.transcript.cursor.v1.';
+/**
+ * Events that arrived since the chat's blob was last written, kept beside it.
+ *
+ * A held transcript runs to megabytes (3000 events of a tool-heavy chat is
+ * ~2.5 MB). Rewriting it for every coalesced batch meant parsing, sorting and
+ * re-serialising the whole thing on the JS thread every 750 ms for every chat
+ * that was moving — on a phone, hundreds of milliseconds per chat, so a few
+ * busy agents kept the thread at 100% and the app froze. New events go to this
+ * small tail instead; the blob is rewritten only when the tail grows past
+ * `TAIL_COMPACT_AT`, or when something else rewrites it anyway.
+ */
+const TAIL_PREFIX = 'patch.transcript.tail.v1.';
+/** Tail length at which it is folded into the blob. */
+export const TAIL_COMPACT_AT = 250;
 /** Most recent events kept per chat — well past a tall screen's worth. */
 export const MAX_CACHED_EVENTS = 3000;
 /**
@@ -83,6 +97,55 @@ function cursorKey(chatId: string): string {
   return `${CURSOR_PREFIX}${chatId}`;
 }
 
+function tailKey(chatId: string): string {
+  return `${TAIL_PREFIX}${chatId}`;
+}
+
+/** Every key held for one chat. */
+function deleteChatKeys(chatId: string): void {
+  store().delete(key(chatId));
+  store().delete(cursorKey(chatId));
+  store().delete(tailKey(chatId));
+}
+
+/**
+ * The events waiting beside the blob, oldest first. Null when it was
+ * unreadable: reported, and the chat dropped.
+ */
+function readTail(chatId: string): unknown[] | null {
+  const raw = store().getString(tailKey(chatId));
+  if (raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('cached transcript tail is not a list');
+    return parsed;
+  } catch (e) {
+    // The tail alone cannot be trusted to sit on top of the blob any more:
+    // drop the chat whole, as with an unreadable blob, so it is refetched.
+    deleteChatKeys(chatId);
+    useUiStore.getState().pushError(`transcript cache unreadable: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** `incoming` merged over `held` by seq — a re-delivery overwrites — oldest first. */
+function mergeBySeq(held: unknown[], incoming: unknown[]): unknown[] {
+  const bySeq = new Map<number, unknown>();
+  for (const event of held) {
+    const seq = durableSeq(event);
+    if (seq !== null) bySeq.set(seq, event);
+  }
+  for (const event of incoming) {
+    const seq = durableSeq(event);
+    if (seq !== null) bySeq.set(seq, event);
+  }
+  return [...bySeq.entries()].sort(([a], [b]) => a - b).map(([, e]) => e);
+}
+
+function trim(events: unknown[]): unknown[] {
+  return events.length > MAX_CACHED_EVENTS ? events.slice(-MAX_CACHED_EVENTS) : events;
+}
+
 function durableSeq(event: unknown): number | null {
   if (typeof event !== 'object' || event === null) return null;
   const e = event as { seq?: unknown; chatId?: unknown };
@@ -115,7 +178,8 @@ function readIndex(): CacheIndex {
   }
 }
 
-function readChat(chatId: string): CachedChat | null {
+/** The blob alone, without the tail beside it. */
+function readBlob(chatId: string): CachedChat | null {
   const raw = store().getString(key(chatId));
   if (raw === undefined) return null;
   try {
@@ -136,11 +200,33 @@ function readChat(chatId: string): CachedChat | null {
     }
     return parsed as CachedChat;
   } catch (e) {
-    store().delete(key(chatId));
-    store().delete(cursorKey(chatId));
+    deleteChatKeys(chatId);
     useUiStore.getState().pushError(`transcript cache unreadable: ${(e as Error).message}`);
     return null;
   }
+}
+
+/** What is held for a chat: the blob with the tail folded over it. */
+function readChat(chatId: string): CachedChat | null {
+  const blob = readBlob(chatId);
+  if (blob === null) {
+    // A tail never outlives its blob (every delete takes both); one left over
+    // from an interrupted write has nothing to sit on and is dropped.
+    store().delete(tailKey(chatId));
+    return null;
+  }
+  const tail = readTail(chatId);
+  if (tail === null) return null;
+  if (tail.length === 0) return blob;
+  return { ...blob, events: trim(mergeBySeq(blob.events, tail)) };
+}
+
+/** Write a chat's whole blob, folding the tail into it. */
+function writeBlob(chatId: string, chat: CachedChat): void {
+  const events = trim(chat.events);
+  store().set(cursorKey(chatId), String(cursorOf(events)));
+  store().set(key(chatId), JSON.stringify({ ...chat, events } satisfies CachedChat));
+  store().delete(tailKey(chatId));
 }
 
 /**
@@ -157,31 +243,31 @@ export function loadTranscript(chatId: string): CachedChat | null {
   return held;
 }
 
-/** Merge `events` into what is held, newest `MAX_CACHED_EVENTS` kept. */
+/**
+ * Merge `events` into what is held, newest `MAX_CACHED_EVENTS` kept.
+ *
+ * Into the tail while it is short — reading and writing a few hundred events,
+ * not the whole transcript — and into the blob once it has grown (see
+ * `TAIL_PREFIX`). A chat with no blob yet gets one straight away.
+ */
 function writeMerged(chatId: string, incoming: unknown[]): void {
-  const held = readChat(chatId);
-  const bySeq = new Map<number, unknown>();
-  for (const event of held?.events ?? []) {
-    const seq = durableSeq(event);
-    if (seq !== null) bySeq.set(seq, event);
+  if (store().getString(key(chatId)) === undefined) {
+    store().delete(tailKey(chatId));
+    writeBlob(chatId, { branchId: null, events: mergeBySeq([], incoming), resolutions: {} });
+    return;
   }
-  for (const event of incoming) {
-    const seq = durableSeq(event);
-    // Re-delivery overwrites rather than duplicates, which is what makes a
-    // reconnect's overlapping replay safe to feed straight in.
-    if (seq !== null) bySeq.set(seq, event);
+  const held = readTail(chatId);
+  if (held === null) return;
+  const tail = mergeBySeq(held, incoming);
+  if (tail.length >= TAIL_COMPACT_AT) {
+    const chat = readChat(chatId);
+    if (chat === null) return;
+    writeBlob(chatId, { ...chat, events: mergeBySeq(chat.events, tail) });
+    return;
   }
-  const events = [...bySeq.entries()].sort(([a], [b]) => a - b).map(([, e]) => e);
-  const trimmed = events.length > MAX_CACHED_EVENTS ? events.slice(-MAX_CACHED_EVENTS) : events;
-  store().set(cursorKey(chatId), String(cursorOf(trimmed)));
-  store().set(
-    key(chatId),
-    JSON.stringify({
-      branchId: held?.branchId ?? null,
-      events: trimmed,
-      resolutions: held?.resolutions ?? {},
-    } satisfies CachedChat),
-  );
+  store().set(tailKey(chatId), JSON.stringify(tail));
+  const cursor = Math.max(heldCursor(chatId), cursorOf(tail));
+  store().set(cursorKey(chatId), String(cursor));
 }
 
 function flush(): void {
@@ -199,8 +285,7 @@ function flush(): void {
     // Bound the number of chats held, least-recently-opened first.
     const ordered = Object.entries(index).sort(([, a], [, b]) => b - a);
     for (const [chatId] of ordered.slice(MAX_CACHED_CHATS)) {
-      store().delete(key(chatId));
-      store().delete(cursorKey(chatId));
+      deleteChatKeys(chatId);
       delete index[chatId];
     }
     store().set(INDEX_KEY, JSON.stringify(index));
@@ -226,15 +311,8 @@ export function saveEvents(chatId: string, events: unknown[]): void {
 /** Record which track the held events belong to. */
 export function setBranch(chatId: string, branchId: string): void {
   const held = readChat(chatId);
-  if (held === null) return;
-  store().set(
-    key(chatId),
-    JSON.stringify({
-      branchId,
-      events: held.events,
-      resolutions: held.resolutions,
-    } satisfies CachedChat),
-  );
+  if (held === null || held.branchId === branchId) return;
+  writeBlob(chatId, { ...held, branchId });
 }
 
 /**
@@ -266,7 +344,7 @@ export function saveResolution(
       ...steps,
       { decision, ...(answers !== undefined ? { answers } : {}) },
     ];
-    store().set(key(chatId), JSON.stringify(held satisfies CachedChat));
+    writeBlob(chatId, held);
   } catch (e) {
     useUiStore.getState().pushError(`transcript cache write failed: ${(e as Error).message}`);
   }
@@ -275,8 +353,7 @@ export function saveResolution(
 /** Forget a chat entirely — its track was replaced, not extended. */
 export function dropTranscript(chatId: string): void {
   pending.delete(chatId);
-  store().delete(key(chatId));
-  store().delete(cursorKey(chatId));
+  deleteChatKeys(chatId);
   const index = readIndex();
   delete index[chatId];
   store().set(INDEX_KEY, JSON.stringify(index));
@@ -323,8 +400,7 @@ export function pruneTranscripts(keep: Set<string>): void {
     for (const chatId of Object.keys(index)) {
       if (keep.has(chatId)) continue;
       pending.delete(chatId);
-      store().delete(key(chatId));
-      store().delete(cursorKey(chatId));
+      deleteChatKeys(chatId);
       delete index[chatId];
     }
     store().set(INDEX_KEY, JSON.stringify(index));
