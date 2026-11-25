@@ -19692,7 +19692,8 @@ a.drop-target,
     grid-template-columns: repeat(2, max-content);
     column-gap: 24px;
   }
-=======
+}
+
 /* Zen mode — one chat, full screen, nothing else. Everything below is what a
    chat shows that is not the conversation itself or the box to answer it. The
    shell leaves out the sidebar, tools and side panels in JSX; the rest is
