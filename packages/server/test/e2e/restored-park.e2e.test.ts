@@ -62,6 +62,11 @@ describe('e2e: a parked chat across a host restart', () => {
         .filter((e) => e.chatId === chatId)
         .map((e) => e.chatStatus?.state ?? '?');
 
+    // Frames about the turn that parked the chat can still be in flight when the
+    // recorder starts; only what the surface is told from the restart on counts.
+    await until(() => told().at(-1) === 'paused', 5000, 'the surface is told paused');
+    const before = told().length;
+
     // The host self-updates: a new host on the same ~/.patch.
     await h.restartHost();
     h.daemon.setLimitBehaviour('other_account');
@@ -69,7 +74,7 @@ describe('e2e: a parked chat across a host restart', () => {
     await new Promise((r) => setTimeout(r, 500));
     expect(status()).toBe('paused');
     expect(h.built.chatRegistry.get(chatId)?.chatStatus?.resetsAt).toBe(resetsAt);
-    expect(told()).not.toContain('idle');
+    expect(told().slice(before)).not.toContain('idle');
 
     // The accounts are known and one has credit: the park is released.
     provider.limited = false;
