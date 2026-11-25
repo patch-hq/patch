@@ -1175,9 +1175,17 @@ kbd {
 .foot-inner {
   display: flex;
   align-items: center;
-  gap: 28px;
-  height: 88px;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding-top: 28px;
+  padding-bottom: 28px;
   font-size: 15px;
+}
+
+.foot-company {
+  flex-basis: 100%;
+  color: var(--ink-3);
+  font-size: 13px;
 }
 
 .foot-inner a {
@@ -1323,6 +1331,9 @@ kbd {
   .foot-inner .brand {
     grid-column: 1 / -1;
     justify-self: start;
+  }
+  .foot-company {
+    grid-column: 1 / -1;
   }
 }
 
