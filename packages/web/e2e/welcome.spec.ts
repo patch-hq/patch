@@ -75,9 +75,9 @@ test('this computer: every step, each choice written where Settings writes it', 
   // 1. Connect an AI — Claude in the browser, the code pasted back.
   await expect(page.getByTestId('welcome-providers')).toBeVisible();
   await expect(page.getByTestId('welcome-next')).toHaveCount(0);
-  // One dot per step this page asks: AI, permissions, keep running, phone. The
-  // model step joins once an AI is connected (checked below).
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  // One dot per step this computer can have: AI, permissions, model, keep
+  // running, phone. The bar is the same length before and after an AI connects.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
   await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(1);
   await expect(page.getByTestId('welcome-claude-plans')).toHaveCount(0);
   await expect(page.getByTestId('claude-add-api-key')).toBeVisible();
@@ -189,8 +189,9 @@ test('nothing connected: skipping says once what it costs, there is no model ste
     r.fulfill({ status: 502, json: { error: 'upstream' } }),
   );
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
-  // AI, permissions, phone: with no AI there is no model step.
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(3);
+  // AI, permissions, model, phone: the model step keeps its dot so the bar is a
+  // fixed length, though with no AI it is skipped (checked below).
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
   // The cost of skipping is on screen before the click, and one click skips.
   await expect(page.getByTestId('welcome-skip-note')).toHaveText(
     'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
