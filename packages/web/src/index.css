@@ -6578,7 +6578,7 @@ button.view-file-download {
   padding: 0;
   border: none;
   border-radius: 6px;
-  background: var(--bg);
+  background: var(--bg-elevated);
   color: var(--ink-2);
   cursor: pointer;
   opacity: 0;
