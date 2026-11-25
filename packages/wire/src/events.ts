@@ -5270,6 +5270,20 @@ export const ChatSnoozeBackClearRequestEvent = z
 export type ChatSnoozeBackClearRequestEvent = z.infer<typeof ChatSnoozeBackClearRequestEvent>;
 
 /**
+ * Surface → host: the user did what a `patch_ask_human` asked (spec/04 §
+ * Current status). The host clears the ask, tells the agent with a short user
+ * turn ("Done: <task>") and puts the chat back into the snooze the ask woke it
+ * from, if that has not run out. Refused when nothing is outstanding.
+ */
+export const ChatAskDoneRequestEvent = z
+  .object({
+    type: z.literal('chat.ask_done_request'),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type ChatAskDoneRequestEvent = z.infer<typeof ChatAskDoneRequestEvent>;
+
+/**
  * Surface → host hide / show (spec/04 § Hidden). `hidden: false` is the
  * Hidden section's Show — the chat moves into the active list without anything
  * being sent to it. Refused for special threads and for archived chats (an
@@ -10790,6 +10804,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ManagerSweepResultEvent,
   ChatSnoozeRequestEvent,
   ChatSnoozeBackClearRequestEvent,
+  ChatAskDoneRequestEvent,
   ChatHideRequestEvent,
   ChatDeleteRequestEvent,
   ChatGoalRequestEvent,
@@ -11132,6 +11147,7 @@ export const EVENT_SCHEMAS = {
   'manager.sweep_result': ManagerSweepResultEvent,
   'chat.snooze_request': ChatSnoozeRequestEvent,
   'chat.snooze_back_clear_request': ChatSnoozeBackClearRequestEvent,
+  'chat.ask_done_request': ChatAskDoneRequestEvent,
   'chat.hide_request': ChatHideRequestEvent,
   'chat.delete_request': ChatDeleteRequestEvent,
   'chat.goal_request': ChatGoalRequestEvent,

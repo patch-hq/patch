@@ -2634,6 +2634,33 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     return reply.code(200).send({ ok: true });
   });
 
+  // ---- POST /api/chats/:id/ask-done ----
+  // spec/04 § Current status. The user did what the chat's `patch_ask_human`
+  // asked: the host clears the ask, tells the agent and restores the snooze.
+  // 409 when the chat is not asking, so a stale Done is told so.
+  app.post<{ Params: { id: string } }>('/api/chats/:id/ask-done', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const chat = deps.chatRegistry.get(req.params.id);
+    if (!chat) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    if (!(chat.statusKind === 'question' && chat.statusDeclared === true)) {
+      return reply.code(409).send({ error: 'this chat is not waiting on an action' });
+    }
+    deps.hostLink.send(auth.surfaceId, {
+      type: 'chat.ask_done_request',
+      chatId: req.params.id,
+    });
+    return reply.code(200).send({ ok: true });
+  });
+
   // ---- POST /api/chats/:id/hide ----
   // spec/04 § Hidden. `hidden: false` is the Hidden section's Show. The host
   // owns the rules (special threads and archived chats are refused there), so

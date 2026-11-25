@@ -7,6 +7,8 @@ import type { JSX } from 'react';
 import { useState } from 'react';
 import { Check, Copy, Hand } from 'lucide-react';
 import { splitActionText } from '@patch/wire';
+import { useChatStore } from '../stores/chatStore.js';
+import { isAskOutstanding, pressAskDone } from '../lib/askDone.js';
 
 function ActionText({ text }: { text: string }): JSX.Element {
   return (
@@ -52,7 +54,21 @@ function CopyCode({ code }: { code: string }): JSX.Element {
   );
 }
 
-export function AskHumanCard({ task, why }: { task: string; why?: string }): JSX.Element {
+export function AskHumanCard({
+  task,
+  why,
+  chatId,
+}: {
+  task: string;
+  why?: string;
+  chatId?: string;
+}): JSX.Element {
+  // Done only on the card for the ask still outstanding: the chat's declared
+  // status text is the task it was given.
+  const outstanding = useChatStore((s) => {
+    const row = chatId ? s.chats[chatId] : undefined;
+    return isAskOutstanding(row) && row?.statusSummary === task;
+  });
   return (
     <div
       className="ask-human-card"
@@ -71,6 +87,16 @@ export function AskHumanCard({ task, why }: { task: string; why?: string }): JSX
           </p>
         ) : null}
       </div>
+      {outstanding && chatId ? (
+        <button
+          type="button"
+          className="ask-human-done"
+          data-testid="ask-human-done"
+          onClick={() => pressAskDone(chatId)}
+        >
+          Done
+        </button>
+      ) : null}
     </div>
   );
 }
