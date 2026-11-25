@@ -30,9 +30,11 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   lstatSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -798,12 +800,23 @@ export async function applyUpdate(opts: {
       },
       'self-update: installer finished',
     );
-    if (installed === version) {
+    if (installerFailure === undefined && installed === version) {
       opts.logger.info(
         { installed, output: installerOutput },
         'self-update: applied (the service restart may have interrupted this call)',
       );
       return { applied: true, message: `updated ${opts.currentVersion} → ${version}` };
+    }
+    // An installer that failed leaves this host running the old build, even when it
+    // had already repointed `current` at the new one (a login-shell PATH timeout
+    // does exactly that). Reporting that as applied left the new build on a
+    // five-minute probation it could never pass. Put `current` back and say so.
+    if (installerFailure !== undefined && installed !== opts.currentVersion) {
+      const link = join(opts.patchHome, 'current');
+      const tmpLink = `${link}.rollback-${process.pid}`;
+      rmSync(tmpLink, { force: true });
+      symlinkSync(join(opts.patchHome, 'versions', opts.currentVersion), tmpLink);
+      renameSync(tmpLink, link);
     }
     clearProbation(opts.patchHome);
     opts.logger.warn(
