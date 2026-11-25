@@ -268,6 +268,14 @@ async function permissions(page: Page): Promise<void> {
   await expect(page.getByTestId('welcome-model')).toHaveCount(0);
 }
 
+/** The notifications step (the desktop shell can always ask): declined, so no system prompt appears. */
+async function notifications(page: Page): Promise<void> {
+  await expect(page.getByTestId('welcome-notifications')).toBeVisible();
+  await shot(page, 'notifications');
+  await page.getByTestId('welcome-skip').click();
+  await expect(page.getByTestId('welcome-notifications')).toBeHidden();
+}
+
 /** The phone step: the app download first, then on its own the pairing code. */
 async function phone(page: Page): Promise<void> {
   await expect(page.getByTestId('welcome-phone')).toHaveAttribute('data-phase', 'app');
@@ -341,6 +349,7 @@ test('my own server: pairs by code, runs the welcome steps, and is remembered', 
     await shot(welcome, 'providers');
     await skipAi(welcome);
     await permissions(welcome);
+    await notifications(welcome);
     // No keep-running step: this computer does not run Patch.
     await expect(welcome.getByTestId('welcome-keep-running')).toHaveCount(0);
     await phone(welcome);
@@ -434,6 +443,7 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
 
   await skipAi(welcome);
   await permissions(welcome);
+  await notifications(welcome);
 
   // A brand-new host invents no folder: the person chooses one.
   expect(existsSync(join(ACCOUNT_HOME, 'My first project'))).toBe(false);
