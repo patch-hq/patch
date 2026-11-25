@@ -225,6 +225,12 @@ function BrowseError({ err }: { err: unknown }): JSX.Element {
   );
 }
 
+// Newcomers browsing their home folder should not meet macOS's system
+// "Library" or hidden dot-folders. Typing a path still reaches any of them.
+function isBrowsableFolder(e: { name: string }): boolean {
+  return !e.name.startsWith('.') && e.name !== 'Library';
+}
+
 export function NewChatRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -1486,7 +1492,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                         )
                       ) : (
                         <ul className="folder-browser-list">
-                          {browse?.entries.map((e) => (
+                          {browse?.entries.filter(isBrowsableFolder).map((e) => (
                             <li key={e.path}>
                               <button
                                 type="button"

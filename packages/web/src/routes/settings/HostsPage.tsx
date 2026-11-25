@@ -669,7 +669,7 @@ function ThisMac(): JSX.Element | null {
           <div className="set-row-head">
             <input
               type="text"
-              className="set-word"
+              className="set-word set-host-name"
               aria-label="Machine name"
               data-testid="this-mac-name"
               value={name}
