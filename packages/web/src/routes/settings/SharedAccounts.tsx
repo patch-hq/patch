@@ -104,7 +104,7 @@ export function SharedAccounts({ provider }: { provider: ProviderSpec }): JSX.El
       ) : null}
       {rows.length > 0 && provider.autoFlag ? (
         <div className="acct-head" data-testid={`accounts-head-${backendId}`}>
-          <span title="Tick to let Patch switch to this account on its own when another hits its limit">
+          <span title="Switch to this account automatically">
             Auto
           </span>
           <span>Account</span>
