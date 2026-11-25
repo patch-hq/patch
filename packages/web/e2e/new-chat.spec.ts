@@ -265,7 +265,9 @@ test.describe('new chat header', () => {
           rows: list.querySelectorAll('li').length,
         };
       });
-      expect(m.rows).toBe(names.length);
+      // The picker hides Library (and dot-folders); the host still serves it.
+      expect(m.rows).toBe(names.filter((n) => n !== 'Library').length);
+      await expect(browser.getByTestId('folder-browser-entry-Library')).toHaveCount(0);
       expect(m.list).toBeGreaterThan(40);
       expect(m.bar + 1).toBeGreaterThanOrEqual(m.barScroll);
       // The first subfolder can be scrolled to and clicked.
