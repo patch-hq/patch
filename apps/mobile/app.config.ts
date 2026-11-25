@@ -14,7 +14,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.1.9',
+  version: '0.2.0',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -72,7 +72,11 @@ const config: ExpoConfig = {
   // Bumped to 0.1.9 for expo-speech (read-aloud on assistant messages and the
   // read-everything mode): its native module is not in a 0.1.8 APK, so the JS
   // that calls it must not reach one by OTA.
-  runtimeVersion: '0.1.9',
+  //
+  // Bumped to 0.2.0 for capture-this-screen (react-native-view-shot photographs
+  // the window, expo-sensors feeds the shake that triggers it): neither native
+  // module is in a 0.1.9 APK, so the JS that calls them must not reach one by OTA.
+  runtimeVersion: '0.2.0',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no

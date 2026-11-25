@@ -1,9 +1,7 @@
 // react-native-safe-area-context stub for unit tests.
 import React from 'react';
 
-export function SafeAreaProvider(props: {
-  children?: React.ReactNode;
-}): React.ReactElement {
+export function SafeAreaProvider(props: { children?: React.ReactNode }): React.ReactElement {
   return React.createElement('SafeAreaProvider', props, props.children);
 }
 
