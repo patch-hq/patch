@@ -34,6 +34,10 @@ describe('setup notifications step', () => {
     expect(ask).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('welcome-next'));
     await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
+    // It waits for the person to answer macOS's banner, and says where it is.
+    await screen.findByTestId('welcome-notifications-where');
+    expect(screen.queryByTestId('welcome-phone')).toBeNull();
+    fireEvent.click(screen.getByTestId('welcome-next'));
     await screen.findByTestId('welcome-phone');
   });
 

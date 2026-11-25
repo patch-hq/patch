@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { Gauge } from 'lucide-react';
+import { Brain } from 'lucide-react';
 import type { EffortLevel } from '@patch/wire';
 import { modelSupportsEffort } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
@@ -133,7 +133,7 @@ function Control({ chatId }: { chatId: string }): JSX.Element {
         }
         onClick={() => setOpen((v) => !v)}
       >
-        <Gauge size={18} aria-hidden />
+        <Brain size={18} aria-hidden />
         {label !== '' ? (
           <span className="model-pill-label setting-word" data-collapsible="">
             {label}

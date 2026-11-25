@@ -321,7 +321,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
             >
               <input
                 type="text"
-                className="set-word"
+                className="set-word set-host-name"
                 aria-label="Host name"
                 data-testid={`host-${host.hostId}-name-input`}
                 value={draft}

@@ -18,10 +18,10 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const level = ctx?.level ?? 'unknown';
-  const label = ctx ? `Context ${ctx.percent}` : 'Usage details';
+  const label = ctx ? `Usage and context, context ${ctx.percent}` : 'Usage details';
   const title = ctx
-    ? `Context window ${ctx.percent} full · ${ctx.tokens}. How much of this chat the agent can hold in mind at once.`
-    : 'Context window not measured yet. It shows how much of this chat the agent can hold in mind at once.';
+    ? `Usage and context. Context window ${ctx.percent} full · ${ctx.tokens}. How much of this chat the agent can hold in mind at once.`
+    : 'Usage and context. Context window not measured yet. It shows how much of this chat the agent can hold in mind at once.';
   return (
     <>
       <button
@@ -31,7 +31,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
         data-testid="context-ring"
         aria-label={label}
         aria-expanded={open}
-        title={title}
+        title={open ? undefined : title}
         data-tooltip-full
         onClick={() => setOpen((v) => !v)}
       >

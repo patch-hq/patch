@@ -10353,6 +10353,10 @@ button.set-row-open:focus-visible {
 .set-word {
   width: 180px;
 }
+/* A host's name is often a long machine name; it gets room to show whole. */
+.set-host-name {
+  width: min(320px, 100%);
+}
 .set-seg {
   display: inline-flex;
   padding: 3px;

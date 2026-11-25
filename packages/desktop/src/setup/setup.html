@@ -427,6 +427,10 @@
         </div>
       </form>
       <ol id="steps" hidden data-testid="steps" aria-live="polite"></ol>
+      <p class="intro" id="steps-note" hidden data-testid="steps-note">
+        macOS may show “App Background Activity” notices while this runs. They are Patch, and
+        expected.
+      </p>
       <p id="status" role="status" data-testid="status"></p>
       <p id="error" role="alert" data-testid="error" hidden></p>
       <div class="row" id="retry-row" hidden>
@@ -498,6 +502,7 @@
           }),
         );
         stepsEl.hidden = false;
+        $('steps-note').hidden = flow === 'remote';
         choose.hidden = true;
         join.hidden = true;
         nameForm.hidden = true;
@@ -527,6 +532,7 @@
       }
       function resetSteps() {
         stepsEl.hidden = true;
+        $('steps-note').hidden = true;
         retryRow.hidden = true;
         flow = null;
         current = null;

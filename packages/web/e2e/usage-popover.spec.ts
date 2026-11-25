@@ -103,7 +103,7 @@ test.describe('usage popover', () => {
     await expect(ring).toBeVisible();
     await expect(ring).toHaveAttribute(
       'title',
-      'Context window 25% full · 50k / 200k. How much of this chat the agent can hold in mind at once.',
+      'Usage and context. Context window 25% full · 50k / 200k. How much of this chat the agent can hold in mind at once.',
     );
     const r = await ring.boundingBox();
     const s = await page.getByTestId('send-btn').boundingBox();
@@ -138,7 +138,7 @@ test.describe('usage popover', () => {
     await seed(page, { usedTokens: 50_000, at: Date.now() });
     await expect(page.getByTestId('context-ring')).toHaveAttribute(
       'title',
-      'Context window ? full · 50k / ?. How much of this chat the agent can hold in mind at once.',
+      'Usage and context. Context window ? full · 50k / ?. How much of this chat the agent can hold in mind at once.',
     );
   });
 
@@ -152,7 +152,7 @@ test.describe('usage popover', () => {
     await expect(ring).toHaveClass(/unknown/);
     await expect(ring).toHaveAttribute(
       'title',
-      'Context window not measured yet. It shows how much of this chat the agent can hold in mind at once.',
+      'Usage and context. Context window not measured yet. It shows how much of this chat the agent can hold in mind at once.',
     );
     await ring.click();
     await expect(page.getByTestId('usage-popover')).toBeVisible();

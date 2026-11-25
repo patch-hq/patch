@@ -320,7 +320,19 @@ export function UsageBars({
     <div className="set-bars" data-testid={testId}>
       {windows.map((scope) => {
         const win = usage[scope];
-        if (!win) return null;
+        if (!win) {
+          // The 5-hour row is the one people look for, so it is always there:
+          // a view that skips it reads as "no limit" rather than "not reported".
+          if (scope !== 'session') return null;
+          return (
+            <div key={scope} className="set-bar-row" data-testid={testIdFor(scope)}>
+              <span className="set-bar-label">{SCOPE_LABELS[scope]}</span>
+              <span className="set-bar" aria-hidden="true" />
+              <span className="set-bar-value">–</span>
+              <span className="set-bar-reset">not reported</span>
+            </div>
+          );
+        }
         const state = rateLimitWindowState(scope, win);
         const blocked = state === 'blocked';
         const off = state === 'off';
@@ -398,7 +410,7 @@ function barTitle(scope: Scope, win: RateLimitWindow): string {
 /** The reason as plain words, for the hover title when the column clips it. */
 function describeDisabledReason(reason: string): string {
   if (reason === OVERAGE_DISABLED_REASON) return 'Extra usage is off: turn it on at claude.ai';
-  if (reason === OVERAGE_ORG_DISABLED_REASON) return `Extra usage is off (${reason})`;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return 'Extra usage is not available on this plan';
   return reason;
 }
 
@@ -423,6 +435,6 @@ function DisabledReason({
   }
   // The row already says "off"; repeating it as "disabled" read as a stutter.
   if (reason === OVERAGE_DISABLED_REASON) return <></>;
-  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>set by your organisation</>;
+  if (reason === OVERAGE_ORG_DISABLED_REASON) return <>not available on this plan</>;
   return <>{reason}</>;
 }
