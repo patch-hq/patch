@@ -349,8 +349,15 @@ test.describe('Settings — behaviour', () => {
   });
 
   test('the strategy pills write the account strategy', async ({ page }) => {
+    // With one account there is nothing to choose between, so the pills only
+    // show from two accounts.
     const s2 = await stubSettingsApi(page, {
-      secrets: { claude: [{ id: 'a1', label: 'Work', connected: true }] },
+      secrets: {
+        claude: [
+          { id: 'a1', label: 'Work', connected: true },
+          { id: 'a2', label: 'Home', connected: true },
+        ],
+      },
     });
     await page.goto(settingsUrl('usage'));
     await page.getByTestId('strategy-claude-code-least-used').click();
