@@ -807,6 +807,8 @@ describe('patch_delegate', () => {
         'mcp__patch__patch_artifact',
         'mcp__patch__patch_agent',
         'mcp__patch__patch_spawn',
+        'mcp__patch__patch_send_back',
+        'mcp__patch__patch_send_to',
       ]),
     );
   });
