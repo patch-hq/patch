@@ -14148,11 +14148,16 @@ export class Daemon {
       },
       'permission answer received',
     );
-    // A person answering means somebody saw the prompt: the chat stays listed.
+    // A person answering completes the action that took the chat out of
+    // Hidden: once the request is settled (and no other is waiting) it goes
+    // back to Hidden (spec/04 § Hidden).
     if (ev.by === undefined) {
       for (const k of this.pendingPermissionEvents.keys()) {
         if (k.endsWith(`:${ev.requestId}`)) {
-          this.rehideOnExpiry.delete(k.slice(0, -(ev.requestId.length + 1)));
+          const answeredChat = k.slice(0, -(ev.requestId.length + 1));
+          if (this.rehideOnExpiry.has(answeredChat)) {
+            setImmediate(() => this.rehideIfExpiredUnseen(answeredChat));
+          }
         }
       }
     }
