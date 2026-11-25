@@ -32,6 +32,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
         aria-label={label}
         aria-expanded={open}
         title={title}
+        data-tooltip-full
         onClick={() => setOpen((v) => !v)}
       >
         <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden>

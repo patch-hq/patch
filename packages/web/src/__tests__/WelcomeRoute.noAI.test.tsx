@@ -1,4 +1,5 @@
-// With no AI connected the setup has no model step: nothing to choose from.
+// The setup's bar is the same length with or without an AI connected, so it
+// never grows part-way through (4 dashes, then 5).
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -17,7 +18,7 @@ describe('setup with and without an AI', () => {
     clearSharedAccounts();
   });
 
-  it('drops the model step when nothing is connected', () => {
+  it('keeps the same step count whether or not an AI is connected', () => {
     setSharedAccounts({ claude: [{ connected: false }], codex: [{ connected: false }] });
     render(
       <MemoryRouter>
@@ -32,6 +33,6 @@ describe('setup with and without an AI', () => {
         <WelcomeRoute />
       </MemoryRouter>,
     );
-    expect(steps()).toBe(without + 1);
+    expect(steps()).toBe(without);
   });
 });

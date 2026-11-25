@@ -49,7 +49,7 @@ import { patchShared } from './settings/sharedWrite.js';
 export const ANDROID_APK_URL =
   'https://github.com/patch-hq/patch/releases/latest/download/Patch-android.apk';
 
-type StepId = 'providers' | 'permissions' | 'model' | 'keep-running' | 'phone';
+type StepId = 'providers' | 'permissions' | 'model' | 'notifications' | 'keep-running' | 'phone';
 type PhonePhase = 'app' | 'pair';
 
 /** How long the "installed" line stays after Claude Code finishes installing. */
@@ -75,19 +75,27 @@ export function WelcomeRoute(): JSX.Element {
   // With no AI connected there is no model to choose, so the step is left out.
   // Connecting one on the first step brings it back, which the dots then show.
   const anyAI = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
-  const steps: StepId[] = [
+  // Only a Mac shell can ask the system for notifications.
+  const canAskNotifications = getDesktopBridge()?.askNotifications !== undefined;
+  // Every step this computer can have, in order. The dots count these, so the
+  // bar is the same length whether or not an AI is connected yet.
+  const slots: StepId[] = [
     'providers',
     'permissions',
-    ...(anyAI ? (['model'] as const) : []),
+    'model',
+    ...(canAskNotifications ? (['notifications'] as const) : []),
     ...(local ? (['keep-running'] as const) : []),
     'phone',
   ];
+  // The steps actually shown: with no AI connected there is no model to choose.
+  const steps = slots.filter((s) => s !== 'model' || anyAI);
   const [index, setIndex] = useState(0);
   // The phone step asks for the app first, then shows the pairing code, so the
   // two codes are never on screen together to be scanned the wrong way round.
   const [phonePhase, setPhonePhase] = useState<PhonePhase>('app');
   const step = steps[Math.min(index, steps.length - 1)]!;
   const last = index >= steps.length - 1;
+  const slot = slots.indexOf(step);
   const next = (): void => {
     // A newcomer lands on a chat ready to type into, not on the Manager.
     if (last) navigate('/chats/new', { replace: true });
@@ -108,16 +116,17 @@ export function WelcomeRoute(): JSX.Element {
         <ol
           className="welcome-dots"
           data-testid="welcome-dots"
-          aria-label={`Step ${index + 1} of ${steps.length}`}
+          aria-label={`Step ${slot + 1} of ${slots.length}`}
         >
-          {steps.map((s, i) => (
-            <li key={s} className={i <= index ? 'done' : ''} />
+          {slots.map((s, i) => (
+            <li key={s} className={i <= slot ? 'done' : ''} />
           ))}
         </ol>
         <BackContext.Provider value={index > 0 ? back : null}>
           {step === 'providers' ? <ProvidersStep onNext={next} /> : null}
           {step === 'permissions' ? <PermissionStep onNext={next} /> : null}
           {step === 'model' ? <ModelStep onNext={next} /> : null}
+          {step === 'notifications' ? <NotificationsStep onNext={next} /> : null}
           {step === 'keep-running' ? <KeepRunningStep onNext={next} /> : null}
           {step === 'phone' ? (
             <PhoneStep onNext={next} phase={phonePhase} onPhase={setPhonePhase} />
@@ -512,6 +521,33 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
   );
 }
 
+function NotificationsStep({ onNext }: { onNext: () => void }): JSX.Element {
+  const ask = getDesktopBridge()?.askNotifications;
+  const [error, setError] = useState<string | null>(null);
+  const allow = (): void => {
+    if (!ask) return;
+    // macOS shows its own permission prompt now, while this explains why.
+    void ask()
+      .then(onNext)
+      .catch((e: Error) => setError(e.message));
+  };
+  return (
+    <section className="welcome-step" data-testid="welcome-notifications">
+      <h1>Get told when a chat needs you</h1>
+      <p className="welcome-lead">
+        Patch can notify you when an agent finishes or is waiting for an answer. macOS will ask you
+        to allow this.
+      </p>
+      {error ? (
+        <p className="set-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <Footer onNext={allow} ready label="Turn on notifications" skip="Not now" onSkip={onNext} />
+    </section>
+  );
+}
+
 function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
   const bridge = getDesktopBridge()?.keepRunning;
   const [state, setState] = useState<KeepRunningState | null>(null);
@@ -542,7 +578,17 @@ function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
   return (
     <section className="welcome-step" data-testid="welcome-keep-running">
       <h1>Keep Patch running</h1>
-      <div className="welcome-options">
+      {state?.canOpenAtLogin ? (
+        <p className="welcome-note" data-testid="welcome-login-notice">
+          macOS will show a notice that Patch can run in the background. That is this setting.
+        </p>
+      ) : null}
+      {draft === null && !error ? (
+        <p className="welcome-note" role="status" data-testid="welcome-keep-running-loading">
+          Loading…
+        </p>
+      ) : null}
+      <div className="welcome-options" hidden={draft === null}>
         {state?.canOpenAtLogin === false ? null : (
           <Toggle
             id="welcome-open-at-login"
@@ -651,8 +697,19 @@ function QrCode({
     );
   }, [payload]);
   return (
-    <div className="welcome-qr">
-      <canvas ref={canvas} data-testid={testId} data-payload={payload ?? ''} aria-label={label} />
+    <div className="welcome-qr" data-loading={payload === null ? 'true' : undefined}>
+      {payload === null ? (
+        <p className="welcome-note" role="status" data-testid={`${testId}-loading`}>
+          Making a code…
+        </p>
+      ) : null}
+      <canvas
+        hidden={payload === null}
+        ref={canvas}
+        data-testid={testId}
+        data-payload={payload ?? ''}
+        aria-label={label}
+      />
       {drawError ? <p className="set-error">{drawError}</p> : null}
     </div>
   );

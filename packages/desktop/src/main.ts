@@ -2133,6 +2133,20 @@ function setupAutoUpdater(): void {
   });
   ipcMain.handle('patch:local-stt:finish', () => localStt.finish());
   ipcMain.on('patch:local-stt:cancel', () => localStt.cancel());
+  // The welcome page's notifications step: macOS asks when an app first posts
+  // one, so this posts it, once per device, at the moment the page explains why.
+  ipcMain.handle('patch:notifications:ask', () => {
+    if (QUIET) return;
+    askNotificationPermissionOnce({
+      platform: process.platform,
+      file: join(app.getPath('userData'), 'notification-permission-asked.json'),
+      show: () =>
+        new Notification({
+          title: 'Patch notifications are on',
+          body: 'You will be told here when a chat needs you.',
+        }).show(),
+    });
+  });
   // spec/05 § Keep running — the welcome step and Settings read and change the
   // same choices the tray menu shows. Refused when this computer does not run
   // Patch itself: there is nothing to keep running.
@@ -2577,17 +2591,6 @@ export function bootstrap(): void {
     // Moving to Applications quits this run and opens the moved copy; an error
     // that stops the start has already been shown and the app is exiting.
     if ((await resolveServer()) === 'stop') return;
-    if (!QUIET) {
-      askNotificationPermissionOnce({
-        platform: process.platform,
-        file: join(app.getPath('userData'), 'notification-permission-asked.json'),
-        show: () =>
-          new Notification({
-            title: 'Patch notifications are on',
-            body: 'You will be told here when a chat needs you.',
-          }).show(),
-      });
-    }
     // Reload has to exist. The UI is a remote page, so when the window and the
     // deployed SPA disagree there is otherwise no way back — see app-menu.ts.
     Menu.setApplicationMenu(
