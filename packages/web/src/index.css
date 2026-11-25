@@ -19613,8 +19613,9 @@ a.drop-target,
 }
 .agent-msg-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
+  gap: 2px 6px;
   font-size: var(--text-min);
   min-width: 0;
 }

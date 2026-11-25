@@ -245,6 +245,8 @@ export type TimelineRow =
       handoffAnswer?: boolean;
       /** spec/04 § Forking — whether an edit or a side thread here would fork. */
       branchPoint?: { edit: boolean; side: boolean };
+      /** The same message also went to these chats: one "Sent to" card names them all. */
+      sendTargets?: { chatId: string; failed: boolean }[];
     }
   | { kind: 'group'; key: string; entries: ChatEventEntry[] }
   /** Where a snooze began (spec/04 § Snooze → Back): a permanent divider, not a message. */
@@ -338,11 +340,36 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
     viewFileResult.set(k, found);
     usedByViewFile.add(j);
   }
+  // The same message sent to several chats is one card naming them all. Only
+  // sends separated by nothing but other sends' calls and results merge (a
+  // parallel batch); the followers' calls are skipped, their results are
+  // already in `usedByViewFile`.
+  const mergedSends = new Set<number>();
+  const sendTargets = new Map<number, { chatId: string; failed: boolean }[]>();
+  for (let k = 0; k < timeline.length; k++) {
+    const first = timeline[k];
+    if (!first || mergedSends.has(k) || !viewFileResult.has(k)) continue;
+    const head = first.kind === 'tool_call' ? sendToCall(first.tool, first.toolArgs) : null;
+    if (!head) continue;
+    const others: { chatId: string; failed: boolean }[] = [];
+    for (let j = k + 1; j < timeline.length; j++) {
+      const e = timeline[j];
+      if (!e) break;
+      if (e.kind === 'tool_result') continue;
+      const t = e.kind === 'tool_call' ? sendToCall(e.tool, e.toolArgs) : null;
+      if (!t || t.message !== head.message || !viewFileResult.has(j)) break;
+      if (t.chatId !== head.chatId && !others.some((o) => o.chatId === t.chatId)) {
+        others.push({ chatId: t.chatId, failed: viewFileResult.get(j)?.toolIsError === true });
+      }
+      mergedSends.add(j);
+    }
+    if (others.length > 0) sendTargets.set(k, others);
+  }
   let i = 0;
   while (i < timeline.length) {
     const entry = timeline[i];
     if (!entry) break;
-    if (usedByViewFile.has(i)) {
+    if (usedByViewFile.has(i) || mergedSends.has(i)) {
       i++;
       continue;
     }
@@ -375,7 +402,14 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
     }
     const fileResult = viewFileResult.get(i);
     if (fileResult) {
-      rows.push({ kind: 'entry', key: `${entry.seq}-${i}`, entry, result: fileResult });
+      const targets = sendTargets.get(i);
+      rows.push({
+        kind: 'entry',
+        key: `${entry.seq}-${i}`,
+        entry,
+        result: fileResult,
+        ...(targets ? { sendTargets: targets } : {}),
+      });
       i++;
       continue;
     }

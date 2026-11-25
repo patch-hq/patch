@@ -25,6 +25,7 @@ export function AgentMessageCard({
   text,
   status,
   testid,
+  extraTargets,
 }: {
   direction: AgentMessageDirection;
   /** Who is on the other side: a chat's name, "agent", a side thread's name. */
@@ -35,7 +36,10 @@ export function AgentMessageCard({
   /** A short state beside the label ("Waiting"), when the exchange is open. */
   status?: string;
   testid?: string;
+  /** The same message went to these chats too: one card names them all. */
+  extraTargets?: { chatId: string; failed?: boolean }[];
 }): JSX.Element {
+  const many = extraTargets !== undefined && extraTargets.length > 0;
   return (
     <div
       className={`agent-msg agent-msg-${direction}`}
@@ -44,12 +48,25 @@ export function AgentMessageCard({
       {...(chatId ? { 'data-chat-id': chatId } : {})}
     >
       <div className="agent-msg-head">
-        <span className="agent-msg-label">{direction === 'sent' ? 'Sent to' : 'From'}</span>
+        <span className="agent-msg-label">
+          {many
+            ? `Sent to ${extraTargets.length + 1} agents:`
+            : direction === 'sent'
+              ? 'Sent to'
+              : 'From'}
+        </span>
         {chatId ? (
           <ChatLink chatId={chatId}>{name}</ChatLink>
         ) : (
           <span className="agent-msg-name">{name}</span>
         )}
+        {many
+          ? extraTargets.map((t) => (
+              <span key={t.chatId} className="agent-msg-target" data-testid="agent-msg-target">
+                <ExtraTarget chatId={t.chatId} failed={t.failed === true} />
+              </span>
+            ))
+          : null}
         {status ? (
           <span className="agent-msg-status" data-testid="agent-msg-status">
             {status}
@@ -60,6 +77,16 @@ export function AgentMessageCard({
         <Markdown content={text} />
       </div>
     </div>
+  );
+}
+
+function ExtraTarget({ chatId, failed }: { chatId: string; failed: boolean }): JSX.Element {
+  const name = useChatName(chatId);
+  return (
+    <>
+      <ChatLink chatId={chatId}>{name}</ChatLink>
+      {failed ? <span className="agent-msg-status">Not sent</span> : null}
+    </>
   );
 }
 

@@ -954,6 +954,7 @@ function ChatDetailBody(): React.ReactElement {
             entry={item.entry}
             chatId={chatId}
             result={item.result}
+            {...(item.sendTargets ? { sendTargets: item.sendTargets } : {})}
             handoffPending={item.handoffPending === true}
             handoffAnswer={item.handoffAnswer === true}
             {...(item.branchPoint ? { branchPoint: item.branchPoint } : {})}
@@ -1796,11 +1797,14 @@ function ToolCallItem({
   chatId,
   entry,
   result,
+  sendTargets,
 }: {
   chatId: string;
   entry: ChatEventEntry;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** The same message also went to these chats (a grouped "Sent to" card). */
+  sendTargets?: { chatId: string; failed: boolean }[];
   /** spec/07 — a voice hand-off the agent has not answered yet. */
   handoffPending?: boolean;
 }): React.ReactElement {
@@ -1849,6 +1853,7 @@ function ToolCallItem({
         chatId={sendTo.chatId}
         message={sendTo.message}
         failed={result?.toolIsError === true}
+        {...(sendTargets ? { extraTargets: sendTargets } : {})}
       />
     );
   }
@@ -2954,10 +2959,12 @@ function SentToCard({
   chatId,
   message,
   failed,
+  extraTargets,
 }: {
   chatId: string;
   message: string;
   failed: boolean;
+  extraTargets?: { chatId: string; failed: boolean }[];
 }): React.ReactElement {
   const name = useChatName(chatId);
   return (
@@ -2967,6 +2974,7 @@ function SentToCard({
       chatId={chatId}
       text={message}
       {...(failed ? { status: 'Not sent' } : {})}
+      {...(extraTargets ? { extraTargets } : {})}
     />
   );
 }
@@ -3089,6 +3097,7 @@ const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
   result,
+  sendTargets,
   handoffPending,
   handoffAnswer,
   queuePos,
@@ -3104,6 +3113,8 @@ const TimelineItem = React.memo(function TimelineItem({
   branchPoint?: { edit: boolean; side: boolean };
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** The same message also went to these chats (a grouped "Sent to" card). */
+  sendTargets?: { chatId: string; failed: boolean }[];
   /** spec/07 — a voice hand-off the agent has not answered yet. */
   handoffPending?: boolean;
   /** spec/07 — the agent's answer to a voice hand-off. */
@@ -3585,7 +3596,14 @@ const TimelineItem = React.memo(function TimelineItem({
     return <ArtifactCard entry={entry} />;
   }
   if (entry.kind === 'tool_call') {
-    return <ToolCallItem chatId={chatId} entry={entry} result={result} />;
+    return (
+      <ToolCallItem
+        chatId={chatId}
+        entry={entry}
+        result={result}
+        {...(sendTargets ? { sendTargets } : {})}
+      />
+    );
   }
   // (attachments render inline within the message branch above)
   if (entry.kind === 'tool_result') {
