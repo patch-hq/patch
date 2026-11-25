@@ -357,6 +357,32 @@ describe('Settings → Usage → changing accounts', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
+  it('Refresh usage asks every online host to re-read now, and says so when none is online', () => {
+    loadShared({ secrets: TWO });
+    const send = vi.fn();
+    setActiveWs({ send } as never);
+    usePresenceStore.getState().setConnection('connected');
+    reportHost('d1', { hostName: 'hetzner', runsManager: true });
+    reportAccounts('d1', [{ id: 'acct-a', label: 'work', connected: true }] as never);
+    usePresenceStore.getState().setHostOnline('d1', true);
+    renderSettings('/settings/usage');
+    fireEvent.click(
+      action('account-menu-claude-code-acct-a', 'account-refresh-claude-code-acct-a'),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'host.backend_usage_refresh',
+      hostId: 'd1',
+      backendId: 'claude-code',
+    });
+    send.mockClear();
+    usePresenceStore.getState().setHostOnline('d1', false);
+    fireEvent.click(
+      action('account-menu-claude-code-acct-a', 'account-refresh-claude-code-acct-a'),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(errors().some((e) => e.includes('no online host'))).toBe(true);
+  });
+
   it('reorders by keyboard and settles on the server’s order', async () => {
     loadShared({ secrets: TWO });
     const orderCall = vi
@@ -388,13 +414,15 @@ describe('Settings → Usage → changing accounts', () => {
     expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
   });
 
-  it('the ⋯ opens a panel whose actions say what they do, with no refresh', () => {
+  it('the ⋯ opens a panel whose actions say what they do', () => {
     loadShared({ secrets: TWO });
     renderSettings('/settings/usage');
     fireEvent.click(screen.getByTestId('account-menu-claude-code-acct-a'));
     const menu = screen.getByTestId('account-menu-claude-code-acct-a-open');
     expect(menu).toHaveAttribute('role', 'menu');
-    expect(screen.queryByTestId('account-refresh-claude-code-acct-a')).toBeNull();
+    expect(screen.getByTestId('account-refresh-claude-code-acct-a')).toHaveTextContent(
+      'Refresh usage',
+    );
     expect(screen.getByTestId('account-connect-claude-code-acct-a')).toHaveTextContent(
       'Sign in again',
     );
