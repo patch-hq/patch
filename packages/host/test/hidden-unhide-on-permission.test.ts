@@ -97,7 +97,7 @@ describe('a hidden chat un-hides when it blocks on the user', () => {
     expect(metaStore.read(chatId)?.hidden).toBe(false);
   });
 
-  it('stays in the list after the question is answered', async () => {
+  it('goes back to Hidden after the question is answered', async () => {
     const { daemon, events, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({
       folder,
@@ -114,14 +114,13 @@ describe('a hidden chat un-hides when it blocks on the user', () => {
 
     // The turn ran on and settled…
     expect(daemon.chatState.get(chatId)?.activity).not.toBe('awaiting-permission');
-    // …and the chat stayed where the user can see it — neither hidden again
-    // nor archived.
-    expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
+    // …and the chat went back to Hidden, still active.
+    expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
     expect(daemon.chatState.get(chatId)?.status).toBe('active');
     expect(metaStore.read(chatId)?.status).toBe('active');
   });
 
-  it('stays in the list after the permission is denied', async () => {
+  it('goes back to Hidden after the permission is denied', async () => {
     const { daemon, events, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({
       folder,
@@ -133,7 +132,7 @@ describe('a hidden chat un-hides when it blocks on the user', () => {
     daemon.submitPermissionResponse({ requestId: pendingRequestId(events), decision: 'deny' });
     await tick();
 
-    expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
+    expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
     expect(daemon.chatState.get(chatId)?.status).toBe('active');
     expect(metaStore.read(chatId)?.status).toBe('active');
   });
