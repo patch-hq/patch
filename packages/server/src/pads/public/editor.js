@@ -54,6 +54,7 @@
   // A screen wider than the stage is scaled down to fit (see applyWidth); pointer
   // distances are screen pixels, the design and the layer work in unscaled ones.
   var scale = 1;
+  var zoom = 1, ZOOM_MAX = 5;
   function local(e) {
     var r = layer.getBoundingClientRect();
     return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
@@ -252,26 +253,43 @@
   function applyWidth() {
     var w = screen && screen.width;
     var fixed = w && !wrap.classList.contains('phone');
-    var avail = $('stage').clientWidth;
+    var stg = $('stage');
+    var avail = stg.clientWidth;
     var fit = fixed && avail > 0 && avail < w ? avail / w : 1;
     if (screen && screen.id !== zoomScreen) { zoom = 1; zoomScreen = screen.id; }
-    // Pinching zooms in from the fitted size up to the design's real size.
-    zoom = Math.min(Math.max(zoom, 1), 1 / fit);
+    wrap.style.width = ''; wrap.style.height = ''; wrap.style.margin = '';
+    wrap.style.marginRight = ''; wrap.style.transform = ''; wrap.style.transformOrigin = '';
+    wrap.style.minWidth = fixed && fit === 1 ? w + 'px' : '';
+    // The unscaled box the design lays out in: the screen's own width when it is
+    // being shrunk to fit, otherwise whatever the wrap naturally measures.
+    var w0 = fit < 1 ? w : wrap.offsetWidth;
+    var h0 = fit < 1 ? stg.clientHeight / fit : wrap.offsetHeight;
     scale = fit * zoom;
-    if (scale < 1) {
-      wrap.style.width = w + 'px';
+    if (scale !== 1) {
+      wrap.style.width = w0 + 'px';
       wrap.style.minWidth = '';
-      wrap.style.height = ($('stage').clientHeight / scale) + 'px';
+      wrap.style.height = h0 + 'px';
       wrap.style.margin = '0';
       wrap.style.transformOrigin = '0 0';
       wrap.style.transform = 'scale(' + scale + ')';
-      wrap.style.marginRight = (-(w - w * scale)) + 'px';
-    } else {
-      wrap.style.width = ''; wrap.style.height = ''; wrap.style.margin = '';
-      wrap.style.marginRight = ''; wrap.style.transform = ''; wrap.style.transformOrigin = '';
-      wrap.style.minWidth = fixed ? w + 'px' : '';
+      wrap.style.marginRight = (-(w0 - w0 * scale)) + 'px';
     }
+    stg.classList.toggle('zoomed', zoom > 1);
     wrap.dataset.scale = String(scale);
+  }
+  // Zoom multiplies the fit scale (1 = fit). Pinch, Ctrl/Cmd-wheel and Ctrl/Cmd +, -, 0
+  // all land here; the point under the fingers stays put.
+  function setZoom(z, cx, cy) {
+    z = Math.min(ZOOM_MAX, Math.max(1, z));
+    if (z === zoom) return;
+    var stg = $('stage'), r = stg.getBoundingClientRect(), before = scale;
+    if (cx === undefined) { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
+    var px = (stg.scrollLeft + cx - r.left) / before, py = (stg.scrollTop + cy - r.top) / before;
+    zoom = z;
+    applyWidth(); fitLayer(); draw();
+    stg.scrollLeft = px * scale - (cx - r.left);
+    stg.scrollTop = py * scale - (cy - r.top);
+    toast(Math.round(zoom * 100) + '%', 700);
   }
   // The layer sits over the iframe, so it would swallow the design's own
   // scrollbar: leave that strip uncovered so it can be grabbed and dragged.
@@ -568,35 +586,41 @@
     return one ? { x: +one[1], y: 0 } : { x: 0, y: 0 };
   }
 
-  // Two fingers on a scaled-down screen zoom and pan it; one finger still edits.
+  // Two fingers on the layer pinch-zoom the screen instead of editing it.
   var touches = {}, pinch = null;
-  function touchList() { return Object.keys(touches).map(function (k) { return touches[k]; }); }
-  function pinchGeometry() {
-    var t = touchList();
-    return { d: Math.hypot(t[0].x - t[1].x, t[0].y - t[1].y) || 1, x: (t[0].x + t[1].x) / 2, y: (t[0].y + t[1].y) / 2 };
-  }
-  function startPinch() {
-    var g = pinchGeometry(), st = $('stage').getBoundingClientRect(), sc = scrollerFor(null);
-    pinch = { d: g.d, zoom: zoom, x: g.x, y: g.y, cx: ($('stage').scrollLeft + g.x - st.left) / scale, cy: sc.scrollTop + (g.y - st.top) / scale };
-  }
-  function movePinch() {
-    var g = pinchGeometry(), st = $('stage').getBoundingClientRect(), sc = scrollerFor(null);
-    zoom = pinch.zoom * g.d / pinch.d;
-    applyWidth(); fitLayer();
-    $('stage').scrollLeft = pinch.cx * scale - (g.x - st.left);
-    sc.scrollTop = pinch.cy - (g.y - st.top) / scale;
-    draw();
+  function pinchState() {
+    var ids = Object.keys(touches), a = touches[ids[0]], b = touches[ids[1]];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
   }
   layer.addEventListener('pointerdown', function (e) {
-    if (e.pointerType === 'touch') {
-      touches[e.pointerId] = { x: e.clientX, y: e.clientY };
-      if (touchList().length === 2 && !(drag && (drag.stroke || drag.note || drag.resize))) {
-        drag = null; marquee.style.display = 'none';
-        startPinch();
-        return;
-      }
+    if (e.pointerType !== 'touch' || tool === 'interact' || (drag && drag.stroke)) return;
+    touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (Object.keys(touches).length === 2) {
+      drag = null; marquee.style.display = 'none'; draw();
+      var p = pinchState(); pinch = { d0: p.d, z0: zoom, cx: p.cx, cy: p.cy };
     }
-    if (pinch) return;
+    if (pinch) e.stopImmediatePropagation();
+  });
+  layer.addEventListener('pointermove', function (e) {
+    if (!touches[e.pointerId]) return;
+    touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (!pinch) return;
+    e.stopImmediatePropagation();
+    var p = pinchState();
+    // Two fingers sliding together pan the zoomed screen.
+    $('stage').scrollBy(pinch.cx - p.cx, pinch.cy - p.cy);
+    pinch.cx = p.cx; pinch.cy = p.cy;
+    setZoom(pinch.z0 * p.d / pinch.d0, p.cx, p.cy);
+  });
+  function endTouch(e) {
+    if (!touches[e.pointerId]) return;
+    delete touches[e.pointerId];
+    if (pinch) { e.stopImmediatePropagation(); if (Object.keys(touches).length < 2) pinch = null; }
+  }
+  layer.addEventListener('pointerup', endTouch);
+  layer.addEventListener('pointercancel', endTouch);
+
+  layer.addEventListener('pointerdown', function (e) {
     if (tool === 'interact' || e.button > 0) return;
     lastPointer = e.pointerType;
     if (e.target.closest('.note, .handle, .del')) return;
@@ -616,8 +640,6 @@
     layer.setPointerCapture(e.pointerId);
   });
   layer.addEventListener('pointermove', function (e) {
-    if (touches[e.pointerId]) touches[e.pointerId] = { x: e.clientX, y: e.clientY };
-    if (pinch) { if (touchList().length === 2) movePinch(); return; }
     if (tool === 'interact' || (drag && drag.stroke)) return;
     if (!drag) {
       if (e.pointerType === 'mouse' && tool === 'select') { hoverEl = pick(local(e)); draw(); }
@@ -680,17 +702,14 @@
     while (common && common !== d.body && !top.every(function (n) { return common.contains(n); })) common = common.parentElement;
     return common && common !== d.body ? common : null;
   }
-  function releaseTouch(e) {
-    delete touches[e.pointerId];
-    if (pinch && touchList().length < 2) pinch = null;
-  }
-  layer.addEventListener('pointerup', function (e) { var was = pinch; releaseTouch(e); if (!was) endPointer(e); });
-  layer.addEventListener('pointercancel', function (e) { releaseTouch(e); });
+  layer.addEventListener('pointerup', endPointer);
+  layer.addEventListener('pointercancel', function () { if (drag && drag.stroke) return; drag = null; marquee.style.display = 'none'; draw(); });
   layer.addEventListener('pointercancel', function () { if (drag && drag.stroke) return; drag = null; marquee.style.display = 'none'; draw(); });
   layer.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse' && !drag) { hoverEl = null; draw(); } });
   layer.addEventListener('wheel', function (e) {
     if (tool === 'interact') return;
     e.preventDefault();
+    if (e.ctrlKey || e.metaKey) { setZoom(zoom * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY); return; }
     // Wheel deltas are screen pixels; a scaled-down screen scrolls in unscaled ones.
     var unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? layer.clientHeight : 1;
     scrollerFor(hit(local(e))).scrollBy({ left: e.deltaX * unit / scale, top: e.deltaY * unit / scale, behavior: 'instant' });
@@ -978,6 +997,9 @@
     if (editing && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); editing.el.blur(); return; }
     if (editing && e.key === 'Escape') { e.preventDefault(); var n = editing.el; commitText(true); n.blur(); return; }
     var mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+    if (mod && !e.altKey && (k === '=' || k === '+' || k === '-' || k === '0')) {
+      e.preventDefault(); if (k === '0') setZoom(1); else setZoom(zoom * (k === '-' ? 1 / 1.25 : 1.25)); return;
+    }
     if (typing) return;
     if (mod && !e.altKey) {
       if (k === 'z' && !e.shiftKey) undo();
