@@ -308,6 +308,54 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('zoomed: two fingers sliding sideways pan the screen and keep the zoom', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#t').waitFor();
+    await page.locator('[data-mode="edit"]').click();
+    await page.keyboard.press('Control+=');
+    await page.keyboard.press('Control+=');
+    const scale = async () => Number(await page.locator('#wrap').getAttribute('data-scale'));
+    const before = await scale();
+    const drag = (dx: number, spread: number) =>
+      page.evaluate(
+        ({ dx, spread }) => {
+          const layer = document.getElementById('layer')!;
+          const stage = document.getElementById('stage')!;
+          const fire = (type: string, id: number, x: number) =>
+            layer.dispatchEvent(
+              new PointerEvent(type, {
+                pointerId: id,
+                pointerType: 'touch',
+                clientX: x,
+                clientY: 400,
+                bubbles: true,
+                cancelable: true,
+                isPrimary: id === 1,
+              }),
+            );
+          fire('pointerdown', 1, 500);
+          fire('pointerdown', 2, 700);
+          // Spacing drifts a little while the fingers slide.
+          for (let i = 1; i <= 10; i++) {
+            fire('pointermove', 1, 500 - (dx * i) / 10 - (spread * i) / 10);
+            fire('pointermove', 2, 700 - (dx * i) / 10 + (spread * i) / 10);
+          }
+          fire('pointerup', 1, 0);
+          fire('pointerup', 2, 0);
+          return stage.scrollLeft;
+        },
+        { dx, spread },
+      );
+    const start = await page.evaluate(() => document.getElementById('stage')!.scrollLeft);
+    const left = await drag(100, 5);
+    expect(left - start).toBeCloseTo(100, 0);
+    expect(await scale()).toBe(before);
+    await ctx.close();
+  });
+
   it('a tall page scrolls by the wheel delta and its scrollbar is left uncovered by the edit layer', async () => {
     const frameUrl = await newPad();
     // Playwright hides scrollbars by default; a real browser shows one.

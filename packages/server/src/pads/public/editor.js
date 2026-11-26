@@ -279,17 +279,21 @@
   }
   // Zoom multiplies the fit scale (1 = fit). Pinch, Ctrl/Cmd-wheel and Ctrl/Cmd +, -, 0
   // all land here; the point under the fingers stays put.
-  function setZoom(z, cx, cy) {
+  // A pinch passes the content point (ax, ay, unscaled) it grabbed, so the same call
+  // zooms and pans: that point follows the fingers' centre exactly.
+  function setZoom(z, cx, cy, ax, ay) {
     z = Math.min(ZOOM_MAX, Math.max(1, z));
-    if (z === zoom) return;
+    var pan = ax !== undefined;
+    if (z === zoom && !pan) return;
     var stg = $('stage'), r = stg.getBoundingClientRect(), before = scale;
     if (cx === undefined) { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
-    var px = (stg.scrollLeft + cx - r.left) / before, py = (stg.scrollTop + cy - r.top) / before;
+    var px = pan ? ax : (stg.scrollLeft + cx - r.left) / before, py = pan ? ay : (stg.scrollTop + cy - r.top) / before;
+    var changed = z !== zoom;
     zoom = z;
-    applyWidth(); fitLayer(); draw();
+    if (changed) { applyWidth(); fitLayer(); draw(); }
     stg.scrollLeft = px * scale - (cx - r.left);
     stg.scrollTop = py * scale - (cy - r.top);
-    toast(Math.round(zoom * 100) + '%', 700);
+    if (changed) toast(Math.round(zoom * 100) + '%', 700);
   }
   // The layer sits over the iframe, so it would swallow the design's own
   // scrollbar: leave that strip uncovered so it can be grabbed and dragged.
@@ -597,7 +601,9 @@
     touches[e.pointerId] = { x: e.clientX, y: e.clientY };
     if (Object.keys(touches).length === 2) {
       drag = null; marquee.style.display = 'none'; draw();
-      var p = pinchState(); pinch = { d0: p.d, z0: zoom, cx: p.cx, cy: p.cy };
+      var p = pinchState(), stg = $('stage'), r = stg.getBoundingClientRect();
+      pinch = { d0: p.d, z0: zoom, zooming: false,
+        ax: (stg.scrollLeft + p.cx - r.left) / scale, ay: (stg.scrollTop + p.cy - r.top) / scale };
     }
     if (pinch) e.stopImmediatePropagation();
   });
@@ -607,10 +613,11 @@
     if (!pinch) return;
     e.stopImmediatePropagation();
     var p = pinchState();
-    // Two fingers sliding together pan the zoomed screen.
-    $('stage').scrollBy(pinch.cx - p.cx, pinch.cy - p.cy);
-    pinch.cx = p.cx; pinch.cy = p.cy;
-    setZoom(pinch.z0 * p.d / pinch.d0, p.cx, p.cy);
+    // Two fingers sliding together pan the zoomed screen. Their spacing drifts a little
+    // while they slide, so it only counts as a zoom once it clearly changes.
+    var ratio = p.d / pinch.d0;
+    if (Math.abs(ratio - 1) > 0.12) pinch.zooming = true;
+    setZoom(pinch.zooming ? pinch.z0 * ratio : pinch.z0, p.cx, p.cy, pinch.ax, pinch.ay);
   });
   function endTouch(e) {
     if (!touches[e.pointerId]) return;
