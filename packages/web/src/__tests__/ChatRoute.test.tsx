@@ -3084,6 +3084,52 @@ describe('ChatRoute regression', () => {
     expect(video.hasAttribute('controls')).toBe(true);
   });
 
+  it('pauses a video and restores its position when the chat is left and reopened', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    const msgs = [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'v1',
+        toolArgs: { file_path: 'a.mp4' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'v1',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'video',
+                url: '/api/chats/c-vpos/artifact/pos1',
+                name: 'a.mp4',
+              }),
+            },
+          ],
+        },
+        at: 1,
+      },
+    ];
+    seedChat('c-vpos', msgs as Parameters<typeof seedChat>[1]);
+    const first = renderChat('c-vpos');
+    const v1 = screen.getByTestId('view-file-video') as HTMLVideoElement;
+    v1.currentTime = 42;
+    first.unmount();
+    expect(pause).toHaveBeenCalled();
+    renderChat('c-vpos');
+    const v2 = screen.getByTestId('view-file-video') as HTMLVideoElement;
+    Object.defineProperty(v2, 'readyState', { value: 1, configurable: true });
+    v2.dispatchEvent(new Event('loadedmetadata'));
+    expect(v2.currentTime).toBe(42);
+    pause.mockRestore();
+  });
+
   function seedFileCard(id: string, ack: Record<string, unknown>): void {
     seedChat(id, [
       {
