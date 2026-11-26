@@ -6102,9 +6102,48 @@ export class Daemon {
     }));
     // Status first, so anything racing the stop already sees a chat that is
     // archived; the stop's own settling frames then carry it too.
+    if (archived) {
+      // Archiving kills these silently; recorded so the chat is told on restore.
+      const stopped = this.describeWorkToStop(chatId);
+      this.opts.metaStore.update(chatId, (m) => ({
+        ...m,
+        archiveStopped: stopped.length > 0 ? stopped : undefined,
+      }));
+    } else {
+      this.announceArchiveStopped(chatId);
+    }
     if (archived) await this.stopAllWork(chatId);
     if (archived) this.closeBrowserWork(chatId);
     this.emitState(chatId);
+  }
+
+  /** One line per background task, wake or subagent that archiving is about to kill. */
+  private describeWorkToStop(chatId: string): string[] {
+    const lines: string[] = [];
+    for (const rec of this.watch.list(chatId)) {
+      if (rec.status === 'running') lines.push(`background task "${rec.description}"`);
+    }
+    if (this.wake.peek(chatId) !== null) lines.push('scheduled wake');
+    for (const m of this.opts.metaStore.list()) {
+      if (m.subagent?.parentChatId === chatId && m.subagent.outcome === undefined) {
+        lines.push(`subagent "${m.subagent.label}"`);
+      }
+    }
+    return lines;
+  }
+
+  /** On restore: put in the log what archiving stopped, so nobody waits on it. */
+  private announceArchiveStopped(chatId: string): void {
+    const stopped = this.opts.metaStore.read(chatId)?.archiveStopped;
+    if (!stopped || stopped.length === 0) return;
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `Chat was archived · stopped: ${stopped.join(', ')}. No results will arrive from these.`,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    });
   }
 
   /**
@@ -7458,6 +7497,12 @@ export class Daemon {
     // themselves, so this doesn't need its own emit.
     if (state.status === 'archived') {
       await this.setArchived(req.chatId, false);
+    }
+    // The agent is told too, once: its own context never contains the log line.
+    const archiveStopped = this.opts.metaStore.read(req.chatId)?.archiveStopped;
+    if (archiveStopped && archiveStopped.length > 0) {
+      this.opts.metaStore.update(req.chatId, (m) => ({ ...m, archiveStopped: undefined }));
+      req.message = `[Patch: this chat was archived, which stopped: ${archiveStopped.join(', ')}. No results will arrive from these; restart them if still needed.]\n\n${req.message}`;
     }
     if (req.fromUser === true) this.rehideOnExpiry.delete(req.chatId);
     if (req.fromAgent === true && state.hidden) {
