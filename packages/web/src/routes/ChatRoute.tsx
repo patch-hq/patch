@@ -5808,6 +5808,7 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
   const [openError, setOpenError] = useState<string | null>(null);
   const isImage = view.kind === 'image';
   const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
+  const chatFolder = useChatStore((st) => st.chats[chatId]?.folder ?? '');
   const bridge = getDesktopBridge();
   const localHostBridge = bridge?.localHost;
   const openPathBridge = bridge?.openPath;
@@ -5834,6 +5835,13 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
       openPathBridge !== undefined &&
       localHostId !== null &&
       localHostId === chatHostId;
+    // A file inside the chat's folder opens in a Patch tab (files are served
+    // relative to that folder); anything outside keeps the card alone.
+    const root = chatFolder.replace(/\/+$/, '');
+    const tabPath =
+      view.absPath !== undefined && root !== '' && view.absPath.startsWith(root + '/')
+        ? view.absPath.slice(root.length + 1)
+        : null;
     const open = (mode: 'file' | 'folder'): void => {
       setOpenError(null);
       (openPathBridge as NonNullable<typeof openPathBridge>)(view.absPath as string, mode).catch(
@@ -5851,6 +5859,25 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
             <span className="view-file-size" data-testid="view-file-size">
               {formatBytes(view.size)}
             </span>
+          ) : null}
+          {tabPath !== null ? (
+            <button
+              type="button"
+              className="view-file-download"
+              data-testid="view-file-open-tab"
+              aria-label={`Open ${view.name} in a tab`}
+              title="Open in a tab"
+              onClick={() =>
+                useUiStore
+                  .getState()
+                  .openFileInBrowser(
+                    { chatId, path: tabPath, name: view.name },
+                    { placement: 'tab' },
+                  )
+              }
+            >
+              <FileText size={14} aria-hidden />
+            </button>
           ) : null}
           {canOpen ? (
             <>
@@ -6001,14 +6028,7 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
           />
         </button>
       ) : view.kind === 'video' ? (
-        <video
-          className="view-file-video"
-          data-testid="view-file-video"
-          src={view.url}
-          controls
-          playsInline
-          preload="metadata"
-        />
+        <ChatVideo url={view.url} />
       ) : (
         <iframe
           className="view-file-frame"
@@ -6027,6 +6047,41 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
         <ImageLightbox url={view.url} alt={view.name} onClose={() => setLightboxOpen(false)} />
       ) : null}
     </div>
+  );
+}
+
+// Playback position per video url, so leaving a chat (which unmounts the
+// player) pauses the video and coming back resumes from the same spot.
+const videoPositions = new Map<string, number>();
+
+function ChatVideo({ url }: { url: string }): JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null) return undefined;
+    const saved = videoPositions.get(url);
+    if (saved !== undefined && saved > 0) {
+      const restore = (): void => {
+        el.currentTime = saved;
+      };
+      if (el.readyState >= 1) restore();
+      else el.addEventListener('loadedmetadata', restore, { once: true });
+    }
+    return () => {
+      el.pause();
+      videoPositions.set(url, el.currentTime);
+    };
+  }, [url]);
+  return (
+    <video
+      ref={ref}
+      className="view-file-video"
+      data-testid="view-file-video"
+      src={url}
+      controls
+      playsInline
+      preload="metadata"
+    />
   );
 }
 

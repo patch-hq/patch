@@ -3132,6 +3132,27 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('view-file-preview').className).toContain('expanded');
   });
 
+  it('opens a file inside the chat folder in a tab, and offers nothing for one outside it', () => {
+    const open = vi.spyOn(useUiStore.getState(), 'openFileInBrowser').mockImplementation(() => {});
+    try {
+      seedFileCard('c-file-tab', { absPath: 'foo/docs/spec.md', name: 'spec.md' });
+      renderChat('c-file-tab');
+      fireEvent.click(screen.getByTestId('view-file-open-tab'));
+      expect(open).toHaveBeenCalledWith(
+        { chatId: 'c-file-tab', path: 'docs/spec.md', name: 'spec.md' },
+        { placement: 'tab' },
+      );
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it('has no open-in-tab for a file outside the chat folder', () => {
+    seedFileCard('c-file-out', { absPath: '/tmp/spec.md', name: 'spec.md' });
+    renderChat('c-file-out');
+    expect(screen.queryByTestId('view-file-open-tab')).not.toBeInTheDocument();
+  });
+
   it('says why there is no preview', () => {
     seedFileCard('c-file-noprev', { previewError: 'corrupt zip' });
     renderChat('c-file-noprev');

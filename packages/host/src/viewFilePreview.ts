@@ -15,6 +15,7 @@
 
 import { closeSync, openSync, readSync } from 'node:fs';
 import mammoth from 'mammoth';
+import { markdownToHtmlFragment } from './docConvert.js';
 
 /** Same ceiling as an `.html` page: the preview is published as one. */
 export const MAX_PREVIEW_HTML_BYTES = 2 * 1024 * 1024;
@@ -37,6 +38,12 @@ const PAGE_STYLE =
   'body{margin:0;padding:12px 16px;font:14px/1.5 system-ui,sans-serif;color:#222;background:#fff}' +
   'pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,monospace}' +
   'table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:2px 6px}img{max-width:100%}' +
+  '.md-toggle{position:absolute;opacity:0}.md-tabs{display:flex;gap:12px;margin:0 0 10px;font:12px system-ui,sans-serif}' +
+  '.md-tabs label{cursor:pointer;color:#888;padding-bottom:2px}' +
+  '#md-r:checked~.md-tabs label[for=md-r],#md-s:checked~.md-tabs label[for=md-s]{color:#222;border-bottom:1px solid #222}' +
+  '#md-r:checked~.md-source,#md-s:checked~.md-rendered{display:none}' +
+  '.md-rendered h1,.md-rendered h2,.md-rendered h3{line-height:1.25}.md-rendered pre,.md-rendered code{font:12px ui-monospace,monospace;background:#f5f5f5}' +
+  '.md-rendered pre{padding:8px;overflow:auto}.md-rendered blockquote{margin:0;padding-left:12px;color:#555}' +
   '.truncated{margin-top:8px;color:#888;font:12px system-ui,sans-serif}';
 
 function page(title: string, body: string): string {
@@ -65,6 +72,21 @@ export async function buildPreviewHtml(
   if (ext === '.docx') {
     const result = await mammoth.convertToHtml({ path: absPath });
     html = page(name, result.value);
+  } else if (ext === '.md') {
+    const { text, truncated } = readHead(absPath, PREVIEW_TEXT_BYTES);
+    const rendered = await markdownToHtmlFragment(text);
+    html = page(
+      name,
+      '<base target="_blank">' +
+        '<input class="md-toggle" type="radio" name="md" id="md-r" checked>' +
+        '<input class="md-toggle" type="radio" name="md" id="md-s">' +
+        '<div class="md-tabs"><label for="md-r">Rendered</label><label for="md-s">Source</label></div>' +
+        `<div class="md-rendered">${rendered}</div>` +
+        `<pre class="md-source">${escapeHtml(text)}</pre>` +
+        (truncated
+          ? `<div class="truncated">Preview shows the first ${PREVIEW_TEXT_BYTES / 1024} KB.</div>`
+          : ''),
+    );
   } else if (TEXT_EXTS.has(ext)) {
     const { text, truncated } = readHead(absPath, PREVIEW_TEXT_BYTES);
     html = page(
