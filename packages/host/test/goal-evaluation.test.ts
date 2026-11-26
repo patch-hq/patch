@@ -792,3 +792,41 @@ describe('maybeEvaluateGoal — default check-in', () => {
     second.daemon.shutdown();
   });
 });
+
+describe('goal judge — background work and snooze', () => {
+  it('lists a running watch as running, never as absent', async () => {
+    const evaluateGoal: EvaluateGoal = async () => ({ verdict: 'met', reason: 'done' });
+    const { daemon, folder } = setup(evaluateGoal);
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    daemon.startWatch(chatId, {
+      command: 'sleep 5',
+      description: 'waiting on Apple',
+      timeoutSec: 600,
+    });
+    const text = (
+      daemon as unknown as { describeBackgroundForGoal(id: string): string }
+    ).describeBackgroundForGoal(chatId);
+    expect(text).toContain('RUNNING watch: waiting on Apple');
+    expect(text).not.toContain('No background task is running now');
+    daemon.shutdown();
+  });
+
+  it('a progress note does not touch a snoozed chat', async () => {
+    const evaluateGoal: EvaluateGoal = async () => ({ verdict: 'met', reason: 'done' });
+    const { daemon, folder } = setup(evaluateGoal);
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Do the thing');
+    await daemon.setSnoozed(chatId, Date.now() + 3_600_000);
+    const before = daemon.chatState.get(chatId)!.lastUpdated;
+    await daemon.declareStatus(chatId, 'report', 'Goal check-in: off track', {
+      keepSnoozed: true,
+    });
+    const after = daemon.chatState.get(chatId)!;
+    expect(after.snoozedUntil).not.toBeNull();
+    expect(after.declaredStatus?.text).toContain('off track');
+    expect(before).toBeLessThanOrEqual(after.lastUpdated);
+    daemon.shutdown();
+  });
+});
