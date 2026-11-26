@@ -768,6 +768,13 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
     });
     sock.once('error', (err: NodeJS.ErrnoException) => {
       if (this.sock === sock) return;
+      // A turn directory that is gone was retired on purpose (retireTurn
+      // deletes it), so there is no socket to wait for: a kill, not a runner
+      // that could not be reached.
+      if (!this.finished && !this.detached && !existsSync(this.turn.dir)) {
+        this.finish(null, 'SIGTERM');
+        return;
+      }
       // The runner creates its socket a moment after it starts.
       if (
         (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') &&

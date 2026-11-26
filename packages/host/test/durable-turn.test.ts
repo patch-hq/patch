@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   renameSync,
+  rmSync,
   readdirSync,
   readFileSync,
   utimesSync,
@@ -373,6 +374,31 @@ describe('a durable turn', () => {
     await ended;
     expect(errors).toEqual([]);
   }, 20000);
+
+  it('a turn directory removed while the runner is still up ends as killed, not as an unreachable runner', async () => {
+    const { cfg, cwd } = fresh();
+    const idle = join(root, 'idle2-runner.cjs');
+    writeFileSync(
+      idle,
+      "require('node:fs').writeFileSync(process.argv[2] + '/runner.json', JSON.stringify({ pid: process.pid }));\nsetInterval(() => undefined, 1000);\n",
+    );
+    const turn = new DurableTurn({
+      config: { ...cfg, runner: { command: process.execPath, args: [idle] } },
+      chatId: 'c-gone',
+      localId: 'L1',
+      log,
+    });
+    const proc = turn.spawn({ ...spawnOpts, cwd });
+    const errors: Error[] = [];
+    proc.on('error', (e) => errors.push(e));
+    const ended = new Promise<void>((r) => proc.once('exit', () => r()));
+    for (let i = 0; i < 200 && !existsSync(join(turn.dir, 'runner.json')); i++) await sleep(25);
+    const pid = JSON.parse(readFileSync(join(turn.dir, 'runner.json'), 'utf8')).pid as number;
+    rmSync(turn.dir, { recursive: true, force: true });
+    await ended;
+    process.kill(pid, 'SIGKILL');
+    expect(errors).toEqual([]);
+  }, 8000);
 
   it('says why a runner that died before claude ran died, from its log', async () => {
     const { cfg, cwd } = fresh();

@@ -341,6 +341,11 @@ export class DurableCodexProcess implements LiveTurn {
     });
     sock.once('error', (err: NodeJS.ErrnoException) => {
       if (this.sock === sock) return;
+      // A turn directory that is gone was retired on purpose: nothing to reach.
+      if (!this.finished && !this.detached && !existsSync(this.dir)) {
+        this.exit(`${this.kind.name} turn was retired`);
+        return;
+      }
       if (
         (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') &&
         attempt < 400 &&
