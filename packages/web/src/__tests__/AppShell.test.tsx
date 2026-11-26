@@ -1346,7 +1346,7 @@ describe('AppShell', () => {
   });
 
   it('⌘⇧D on a page with no chat starts a PTT voice note to Manager', async () => {
-    await renderShell('/', [makeRow(SPECIAL_THREAD_IDS.manager)]);
+    await renderShell('/jobs', [makeRow(SPECIAL_THREAD_IDS.manager)]);
     await waitFor(() =>
       expect(useChatStore.getState().chats[SPECIAL_THREAD_IDS.manager]).toBeDefined(),
     );
