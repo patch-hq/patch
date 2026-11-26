@@ -25,6 +25,16 @@
 (async () => {
   const base = location.pathname.replace(/\/?$/, '/');
   const frame = document.getElementById("view");
+  // A wide table inside a clipping card would hide its right-hand columns: let the card scroll.
+  frame.addEventListener('load', () => {
+    const d = frame.contentDocument;
+    d.querySelectorAll('table').forEach((t) => {
+      for (let n = t.parentElement; n && n !== d.body && n !== d.documentElement; n = n.parentElement) {
+        const ox = frame.contentWindow.getComputedStyle(n).overflowX;
+        if ((ox === 'hidden' || ox === 'clip') && n.scrollWidth > n.clientWidth + 1) n.style.overflowX = 'auto';
+      }
+    });
+  });
   try {
     const r = await fetch(base + 'api');
     if (!r.ok) throw new Error('This Pad is not shared (' + r.status + ')');

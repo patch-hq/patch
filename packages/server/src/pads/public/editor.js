@@ -359,9 +359,22 @@
   $('prevScreen').addEventListener('click', function () { var i = state.screens.indexOf(screen); if (i > 0) setScreen(state.screens[i - 1]); });
   $('nextScreen').addEventListener('click', function () { var i = state.screens.indexOf(screen); if (i >= 0 && i < state.screens.length - 1) setScreen(state.screens[i + 1]); });
   var observer = null;
+  // A wide table inside a card that clips (overflow:hidden) leaves its right-hand
+  // columns unreachable by touch: let that card scroll sideways instead.
+  function unclipTables() {
+    var d = doc(); if (!d || !d.body) return;
+    var w = win();
+    Array.prototype.forEach.call(d.querySelectorAll('table'), function (t) {
+      for (var n = t.parentElement; n && n !== d.body && n !== d.documentElement; n = n.parentElement) {
+        var ox = w.getComputedStyle(n).overflowX;
+        if ((ox === 'hidden' || ox === 'clip') && n.scrollWidth > n.clientWidth + 1) n.style.overflowX = 'auto';
+      }
+    });
+  }
   frame.addEventListener('load', function () {
     var d = doc();
     frameReady = true; notesLayer.style.visibility = '';
+    unclipTables();
     fitLayer();
     applyPreviews();
     if (restoring) {
@@ -382,7 +395,7 @@
     var queued = false;
     observer = new (win().MutationObserver)(function () {
       if (queued) return; queued = true;
-      requestAnimationFrame(function () { queued = false; applyPreviews(); notesDirty = true; fitLayer(); draw(); });
+      requestAnimationFrame(function () { queued = false; applyPreviews(); notesDirty = true; unclipTables(); fitLayer(); draw(); });
     });
     observer.observe(d.documentElement, { subtree: true, childList: true, characterData: true });
     // A scrollbar appears or goes when the content's height crosses the pane's.
