@@ -413,6 +413,8 @@ export const ChatMeta = z
      * and nothing else (see `chatRunner.sendInput`) — a machine turn is the
      * chat carrying on, not evidence anybody read it.
      */
+    /** What archiving killed (background tasks, a wake, subagents), told to the chat once on restore. */
+    archiveStopped: z.array(z.string().min(1)).optional(),
     declaredStatus: z
       .object({
         kind: z.enum(['question', 'report']),
