@@ -45,7 +45,7 @@ beforeEach(async () => {
   const { usePreferencesStore, DEFAULT_PREFERENCES } =
     await import('../stores/preferencesStore.js');
   usePreferencesStore.setState({
-    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true, experimentalInbox: true },
   });
 });
 

@@ -74,7 +74,7 @@ import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { SideThreadsPanel } from './SideThreadsPanel.js';
 import { FileEditorTab } from './FileEditorTab.js';
-import { useExperimentalFeatures } from '../stores/preferencesStore.js';
+import { useExperimentalFeatures, useExperimentalInbox } from '../stores/preferencesStore.js';
 import { FilesPage } from './FilesPage.js';
 import { HostFilesPage } from './HostFilesPage.js';
 import { JobsRoute } from '../routes/JobsRoute.js';
@@ -1078,6 +1078,7 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
   const timeline = useChatStore((s) => (chatId ? s.timelines[chatId] : undefined));
   const pads = usePadsStore((s) => s.pads);
   const experimental = useExperimentalFeatures();
+  const inboxOn = useExperimentalInbox();
   return useMemo(() => {
     if (!open) return [];
     const openTab = (d: TabDescriptor) => (): void => {
@@ -1153,13 +1154,13 @@ function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMen
     }
     out.push(
       tab('new-triage', 'Triage', { kind: 'page', page: 'triage' }, 'Pages'),
-      tab('new-inbox', 'Inbox', { kind: 'page', page: 'inbox' }, 'Pages'),
+      ...(inboxOn ? [tab('new-inbox', 'Inbox', { kind: 'page', page: 'inbox' }, 'Pages')] : []),
       tab('new-pads', 'Pads', { kind: 'page', page: 'pads' }, 'Pages'),
       tab('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }, 'Pages'),
       tab('new-settings', 'Settings', { kind: 'page', page: 'settings' }, 'Pages'),
     );
     return out;
-  }, [open, chatId, chats, timeline, pads, group.id, paneId, experimental]);
+  }, [open, chatId, chats, timeline, pads, group.id, paneId, experimental, inboxOn]);
 }
 
 /** A chat's status badge for a menu row. */

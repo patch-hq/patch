@@ -37,6 +37,18 @@ export function ExperimentalPage(): JSX.Element {
             testid="experimental-features"
           />
         </Row>
+        <Row title="Show Inbox" sub="The Inbox page of agent questions and updates">
+          <Toggle
+            checked={preferences.experimentalInbox}
+            disabled={!loaded}
+            onChange={(next) => {
+              void update({ experimentalInbox: next }).catch((e: Error) =>
+                pushError(failed('settings'), undefined, e.message),
+              );
+            }}
+            testid="experimental-inbox"
+          />
+        </Row>
       </Group>
     </SettingsPage>
   );

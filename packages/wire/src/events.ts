@@ -2637,6 +2637,8 @@ export const SharedSettings = z
   .object({
     /** Whether half-finished features (the Manager, Batch, Meeting mode) are shown. Off by default; Settings → Experimental features. */
     experimentalFeatures: z.boolean(),
+    /** Whether the Inbox page is shown. Its own switch, independent of `experimentalFeatures`; Settings → Experimental features. */
+    experimentalInbox: z.boolean(),
     /** Whether the first-run intro on a new chat has been dismissed. Per account; the "Getting started" guide stays reachable either way. */
     introDismissed: z.boolean(),
     // ---- server-acted preferences ----
@@ -2887,6 +2889,7 @@ export type SharedSettingsPatch = z.infer<typeof SharedSettingsPatch>;
 
 export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   experimentalFeatures: false,
+  experimentalInbox: false,
   introDismissed: false,
   agentIdentity: {
     enabled: false,

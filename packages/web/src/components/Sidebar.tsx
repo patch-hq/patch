@@ -64,6 +64,7 @@ import { useBatchStore } from '../stores/batchStore.js';
 import {
   anyProviderConnected,
   useExperimentalFeatures,
+  useExperimentalInbox,
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
@@ -1328,6 +1329,7 @@ function BottomNav(): JSX.Element {
   });
   const path = location.pathname;
   const experimentalNav = useExperimentalFeatures();
+  const inboxOn = useExperimentalInbox();
   const section = (pages: string[], prefix: string): boolean =>
     focusedPage !== null ? pages.includes(focusedPage) : path.startsWith(prefix);
   const filesActive = focusedPage === 'host-files';
@@ -1362,7 +1364,7 @@ function BottomNav(): JSX.Element {
               Triage
             </OpenableLink>
           )}
-          {experimentalNav && (
+          {inboxOn && (
             <OpenableLink
               to="/inbox"
               opens={{ kind: 'page', page: 'inbox' }}
