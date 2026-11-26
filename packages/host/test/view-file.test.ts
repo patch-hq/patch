@@ -453,6 +453,32 @@ describe('POST /internal/view_file (view_file)', () => {
     },
   );
 
+  it('renders a markdown preview with a source toggle and drops raw html', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(
+        join(folder, 'spec.md'),
+        '# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n[x](https://example.com) <script>alert(1)</script>',
+        'utf8',
+      );
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'spec.md' },
+      });
+      expect(res.statusCode).toBe(200);
+      const html = published[1]!.html;
+      expect(html).toContain('<h1>Title</h1>');
+      expect(html).toContain('<table>');
+      expect(html).toContain('<a href="https://example.com">x</a>');
+      expect(html).toContain('id="md-s"');
+      expect(html).not.toContain('<script>');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('publishes an escaped text preview next to a text file, and reports absPath', async () => {
     const { app, chatId, folder, published } = await setup();
     try {

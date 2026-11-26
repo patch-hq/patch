@@ -5808,6 +5808,7 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
   const [openError, setOpenError] = useState<string | null>(null);
   const isImage = view.kind === 'image';
   const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
+  const chatFolder = useChatStore((st) => st.chats[chatId]?.folder ?? '');
   const bridge = getDesktopBridge();
   const localHostBridge = bridge?.localHost;
   const openPathBridge = bridge?.openPath;
@@ -5834,6 +5835,13 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
       openPathBridge !== undefined &&
       localHostId !== null &&
       localHostId === chatHostId;
+    // A file inside the chat's folder opens in a Patch tab (files are served
+    // relative to that folder); anything outside keeps the card alone.
+    const root = chatFolder.replace(/\/+$/, '');
+    const tabPath =
+      view.absPath !== undefined && root !== '' && view.absPath.startsWith(root + '/')
+        ? view.absPath.slice(root.length + 1)
+        : null;
     const open = (mode: 'file' | 'folder'): void => {
       setOpenError(null);
       (openPathBridge as NonNullable<typeof openPathBridge>)(view.absPath as string, mode).catch(
@@ -5851,6 +5859,25 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
             <span className="view-file-size" data-testid="view-file-size">
               {formatBytes(view.size)}
             </span>
+          ) : null}
+          {tabPath !== null ? (
+            <button
+              type="button"
+              className="view-file-download"
+              data-testid="view-file-open-tab"
+              aria-label={`Open ${view.name} in a tab`}
+              title="Open in a tab"
+              onClick={() =>
+                useUiStore
+                  .getState()
+                  .openFileInBrowser(
+                    { chatId, path: tabPath, name: view.name },
+                    { placement: 'tab' },
+                  )
+              }
+            >
+              <FileText size={14} aria-hidden />
+            </button>
           ) : null}
           {canOpen ? (
             <>

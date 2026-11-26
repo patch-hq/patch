@@ -502,7 +502,7 @@ function resolveLocalImageSrcs(html: string, baseDir: string): string {
   });
 }
 
-async function markdownToHtmlFragment(markdown: string): Promise<string> {
+export async function markdownToHtmlFragment(markdown: string): Promise<string> {
   const file = await unified()
     .use(remarkParse)
     .use(remarkGfm)
