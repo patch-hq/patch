@@ -57,4 +57,24 @@ describe('Experimental features — settings', () => {
     await waitFor(() => expect(patches).toEqual([{ experimentalFeatures: true }]));
     expect(usePreferencesStore.getState().preferences.experimentalFeatures).toBe(true);
   });
+
+  it('Inbox is off by default and has its own toggle that writes experimentalInbox', async () => {
+    expect(DEFAULT_SHARED_SETTINGS.experimentalInbox).toBe(false);
+    const patches: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({}, (u, init) => {
+        if (u.includes('/api/settings') && init?.method === 'PATCH') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          patches.push(body);
+          return json({ preferences: { ...DEFAULT_PREFERENCES, ...body } });
+        }
+        return null;
+      }),
+    );
+    renderSettings('/settings/experimental');
+    fireEvent.click(await screen.findByTestId('experimental-inbox'));
+    await waitFor(() => expect(patches).toEqual([{ experimentalInbox: true }]));
+    expect(usePreferencesStore.getState().preferences.experimentalFeatures).toBe(false);
+  });
 });

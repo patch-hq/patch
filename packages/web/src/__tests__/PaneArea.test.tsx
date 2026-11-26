@@ -70,7 +70,7 @@ function renderPanes({ strict = false }: { strict?: boolean } = {}): void {
 
 beforeEach(() => {
   usePreferencesStore.setState({
-    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true, experimentalInbox: true },
   });
   useLayoutStore.getState()._reset();
   useChatStore.getState()._reset();

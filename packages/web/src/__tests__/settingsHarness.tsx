@@ -199,7 +199,7 @@ export function resetSettingsState(): void {
   useSettingsHostStore.setState({ selected: null });
   // Settings tests start with the experimental features on, so Manager is in the nav.
   usePreferencesStore.setState({
-    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true, experimentalInbox: true },
     loaded: true,
     shared: null,
   });
