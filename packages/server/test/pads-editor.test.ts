@@ -285,6 +285,29 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('zoom: ctrl-wheel and keyboard enlarge the screen past fit, and ctrl+0 returns to fit', async () => {
+    const frameUrl = await newPad();
+    const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#t').waitFor();
+    await page.locator('[data-mode="edit"]').click();
+    const scale = async () => Number(await page.locator('#wrap').getAttribute('data-scale'));
+    expect(await scale()).toBe(1);
+    await page.keyboard.press('Control+=');
+    expect(await scale()).toBeCloseTo(1.25, 5);
+    await page.mouse.move(600, 400);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -100);
+    await page.keyboard.up('Control');
+    expect(await scale()).toBeGreaterThan(1.25);
+    const box = await page.locator('#wrap').boundingBox();
+    expect(box!.width).toBeGreaterThan(1200);
+    await page.keyboard.press('Control+0');
+    expect(await scale()).toBe(1);
+    await ctx.close();
+  });
+
   it('a tall page scrolls by the wheel delta and its scrollbar is left uncovered by the edit layer', async () => {
     const frameUrl = await newPad();
     // Playwright hides scrollbars by default; a real browser shows one.
