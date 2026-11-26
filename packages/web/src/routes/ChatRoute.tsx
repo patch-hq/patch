@@ -6001,14 +6001,7 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
           />
         </button>
       ) : view.kind === 'video' ? (
-        <video
-          className="view-file-video"
-          data-testid="view-file-video"
-          src={view.url}
-          controls
-          playsInline
-          preload="metadata"
-        />
+        <ChatVideo url={view.url} />
       ) : (
         <iframe
           className="view-file-frame"
@@ -6027,6 +6020,41 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
         <ImageLightbox url={view.url} alt={view.name} onClose={() => setLightboxOpen(false)} />
       ) : null}
     </div>
+  );
+}
+
+// Playback position per video url, so leaving a chat (which unmounts the
+// player) pauses the video and coming back resumes from the same spot.
+const videoPositions = new Map<string, number>();
+
+function ChatVideo({ url }: { url: string }): JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null) return undefined;
+    const saved = videoPositions.get(url);
+    if (saved !== undefined && saved > 0) {
+      const restore = (): void => {
+        el.currentTime = saved;
+      };
+      if (el.readyState >= 1) restore();
+      else el.addEventListener('loadedmetadata', restore, { once: true });
+    }
+    return () => {
+      el.pause();
+      videoPositions.set(url, el.currentTime);
+    };
+  }, [url]);
+  return (
+    <video
+      ref={ref}
+      className="view-file-video"
+      data-testid="view-file-video"
+      src={url}
+      controls
+      playsInline
+      preload="metadata"
+    />
   );
 }
 
