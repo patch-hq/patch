@@ -1350,8 +1350,13 @@ describe('AppShell', () => {
     await waitFor(() =>
       expect(useChatStore.getState().chats[SPECIAL_THREAD_IDS.manager]).toBeDefined(),
     );
-    fireEvent.keyDown(window, { key: 'D', code: 'KeyD', metaKey: true, shiftKey: true });
-    expect(startVoiceNote).toHaveBeenCalledWith(SPECIAL_THREAD_IDS.manager, 'ptt');
+    // The shortcut listener is attached by an effect; press until it is live (a
+    // repeat while held is ignored by the handler, so retrying cannot double-start).
+    await waitFor(() => {
+      fireEvent.keyDown(window, { key: 'D', code: 'KeyD', metaKey: true, shiftKey: true });
+      expect(startVoiceNote).toHaveBeenCalledWith(SPECIAL_THREAD_IDS.manager, 'ptt');
+    });
+    fireEvent.keyUp(window, { key: 'D', code: 'KeyD' });
   });
 
   it('⌘⇧D with no chat and no Manager does not start a note', async () => {
