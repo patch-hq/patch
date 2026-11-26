@@ -63,6 +63,8 @@ export interface GoalEvalInput {
   folder: string;
   /** Host-verified state of this chat's background tasks/monitors (never the agent's own claim). */
   background: string;
+  /** The latest tool calls and their results, rendered by `renderToolActivity`: the evidence the text transcript lacks. */
+  recentTools?: string;
   /** Everything the user has asked for in this chat, so the scope survives the transcript being cut. */
   userScope: string;
   /** The agent's latest message, verbatim: where it states what is done and what blocks it. */
@@ -220,7 +222,19 @@ function buildPrompt(input: GoalEvalInput, instructions: string, level: GoalStri
       'If it names a blocker that stops the in-scope work and only the user can clear it, ' +
       'judge blocked with that blocker as the reason (impossible is only for a goal no one could ever meet), rather than not_met.',
     '',
+    "Judge from the whole record: the conversation, the tool activity and the agent's latest message. " +
+      'Never say no work has been done when any of them shows work; say what is done and name only what remains. ' +
+      'If everything left waits on an outside party (an approval, a reply, a delivery) and the agent has said so, ' +
+      'that is a valid pause: judge blocked and name what is awaited, rather than not_met, and never tell the agent to repeat an outward-facing action already taken.',
+    '',
     ...stringencySection(level),
+    ...(level === 1 || !input.recentTools
+      ? []
+      : [
+          'RECENT TOOL ACTIVITY (recorded by the host, oldest first; this is the evidence of work done, and the conversation below holds only the messages):',
+          input.recentTools,
+          '',
+        ]),
     ...(level === 1 ? [] : ['CONVERSATION SO FAR (oldest first):', input.transcript, '']),
     ...(input.checkIn
       ? [
@@ -333,4 +347,45 @@ export function renderGoalTranscript(
   let text = lines.join('\n\n');
   if (text.length > maxChars) text = `…\n${tailCodePoints(text, maxChars)}`;
   return text;
+}
+
+export interface ToolActivityEntry {
+  name: string;
+  args: unknown;
+  result: unknown;
+  isError: boolean;
+}
+
+export function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${cutAt(flat, max - 1).trimEnd()}…` : flat;
+}
+
+export function textOf(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((b) =>
+        typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'text'
+          ? String((b as { text?: unknown }).text ?? '')
+          : '',
+      )
+      .filter((t) => t !== '')
+      .join(' ');
+  }
+  return JSON.stringify(value) ?? '';
+}
+
+/** Render the latest tool calls, one line each, bounded; newest last. */
+export function renderToolActivity(
+  entries: ReadonlyArray<ToolActivityEntry>,
+  maxChars = 5000,
+): string {
+  if (entries.length === 0) return '(no tool calls yet)';
+  const lines = entries.map(
+    (e) =>
+      `- ${e.name}(${clip(textOf(e.args), 160)}) ${e.isError ? 'FAILED' : '->'} ${clip(textOf(e.result), 400)}`,
+  );
+  const text = lines.join('\n');
+  return text.length > maxChars ? `…\n${tailCodePoints(text, maxChars)}` : text;
 }

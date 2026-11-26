@@ -347,3 +347,21 @@ describe('makeGoalEvaluator', () => {
     await expect(evaluate(baseInput)).resolves.toBeNull();
   });
 });
+
+describe('renderToolActivity', () => {
+  it('renders calls with results and failures, bounded', async () => {
+    const { renderToolActivity } = await import('../src/goalEval.js');
+    const text = renderToolActivity([
+      {
+        name: 'Bash',
+        args: 'curl patchhq.dev',
+        result: '<footer>Acme Ltd</footer>',
+        isError: false,
+      },
+      { name: 'Bash', args: 'gh pr view', result: 'not found', isError: true },
+    ]);
+    expect(text).toContain('Bash(curl patchhq.dev) -> <footer>Acme Ltd</footer>');
+    expect(text).toContain('FAILED not found');
+    expect(renderToolActivity([])).toBe('(no tool calls yet)');
+  });
+});

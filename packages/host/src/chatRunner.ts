@@ -179,7 +179,15 @@ import {
   keepCompletedHistory,
 } from './todos.js';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
-import { renderAgentStatement, renderGoalTranscript, renderUserScope } from './goalEval.js';
+import {
+  clip,
+  renderAgentStatement,
+  renderGoalTranscript,
+  renderToolActivity,
+  renderUserScope,
+  textOf,
+  type ToolActivityEntry,
+} from './goalEval.js';
 import {
   isReservedSpecialThread,
   resolvePermissionModeForModel,
@@ -647,6 +655,7 @@ export interface HostOptions {
     userScope: string;
     /** The agent's latest message, where it states blockers. */
     agentStatement: string;
+    recentTools?: string;
     /** Also report whether the goal is on track (spec/04 § Goals — check-in). */
     checkIn?: boolean;
     /** The chat's own model: a chat on a model endpoint is judged on it. */
@@ -2556,6 +2565,9 @@ export class Daemon {
   private readonly delegateOrphanSeen = new Set<string>();
   /** chatId → callId → start time of tool calls that have not returned yet. */
   private readonly toolsInFlight = new Map<string, Map<string, number>>();
+  /** The goal judge's view of tool work: args by callId while in flight, then the latest finished calls per chat. */
+  private readonly goalToolArgs = new Map<string, unknown>();
+  private readonly goalToolActivity = new Map<string, ToolActivityEntry[]>();
   /** Spots an agent re-running the same failing tool call (repeatFailureGuard.ts). */
   private readonly repeatFailures = new RepeatFailureGuard();
 
@@ -5760,6 +5772,7 @@ export class Daemon {
       folder: state.folder,
       ...(state.model ? { chatModel: state.model } : {}),
       background: this.describeBackgroundForGoal(chatId),
+      recentTools: this.goalToolSummary(chatId),
       userScope: renderUserScope(state.lastMessages),
       agentStatement:
         `The agent is asking to end the goal as "${claimed}" and says: ${claim}\n` +
@@ -12446,6 +12459,7 @@ export class Daemon {
     const folder = state.folder;
     const chatModel = state.model;
     const background = this.describeBackgroundForGoal(chatId);
+    const recentTools = this.goalToolSummary(chatId);
     // spec/04 § Goals — check-in: on its cadence the same call also says whether
     // the work is on track.
     const checkInEvery = state.goalCheckInEvery;
@@ -12463,6 +12477,7 @@ export class Daemon {
           turnsEvaluated,
           folder,
           background,
+          recentTools,
           userScope,
           agentStatement,
           ...(checkIn ? { checkIn: true } : {}),
@@ -12475,6 +12490,7 @@ export class Daemon {
               turnsEvaluated,
               folder,
               background,
+              recentTools,
               userScope,
               agentStatement,
               ...(chatModel ? { chatModel } : {}),
@@ -12508,6 +12524,7 @@ export class Daemon {
       background: string;
       userScope: string;
       agentStatement: string;
+      recentTools?: string;
       chatModel?: string;
     },
   ): Promise<R | null> {
@@ -12566,6 +12583,28 @@ export class Daemon {
             : ` (exit ${r.exitCode ?? 'unknown'}${r.signal ? `, signal ${r.signal}` : ''})`),
       );
     return `No background task is running now. Most recent:\n${lines.join('\n')}`;
+  }
+
+  private recordGoalToolActivity(
+    chatId: string,
+    r: { name: string; callId: string; result: unknown; isError?: boolean },
+  ): void {
+    const key = `${chatId}:${r.callId}`;
+    const args = this.goalToolArgs.get(key);
+    this.goalToolArgs.delete(key);
+    const list = this.goalToolActivity.get(chatId) ?? [];
+    list.push({
+      name: r.name,
+      args: args ?? '',
+      result: clip(textOf(r.result), 400),
+      isError: r.isError === true,
+    });
+    if (list.length > 15) list.splice(0, list.length - 15);
+    this.goalToolActivity.set(chatId, list);
+  }
+
+  private goalToolSummary(chatId: string): string {
+    return renderToolActivity(this.goalToolActivity.get(chatId) ?? []);
   }
 
   /** Re-check `maybeEvaluateGoal` once this chat's `patch_watch` tasks finish. */
@@ -13338,6 +13377,7 @@ export class Daemon {
           startedAt: Date.now(),
         };
         this.emit(ev);
+        this.goalToolArgs.set(`${chatId}:${env.tool.callId}`, clip(textOf(env.tool.args), 160));
         const inFlight = this.toolsInFlight.get(chatId) ?? new Map<string, number>();
         inFlight.set(env.tool.callId, this.opts.now());
         this.repeatFailures.onToolUse(chatId, env.tool.callId, env.tool.name, env.tool.args);
@@ -13398,6 +13438,7 @@ export class Daemon {
         // behind. Broadcast only fires for a SUCCESSFUL result — a failed
         // Edit/Write/NotebookEdit never touched disk.
         this.toolsInFlight.get(chatId)?.delete(env.toolResult.callId);
+        this.recordGoalToolActivity(chatId, env.toolResult);
         const pendingKey = `${chatId}:${env.toolResult.callId}`;
         const changedPath = this.pendingEditToolCalls.get(pendingKey);
         this.pendingEditToolCalls.delete(pendingKey);
