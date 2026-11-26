@@ -206,8 +206,8 @@ function buildPrompt(input: GoalEvalInput, instructions: string, level: GoalStri
     '',
     'BACKGROUND TASKS (verified by the host, not the agent):',
     input.background,
-    'If the agent says it is waiting on a monitor or background task, that wait is only valid ' +
-      'when a task above is running. If none is, the wait is invalid: judge not_met and tell ' +
+    'If the agent says it is waiting on a monitor, background task, delegated agent or wake, that wait is only valid ' +
+      'when one is listed above as running or pending. If none is, the wait is invalid: judge not_met and tell ' +
       "the agent to check the finished task's output and carry on.",
     '',
     'WHAT THE USER ASKED FOR (this, and only this, is the scope of the work; it is complete even if the conversation below is cut short):',

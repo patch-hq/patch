@@ -5950,9 +5950,17 @@ export class Daemon {
    * One-way, like the un-archive it performs. Nothing re-hides the chat and
    * nothing downgrades the status except a user turn — see `sendInput`.
    */
-  async declareStatus(chatId: string, kind: 'question' | 'report', text: string): Promise<void> {
+  async declareStatus(
+    chatId: string,
+    kind: 'question' | 'report',
+    text: string,
+    opts: { keepSnoozed?: boolean } = {},
+  ): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
+    // A goal chat's snooze ends only on met, impossible or needing the user. A
+    // progress note (check-in, judge trouble) must not move it or un-hide it.
+    const quiet = opts.keepSnoozed === true && state.snoozedUntil !== null;
     const at = this.opts.now();
     const declared = { kind, text, at };
     state.declaredStatus = declared;
@@ -5961,8 +5969,12 @@ export class Daemon {
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       declaredStatus: declared,
-      updatedAt: at,
+      ...(quiet ? {} : { updatedAt: at }),
     }));
+    if (quiet) {
+      this.emitState(chatId);
+      return;
+    }
     // Announcing itself is what takes a chat out of hiding (spec/04 § Hidden).
     // `setArchived`/`setHidden` emit the state themselves, so only the case
     // where neither applies has to.
@@ -12604,6 +12616,7 @@ export class Daemon {
       chatId,
       'report',
       `Goal is not being checked: the goal judge failed ${n} turns running (${why}). The chat may stop without meeting its goal.`,
+      { keepSnoozed: true },
     ).catch((err) => {
       this.opts.logger.warn({ chatId, err }, 'goal judge failure: declareStatus failed');
     });
@@ -12617,17 +12630,35 @@ export class Daemon {
    */
   private describeBackgroundForGoal(chatId: string): string {
     const recs = this.watch.list(chatId);
-    if (recs.length === 0) return 'No background tasks or monitors are running or have run.';
-    const lines = recs
-      .slice(-5)
+    const running = recs.filter((r) => r.status === 'running');
+    const delegates = this.chatState
+      .list()
+      .filter((c) => c.subagent?.parentChatId === chatId && c.subagent.outcome === undefined);
+    const wake = this.wake.peek(chatId);
+    const lines: string[] = [];
+    for (const r of running) lines.push(`- RUNNING watch: ${r.description}`);
+    for (const d of delegates)
+      lines.push(`- RUNNING delegated agent: ${d.subagent?.label ?? d.chatId}`);
+    if (wake !== null) {
+      lines.push(
+        `- PENDING ${wake.every !== undefined ? 'recurring wake (loop)' : 'wake'} due ${new Date(wake.fireAt).toISOString()}: ${wake.message.slice(0, 120)}`,
+      );
+    }
+    const ended = recs
+      .filter((r) => r.status !== 'running')
+      .slice(0, 5)
       .map(
         (r) =>
-          `- ${r.description}: ${r.status}` +
-          (r.status === 'running'
-            ? ''
-            : ` (exit ${r.exitCode ?? 'unknown'}${r.signal ? `, signal ${r.signal}` : ''})`),
+          `- ended watch: ${r.description}: ${r.status} (exit ${r.exitCode ?? 'unknown'}${r.signal ? `, signal ${r.signal}` : ''})`,
       );
-    return `No background task is running now. Most recent:\n${lines.join('\n')}`;
+    if (lines.length === 0 && ended.length === 0) {
+      return 'No background tasks or monitors are running or have run.';
+    }
+    const head =
+      lines.length > 0
+        ? `Running or pending now:\n${lines.join('\n')}`
+        : 'Nothing is running or pending now.';
+    return ended.length > 0 ? `${head}\nRecently ended:\n${ended.join('\n')}` : head;
   }
 
   private recordGoalToolActivity(
@@ -12730,6 +12761,7 @@ export class Daemon {
           chatId,
           'report',
           `Goal check-in: off track. ${result.onTrackReason}`,
+          { keepSnoozed: true },
         ).catch((err) => {
           this.opts.logger.warn({ chatId, err }, 'goal check-in: declareStatus failed');
         });
@@ -12765,6 +12797,8 @@ export class Daemon {
         ).catch((err) => {
           this.opts.logger.warn({ chatId, err }, 'goal deadlock guard: declareStatus failed');
         });
+        // Needs the user: the one case besides met/impossible that ends a goal chat's snooze.
+        this.wakeFromSnooze(chatId);
         this.opts.logger.warn(
           { chatId, limit: this.goalRefusalLimit },
           'goal deadlock guard tripped; chat surfaced instead of pushed',
