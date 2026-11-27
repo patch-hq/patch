@@ -98,6 +98,7 @@ import { hostAnswers, kickstartHost, watchHost } from './host-watchdog';
 import { LocalSttController } from './local-stt-controller';
 import { modelDir } from './local-stt-models';
 import { SherpaAccurateEngine, SherpaLiveEngine } from './local-stt-workers';
+import { KOKORO_WARM_INTERVAL_MS, LocalTtsController, SherpaKokoroEngine } from './local-tts';
 import { SystemPresence } from './system-presence';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
 import { NotificationsMaster } from './notificationsMaster';
@@ -2132,6 +2133,45 @@ function setupAutoUpdater(): void {
     if (pcm instanceof Int16Array) localStt.push(pcm);
   });
   ipcMain.handle('patch:local-stt:finish', () => localStt.finish());
+  // A direct call's speech to text (spec/07 § Direct calls): one utterance, read once.
+  ipcMain.handle('patch:local-stt:read', (_e, pcm: unknown) => {
+    if (!(pcm instanceof Int16Array)) throw new Error('a read takes 16 kHz PCM16 samples');
+    return localStt.read(pcm);
+  });
+  // Kokoro on this computer: a direct call's text to speech (spec/07 § Direct calls).
+  const localTts = new LocalTtsController({
+    modelsDir: join(app.getPath('userData'), 'models'),
+    makeEngine: (dir) =>
+      new SherpaKokoroEngine({
+        sherpa: app.isPackaged
+          ? join(
+              process.resourcesPath,
+              'app.asar.unpacked',
+              'node_modules',
+              'sherpa-onnx-node',
+              'sherpa-onnx.js',
+            )
+          : require.resolve('sherpa-onnx-node'),
+        dir,
+      }),
+  });
+  ipcMain.handle('patch:local-tts:status', () => localTts.status());
+  ipcMain.handle('patch:local-tts:download', (e) =>
+    localTts.download((p) => {
+      if (!e.sender.isDestroyed()) e.sender.send('patch:local-tts:progress', p);
+    }),
+  );
+  ipcMain.handle('patch:local-tts:speak', (_e, text: unknown, voice: unknown, speed: unknown) => {
+    if (typeof text !== 'string' || typeof voice !== 'string' || typeof speed !== 'number') {
+      throw new Error('speak takes text, a voice and a speed');
+    }
+    return localTts.speak(text, voice, speed);
+  });
+  const warmKokoro = (): void => {
+    localTts.warm().catch((err: Error) => console.error(`Kokoro warm-up failed: ${err.message}`));
+  };
+  warmKokoro();
+  setInterval(warmKokoro, KOKORO_WARM_INTERVAL_MS).unref();
   ipcMain.on('patch:local-stt:cancel', () => localStt.cancel());
   // The welcome page's notifications step: macOS asks when an app first posts
   // one, so this posts it, once per device, at the moment the page explains why.

@@ -17,6 +17,14 @@
 import { create } from 'zustand';
 import type { AudioSession } from '../lib/audioSession.js';
 import type { AudioSessionMode, AudioSessionStateName } from '@patch/wire/audio';
+import type { DirectCallStatus } from '@patch/wire/direct-call-runtime';
+
+/** A direct call's own half of the bar (spec/07 § Direct calls). */
+export interface DirectCallBarState {
+  /** The device's setup in one line (`Parakeet → Kokoro`). */
+  setup: string;
+  status: DirectCallStatus;
+}
 
 export interface IncomingCall {
   callId: string;
@@ -98,6 +106,8 @@ export interface VoiceCallState {
    * from the button.
    */
   paused: PauseReason | null;
+  /** Set on a direct call: no voice agent, speech runs on this device. */
+  direct: DirectCallBarState | null;
 }
 
 /** Why a call paused: the button, the headphones coming out, or the silence timeout. */
@@ -167,7 +177,8 @@ interface VoiceState {
   clearComposerRestore(): void;
 
   // --- voice-call (modes 2 & 3) ---
-  startCall(chatId: string, mode?: AudioSessionMode): void;
+  startCall(chatId: string, mode?: AudioSessionMode, direct?: { setup: string }): void;
+  setDirectStatus(status: DirectCallStatus): void;
   setCallMode(mode: AudioSessionMode): void;
   setCallUnaddressed(text: string | null): void;
   setCallPhase(phase: AudioSessionStateName): void;
@@ -242,7 +253,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
     set({ composerRestore: null });
   },
 
-  startCall(chatId, mode = 'call') {
+  startCall(chatId, mode = 'call', direct) {
     set({
       call: {
         chatId,
@@ -258,8 +269,19 @@ export const useVoiceStore = create<VoiceState>((set) => ({
         phase: 'connecting',
         reconnecting: false,
         paused: null,
+        direct: direct
+          ? {
+              setup: direct.setup,
+              status: { line: 'listening', workingSince: null, failure: null, pending: 0 },
+            }
+          : null,
       },
     });
+  },
+  setDirectStatus(status) {
+    set((s) =>
+      s.call?.direct ? { call: { ...s.call, direct: { ...s.call.direct, status } } } : {},
+    );
   },
   setCallMode(mode) {
     set((s) => (s.call ? { call: { ...s.call, mode } } : {}));

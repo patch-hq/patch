@@ -14,7 +14,8 @@ import { pipeline } from 'node:stream/promises';
 
 const RELEASES = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models';
 
-export interface LocalSttModel {
+/** A model this app downloads on demand into its own models folder. */
+export interface LocalModel {
   /** Folder name, inside the models directory, once unpacked. */
   dir: string;
   url: string;
@@ -22,6 +23,9 @@ export interface LocalSttModel {
   files: readonly string[];
   /** Download size, for the prompt that offers it. */
   bytes: number;
+}
+
+export interface LocalSttModel extends LocalModel {
   /** What it does in a dictation. */
   role: 'live' | 'accurate';
 }
@@ -50,7 +54,7 @@ export function modelDir(modelsDir: string, role: LocalSttModel['role']): string
   return join(modelsDir, m.dir);
 }
 
-export interface LocalSttStatus {
+export interface ModelsStatus {
   installed: boolean;
   /** Files absent from the models folder, as `<model dir>/<file>`. */
   missing: string[];
@@ -58,10 +62,17 @@ export interface LocalSttStatus {
   downloadBytes: number;
 }
 
+export type LocalSttStatus = ModelsStatus;
+
 export function localSttStatus(modelsDir: string): LocalSttStatus {
+  return modelsStatus(modelsDir, LOCAL_STT_MODELS);
+}
+
+/** Whether every file of these models is on disk, and what is not. */
+export function modelsStatus(modelsDir: string, models: readonly LocalModel[]): ModelsStatus {
   const missing: string[] = [];
   let downloadBytes = 0;
-  for (const m of LOCAL_STT_MODELS) {
+  for (const m of models) {
     const gone = m.files.filter((f) => !existsSync(join(modelsDir, m.dir, f)));
     if (gone.length > 0) downloadBytes += m.bytes;
     for (const f of gone) missing.push(`${m.dir}/${f}`);
@@ -108,17 +119,25 @@ export function extractTarBz2(archive: string, into: string): Promise<void> {
  * scratch folder and is moved into place only once it holds every file, so an
  * interrupted download never leaves a folder that looks installed.
  */
-export async function downloadLocalSttModels(
+export function downloadLocalSttModels(
   modelsDir: string,
+  onProgress: (p: DownloadProgress) => void,
+  deps: DownloadDeps = {},
+): Promise<void> {
+  return downloadModels(modelsDir, LOCAL_STT_MODELS, onProgress, deps);
+}
+
+/** Download and unpack each of `models` that is not complete. */
+export async function downloadModels(
+  modelsDir: string,
+  models: readonly LocalModel[],
   onProgress: (p: DownloadProgress) => void,
   deps: DownloadDeps = {},
 ): Promise<void> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const extract = deps.extract ?? extractTarBz2;
   mkdirSync(modelsDir, { recursive: true });
-  const todo = LOCAL_STT_MODELS.filter((m) =>
-    m.files.some((f) => !existsSync(join(modelsDir, m.dir, f))),
-  );
+  const todo = models.filter((m) => m.files.some((f) => !existsSync(join(modelsDir, m.dir, f))));
   const total = todo.reduce((n, m) => n + m.bytes, 0);
   let done = 0;
   for (const m of todo) {

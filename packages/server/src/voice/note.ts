@@ -22,7 +22,9 @@
 // host's typed error (`unsupported_format` → 400, else 502). The note is
 // NEVER silently dropped.
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { CLOUD_STT_ENGINES, CLOUD_TTS_ENGINES, DirectTtsSound } from '@patch/wire/direct-call';
 import type { Logger } from 'pino';
 import { verifySurfaceCredential } from '@patch/auth';
 import type { VoiceAppSurfaceKind, WireEvent } from '@patch/wire';
@@ -42,6 +44,8 @@ const TRANSCRIBE_REQUEST_TIMEOUT_MS = 150_000;
 const TURN_CHECK_TIMEOUT_MS = 10_000;
 /** Reject clips larger than this before spending a host round-trip on them. */
 const MAX_CLIP_BYTES = 25 * 1024 * 1024;
+/** One utterance or one sentence: a cloud engine answers in a second or two. */
+const DIRECT_SPEECH_TIMEOUT_MS = 30_000;
 
 const VALID_SURFACE_KINDS: readonly VoiceAppSurfaceKind[] = ['web', 'desktop', 'mobile'];
 function normaliseSurfaceKind(raw: string | undefined): VoiceAppSurfaceKind {
@@ -86,6 +90,8 @@ export interface VoiceNoteRouteDeps {
   idGenerator: () => string;
   /** Override the wait for the host's transcript (tests). */
   transcribeTimeoutMs?: number;
+  /** Override the wait for a direct call's cloud speech (tests). */
+  directSpeechTimeoutMs?: number;
 }
 
 export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRouteDeps): void {
@@ -395,5 +401,175 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     );
     if (!result.ok) return reply.code(result.status).send(result.body);
     return reply.code(200).send({ ok: true, transcript: result.transcript });
+  });
+
+  // ---- Direct calls' cloud speech (spec/07 § Direct calls) ----
+  //
+  // A direct call runs on its device, but a cloud engine's key is on the
+  // chat's host, never on the device. These two routes carry one utterance to
+  // be read, or one piece of a reply to be spoken, to the chat's host and back.
+  // A failure names the engine; nothing is answered by another engine.
+  type DirectResponse = Extract<
+    WireEvent,
+    { type: 'patch.voice.direct_transcribe_response' | 'patch.voice.direct_speak_response' }
+  >;
+  const pendingDirect = new Map<
+    string,
+    { resolve: (ev: DirectResponse) => void; timeout: NodeJS.Timeout }
+  >();
+  deps.hostLink.onEvent((event: WireEvent) => {
+    if (
+      event.type !== 'patch.voice.direct_transcribe_response' &&
+      event.type !== 'patch.voice.direct_speak_response'
+    ) {
+      return;
+    }
+    const w = pendingDirect.get(event.requestId);
+    if (!w) return;
+    pendingDirect.delete(event.requestId);
+    clearTimeout(w.timeout);
+    w.resolve(event);
+  });
+  function awaitDirect(
+    surfaceId: string,
+    build: (requestId: string) => WireEvent,
+  ): Promise<DirectResponse | 'timeout'> {
+    const requestId = deps.idGenerator();
+    return new Promise((resolveP) => {
+      const timeout = setTimeout(() => {
+        pendingDirect.delete(requestId);
+        resolveP('timeout');
+      }, deps.directSpeechTimeoutMs ?? DIRECT_SPEECH_TIMEOUT_MS);
+      pendingDirect.set(requestId, { resolve: resolveP, timeout });
+      // `chatId` on the frame routes it to the chat's own host.
+      deps.hostLink.send(surfaceId, build(requestId));
+    });
+  }
+  function directFailure(
+    reply: FastifyReply,
+    result: DirectResponse | 'timeout',
+    what: string,
+  ): FastifyReply {
+    if (result === 'timeout') {
+      deps.logger.warn(`voice: host did not answer a direct call ${what}`);
+      return reply.code(504).send({
+        error: 'daemon_timeout',
+        message: `the chat's host did not answer the ${what} — it may be offline or need updating`,
+      });
+    }
+    const code = result.error?.code ?? 'internal';
+    return reply
+      .code(code === 'key_missing' ? 409 : 502)
+      .send({ error: code, message: result.error?.message ?? `${what} failed` });
+  }
+
+  const TranscribeBody = z
+    .object({
+      chatId: z.string().min(1),
+      engine: z.enum(CLOUD_STT_ENGINES),
+      model: z.string().min(1).optional(),
+      /** 16 kHz mono PCM16 WAV, base64. */
+      audioBase64: z.string().min(1),
+    })
+    .strict();
+
+  // An utterance runs up to two minutes: ~5 MB as base64 WAV.
+  app.post('/api/voice/direct/transcribe', { bodyLimit: MAX_CLIP_BYTES }, async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const body = TranscribeBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message });
+    if (!deps.chatRegistry.get(body.data.chatId)) {
+      return reply.code(404).send({ error: `chat not found: ${body.data.chatId}` });
+    }
+    const result = await awaitDirect(auth.surfaceId, (requestId) => ({
+      type: 'patch.voice.direct_transcribe_request',
+      requestId,
+      ...body.data,
+    }));
+    if (result === 'timeout' || !result.ok || !('transcript' in result)) {
+      return directFailure(reply, result, 'transcription');
+    }
+    return reply.code(200).send({ ok: true, transcript: result.transcript ?? '' });
+  });
+
+  const SpeakBody = z
+    .object({
+      chatId: z.string().min(1),
+      engine: z.enum(CLOUD_TTS_ENGINES),
+      model: z.string().min(1),
+      voice: z.string().min(1),
+      sound: DirectTtsSound,
+      text: z.string().min(1).max(5000),
+    })
+    .strict();
+
+  app.post('/api/voice/direct/speak', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const body = SpeakBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message });
+    if (!deps.chatRegistry.get(body.data.chatId)) {
+      return reply.code(404).send({ error: `chat not found: ${body.data.chatId}` });
+    }
+    const result = await awaitDirect(auth.surfaceId, (requestId) => ({
+      type: 'patch.voice.direct_speak_request',
+      requestId,
+      ...body.data,
+    }));
+    if (result === 'timeout' || !result.ok || !('pcmBase64' in result) || !result.pcmBase64) {
+      return directFailure(reply, result, 'speech');
+    }
+    return reply.code(200).send({ ok: true, pcmBase64: result.pcmBase64, sampleRate: 24000 });
+  });
+
+  // A direct call's words, read on the device, become the chat's next user turn
+  // tagged `[voice • <kind>]` (spec/07 § Direct calls). A surface never sets a
+  // voice `source` itself (ChatInputSource), so the server attaches it here from
+  // the authenticated surface's own kind. Mid-turn it queues like typed input.
+  const TurnBody = z.object({ chatId: z.string().min(1), text: z.string().min(1) }).strict();
+  app.post('/api/voice/direct/turn', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const body = TurnBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message });
+    const { chatId } = body.data;
+    const text = body.data.text.trim();
+    if (text === '') return reply.code(400).send({ error: 'text is empty' });
+    if (!deps.chatRegistry.get(chatId)) {
+      return reply.code(404).send({ error: `chat not found: ${chatId}` });
+    }
+    const kind = deps.registry.getSurface(auth.surfaceId)?.surfaceKind;
+    if (kind !== 'web' && kind !== 'desktop' && kind !== 'mobile') {
+      return reply
+        .code(400)
+        .send({ error: `a ${kind ?? 'unknown'} surface cannot make a direct call` });
+    }
+    deps.hostLink.send(auth.surfaceId, {
+      type: 'chat.input',
+      chatId,
+      message: text,
+      localId: deps.idGenerator(),
+      source: { kind: 'voice-app', surfaceKind: kind },
+    });
+    return reply.code(200).send({ ok: true, text });
   });
 }

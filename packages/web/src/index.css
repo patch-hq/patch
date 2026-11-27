@@ -14464,6 +14464,10 @@ input.browse-filter {
   font-size: var(--text-min);
   overflow-wrap: anywhere;
 }
+.vb-note-error {
+  /* A direct call's failed engine, named — on the dark bar, a light red that stays readable. */
+  color: #f0a597;
+}
 .voice-bar[data-state='heard'] .vb-note {
   opacity: 0.75;
   font-style: italic;
@@ -14547,6 +14551,11 @@ input.browse-filter {
 .vb-timer {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   color: #cfc8b8;
+  flex: 0 0 auto;
+}
+.vb-setup {
+  color: #cfc8b8;
+  font-size: var(--text-min);
   flex: 0 0 auto;
 }
 .vb-action {

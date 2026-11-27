@@ -494,7 +494,12 @@ describe('TerminalPanel — command completion', () => {
     act(() => {
       useTerminalStore
         .getState()
-        .ingest({ type: 'patch.terminal.exit', sessionId: id, code: null, reason: 'daemon_shutdown' });
+        .ingest({
+          type: 'patch.terminal.exit',
+          sessionId: id,
+          code: null,
+          reason: 'daemon_shutdown',
+        });
     });
     expect(ws.sent).toHaveLength(1);
     act(() => {
@@ -514,7 +519,12 @@ describe('TerminalPanel — command completion', () => {
     act(() => {
       useTerminalStore
         .getState()
-        .ingest({ type: 'patch.terminal.exit', sessionId: sessionId(), code: 0, reason: 'shell_exit' });
+        .ingest({
+          type: 'patch.terminal.exit',
+          sessionId: sessionId(),
+          code: 0,
+          reason: 'shell_exit',
+        });
     });
     expect(screen.getByTestId('terminal-restart')).toBeInTheDocument();
     expect(ws.sent).toHaveLength(1);

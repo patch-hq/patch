@@ -49,6 +49,13 @@ import {
   MeetingWriteup,
 } from './meeting.js';
 import { SnoozeRecord } from './snooze.js';
+import {
+  CLOUD_STT_ENGINES,
+  CLOUD_TTS_ENGINES,
+  DirectCallSetup,
+  DirectTtsSound,
+  SpeechEngineReport,
+} from './direct-call.js';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from './job-autonomy-prompt.js';
 import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
@@ -2819,6 +2826,12 @@ export const SharedSettings = z
      * engine in `voiceConfig.dictation`. Written whole; synced to every device.
      */
     deviceDictation: z.record(z.string().min(1), DictationEngineSchema).optional(),
+    /**
+     * Per signed-in device, by surface id: what its direct calls run on
+     * (spec/07 § Direct calls). A device absent here runs on the first engines
+     * it reports. Written whole; synced to every device.
+     */
+    deviceDirectCall: z.record(z.string().min(1), DirectCallSetup).optional(),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -6426,6 +6439,20 @@ export const SurfaceForegroundedEvent = z
   .strict();
 export type SurfaceForegroundedEvent = z.infer<typeof SurfaceForegroundedEvent>;
 
+/**
+ * Surface → server: the speech engines this surface can run for a direct call
+ * (spec/05 § Speech engines), on connect and whenever that changes. The server
+ * keeps the last report per surface, so Settings can show an offline device's.
+ */
+export const SurfaceSpeechEnginesEvent = z
+  .object({
+    type: z.literal('surface.speech_engines'),
+    stt: SpeechEngineReport.shape.stt,
+    tts: SpeechEngineReport.shape.tts,
+  })
+  .strict();
+export type SurfaceSpeechEnginesEvent = z.infer<typeof SurfaceSpeechEnginesEvent>;
+
 export const SurfaceBackgroundedEvent = z
   .object({
     type: z.literal('surface.backgrounded'),
@@ -9853,6 +9880,73 @@ export const PatchVoiceTurnCheckResponseEvent = z
   .strict();
 export type PatchVoiceTurnCheckResponseEvent = z.infer<typeof PatchVoiceTurnCheckResponseEvent>;
 
+/**
+ * A direct call's cloud speech (spec/07 § Direct calls): the device has no key,
+ * so the chat's host reads an utterance or speaks a piece of the reply for it.
+ * Server → host, routed by `chatId` to the chat's own host; the host answers
+ * with the result or names the engine that failed — never another engine.
+ */
+export const PatchVoiceDirectTranscribeRequestEvent = z
+  .object({
+    type: z.literal('patch.voice.direct_transcribe_request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    engine: z.enum(CLOUD_STT_ENGINES),
+    model: z.string().min(1).optional(),
+    /** 16 kHz mono PCM16 WAV, base64. */
+    audioBase64: z.string().min(1),
+  })
+  .strict();
+export type PatchVoiceDirectTranscribeRequestEvent = z.infer<
+  typeof PatchVoiceDirectTranscribeRequestEvent
+>;
+
+const DirectSpeechError = z
+  .object({
+    code: z.enum(['key_missing', 'engine_failed', 'internal']),
+    message: z.string(),
+  })
+  .strict();
+
+export const PatchVoiceDirectTranscribeResponseEvent = z
+  .object({
+    type: z.literal('patch.voice.direct_transcribe_response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    transcript: z.string().optional(),
+    error: DirectSpeechError.optional(),
+  })
+  .strict();
+export type PatchVoiceDirectTranscribeResponseEvent = z.infer<
+  typeof PatchVoiceDirectTranscribeResponseEvent
+>;
+
+export const PatchVoiceDirectSpeakRequestEvent = z
+  .object({
+    type: z.literal('patch.voice.direct_speak_request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    engine: z.enum(CLOUD_TTS_ENGINES),
+    model: z.string().min(1),
+    voice: z.string().min(1),
+    sound: DirectTtsSound,
+    text: z.string().min(1).max(5000),
+  })
+  .strict();
+export type PatchVoiceDirectSpeakRequestEvent = z.infer<typeof PatchVoiceDirectSpeakRequestEvent>;
+
+export const PatchVoiceDirectSpeakResponseEvent = z
+  .object({
+    type: z.literal('patch.voice.direct_speak_response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** 24 kHz mono PCM16, base64, present when `ok`. */
+    pcmBase64: z.string().optional(),
+    error: DirectSpeechError.optional(),
+  })
+  .strict();
+export type PatchVoiceDirectSpeakResponseEvent = z.infer<typeof PatchVoiceDirectSpeakResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Composer attachment store (spec/14 & spec/15 § Composer — "Attachments").
 //
@@ -11003,6 +11097,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   SurfaceHeartbeatEvent,
   SurfaceHeartbeatAckEvent,
   SurfaceForegroundedEvent,
+  SurfaceSpeechEnginesEvent,
   SurfaceInputEvent,
   SurfaceBackgroundedEvent,
   // Cross-chat
@@ -11145,6 +11240,10 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchVoiceNoteTranscribeResponseEvent,
   PatchVoiceTurnCheckRequestEvent,
   PatchVoiceTurnCheckResponseEvent,
+  PatchVoiceDirectTranscribeRequestEvent,
+  PatchVoiceDirectTranscribeResponseEvent,
+  PatchVoiceDirectSpeakRequestEvent,
+  PatchVoiceDirectSpeakResponseEvent,
   // Composer attachment store
   PatchAttachmentStoreRequestEvent,
   PatchAttachmentStoreResponseEvent,
@@ -11350,6 +11449,7 @@ export const EVENT_SCHEMAS = {
   'surface.heartbeat': SurfaceHeartbeatEvent,
   'surface.heartbeat_ack': SurfaceHeartbeatAckEvent,
   'surface.foregrounded': SurfaceForegroundedEvent,
+  'surface.speech_engines': SurfaceSpeechEnginesEvent,
   'surface.input': SurfaceInputEvent,
   'surface.backgrounded': SurfaceBackgroundedEvent,
   'patch.peek.request': PatchPeekRequestEvent,
@@ -11485,6 +11585,10 @@ export const EVENT_SCHEMAS = {
   'patch.voice_note.transcribe_response': PatchVoiceNoteTranscribeResponseEvent,
   'patch.voice.turn_check_request': PatchVoiceTurnCheckRequestEvent,
   'patch.voice.turn_check_response': PatchVoiceTurnCheckResponseEvent,
+  'patch.voice.direct_transcribe_request': PatchVoiceDirectTranscribeRequestEvent,
+  'patch.voice.direct_transcribe_response': PatchVoiceDirectTranscribeResponseEvent,
+  'patch.voice.direct_speak_request': PatchVoiceDirectSpeakRequestEvent,
+  'patch.voice.direct_speak_response': PatchVoiceDirectSpeakResponseEvent,
   'patch.attachment.store_request': PatchAttachmentStoreRequestEvent,
   'patch.attachment.store_response': PatchAttachmentStoreResponseEvent,
   'patch.attachment.delete_request': PatchAttachmentDeleteRequestEvent,

@@ -46,6 +46,21 @@
       "types": "./dist/utterance-segmenter.d.ts",
       "import": "./dist/utterance-segmenter.js",
       "default": "./dist/utterance-segmenter.js"
+    },
+    "./smart-turn": {
+      "types": "./dist/smart-turn.d.ts",
+      "import": "./dist/smart-turn.js",
+      "default": "./dist/smart-turn.js"
+    },
+    "./direct-call": {
+      "types": "./dist/direct-call.d.ts",
+      "import": "./dist/direct-call.js",
+      "default": "./dist/direct-call.js"
+    },
+    "./direct-call-runtime": {
+      "types": "./dist/direct-call-runtime.d.ts",
+      "import": "./dist/direct-call-runtime.js",
+      "default": "./dist/direct-call-runtime.js"
     }
   },
   "scripts": {

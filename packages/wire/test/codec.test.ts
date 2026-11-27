@@ -804,6 +804,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'surface.heartbeat_ack': { type: 'surface.heartbeat_ack' },
   'surface.foregrounded': { type: 'surface.foregrounded' },
   'surface.input': { type: 'surface.input', idleMs: 4200, scope: 'system' },
+  'surface.speech_engines': {
+    type: 'surface.speech_engines',
+    stt: [{ engine: 'parakeet', where: 'device', models: ['parakeet-tdt-0.6b-v3'] }],
+    tts: [{ engine: 'openai', where: 'cloud', models: ['gpt-4o-mini-tts'], voices: ['coral'] }],
+  },
   'surface.backgrounded': { type: 'surface.backgrounded' },
   'patch.peek.request': {
     type: 'patch.peek.request',
@@ -1743,6 +1748,35 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'tc-1',
     ok: true,
     probability: 0.93,
+  },
+  'patch.voice.direct_transcribe_request': {
+    type: 'patch.voice.direct_transcribe_request',
+    requestId: 'dt-1',
+    chatId: 'c1',
+    engine: 'groq',
+    audioBase64: 'UklGRg==',
+  },
+  'patch.voice.direct_transcribe_response': {
+    type: 'patch.voice.direct_transcribe_response',
+    requestId: 'dt-1',
+    ok: false,
+    error: { code: 'key_missing', message: 'no Groq key is set on this host' },
+  },
+  'patch.voice.direct_speak_request': {
+    type: 'patch.voice.direct_speak_request',
+    requestId: 'ds-1',
+    chatId: 'c1',
+    engine: 'elevenlabs',
+    model: 'eleven_flash_v2_5',
+    voice: 'v1',
+    sound: { stability: 0.7, speed: 0.95 },
+    text: 'Done.',
+  },
+  'patch.voice.direct_speak_response': {
+    type: 'patch.voice.direct_speak_response',
+    requestId: 'ds-1',
+    ok: true,
+    pcmBase64: 'AAA=',
   },
   'patch.voice_note.transcribe_response': {
     type: 'patch.voice_note.transcribe_response',

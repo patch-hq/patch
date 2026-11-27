@@ -413,6 +413,7 @@ describe('AppShell', () => {
         phase: 'listening',
         reconnecting: false,
         paused: null,
+        direct: null,
       },
     });
     cleanup();
@@ -468,6 +469,7 @@ describe('AppShell', () => {
         phase: 'listening',
         reconnecting: false,
         paused: null,
+        direct: null,
       },
     });
     sessionStorage.setItem(AUTO_CALL_KEY, 'c-auto2');

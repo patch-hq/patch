@@ -357,6 +357,7 @@ import {
 } from './audio/whisper.js';
 import { ParakeetWhisperBackend } from './audio/parakeet.js';
 import { createSpeechToTextResolver } from './audio/stt-engines.js';
+import { handleDirectSpeak, handleDirectTranscribe } from './audio/direct-speech.js';
 import { ParakeetLiveRecognizer } from './audio/parakeet-live.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
 import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
@@ -3679,6 +3680,22 @@ async function startHost(
           resolveOAuth: resolveModelOAuth,
           logger,
         });
+        return;
+      }
+      if (
+        event.type === 'patch.voice.direct_transcribe_request' ||
+        event.type === 'patch.voice.direct_speak_request'
+      ) {
+        // spec/07 § Direct calls — a device's cloud speech, on this host's key.
+        const deps = {
+          key: (p: 'groq' | 'elevenlabs' | 'openai') => providerKeys.get(p),
+          logger,
+        };
+        if (event.type === 'patch.voice.direct_transcribe_request') {
+          void handleDirectTranscribe(event, deps, sender);
+        } else {
+          void handleDirectSpeak(event, deps, sender);
+        }
         return;
       }
       if (event.type === 'patch.voice.turn_check_request') {

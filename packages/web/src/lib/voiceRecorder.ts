@@ -24,6 +24,12 @@ import { micConstraints } from './micDevice.js';
 export interface VoiceRecorderDeps {
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   AudioContextImpl?: typeof AudioContext;
+  /**
+   * Keep the audio for `stop()` to return as a clip (default). A call that only
+   * streams through `onPcm` turns it off: an hour's call would otherwise hold
+   * an hour of audio in memory for a clip nobody asks for.
+   */
+  keepClip?: boolean;
 }
 
 /** A live recording. The caller stops (→ clip) or cancels (→ discard). */
@@ -79,6 +85,7 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
   const BUFFER = 2048;
   const processor = audioCtx.createScriptProcessor(BUFFER, 1, 1);
 
+  const keepClip = deps.keepClip ?? true;
   const chunks: Float32Array[] = [];
   let levelCb: ((level: number) => void) | null = null;
   let pcmCb: ((pcm: Int16Array) => void) | null = null;
@@ -94,7 +101,7 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
     const rms = Math.sqrt(sumSq / input.length);
     levelCb?.(Math.min(1, rms * 4));
     // Copy: the ScriptProcessor reuses its input buffer across callbacks.
-    chunks.push(new Float32Array(input));
+    if (keepClip) chunks.push(new Float32Array(input));
     // The clip above is already safe by this point, so a throwing listener
     // must not be able to stop the next buffer being captured.
     if (pcmCb) {
@@ -138,6 +145,7 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
     async stop(): Promise<Blob> {
       const rate = audioCtx.sampleRate;
       teardown();
+      if (!keepClip) throw new Error('this recording streams only; it keeps no clip');
       return encodeWav(chunks, rate);
     },
     cancel(): void {

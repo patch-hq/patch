@@ -14,6 +14,7 @@
 //   - patch.getDesktopEvents()                → test/inspection hook
 //   - patch.localHost.status()/install()    → the host on this Mac
 //   - patch.localStt.*                      → Parakeet dictation run in this app
+//   - patch.localTts.*                      → Kokoro speech run in this app
 //   - patch.overlayTitleBar                   → this platform's windows have no
 //                                               native title bar (spec/05
 //                                               § Window chrome)
@@ -398,6 +399,40 @@ contextBridge.exposeInMainWorld('patch', {
     },
     cancel(): void {
       ipcRenderer.send('patch:local-stt:cancel');
+    },
+    // A direct call's speech to text: one utterance read once (spec/07 § Direct calls).
+    read(pcm: Int16Array): Promise<string> {
+      return ipcRenderer.invoke('patch:local-stt:read', pcm) as Promise<string>;
+    },
+  },
+  // spec/07 § Direct calls: Kokoro run in this app, on this computer, from its
+  // own copy of the model, downloaded on demand.
+  localTts: {
+    status(): Promise<{
+      installed: boolean;
+      missing: string[];
+      downloadBytes: number;
+      voices: string[];
+      model: string;
+    }> {
+      return ipcRenderer.invoke('patch:local-tts:status') as Promise<{
+        installed: boolean;
+        missing: string[];
+        downloadBytes: number;
+        voices: string[];
+        model: string;
+      }>;
+    },
+    download(onProgress: (p: { received: number; total: number }) => void): Promise<void> {
+      const handler = (_e: unknown, p: { received: number; total: number }): void => onProgress(p);
+      ipcRenderer.on('patch:local-tts:progress', handler);
+      return (ipcRenderer.invoke('patch:local-tts:download') as Promise<void>).finally(() =>
+        ipcRenderer.removeListener('patch:local-tts:progress', handler),
+      );
+    },
+    // 24 kHz mono PCM16. Rejects naming what is missing when not downloaded.
+    speak(text: string, voice: string, speed: number): Promise<Int16Array> {
+      return ipcRenderer.invoke('patch:local-tts:speak', text, voice, speed) as Promise<Int16Array>;
     },
   },
   async getUpdaterState(): Promise<unknown> {

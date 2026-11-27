@@ -46,6 +46,7 @@ import { SharedSettingsService } from './shared-settings.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { ComposerDraftStore } from './composer-drafts.js';
 import { ViewPositionStore } from './view-position.js';
+import { SpeechEngineStore } from './speech-engines.js';
 import { NewChatDraftStore } from './new-chat-drafts.js';
 import { DraftAttachmentStore } from './draft-attachments.js';
 import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
@@ -203,6 +204,8 @@ export interface BuildOptions {
   recurrenceTranslateTimeoutMs?: number;
   /** Wait for the host's voice-note transcript (tests). */
   voiceNoteTimeoutMs?: number;
+  /** How long a direct call's cloud speech waits for the chat's host. Tests shorten it. */
+  directSpeechTimeoutMs?: number;
   /** How long a host has to answer a step of replacing a host. Tests shorten it. */
   hostReplaceTimeoutMs?: number;
   /** Inject a jobs store (tests); otherwise constructed from dataDir. */
@@ -804,6 +807,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
 
+  // Each device's last speech-engine report, for direct calls (spec/05).
+  const speechEngines = new SpeechEngineStore({
+    ...(jobChatLinksDataDir ? { dataDir: jobChatLinksDataDir } : {}),
+    logger: log.child({ component: 'speech-engines' }),
+    ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
+  });
+
   // Where the user was last looking, for handover between surfaces (spec/05).
   const viewPosition =
     opts.viewPosition ??
@@ -1106,6 +1116,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     commitAcks,
     composerDrafts,
     viewPosition,
+    speechEngines,
     newChatDrafts,
     composerAttachments,
     newChatAttachments,
@@ -2457,6 +2468,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(opts.voiceNoteTimeoutMs !== undefined
       ? { transcribeTimeoutMs: opts.voiceNoteTimeoutMs }
       : {}),
+    ...(opts.directSpeechTimeoutMs !== undefined
+      ? { directSpeechTimeoutMs: opts.directSpeechTimeoutMs }
+      : {}),
   });
 
   // ---- composer attachments (spec/14 & spec/15 § Composer) ----
@@ -2509,6 +2523,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'auth-routes' }),
     registry,
     presence,
+    speechEngines,
     ...(opts.internalToken ? { internalToken: opts.internalToken } : {}),
     ...(opts.relay ? { relay: opts.relay } : {}),
     hostLink,
@@ -2951,7 +2966,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         // /app/assets/). Serving the shell here answers a <script> request with
         // 200 text/html: the browser silently renders nothing, and prod looks
         // healthy while the app is a blank window. Fail loudly instead.
-        if (rel.startsWith('assets/')) {
+        if (rel.startsWith('assets/') || rel.startsWith('models/')) {
           return reply
             .code(404)
             .header('cache-control', 'no-store')

@@ -109,6 +109,7 @@ export function __resetWireMismatchReloadForTests(): void {
   wireMismatchBannerStaged = false;
 }
 import { BUILD_INFO } from '../lib/buildInfo.js';
+import { startSpeechEngineReports, type SpeechEngineReporter } from '../lib/direct/engineReport.js';
 import {
   INPUT_REPORT_INTERVAL_MS,
   listenForPageInput,
@@ -167,6 +168,7 @@ export class PatchWs {
   private heartbeatTimer: number | null = null;
   /** spec/09 § Presence heuristic — `surface.input` reports, hidden or not. */
   private inputTimer: number | null = null;
+  private speechEngines: SpeechEngineReporter | null = null;
   private stopAwayReports: (() => void) | null = null;
   private resyncTimer: number | null = null;
   private closed = false;
@@ -896,6 +898,8 @@ export class PatchWs {
       // hidden: typing in another app is exactly what they exist to see.
       this.startInputReports();
       this.startRunningResync();
+      // spec/05 § Speech engines — what this device can run for a direct call.
+      (this.speechEngines ??= startSpeechEngineReports((e) => this.safeSend(e))).report();
       // Resend this surface's currently-open chat (spec/09 § Chat completion).
       // `PresenceTracker.online()` replaces the whole record on every hello,
       // so a reconnect (network blip, sleep/wake) silently wipes

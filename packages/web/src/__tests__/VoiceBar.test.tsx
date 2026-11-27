@@ -29,6 +29,7 @@ function base(mode: AudioSessionMode) {
     phase: 'listening' as const,
     reconnecting: false,
     paused: null as PauseReason | null,
+    direct: null as import('../stores/voiceStore.js').DirectCallBarState | null,
   };
 }
 
