@@ -279,9 +279,11 @@ export const ChatMeta = z
     /**
      * The seq of the turn the chat's current provider session began on. The
      * Manager starts a fresh session once the current one has carried more
-     * than its window of messages (spec/06 § Manager conversation).
+     * than its window of messages (spec/06 § Bounded context).
      */
     sessionFromSeq: z.number().int().nonnegative().optional(),
+    /** When the chat's current provider session began (spec/06 § Bounded context). */
+    sessionStartedAt: z.number().int().nonnegative().optional(),
     /** Which track the chat IS right now (spec/04 § Branching). */
     activeBranchId: z.string().min(1).optional(),
     /** Per-chat monotonic sequence — next value to stamp. Strictly increasing. */

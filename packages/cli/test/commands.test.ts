@@ -676,15 +676,18 @@ test('"help" is commander\'s built-in command, not an unknown one', async () => 
   );
 });
 
-test('threads sweeps --limit goes through the shared --limit contract', async () => {
+test('threads send-finished posts to the server and says whether anything went', async () => {
+  const seen: string[] = [];
   await withSetup(
-    () => ({ status: 200, body: { runs: [] } }),
+    (req) => {
+      seen.push(`${req.method} ${req.url}`);
+      return { status: 200, body: { sent: false } };
+    },
     async (env) => {
-      for (const bad of ['abc', '0', '-5']) {
-        const r = await runCli(['threads', 'sweeps', '--limit', bad], env);
-        assert.equal(r.code, 1, `limit ${bad}: stdout=${r.stdout} stderr=${r.stderr}`);
-        assert.match(r.stderr + r.stdout, /--limit must be a positive integer/);
-      }
+      const r = await runCli(['threads', 'send-finished'], env);
+      assert.equal(r.code, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stdout, /nothing finished — nothing sent/);
+      assert.ok(seen.includes('POST /api/manager/finished/send-now'), seen.join(', '));
     },
   );
 });

@@ -55,6 +55,9 @@ import {
   isAnthropicApiKey,
   type ProviderBackendId,
   limitBehaviourFromAutoResume,
+  managerWakeFromSweep,
+  sweepFieldsForManagerWake,
+  DEFAULT_SWEEP_PROMPT,
   ownSettingsGroups,
   invalidOwnSettingValue,
   resolveAcpAgents,
@@ -111,6 +114,44 @@ export function limitBehaviourInStep<T extends Partial<SharedSettings>>(patch: T
     return { ...patch, limitBehaviour: limitBehaviourFromAutoResume(patch.autoResumeRateLimit) };
   }
   return patch;
+}
+
+/**
+ * `managerWake` and the retired sweep pair kept in step (spec/06 § Finished
+ * chats): a write of either side gains the other, so an older host or
+ * surface still reads and writes what it knows.
+ */
+export function managerWakeInStep<T extends Partial<SharedSettings>>(
+  patch: T,
+  current: Pick<
+    SharedSettings,
+    'managerWake' | 'managerWakeIntervalMinutes' | 'sweepEnabled' | 'sweepIntervalMinutes'
+  >,
+): T {
+  if (patch.managerWake !== undefined || patch.managerWakeIntervalMinutes !== undefined) {
+    return {
+      ...patch,
+      ...sweepFieldsForManagerWake(
+        patch.managerWake ?? current.managerWake,
+        patch.managerWakeIntervalMinutes ?? current.managerWakeIntervalMinutes,
+      ),
+    };
+  }
+  if (patch.sweepEnabled !== undefined || patch.sweepIntervalMinutes !== undefined) {
+    return {
+      ...patch,
+      ...managerWakeFromSweep(
+        patch.sweepEnabled ?? current.sweepEnabled,
+        patch.sweepIntervalMinutes ?? current.sweepIntervalMinutes,
+      ),
+    };
+  }
+  return patch;
+}
+
+/** `''` (the default folder) or an absolute path, POSIX or Windows. */
+function isManagerFolder(folder: string): boolean {
+  return folder === '' || /^(\/|[A-Za-z]:[\\/])/.test(folder);
 }
 
 /** A refusal a REST caller should see verbatim, with its HTTP status. */
@@ -438,7 +479,7 @@ export class SharedSettingsService {
     // host's own file (spec/02 § Claude Code settings), so the retired key is
     // dropped on read and gone from the file at the next write.
     delete raw['claudeSettings'];
-    // The Manager redesign (spec/06 § The sweep) retired the stall threshold
+    // An earlier Manager redesign retired the stall threshold
     // and changed what the sweep prompt must return. A file that still has the
     // threshold predates it: the sweep goes back to off (its new default) and
     // the old prompt, whose nudge/wake/flag replies the sweep no longer
@@ -460,6 +501,27 @@ export class SharedSettingsService {
           { id: MIGRATED_LOCAL_ENDPOINT_ID, label: 'Local model', api: 'openai', baseUrl: url },
         ];
       }
+    }
+    // Finished chats replaced the sweep (spec/06 § Finished chats). A file
+    // from before it gains the `managerWake` its sweep switch and interval
+    // meant, and a customised standing-instructions prompt becomes the
+    // Manager prompt so nothing written is lost.
+    if (!('managerWake' in raw) && typeof raw['sweepEnabled'] === 'boolean') {
+      Object.assign(
+        raw,
+        managerWakeFromSweep(
+          raw['sweepEnabled'],
+          typeof raw['sweepIntervalMinutes'] === 'number' ? raw['sweepIntervalMinutes'] : 30,
+        ),
+      );
+    }
+    if (
+      !('managerPrompt' in raw) &&
+      typeof raw['sweepPrompt'] === 'string' &&
+      raw['sweepPrompt'].trim() !== '' &&
+      raw['sweepPrompt'] !== DEFAULT_SWEEP_PROMPT
+    ) {
+      raw['managerPrompt'] = raw['sweepPrompt'];
     }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
@@ -1401,12 +1463,22 @@ export class SharedSettingsService {
     ) {
       throw new SettingsError(400, 'invalid_input', `No Claude account ${background}`);
     }
+    if (parsed.data.managerFolder !== undefined && !isManagerFolder(parsed.data.managerFolder)) {
+      throw new SettingsError(
+        400,
+        'invalid_input',
+        `The Manager folder must be an absolute path: ${parsed.data.managerFolder}`,
+      );
+    }
     // An endpoint taken out takes its key with it.
     const keptKeys = parsed.data.modelEndpoints
       ? this.endpointKeysFor(parsed.data.modelEndpoints.map((e) => e.id))
       : undefined;
     if (keptKeys !== undefined) this.requireSecrets();
-    this.settings = { ...this.settings, ...limitBehaviourInStep(parsed.data) };
+    this.settings = {
+      ...this.settings,
+      ...managerWakeInStep(limitBehaviourInStep(parsed.data), this.settings),
+    };
     if (keptKeys !== undefined) this.replaceEndpointKeys(keptKeys);
     this.commit({ secrets: keptKeys !== undefined });
     return this.current();

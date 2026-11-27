@@ -49,7 +49,7 @@ import { ViewPositionStore } from './view-position.js';
 import { SpeechEngineStore } from './speech-engines.js';
 import { NewChatDraftStore } from './new-chat-drafts.js';
 import { DraftAttachmentStore } from './draft-attachments.js';
-import { ManagerSweeper, type SweepRunStore } from './manager-sweep.js';
+import { ManagerFinishedCollector } from './manager-finished.js';
 import { ChatLogStore } from './chat-log-store.js';
 import { removeRetiredChatMirror } from './retired-chat-mirror.js';
 import { prepareAccountData } from './account-data.js';
@@ -59,8 +59,7 @@ import { HeldInputStore } from './held-input-store.js';
 import { registerHostReplaceRoutes } from './host-replace-routes.js';
 import { QueueTracker } from './queue-tracker.js';
 import { ServerQueue } from './server-queue.js';
-import { createSweepRunStore } from './sweep-run-store.js';
-import { registerManagerSweepRoutes } from './manager-sweep-routes.js';
+import { registerManagerFinishedRoutes } from './manager-finished-routes.js';
 import { ThreadRotator } from './thread-rotation.js';
 import { type HostLink, InboundHostLink } from './host-link.js';
 import { WsHub } from './ws-hub.js';
@@ -83,12 +82,11 @@ import { registerVoiceprintRoutes } from './voiceprint-routes.js';
 import { registerChatSearchRoutes } from './chat-search-routes.js';
 
 /**
- * How often the Manager sweep checks whether it's due (spec/06 § The
- * sweep). Well under the shortest realistic interval setting, so a due sweep
- * goes out promptly; the interval is what actually decides, this is just the
- * clock resolution.
+ * How often finished chats are checked for a due delivery (spec/06 § Finished
+ * chats). Well under the shortest batch interval; the interval decides, this
+ * is just the clock resolution.
  */
-const MANAGER_SWEEP_TICK_MS = 10_000;
+const MANAGER_FINISHED_TICK_MS = 10_000;
 // Minute-granularity (spec/06 § Session rotation compares HH:MM), so a much
 // less frequent tick than the watch loop's is enough.
 const THREAD_ROTATION_TICK_MS = 30_000;
@@ -268,8 +266,7 @@ export interface BuiltApp {
   replyRouter: ReplyRouter;
   batchStore: BatchStore;
   batchNotifier: BatchNotifier;
-  managerSweeper: ManagerSweeper;
-  sweepRuns: SweepRunStore;
+  managerFinished: ManagerFinishedCollector;
   /** The server's log of each chat's transcript. */
   chatLogStore: ChatLogStore;
   issueFiler: IssueFiler;
@@ -870,7 +867,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   hostLink.onEvent((event) => acpLogins.observe(event));
 
-  // ---- shared settings (spec/01 § Settings) + the Manager sweep ----
+  // ---- shared settings (spec/01 § Settings) + finished chats ----
   // Same dataDir resolution as the jobs subsystem: absent one (a test that
   // injects a bare registry with no disk), there is nowhere to persist
   // settings, so there is no store and the defaults stand.
@@ -913,39 +910,31 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     for (const hostId of hostLink.onlineHostIds()) accountSettings.hostOnline(hostId);
   }
 
-  const sweepRuns = createSweepRunStore(accountDir);
-  const managerSweeper = new ManagerSweeper({
+  const managerFinished = new ManagerFinishedCollector({
     chats: chatRegistry,
     settings: () => accountSettings?.current() ?? DEFAULT_SETTINGS,
     managerHostId: () => {
       const id = specialThreadHost();
       return id && hostLink.onlineHostIds().includes(id) ? id : undefined;
     },
-    runSweep: (req) => {
+    deliver: (req) => {
       const id = specialThreadHost();
       if (!id) return;
-      hostLink.sendTo(id, 'manager-sweep', { type: 'manager.sweep_run', ...req });
+      hostLink.sendTo(id, 'manager-finished', { type: 'manager.finished_run', ...req });
     },
-    cancelSweep: () => {
-      const id = specialThreadHost();
-      if (!id) return false;
-      hostLink.sendTo(id, 'manager-sweep', { type: 'manager.sweep_cancel' });
-      return true;
-    },
-    runs: sweepRuns,
-    logger: log.child({ component: 'manager-sweep' }),
+    logger: log.child({ component: 'manager-finished' }),
     idGenerator,
     ...(opts.nowMs ? { now: opts.nowMs } : {}),
   });
-  // Observe AFTER the chat registry, so a sweep candidate built on this tick
-  // reads the state the same event just wrote rather than the previous one.
+  // Observe AFTER the chat registry, so a chat read on this event is the
+  // state the same event just wrote rather than the previous one.
   hostLink.onEvent((event) => {
-    managerSweeper.observe(event);
-    if (event.type === 'manager.sweep_result') managerSweeper.onResult(event);
+    managerFinished.observe(event);
+    if (event.type === 'manager.finished_result') managerFinished.onResult(event);
   });
-  const managerSweepTimer = setInterval(() => managerSweeper.tick(), MANAGER_SWEEP_TICK_MS);
-  managerSweepTimer.unref();
-  registerManagerSweepRoutes(app, { registry, sweeper: managerSweeper, runs: sweepRuns });
+  const managerFinishedTimer = setInterval(() => managerFinished.tick(), MANAGER_FINISHED_TICK_MS);
+  managerFinishedTimer.unref();
+  registerManagerFinishedRoutes(app, { registry, collector: managerFinished });
 
   const threadRotator = new ThreadRotator({
     chats: chatRegistry,
@@ -3018,8 +3007,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     replyRouter,
     batchStore,
     batchNotifier,
-    managerSweeper,
-    sweepRuns,
+    managerFinished,
     chatLogStore,
     issueFiler,
     audioCalls,

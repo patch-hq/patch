@@ -21,6 +21,7 @@ import {
   VoiceTones,
 } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
+import { DEFAULT_MANAGER_PROMPT } from './manager-prompt.js';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from './manager-voice-prompt.js';
 import { DEFAULT_VOICE_INSTRUCTIONS } from './voice-instructions.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
@@ -1021,7 +1022,7 @@ export const ChatMessageEvent = z
      * Present ONLY on a user-role turn the host started itself rather than a
      * person (spec/09 § Whose turn it was), mirroring `SendInputOptions.origin`
      * onto the persisted turn — a self-wake firing (spec/02 § Self-wake), a
-     * Manager-sweep nudge/wake (spec/06 § Sweep), a `patch_delegate` subagent's
+     * finished-chats delivery to the Manager (spec/06 § Finished chats), a `patch_delegate` subagent's
      * relay into its parent, or the todo list advancing itself. Never 'user',
      * which is the default and so omitted — only ever present as 'machine'.
      * A turn already carrying `jobTrigger`/`hookTrigger`/`goalTrigger` above
@@ -1692,6 +1693,19 @@ export const ChatStateEvent = z
      */
     preferredAccountId: z.string().min(1).nullable().optional(),
     chatId: z.string().min(1),
+    /**
+     * A special thread's current provider session (spec/06 § Bounded context):
+     * how many messages it has carried and when it started. `null` before its
+     * first session; absent from an older host and on ordinary chats.
+     */
+    session: z
+      .object({
+        messages: z.number().int().nonnegative(),
+        startedAt: z.number().int().nonnegative(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
     /**
      * The highest seq this host's own log of the chat has recorded. Optional:
      * an older host never says.
@@ -2689,6 +2703,37 @@ export const PauseWhenQuietMinutes = z.union([
 ]);
 export type PauseWhenQuietMinutes = z.infer<typeof PauseWhenQuietMinutes>;
 
+/** When finished chats are sent to the Manager (spec/06 § Finished chats). */
+export const ManagerWake = z.enum(['off', 'each', 'batched']);
+export type ManagerWake = z.infer<typeof ManagerWake>;
+
+/** The batch intervals Settings offers, in minutes. */
+export const MANAGER_WAKE_INTERVAL_CHOICES = [5, 15, 30, 60, 120, 240, 480, 1440] as const;
+
+/**
+ * The retired sweep pair an older reader understands, for a `managerWake`:
+ * off is the sweep off; each one is Instant (interval 0).
+ */
+export function sweepFieldsForManagerWake(
+  wake: ManagerWake,
+  intervalMinutes: number,
+): { sweepEnabled: boolean; sweepIntervalMinutes: number } {
+  return {
+    sweepEnabled: wake !== 'off',
+    sweepIntervalMinutes: wake === 'each' ? 0 : intervalMinutes,
+  };
+}
+
+/** The `managerWake` the retired sweep pair meant. */
+export function managerWakeFromSweep(
+  enabled: boolean,
+  intervalMinutes: number,
+): { managerWake: ManagerWake; managerWakeIntervalMinutes?: number } {
+  if (!enabled) return { managerWake: 'off' };
+  if (intervalMinutes === 0) return { managerWake: 'each' };
+  return { managerWake: 'batched', managerWakeIntervalMinutes: intervalMinutes };
+}
+
 /** `SharedSettings.backgroundAccount` when no account is named. */
 export const BACKGROUND_ACCOUNT_AUTO = 'auto';
 
@@ -2711,19 +2756,33 @@ export const SharedSettings = z
         contact: z.string().trim().max(200),
       })
       .strict(),
-    /** Whether the Manager sweep runs at all (spec/06 § The sweep). Off by default; the one switch that stops everything. */
-    sweepEnabled: z.boolean(),
-    /** How soon a question the Manager can't answer reaches Tom: 0 = at once (a notification as the chat goes idle), otherwise batched into one digest every N minutes. */
-    sweepIntervalMinutes: z.number().int().nonnegative(),
-    /** How many of each idle chat's most recent messages the sweep reads. */
-    sweepMessagesPerChat: z.number().int().positive(),
-    /** The Manager's own bounded context window (spec/06 § Manager conversation). */
+    /**
+     * When finished chats are sent to the Manager (spec/06 § Finished chats):
+     * not at all, a turn as each one finishes, or one turn per
+     * `managerWakeIntervalMinutes`. Defaulted so a snapshot from an older
+     * server still reads.
+     */
+    managerWake: ManagerWake.default('off'),
+    /** The batch interval for `managerWake: 'batched'`, in minutes. */
+    managerWakeIntervalMinutes: z.number().int().positive().default(30),
+    /** The Manager's role, appended to the system prompt of its turns (spec/06 § Manager prompt and folder); "Default" writes `DEFAULT_MANAGER_PROMPT` back. */
+    managerPrompt: z.string().min(1).default(DEFAULT_MANAGER_PROMPT),
+    /** The absolute folder on the home host the Manager works in; `''` is the default `~/.patch/threads/manager`. */
+    managerFolder: z.string().default(''),
+    /** The Manager's own bounded context window (spec/06 § Bounded context): a fresh session after this many messages, carrying half. */
     managerContextWindow: z.number().int().positive(),
-    /** The Manager's standing instructions — written guidance Tom edits, which the sweep reads to decide what it may answer on his behalf; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
+    /**
+     * Retired by `managerWake`, and kept only so a host or surface older than
+     * it still reads a settings snapshot. The server keeps `sweepEnabled` and
+     * `sweepIntervalMinutes` in step with `managerWake` (and reads a write of
+     * them from an older surface as the `managerWake` it means); the rest are
+     * ignored.
+     */
+    sweepEnabled: z.boolean(),
+    sweepIntervalMinutes: z.number().int().nonnegative(),
+    sweepMessagesPerChat: z.number().int().positive(),
     sweepPrompt: z.string().min(1),
-    /** The model the sweep's one decision call runs on. */
     sweepModel: z.string().min(1),
-    /** The spoken feed (spec/06 § The feed): each sweep also writes one line on what every finished chat did, and the run's lines and open questions are spoken — into an open call, or over whatever is playing under `auto-notify`. Off by default. */
     sweepSpeak: z.boolean(),
     /** The instructions the message-link Summarise button runs with; "Reset to default" writes `DEFAULT_LINK_SUMMARY_PROMPT` back. */
     linkSummaryPrompt: z.string().min(1),
@@ -2985,12 +3044,15 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
     operator: '',
     contact: '',
   },
+  managerWake: 'off',
+  managerWakeIntervalMinutes: 30,
+  managerPrompt: DEFAULT_MANAGER_PROMPT,
+  managerFolder: '',
+  managerContextWindow: 80,
   sweepEnabled: false,
   sweepIntervalMinutes: 30,
   sweepMessagesPerChat: 1,
-  managerContextWindow: 40,
   sweepPrompt: DEFAULT_SWEEP_PROMPT,
-  // Mid-size by default (spec/06 § Settings).
   sweepModel: 'claude-sonnet-5',
   sweepSpeak: false,
   linkSummaryPrompt: DEFAULT_LINK_SUMMARY_PROMPT,
@@ -5264,89 +5326,55 @@ export const ChatRotateRequestEvent = z
   .object({
     type: z.literal('chat.rotate_request'),
     chatId: z.string().min(1),
+    /**
+     * `false` is Clear (spec/06 § Bounded context): retire the session with no
+     * carry-over. Absent is a rotation, which carries the recent conversation.
+     */
+    carry: z.boolean().optional(),
   })
   .strict();
 export type ChatRotateRequestEvent = z.infer<typeof ChatRotateRequestEvent>;
 
 /**
- * One chat a sweep found changed, and why (spec/06 § Sweep — Gate). Carries no
- * message content — the digest's transcript snippets are assembled on the
- * Manager host (the one component with both local and cross-host read access
- * via `patch_history`), not here; the server's cross-host view only ever
- * covers chat STATE, never transcripts.
+ * One finished chat the server asks the Manager's home host to tell the
+ * Manager about (spec/06 § Finished chats). State only: the host reads the
+ * chat's last reply from the record itself, locally or across hosts.
  */
-export const ManagerSweepCandidate = z
+export const ManagerFinishedChat = z
   .object({
     chatId: z.string().min(1),
     hostId: z.string().min(1),
     folder: z.string().min(1),
-    // The sweep has one reason to look at a chat: it went idle. Kept as a field
-    // so an older host still parses the candidate.
-    edge: z.literal('settled'),
-    idleMinutes: z.number().nonnegative(),
+    name: z.string(),
   })
   .strict();
-export type ManagerSweepCandidate = z.infer<typeof ManagerSweepCandidate>;
+export type ManagerFinishedChat = z.infer<typeof ManagerFinishedChat>;
 
 /**
- * Server → Manager host: run a sweep (spec/06 § Sweep). Fire-and-forget, same
- * shape as `chat.rotate_request` — the gate has already decided this is due;
- * the host assembles the digest (fetching each candidate's recent messages,
- * local or cross-host), makes the one decision call, and executes it.
+ * Server → Manager host: deliver these finished chats to the Manager as one
+ * turn (spec/06 § Finished chats). `windowMinutes` is the batch interval the
+ * turn's line names; absent for a chat sent as it finished.
  */
-export const ManagerSweepRunEvent = z
+export const ManagerFinishedRunEvent = z
   .object({
-    type: z.literal('manager.sweep_run'),
+    type: z.literal('manager.finished_run'),
     runId: z.string().min(1),
-    candidates: z.array(ManagerSweepCandidate).min(1),
-    messagesPerChat: z.number().int().positive(),
-    prompt: z.string().min(1),
-    model: z.string().min(1),
-    /** The spoken feed is on (spec/06 § The feed): ask for a summary line per chat and speak the run. Absent reads as off. */
-    speak: z.boolean().optional(),
+    chats: z.array(ManagerFinishedChat).min(1),
+    windowMinutes: z.number().int().positive().optional(),
   })
   .strict();
-export type ManagerSweepRunEvent = z.infer<typeof ManagerSweepRunEvent>;
+export type ManagerFinishedRunEvent = z.infer<typeof ManagerFinishedRunEvent>;
 
-/**
- * Server → Manager host: the sweep is switched off (sweep setting off, or
- * Manager disabled). Abandon any run in flight and drop every sweep nudge still
- * queued on a chat. Fire-and-forget.
- */
-export const ManagerSweepCancelEvent = z
-  .object({ type: z.literal('manager.sweep_cancel') })
-  .strict();
-export type ManagerSweepCancelEvent = z.infer<typeof ManagerSweepCancelEvent>;
-
-/** One action the sweep took (or chose not to) on one candidate chat. */
-export const ManagerSweepAction = z
+/** Manager host → server: a finished-chats delivery is done (or why it could not be). */
+export const ManagerFinishedResultEvent = z
   .object({
-    chatId: z.string().min(1),
-    action: z.enum(['answer', 'digest', 'leave']),
-    /** Why the chat was a candidate. */
-    edge: ManagerSweepCandidate.shape.edge.optional(),
-    /** What the sweep sent (answer), the open question it listed (digest), or why it left the chat alone. */
-    detail: z.string().optional(),
-  })
-  .strict();
-export type ManagerSweepAction = z.infer<typeof ManagerSweepAction>;
-
-/**
- * Manager host → server: what a sweep did (spec/06 § Sweep — Visible). Fire-
- * and-forget report, same direction/shape as a job's run outcome — the
- * server records it for the Manager view's "Last sweep" line and the sweep-
- * runs list, but nothing here blocks on the server's reply.
- */
-export const ManagerSweepResultEvent = z
-  .object({
-    type: z.literal('manager.sweep_result'),
+    type: z.literal('manager.finished_result'),
     runId: z.string().min(1),
-    actions: z.array(ManagerSweepAction),
-    tokensUsed: z.number().nonnegative(),
-    error: z.string().optional(),
+    delivered: z.number().int().nonnegative(),
+    error: z.string().min(1).optional(),
   })
   .strict();
-export type ManagerSweepResultEvent = z.infer<typeof ManagerSweepResultEvent>;
+export type ManagerFinishedResultEvent = z.infer<typeof ManagerFinishedResultEvent>;
 
 /**
  * Surface → host snooze / unsnooze (spec/04 § Snooze). `snoozedUntil` is an
@@ -6841,8 +6869,8 @@ export type PatchActivityRequestEvent = z.infer<typeof PatchActivityRequestEvent
  * convention as those flags themselves. `'job'`/`'hook'`/`'goal'` are a job's
  * fire into an existing chat, an agent-response hook's block resubmit, and a
  * goal evaluator's not-met resubmit respectively; `'machine'` is everything
- * else the host started on its own — a self-wake firing, a Manager-sweep
- * nudge/wake, a `patch_delegate` subagent's relay to its parent, the todo
+ * else the host started on its own — a self-wake firing, a finished-chats
+ * delivery to the Manager, a `patch_delegate` subagent's relay to its parent, the todo
  * list advancing.
  */
 export const ActivityMessageKind = z.enum(['job', 'hook', 'goal', 'machine']);
@@ -11082,9 +11110,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatArchiveRequestEvent,
   ChatDisableRequestEvent,
   ChatRotateRequestEvent,
-  ManagerSweepRunEvent,
-  ManagerSweepCancelEvent,
-  ManagerSweepResultEvent,
+  ManagerFinishedRunEvent,
+  ManagerFinishedResultEvent,
   ChatSnoozeRequestEvent,
   ChatSnoozeBackClearRequestEvent,
   ChatAskDoneRequestEvent,
@@ -11435,9 +11462,8 @@ export const EVENT_SCHEMAS = {
   'chat.archive_request': ChatArchiveRequestEvent,
   'chat.disable_request': ChatDisableRequestEvent,
   'chat.rotate_request': ChatRotateRequestEvent,
-  'manager.sweep_run': ManagerSweepRunEvent,
-  'manager.sweep_cancel': ManagerSweepCancelEvent,
-  'manager.sweep_result': ManagerSweepResultEvent,
+  'manager.finished_run': ManagerFinishedRunEvent,
+  'manager.finished_result': ManagerFinishedResultEvent,
   'chat.snooze_request': ChatSnoozeRequestEvent,
   'chat.snooze_back_clear_request': ChatSnoozeBackClearRequestEvent,
   'chat.ask_done_request': ChatAskDoneRequestEvent,

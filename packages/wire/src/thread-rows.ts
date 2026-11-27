@@ -1,8 +1,5 @@
-// The Manager's Threads list (spec/14 § Manager view, spec/15 § Voice tab
-// (Manager)): which chats it shows and in what order. One copy of the rule, shared
-// by the desktop Threads strip and the phone's Manager "Chats" tab, so the two
-// can never disagree about what needs the user first.
-//
+// What a chat row is blocked on (spec/14 § Main chat panel): a native
+// decision, a declared question, a report, work in progress, or nothing.
 // Structural on purpose: each surface keeps its own store row type, and this
 // reads only the fields the rule needs.
 
@@ -40,40 +37,4 @@ export function threadRowState(row: ThreadRankInput): ThreadRowState {
   if (row.statusKind === 'report') return 'report';
   if (state === 'running') return 'working';
   return 'idle';
-}
-
-const STATE_RANK: Record<ThreadRowState, number> = {
-  permission: 0,
-  question: 1,
-  report: 2,
-  working: 3,
-  idle: 4,
-};
-
-// Special-thread ids, repeated here rather than imported from index.ts to keep
-// this module free of an import cycle. `isReservedSpecialThread` in index.ts
-// is the canonical list; thread-rows.test.ts pins the two together.
-const SPECIAL_THREADS = new Set(['thread_manager', 'thread_speakers']);
-
-/**
- * Every active chat, needs-you first, then by recency. Archived, snoozed and
- * deleted chats are not listed, nor are the special threads — the Manager is
- * not one of the things it watches.
- */
-export function threadRows<T extends ThreadRankInput>(
-  chats: Record<string, T> | readonly T[],
-  now: number,
-): T[] {
-  const all: T[] = Array.isArray(chats) ? [...chats] : Object.values(chats);
-  return all
-    .filter(
-      (c) =>
-        c.status === 'active' &&
-        !SPECIAL_THREADS.has(c.chatId) &&
-        (c.snoozedUntil === null || c.snoozedUntil <= now),
-    )
-    .sort((a, b) => {
-      const byState = STATE_RANK[threadRowState(a)] - STATE_RANK[threadRowState(b)];
-      return byState !== 0 ? byState : b.lastUpdated - a.lastUpdated;
-    });
 }

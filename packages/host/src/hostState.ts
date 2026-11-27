@@ -76,10 +76,17 @@ const HostStateFile = z
     chatNameInterval: z.number().int().nonnegative().optional(),
     /**
      * The Manager's bounded context window (`host.settings` →
-     * `managerContextWindow`, spec/06 § Manager conversation). Absent means
+     * `managerContextWindow`, spec/06 § Bounded context). Absent means
      * the host's own generous built-in default stands.
      */
     managerContextWindow: z.number().int().positive().optional(),
+    /**
+     * The last `managerPrompt` and `managerFolder` the server sent (spec/06 §
+     * Manager prompt and folder), so a Manager turn before the next snapshot
+     * still has them. Absent until the first one.
+     */
+    managerPrompt: z.string().min(1).optional(),
+    managerFolder: z.string().optional(),
     /**
      * The goal judge's settings (`shared` → `goalEvalPrompt`, `goalModel`,
      * `goalRefusalLimit`, spec/04 § Goals), kept so a host that restarts before the

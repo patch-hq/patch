@@ -3,7 +3,7 @@
 // in a chat's record; there is no second store of them, and no host is asked.
 //
 // Not every `role: 'user'` row is a person typing: a job's fire, a hook/goal
-// resubmit, or the host starting a turn itself (self-wake, Manager sweep, a
+// resubmit, or the host starting a turn itself (self-wake, a finished-chats delivery, a
 // delegate relay, the todo list advancing) all land that way too. Each row's
 // `kind` is read off the message's own flags — see `ActivityMessageKind`.
 

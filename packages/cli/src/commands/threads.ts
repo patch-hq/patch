@@ -6,7 +6,7 @@
 
 import { Command } from 'commander';
 import type { CommonOpts } from './_common.js';
-import { accountChatsPath, emitJson, emitText, getTransport, parseLimit, run } from './_common.js';
+import { accountChatsPath, emitJson, emitText, getTransport, run } from './_common.js';
 
 interface ChatSummary {
   chatId: string;
@@ -66,40 +66,19 @@ export function registerThreadsCommands(program: Command): void {
       });
     });
 
-  // Manager sweep (spec/06 § Sweep) — account-wide, server-owned state with
-  // no local UDS equivalent: unlike send-to, there is nothing a host can
-  // answer for this on its own, so these always go straight to the server
-  // (`remote: true` forces REST — `getTransport` never returns a UDS
-  // transport once that's set).
+  // Finished chats → the Manager (spec/06 § Finished chats) — account-wide,
+  // server-owned state with no local UDS equivalent: nothing a host can answer
+  // on its own, so this always goes straight to the server (`remote: true`).
   threads
-    .command('sweep-now')
-    .description(
-      'Check now for chats that went idle and run the Manager sweep (spec/06 § The sweep)',
-    )
+    .command('send-finished')
+    .description('Deliver the chats finished so far to the Manager now (spec/06 § Finished chats)')
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
         const t = getTransport({ ...opts, remote: true });
-        const res = await t.post<{ fired: boolean }>('/api/manager/sweep/check-now', {});
+        const res = await t.post<{ sent: boolean }>('/api/manager/finished/send-now', {});
         if (opts.json) emitJson(res);
-        else emitText(res.fired ? 'sweep fired' : 'nothing went idle — no sweep run');
-      });
-    });
-
-  threads
-    .command('sweeps')
-    .description('List recent Manager sweep runs (spec/06 § Sweep)')
-    .option('--limit <n>', 'Max runs to list (default 50, max 200)')
-    .option('--json', 'JSON output')
-    .action(async (opts: CommonOpts & { limit?: string }) => {
-      await run(opts, async () => {
-        const t = getTransport({ ...opts, remote: true });
-        const limit = opts.limit !== undefined ? Math.min(200, parseLimit(opts.limit)) : undefined;
-        const res = await t.get<{ runs: unknown[] }>(
-          `/api/manager/sweeps${limit ? `?limit=${limit}` : ''}`,
-        );
-        if (opts.json) emitJson(res);
-        else for (const run of res.runs) emitText(JSON.stringify(run));
+        else emitText(res.sent ? 'sent to the Manager' : 'nothing finished — nothing sent');
       });
     });
 }

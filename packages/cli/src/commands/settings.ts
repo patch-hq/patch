@@ -299,7 +299,10 @@ const SETTING_KEYS: Record<string, string> = {
   'manager-voice-prompt': 'managerVoicePrompt',
   'voice-instructions': 'voiceInstructions',
   'voice-match-threshold': 'voiceMatchThreshold',
-  'sweep-speak': 'sweepSpeak',
+  'manager-wake': 'managerWake',
+  'manager-wake-interval': 'managerWakeIntervalMinutes',
+  'manager-prompt': 'managerPrompt',
+  'manager-folder': 'managerFolder',
 };
 
 /** A value as typed: JSON where it parses (true, 60, "x"), else the text itself. */

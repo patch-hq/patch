@@ -204,11 +204,12 @@ export * from './background-task-tracking.js';
 export * from './goal-outcome.js';
 // The Manager's Threads list — which chats it shows, needs-you first (spec/14
 // § Manager view). Shared by the desktop strip and the phone's Chats tab.
-export * from './thread-rows.js';
 export * from './snooze.js';
 export * from './tool-runs.js';
 export * from './chat-move.js';
 export * from './sweep-prompt.js';
+export * from './manager-prompt.js';
+export * from './thread-rows.js';
 export * from './manager-voice-prompt.js';
 export * from './voice-instructions.js';
 export * from './link-summary-prompt.js';

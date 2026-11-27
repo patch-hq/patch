@@ -1430,6 +1430,33 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/rotate {carry:false} is Clear: the request says so, and a bad carry is refused', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'thread_manager', folder: '/m' });
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/thread_manager/rotate',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { carry: false },
+      });
+      expect(res.statusCode).toBe(200);
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.rotate_request');
+      expect(sent?.event).toMatchObject({ chatId: 'thread_manager', carry: false });
+      const bad = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/thread_manager/rotate',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { carry: 'no' },
+      });
+      expect(bad.statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/rotate refuses a non-special thread with 403', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();

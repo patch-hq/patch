@@ -2361,29 +2361,38 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // DELETE route's guard. Fire-and-forget like /stop: the host's own NO
   // FALLBACK guard (mid-turn, no digest generator, digest failure) logs and
   // drops a refusal rather than answering it here.
-  app.post<{ Params: { id: string } }>('/api/chats/:id/rotate', async (req, reply) => {
-    let auth;
-    try {
-      auth = await requireAuth(req, deps.registry);
-    } catch (e) {
-      return reply
-        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
-        .send({ error: (e as Error).message });
-    }
-    if (!isReservedSpecialThread(req.params.id)) {
-      return reply
-        .code(403)
-        .send({ error: `cannot rotate a non-special thread: ${req.params.id}` });
-    }
-    if (!deps.chatRegistry.get(req.params.id)) {
-      return reply.code(404).send({ error: `chat not found: ${req.params.id}` });
-    }
-    deps.hostLink.send(auth.surfaceId, {
-      type: 'chat.rotate_request',
-      chatId: req.params.id,
-    });
-    return reply.code(200).send({ ok: true });
-  });
+  // `{carry: false}` is Clear (spec/06 § Bounded context): no carry-over.
+  app.post<{ Params: { id: string }; Body: { carry?: unknown } | undefined }>(
+    '/api/chats/:id/rotate',
+    async (req, reply) => {
+      let auth;
+      try {
+        auth = await requireAuth(req, deps.registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: (e as Error).message });
+      }
+      if (!isReservedSpecialThread(req.params.id)) {
+        return reply
+          .code(403)
+          .send({ error: `cannot rotate a non-special thread: ${req.params.id}` });
+      }
+      if (!deps.chatRegistry.get(req.params.id)) {
+        return reply.code(404).send({ error: `chat not found: ${req.params.id}` });
+      }
+      const carry = req.body?.carry;
+      if (carry !== undefined && typeof carry !== 'boolean') {
+        return reply.code(400).send({ error: 'carry must be true or false' });
+      }
+      deps.hostLink.send(auth.surfaceId, {
+        type: 'chat.rotate_request',
+        chatId: req.params.id,
+        ...(carry === false ? { carry: false } : {}),
+      });
+      return reply.code(200).send({ ok: true });
+    },
+  );
 
   // ---- DELETE /api/chats/:id ----
   // Recoverable SOFT-DELETE (spec/04 § Lifecycle, spec/14 § Chat lifecycle):

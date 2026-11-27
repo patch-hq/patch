@@ -5782,28 +5782,22 @@ describe('handleServerEvent', () => {
     expect(sent).toEqual([]);
   });
 
-  it('a failed manager sweep reports a manager.sweep_result error, not a chat.error for a chat that does not exist', async () => {
+  it('a failed finished-chats delivery reports a manager.finished_result error, not a chat.error for a chat that does not exist', async () => {
     const { daemon } = makeHost();
-    vi.spyOn(daemon, 'runManagerSweep').mockRejectedValue(
-      new Error('Claude Code process aborted by user'),
-    );
+    vi.spyOn(daemon, 'deliverFinishedChats').mockRejectedValue(new Error('history relay down'));
     const { sender, sent } = captureSender();
     await handleServerEvent(
-      { type: 'manager.sweep_run', runId: 'r1' } as unknown as Parameters<
-        typeof handleServerEvent
-      >[0],
+      {
+        type: 'manager.finished_run',
+        runId: 'r1',
+        chats: [{ chatId: 'c1', hostId: 'd1', folder: '/w', name: 'W' }],
+      },
       daemon,
       sender,
       silent,
     );
     expect(sent).toEqual([
-      {
-        type: 'manager.sweep_result',
-        runId: 'r1',
-        actions: [],
-        tokensUsed: 0,
-        error: 'Claude Code process aborted by user',
-      },
+      { type: 'manager.finished_result', runId: 'r1', delivered: 0, error: 'history relay down' },
     ]);
   });
 
