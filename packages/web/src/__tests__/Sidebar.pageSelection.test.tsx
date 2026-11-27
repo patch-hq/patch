@@ -149,4 +149,39 @@ describe('Sidebar selection tracks the page you are actually on', () => {
     expect(screen.getByTestId('nav-files')).toHaveClass('active');
     expect(screen.getByTestId('nav-pads')).not.toHaveClass('active');
   });
+
+  describe('drawer dismissal after picking a page from the footer', () => {
+    const setWidth = (w: number): void => {
+      Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+    };
+    const original = window.innerWidth;
+    afterEach(() => setWidth(original));
+
+    it.each(['nav-files', 'nav-triage', 'nav-pads', 'nav-jobs', 'nav-settings'])(
+      'collapses the narrow drawer when %s is clicked',
+      (id) => {
+        setWidth(500);
+        useUiStore.getState().setSidebarCollapsed(false);
+        renderAt('/');
+        fireEvent.click(screen.getByTestId(id));
+        expect(useUiStore.getState().sidebarCollapsed).toBe(true);
+      },
+    );
+
+    it('leaves the sidebar open at desktop width', () => {
+      setWidth(1200);
+      useUiStore.getState().setSidebarCollapsed(false);
+      renderAt('/');
+      fireEvent.click(screen.getByTestId('nav-settings'));
+      expect(useUiStore.getState().sidebarCollapsed).toBe(false);
+    });
+
+    it('leaves the drawer open for the getting-started button', () => {
+      setWidth(500);
+      useUiStore.getState().setSidebarCollapsed(false);
+      renderAt('/');
+      fireEvent.click(screen.getByTestId('nav-getting-started'));
+      expect(useUiStore.getState().sidebarCollapsed).toBe(false);
+    });
+  });
 });
