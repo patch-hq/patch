@@ -11,6 +11,8 @@ import { createHmac } from 'node:crypto';
 import { connect as netConnect } from 'node:net';
 import { WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import { startAudioServer, type AudioServerHandle } from '../src/audio/server.js';
 import { createWhisper } from '../src/audio/whisper.js';
 import { createKokoro } from '../src/audio/kokoro.js';
@@ -73,6 +75,8 @@ class FakeGeminiWs extends EventEmitter {
 }
 const HOSTED_CALL = {
   geminiApiKey: 'g-key',
+  voiceAgentLink: fakeVoiceAgentLink().link,
+  getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
   makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
   geminiWsCtor: function () {
     const inst = new FakeGeminiWs();
