@@ -160,3 +160,26 @@ describe('direct call refusals and pause', () => {
     expect(useVoiceStore.getState().activeSession).toBeNull();
   });
 });
+
+describe('a direct call over a paused call', () => {
+  it('replaces the paused call', async () => {
+    useVoiceStore.setState({
+      activeSession: { sessionId: 's-old', chatId: 'c9', audioUrl: '/a', startedAt: 1 },
+      callPaused: 'button',
+    } as never);
+    const hangUp = vi.fn(async () => {
+      useVoiceStore.setState({ activeSession: null, callPaused: null } as never);
+    });
+    const { mod } = fakeModule();
+    await startDirectCall('c1', {
+      mod,
+      mic: fakeMic().mic,
+      hangUp,
+      post: (async () => ({})) as never,
+    });
+    expect(hangUp).toHaveBeenCalled();
+    expect(useVoiceStore.getState().activeSession?.chatId).toBe('c1');
+    expect(useVoiceStore.getState().callDirect).not.toBeNull();
+    await endDirectCall();
+  });
+});

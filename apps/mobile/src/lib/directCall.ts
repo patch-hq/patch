@@ -259,6 +259,8 @@ function followChat(chatId: string, runtime: DirectCall): () => void {
  * engine, or a setup it cannot run, is refused with the reason.
  */
 export async function startDirectCall(chatId: string, deps: DirectCallDeps = {}): Promise<void> {
+  // A paused call holds no session (spec/07 § Pause): a new call replaces it.
+  if (useVoiceStore.getState().callPaused !== null) await (deps.hangUp ?? endDirectCall)();
   if (useVoiceStore.getState().activeSession !== null) return;
   const prefs = useSettingsStore.getState().data?.preferences;
   if (!prefs) {
