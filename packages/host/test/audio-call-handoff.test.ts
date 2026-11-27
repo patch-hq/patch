@@ -198,6 +198,25 @@ describe('call handoff', () => {
     );
   });
 
+  test("endOpenCall with no goodbye hangs up the chat's call from elsewhere, and only that one", async () => {
+    const calls: CallInfo[] = [];
+    const s = await start(calls);
+    const phone = await openCall(s.port, {
+      sessionId: 's1',
+      surfaceId: 'phone',
+      chatId: 'c1',
+      kind: 'mobile',
+    });
+    const other = await openCall(s.port, { sessionId: 's3', surfaceId: 'tablet', chatId: 'c2' });
+    await wait(60);
+    expect(await s.endOpenCall('c1')).toBe(true);
+    expect(await phone.closed).toBe('ended_by_agent');
+    await wait(60);
+    expect(other.ws.readyState).toBe(WebSocket.OPEN);
+    expect(calls.filter((c) => c.chatId === 'c1').map((c) => c.active)).toEqual([true, false]);
+    expect(await s.endOpenCall('c1')).toBe(false);
+  });
+
   test('without takeOver a second call on the chat leaves the first alone', async () => {
     const calls: CallInfo[] = [];
     const s = await start(calls);

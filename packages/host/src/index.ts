@@ -3729,6 +3729,14 @@ async function startHost(
         daemon.injectPermissionRequest(event.chatId, event.tool, event.description);
         return;
       }
+      if (event.type === 'voice.end_call_request') {
+        // spec/07 § A call can move between devices — hang up the chat's call
+        // on whichever surface holds it; that surface ends it quietly.
+        void audioServer?.endOpenCall(event.chatId).catch((err: Error) => {
+          logger.error({ err: err.message, chatId: event.chatId }, 'voice.end_call_request failed');
+        });
+        return;
+      }
       if (event.type === 'patch.diag.voice_inject') {
         // DEV/TEST (spec/07): feed a transcribed utterance into the open voice
         // session for this surface, routed to its current focus chat. Proves

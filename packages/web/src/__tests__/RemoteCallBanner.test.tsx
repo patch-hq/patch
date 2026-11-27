@@ -7,6 +7,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { setActiveWs } from '../api/ws.js';
 import { __setAudioOpenerForTests } from '../lib/voiceController.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
@@ -68,6 +69,16 @@ describe('RemoteCallBanner', () => {
       useVoiceStore.getState().startCall('c1');
     });
     expect(screen.queryByTestId('remote-call')).toBeNull();
+  });
+
+  it("End call asks the host to end that chat's call", () => {
+    const send = vi.fn();
+    setActiveWs({ send } as never);
+    render(<RemoteCallBanner />);
+    act(() => useVoiceStore.getState().setRemoteCall(remote, true));
+    fireEvent.click(screen.getByTestId('remote-call-end'));
+    expect(send).toHaveBeenCalledWith({ type: 'voice.end_call_request', chatId: 'c1' });
+    setActiveWs(null);
   });
 
   it('Switch here opens a call on that chat with takeOver', async () => {

@@ -18,6 +18,9 @@ import { useChatStore } from '../src/stores/chatStore';
 const { startVoiceCallSpy } = vi.hoisted(() => ({ startVoiceCallSpy: vi.fn() }));
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: startVoiceCallSpy }));
 
+const { sendSpy } = vi.hoisted(() => ({ sendSpy: vi.fn() }));
+vi.mock('../src/api/ws', () => ({ getWs: () => ({ send: sendSpy }) }));
+
 import { RemoteCallPill } from '../src/components/RemoteCallPill';
 
 const remote = {
@@ -73,6 +76,13 @@ describe('RemoteCallPill', () => {
     const r = renderRN(<RemoteCallPill />);
     findHost(r.root, byTestId('remote-call-switch')).props['onPress']();
     expect(startVoiceCallSpy).toHaveBeenCalledWith('c1', 'call', { takeOver: true });
+  });
+
+  it("End call asks the host to end that chat's call", () => {
+    useVoiceStore.setState({ remoteCalls: { s1: remote } });
+    const r = renderRN(<RemoteCallPill />);
+    findHost(r.root, byTestId('remote-call-end')).props['onPress']();
+    expect(sendSpy).toHaveBeenCalledWith({ type: 'voice.end_call_request', chatId: 'c1' });
   });
 
   it('the store drops the call when the host reports it ended', () => {
