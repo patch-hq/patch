@@ -189,8 +189,8 @@ export function StatusBadge({
 /**
  * The `monitoring` badge's own tiny clock — ticks once a second, same as
  * `WakeBar`, so a tooltip left open (or reopened) never reads a stale
- * countdown. `pendingWake` is optional because some callers (BatchPanel,
- * ThreadsStrip) don't thread it through yet; those fall back to the static
+ * countdown. `pendingWake` is optional because some callers (BatchPanel)
+ * don't thread it through yet; those fall back to the static
  * "Monitoring" title rather than a countdown they have no data for.
  */
 function MonitoringBadge({

@@ -6,19 +6,101 @@
 
 import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
-import { DEFAULT_MANAGER_VOICE_PROMPT, DEFAULT_SWEEP_PROMPT } from '@patch/wire';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  DEFAULT_MANAGER_PROMPT,
+  DEFAULT_MANAGER_VOICE_PROMPT,
+  SPECIAL_THREAD_IDS,
+  type ManagerWake,
+} from '@patch/wire';
+import { api } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { Toggle } from '../../components/Toggle.js';
 import { useModelOptions } from './modelOptions.js';
-import { Group, Row, SettingsPage } from './ui.js';
+import { Group, Pills, Row, SettingsPage } from './ui.js';
 import { patchShared } from './sharedWrite.js';
 import { failed } from '../../lib/errorCopy.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
-import { DeliverySlider } from './DeliverySlider.js';
-import { ManagerHomeGroup } from './ManagerHomeGroup.js';
-import { ManagerInstructionsRow } from './ManagerInstructionsRow.js';
+import { BatchIntervalSlider } from './BatchIntervalSlider.js';
+import { ManagerHomeGroup, serverSays } from './ManagerHomeGroup.js';
 import { PromptRow } from './PromptRow.js';
+
+const WAKE_LABELS: Record<ManagerWake, string> = {
+  off: 'Off',
+  each: 'Each one',
+  batched: 'Batched',
+};
+
+export const MANAGER_SESSION_QUERY = ['manager-session'] as const;
+
+/** `today 09:12`, `yesterday 18:40`, `3 Nov 09:12`. */
+export function sessionStarted(at: number, now: number = Date.now()): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const day = (t: number): string => new Date(t).toDateString();
+  if (day(at) === day(now)) return `today ${time}`;
+  if (day(at) === day(now - 86_400_000)) return `yesterday ${time}`;
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time}`;
+}
+
+/**
+ * Context → This session (spec/06 § Bounded context): the current session's
+ * message count and start, and Clear, a fresh session with nothing carried.
+ */
+function ManagerSessionRow(): JSX.Element {
+  const queryClient = useQueryClient();
+  const pushError = useUiStore((s) => s.pushError);
+  const [busy, setBusy] = useState(false);
+  const chat = useQuery({
+    queryKey: MANAGER_SESSION_QUERY,
+    queryFn: () => api.getChat(SPECIAL_THREAD_IDS.manager),
+    refetchInterval: 30_000,
+  });
+  const session = chat.data?.session;
+  let sub: JSX.Element | string;
+  if (chat.isError) {
+    sub = (
+      <span className="set-sub-error" data-testid="manager-session-error">
+        {serverSays(chat.error)}
+      </span>
+    );
+  } else if (!chat.isSuccess) {
+    sub = 'Loading…';
+  } else if (session === undefined) {
+    sub = 'Not reported by the home host yet';
+  } else if (session === null) {
+    sub = 'No session yet';
+  } else {
+    sub = `${session.messages} message${session.messages === 1 ? '' : 's'} · started ${sessionStarted(session.startedAt)}`;
+  }
+
+  async function clear(): Promise<void> {
+    setBusy(true);
+    try {
+      await api.rotateChat(SPECIAL_THREAD_IDS.manager, { carry: false });
+      await queryClient.invalidateQueries({ queryKey: MANAGER_SESSION_QUERY });
+    } catch (e) {
+      pushError(failed('clearing the Manager’s session'), undefined, serverSays(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Row title="This session" sub={sub} testid="manager-session">
+      <button
+        type="button"
+        className="set-link"
+        data-testid="manager-clear"
+        disabled={busy || !session}
+        onClick={() => void clear()}
+      >
+        Clear
+      </button>
+    </Row>
+  );
+}
 
 export function ManagerPage(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -27,7 +109,6 @@ export function ManagerPage(): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
   const [addressWord, setAddressWord] = useState(preferences.addressWord);
   const model = useModelOptions(preferences.specialThreadModel);
-  const sweepModel = useModelOptions(preferences.sweepModel);
 
   // Track the server's value until the field is actually edited, so a load
   // arriving after mount is not left showing a stale word.
@@ -49,7 +130,15 @@ export function ManagerPage(): JSX.Element {
       <ManagerHomeGroup />
 
       <Group label="Prompts" testid="settings-manager-prompts">
-        <ManagerInstructionsRow />
+        <PromptRow
+          id="manager"
+          title="Prompt"
+          sub="Given to the Manager at the start of every session."
+          defaultText={DEFAULT_MANAGER_PROMPT}
+          current={preferences.managerPrompt}
+          onSave={(text) => patchShared('Manager prompt', { managerPrompt: text })}
+          onDefault={() => patchShared('Manager prompt', { managerPrompt: DEFAULT_MANAGER_PROMPT })}
+        />
         <PromptRow
           id="manager-voice"
           title="Voice"
@@ -63,79 +152,49 @@ export function ManagerPage(): JSX.Element {
             })
           }
         />
-        <PromptRow
-          id="sweep"
-          title="Standing instructions"
-          sub="Which questions the Manager may answer for you when a chat goes idle."
-          defaultText={DEFAULT_SWEEP_PROMPT}
-          current={preferences.sweepPrompt}
-          onSave={(text) => patchShared('sweep prompt', { sweepPrompt: text })}
-          onDefault={() => patchShared('sweep prompt', { sweepPrompt: DEFAULT_SWEEP_PROMPT })}
-        />
       </Group>
 
-      <Group label="Sweep" testid="settings-sweep">
-        <Row title="Enabled">
-          <Toggle
-            checked={preferences.sweepEnabled}
+      <Group label="Finished chats" testid="settings-manager-wake">
+        <Row title="Send to the Manager" sub="Chats with a goal running are left out">
+          <Pills
+            label="Send finished chats"
+            options={['off', 'each', 'batched'] as const}
+            labels={WAKE_LABELS}
+            value={preferences.managerWake}
             disabled={!loaded}
-            onChange={(next) => write({ sweepEnabled: next })}
-            testid="sweep-enabled"
+            testid="manager-wake-mode"
+            onChange={(next) => write({ managerWake: next })}
           />
         </Row>
-        <Row title="Questions for me">
-          <DeliverySlider
-            value={preferences.sweepIntervalMinutes}
-            disabled={!loaded}
-            testid="sweep-delivery"
-            onCommit={(next) => write({ sweepIntervalMinutes: next })}
+        <Row title="Every">
+          <BatchIntervalSlider
+            value={preferences.managerWakeIntervalMinutes}
+            disabled={!loaded || preferences.managerWake !== 'batched'}
+            testid="manager-wake-interval"
+            onCommit={(next) => write({ managerWakeIntervalMinutes: next })}
           />
         </Row>
-        <Row title="Speak finishes">
-          <Toggle
-            checked={preferences.sweepSpeak}
-            disabled={!loaded}
-            onChange={(next) => write({ sweepSpeak: next })}
-            testid="sweep-speak"
-          />
-        </Row>
-        <Row title="Messages per chat">
+      </Group>
+
+      <Group label="Context" testid="settings-manager-context">
+        <ManagerSessionRow />
+        <Row title="Start fresh after">
           <PositiveNumberInput
-            ariaLabel="Messages read per chat"
-            value={preferences.sweepMessagesPerChat}
+            ariaLabel="Start a fresh session after (messages)"
+            value={preferences.managerContextWindow}
             disabled={!loaded}
-            testid="sweep-messages-per-chat"
-            onCommit={(next) => write({ sweepMessagesPerChat: next })}
+            integer
+            testid="manager-context-window"
+            onCommit={(next) => write({ managerContextWindow: next })}
           />
-        </Row>
-        <Row title="Model">
-          <select
-            aria-label="Sweep model"
-            value={preferences.sweepModel}
-            disabled={!loaded}
-            data-testid="sweep-model"
-            onChange={(e) => write({ sweepModel: e.target.value })}
-          >
-            {sweepModel.options.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          <span className="set-unit" data-testid="manager-context-window-unit">
+            messages, keeping the last{' '}
+            {Math.max(1, Math.floor(preferences.managerContextWindow / 2))}
+          </span>
         </Row>
       </Group>
 
       <Group label="Manager" testid="settings-manager">
-        <Row title="Context window">
-          <PositiveNumberInput
-            ariaLabel="Manager context window (messages)"
-            value={preferences.managerContextWindow}
-            disabled={!loaded}
-            testid="manager-context-window"
-            onCommit={(next) => write({ managerContextWindow: next })}
-          />
-          <span className="set-unit">messages</span>
-        </Row>
         <Row title="Quiet hours">
           <input
             id="quiet-start"

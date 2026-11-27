@@ -1,66 +1,93 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 // Real-browser e2e (dev harness, real ChatRoute + real CSS, no backend) for
-// spec/14 § Manager view: the Manager conversation on top, everything it is
-// watching in a strip underneath. jsdom can assert the rows exist; only a real
-// browser can confirm the strip is actually laid out BELOW the conversation and
-// that its rows carry live controls, which is the whole point of the view.
+// spec/14 § Manager view: the Manager is an ordinary chat with one extra
+// header action, and finished chats reach it as collapsed notes.
 const MANAGER = '/app/dev-harness.html?chat=thread_manager';
 const REGULAR = '/app/dev-harness.html?chat=chat_bus';
 
+async function emit(page: Page, event: unknown): Promise<void> {
+  await page.evaluate((ev) => {
+    (window as unknown as { __store: { getState(): { applyEvent(e: unknown): void } } }).__store
+      .getState()
+      .applyEvent(ev);
+  }, event);
+}
+
 test.describe('Manager view', () => {
-  test('puts the Threads strip beneath the Manager conversation', async ({ page }) => {
+  test('is the conversation alone: no Threads strip', async ({ page }) => {
     await page.goto(MANAGER);
-    const strip = page.getByTestId('threads-strip');
-    await expect(strip).toBeVisible();
-    const stream = await page.getByTestId('chat-stream').boundingBox();
-    const box = await strip.boundingBox();
-    expect(stream).not.toBeNull();
-    expect(box).not.toBeNull();
-    expect(box!.y).toBeGreaterThan(stream!.y);
-    // And it is a strip, not a takeover: the conversation keeps most of the room.
-    expect(box!.height).toBeLessThan(stream!.height + box!.height);
-  });
-
-  test('every row names its host and folder and offers the action it is blocked on', async ({
-    page,
-  }) => {
-    await page.goto(MANAGER);
-    const rows = page.locator('.thread-row');
-    expect(await rows.count()).toBeGreaterThan(0);
-    await expect(rows.first()).toContainText('/home/tom/projects');
-    // A working chat can be stopped; a stopped one can be carried on. Both
-    // exist in the seeded harness, so both controls are on screen.
-    await expect(page.locator('[data-testid^="thread-stop-"]').first()).toBeVisible();
-    await expect(page.locator('[data-testid^="thread-carry-on-"]').first()).toBeVisible();
-    await expect(page.locator('[data-testid^="thread-open-"]').first()).toBeVisible();
-  });
-
-  test('the strip belongs to the Manager alone — an ordinary chat is just a chat', async ({
-    page,
-  }) => {
-    await page.goto(REGULAR);
     await expect(page.getByTestId('chat-stream')).toBeVisible();
     await expect(page.getByTestId('threads-strip')).toHaveCount(0);
+    await expect(page.locator('.threads-divider')).toHaveCount(0);
+    await expect(page.getByTestId('reach-switch')).toHaveCount(0);
   });
 
-  test('the strip head carries the reach switch — the one control you set before a drive', async ({
+  test('has a Manager settings gear beside Zen that opens Settings → Manager', async ({ page }) => {
+    await page.goto(MANAGER);
+    const gear = page.getByTestId('action-manager-settings');
+    await expect(gear).toBeVisible();
+    await expect(gear).toHaveAttribute('aria-label', 'Manager settings');
+    // Beside Zen, in the title row.
+    const zen = await page.getByTestId('action-zen').boundingBox();
+    const box = await gear.boundingBox();
+    expect(Math.abs(box!.y - zen!.y)).toBeLessThan(4);
+    expect(box!.x).toBeGreaterThan(zen!.x);
+    await gear.click();
+    await expect(page.getByTestId('settings-manager-page')).toBeVisible();
+  });
+
+  test('an ordinary chat has no Manager settings gear', async ({ page }) => {
+    await page.goto(REGULAR);
+    await expect(page.getByTestId('action-zen')).toBeVisible();
+    await expect(page.getByTestId('action-manager-settings')).toHaveCount(0);
+  });
+
+  test('finished chats arrive as collapsed "Finished · <name>" notes and Patch’s own line', async ({
     page,
   }) => {
     await page.goto(MANAGER);
-    const reach = page.getByTestId('reach-switch');
-    await expect(reach).toBeVisible();
-    // Above the rows, where it is reached in one look — not buried in Settings.
-    const head = await reach.boundingBox();
-    const firstRow = await page.locator('.thread-row').first().boundingBox();
-    expect(head!.y).toBeLessThan(firstRow!.y);
+    await expect(page.getByTestId('chat-stream')).toBeVisible();
+    const base = 9000;
+    for (const [i, name] of ['Bus tracker', 'Garden podcast'].entries()) {
+      await emit(page, {
+        type: 'chat.note',
+        chatId: 'thread_manager',
+        label: `Finished · ${name}`,
+        text: `Chat: c${i}\nLink: patch://chats/c${i}\n\nLast reply:\nShould I carry on?`,
+        seq: base + i,
+        createdAt: Date.now(),
+      });
+    }
+    await emit(page, {
+      type: 'chat.message',
+      chatId: 'thread_manager',
+      role: 'user',
+      origin: 'machine',
+      content: '2 chats finished in the last 30 min.',
+      seq: base + 2,
+      createdAt: Date.now(),
+    });
+    const notes = page.getByTestId('note');
+    await expect(notes.filter({ hasText: 'Finished · Bus tracker' })).toHaveCount(1);
+    await expect(notes.filter({ hasText: 'Finished · Garden podcast' })).toHaveCount(1);
+    const toggle = notes
+      .filter({ hasText: 'Finished · Bus tracker' })
+      .locator('button[aria-expanded]')
+      .first();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByText('Should I carry on?')).toHaveCount(0);
+    await toggle.click();
+    await expect(page.getByText('Should I carry on?').first()).toBeVisible();
+    // Not drawn as the user typing: Patch's own quiet row.
+    await expect(
+      page.getByTestId('job-trigger').filter({ hasText: '2 chats finished in the last 30 min.' }),
+    ).toHaveCount(1);
   });
 
   test('the sidebar Manager row carries both Talk and the hands-free control', async ({ page }) => {
     await page.goto(MANAGER);
     await expect(page.getByTestId('row-handsfree')).toBeVisible();
-    // One Manager, not two: it is a chat with a view beneath it, never a
-    // sidebar tab of its own.
     await expect(page.getByTestId('batch-tab-manager')).toHaveCount(0);
   });
 });

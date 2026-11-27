@@ -14,7 +14,7 @@ import {
   DEFAULT_MANAGER_VOICE_PROMPT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   DEFAULT_VOICE_DEVICE_PROMPT,
-  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_MANAGER_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
@@ -66,7 +66,7 @@ describe('Settings prompts', () => {
       [
         'manager',
         [
-          ['sweep', DEFAULT_SWEEP_PROMPT],
+          ['manager', DEFAULT_MANAGER_PROMPT],
           ['manager-voice', DEFAULT_MANAGER_VOICE_PROMPT],
         ],
       ],
@@ -168,10 +168,10 @@ describe('Settings prompts', () => {
   it('cancelling a switch to Custom writes nothing', async () => {
     const server = serve();
     renderSettings('/settings/manager');
-    fireEvent.click(await screen.findByTestId('prompt-sweep-mode-custom'));
-    fireEvent.click(screen.getByTestId('prompt-sweep-cancel'));
+    fireEvent.click(await screen.findByTestId('prompt-manager-mode-custom'));
+    fireEvent.click(screen.getByTestId('prompt-manager-cancel'));
     expect(server.writes).toEqual([]);
-    expect(screen.getByTestId('prompt-sweep-mode-default').getAttribute('aria-pressed')).toBe(
+    expect(screen.getByTestId('prompt-manager-mode-default').getAttribute('aria-pressed')).toBe(
       'true',
     );
   });

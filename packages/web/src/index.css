@@ -10523,6 +10523,16 @@ button.set-row-open:focus-visible {
 .set-word {
   width: 180px;
 }
+/* Settings → Manager → Folder: a path is read as a path. */
+.mgr-path {
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.set-path {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
 /* A host's name is often a long machine name; it gets room to show whole. */
 .set-host-name {
   width: min(420px, 100%);
@@ -11137,7 +11147,7 @@ button.set-row-open:focus-visible {
    batch." starting ~2px off the scroll region's raw edge while every row beside
    them started at 20px.
    Scoped to `.sb` deliberately: `.empty-hint` is also used outside the sidebar
-   (`.threads-empty` in the chat panel), where there are no rows to match and
+   (the chat panel's placeholders), where there are no rows to match and
    the compact styling above is still right. */
 .sb .empty-hint {
   margin: 0 var(--sb-inset-right) 0 var(--sb-inset);
@@ -14259,227 +14269,6 @@ input.browse-filter {
 }
 .browse-meta .browse-meta-name {
   flex: 0 0 auto;
-}
-
-/* ---------- Manager view — the Threads strip (spec/14 § Manager view) ------ */
-
-/* A drag handle, not a decoration: the strip is resizable like every other
-   column divider, and its height persists per-user. */
-.threads-divider {
-  flex: 0 0 auto;
-  height: 6px;
-  cursor: row-resize;
-  background: var(--line-soft);
-}
-.threads-divider:hover {
-  background: var(--accent-soft, var(--line));
-}
-.threads-strip {
-  flex: 0 0 auto;
-  overflow-y: auto;
-  border-top: 1px solid var(--line-soft);
-  background: var(--bg-elevated);
-  padding: 6px 0;
-}
-.threads-empty {
-  padding: 16px;
-}
-.thread-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.thread-row:last-child {
-  border-bottom: none;
-}
-/* The row is top-aligned (a summary can wrap under the title), so the dot is
-   dropped to the middle of the title's first line — (21.7px line - 9px dot)/2
-   — rather than riding 6px above it. */
-.thread-row > .badge {
-  flex: 0 0 auto;
-  margin-top: 6px;
-}
-.thread-body {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.thread-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  /* One line: the name keeps its width and the host · folder after it
-     truncates. Wrappable, a narrow strip broke the name at its hyphen
-     ("index-" / "rebuild") while the path kept its room. */
-  white-space: nowrap;
-  min-width: 0;
-}
-.thread-where {
-  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
-  font-size: var(--text-min);
-  font-weight: 400;
-  color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.thread-summary {
-  font-size: var(--text-min);
-  color: var(--ink-2);
-  margin-top: 2px;
-}
-.thread-question {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.thread-question-text {
-  font-size: var(--text-min);
-}
-.thread-question-options {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.thread-actions {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.thread-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--bg-elevated);
-  color: var(--ink);
-  font-size: var(--text-min);
-  cursor: pointer;
-}
-.thread-btn:hover {
-  background: var(--accent-tint);
-  border-color: var(--accent-soft, var(--line));
-}
-.thread-btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-.thread-btn.ghost {
-  padding: 0 8px;
-  color: var(--ink-3);
-}
-
-/* The Threads strip's own head: what the list is, and the reach switch — the
-   one control that changes how Patch may reach you for the next few hours
-   (spec/09 § Reaching the user). */
-.threads-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2px 14px 8px;
-}
-.threads-head-label {
-  font-size: var(--text-min);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-.reach-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 13px;
-  border: 1px solid var(--line);
-  background: var(--bg-elevated);
-  color: var(--ink-2);
-  font-size: var(--text-min);
-  font-weight: 600;
-  cursor: pointer;
-}
-.reach-switch:hover:not(:disabled) {
-  border-color: var(--accent-soft, var(--line));
-}
-.reach-switch.auto {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-.reach-switch:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* The sweep's slim status line (spec/06 § Sweep — "Visible"): what it did,
-   when, and a way to force an early check — right above the thread rows it
-   acted on. */
-.sweep-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px 8px;
-}
-.sweep-status-summary {
-  flex: 1 1 auto;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: var(--text-min);
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.sweep-status-summary:disabled {
-  cursor: default;
-}
-.sweep-status-check-now {
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 11px;
-  border: 1px solid var(--line);
-  background: var(--bg-elevated);
-  color: var(--ink-2);
-  font-size: var(--text-min);
-  cursor: pointer;
-}
-.sweep-status-check-now:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.sweep-status-detail {
-  flex: 1 0 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.sweep-status-row {
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  font-size: var(--text-min);
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.sweep-status-row:hover {
-  color: var(--ink-2);
-}
-.sweep-status-error {
-  color: var(--danger);
-  font-size: var(--text-min);
 }
 
 /* ---------- Voice bar (spec/07 § Session modes) -------------------------- */
@@ -18446,11 +18235,6 @@ select.permission-mode.is-pending {
   }
 }
 
-.sweep-status-detail-text,
-.sweep-status-earlier {
-  opacity: 0.7;
-}
-
 /* ---------- Status list (spec/14 § Main chat panel — Status list) ---------- */
 /* One container under the header for Goal, Agents, Tasks and Artifacts. Every
    row shares one grid: 16px icon | label word | content | meta | action. */
@@ -19940,7 +19724,6 @@ a.drop-target,
 .zen .status-list,
 .zen .reminder-banner,
 .zen .wake-bar,
-.zen .threads-strip,
 .zen .composer-actions .composer-tools,
 .zen .composer-actions .composer-settings,
 .zen .composer-actions-end .context-ring {

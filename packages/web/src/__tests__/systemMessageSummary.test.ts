@@ -15,10 +15,11 @@ describe('systemMessageSummary', () => {
   it('names the todo list advancing', () => {
     expect(systemMessageSummary('[todo] write tests', 'machine')).toBe('Next todo — write tests');
   });
-  it('names a manager sweep by how many chats changed', () => {
-    expect(systemMessageSummary('3 chats changed:\n\n- a', 'machine')).toBe(
-      'Manager check-in — 3 chats changed',
+  it('keeps the finished-chats line to the Manager as is', () => {
+    expect(systemMessageSummary('2 chats finished in the last 30 min.', 'machine')).toBe(
+      '2 chats finished in the last 30 min.',
     );
+    expect(systemMessageSummary('Bus tracker finished.', 'machine')).toBe('Bus tracker finished.');
   });
   it('keeps a Pad delivery line as is', () => {
     expect(systemMessageSummary('[Pad] The user sent 2 changes\nbody', 'job')).toBe(

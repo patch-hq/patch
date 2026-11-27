@@ -50,6 +50,7 @@ import {
   Clock,
   Maximize2,
   Minimize2,
+  Settings,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
 import { JobTickChip } from './JobTickBar.js';
@@ -530,6 +531,19 @@ export function ChatHeader({
             >
               {zen ? <Minimize2 size={16} aria-hidden /> : <Maximize2 size={16} aria-hidden />}
             </button>
+            {/* spec/14 § Manager view — the Manager's own settings, one click away. */}
+            {row.chatId === SPECIAL_THREAD_IDS.manager ? (
+              <button
+                type="button"
+                className="head-action chat-title-manager-settings"
+                data-testid="action-manager-settings"
+                aria-label="Manager settings"
+                title="Manager settings"
+                onClick={() => navigate('/settings/manager')}
+              >
+                <Settings size={16} aria-hidden />
+              </button>
+            ) : null}
           </div>
         </div>
 

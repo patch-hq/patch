@@ -100,7 +100,6 @@ test('a newcomer’s app: Manager says what it is, and nothing empty or unexplai
   await page.route('**/api/chats/counts', (r) =>
     r.fulfill({ json: { hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 } }),
   );
-  await page.route('**/api/manager/sweeps*', (r) => r.fulfill({ json: { runs: [] } }));
   await page.goto('/app/dev-harness.html?chat=thread_manager');
   await expect(page.getByTestId('sidebar')).toBeVisible();
   await page.evaluate(() => {
@@ -120,8 +119,6 @@ test('a newcomer’s app: Manager says what it is, and nothing empty or unexplai
   await expect(page.getByTestId('empty-chat-line')).toHaveText(
     'Ask about any of your chats, or have it message them for you.',
   );
-  await expect(page.getByTestId('threads-strip')).toHaveCount(0);
-  await expect(page.getByTestId('sweep-check-now')).toHaveCount(0);
   await expect(page.getByTestId('channels-toggle')).toHaveCount(0);
   await expect(page.getByTestId('sb-lifecycle')).toHaveCount(0);
   // The pill names the model the Manager starts on, never "Choose a model…".

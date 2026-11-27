@@ -11,7 +11,7 @@ import { screen, waitFor, fireEvent, act, within } from '@testing-library/react'
 import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
-  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_MANAGER_PROMPT,
 } from '@patch/wire';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -1480,7 +1480,7 @@ describe('Settings → Manager (account-wide)', () => {
     const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     renderSettings('/settings/manager');
-    fireEvent.click(await screen.findByTestId('sweep-enabled'));
+    fireEvent.click(await screen.findByTestId('manager-wake-mode-batched'));
     await waitFor(() => expect(server.writes).toHaveLength(1));
     fireEvent.change(screen.getByTestId('manager-quiet-start'), { target: { value: '22:30' } });
     await waitFor(() => expect(server.writes).toHaveLength(2));
@@ -1491,7 +1491,7 @@ describe('Settings → Manager (account-wide)', () => {
     fireEvent.change(screen.getByTestId('rotation-time'), { target: { value: '03:00' } });
     await waitFor(() => expect(server.writes).toHaveLength(5));
     expect(server.writes).toEqual([
-      { sweepEnabled: true },
+      { managerWake: 'batched' },
       { quietHoursStart: '22:30' },
       { quietHoursEnd: '06:15' },
       { rotationEnabled: false },
@@ -1513,18 +1513,65 @@ describe('Settings → Manager (account-wide)', () => {
     await waitFor(() => expect(server.writes).toEqual([{ addressWord: 'jeeves' }]));
   });
 
-  it('sweep prompt: edits it, and Default restores the built-in one', async () => {
+  it('Manager prompt: edits it, and Default restores the built-in one', async () => {
     const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     renderSettings('/settings/manager');
-    fireEvent.click(await screen.findByTestId('prompt-sweep-mode-custom'));
-    const box = screen.getByTestId('prompt-sweep-text') as HTMLTextAreaElement;
-    expect(box.value).toBe(DEFAULT_SWEEP_PROMPT); // nothing has overridden it yet
+    fireEvent.click(await screen.findByTestId('prompt-manager-mode-custom'));
+    const box = screen.getByTestId('prompt-manager-text') as HTMLTextAreaElement;
+    expect(box.value).toBe(DEFAULT_MANAGER_PROMPT);
     fireEvent.change(box, { target: { value: 'Be extra terse.' } });
-    fireEvent.click(screen.getByTestId('prompt-sweep-save'));
-    await waitFor(() => expect(server.writes).toEqual([{ sweepPrompt: 'Be extra terse.' }]));
-    fireEvent.click(await screen.findByTestId('prompt-sweep-mode-default'));
-    await waitFor(() => expect(server.writes[1]).toEqual({ sweepPrompt: DEFAULT_SWEEP_PROMPT }));
+    fireEvent.click(screen.getByTestId('prompt-manager-save'));
+    await waitFor(() => expect(server.writes).toEqual([{ managerPrompt: 'Be extra terse.' }]));
+    fireEvent.click(await screen.findByTestId('prompt-manager-mode-default'));
+    await waitFor(() =>
+      expect(server.writes[1]).toEqual({ managerPrompt: DEFAULT_MANAGER_PROMPT }),
+    );
+  });
+
+  it('finished chats: Every is only usable when Batched, and writes the interval', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      renderSettings('/settings/manager');
+      const slider = (await screen.findByTestId('manager-wake-interval')) as HTMLInputElement;
+      expect(screen.getByTestId('manager-wake-mode-off').getAttribute('aria-pressed')).toBe('true');
+      expect(slider.disabled).toBe(true);
+      fireEvent.click(screen.getByTestId('manager-wake-mode-batched'));
+      await waitFor(() => expect(slider.disabled).toBe(false));
+      fireEvent.change(slider, { target: { value: '3' } });
+      await vi.advanceTimersByTimeAsync(400);
+      await waitFor(() =>
+        expect(server.writes).toEqual([
+          { managerWake: 'batched' },
+          { managerWakeIntervalMinutes: 60 },
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Context: the window says how many are kept, and This session says what the host reported', async () => {
+    const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({}, (u, init) =>
+        u.endsWith('/api/chats/thread_manager')
+          ? json({ chatId: 'thread_manager', session: { messages: 34, startedAt: Date.now() } })
+          : server.handler(u, init),
+      ),
+    );
+    renderSettings('/settings/manager');
+    expect((await screen.findByTestId('manager-context-window-unit')).textContent).toBe(
+      'messages, keeping the last 40',
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('manager-session').textContent).toMatch(
+        /34 messages · started today \d\d:\d\d/,
+      ),
+    );
   });
 
   it('link summary prompt: edits it on the Agent page, and Default restores the built-in one', async () => {
@@ -1556,8 +1603,6 @@ describe('Settings → Manager (account-wide)', () => {
     reportHost('d1');
     renderSettings('/settings/manager');
     const select = (await screen.findByTestId('special-thread-model')) as HTMLSelectElement;
-    // Scoped to this select: the sweep model picker on the same page reads
-    // the same catalogue and lists the same options.
     await waitFor(() =>
       expect(within(select).getByRole('option', { name: 'Opus 5' })).toBeInTheDocument(),
     );
