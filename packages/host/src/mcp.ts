@@ -1702,7 +1702,11 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       description:
         'Hang up the open voice call on this chat once the conversation is finished. Pass message to say a short goodbye first. Returns ended:false when no call is open. Never end a call while the user is still mid-thought or has asked for something you have not done.',
       inputSchema: {
-        chatId: z.string().min(1).optional(),
+        chatId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Chat whose call to end; defaults to this chat.'),
         message: z.string().min(1).optional(),
       },
     },

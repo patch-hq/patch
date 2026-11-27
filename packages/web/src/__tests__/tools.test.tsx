@@ -138,6 +138,7 @@ const EXPECTED_PATCH_TOOLS = [
   'view_file',
   'link_file',
   'patch_call',
+  'patch_end_call',
   'patch_browser_open',
   'patch_browser_read',
   'patch_browser_click',
