@@ -232,6 +232,10 @@ The permission round-trip is text-only on the wire, but the user can answer it e
 
 Manager initiates a voice call by exercising the same `patch_call` path any chat has.
 
+### The agent ends the call
+
+`patch_end_call({ message?, chatId? })` hangs up the open app call on the calling chat (or `chatId`) so a call the agent started can finish without the user touching a screen. With `message` the agent says it first; the host then closes the audio socket with the reason `ended_by_agent`. Clients treat that reason as a clean hang-up (hang-up sound, bar cleared, no redial, no error), like `transferred`. With no call open it returns `ended: false`. Voice devices are never hung up by it, and subagents do not get it.
+
 ### Other chats during a focused-chat voice session
 
 Events from non-focused chats during a voice session are dropped from the audio path. Visual indicators (badges, banner, sidebar) still update. To hear those events spoken, the user switches focus to Manager voice; Manager's queue handling reads them aloud.

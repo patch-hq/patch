@@ -498,6 +498,15 @@ describe('voiceController', () => {
     expect(sound).toHaveBeenCalledTimes(4);
   });
 
+  it('a call the agent ends is a clean hang-up: sound, cleared, no redial', async () => {
+    const sound = vi.mocked(playCallSound);
+    await startVoiceCall('c1');
+    sound.mockClear();
+    lastCallbacks?.onClose('ended_by_agent');
+    expect(useVoiceStore.getState().call).toBeNull();
+    expect(sound.mock.calls).toEqual([['hangup']]);
+  });
+
   it('a call that drops redials by itself, telling the host it is picking the call back up', async () => {
     vi.useFakeTimers();
     try {

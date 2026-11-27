@@ -859,6 +859,7 @@ const SUBAGENT_DISALLOWED_PATCH_TOOLS = [
   'mcp__patch__patch_notify',
   'mcp__patch__patch_report',
   'mcp__patch__patch_call',
+  'mcp__patch__patch_end_call',
   'mcp__patch__patch_speak',
   'mcp__patch__patch_ask_human',
   'mcp__patch__patch_artifact',

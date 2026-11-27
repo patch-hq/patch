@@ -479,7 +479,7 @@ async function openCallSession(
           // dropped call (a restart, the network), so redial it.
           const store = useVoiceStore.getState();
           if (store.call === null) return;
-          if (reason === 'transferred') {
+          if (reason === 'transferred' || reason === 'ended_by_agent') {
             clearRedial();
             playCallSound('hangup');
             store.setSession(null);

@@ -2657,6 +2657,82 @@ describe('C1 Control IPC: POST /internal/notify — remaining branches', () => {
   });
 });
 
+describe('C1 Control IPC: POST /internal/end_call', () => {
+  it('503s with no host; 400s a zod violation; 503s with no audio server', async () => {
+    const app = await buildControl({ localKey: LOCAL_KEY });
+    try {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/internal/end_call',
+            headers: AUTH,
+            payload: {},
+          })
+        ).statusCode,
+      ).toBe(503);
+    } finally {
+      await app.close();
+    }
+    const { daemon, jobs } = setup();
+    const app2 = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const bad = await app2.inject({
+        method: 'POST',
+        url: '/internal/end_call',
+        headers: AUTH,
+        payload: {},
+      });
+      expect(bad.statusCode).toBe(400);
+      const noAudio = await app2.inject({
+        method: 'POST',
+        url: '/internal/end_call',
+        headers: AUTH,
+        payload: { callerChatId: 'c1' },
+      });
+      expect(noAudio.statusCode).toBe(503);
+    } finally {
+      await app2.close();
+    }
+  });
+
+  it('ends the calling chat call, passing the goodbye, and reports whether one was open', async () => {
+    const { daemon, jobs } = setup();
+    const calls: Array<[string, string | undefined]> = [];
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      endOpenCall: async (chatId, goodbye) => {
+        calls.push([chatId, goodbye]);
+        return chatId === 'c1';
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/end_call',
+        headers: AUTH,
+        payload: { callerChatId: 'c1', message: 'Bye for now' },
+      });
+      expect(res.json()).toEqual({ ok: true, ended: true });
+      const other = await app.inject({
+        method: 'POST',
+        url: '/internal/end_call',
+        headers: AUTH,
+        payload: { callerChatId: 'c1', chatId: 'c2' },
+      });
+      expect(other.json()).toEqual({ ok: true, ended: false });
+      expect(calls).toEqual([
+        ['c1', 'Bye for now'],
+        ['c2', undefined],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('C1 Control IPC: POST /internal/call', () => {
   it('503s with no host; 400s a zod violation', async () => {
     const app = await buildControl({ localKey: LOCAL_KEY });

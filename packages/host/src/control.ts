@@ -405,6 +405,8 @@ export interface BuildOptions {
    * always wires it.
    */
   interruptOpenCall?: (text: string) => boolean;
+  /** Backs `patch_end_call`: hang up the open app call on a chat. Unset in smoke tests. */
+  endOpenCall?: (chatId: string, goodbye?: string) => Promise<boolean>;
 }
 
 const SendToBody = z
@@ -427,6 +429,15 @@ const SendToBody = z
      * don't double-deliver. See group 10 BLOCKER B2.
      */
     localId: z.string().min(1).max(128).optional(),
+  })
+  .strict();
+
+const EndCallBody = z
+  .object({
+    /** When omitted, the calling chat's call is ended. */
+    chatId: z.string().min(1).optional(),
+    message: z.string().min(1).optional(),
+    callerChatId: z.string().min(1),
   })
   .strict();
 
@@ -4419,6 +4430,33 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       ok: true,
     });
     return { ok: true, spokenIntoOpenCall };
+  });
+
+  // patch_end_call.
+  app.post('/internal/end_call', async (req, reply) => {
+    const start = Date.now();
+    if (require503(reply)) return;
+    const parsed = EndCallBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const { callerChatId } = parsed.data;
+    const targetChatId = parsed.data.chatId ?? callerChatId;
+    if (!opts.endOpenCall) {
+      return reply.code(503).send({
+        error: 'voice_unavailable',
+        message: 'this host runs no audio server, so it has no call to end',
+      } satisfies ErrorEnvelope);
+    }
+    const ended = await opts.endOpenCall(targetChatId, parsed.data.message);
+    toolLog({
+      tool: 'patch_end_call',
+      callerChatId,
+      targetChatId,
+      durationMs: Date.now() - start,
+      ok: true,
+    });
+    return { ok: true, ended };
   });
 
   // patch_job_list.

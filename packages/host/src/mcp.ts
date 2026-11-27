@@ -1695,6 +1695,26 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     },
   );
 
+  // ---- patch_end_call -----------------------------------------------------
+  server.registerTool(
+    'patch_end_call',
+    {
+      description:
+        'Hang up the open voice call on this chat once the conversation is finished. Pass message to say a short goodbye first. Returns ended:false when no call is open. Never end a call while the user is still mid-thought or has asked for something you have not done.',
+      inputSchema: {
+        chatId: z.string().min(1).optional(),
+        message: z.string().min(1).optional(),
+      },
+    },
+    async ({ chatId, message }) => {
+      const body: Record<string, unknown> = { callerChatId };
+      if (chatId !== undefined) body['chatId'] = chatId;
+      if (message !== undefined) body['message'] = message;
+      const res = await uds<unknown>({ method: 'POST', path: '/internal/end_call', body });
+      return toolResult(res);
+    },
+  );
+
   return server;
 }
 

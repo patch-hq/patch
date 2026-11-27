@@ -127,6 +127,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_cancel_wake',
         'patch_wake_status',
         'patch_doc_comment',
+        'patch_end_call',
         'patch_doc_convert',
         'patch_doc_export',
         'patch_doc_reply',

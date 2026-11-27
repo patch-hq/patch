@@ -439,6 +439,13 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'chatId?: string, message?: string',
   },
   {
+    name: patchToolId('patch_end_call'),
+    label: 'patch_end_call',
+    category: 'patch',
+    description: 'Hangs up the open voice call on this chat, with an optional spoken goodbye.',
+    params: 'chatId?: string, message?: string',
+  },
+  {
     name: patchToolId('patch_browser_open'),
     label: 'patch_browser_open',
     category: 'patch',
