@@ -118,7 +118,7 @@ A call demands attention in a way a notification doesn't, so agents reach for it
 
 ## Reaching the user
 
-How Patch is allowed to reach the user when no voice session is open is one account-wide setting with two values, set from the Manager surface (`14-design-web.md` § Manager view) and left alone for hours at a time:
+How Patch is allowed to reach the user when no voice session is open is one account-wide setting with two values, set from the phone's Voice tab (`15-design-mobile.md` § Voice tab (Manager)) and left alone for hours at a time:
 
 | Reach         | What it does                                                             | Good for                                          |
 | ------------- | ------------------------------------------------------------------------ | ------------------------------------------------- |
@@ -266,7 +266,7 @@ When a chat's turn settles — its status goes from running to idle — the serv
 
 - Desktop fires on every desktop surface except one that already has this exact chat open — it is already in front of the user, so the toast would only repeat what the screen already shows. If Patch is open on the computer at all the toast appears there; if it isn't, the notification is simply not delivered anywhere.
 - Push fires only when no computer surface is active — the user is somewhere other than the host Patch is on. A live phone surface does not suppress it, since being on the phone is exactly when the push is the point.
-- Archived and deleted chats are skipped, snoozed ones are silent (§ Snoozed chats), as are the special threads — Manager and Speakers each already reach the user through their own channel, and a Manager sweep ending is caused by other chats finishing rather than being news of its own.
+- Archived and deleted chats are skipped, snoozed ones are silent (§ Snoozed chats), as are the special threads — Manager and Speakers each already reach the user through their own channel, and a Manager turn answering finished chats is caused by other chats finishing rather than being news of its own.
 - A chat a job created is skipped when that job's action sets `notifyOnComplete: false` (`08-triggers-and-jobs.md` § Action). Absent — the default — the job's chats notify like any other.
 - A chat that is a member of the currently-running batch (`14-design-web.md` § Batch mode) is skipped, and so is § A turn that failed below for the same chat — that is the suppression the feature is for. It applies for as long as the batch is running, check-in included: the one check-in notification already said what there was to say, and a member finishing afterwards must not go back to pinging one at a time. § Waiting on you is unaffected — a permission ask is not a finish, and stays live.
 
@@ -318,7 +318,7 @@ The rule deliberately does not judge whether a turn's _content_ was interesting.
 
 ### A turn the user stopped
 
-Stopping a chat (`04-chats-and-folders.md` § Stopping) is silent. The turn did not finish, the user is the one who ended it, and they already know where it got to. The Manager sweep (`06-threads-manager-speakers.md` § The sweep) leaves it out of its gate for the same reason — its `settled` edge means "finished its turn".
+Stopping a chat (`04-chats-and-folders.md` § Stopping) is silent. The turn did not finish, the user is the one who ended it, and they already know where it got to. Finished chats (`06-threads-manager-speakers.md` § Finished chats) leaves it out for the same reason.
 
 The fact rides on `chat.state` as `turnStopped` (`03-wire-protocol.md`), stamped when the stop aborts the turn and cleared as the next turn goes running. It cannot be inferred from `chat.stopped` instead: the two are emitted independently and their order differs by case — a bare stop settles idle before the stop is announced, while a stop with turns queued behind it announces the stop first and the next idle belongs to the promoted turn, which really did complete and must notify. Optional on the wire, and absent reads as not stopped — the value that preserves the behaviour a host too old to send it already had.
 
@@ -350,7 +350,7 @@ The message names the chat and what is being asked: the question text itself for
 
 ## Snoozed chats
 
-While a chat is snoozed (`snoozedUntil > now`, `04-chats-and-folders.md` § Snooze) it produces no notification of any kind on any channel: push/FCM, desktop, the in-app toast and the bell. That covers chat completion, waiting on a permission or `AskUserQuestion`, `patch_ask_human`, `patch_report`, `patch_notify` at every importance, `patch_call` and errors. The rule is applied once, where every notification is routed (the server's notification router, the bell's log and the call orchestrator), by looking the chat up at the moment the notification would be sent; a notification that is dropped is not queued and is not replayed when the snooze ends. What the user sees instead is the Back state (`04-chats-and-folders.md` § Snooze → Back). A permission prompt or question raised while snoozed waits, and does not end the snooze. Not changed: an agent's `patch_send_to` into a snoozed chat ends the snooze, a permission prompt that expires still expires, and `manager-sweep` skips snoozed chats.
+While a chat is snoozed (`snoozedUntil > now`, `04-chats-and-folders.md` § Snooze) it produces no notification of any kind on any channel: push/FCM, desktop, the in-app toast and the bell. That covers chat completion, waiting on a permission or `AskUserQuestion`, `patch_ask_human`, `patch_report`, `patch_notify` at every importance, `patch_call` and errors. The rule is applied once, where every notification is routed (the server's notification router, the bell's log and the call orchestrator), by looking the chat up at the moment the notification would be sent; a notification that is dropped is not queued and is not replayed when the snooze ends. What the user sees instead is the Back state (`04-chats-and-folders.md` § Snooze → Back). A permission prompt or question raised while snoozed waits, and does not end the snooze. Not changed: an agent's `patch_send_to` into a snoozed chat ends the snooze, a permission prompt that expires still expires, and finished chats (`06-threads-manager-speakers.md` § Finished chats) skips snoozed chats.
 
 ## Batch check-in
 
