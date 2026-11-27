@@ -94,18 +94,6 @@ export interface SessionDeps {
      * speaks the full returned reply at the end (fallback).
      */
     onReplyText?: (chunk: string) => void;
-    /**
-     * spec/07 § The fast voice and the chat's agent — a fast voice handing a
-     * request to the chat's agent. The turn is tagged as a hand-off rather
-     * than as the user's own words, which are already in the timeline.
-     */
-    handoff?: boolean;
-    /**
-     * Called once the chat has the message and its turn has started. A hand-off
-     * must not be reported as passed on before this fires; if the promise rejects
-     * first, the message never arrived.
-     */
-    onAccepted?: () => void;
   }) => Promise<string>;
   /**
    * Returns the currently configured voice for this host's speech engine (a
@@ -411,12 +399,8 @@ export class VoiceSession implements VoiceSessionLike {
     return { backend: 'local', model, tokens: null, stt: { ...this.stt } };
   }
 
-  /** No fast voice on `local`: every utterance already is the agent's turn. */
-  pushContext(): void {}
-
-  isAwaitingHandoff(): boolean {
-    return false;
-  }
+  /** No voice agent on `local`: every utterance already is the agent's turn, and its reply is spoken. */
+  pushMessage(): void {}
 
   /**
    * What the session actually did, logged when it closes. A call the user says

@@ -13,6 +13,7 @@
 // rather than silently degrading.
 
 import {
+  AUDIO_NOTICE_CODES,
   decodeAudio,
   type AudioCallLogEvent,
   type AudioEvent,
@@ -61,6 +62,12 @@ export interface AudioSessionCallbacks {
   onLevel(level: number): void;
   /** Fatal session error (auth, concurrency cap, backend unavailable, …). */
   onError(message: string): void;
+  /** A failure the call carries on through (`AUDIO_NOTICE_CODES`): shown, not hung up on. */
+  onNotice?(message: string): void;
+  /** The voice agent passed a request to the chat's agent (it plays the passed to agent sound). */
+  onPassedToAgent?(): void;
+  /** The voice agent moved the call to another chat (spec/07 § A call stays on its chat). */
+  onChatSwitched?(chatId: string): void;
   /** WSS closed (clean or otherwise), with the close reason when one was given. */
   onClose(reason?: string): void;
 }
@@ -421,7 +428,17 @@ function dispatchFrame(frame: AudioEvent, cb: AudioSessionCallbacks, stopTts: ()
     case 'audio.heartbeat':
       cb.onHeartbeat?.(frame);
       return;
+    case 'audio.passed_to_agent':
+      cb.onPassedToAgent?.();
+      return;
+    case 'audio.chat_switched':
+      cb.onChatSwitched?.(frame.chatId);
+      return;
     case 'audio.error':
+      if (AUDIO_NOTICE_CODES.has(frame.code)) {
+        cb.onNotice?.(frame.message);
+        return;
+      }
       // `voice_key_missing` is already the whole sentence (key, host, the
       // Settings → Voice fix); every other code keeps its code prefix.
       cb.onError(

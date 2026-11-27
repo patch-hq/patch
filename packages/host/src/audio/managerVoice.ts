@@ -223,6 +223,29 @@ export const MANAGER_TOOL_PARAMS = {
 } as const;
 
 /** The built-in voice prompt; Settings → Manager can replace it (`managerVoicePrompt`). */
+/**
+ * The Manager voice's rule for a speaker who pauses mid-sentence. (An ordinary
+ * call's voice agent is told only the user's voice instructions; spec/07 §
+ * Voice instructions.)
+ */
+export const FRAGMENT_RULE =
+  'The user often pauses mid-sentence ("uh", "um", "so basically"). If what you heard is an ' +
+  'unfinished sentence, a fragment, or ends on a filler word or a dangling clause, it is not a ' +
+  'full request yet: say nothing and wait for the rest. Only respond once the request is ' +
+  'complete, and never ask "what do you mean?" about half a sentence.\n\n';
+
+/**
+ * The brief acknowledgement before a Manager tool that takes a while. Useful
+ * when the answer is a while coming, grating when it is the same two words
+ * every time or comes in front of an answer that was going to be instant.
+ */
+export const ACKNOWLEDGEMENT_RULE =
+  'A brief acknowledgement before a hand-off is optional. Skip it when the answer will be quick — ' +
+  'a short look-up, or a tool that answers at once — and just give the answer. When you do say ' +
+  'one, keep it to a few words and vary it: never the same words twice in a row, and not always ' +
+  '"one sec" (for instance "let me check", "on it", "I\'ll find out", "give me a moment", or just ' +
+  '"okay"). ';
+
 export const MANAGER_VOICE_PREAMBLE = `${DEFAULT_MANAGER_VOICE_PROMPT}\n\n`;
 
 export const MANAGER_TOOLS_RULE =
@@ -507,15 +530,54 @@ export function londonToEpoch(iso: string): number {
   return asUtc - (shown - asUtc);
 }
 
+/** The chats a call may name: not the Manager itself, nothing archived or deleted. */
+function nameableChats(all: ManagerChatEntry[]): ManagerChatEntry[] {
+  return all.filter(
+    (c) => c.chatId !== MANAGER_CHAT_ID && c.status !== 'archived' && c.status !== 'deleted',
+  );
+}
+
+/**
+ * The one chat a call means by an id or a spoken name (spec/07 § A call to the
+ * Manager, § A call stays on its chat): an id or an exact name wins, otherwise
+ * the words must pick out one chat. A name that fits none or several is a
+ * {@link ManagerChatLookupError} naming the choices, for the voice to ask about.
+ */
+export function resolveChat(listing: ManagerChatEntry[], chat: string): ManagerChatEntry {
+  const all = nameableChats(listing);
+  const wanted = chat.trim();
+  if (wanted === '') throw new ManagerChatLookupError('Say which chat.');
+  const byId = all.find((c) => c.chatId === wanted);
+  if (byId) return byId;
+  const lower = wanted.toLowerCase();
+  const exact = all.filter((c) => displayName(c).toLowerCase() === lower);
+  if (exact.length === 1) return exact[0]!;
+  const terms = words(wanted);
+  const partial =
+    exact.length > 1
+      ? exact
+      : all.filter((c) => {
+          const hay = words(`${displayName(c)} ${c.folder}`);
+          return terms.every((t) => hay.some((w) => w.startsWith(t)));
+        });
+  if (partial.length === 1) return partial[0]!;
+  if (partial.length === 0) {
+    throw new ManagerChatLookupError(`No chat matches "${wanted}".`);
+  }
+  throw new ManagerChatLookupError(
+    `Several chats match "${wanted}": ${partial
+      .slice(0, LIST_LIMIT)
+      .map((c) => `"${displayName(c)}"`)
+      .join(', ')}. Ask the user which one.`,
+  );
+}
+
 export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoiceTools {
   const now = deps.now ?? Date.now;
   /** Targets with a message out and no reply yet: a second send would cut the first off. */
   const awaiting = new Set<string>();
 
-  const candidates = async (): Promise<ManagerChatEntry[]> =>
-    (await deps.listChats()).filter(
-      (c) => c.chatId !== MANAGER_CHAT_ID && c.status !== 'archived' && c.status !== 'deleted',
-    );
+  const candidates = async (): Promise<ManagerChatEntry[]> => nameableChats(await deps.listChats());
 
   const line = (c: ManagerChatEntry): string => {
     const parts = [statusWords(c.chatStatus)];
@@ -524,34 +586,8 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
   };
 
   /** One chat for an id or a spoken name; a lookup error when it is none or several. */
-  const resolve = async (chat: string): Promise<ManagerChatEntry> => {
-    const all = await candidates();
-    const wanted = chat.trim();
-    if (wanted === '') throw new ManagerChatLookupError('Say which chat.');
-    const byId = all.find((c) => c.chatId === wanted);
-    if (byId) return byId;
-    const lower = wanted.toLowerCase();
-    const exact = all.filter((c) => displayName(c).toLowerCase() === lower);
-    if (exact.length === 1) return exact[0]!;
-    const terms = words(wanted);
-    const partial =
-      exact.length > 1
-        ? exact
-        : all.filter((c) => {
-            const hay = words(`${displayName(c)} ${c.folder}`);
-            return terms.every((t) => hay.some((w) => w.startsWith(t)));
-          });
-    if (partial.length === 1) return partial[0]!;
-    if (partial.length === 0) {
-      throw new ManagerChatLookupError(`No chat matches "${wanted}".`);
-    }
-    throw new ManagerChatLookupError(
-      `Several chats match "${wanted}": ${partial
-        .slice(0, LIST_LIMIT)
-        .map((c) => `"${displayName(c)}"`)
-        .join(', ')}. Ask the user which one.`,
-    );
-  };
+  const resolve = async (chat: string): Promise<ManagerChatEntry> =>
+    resolveChat(await deps.listChats(), chat);
 
   return {
     ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
@@ -748,3 +784,24 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
     },
   };
 }
+
+/**
+ * The voice's instructions on a call to the Manager (spec/07 § A call to the
+ * Manager). `asyncResult`: a chat's reply arrives later as a message (Gemini)
+ * rather than as the send tool's own return (OpenAI Realtime, ElevenLabs).
+ */
+export function managerHostedInstruction(asyncResult: boolean, voicePrompt?: string): string {
+  const preamble = voicePrompt?.trim() ? `${voicePrompt.trim()}\n\n` : MANAGER_VOICE_PREAMBLE;
+  return (
+    preamble +
+    FRAGMENT_RULE +
+    MANAGER_TOOLS_RULE +
+    ACKNOWLEDGEMENT_RULE +
+    '\n\n' +
+    (asyncResult ? MANAGER_ASYNC_REPLY_RULE : MANAGER_BLOCKING_REPLY_RULE)
+  ).trimEnd();
+}
+
+/** Added to a chat's reply on a Manager call so the voice gives the gist rather than reading it out. */
+export const RESULT_GIST_NOTE =
+  '(Give the user the gist of this in one short sentence; do not read it out.)\n\n';

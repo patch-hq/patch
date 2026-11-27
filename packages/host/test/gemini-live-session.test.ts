@@ -7,16 +7,18 @@ import { describe, test, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import type { WebSocket as WsSocket } from 'ws';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import {
   GeminiLiveSession,
-  DISPATCH_TOOL_NAME,
   DEFAULT_GEMINI_LIVE_MODEL,
   DEFAULT_GEMINI_LIVE_HEAVY_MODEL,
   geminiLiveModelFor,
   type GeminiLiveDeps,
 } from '../src/audio/gemini-live.js';
 import { MockVad } from '../src/audio/vad.js';
-import type { SessionInit, VoiceTurnSource } from '../src/audio/session.js';
+import type { SessionInit } from '../src/audio/session.js';
+import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
 import type { AudioEvent } from '@patch/wire/audio';
 
 const logger = pino({ level: 'silent' });
@@ -63,7 +65,11 @@ export class FakeTimeline {
   userSaid(chatId: string, text: string): void {
     this.log.push(`user:${chatId}:${text}`);
   }
-  beginReply(chatId: string): { append(d: string): void; finish(): void } {
+  beginReply(chatId: string): {
+    append(d: string): void;
+    finish(heard?: string): void;
+    text(): string;
+  } {
     let text = '';
     this.log.push(`begin:${chatId}`);
     return {
@@ -71,9 +77,10 @@ export class FakeTimeline {
         text += d;
         this.log.push(`delta:${d}`);
       },
-      finish: () => {
-        this.log.push(`reply:${chatId}:${text}`);
+      finish: (heard?: string) => {
+        this.log.push(`reply:${chatId}:${heard ?? text}`);
       },
+      text: () => text,
     };
   }
 }
@@ -90,16 +97,14 @@ function makeDeps(overrides: Partial<GeminiLiveDeps> = {}): {
   audioEvents: AudioEvent[];
   binaryFrames: Int16Array[];
   lastWs: { current?: FakeGeminiWs };
-  submitUserTurn: ReturnType<typeof vi.fn>;
+  passed: ReturnType<typeof fakeVoiceAgentLink>['passed'];
+  link: ReturnType<typeof fakeVoiceAgentLink>['link'];
   timeline: FakeTimeline;
 } {
   const audioEvents: AudioEvent[] = [];
   const binaryFrames: Int16Array[] = [];
   const lastWs: { current?: FakeGeminiWs } = {};
-  const submitUserTurn = vi.fn(async (args: { onAccepted?: () => void }) => {
-    args.onAccepted?.();
-    return 'the heavy agent reply';
-  });
+  const { link, passed } = fakeVoiceAgentLink();
   const timeline = new FakeTimeline();
   const wsCtor = function (this: FakeGeminiWs, url: string): FakeGeminiWs {
     const inst = new FakeGeminiWs(url);
@@ -110,13 +115,14 @@ function makeDeps(overrides: Partial<GeminiLiveDeps> = {}): {
     logger,
     sendAudio: (ev) => audioEvents.push(ev),
     sendBinary: (pcm) => binaryFrames.push(pcm),
-    submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
+    link,
+    instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'test-key',
     wsCtor,
     timeline,
     ...overrides,
   };
-  return { deps, audioEvents, binaryFrames, lastWs, submitUserTurn, timeline };
+  return { deps, audioEvents, binaryFrames, lastWs, passed, link, timeline };
 }
 
 /** Drive a session through connect + setupComplete, returning the fake ws. */
@@ -186,7 +192,7 @@ describe('GeminiLiveSession — connect + setup', () => {
     const [first] = ws.sentJson() as [{ setup: { model: string; tools: unknown[] } }];
     expect(first.setup.model).toBe(DEFAULT_GEMINI_LIVE_MODEL);
     const tools = first.setup.tools as Array<{ functionDeclarations: Array<{ name: string }> }>;
-    expect(tools[0]?.functionDeclarations[0]?.name).toBe(DISPATCH_TOOL_NAME);
+    expect(tools[0]?.functionDeclarations[0]?.name).toBe(PASS_TO_AGENT_TOOL_NAME);
   });
 
   test('honours a model override', async () => {
@@ -210,56 +216,87 @@ describe('GeminiLiveSession — connect + setup', () => {
     expect(setup2.setup.generationConfig.speechConfig).toBeUndefined();
   });
 
-  test('puts a briefing on the chat in the instructions, so the voice knows what the chat is from its first word', async () => {
-    const getChatContext = vi.fn(async () => [
-      { role: 'user' as const, text: '(This chat is titled "Train times".)' },
-      { role: 'user' as const, text: '(It began with the user saying: "when is my train")' },
-      { role: 'user' as const, text: 'what time is my train' },
-      { role: 'model' as const, text: 'the 09:14' },
-    ]);
-    const { deps, lastWs } = makeDeps({ getChatContext });
+  test('the instructions are the voice instructions, then the chat as it stands — nothing else', async () => {
+    const { deps, lastWs, link } = makeDeps({ instructions: 'Be the voice of this chat.' });
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
-    expect(getChatContext).toHaveBeenCalledWith('chat-1');
+    expect(link.startContext).toHaveBeenCalledWith('chat-1');
     const [first] = ws.sentJson() as [
       { setup: { systemInstruction: { parts: Array<{ text: string }> } } },
     ];
-    const instruction = first.setup.systemInstruction.parts[0]!.text;
-    expect(instruction).toContain('This chat is titled "Train times"');
-    expect(instruction).toContain('It began with the user saying: "when is my train"');
-    expect(instruction).toContain('User: what time is my train');
-    expect(instruction).toContain('Agent: the 09:14');
+    expect(first.setup.systemInstruction.parts[0]!.text).toBe(
+      `Be the voice of this chat.\n\n${FAKE_START_CONTEXT}`,
+    );
     // The history is not replayed as turns as well.
     expect(ws.sentJson().some((f) => 'clientContent' in (f as object))).toBe(false);
   });
 
-  test('logs the whole briefing the voice was given, so it can be read back', async () => {
-    const lines: Array<Record<string, unknown>> = [];
-    const logger = {
-      info: (o: Record<string, unknown>, msg: string) => lines.push({ ...o, msg }),
-      warn: () => undefined,
-      error: () => undefined,
-      debug: () => undefined,
-    } as unknown as GeminiLiveDeps['logger'];
-    const { deps, lastWs } = makeDeps({
-      logger,
-      getChatContext: async () => [
-        { role: 'user' as const, text: '(This chat is titled "Train times".)' },
-        { role: 'user' as const, text: 'what time is my train' },
-      ],
-    });
-    await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
-    const line = lines.find((l) => l['msg'] === 'gemini-live: chat briefing');
-    expect(line?.['messages']).toBe(2);
-    expect(String(line?.['briefing'])).toContain('Train times');
-    expect(String(line?.['briefing'])).toContain('User: what time is my train');
-    expect(line?.['chars']).toBe(String(line?.['briefing']).length);
+  test('the tone goes after the instructions and before the start context', async () => {
+    const { deps, lastWs } = makeDeps({ instructions: 'Voice.', tone: 'Calm and slow.' });
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
+    const [first] = ws.sentJson() as [
+      { setup: { systemInstruction: { parts: Array<{ text: string }> } } },
+    ];
+    expect(first.setup.systemInstruction.parts[0]!.text).toBe(
+      `Voice.\n\nCalm and slow.\n\n${FAKE_START_CONTEXT}`,
+    );
   });
 
-  test('opens with no context when getChatContext is absent — not an error', async () => {
-    const { deps, lastWs } = makeDeps();
+  test('a chat that cannot be read fails the session loudly', async () => {
+    const { link } = fakeVoiceAgentLink({
+      startContext: () => {
+        throw new Error('chat chat-1 not found');
+      },
+    });
+    const { deps, lastWs, audioEvents } = makeDeps({ link });
     const session = new GeminiLiveSession(makeInit(), deps);
-    await expect(openSession(session, lastWs)).resolves.toBeDefined();
+    session.onSessionStart();
+    await vi.waitFor(() => expect(lastWs.current).toBeDefined());
+    lastWs.current!.emit('open');
+    await vi.waitFor(() =>
+      expect(audioEvents.some((e) => e.type === 'audio.error' && /not found/.test(e.message))).toBe(
+        true,
+      ),
+    );
+    expect(session.getState()).not.toBe('listening');
+  });
+
+  test('a catch-up written while the call connects is added to the conversation without a reply', async () => {
+    let write!: (text: string) => void;
+    const catchUp = new Promise<string>((r) => (write = r));
+    const { link } = fakeVoiceAgentLink({
+      startContext: () => ({ text: FAKE_START_CONTEXT, catchUp }),
+    });
+    const { deps, lastWs } = makeDeps({ link });
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
+    write('They are planning a trip to Leeds.');
+    await vi.waitFor(() => expect(clientTurns(ws)).toHaveLength(1));
+    expect(clientTurns(ws)[0]).toContain('They are planning a trip to Leeds.');
+    const frame = (ws.sentJson() as Array<{ clientContent?: { turnComplete: boolean } }>).find(
+      (f) => f.clientContent,
+    );
+    expect(frame?.clientContent?.turnComplete).toBe(false);
+  });
+
+  test('a catch-up that fails is shown on the call bar and the call carries on', async () => {
+    const { link } = fakeVoiceAgentLink({
+      startContext: () => ({
+        text: FAKE_START_CONTEXT,
+        catchUp: Promise.reject(new Error('every small-job model failed')),
+      }),
+    });
+    const { deps, lastWs, audioEvents } = makeDeps({ link });
+    const session = new GeminiLiveSession(makeInit(), deps);
+    await openSession(session, lastWs);
+    await vi.waitFor(() =>
+      expect(
+        audioEvents.some(
+          (e) =>
+            e.type === 'audio.error' && e.code === 'catch_up_failed' && /small-job/.test(e.message),
+        ),
+      ).toBe(true),
+    );
+    expect(session.getState()).toBe('listening');
   });
 
   test('emits gemini_unavailable and never sets state=listening when the socket errors before open', async () => {
@@ -425,7 +462,7 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
   });
 
   test('a light-layer-only turn with no dispatch still produces exactly one transcript_final + tts_end', async () => {
-    const { deps, lastWs, audioEvents, submitUserTurn } = makeDeps();
+    const { deps, lastWs, audioEvents, passed } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend({
@@ -439,8 +476,8 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
       expect(audioEvents.filter((e) => e.type === 'audio.transcript_final').length).toBe(1),
     );
     expect(audioEvents.filter((e) => e.type === 'audio.tts_end').length).toBe(1);
-    // The light layer answered this itself — no dispatch to the heavy agent.
-    expect(submitUserTurn).not.toHaveBeenCalled();
+    // The voice answered this itself — nothing passed to the chat's agent.
+    expect(passed).toHaveLength(0);
   });
 
   test('barge-in (interrupted) emits audio.barge_in + tts_end{bargedIn:true} and returns to listening', async () => {
@@ -474,31 +511,24 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
   });
 });
 
-describe('GeminiLiveSession — dispatch to the heavy agent', () => {
-  test('a dispatch_to_patch tool call invokes submitUserTurn and sends the reply back as a toolResponse', async () => {
-    const { deps, lastWs, submitUserTurn } = makeDeps();
+describe('GeminiLiveSession — pass to agent', () => {
+  test('answers "received" at once and passes the request to the chat agent', async () => {
+    const { deps, lastWs, passed } = makeDeps();
     const init = makeInit({ surfaceKind: 'mobile', sessionId: 'sess-42', chatId: 'chat-42' });
     const session = new GeminiLiveSession(init, deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend({
       toolCall: {
         functionCalls: [
-          { id: 'call-1', name: DISPATCH_TOOL_NAME, args: { request: 'add milk to my list' } },
+          { id: 'call-1', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'add milk to my list' } },
         ],
       },
     });
-    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalledTimes(1));
-    const call = submitUserTurn.mock.calls[0]![0] as {
-      chatId: string;
-      message: string;
-      source: VoiceTurnSource;
-    };
-    expect(call.chatId).toBe('chat-42');
-    expect(call.message).toBe('add milk to my list');
-    expect(call.source).toEqual({ kind: 'voice-app', surfaceKind: 'mobile', sessionId: 'sess-42' });
-    // The call is answered at once, so nothing stays pending on Gemini's side …
     await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('toolResponse'))).toBe(true));
-    const started = (
+    expect(passed).toEqual([
+      { sessionId: 'sess-42', chatId: 'chat-42', request: 'add milk to my list' },
+    ]);
+    const answered = (
       ws.sentJson() as Array<{
         toolResponse?: {
           functionResponses: Array<{
@@ -509,14 +539,13 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
         };
       }>
     ).find((f) => f.toolResponse);
-    expect(started?.toolResponse?.functionResponses[0]).toMatchObject({
+    expect(answered?.toolResponse?.functionResponses[0]).toMatchObject({
       id: 'call-1',
-      name: DISPATCH_TOOL_NAME,
-      response: { result: 'started', scheduling: 'WHEN_IDLE' },
+      name: PASS_TO_AGENT_TOOL_NAME,
+      response: { result: 'received', scheduling: 'WHEN_IDLE' },
     });
-    // … and the agent's answer arrives later, as a message.
-    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('clientContent'))).toBe(true));
-    expect(clientTurns(ws)[0]).toContain('the heavy agent reply');
+    // Nothing is said on the agent's behalf until its answer is pushed.
+    expect(clientTurns(ws)).toHaveLength(0);
   });
 
   test('dispatches count toward stats().turns via the following turnComplete', async () => {
@@ -527,7 +556,7 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
     ws.serverSend({
       toolCall: {
         functionCalls: [
-          { id: 'c1', name: DISPATCH_TOOL_NAME, args: { request: "what's my next train" } },
+          { id: 'c1', name: PASS_TO_AGENT_TOOL_NAME, args: { request: "what's my next train" } },
         ],
       },
     });
@@ -539,60 +568,95 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
     await vi.waitFor(() => expect(session.stats().turns).toBe(1));
   });
 
-  test('a dispatch the chat never received is reported as an error, and the voice is told it did not go through', async () => {
-    const submitUserTurn = vi.fn(async () => {
-      throw new Error('host offline');
+  test('a request that could not be passed on is an error, and the voice is told so', async () => {
+    const { link } = fakeVoiceAgentLink({
+      passToAgent: () => {
+        throw new Error('chat chat-1 not found');
+      },
     });
-    const { deps, lastWs, audioEvents } = makeDeps({
-      submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
-    });
+    const { deps, lastWs, audioEvents } = makeDeps({ link });
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend({
       toolCall: {
-        functionCalls: [{ id: 'c2', name: DISPATCH_TOOL_NAME, args: { request: 'do a thing' } }],
+        functionCalls: [
+          { id: 'c2', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'do a thing' } },
+        ],
       },
     });
-    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('"failed"'))).toBe(true));
-    expect(ws.sent.some((s) => s.includes('"started"'))).toBe(false);
-    expect(
-      audioEvents.some((e) => e.type === 'audio.error' && /host offline/.test(e.message)),
-    ).toBe(true);
-  });
-
-  test('the voice is not told it has passed a request on until the chat has accepted it', async () => {
-    let accept!: () => void;
-    const submitUserTurn = vi.fn(
-      (args: { onAccepted?: () => void }) =>
-        new Promise<string>(() => {
-          accept = () => args.onAccepted?.();
-        }),
+    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('Not passed on'))).toBe(true));
+    expect(ws.sent.some((s) => s.includes('"received"'))).toBe(false);
+    expect(audioEvents.some((e) => e.type === 'audio.error' && /not found/.test(e.message))).toBe(
+      true,
     );
-    const { deps, lastWs } = makeDeps({
-      submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
-    });
+  });
+
+  test('check_status, look_back and switch_chat are answered from the host at once', async () => {
+    const { deps, lastWs, link } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend({
       toolCall: {
-        functionCalls: [{ id: 'c3', name: DISPATCH_TOOL_NAME, args: { request: 'bread' } }],
+        functionCalls: [
+          { id: 's1', name: 'check_status', args: {} },
+          { id: 's2', name: 'look_back', args: { query: 'dentist' } },
+          { id: 's3', name: 'switch_chat', args: { chat: 'x' } },
+        ],
       },
     });
-    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalled());
-    expect(ws.sent.some((s) => s.includes('"started"'))).toBe(false);
-    accept();
-    expect(ws.sent.some((s) => s.includes('"started"'))).toBe(true);
+    await vi.waitFor(() =>
+      expect(ws.sent.filter((s) => s.includes('toolResponse'))).toHaveLength(3),
+    );
+    expect(link.checkStatus).toHaveBeenCalledWith('sess-1', 'chat-1');
+    expect(link.lookBack).toHaveBeenCalledWith('chat-1', 'dentist');
+    expect(link.switchChat).toHaveBeenCalledWith('sess-1', 'chat-1', 'x');
+    const results = (
+      ws.sentJson() as Array<{
+        toolResponse?: {
+          functionResponses: Array<{ response: { result: string; scheduling: string } }>;
+        };
+      }>
+    ).flatMap((f) => f.toolResponse?.functionResponses ?? []);
+    expect(results.map((r) => r.response.result)).toEqual([
+      'status of chat-1',
+      'found in chat-1: dentist on Tuesday',
+      'No chat matches "x".',
+    ]);
+    expect(results.every((r) => r.response.scheduling === 'INTERRUPT')).toBe(true);
   });
 
-  test('ignores a function call for a tool name other than dispatch_to_patch', async () => {
-    const { deps, lastWs, submitUserTurn } = makeDeps();
+  test('switch_chat moves the call: its words land in the new chat and its context is in the answer', async () => {
+    const { link } = fakeVoiceAgentLink({
+      switchChat: async () => ({
+        ok: true,
+        chatId: 'chat-2',
+        name: 'Garden',
+        context: { text: 'THE CHAT AS IT STANDS\nChat: Garden', catchUp: null },
+      }),
+    });
+    const { deps, lastWs, timeline } = makeDeps({ link });
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    ws.serverSend({
+      toolCall: { functionCalls: [{ id: 'w1', name: 'switch_chat', args: { chat: 'garden' } }] },
+    });
+    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('Chat: Garden'))).toBe(true));
+    expect(session.getCurrentChatId()).toBe('chat-2');
+    ws.serverSend({ serverContent: { inputTranscription: { text: 'how are the roses' } } });
+    ws.serverSend({ serverContent: { outputTranscription: { text: 'Fine.' } } });
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await vi.waitFor(() => expect(timeline.log).toContain('user:chat-2:how are the roses'));
+  });
+
+  test('an unknown tool is answered as unknown, and nothing is passed on', async () => {
+    const { deps, lastWs, passed } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend({
       toolCall: { functionCalls: [{ id: 'x', name: 'some_other_tool', args: {} }] },
     });
-    await new Promise((r) => setTimeout(r, 20));
-    expect(submitUserTurn).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('no tool called'))).toBe(true));
+    expect(passed).toHaveLength(0);
   });
 });
 
@@ -751,6 +815,8 @@ describe('GeminiLiveSession — one conversation with the chat', () => {
     ws.serverSend({ serverContent: { outputTranscription: { text: 'of gas.' } } });
     ws.serverSend({ serverContent: { turnComplete: true } });
 
+    // Written once it has played out.
+    await vi.waitFor(() => expect(timeline.log.at(-1)).toMatch(/^reply:/));
     expect(timeline.log).toEqual([
       'user:chat-1:what is a nebula',
       'begin:chat-1',
@@ -766,122 +832,85 @@ describe('GeminiLiveSession — one conversation with the chat', () => {
     expect(finalIdx).toBeLessThan(ttsIdx);
   });
 
-  test("a hand-off flushes the words and the bridge, goes to the chat's agent tagged as a hand-off, and what the voice says of the answer is written too", async () => {
-    const { deps, lastWs, timeline, submitUserTurn } = makeDeps();
+  test("a hand-off flushes the words and the bridge, goes to the chat's agent, and what the voice says of the answer is written too", async () => {
+    const { deps, lastWs, timeline, passed } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
 
     ws.serverSend({ serverContent: { inputTranscription: { text: 'add milk to my list' } } });
-    ws.serverSend({ serverContent: { outputTranscription: { text: 'One sec.' } } });
+    ws.serverSend({ serverContent: { outputTranscription: { text: 'Passing that on.' } } });
     ws.serverSend({
       toolCall: {
-        functionCalls: [{ id: 'call-1', name: DISPATCH_TOOL_NAME, args: { request: 'Add milk' } }],
+        functionCalls: [
+          { id: 'call-1', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'Add milk' } },
+        ],
       },
     });
-    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalled());
-    expect(submitUserTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: 'chat-1', message: 'Add milk', handoff: true }),
-    );
+    await vi.waitFor(() => expect(passed).toHaveLength(1));
+    expect(passed[0]).toMatchObject({ chatId: 'chat-1', request: 'Add milk' });
     expect(timeline.log).toEqual([
       'user:chat-1:add milk to my list',
       'begin:chat-1',
-      'delta:One sec.',
-      'reply:chat-1:One sec.',
+      'delta:Passing that on.',
+      'reply:chat-1:Passing that on.',
     ]);
-    // The bridge turn ends, then the model speaks the agent's answer.
     ws.serverSend({ serverContent: { turnComplete: true } });
-    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('toolResponse'))).toBe(true));
+    // The answer is pushed in; the model speaks the gist, which is written too.
+    session.pushMessage("Answer from the chat's agent: milk added", { handoffSettled: true });
+    await vi.waitFor(() => expect(clientTurns(ws)).toHaveLength(1));
     ws.serverSend({ serverContent: { outputTranscription: { text: 'Milk is on the list.' } } });
     ws.serverSend({ serverContent: { turnComplete: true } });
     expect(timeline.log.filter((l) => l.startsWith('reply:'))).toEqual([
-      'reply:chat-1:One sec.',
+      'reply:chat-1:Passing that on.',
       'reply:chat-1:Milk is on the list.',
     ]);
-    expect(session.isAwaitingHandoff()).toBe(false);
   });
 
-  test('a message landing in the chat is a short quiet note from the user side, not asking for an answer', async () => {
-    const { deps, lastWs } = makeDeps();
-    const session = new GeminiLiveSession(makeInit(), deps);
-    const ws = await openSession(session, lastWs);
-    session.pushContext('assistant', 'The build finished.');
-    const last = ws.sentJson().at(-1) as {
-      clientContent: {
-        turns: Array<{ role: string; parts: Array<{ text: string }> }>;
-        turnComplete: boolean;
-      };
-    };
-    expect(last.clientContent.turnComplete).toBe(false);
-    expect(last.clientContent.turns[0]!.role).toBe('user');
-    expect(last.clientContent.turns[0]!.parts[0]!.text).toContain(
-      'the agent wrote in the chat: "The build finished."',
-    );
-  });
-
-  test('look_back: declared only when the host can search, and answered at once from the chat', async () => {
-    const without = makeDeps();
-    const w0 = await openSession(new GeminiLiveSession(makeInit(), without.deps), without.lastWs);
-    const [first0] = w0.sentJson() as [{ setup: { tools?: unknown } }];
-    expect(JSON.stringify(first0.setup.tools ?? [])).not.toContain('look_back');
-
-    const lookBack = vi.fn(() => 'User: why was it archived');
-    const { deps, lastWs } = makeDeps({ lookBack });
-    const session = new GeminiLiveSession(makeInit({ chatId: 'chat-9' }), deps);
-    const ws = await openSession(session, lastWs);
+  test('the instructions carry no rules of the host’s own: tools say what they do', async () => {
+    const { deps, lastWs } = makeDeps({ instructions: 'Only this.' });
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
     const [first] = ws.sentJson() as [
       {
         setup: {
-          tools: Array<{ functionDeclarations: Array<{ name: string }> }>;
-          systemInstruction: { parts: Array<{ text: string }> };
+          systemInstruction: { parts: [{ text: string }] };
+          tools: Array<{ functionDeclarations: Array<{ name: string; description: string }> }>;
         };
       },
     ];
-    expect(first.setup.tools[0]!.functionDeclarations.map((d) => d.name)).toEqual([
-      DISPATCH_TOOL_NAME,
+    expect(first.setup.systemInstruction.parts[0].text.startsWith('Only this.\n\n')).toBe(true);
+    expect(first.setup.systemInstruction.parts[0].text).not.toMatch(/acknowledgement|one sec/i);
+    const decls = first.setup.tools[0]!.functionDeclarations;
+    expect(decls.map((d) => d.name)).toEqual([
+      PASS_TO_AGENT_TOOL_NAME,
+      'check_status',
       'look_back',
+      'end_call',
+      'switch_chat',
     ]);
-    expect(first.setup.systemInstruction.parts[0]!.text).toContain('call look_back');
-    ws.serverSend({
-      toolCall: { functionCalls: [{ id: 'lb-1', name: 'look_back', args: { query: 'archived' } }] },
-    });
-    await vi.waitFor(() => expect(lookBack).toHaveBeenCalledWith('chat-9', 'archived'));
-    const reply = (ws.sentJson() as Array<Record<string, unknown>>).find(
-      (f) => 'toolResponse' in f,
-    ) as {
-      toolResponse: {
-        functionResponses: Array<{ id: string; response: { result: string; scheduling: string } }>;
-      };
-    };
-    expect(reply.toolResponse.functionResponses[0]).toMatchObject({
-      id: 'lb-1',
-      response: { result: 'User: why was it archived', scheduling: 'INTERRUPT' },
-    });
+    expect(decls[0]!.description).toMatch(/received/);
   });
 
-  test('look_back that throws says so to the voice and in the log, never silently', async () => {
-    const lookBack = vi.fn(() => {
-      throw new Error('chat gone');
-    });
-    const { deps, lastWs } = makeDeps({ lookBack });
-    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
-    ws.serverSend({
-      toolCall: { functionCalls: [{ id: 'lb-2', name: 'look_back', args: { query: 'x' } }] },
-    });
-    await vi.waitFor(() =>
-      expect(ws.sent.some((s) => s.includes('Looking back failed: chat gone'))).toBe(true),
-    );
-  });
-
-  test('the instruction makes it the voice of this conversation, not an assistant with no knowledge', async () => {
-    const { deps, lastWs } = makeDeps();
+  test('a barge-in writes only what was heard of the reply into the chat', async () => {
+    const { deps, lastWs, timeline } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
-    const [first] = ws.sentJson() as [
-      { setup: { systemInstruction: { parts: [{ text: string }] } } },
-    ];
-    const text = first.setup.systemInstruction.parts[0].text;
-    expect(text).toContain('voice of this conversation');
-    expect(text).not.toContain('NO access');
+    ws.serverSend({ serverContent: { inputTranscription: { text: 'tell me a story' } } });
+    // 2s of audio and its words arrive at once; the user cuts in after a fraction of it.
+    const pcm = new Int16Array(48_000);
+    const data = Buffer.from(pcm.buffer).toString('base64');
+    ws.serverSend({
+      serverContent: {
+        modelTurn: { parts: [{ inlineData: { data } }] },
+        outputTranscription: { text: 'Once upon a time there was a very long story indeed.' },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    ws.serverSend({ serverContent: { interrupted: true } });
+    const reply = timeline.log.find((l) => l.startsWith('reply:'))!;
+    expect(reply).toMatch(/^reply:chat-1:Once upon/);
+    expect(reply.length).toBeLessThan(
+      'reply:chat-1:Once upon a time there was a very long story indeed.'.length,
+    );
   });
 
   test('tallies the usage Gemini reports, the last report of each turn, by modality', async () => {
@@ -914,22 +943,6 @@ describe('GeminiLiveSession — one conversation with the chat', () => {
   });
 });
 
-/** A hand-off the test resolves when it chooses. */
-function pendingHandoff(): {
-  submit: GeminiLiveDeps['submitUserTurn'];
-  resolve: (reply: string) => void;
-} {
-  let resolve!: (reply: string) => void;
-  const done = new Promise<string>((r) => (resolve = r));
-  return {
-    submit: (async (args: { onAccepted?: () => void }) => {
-      args.onAccepted?.();
-      return done;
-    }) as unknown as GeminiLiveDeps['submitUserTurn'],
-    resolve,
-  };
-}
-
 function speech(): unknown {
   const pcm = new Int16Array([1, 2]);
   const data = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64');
@@ -938,14 +951,18 @@ function speech(): unknown {
 
 const dispatchCall = {
   toolCall: {
-    functionCalls: [{ id: 'call-1', name: DISPATCH_TOOL_NAME, args: { request: 'list files' } }],
+    functionCalls: [
+      { id: 'call-1', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'list files' } },
+    ],
   },
 };
 
 describe('GeminiLiveSession — waiting on a hand-off', () => {
+  const answer = (session: GeminiLiveSession, text: string): void =>
+    session.pushMessage(`Answer from the chat's agent: ${text}`, { handoffSettled: true });
+
   test('one acknowledgement is spoken; the model talking on its own after that is dropped', async () => {
-    const handoff = pendingHandoff();
-    const { deps, lastWs, binaryFrames } = makeDeps({ submitUserTurn: handoff.submit });
+    const { deps, lastWs, binaryFrames } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend({ serverContent: { inputTranscription: { text: 'list the files' } } });
@@ -961,12 +978,12 @@ describe('GeminiLiveSession — waiting on a hand-off', () => {
     ws.serverSend(speech()); // "waiting"
     ws.serverSend({ serverContent: { turnComplete: true } });
     expect(binaryFrames.length).toBe(2);
-    expect(session.getState()).toBe('thinking');
+    // The voice carries on: the line is open for the user.
+    expect(session.getState()).toBe('listening');
   });
 
   test('what the user says while waiting still gets a spoken reply', async () => {
-    const handoff = pendingHandoff();
-    const { deps, lastWs, binaryFrames } = makeDeps({ submitUserTurn: handoff.submit });
+    const { deps, lastWs, binaryFrames } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend(dispatchCall);
@@ -983,32 +1000,28 @@ describe('GeminiLiveSession — waiting on a hand-off', () => {
   });
 
   test('the agent answer is said as a message once the conversation is quiet', async () => {
-    const handoff = pendingHandoff();
-    const { deps, lastWs, audioEvents } = makeDeps({ submitUserTurn: handoff.submit });
+    const { deps, lastWs, audioEvents } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend(dispatchCall);
     ws.serverSend({ serverContent: { turnComplete: true } });
-    handoff.resolve('index.html');
+    answer(session, 'index.html');
     await vi.waitFor(() => expect(clientTurns(ws)).toHaveLength(1));
     expect(clientTurns(ws)[0]).toContain('index.html');
     // The model speaks it; that is the agent's reply, already in the chat.
     ws.serverSend(speech());
     ws.serverSend({ serverContent: { turnComplete: true } });
     expect(audioEvents.some((e) => e.type === 'audio.error')).toBe(false);
-    expect(session.isAwaitingHandoff()).toBe(false);
   });
 
   test('the answer waits while the user is talking, and is said when they stop', async () => {
-    const handoff = pendingHandoff();
-    const { deps, lastWs } = makeDeps({ submitUserTurn: handoff.submit });
+    const { deps, lastWs } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend(dispatchCall);
     ws.serverSend({ serverContent: { turnComplete: true } });
     ws.serverSend({ serverContent: { inputTranscription: { text: 'and another thing' } } });
-    handoff.resolve('index.html');
-    await vi.waitFor(() => expect(session.isAwaitingHandoff()).toBe(true));
+    answer(session, 'index.html');
     await new Promise((r) => setTimeout(r, 30));
     expect(clientTurns(ws)).toHaveLength(0);
     ws.serverSend(speech());
@@ -1016,27 +1029,37 @@ describe('GeminiLiveSession — waiting on a hand-off', () => {
     await vi.waitFor(() => expect(clientTurns(ws)).toHaveLength(1));
   });
 
+  test('pushes are said one at a time, in the order they arrived', async () => {
+    const { deps, lastWs } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    session.pushMessage('first');
+    session.pushMessage('second');
+    await vi.waitFor(() => expect(clientTurns(ws)).toEqual(['first']));
+    ws.serverSend(speech());
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await vi.waitFor(() => expect(clientTurns(ws)).toEqual(['first', 'second']));
+  });
+
   test('a server cancellation does not lose the answer', async () => {
-    const handoff = pendingHandoff();
-    const { deps, lastWs } = makeDeps({ submitUserTurn: handoff.submit });
+    const { deps, lastWs } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend(dispatchCall);
     ws.serverSend({ serverContent: { turnComplete: true } });
     ws.serverSend({ toolCallCancellation: { ids: ['call-1'] } });
-    handoff.resolve('index.html');
+    answer(session, 'index.html');
     await vi.waitFor(() => expect(clientTurns(ws)).toHaveLength(1));
     expect(clientTurns(ws)[0]).toContain('index.html');
   });
 
   test('an answer the model never speaks is reported, not swallowed', async () => {
-    const handoff = pendingHandoff();
-    const { deps, lastWs, audioEvents } = makeDeps({ submitUserTurn: handoff.submit });
+    const { deps, lastWs, audioEvents } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
     const ws = await openSession(session, lastWs);
     ws.serverSend(dispatchCall);
     ws.serverSend({ serverContent: { turnComplete: true } });
-    handoff.resolve('index.html');
+    answer(session, 'index.html');
     await vi.waitFor(() => expect(clientTurns(ws)).toHaveLength(1));
     ws.serverSend({ serverContent: { turnComplete: true } }); // the turn ends with no speech
     expect(audioEvents.some((e) => e.type === 'audio.error')).toBe(true);
@@ -1044,33 +1067,29 @@ describe('GeminiLiveSession — waiting on a hand-off', () => {
 });
 
 describe('GeminiLiveSession — hand-off mode', () => {
-  async function setupFor(handoff: 'auto' | 'always' | 'never'): Promise<{
-    setup: { systemInstruction: { parts: Array<{ text: string }> }; tools?: unknown[] };
-  }> {
+  async function toolsFor(handoff: 'auto' | 'always' | 'never'): Promise<string[]> {
     const { deps, lastWs } = makeDeps({ handoff });
-    const session = new GeminiLiveSession(makeInit(), deps);
-    const ws = await openSession(session, lastWs);
-    return ws.sentJson()[0] as never;
+    const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
+    const first = ws.sentJson()[0] as {
+      setup: { tools?: Array<{ functionDeclarations: Array<{ name: string }> }> };
+    };
+    return (first.setup.tools?.[0]?.functionDeclarations ?? []).map((d) => d.name);
   }
 
-  test('auto: answers what it can and has the dispatch tool', async () => {
-    const first = await setupFor('auto');
-    expect(first.setup.tools).toHaveLength(1);
-    expect(first.setup.systemInstruction.parts[0]?.text).toMatch(/Answer yourself/);
+  test('auto and always: the voice can pass work on and ask how it stands', async () => {
+    for (const mode of ['auto', 'always'] as const) {
+      expect(await toolsFor(mode)).toEqual([
+        PASS_TO_AGENT_TOOL_NAME,
+        'check_status',
+        'look_back',
+        'end_call',
+        'switch_chat',
+      ]);
+    }
   });
 
-  test('always: told to answer nothing itself, still has the tool', async () => {
-    const first = await setupFor('always');
-    expect(first.setup.tools).toHaveLength(1);
-    expect(first.setup.systemInstruction.parts[0]?.text).toMatch(
-      /do not answer anything yourself/i,
-    );
-  });
-
-  test('never: no dispatch tool, and told it has no agent', async () => {
-    const first = await setupFor('never');
-    expect(first.setup.tools).toBeUndefined();
-    expect(first.setup.systemInstruction.parts[0]?.text).toMatch(/no agent and no tools/i);
+  test('never: no agent behind the voice, so nothing to pass on', async () => {
+    expect(await toolsFor('never')).toEqual(['look_back', 'end_call', 'switch_chat']);
   });
 });
 
@@ -1081,7 +1100,7 @@ describe('GeminiLiveSession — false hand-off claims', () => {
     ws.serverSend({ serverContent: { turnComplete: true } });
   };
   const corrections = (ws: FakeGeminiWs): string[] =>
-    clientTurns(ws).filter((t) => /did not call dispatch_to_patch/.test(t));
+    clientTurns(ws).filter((t) => /did not call pass_to_agent/.test(t));
 
   test('claims "passed that on" without calling the tool: the model is told to send it now', async () => {
     const { deps, lastWs } = makeDeps();
@@ -1113,7 +1132,7 @@ describe('GeminiLiveSession — false hand-off claims', () => {
     ws.serverSend({ serverContent: { inputTranscription: { text: 'add milk' } } });
     ws.serverSend({
       toolCall: {
-        functionCalls: [{ id: 'c1', name: DISPATCH_TOOL_NAME, args: { request: 'milk' } }],
+        functionCalls: [{ id: 'c1', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'milk' } }],
       },
     });
     say(ws, null, "I've passed that on.");
@@ -1128,7 +1147,7 @@ describe('GeminiLiveSession — false hand-off claims', () => {
     say(ws, 'check my train times today', "I've passed that on.");
     ws.serverSend({
       toolCall: {
-        functionCalls: [{ id: 'c1', name: DISPATCH_TOOL_NAME, args: { request: 'trains' } }],
+        functionCalls: [{ id: 'c1', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'trains' } }],
       },
     });
     await new Promise((r) => setTimeout(r, 700));

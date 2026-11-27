@@ -351,6 +351,13 @@ export function VoicePage(): React.ReactElement {
       <SettingsSection title="Engine" testID="settings-voice-config">
         <VoiceEngine />
       </SettingsSection>
+      <WithSettings testID="voice-instructions">
+        {(data) => (
+          <SettingsSection title="Voice agent" testID="settings-voice-instructions">
+            <TextPromptLink layer="voice-instructions" preferences={data.preferences} />
+          </SettingsSection>
+        )}
+      </WithSettings>
       <VoiceUsage />
       <VoiceDevicesSection />
       <WithSettings testID="voice-device-prompt">

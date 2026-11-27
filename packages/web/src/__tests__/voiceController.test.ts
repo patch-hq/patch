@@ -513,6 +513,22 @@ describe('voiceController', () => {
     expect(sound).toHaveBeenCalledTimes(4);
   });
 
+  it('the passed to agent sound plays when the voice agent passes a request on', async () => {
+    const sound = vi.mocked(playCallSound);
+    await startVoiceCall('c1');
+    sound.mockClear();
+    lastCallbacks?.onPassedToAgent?.();
+    expect(sound.mock.calls).toEqual([['passed-to-agent']]);
+    endVoiceCall();
+  });
+
+  it('the call bar follows the voice agent to another chat', async () => {
+    await startVoiceCall('c1');
+    lastCallbacks?.onChatSwitched?.('c2');
+    expect(useVoiceStore.getState().call?.chatId).toBe('c2');
+    endVoiceCall();
+  });
+
   it('a call the agent ends is a clean hang-up: sound, cleared, no redial', async () => {
     const sound = vi.mocked(playCallSound);
     await startVoiceCall('c1');

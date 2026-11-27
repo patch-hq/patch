@@ -52,7 +52,8 @@ import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
 import type { SpeechToTextResolution } from './stt-engines.js';
 import type { KokoroBackend } from './kokoro.js';
-import { GeminiLiveSession, geminiLiveModelFor, type GeminiContextTurn } from './gemini-live.js';
+import { GeminiLiveSession, geminiLiveModelFor } from './gemini-live.js';
+import type { VoiceAgentLink } from './voiceAgent.js';
 import { isManagerCall, type ManagerVoiceTools } from './managerVoice.js';
 import {
   OpenAIRealtimeSession,
@@ -228,16 +229,15 @@ export interface AudioServerOptions {
   elevenLabsFetch?: ElevenLabsFetch;
   elevenLabsApiBase?: string;
   /**
-   * spec/07 § Keeping voice and text as one conversation — the one-time
-   * context snapshot a native session sends Gemini Live before the mic opens.
-   * Optional: absent opens a native session with no prior context.
+   * spec/07 § The voice agent and the chat's agent — the voice agent's tools
+   * the host answers (pass to agent, check status, look back, switch chat) and
+   * the chat's start context. Required to run a voice agent call at all.
    */
-  getChatContext?: (chatId: string) => Promise<GeminiContextTurn[]> | GeminiContextTurn[];
-  /**
-   * A hosted voice's `look_back` (spec/07 § Keeping voice and text as one conversation): the
-   * messages in the chat that match a few words. Absent means the voice is not given the tool.
-   */
-  lookBack?: (chatId: string, query: string) => string;
+  voiceAgentLink?: VoiceAgentLink;
+  /** spec/07 § Voice instructions — the account's voice instructions, read at each call's start. */
+  getVoiceInstructions?: () => string;
+  /** How the chosen voice sounds (its tone, as the user wrote it), read at each call's start. */
+  getVoiceTone?: (backend: 'gemini' | 'openai' | 'elevenlabs') => string | undefined;
   /**
    * spec/07 § A call to the Manager — the tools a hosted voice is given on a
    * call to the Manager chat, in place of handing off to the Manager's agent.
@@ -365,8 +365,16 @@ export interface AudioServerHandle {
   }>;
   /** Inspect a session's state (test/diagnostics). */
   getSessionState(sessionId: string): SessionState | undefined;
-  /** The open sessions currently aimed at `chatId` (live context sync). */
+  /** The open sessions currently aimed at `chatId` (pushes from the chat). */
   sessionsOnChat(chatId: string): VoiceSessionLike[];
+  /** One open session by id; undefined once it has closed. */
+  sessionById(sessionId: string): VoiceSessionLike | undefined;
+  /**
+   * spec/07 § A call stays on its chat — the voice agent moved the call to
+   * `chatId`: the session, the announced call and the surface's call bar all
+   * follow it.
+   */
+  retargetCall(sessionId: string, chatId: string): void;
   /** Push a focus-change to whatever session belongs to this surface. */
   setFocusForSurface(surfaceId: string, chatId: string): void;
   /**
@@ -400,6 +408,12 @@ export interface AudioServerHandle {
    * dropped line. Resolves false when no call is open on that chat.
    */
   endOpenCall(chatId: string, goodbye?: string): Promise<boolean>;
+  /**
+   * The voice agent hangs up its own call (its end_call tool): closed with
+   * `ended_by_agent`, the same clean end as `endOpenCall`. Throws when the
+   * session is not open.
+   */
+  endSession(sessionId: string): void;
   close(): Promise<void>;
 }
 
@@ -491,6 +505,14 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       startedAt: entry.call.startedAt,
       ...(entry.call.init.resumed === true ? { resumed: true } : {}),
     });
+  };
+
+  // spec/07 § The agent ends the call — a clean hang-up, never read as a drop.
+  const hangUpByAgent = (active: ActiveSession): void => {
+    if (active.callAnnounced === true) announceCall(active, false);
+    if (active.socket.readyState === active.socket.OPEN) {
+      active.socket.close(CLOSE_NORMAL, END_BY_AGENT);
+    }
   };
 
   // Forward-declared so the HTTP request handler (defined before the handle's
@@ -890,6 +912,23 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           return;
         }
         const managerDeps = managerCall ? { manager: opts.managerVoice! } : {};
+        // spec/07 § The voice agent and the chat's agent — what every voice agent call is
+        // given, whichever provider runs it.
+        const voiceAgentDeps = (
+          backend: 'gemini' | 'openai' | 'elevenlabs',
+        ): { link: VoiceAgentLink; instructions: string; tone?: string } => {
+          if (!opts.voiceAgentLink || !opts.getVoiceInstructions) {
+            throw new Error(
+              'audio server: a voice agent call needs voiceAgentLink and getVoiceInstructions',
+            );
+          }
+          const tone = opts.getVoiceTone?.(backend);
+          return {
+            link: opts.voiceAgentLink,
+            instructions: opts.getVoiceInstructions(),
+            ...(tone !== undefined && tone.trim() !== '' ? { tone } : {}),
+          };
+        };
 
         // spec/16 — a device's session is heard out loud in a room, by whoever is there.
         const device = voiceSurface === 'device' ? opts.deviceVoice?.() : undefined;
@@ -922,7 +961,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             logger: sessionLog,
             sendAudio: sendAudioFn,
             sendBinary: hostedSendBinary,
-            submitUserTurn: opts.submitUserTurn,
+            ...voiceAgentDeps('gemini'),
             apiKey: geminiKey,
             gate: {
               makeVad: (): Vad => geminiVad,
@@ -936,8 +975,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             }),
             onFatal,
             ...(device ? { spokenAloud: device.prompt() } : {}),
-            ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
-            ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
             ...managerDeps,
             ...(opts.geminiWsCtor ? { wsCtor: opts.geminiWsCtor } : {}),
             ...(opts.geminiWsUrl ? { wsUrl: opts.geminiWsUrl } : {}),
@@ -954,7 +991,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             logger: sessionLog,
             sendAudio: sendAudioFn,
             sendBinary: hostedSendBinary,
-            submitUserTurn: opts.submitUserTurn,
+            ...voiceAgentDeps('openai'),
             apiKey: openaiKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
             ...(hostedVoices.openai !== undefined ? { voice: hostedVoices.openai } : {}),
@@ -964,8 +1001,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             }),
             onFatal,
             ...(device ? { device } : {}),
-            ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
-            ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
             ...managerDeps,
             ...(opts.openaiWsCtor ? { wsCtor: opts.openaiWsCtor } : {}),
             ...(opts.openaiWsUrl ? { wsUrl: opts.openaiWsUrl } : {}),
@@ -982,7 +1017,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             logger: sessionLog,
             sendAudio: sendAudioFn,
             sendBinary: hostedSendBinary,
-            submitUserTurn: opts.submitUserTurn,
+            ...voiceAgentDeps('elevenlabs'),
             apiKey: elevenKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
             ...(hostedVoices.elevenlabs !== undefined ? { voiceId: hostedVoices.elevenlabs } : {}),
@@ -992,8 +1027,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             }),
             onFatal,
             ...(device ? { spokenAloud: device.prompt() } : {}),
-            ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
-            ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
             ...managerDeps,
             ...(opts.elevenLabsWsCtor ? { wsCtor: opts.elevenLabsWsCtor } : {}),
             ...(opts.elevenLabsFetch ? { fetchImpl: opts.elevenLabsFetch } : {}),
@@ -1393,6 +1426,23 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           : [],
       );
     },
+    sessionById(sessionId: string): VoiceSessionLike | undefined {
+      return sessions.get(sessionId)?.session;
+    },
+    retargetCall(sessionId: string, chatId: string): void {
+      const entry = sessions.get(sessionId);
+      if (!entry) throw new Error(`no open call ${sessionId} to move`);
+      entry.session.setFocus(chatId);
+      if (entry.call) {
+        entry.call = { ...entry.call, init: { ...entry.call.init, chatId } };
+        // Re-announced as live on the new chat: every surface's strip follows it.
+        if (entry.callAnnounced === true) {
+          entry.callAnnounced = false;
+          announceCall(entry, true);
+        }
+      }
+      send(entry.socket, { type: 'audio.chat_switched', sessionId, chatId });
+    },
     sessionsOnChat(chatId: string): VoiceSessionLike[] {
       return [...sessions.values()]
         .map((a) => a.session)
@@ -1453,12 +1503,14 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             log.warn({ err: err.message, chatId }, 'audio: endOpenCall goodbye failed');
           });
         }
-        if (active.callAnnounced === true) announceCall(active, false);
-        if (active.socket.readyState === active.socket.OPEN) {
-          active.socket.close(CLOSE_NORMAL, END_BY_AGENT);
-        }
+        hangUpByAgent(active);
       }
       return true;
+    },
+    endSession(sessionId: string): void {
+      const active = sessions.get(sessionId);
+      if (!active) throw new Error(`no open call ${sessionId} to end`);
+      hangUpByAgent(active);
     },
     async close(): Promise<void> {
       for (const [, active] of sessions) {

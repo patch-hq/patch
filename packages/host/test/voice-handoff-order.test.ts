@@ -2,7 +2,7 @@
 // chat when it is made, in order with what was said around it, not when the
 // agent gets to it behind work already running.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +12,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import type { SdkBackend } from '../src/sdkBackend.js';
 import { createVoiceReplyBridge } from '../src/audio/replyBridge.js';
-import { createChatVoice } from '../src/audio/chatVoice.js';
+import { createChatVoice, type ChatVoice } from '../src/audio/chatVoice.js';
 import { createVoiceLedger } from '../src/audio/voiceLedger.js';
 
 const silent = pino({ level: 'silent' });
@@ -38,6 +38,7 @@ function setup(backend: SdkBackend) {
   mkdirSync(folder, { recursive: true });
   const events: WireEvent[] = [];
   const bridge = createVoiceReplyBridge();
+  let glue: ChatVoice | undefined;
   let id = 0;
   const daemon = new Daemon({
     hostId: 'd1',
@@ -47,13 +48,29 @@ function setup(backend: SdkBackend) {
     emit: (e) => {
       events.push(e);
       bridge.observe(e);
+      glue?.observe(e);
     },
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
-    onDrawnTurnStarted: (chatId, localId) => bridge.turnStarted(chatId, localId),
+    onDrawnTurnStarted: (chatId, localId) => {
+      bridge.turnStarted(chatId, localId);
+      glue?.handoffStarted({ chatId, handoffId: localId });
+    },
   });
-  return { daemon, events, folder, bridge };
+  // The voice glue, as main() wires it: it sees every event and every hand-off's start.
+  const withGlue = (): ChatVoice => {
+    glue = createChatVoice({
+      daemon,
+      sessionsOnChat: () => [],
+      ledger: createVoiceLedger(join(mkdtempSync(join(tmpdir(), 'patch-vhol-')), 'v.jsonl')),
+      logger: silent,
+      onCosted: () => undefined,
+      now: () => 1_700_000_000_000,
+    });
+    return glue;
+  };
+  return { daemon, events, folder, bridge, withGlue };
 }
 
 describe('a voice hand-off behind a running turn', () => {
@@ -139,44 +156,26 @@ function midStepBackend() {
 describe('a voice hand-off made while the agent is mid-step', () => {
   it('sits where it was made, and its answer is recorded on it rather than as a reply of its own', async () => {
     const m = midStepBackend();
-    const { daemon, events, folder, bridge } = setup(m.backend);
-    const glue = createChatVoice({
-      daemon,
-      sessionsOnChat: () => [],
-      ledger: createVoiceLedger(join(mkdtempSync(join(tmpdir(), 'patch-vhol-')), 'v.jsonl')),
-      logger: silent,
-      onCosted: () => undefined,
-    });
+    const { daemon, events, folder, withGlue } = setup(m.backend);
+    const glue = withGlue();
     const chatId = await daemon.spawnChat({ folder });
     void daemon.sendInput({ chatId, message: 'build it', localId: 'L1' });
     await tick();
 
-    // What index.ts does for a hand-off: draw it, record it, deliver it under that line.
-    const prefix = '[voice hand-off • web] ';
-    const reply = bridge.awaitReply(chatId, undefined, 'H1', () =>
-      glue.handoffStarted({ chatId, handoffId: 'H1' }),
-    );
-    const rowSeq = daemon.recordVoiceMessage({
-      chatId,
-      role: 'user',
-      content: `${prefix}is the build green`,
-      owed: false,
-    });
-    glue.handoffSent({
+    // The voice agent passes a request on while the agent is inside its step.
+    glue.link.passToAgent({
       sessionId: 's',
       chatId,
-      handoffId: 'H1',
-      rowSeq,
       request: 'is the build green',
+      source: { kind: 'voice-app', surfaceKind: 'web', sessionId: 's' },
     });
-    void daemon.sendInput({
-      chatId,
-      message: 'is the build green',
-      localId: 'H1',
-      voicePrefix: prefix,
-      fromUser: true,
-      deliverDrawn: rowSeq,
-    });
+    const rowSeq = (
+      events.find(
+        (e) =>
+          e.type === 'chat.message' &&
+          (e as { content: string }).content.endsWith('is the build green'),
+      ) as { seq: number }
+    ).seq;
     // The call carries on while the agent is still inside its step.
     const said = daemon.recordVoiceMessage({
       chatId,
@@ -186,8 +185,11 @@ describe('a voice hand-off made while the agent is mid-step', () => {
     await tick();
 
     m.release(); // the step ends; the hand-off is handed over at the boundary
-    const answered = await reply;
-    glue.handoffAnswered({ chatId, handoffId: 'H1', reply: answered });
+    await vi.waitFor(() =>
+      expect(events.some((e) => e.type === 'chat.voice_handoff' && e.state === 'answered')).toBe(
+        true,
+      ),
+    );
 
     const userLines = events.filter(
       (e) => e.type === 'chat.message' && (e as { role: string }).role === 'user',
@@ -223,27 +225,32 @@ describe('a voice hand-off made while the agent is mid-step', () => {
 describe('reply bridge turnStarted', () => {
   it('arms only the waiter that asked for that localId', async () => {
     const bridge = createVoiceReplyBridge();
-    let accepted = 0;
-    const reply = bridge.awaitReply('c', undefined, 'mine', () => accepted++);
+    const reply = bridge.awaitReply('c', undefined, 'mine');
+    let settled = false;
+    void reply.then(() => (settled = true));
+    const turn = (content: string): void => {
+      bridge.observe({
+        type: 'chat.message',
+        chatId: 'c',
+        role: 'assistant',
+        content,
+        seq: 1,
+      } as unknown as WireEvent);
+      bridge.observe({
+        type: 'chat.turn_ended',
+        chatId: 'c',
+        turnId: 't',
+        seq: -1,
+        at: 2,
+        outcome: 'completed',
+      } as unknown as WireEvent);
+    };
     bridge.turnStarted('c', 'other');
-    expect(accepted).toBe(0);
+    turn('not mine');
+    await Promise.resolve();
+    expect(settled).toBe(false);
     bridge.turnStarted('c', 'mine');
-    expect(accepted).toBe(1);
-    bridge.observe({
-      type: 'chat.message',
-      chatId: 'c',
-      role: 'assistant',
-      content: 'done',
-      seq: 1,
-    } as unknown as WireEvent);
-    bridge.observe({
-      type: 'chat.turn_ended',
-      chatId: 'c',
-      turnId: 't',
-      seq: -1,
-      at: 2,
-      outcome: 'completed',
-    } as unknown as WireEvent);
+    turn('done');
     await expect(reply).resolves.toMatchObject({ text: 'done' });
   });
 });

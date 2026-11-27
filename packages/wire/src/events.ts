@@ -17,6 +17,7 @@ import {
 } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from './manager-voice-prompt.js';
+import { DEFAULT_VOICE_INSTRUCTIONS } from './voice-instructions.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import {
   DEFAULT_VOICE_DEVICE_PROMPT,
@@ -2791,6 +2792,8 @@ export const SharedSettings = z
     voiceDevicePrompt: z.string().min(1),
     /** Who the voice is on a call to the Manager chat (spec/07 § A call to the Manager). */
     managerVoicePrompt: z.string().min(1),
+    /** What the voice agent on every other call is told it is (spec/07 § Voice instructions). */
+    voiceInstructions: z.string().min(1),
     /** People recognised by voice on a voice device (spec/16 § Who is speaking). */
     voiceProfiles: z.array(VoiceProfile).max(VOICE_PROFILES_MAX),
     /** How sure a voice match must be (cosine similarity); Settings offers relaxed, normal and strict. */
@@ -3037,6 +3040,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   },
   voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
   managerVoicePrompt: DEFAULT_MANAGER_VOICE_PROMPT,
+  voiceInstructions: DEFAULT_VOICE_INSTRUCTIONS,
   voiceProfiles: [],
   voiceMatchThreshold: VOICE_MATCH_THRESHOLD,
   dictationPauseSeconds: 10,
@@ -10871,11 +10875,6 @@ export const AuthOkEvent = z
      * reaches one that has it.
      */
     delegateRecord: z.literal(true).optional(),
-    /**
-     * Sent to a host by a server that keeps voice hand-off state
-     * (`chat.voice_handoff`). A host sends it none to a server without it.
-     */
-    voiceHandoffs: z.literal(true).optional(),
     /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Every current

@@ -204,8 +204,5 @@ export class ElevenLabsDictationSession implements VoiceSessionLike {
       stt: { requests: 1, audioSeconds: seconds, billedSeconds: seconds },
     };
   }
-  pushContext(): void {}
-  isAwaitingHandoff(): boolean {
-    return false;
-  }
+  pushMessage(): void {}
 }

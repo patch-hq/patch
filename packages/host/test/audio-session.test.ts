@@ -1916,6 +1916,5 @@ describe('VoiceSession — engine costing', () => {
       }),
     );
     expect(session.engineCosting().stt).toBeNull();
-    expect(session.isAwaitingHandoff()).toBe(false);
   });
 });

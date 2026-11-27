@@ -18,7 +18,7 @@ import { DeviceRow, useDevices } from './DevicesPage.js';
 import { VoiceProfilesGroup } from './VoiceProfilesGroup.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
-import { DEFAULT_VOICE_DEVICE_PROMPT } from '@patch/wire';
+import { DEFAULT_VOICE_DEVICE_PROMPT, DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { PromptRow } from './PromptRow.js';
 
 const PROVIDERS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
@@ -64,6 +64,7 @@ export function VoicePage(): JSX.Element {
       testid="settings-voice"
     >
       <ConversationGroup />
+      <VoiceInstructionsGroup />
       <UsageGroup />
       <VoiceDevicesGroup />
       <VoiceProfilesGroup />
@@ -441,6 +442,26 @@ function VoiceDevicesGroup(): JSX.Element {
         </div>
       ) : null}
       <SpeakingAloudPromptRow />
+    </Group>
+  );
+}
+
+/** What the voice agent is told it is (spec/07 § Voice instructions): the user's own text. */
+function VoiceInstructionsGroup(): JSX.Element {
+  const current = usePreferencesStore((s) => s.preferences.voiceInstructions);
+  return (
+    <Group label="Voice agent" testid="settings-voice-instructions">
+      <PromptRow
+        id="voice-instructions"
+        title="Voice instructions"
+        sub="What the voice agent on a call is told it is. Nothing else is added but its tone and the chat."
+        defaultText={DEFAULT_VOICE_INSTRUCTIONS}
+        current={current}
+        onSave={(text) => patchShared('voice instructions', { voiceInstructions: text })}
+        onDefault={() =>
+          patchShared('voice instructions', { voiceInstructions: DEFAULT_VOICE_INSTRUCTIONS })
+        }
+      />
     </Group>
   );
 }

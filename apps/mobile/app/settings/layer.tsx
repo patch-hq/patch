@@ -16,6 +16,8 @@ const LAYERS: readonly Layer[] = [
   'sweep',
   'manager-voice',
   'job-autonomy',
+  'voice-device',
+  'voice-instructions',
   'question-expired',
   'meeting-now',
   'meeting-notes',

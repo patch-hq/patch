@@ -327,8 +327,5 @@ export class DeepgramDictationSession implements VoiceSessionLike {
   engineCosting(): EngineCosting {
     return { backend: 'local', model: DEEPGRAM_MODEL, tokens: null, stt: null };
   }
-  pushContext(): void {}
-  isAwaitingHandoff(): boolean {
-    return false;
-  }
+  pushMessage(): void {}
 }

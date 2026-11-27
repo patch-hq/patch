@@ -7,10 +7,10 @@
 // on `openai` sends exactly the frames it sends on `local`, which is why this
 // backend needs no WebRTC or other native module on Android.
 //
-// The model IS the light layer and dispatches to the heavy agent through the
-// one `dispatch_to_patch` function tool (the same `submitUserTurn` callback
-// `VoiceSession` and `GeminiLiveSession` use, so a dispatched turn lands in the
-// real chat). `layer` picks the model: `light` → the mini realtime model,
+// The model IS the voice agent and passes work to the chat's agent with the
+// voice agent's tools (voiceAgent.ts); everything about the chat — the start
+// context, the tools the host answers, the answers pushed back in — is the
+// shared VoiceAgentCall, the same as on the other providers. `layer` picks the model: `light` → the mini realtime model,
 // `heavy` → the flagship (`DEFAULT_OPENAI_REALTIME_MODELS`, overridable per
 // host). `direct` has no meaning on a hosted backend — the hosted model always
 // fronts Manager — and runs as `light` (the same rule the Gemini tier has
@@ -40,6 +40,12 @@
 // (`addressed: false`) and the item deleted from the conversation so it never
 // becomes context either.
 //
+// Barge-in (spec/07 § Barge-in): when the user speaks over a reply, the reply
+// is cut in OpenAI's own conversation with `conversation.item.truncate` at the
+// point playback had reached (the time since its first audio chunk went to the
+// surface), which also drops the unheard part of its transcript, and the reply
+// written into the chat is cut to the same point.
+//
 // NO SILENT FALLBACK. A connect failure, an `error` event, a failed response,
 // a failed transcription, or the provider closing the socket is reported to
 // the surface as `audio.error {code: 'openai_unavailable'}`; a closed or
@@ -63,40 +69,33 @@ import {
   type DeviceVoiceDeps,
 } from './deviceVoice.js';
 import { MIN_VOICEPRINT_SECONDS } from './speakerId.js';
-import type { VoiceReplyWriter, VoiceTimeline } from './voice-session-like.js';
+import type { VoiceTimeline } from './voice-session-like.js';
+import { SpokenReply } from './spokenReply.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { addTokens, ZERO_TOKENS, type EngineCosting, type EngineTokens } from './voiceCost.js';
 import {
   DEFAULT_ADDRESS_WORD,
   isAddressed,
   type SessionInit,
-  type SessionDeps,
   type SessionState,
-  type VoiceTurnSource,
 } from './session.js';
 import type { VoiceSessionLike } from './voice-session-like.js';
 import {
-  callOpening,
-  chatBriefing,
-  liveNote,
-  withBriefing,
-  LOOK_BACK_DESCRIPTION,
-  LOOK_BACK_RULE,
-  LOOK_BACK_TOOL_NAME,
-} from './chatBriefing.js';
-import {
-  DISPATCH_TOOL_DESCRIPTION,
-  DISPATCH_TOOL_NAME,
-  hostedVoiceInstruction,
-  managerHostedInstruction,
-  type GeminiContextTurn,
-} from './gemini-live.js';
+  PASS_TO_AGENT_TOOL_NAME,
+  SWITCH_CHAT_TOOL_NAME,
+  voiceAgentInstructions,
+  voiceAgentTools,
+  type VoiceAgentLink,
+  type VoiceToolSpec,
+} from './voiceAgent.js';
+import { VoiceAgentCall } from './voiceAgentCall.js';
 import {
   CHAT_STATUS_DESCRIPTION,
   CHAT_STATUS_TOOL_NAME,
   FIND_CHATS_DESCRIPTION,
   FIND_CHATS_TOOL_NAME,
   ManagerChatLookupError,
+  managerHostedInstruction,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
   MANAGER_TOOL_NAMES,
@@ -136,22 +135,24 @@ export interface OpenAIRealtimeDeps {
   logger: Logger;
   sendAudio: (ev: AudioEvent) => void;
   sendBinary: (pcm: Int16Array) => void;
-  submitUserTurn: SessionDeps['submitUserTurn'];
   /** Where this session's spoken exchanges are written into the chat. */
   timeline: VoiceTimeline;
+  /** The voice agent's tools the host answers, and the chat's start context. */
+  link: VoiceAgentLink;
+  /** The account's voice instructions (spec/07 § Voice instructions), read at the session's start. */
+  instructions: string;
+  /** How the voice sounds, as the user wrote it; goes in the instructions after them. */
+  tone?: string;
   /** OPENAI_REALTIME_API_KEY. The caller refuses to construct this class without one. */
   apiKey: string;
   /** Realtime model — resolved from the layer by the caller (`openaiRealtimeModelFor`). */
   model: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
-  /** The `look_back` tool's search over this chat. Absent means the voice is not given the tool. */
-  lookBack?: (chatId: string, query: string) => string;
   /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
   manager?: ManagerVoiceTools;
   transcribeModel?: string;
   voice?: string;
-  getChatContext?: (chatId: string) => Promise<GeminiContextTurn[]> | GeminiContextTurn[];
   /**
    * The provider side is gone for good (never opened, or closed under us). The
    * audio server ends the surface session so the surface stops streaming into
@@ -239,7 +240,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   private readonly init: SessionInit;
   private readonly deps: OpenAIRealtimeDeps;
   private state: SessionState = 'connecting';
-  private currentChatId: string;
+  /** The call's chat, tools and pushes (spec/07 § The voice agent and the chat's agent). */
+  private readonly call: VoiceAgentCall;
   private mode: AudioSessionMode;
   private ws?: WsSocket;
   private setupDone = false;
@@ -252,15 +254,22 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   // Per-response bookkeeping, reset on every response.done.
   private responseHadAudio = false;
   private responseHadToolCall = false;
-  private dispatchesInFlight = 0;
+  // --- the reply as the user hears it (spec/07 § Barge-in) ---
+  /** The reply being generated now, and the conversation item its audio belongs to. */
+  private reply?: SpokenReply;
+  private replyItemId?: string;
+  /** The reply before it: over for OpenAI, maybe still playing on the surface. */
+  private lastReply?: SpokenReply;
+  private lastReplyItemId?: string;
+  /** The reply in flight was cut off: what is still streaming of it was never heard. */
+  private replyCut = false;
   // --- the chat timeline (spec/07 § Keeping voice and text as one conversation) ---
   /** The user is mid-utterance or its transcript has not landed yet. */
   private awaitingUserWords = false;
   /** Reply text that arrived before the user's words were written. */
   private heldReply = '';
-  private reply?: VoiceReplyWriter;
-  /** What the chat is about, from the chat's own history; in the instructions. */
-  private briefing = '';
+  /** The chat as it stood when the call started; at the end of the instructions. */
+  private startContext = '';
   private tokens: EngineTokens = ZERO_TOKENS;
   // --- who is speaking (spec/16 § Who is speaking) ---
   /** Settled at session start: recognise speakers, and answer only once we know who it was. */
@@ -288,8 +297,23 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   constructor(init: SessionInit, deps: OpenAIRealtimeDeps) {
     this.init = init;
     this.deps = deps;
-    this.currentChatId = init.chatId;
     this.mode = init.mode ?? 'call';
+    this.call = new VoiceAgentCall({
+      link: deps.link,
+      sessionId: init.sessionId,
+      chatId: init.chatId,
+      source:
+        init.surfaceKind === 'device'
+          ? { kind: 'voice-device', deviceId: init.deviceId ?? 'unknown' }
+          : {
+              kind: 'voice-app',
+              surfaceKind: init.surfaceKind as 'web' | 'desktop' | 'mobile',
+              sessionId: init.sessionId,
+            },
+      logger: deps.logger,
+      sendAudio: deps.sendAudio,
+      ...(init.callReason !== undefined ? { callReason: init.callReason } : {}),
+    });
     this.gate = recognisesSpeakers(deps.device) && deps.device?.embed !== undefined;
     if (deps.device?.embed !== undefined) this.tape = new MicTape();
   }
@@ -322,11 +346,12 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   }
 
   getCurrentChatId(): string {
-    return this.currentChatId;
+    return this.call.chatId;
   }
 
+  /** The host moved the call to another chat (switch chat). */
   setFocus(chatId: string): void {
-    this.currentChatId = chatId;
+    this.call.setChat(chatId);
   }
 
   private readonly micLevel = new MicLevelWatch();
@@ -388,72 +413,39 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     return this.gate && !mayUseAgent(this.speaker) ? 'never' : handoff;
   }
 
-  /** Whether the chat's history (briefing, look-back, live notes) may reach this speaker. */
+  /** Whether the chat's history (start context, look-back, switch chat, pushes) may reach this speaker. */
   private historyAllowed(): boolean {
     return !this.gate || mayHearHistory(this.speaker);
   }
 
   private instructions(): string {
-    let text =
-      (this.deps.manager
+    const extra: string[] = [];
+    if (this.deps.device) extra.push(this.deps.device.prompt());
+    if (this.gate) extra.push(speakerInstruction(this.speaker));
+    return voiceAgentInstructions({
+      instructions: this.deps.manager
         ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
-        : hostedVoiceInstruction(this.effectiveHandoff())) +
-      (this.deps.lookBack !== undefined && this.historyAllowed() ? `\n\n${LOOK_BACK_RULE}` : '');
-    if (this.deps.device) text += `\n\n${this.deps.device.prompt()}`;
-    if (this.gate) text += `\n\n${speakerInstruction(this.speaker)}`;
-    return withBriefing(text, this.historyAllowed() ? this.briefing : '');
+        : this.deps.instructions,
+      extra,
+      ...(this.deps.tone !== undefined ? { tone: this.deps.tone } : {}),
+      startContext: this.historyAllowed() ? this.startContext : '',
+    });
   }
 
   /** The parts of the session that change with who is speaking. */
   private speakerConfig(): Record<string, unknown> {
-    const handoff = this.effectiveHandoff();
-    const lookBack = this.deps.lookBack !== undefined && this.historyAllowed();
+    const history = this.historyAllowed();
+    const manager = this.deps.manager !== undefined;
+    const tools = voiceAgentTools({
+      // A Manager call has its own tools and no agent behind it; `never` has no agent either.
+      handoff: manager ? 'never' : this.effectiveHandoff(),
+      lookBack: history,
+      switchChat: !manager && history,
+    });
     return {
       instructions: this.instructions(),
-      tools: [
-        // A Manager call has its own tools and no agent behind it; `never` has no agent either.
-        ...(this.deps.manager
-          ? managerRealtimeTools()
-          : handoff === 'never'
-            ? []
-            : [
-                {
-                  type: 'function',
-                  name: DISPATCH_TOOL_NAME,
-                  description: DISPATCH_TOOL_DESCRIPTION,
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      request: {
-                        type: 'string',
-                        description: 'What Patch should do or look up, in plain language.',
-                      },
-                    },
-                    required: ['request'],
-                  },
-                },
-              ]),
-        ...(lookBack
-          ? [
-              {
-                type: 'function',
-                name: LOOK_BACK_TOOL_NAME,
-                description: LOOK_BACK_DESCRIPTION,
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    query: {
-                      type: 'string',
-                      description: 'A few key words to search the chat for.',
-                    },
-                  },
-                  required: ['query'],
-                },
-              },
-            ]
-          : []),
-      ],
-      tool_choice: handoff === 'always' && !lookBack && !this.deps.manager ? 'required' : 'auto',
+      tools: [...(manager ? managerRealtimeTools() : []), ...tools.map(realtimeTool)],
+      tool_choice: 'auto',
     };
   }
 
@@ -518,23 +510,17 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     const configured = new Promise<void>((resolve, reject) => {
       this.setupWaiter = { resolve, reject };
     });
-    // spec/07 § Keeping voice and text as one conversation — what the chat is, how it
-    // began and what has just been said, as a briefing in the instructions. A chat whose
-    // history cannot be read fails the session loudly.
-    const context = (await this.deps.getChatContext?.(this.currentChatId)) ?? [];
-    this.briefing = chatBriefing(context);
-    // The full text, so what the voice was told about the chat can be read back from the log.
-    this.deps.logger.info(
-      {
-        sessionId: this.init.sessionId,
-        messages: context.length,
-        chars: this.briefing.length,
-        briefing: this.briefing,
-      },
-      'openai-realtime: chat briefing',
-    );
+    // spec/07 § Keeping voice and text as one conversation — the chat as it stands, at the
+    // end of the instructions. A chat that cannot be read fails the session loudly.
+    this.startContext = this.call.startContext();
     if (this.closed) return;
-    this.sendJson(this.sessionConfig());
+    const config = this.sessionConfig();
+    // The full text, so what the voice was told can be read back from the log.
+    this.deps.logger.info(
+      { sessionId: this.init.sessionId, instructions: this.instructions() },
+      'openai-realtime: instructions',
+    );
+    this.sendJson(config);
     await configured;
     if (this.closed) return;
     this.setupDone = true;
@@ -544,18 +530,21 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     // Load the speaker model now, so the first utterance does not wait for it.
     this.deps.device?.warm?.();
     for (const b64 of queued) this.sendJson({ type: 'input_audio_buffer.append', audio: b64 });
-    // spec/07 § Agent-initiated voice — a call answering an agent's ring opens with its reason.
-    if (this.init.callReason !== undefined) {
-      this.sendJson({
-        type: 'conversation.item.create',
-        item: {
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: callOpening(this.init.callReason) }],
-        },
-      });
-      this.sendJson({ type: 'response.create' });
-    }
+    this.call.attach({
+      addContext: (text) => this.sendJson(userText(text)),
+      speakAbout: (text) => {
+        this.sendJson(userText(text));
+        this.askForReply();
+      },
+      isIdle: () =>
+        this.setupDone &&
+        !this.responseInFlight &&
+        !this.replyQueued &&
+        !this.awaitingUserWords &&
+        this.state !== 'speaking' &&
+        this.state !== 'transcribing',
+      playbackLeftMs: () => Math.max(this.reply?.leftMs() ?? 0, this.lastReply?.leftMs() ?? 0),
+    });
   }
 
   async onMicFrame(pcm: Int16Array): Promise<void> {
@@ -627,9 +616,14 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       case 'input_audio_buffer.speech_started':
         this.speechStartMs = ev.audio_start_ms ?? 0;
         this.awaitingUserWords = true;
-        if (this.state === 'speaking' && !modeRequiresAddress(this.mode)) {
+        if (
+          (this.state === 'speaking' || this.lastReply?.playing() === true) &&
+          !modeRequiresAddress(this.mode)
+        ) {
           // Barge-in — the server has already cancelled its reply
-          // (interrupt_response); stop what the surface is still playing.
+          // (interrupt_response); stop what the surface is still playing, and
+          // cut the reply, in OpenAI's record and the chat's, to what was heard.
+          this.cutReply();
           this.deps.sendAudio({
             type: 'audio.barge_in',
             sessionId: this.init.sessionId,
@@ -664,6 +658,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
           `OpenAI Realtime could not transcribe what was said: ${ev.error?.message ?? 'unknown'}`,
         );
         if (this.state === 'transcribing') this.setState('listening');
+        this.call.flush();
         return;
       case 'response.created':
         this.responseInFlight = true;
@@ -678,7 +673,10 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
         const pcm = new Int16Array(buf.byteLength >>> 1);
         new Uint8Array(pcm.buffer).set(buf.subarray(0, pcm.byteLength));
         if (pcm.length === 0) return;
+        if (this.replyCut) return;
         this.responseHadAudio = true;
+        this.spokenReply().audio(pcm.length);
+        if (ev.item_id !== undefined) this.replyItemId = ev.item_id;
         if (this.state !== 'speaking') this.setState('speaking');
         this.deps.sendAudio({
           type: 'audio.tts_chunk',
@@ -693,13 +691,9 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
           this.responseHadToolCall = true;
           void this.handleManagerTool(this.deps.manager, ev.call_id, ev.name, ev.arguments ?? '{}');
         }
-        if (ev.name === DISPATCH_TOOL_NAME && ev.call_id && !this.deps.manager) {
+        if (ev.name && ev.call_id && this.call.handles(ev.name)) {
           this.responseHadToolCall = true;
-          void this.handleDispatch(ev.call_id, ev.arguments ?? '{}');
-        }
-        if (ev.name === LOOK_BACK_TOOL_NAME && ev.call_id) {
-          this.responseHadToolCall = true;
-          this.handleLookBack(ev.call_id, ev.arguments ?? '{}');
+          void this.handleVoiceTool(ev.call_id, ev.name, ev.arguments ?? '{}');
         }
         return;
       case 'response.done':
@@ -709,6 +703,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
           this.replyQueued = false;
           this.sendJson({ type: 'response.create' });
         }
+        this.call.flush();
         return;
       default:
         return;
@@ -784,6 +779,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   }
 
   private onReplyText(delta: string): void {
+    // The rest of a reply the user cut off was never said to them.
+    if (this.replyCut) return;
     // The voice's words about an agent's answer are written too: the answer is already in
     // the chat as the agent's own message, and what the voice said of it is a separate
     // thing the user heard and should be able to read.
@@ -791,14 +788,55 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       this.heldReply += delta;
       return;
     }
-    this.reply ??= this.deps.timeline.beginReply(this.currentChatId);
-    this.reply.append(delta);
+    this.spokenReply().append(delta);
   }
 
+  /** The reply being generated now, begun on its first words or audio. */
+  private spokenReply(): SpokenReply {
+    this.reply ??= new SpokenReply(() => this.deps.timeline.beginReply(this.call.chatId));
+    return this.reply;
+  }
+
+  /** Nothing more of the reply is coming; the chat gets it once it has played out. */
   private finishReply(): void {
-    const reply = this.reply;
+    if (!this.reply) return;
+    this.reply.end();
+    this.lastReply = this.reply;
+    this.lastReplyItemId = this.replyItemId;
     this.reply = undefined;
-    reply?.finish();
+    this.replyItemId = undefined;
+  }
+
+  /**
+   * The user spoke over the reply: cut it, in OpenAI's conversation and in the
+   * chat, to what had played.
+   */
+  private cutReply(): void {
+    if (this.responseInFlight) this.replyCut = true;
+    const target = this.reply ?? this.lastReply;
+    const itemId = this.reply ? this.replyItemId : this.lastReplyItemId;
+    this.reply = undefined;
+    this.replyItemId = undefined;
+    this.lastReply = undefined;
+    this.lastReplyItemId = undefined;
+    const heardMs = target?.cut() ?? null;
+    if (heardMs === null) return;
+    if (itemId !== undefined) {
+      this.sendJson({
+        type: 'conversation.item.truncate',
+        item_id: itemId,
+        content_index: 0,
+        audio_end_ms: Math.floor(heardMs),
+      });
+    }
+    this.deps.logger.info(
+      {
+        sessionId: this.init.sessionId,
+        heardMs: Math.round(heardMs),
+        audioMs: Math.round(target!.audioMs()),
+      },
+      'openai-realtime: reply cut off',
+    );
   }
 
   /** The user's words are settled (written, or dropped): release any held reply. */
@@ -813,58 +851,16 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     return { backend: 'openai', model: this.deps.model, tokens: this.tokens, stt: null };
   }
 
-  isAwaitingHandoff(): boolean {
-    return this.dispatchesInFlight > 0;
-  }
-
-  pushContext(role: 'user' | 'assistant', text: string): void {
-    if (this.closed || !this.setupDone) return;
-    // The chat's live activity is its history: not for someone who may not hear it.
-    if (!this.historyAllowed()) return;
-    // A short quiet note from the user's side, not the message replayed as if someone had said it.
-    this.sendJson({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: liveNote(role, text, { handoffRunning: this.isAwaitingHandoff() }),
-          },
-        ],
-      },
-    });
-  }
-
-  /** The `look_back` tool: search the chat on the host and answer at once; no model, no wait. */
-  private handleLookBack(callId: string, rawArgs: string): void {
-    let query = '';
-    try {
-      const args = JSON.parse(rawArgs) as { query?: unknown };
-      if (typeof args.query === 'string') query = args.query;
-    } catch {
-      query = rawArgs;
-    }
-    let result: string;
-    try {
-      result = this.deps.lookBack!(this.currentChatId, query);
-    } catch (err) {
-      result = `Looking back failed: ${(err as Error).message}`;
-      this.deps.logger.error(
-        { sessionId: this.init.sessionId, err: (err as Error).message, query },
-        'openai-realtime: look_back failed',
+  pushMessage(text: string, opts: { handoffSettled?: boolean } = {}): void {
+    // The chat's activity is its history: not for someone who may not hear it.
+    if (!this.historyAllowed() && opts.handoffSettled !== true) {
+      this.deps.logger.info(
+        { sessionId: this.init.sessionId },
+        'openai-realtime: a chat reply was not pushed: this speaker may not hear the chat',
       );
+      return;
     }
-    this.deps.logger.info(
-      { sessionId: this.init.sessionId, query, chars: result.length, result },
-      'openai-realtime: look_back',
-    );
-    this.sendJson({
-      type: 'conversation.item.create',
-      item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result }) },
-    });
-    this.askForReply();
+    this.call.push(text, opts);
   }
 
   private onTranscript(itemId: string, text: string): void {
@@ -901,6 +897,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       this.awaitingUserWords = false;
       this.sendJson({ type: 'conversation.item.delete', item_id: itemId });
       if (this.state === 'transcribing') this.setState('listening');
+      this.call.flush();
       return;
     }
     this.turns += 1;
@@ -912,7 +909,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       this.wordsByItem.set(itemId, text);
     }
     this.deps.timeline.userSaid(
-      this.currentChatId,
+      this.call.chatId,
       this.gate ? `${this.speaker?.name ?? 'Unrecognised voice'}: ${text}` : text,
     );
     this.releaseHeldReply();
@@ -929,6 +926,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       this.responseHadToolCall || (response.output ?? []).some((o) => o.type === 'function_call');
     this.responseHadAudio = false;
     this.responseHadToolCall = false;
+    const wasCut = this.replyCut;
+    this.replyCut = false;
     if (response.usage) this.tokens = addTokens(this.tokens, realtimeUsageTokens(response.usage));
     // Reply text still held for words that never settled is written anyway,
     // rather than lost.
@@ -946,75 +945,48 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       );
     }
     // A cancelled response was barged in on — tts_end already went out.
-    if (hadAudio && response.status !== 'cancelled') {
+    if (hadAudio && response.status !== 'cancelled' && !wasCut) {
       this.deps.sendAudio({ type: 'audio.tts_end', sessionId: this.init.sessionId });
     }
-    this.setState(this.dispatchesInFlight > 0 ? 'thinking' : 'listening');
+    this.setState('listening');
   }
 
-  private async handleDispatch(callId: string, rawArgs: string): Promise<void> {
-    let request = '';
+  /** The voice agent's own tools (voiceAgent.ts), answered through the shared call. */
+  private async handleVoiceTool(callId: string, name: string, rawArgs: string): Promise<void> {
+    let args: Record<string, unknown> = {};
     try {
-      const args = JSON.parse(rawArgs) as { request?: unknown };
-      if (typeof args.request === 'string') request = args.request;
+      args = JSON.parse(rawArgs) as Record<string, unknown>;
     } catch {
-      request = rawArgs;
+      /* the tool reports the missing arguments itself */
     }
-    // The chat reads in order: what the user said, the bridge, then the hand-off.
-    this.finishReply();
-    if (this.gate && !mayUseAgent(this.speaker)) {
+    let result: string;
+    if (name === PASS_TO_AGENT_TOOL_NAME || name === SWITCH_CHAT_TOOL_NAME) {
+      // The chat reads in order: what the user said, what the voice said, then the hand-off.
+      this.finishReply();
+    }
+    if (name === PASS_TO_AGENT_TOOL_NAME && this.gate && !mayUseAgent(this.speaker)) {
       // Decided here, not by the model: the tool is withdrawn for such a
       // speaker, and a call that arrives anyway (a race with a speaker change)
       // never reaches the agent.
       this.deps.logger.warn(
-        { sessionId: this.init.sessionId, request },
+        { sessionId: this.init.sessionId, args },
         'openai-realtime: hand-off refused, speaker not recognised',
       );
-      this.sendJson({
-        type: 'conversation.item.create',
-        item: {
-          type: 'function_call_output',
-          call_id: callId,
-          output: JSON.stringify({ result: HANDOFF_REFUSED }),
-        },
-      });
-      this.askForReply();
-      return;
-    }
-    if (this.gate && this.speaker !== null) request = handoffSpeakerLine(this.speaker) + request;
-    this.dispatchesInFlight += 1;
-    this.deps.logger.info(
-      { sessionId: this.init.sessionId, chatId: this.currentChatId, request },
-      'openai-realtime: dispatching to the heavy agent',
-    );
-    const source: VoiceTurnSource = {
-      kind: 'voice-app',
-      surfaceKind: this.init.surfaceKind as 'web' | 'desktop' | 'mobile',
-      sessionId: this.init.sessionId,
-    };
-    let result: string;
-    try {
-      result = await this.deps.submitUserTurn({
-        chatId: this.currentChatId,
-        message: request,
-        source,
-        handoff: true,
-      });
-    } catch (err) {
-      result = `That failed: ${(err as Error).message}`;
-      this.deps.logger.error(
-        { sessionId: this.init.sessionId, err: (err as Error).message },
-        'openai-realtime: dispatch failed',
-      );
-    } finally {
-      this.dispatchesInFlight -= 1;
+      result = HANDOFF_REFUSED;
+    } else {
+      if (name === PASS_TO_AGENT_TOOL_NAME && this.gate && this.speaker !== null) {
+        args = {
+          ...args,
+          request: handoffSpeakerLine(this.speaker) + String(args['request'] ?? ''),
+        };
+      }
+      result = await this.call.runTool(name, args);
     }
     if (this.closed || this.fatal) return;
     this.sendJson({
       type: 'conversation.item.create',
       item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result }) },
     });
-    // The response this asks for speaks the agent's answer.
     this.askForReply();
   }
 
@@ -1042,7 +1014,6 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     }
     const arg = (k: string): string => (typeof args[k] === 'string' ? (args[k] as string) : '');
     const isSend = name === SEND_TO_CHAT_TOOL_NAME;
-    if (isSend) this.dispatchesInFlight += 1;
     this.deps.logger.info(
       { sessionId: this.init.sessionId, tool: name, args },
       'openai-realtime: manager tool',
@@ -1069,15 +1040,13 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       if (!(err instanceof ManagerChatLookupError)) {
         this.reportError(`${name} failed: ${reason}`);
       }
-    } finally {
-      if (isSend) this.dispatchesInFlight -= 1;
     }
     if (this.closed || this.fatal) return;
     this.sendJson({
       type: 'conversation.item.create',
       item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result }) },
     });
-    this.sendJson({ type: 'response.create' });
+    this.askForReply();
   }
 
   private onWsClose(code: number, reason: Buffer | string): void {
@@ -1122,7 +1091,9 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   async close(): Promise<void> {
     if (this.closed) return;
     this.releaseHeldReply();
-    this.finishReply();
+    this.reply?.flush();
+    this.lastReply?.flush();
+    this.call.close();
     this.closed = true;
     const w = this.setupWaiter;
     this.setupWaiter = undefined;
@@ -1163,4 +1134,28 @@ function managerRealtimeTools(): Array<Record<string, unknown>> {
     }),
     ...MANAGER_QUICK_TOOLS.map((t) => fn(t.name, t.description, t.params, t.required)),
   ];
+}
+
+/** One of the voice agent's tools in Realtime's function shape. */
+function realtimeTool(t: VoiceToolSpec): Record<string, unknown> {
+  return {
+    type: 'function',
+    name: t.name,
+    description: t.description,
+    parameters: {
+      type: 'object',
+      properties: Object.fromEntries(
+        Object.entries(t.params).map(([k, d]) => [k, { type: 'string', description: d }]),
+      ),
+      required: t.required,
+    },
+  };
+}
+
+/** Text added to the conversation from the user's side: context, or a push to speak about. */
+function userText(text: string): Record<string, unknown> {
+  return {
+    type: 'conversation.item.create',
+    item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+  };
 }

@@ -259,6 +259,31 @@ describe('audioSession', () => {
     expect(bargeIn).toHaveBeenCalledOnce();
   });
 
+  it('a chat switch moves the call bar to the new chat', async () => {
+    const onChatSwitched = vi.fn();
+    const { ws } = await open(noopCallbacks({ onChatSwitched }));
+    ws.emit('message', {
+      data: JSON.stringify({ type: 'audio.chat_switched', sessionId: 'sess-9', chatId: 'c2' }),
+    });
+    expect(onChatSwitched).toHaveBeenCalledWith('c2');
+  });
+
+  it('a failed catch-up or voice tool is a notice the call carries on through, not an error', async () => {
+    const onError = vi.fn();
+    const onNotice = vi.fn();
+    const { ws } = await open(noopCallbacks({ onError, onNotice }));
+    for (const code of ['catch_up_failed', 'voice_tool_failed']) {
+      ws.emit('message', {
+        data: JSON.stringify({ type: 'audio.error', code, message: `${code} happened` }),
+      });
+    }
+    expect(onNotice.mock.calls).toEqual([
+      ['catch_up_failed happened'],
+      ['voice_tool_failed happened'],
+    ]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('surfaces a backend audio.error to onError', async () => {
     const onError = vi.fn();
     const { ws } = await open(noopCallbacks({ onError }));

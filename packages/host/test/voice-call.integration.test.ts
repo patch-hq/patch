@@ -29,7 +29,8 @@ import { startAudioServer, type AudioServerHandle } from '../src/audio/server.js
 import { createWhisper } from '../src/audio/whisper.js';
 import { createKokoro } from '../src/audio/kokoro.js';
 import { MockVad } from '../src/audio/vad.js';
-import { DISPATCH_TOOL_NAME } from '../src/audio/gemini-live.js';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 
 const SECRET = 'integration-test-internal-token-aaaaaaa';
 const silent = pino({ level: 'silent' });
@@ -93,6 +94,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     });
   };
   let observe: (e: WireEvent) => void = () => undefined;
+  let drawnStarted: (chatId: string, localId: string) => void = () => undefined;
   const replies = createVoiceReplyBridge();
   const daemon = new Daemon({
     hostId: 'd1',
@@ -118,6 +120,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     logger: silent,
     now: () => Date.now(),
     generateChatId: () => `chat-${++id}`,
+    onDrawnTurnStarted: (chatId, localId) => drawnStarted(chatId, localId),
     sessionProbe: createClaudeSessionProbe({
       sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-call-claude-')),
     }),
@@ -126,6 +129,9 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
   const glue = createChatVoice({
     daemon,
     sessionsOnChat: (chatId) => server?.sessionsOnChat(chatId) ?? [],
+    sessionById: (sessionId) => server?.sessionById(sessionId),
+    endCall: (sessionId) => server!.endSession(sessionId),
+    catchUp: async (_chatId, earlier) => `caught up on ${earlier.length} messages`,
     ledger: createVoiceLedger(join(home, 'voice-usage.jsonl')),
     logger: silent,
     onCosted: () => undefined,
@@ -134,6 +140,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     glue.observe(e);
     replies.observe(e);
   };
+  drawnStarted = (chatId, localId) => glue.handoffStarted({ chatId, handoffId: localId });
   const geminis: FakeGemini[] = [];
   const config: VoiceConfig = {
     ...DEFAULT_VOICE_CONFIG,
@@ -158,27 +165,12 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
         geminis.push(g);
         return g;
       } as unknown as new (url: string) => WsSocket,
-      lookBack: (chatId, query) => daemon.searchChat(chatId, query),
       makeTimeline: (init) => glue.makeTimeline(init),
-      // What index.ts does for a hand-off: a tagged turn on the chat, answered when
-      // that turn settles (not when sendInput returns: a queued message returns at once).
-      submitUserTurn: async ({ chatId, message, source, handoff, onReplyText }) => {
-        const surface = source.kind === 'voice-app' ? source.surfaceKind : 'device';
-        const localId = `voice-${randomUUID()}`;
-        const reply = replies.awaitReply(chatId, onReplyText, localId);
-        try {
-          await daemon.sendInput({
-            chatId,
-            message,
-            localId,
-            voicePrefix: `[voice${handoff === true ? ' hand-off' : ''} • ${surface}] `,
-            fromUser: true,
-          });
-        } catch (err) {
-          replies.abandon(chatId, err as Error);
-          throw err;
-        }
-        return (await reply).text;
+      voiceAgentLink: glue.link,
+      getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
+      // Only the local tier runs a turn per utterance; a voice agent call never does.
+      submitUserTurn: async () => {
+        throw new Error('a voice agent call does not submit turns itself');
       },
       onCallEnded: (info) => glue.callEnded(info),
     });
@@ -214,12 +206,16 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
     return {
       gemini,
       hangUp: () => ws.close(),
+      /** Resolves with the close reason once the host closes the surface's socket. */
+      closed: new Promise<string>((resolve) =>
+        ws.once('close', (_code: number, reason: Buffer) => resolve(reason.toString())),
+      ),
       /** The user speaks and the model decides to hand off to the agent. */
       handOff: (callId: string, request: string) => {
         gemini.say({ serverContent: { inputTranscription: { text: request } } });
         gemini.say({
           toolCall: {
-            functionCalls: [{ id: callId, name: DISPATCH_TOOL_NAME, args: { request } }],
+            functionCalls: [{ id: callId, name: PASS_TO_AGENT_TOOL_NAME, args: { request } }],
           },
         });
         gemini.say(speech());
@@ -344,9 +340,19 @@ describe('a voice call, end to end', () => {
     // The typed turn finishes first; the call's answer must wait for its own turn.
     w.release();
     await work;
-    await vi.waitFor(() => expect(results(c)).toHaveLength(1));
-    expect(results(c)[0]).toContain('check the weather');
-    expect(results(c)[0]).not.toContain('typed work');
+    // The typed turn's reply is pushed as news, and the voice says it; then comes the
+    // answer, which is its own turn's text.
+    await vi.waitFor(() => expect(results(c).length).toBeGreaterThan(0));
+    c.gemini.say(speech());
+    c.gemini.say({ serverContent: { turnComplete: true } });
+    let answer: string | undefined;
+    await vi.waitFor(() => {
+      answer = results(c).find((t) => t.startsWith("Answer from the chat's agent"));
+      expect(answer).toBeDefined();
+    });
+    expect(answer).toContain('check the weather');
+    expect(answer).not.toContain('typed work');
+    expect(results(c).some((t) => t.startsWith("Message from the chat's agent"))).toBe(true);
   });
 
   it('look_back answers from what is actually in the chat, and from nothing else', async () => {
@@ -359,26 +365,87 @@ describe('a voice call, end to end', () => {
     });
     w.daemon.recordVoiceMessage({ chatId, role: 'user', content: 'what is the weather' });
     const c = await w.call(chatId);
-    const ask = (id: string, query: string): string => {
+    const ask = async (id: string, query: string): Promise<string> => {
       c.gemini.say({
         toolCall: { functionCalls: [{ id, name: 'look_back', args: { query } }] },
       });
-      const frame = c.gemini
-        .frames()
-        .find(
-          (f) =>
-            'toolResponse' in f &&
-            JSON.stringify(f).includes(`"id":"${id}"`) &&
-            JSON.stringify(f).includes('"name":"look_back"'),
-        );
-      return JSON.stringify(frame ?? {});
+      let frame: Record<string, unknown> | undefined;
+      await vi.waitFor(() => {
+        frame = c.gemini
+          .frames()
+          .find(
+            (f) =>
+              'toolResponse' in f &&
+              JSON.stringify(f).includes(`"id":"${id}"`) &&
+              JSON.stringify(f).includes('"name":"look_back"'),
+          );
+        expect(frame).toBeDefined();
+      });
+      return JSON.stringify(frame);
     };
-    const hit = ask('lb-1', 'archived');
+    const hit = await ask('lb-1', 'archived');
     expect(hit).toContain('why did the chat get archived');
     expect(hit).not.toContain('weather');
-    expect(ask('lb-2', 'zebra')).toContain('Nothing in this chat matches');
+    expect(await ask('lb-2', 'zebra')).toContain('Nothing in this chat matches');
     // Nothing of this ran an agent turn or cost the call anything but its voice.
     c.hangUp();
+    await vi.waitFor(() => expect(w.banners()).toHaveLength(1));
+  });
+
+  it('a typed turn that ends during the call is pushed in; check status reads the host', async () => {
+    const chatId = await begin();
+    const c = await w.call(chatId);
+    w.hold();
+    c.handOff('c1', 'list the files');
+    await vi.waitFor(() => expect(w.daemon.isTurnRunning(chatId)).toBe(true));
+    c.gemini.say({ toolCall: { functionCalls: [{ id: 's1', name: 'check_status', args: {} }] } });
+    let status = '';
+    await vi.waitFor(() => {
+      const frame = c.gemini
+        .frames()
+        .find((f) => 'toolResponse' in f && JSON.stringify(f).includes('"id":"s1"'));
+      expect(frame).toBeDefined();
+      status = JSON.stringify(frame);
+    });
+    expect(status).toContain('list the files');
+    expect(status).toContain('being worked on');
+    expect(status).toContain("The chat's agent now: working");
+    w.release();
+    await vi.waitFor(() => expect(results(c)).toHaveLength(1));
+    expect(results(c)[0]).toMatch(/^Answer from the chat's agent to "list the files"/);
+    c.gemini.say(speech());
+    c.gemini.say({ serverContent: { turnComplete: true } });
+    // Typed into the chat from elsewhere while the call is open.
+    await typed(w.daemon, chatId);
+    await vi.waitFor(() => expect(results(c)).toHaveLength(2));
+    expect(results(c)[1]).toMatch(/^Message from the chat's agent, ending its turn/);
+    expect(results(c)[1]).toContain('typed work');
+  });
+
+  it('the call opens with the chat as it stands, and the catch-up follows as context', async () => {
+    const chatId = await begin();
+    for (const m of ['first', 'second', 'third']) {
+      await w.daemon.sendInput({ chatId, message: m, localId: randomUUID() });
+    }
+    const c = await w.call(chatId);
+    const setup = c.gemini.frames()[0] as {
+      setup: { systemInstruction: { parts: Array<{ text: string }> } };
+    };
+    const instructions = setup.setup.systemInstruction.parts[0]!.text;
+    expect(instructions.startsWith(DEFAULT_VOICE_INSTRUCTIONS)).toBe(true);
+    expect(instructions).toContain('User: third');
+    expect(instructions).not.toContain('User: first');
+    await vi.waitFor(() => expect(results(c).some((t) => t.includes('caught up on'))).toBe(true));
+  });
+
+  it('the voice says goodbye and ends the call: a clean end, after the goodbye has played', async () => {
+    const chatId = await begin();
+    const c = await w.call(chatId);
+    c.gemini.say({ serverContent: { inputTranscription: { text: 'that is all, bye' } } });
+    c.gemini.say(speech()); // "Bye!"
+    c.gemini.say({ toolCall: { functionCalls: [{ id: 'e1', name: 'end_call', args: {} }] } });
+    c.gemini.say({ serverContent: { turnComplete: true } });
+    await expect(c.closed).resolves.toBe('ended_by_agent');
     await vi.waitFor(() => expect(w.banners()).toHaveLength(1));
   });
 

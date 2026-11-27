@@ -6,6 +6,8 @@
 // host's own wire events (the user message carrying the sent localId, running,
 // the agent's answer, idle). No request leaves this process.
 
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
@@ -28,7 +30,7 @@ import {
   SEND_TO_CHAT_TOOL_NAME,
   FIND_CHATS_TOOL_NAME,
 } from '../src/audio/managerVoice.js';
-import { DISPATCH_TOOL_NAME } from '../src/audio/gemini-live.js';
+import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 import {
   encodeAudio,
   decodeAudio,
@@ -215,7 +217,14 @@ describe('audio server — a hosted call to the Manager', () => {
         whisper,
         kokoro: createKokoro({ backend: 'mock', logger }),
         makeVad: () => new SilentVad(),
-        makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
+        makeTimeline: () => ({
+          userSaid() {},
+          beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+        }),
+        voiceAgentLink: fakeVoiceAgentLink({
+          passToAgent: (req) => agentTurns.push({ chatId: req.chatId, message: req.request }),
+        }).link,
+        getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
         submitUserTurn: async ({ chatId, message }) => {
           agentTurns.push({ chatId, message });
           return 'the chat agent answered';
@@ -249,7 +258,7 @@ describe('audio server — a hosted call to the Manager', () => {
     );
     const g = t.gemini[0]!;
     expect(g.toolNames()).toContain(SEND_TO_CHAT_TOOL_NAME);
-    expect(g.toolNames()).not.toContain(DISPATCH_TOOL_NAME);
+    expect(g.toolNames()).not.toContain(PASS_TO_AGENT_TOOL_NAME);
 
     g.say({
       toolCall: { functionCalls: [{ id: 'f', name: FIND_CHATS_TOOL_NAME, args: { query: '' } }] },
@@ -299,10 +308,16 @@ describe('audio server — a hosted call to the Manager', () => {
       ),
     );
     const g = t.gemini[0]!;
-    expect(g.toolNames()).toEqual([DISPATCH_TOOL_NAME]);
+    expect(g.toolNames()).toEqual([
+      PASS_TO_AGENT_TOOL_NAME,
+      'check_status',
+      'look_back',
+      'end_call',
+      'switch_chat',
+    ]);
     g.say({
       toolCall: {
-        functionCalls: [{ id: 'd', name: DISPATCH_TOOL_NAME, args: { request: 'what next' } }],
+        functionCalls: [{ id: 'd', name: PASS_TO_AGENT_TOOL_NAME, args: { request: 'what next' } }],
       },
     });
     await until(() => expect(t.agentTurns).toEqual([{ chatId: 'c-garden', message: 'what next' }]));

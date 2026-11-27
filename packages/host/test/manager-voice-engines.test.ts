@@ -1,5 +1,5 @@
 // spec/07 § A call to the Manager — each hosted engine on a Manager call: it
-// declares the manager tools in place of dispatch_to_patch, runs them against
+// declares the manager tools in place of pass_to_agent, runs them against
 // the host, and a chat's reply reaches the voice. Every provider socket is an
 // in-memory fake; nothing here spends.
 
@@ -7,9 +7,11 @@ import { describe, test, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import type { WebSocket as WsSocket } from 'ws';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
+import { LOOK_BACK_TOOL_NAME, PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 import {
   GeminiLiveSession,
-  DISPATCH_TOOL_NAME,
   MANAGER_FALSE_CLAIM_CORRECTION,
   type GeminiLiveDeps,
 } from '../src/audio/gemini-live.js';
@@ -63,6 +65,7 @@ const timeline = () => ({
       finish: () => {
         this.log.push(`reply:${chatId}:${text}`);
       },
+      text: () => text,
     };
   },
 });
@@ -131,12 +134,13 @@ class FakeGeminiWs extends EventEmitter {
 async function openGemini(manager: ManagerVoiceTools | undefined, chatId = MANAGER_CHAT_ID) {
   const last: { ws?: FakeGeminiWs } = {};
   const events: AudioEvent[] = [];
-  const submitUserTurn = vi.fn(async () => 'agent reply');
+  const { link, passed } = fakeVoiceAgentLink();
   const deps: GeminiLiveDeps = {
     logger,
     sendAudio: (e) => events.push(e),
     sendBinary: () => {},
-    submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
+    link,
+    instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'k',
     timeline: timeline(),
     wsCtor: function (this: unknown, url: string) {
@@ -153,11 +157,11 @@ async function openGemini(manager: ManagerVoiceTools | undefined, chatId = MANAG
   await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
   ws.serverSend({ setupComplete: {} });
   await vi.waitFor(() => expect(session.getState()).toBe('listening'));
-  return { session, ws, events, submitUserTurn };
+  return { session, ws, events, passed };
 }
 
 describe('Gemini Live on a Manager call', () => {
-  test('declares the manager tools and the Manager instruction, not dispatch_to_patch', async () => {
+  test('declares the manager tools and the Manager instruction, not pass_to_agent', async () => {
     const { manager } = fakeManager();
     const { ws } = await openGemini(manager);
     const setup = ws.json()[0]!['setup'];
@@ -167,23 +171,31 @@ describe('Gemini Live on a Manager call', () => {
       CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
+      LOOK_BACK_TOOL_NAME,
+      'end_call',
     ]);
     const text = setup.systemInstruction.parts[0].text as string;
     expect(text).toContain('You are the Manager');
-    expect(text).not.toContain(DISPATCH_TOOL_NAME);
+    expect(text).not.toContain(PASS_TO_AGENT_TOOL_NAME);
   });
 
-  test('a non-Manager session keeps dispatch_to_patch', async () => {
+  test('a non-Manager session keeps the voice agent tools', async () => {
     const { ws } = await openGemini(undefined, 'chat-1');
     const names = ws
       .json()[0]!
       ['setup'].tools[0].functionDeclarations.map((d: { name: string }) => d.name);
-    expect(names).toEqual([DISPATCH_TOOL_NAME]);
+    expect(names).toEqual([
+      PASS_TO_AGENT_TOOL_NAME,
+      'check_status',
+      LOOK_BACK_TOOL_NAME,
+      'end_call',
+      'switch_chat',
+    ]);
   });
 
   test('send_to_chat is answered once the chat has it; its reply arrives later as a message', async () => {
     const { manager, sendToChat, release } = fakeManager();
-    const { ws, submitUserTurn, session } = await openGemini(manager);
+    const { ws, passed } = await openGemini(manager);
     ws.serverSend({
       toolCall: {
         functionCalls: [
@@ -200,22 +212,20 @@ describe('Gemini Live on a Manager call', () => {
       expect.objectContaining({ chat: 'garden', message: 'use ferns' }),
     );
     // The Manager's own agent is not in the loop.
-    expect(submitUserTurn).not.toHaveBeenCalled();
+    expect(passed).toHaveLength(0);
     const started = ws.toolResponses()[0]!;
     expect(started).toMatchObject({ id: 's1', name: SEND_TO_CHAT_TOOL_NAME });
     expect(started['response'].result).toBe('started');
     expect(started['response'].note).toContain('"Garden planning" has the message');
-    expect(session.isAwaitingHandoff()).toBe(true);
     release('Ferns are in the plan.');
     await vi.waitFor(() => expect(ws.clientTurns().length).toBe(1));
     expect(ws.clientTurns()[0]).toContain('The chat "Garden planning" has answered');
     expect(ws.clientTurns()[0]).toContain('Ferns are in the plan.');
-    expect(session.isAwaitingHandoff()).toBe(false);
   });
 
   test('a chat on another host: sent, and the voice is told no reply will come into the call', async () => {
     const { manager } = fakeManager({ remote: true });
-    const { ws, session } = await openGemini(manager);
+    const { ws } = await openGemini(manager);
     ws.serverSend({
       toolCall: {
         functionCalls: [
@@ -225,7 +235,7 @@ describe('Gemini Live on a Manager call', () => {
     });
     await vi.waitFor(() => expect(ws.toolResponses()).toHaveLength(1));
     expect(ws.toolResponses()[0]!['response'].note).toContain('on another computer');
-    await vi.waitFor(() => expect(session.isAwaitingHandoff()).toBe(false));
+    await new Promise((r) => setTimeout(r, 20));
     expect(ws.clientTurns()).toEqual([]);
   });
 
@@ -316,12 +326,13 @@ class FakeOpenAIWs extends EventEmitter {
 async function openOpenAI(manager: ManagerVoiceTools) {
   const last: { ws?: FakeOpenAIWs } = {};
   const events: AudioEvent[] = [];
-  const submitUserTurn = vi.fn(async () => 'agent reply');
+  const { link, passed } = fakeVoiceAgentLink();
   const deps: OpenAIRealtimeDeps = {
     logger,
     sendAudio: (e) => events.push(e),
     sendBinary: () => {},
-    submitUserTurn: submitUserTurn as unknown as OpenAIRealtimeDeps['submitUserTurn'],
+    link,
+    instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'k',
     model: 'gpt-realtime-2.1-mini',
     timeline: timeline(),
@@ -339,19 +350,21 @@ async function openOpenAI(manager: ManagerVoiceTools) {
   await vi.waitFor(() => expect(ws.ofType('session.update')).toHaveLength(1));
   ws.serverSend({ type: 'session.updated' });
   await vi.waitFor(() => expect(session.getState()).toBe('listening'));
-  return { session, ws, events, submitUserTurn };
+  return { session, ws, events, passed };
 }
 
 describe('OpenAI Realtime on a Manager call', () => {
   test('declares the manager tools, and send_to_chat returns the chat reply as the call output', async () => {
     const { manager, release } = fakeManager();
-    const { ws, submitUserTurn } = await openOpenAI(manager);
+    const { ws, passed } = await openOpenAI(manager);
     const session = ws.ofType('session.update')[0]!['session'];
     expect(session.tools.map((t: { name: string }) => t.name)).toEqual([
       FIND_CHATS_TOOL_NAME,
       CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
+      LOOK_BACK_TOOL_NAME,
+      'end_call',
     ]);
     expect(session.instructions).toContain('You are the Manager');
     ws.serverSend({
@@ -368,7 +381,7 @@ describe('OpenAI Realtime on a Manager call', () => {
     expect(item).toMatchObject({ type: 'function_call_output', call_id: 'o1' });
     expect(JSON.parse(item.output).result).toBe('"Garden planning" replied: Ferns are in.');
     expect(ws.ofType('response.create')).toHaveLength(1);
-    expect(submitUserTurn).not.toHaveBeenCalled();
+    expect(passed).toHaveLength(0);
   });
 
   test('a lookup miss is handed back to the voice without an error', async () => {
@@ -428,7 +441,8 @@ describe('ElevenLabs Agents on a Manager call', () => {
       logger,
       sendAudio: () => {},
       sendBinary: () => {},
-      submitUserTurn: vi.fn() as unknown as ElevenLabsAgentDeps['submitUserTurn'],
+      link: fakeVoiceAgentLink().link,
+      instructions: DEFAULT_VOICE_INSTRUCTIONS,
       apiKey: 'k',
       llm: 'claude-haiku-4-5',
       timeline: timeline(),
@@ -462,6 +476,8 @@ describe('ElevenLabs Agents on a Manager call', () => {
       CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
+      LOOK_BACK_TOOL_NAME,
+      'end_call',
     ]);
     expect(Object.keys(tools[2]!.body.tool_config.parameters.properties)).toEqual([
       'chat',

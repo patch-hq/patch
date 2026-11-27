@@ -85,6 +85,8 @@ const FIXTURES: { [K in AudioEventType]: Extract<AudioEvent, { type: K }> } = {
       { kind: 'turn', at: 4, sessionId: 'sess2', speechToTextMs: 300, modelMs: 900 },
     ],
   },
+  'audio.chat_switched': { type: 'audio.chat_switched', sessionId: 'sess1', chatId: 'chat2' },
+  'audio.passed_to_agent': { type: 'audio.passed_to_agent', sessionId: 'sess1' },
 };
 
 describe('@patch/wire/audio codec', () => {

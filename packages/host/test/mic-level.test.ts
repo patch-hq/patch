@@ -5,6 +5,8 @@ import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
 import { MicLevelWatch, micSilentMessage } from '../src/audio/micLevel.js';
 import { GeminiLiveSession } from '../src/audio/gemini-live.js';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import type { AudioEvent } from '@patch/wire/audio';
 import type { WebSocket as WsSocket } from 'ws';
 import { EventEmitter } from 'node:events';
@@ -75,8 +77,12 @@ describe('a call whose microphone sends silence', () => {
         logger: pino({ level: 'silent' }),
         sendAudio: (e) => events.push(e),
         sendBinary: () => {},
-        submitUserTurn: async () => '',
-        timeline: { userSaid: () => {}, beginReply: () => ({ append() {}, finish() {} }) },
+        link: fakeVoiceAgentLink().link,
+        instructions: DEFAULT_VOICE_INSTRUCTIONS,
+        timeline: {
+          userSaid: () => {},
+          beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+        },
         apiKey: 'k',
         wsCtor: function () {
           const ws = new FakeWs();

@@ -43,8 +43,6 @@ interface Waiter {
   resolve: (reply: VoiceReply) => void;
   reject: (err: Error) => void;
   onReplyText?: (chunk: string) => void;
-  /** Called once, when the waiter is armed: the chat has the turn. */
-  onAccepted?: () => void;
   /**
    * The `localId` the turn was sent with. When set, the waiter is armed only by that
    * turn's own persisted user message (emitted as the turn starts), never by whichever
@@ -81,7 +79,6 @@ export interface VoiceReplyBridge {
     chatId: string,
     onReplyText?: (chunk: string) => void,
     localId?: string,
-    onAccepted?: () => void,
   ): Promise<VoiceReply>;
   /**
    * Drop the pending waiter for `chatId`, rejecting it with `err`. Used when
@@ -126,7 +123,6 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
               w.armed = true;
               w.buf = [];
               w.seqs = [];
-              w.onAccepted?.();
             }
             return;
           }
@@ -148,7 +144,6 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
             w.armed = true;
             w.buf = [];
             w.seqs = [];
-            w.onAccepted?.();
           }
           return;
         }
@@ -184,7 +179,6 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
       chatId: string,
       onReplyText?: (chunk: string) => void,
       localId?: string,
-      onAccepted?: () => void,
     ): Promise<VoiceReply> {
       // One voice session per chat is the v1 contract. A second registration
       // means the first will never be settled by its own turn — fail it loudly
@@ -195,7 +189,6 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           resolve,
           reject,
           ...(onReplyText ? { onReplyText } : {}),
-          ...(onAccepted ? { onAccepted } : {}),
           ...(localId !== undefined ? { localId } : {}),
           armed: false,
           buf: [],
@@ -214,7 +207,6 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
       w.armed = true;
       w.buf = [];
       w.seqs = [];
-      w.onAccepted?.();
     },
 
     pendingCount(): number {

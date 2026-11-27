@@ -8,6 +8,8 @@
 // APIs and this suite must never spend. Dictation on Deepgram is covered in
 // audio-server-native-tier.test.ts.
 
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
@@ -193,7 +195,12 @@ describe('audio server — hosted backends on every app surface', () => {
   ): Promise<AudioServerHandle & { port: number }> {
     const cfg: VoiceConfig = { ...DEFAULT_VOICE_CONFIG, ...voiceConfig };
     const handle = await startAudioServer({
-      makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
+      makeTimeline: () => ({
+        userSaid() {},
+        beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+      }),
+      voiceAgentLink: fakeVoiceAgentLink().link,
+      getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
       host: '127.0.0.1',
       port: 0,
       logger,
@@ -284,6 +291,7 @@ describe('audio server — hosted backends on every app surface', () => {
               text += d;
             },
             finish: () => log.push(`reply:${chatId}:${text}`),
+            text: () => text,
           };
         },
       }),
@@ -442,7 +450,12 @@ describe('audio server — hosted backends on every app surface', () => {
       const surface = await openSurface(s.port, `e-${mode}`, 'voice-call', mode);
       await until(() => expect(eleven).toHaveLength(1));
       expect(eleven[0]!.url).toBe('wss://signed/c');
+      // One client tool each: pass_to_agent, check_status, look_back, end_call, switch_chat.
       expect(elevenRest).toEqual([
+        'POST /v1/convai/tools',
+        'POST /v1/convai/tools',
+        'POST /v1/convai/tools',
+        'POST /v1/convai/tools',
         'POST /v1/convai/tools',
         'POST /v1/convai/agents/create',
         'GET /v1/convai/conversation/get-signed-url',
