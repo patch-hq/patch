@@ -10,6 +10,7 @@ import pino from 'pino';
 import { createHmac } from 'node:crypto';
 import { connect as netConnect } from 'node:net';
 import { WebSocket } from 'ws';
+import { EventEmitter } from 'node:events';
 import { startAudioServer, type AudioServerHandle } from '../src/audio/server.js';
 import { createWhisper } from '../src/audio/whisper.js';
 import { createKokoro } from '../src/audio/kokoro.js';
@@ -58,6 +59,28 @@ async function recvOne(ws: WebSocket): Promise<AudioEvent> {
   });
 }
 
+/**
+ * A call or hands-free session is always a voice agent call (spec/07 § Two
+ * kinds of call): an in-memory Gemini Live stands in for the provider.
+ */
+class FakeGeminiWs extends EventEmitter {
+  send(data: string): void {
+    if ((JSON.parse(data) as { setup?: unknown }).setup) {
+      queueMicrotask(() => this.emit('message', JSON.stringify({ setupComplete: {} }), false));
+    }
+  }
+  close(): void {}
+}
+const HOSTED_CALL = {
+  geminiApiKey: 'g-key',
+  makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
+  geminiWsCtor: function () {
+    const inst = new FakeGeminiWs();
+    queueMicrotask(() => inst.emit('open'));
+    return inst;
+  } as never,
+};
+
 async function startServer(opts?: {
   cap?: number;
   deadPeerMs?: number;
@@ -76,6 +99,7 @@ async function startServer(opts?: {
     submitUserTurn: async () => opts?.reply ?? 'mock reply',
     // Default: every chat exists. Tests for E1-d3 override this.
     chatExists: opts?.chatExists ?? ((): boolean => true),
+    ...HOSTED_CALL,
     ...(opts?.cap !== undefined ? { maxConcurrentSessions: opts.cap } : {}),
     ...(opts?.deadPeerMs !== undefined
       ? { deadPeerTimeoutMs: opts.deadPeerMs, pingIntervalMs: 50 }
@@ -113,9 +137,10 @@ describe('audio WSS server', () => {
         sessionId: 'sess-bad',
         accountId: 'acct',
         surfaceId: 'surf',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c1',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: 'aaaa.zzzz',
         surfaceHasAec: true,
       }),
@@ -140,9 +165,10 @@ describe('audio WSS server', () => {
         sessionId: 'sess-exp',
         accountId: 'a',
         surfaceId: 's',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -169,9 +195,10 @@ describe('audio WSS server', () => {
         sessionId: 'sess-r1',
         accountId: 'a',
         surfaceId: 's1',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: token1,
         surfaceHasAec: true,
       }),
@@ -193,9 +220,10 @@ describe('audio WSS server', () => {
         sessionId: 'sess-r2',
         accountId: 'a',
         surfaceId: 's2',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: token2,
         surfaceHasAec: true,
       }),
@@ -221,9 +249,10 @@ describe('audio WSS server', () => {
           sessionId: sid,
           accountId: 'a',
           surfaceId: `s${i}`,
-          surfaceKind: 'web',
+          surfaceKind: 'device',
+          deviceId: 'dev-test',
           chatId: 'c',
-          role: 'voice-call',
+          role: 'voice-device-conv',
           token,
           surfaceHasAec: true,
         }),
@@ -243,9 +272,10 @@ describe('audio WSS server', () => {
         sessionId: sid3,
         accountId: 'a',
         surfaceId: 's3',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: token3,
         surfaceHasAec: true,
       }),
@@ -296,9 +326,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-le',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -509,9 +540,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'chat-speak-fail',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -523,114 +555,6 @@ describe('audio WSS server', () => {
     // No crash — the server (and this session) is still healthy.
     expect(server.activeCount()).toBe(1);
     ws.close();
-  });
-
-  test('a local call greets the user aloud as soon as it opens (no silent connect)', async () => {
-    const spoken: string[] = [];
-    const kokoro: KokoroBackend = {
-      isReady: () => true,
-      async close() {},
-      async synthesize(text: string): Promise<KokoroSynthesis> {
-        spoken.push(text);
-        async function* gen() {
-          yield { pcm: new Int16Array(240), first: true };
-        }
-        return { iterator: gen(), async cancel() {} };
-      },
-    };
-    const handle = await startAudioServer({
-      host: '127.0.0.1',
-      port: 0,
-      logger,
-      internalToken: SECRET,
-      whisper: createWhisper({ backend: 'mock', logger }),
-      kokoro,
-      makeVad: () => new MockVad(),
-      submitUserTurn: async () => 'ok',
-      chatExists: (): boolean => true,
-    });
-    try {
-      for (const [sid, mode] of [
-        ['sess-greet-call', 'call'],
-        ['sess-greet-hf', 'hands-free'],
-      ] as const) {
-        const ws = await openSocket(handle.address().port, sid);
-        ws.send(
-          encodeAudio({
-            type: 'audio.session_start',
-            sessionId: sid,
-            accountId: 'a',
-            surfaceId: `s-${sid}`,
-            surfaceKind: 'mobile',
-            chatId: 'c',
-            role: 'voice-call',
-            mode,
-            token: mintToken({ accountId: 'a', surfaceId: `s-${sid}`, sessionId: sid }),
-            surfaceHasAec: true,
-          }),
-        );
-        await new Promise((r) => setTimeout(r, 100));
-        ws.close();
-      }
-      expect(spoken).toEqual(['Connected.', 'Connected.']);
-    } finally {
-      await handle.close();
-    }
-  });
-
-  test("a local call answering an agent's ring opens with its reason; a redial does not repeat it", async () => {
-    const spoken: string[] = [];
-    const kokoro: KokoroBackend = {
-      isReady: () => true,
-      async close() {},
-      async synthesize(text: string): Promise<KokoroSynthesis> {
-        spoken.push(text);
-        async function* gen() {
-          yield { pcm: new Int16Array(240), first: true };
-        }
-        return { iterator: gen(), async cancel() {} };
-      },
-    };
-    const handle = await startAudioServer({
-      host: '127.0.0.1',
-      port: 0,
-      logger,
-      internalToken: SECRET,
-      whisper: createWhisper({ backend: 'mock', logger }),
-      kokoro,
-      makeVad: () => new MockVad(),
-      submitUserTurn: async () => 'ok',
-      chatExists: (): boolean => true,
-    });
-    try {
-      for (const [sid, resumed] of [
-        ['sess-reason', false],
-        ['sess-reason-redial', true],
-      ] as const) {
-        const ws = await openSocket(handle.address().port, sid);
-        ws.send(
-          encodeAudio({
-            type: 'audio.session_start',
-            sessionId: sid,
-            accountId: 'a',
-            surfaceId: `s-${sid}`,
-            surfaceKind: 'mobile',
-            chatId: 'c',
-            role: 'voice-call',
-            mode: 'hands-free',
-            token: mintToken({ accountId: 'a', surfaceId: `s-${sid}`, sessionId: sid }),
-            surfaceHasAec: true,
-            callReason: 'The deploy failed; shall I roll back?',
-            ...(resumed ? { resumed: true } : {}),
-          }),
-        );
-        await new Promise((r) => setTimeout(r, 100));
-        ws.close();
-      }
-      expect(spoken).toEqual(['The deploy failed; shall I roll back?', 'Connected.']);
-    } finally {
-      await handle.close();
-    }
   });
 
   test('fires onSessionClosed({wasPhoneCall}) correctly for a phone voice-call vs a device session', async () => {
@@ -647,6 +571,7 @@ describe('audio WSS server', () => {
       makeVad: () => new MockVad(),
       submitUserTurn: async () => 'ok',
       chatExists: (): boolean => true,
+      ...HOSTED_CALL,
       onSessionClosed: (info) => closedEvents.push(info),
     });
     const s3 = Object.assign(handle, { port: handle.address().port });
@@ -798,9 +723,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'chat-a',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -868,10 +794,11 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-mm',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         // … but session_start declares chat-B.
         chatId: 'chat-B',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -902,9 +829,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-nc',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'GONE_CHAT',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -978,9 +906,10 @@ describe('audio WSS server', () => {
         sessionId: 'sess-close-auth',
         accountId: 'a',
         surfaceId: 's-forge',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: 'forged.signature',
         surfaceHasAec: true,
       }),
@@ -1257,9 +1186,10 @@ describe('audio WSS server', () => {
           sessionId: 'sess-send-fail',
           accountId: 'a',
           surfaceId: 's',
-          surfaceKind: 'web',
+          surfaceKind: 'device',
+          deviceId: 'dev-test',
           chatId: 'c',
-          role: 'voice-call',
+          role: 'voice-device-conv',
           token: 'forged.bad', // rejected -> server tries to send audio.error back
           surfaceHasAec: true,
         }),
@@ -1284,9 +1214,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-err',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1335,9 +1266,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-mismatch',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1361,9 +1293,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-odd',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1410,9 +1343,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-mic-err',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1448,9 +1382,10 @@ describe('audio WSS server', () => {
         sessionId: 'sess-DIFFERENT', // mismatches the URL's sess-url-one
         accountId: 'a',
         surfaceId: 's',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1473,9 +1408,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1499,9 +1435,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'account-B', // mismatches the token's claimed accountId
         surfaceId: 'surface-A',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1587,6 +1524,7 @@ describe('audio WSS server', () => {
       makeVad: () => new MockVad(),
       submitUserTurn: async () => 'ok',
       chatExists: (): boolean => true,
+      ...HOSTED_CALL,
     });
     server = Object.assign(handle, { port: handle.address().port });
     expect(server.phoneCallActive()).toBe(false);
@@ -1675,9 +1613,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'chat-inj',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1723,9 +1662,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'chat-err',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1766,9 +1706,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'chat-speak',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1810,9 +1751,10 @@ describe('audio WSS server', () => {
         sessionId: sid1,
         accountId: 'a',
         surfaceId: 's1',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: token1,
         surfaceHasAec: true,
       }),
@@ -1840,9 +1782,10 @@ describe('audio WSS server', () => {
         sessionId: sid2,
         accountId: 'a',
         surfaceId: 's2',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: token2,
         surfaceHasAec: true,
       }),
@@ -1876,9 +1819,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-default-vad',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1898,9 +1842,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-default-case',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -1945,9 +1890,10 @@ describe('audio WSS server', () => {
         sessionId: sid,
         accountId: 'a',
         surfaceId: 's-close-throws',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token,
         surfaceHasAec: true,
       }),
@@ -2029,9 +1975,10 @@ describe('audio WSS server', () => {
         sessionId: sharedSessionId,
         accountId: 'a',
         surfaceId: surfaceA,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: tokenA,
         surfaceHasAec: true,
       }),
@@ -2046,9 +1993,10 @@ describe('audio WSS server', () => {
         sessionId: sharedSessionId,
         accountId: 'a',
         surfaceId: surfaceB,
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'dev-test',
         chatId: 'c',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: tokenB,
         surfaceHasAec: true,
       }),

@@ -355,19 +355,6 @@ describe('audio server — hosted backends on every app surface', () => {
     ['hands-free', 'handsFree'],
   ];
   for (const [mode, key] of CONVERSATIONAL) {
-    test(`${mode} on local/direct runs the local pipeline — no provider dialled`, async () => {
-      const s = await start({ [key]: { backend: 'local', layer: 'direct' } });
-      const surface = await openSurface(s.port, `l-${mode}`, 'voice-call', mode);
-      await until(() =>
-        expect(surface.events).toContainEqual(
-          expect.objectContaining({ type: 'audio.state', state: 'listening' }),
-        ),
-      );
-      expect(gemini).toHaveLength(0);
-      expect(openai).toHaveLength(0);
-      surface.ws.close();
-    });
-
     for (const layer of ['light', 'heavy'] as const) {
       test(`${mode} on gemini/${layer} dials Gemini Live with the ${layer} model`, async () => {
         const s = await start({ [key]: { backend: 'gemini', layer } });
@@ -464,16 +451,6 @@ describe('audio server — hosted backends on every app surface', () => {
       expect(openai).toHaveLength(0);
       surface.ws.close();
     });
-
-    test(`${mode} on local/light is refused — no local front model`, async () => {
-      const s = await start({ [key]: { backend: 'local', layer: 'light' } });
-      const surface = await openSurface(s.port, `l-light-${mode}`, 'voice-call', mode);
-      await surface.closed;
-      expect(surface.events[0]).toMatchObject({
-        type: 'audio.error',
-        code: 'voice_config_not_implemented',
-      });
-    });
   }
 
   test('an OpenAI session whose provider hangs up ends the surface session loudly', async () => {
@@ -515,7 +492,7 @@ describe('audio server — hosted backends on every app surface', () => {
   test('switching mode in place across engines is refused; the session keeps its mode', async () => {
     const s = await start({
       call: { backend: 'openai', layer: 'light' },
-      handsFree: { backend: 'local', layer: 'direct' },
+      handsFree: { backend: 'gemini', layer: 'light' },
     });
     const surface = await openSurface(s.port, 'mix-1', 'voice-call', 'call');
     await until(() => expect(openai).toHaveLength(1));

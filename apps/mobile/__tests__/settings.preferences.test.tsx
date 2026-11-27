@@ -17,7 +17,6 @@ import {
   DictationPage,
   MeetingsPage,
   VoicePage,
-  voiceCellStatus,
   writePreferences,
 } from '../src/components/settings/PreferenceSections';
 import {
@@ -181,22 +180,23 @@ const DEVICES = [
   },
 ] as never;
 
-describe('Voice: one config for every conversation', () => {
-  it('draws the saved provider, Local by default, with Local’s reply voice nested under it', () => {
+describe('Voice: the voice agent, and how a voice device answers', () => {
+  it('a call is a voice agent call: Gemini by default, with no Local choice', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
-    expect(findHost(r.root, byTestId('voice-engine-local')).props.accessibilityState.selected).toBe(
-      true,
-    );
+    expect(
+      findHost(r.root, byTestId('voice-engine-gemini')).props.accessibilityState.selected,
+    ).toBe(true);
+    expect(queryHost(r.root, byTestId('voice-engine-local'))).toBeNull();
+    // A voice device answers directly by default, with the host's reply voice under it.
+    expect(
+      findHost(r.root, byTestId('voice-device-answer-direct')).props.accessibilityState.selected,
+    ).toBe(true);
     expect(findHost(r.root, byTestId('voice-local-tts'))).toBeTruthy();
     expect(findHost(r.root, byTestId('kokoro-voice'))).toBeTruthy();
-    for (const s of ['device', 'handsFree', 'call']) {
-      expect(queryHost(r.root, byTestId(`voice-${s}`))).toBeNull();
-    }
-    expect(queryHost(r.root, byTestId('voice-status'))).toBeNull();
   });
 
-  it('a provider choice is written to calls, hands-free and voice devices alike', async () => {
+  it('a provider choice is written to calls and hands-free; a device answered directly keeps host speech', async () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     await actAsync(async () => {
@@ -205,7 +205,25 @@ describe('Voice: one config for every conversation', () => {
     });
     const cell = { backend: 'openai', layer: 'light', handoff: 'auto' };
     expect(api.setPreferences).toHaveBeenCalledWith({
-      voiceConfig: expect.objectContaining({ call: cell, handsFree: cell, device: cell }),
+      voiceConfig: expect.objectContaining({
+        call: cell,
+        handsFree: cell,
+        device: { backend: 'local', layer: 'direct', handoff: 'auto' },
+      }),
+    });
+  });
+
+  it('a voice device answered by the voice agent takes the voice agent setup', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('voice-device-answer-agent')).props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({
+      voiceConfig: expect.objectContaining({
+        device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+      }),
     });
   });
 
@@ -243,12 +261,12 @@ describe('Voice: one config for every conversation', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('voice-engine-gemini')).props.onPress();
+      findHost(r.root, byTestId('voice-engine-openai')).props.onPress();
       await flush();
     });
     expect(__getLastAlert()?.title).toBe('Settings failed');
     expect(__getLastAlert()?.message).toBe('nope');
-    expect(findHost(r.root, byTestId('voice-engine-local')).props.accessibilityState).toEqual({
+    expect(findHost(r.root, byTestId('voice-engine-gemini')).props.accessibilityState).toEqual({
       selected: true,
       disabled: false,
     });
@@ -346,15 +364,6 @@ describe('Voice: one config for every conversation', () => {
     expect(textOf(findHost(r.root, byTestId('voice-usage-plan')))).toContain(
       '41,304 of 185,575 credits used',
     );
-  });
-
-  it('states each config honestly — the same words web uses', () => {
-    expect(voiceCellStatus('local', 'heavy')).toMatch(/no front model built for local/);
-    expect(voiceCellStatus('local', 'direct')).toBeNull();
-    for (const layer of ['light', 'heavy'] as const) {
-      expect(voiceCellStatus('gemini', layer)).toBeNull();
-      expect(voiceCellStatus('openai', layer)).toBeNull();
-    }
   });
 });
 

@@ -16,7 +16,7 @@
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
-import type { AccountPreferences, VoiceBackend, VoiceHandoff, VoiceLayer } from '../../api/rest';
+import type { AccountPreferences, VoiceLayer } from '../../api/rest';
 import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
@@ -27,6 +27,8 @@ import {
   OPENAI_VOICES,
   dictationEnginesFor,
   voiceKeyHostStatus,
+  VoiceAgentBackend,
+  type VoiceAgentCellConfig,
   type AudioSurfaceKind,
   type DictationEngine,
   type MeetingEngine,
@@ -200,16 +202,15 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
 
 // ── Voice ────────────────────────────────────────────────────────────────────
 
-const VOICE_BACKENDS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
-const VOICE_BACKEND_LABELS: Record<VoiceBackend, string> = {
-  local: 'Local',
+const VOICE_BACKENDS = VoiceAgentBackend.options;
+const VOICE_BACKEND_LABELS: Record<VoiceAgentBackend, string> = {
   gemini: 'Gemini',
   openai: 'OpenAI',
   elevenlabs: 'ElevenLabs',
 };
 type Variant = Exclude<VoiceLayer, 'direct'>;
 const VARIANTS: readonly Variant[] = ['light', 'heavy'];
-const VARIANT_NAMES: Record<Exclude<VoiceBackend, 'local'>, Record<Variant, string>> = {
+const VARIANT_NAMES: Record<VoiceAgentBackend, Record<Variant, string>> = {
   gemini: { light: 'Flash', heavy: 'Thinking' },
   openai: { light: 'mini', heavy: 'full' },
   elevenlabs: { light: 'Haiku', heavy: 'Sonnet' },
@@ -235,21 +236,6 @@ const MEETING_LABELS: Record<MeetingEngine, string> = {
   deepgram: 'Deepgram',
   assemblyai: 'AssemblyAI',
 };
-/** The three conversation entries share one config; `call` is the one shown. */
-const VOICE_SURFACES = ['call', 'handsFree', 'device'] as const;
-
-/**
- * What actually happens for a config, right now. Mirrors the host's audio
- * server branching and web's `voiceCellStatus`, so neither surface claims a
- * config works when the host would refuse it.
- */
-export function voiceCellStatus(backend: VoiceBackend, layer?: VoiceLayer): string | null {
-  if (backend === 'local' && layer !== undefined && layer !== 'direct') {
-    return 'Not implemented yet — no front model built for local. Refused at connect time.';
-  }
-  return null;
-}
-
 const HOST_SPEECH_LABELS: Record<SpeechBackendSetting, string> = {
   auto: 'Automatic',
   off: 'Off',
@@ -360,6 +346,9 @@ export function VoicePage(): React.ReactElement {
       </WithSettings>
       <VoiceUsage />
       <VoiceDevicesSection />
+      <SettingsSection title="How a voice device answers" testID="settings-voice-device-answer">
+        <VoiceDeviceAnswer />
+      </SettingsSection>
       <WithSettings testID="voice-device-prompt">
         {(data) => (
           <SettingsSection title="On a voice device" testID="settings-voice-device-prompt">
@@ -372,8 +361,53 @@ export function VoicePage(): React.ReactElement {
 }
 
 /**
- * The voice conversation config (spec/07 § Voice). One choice drives calls,
- * hands-free and voice devices: it is written to all three cells.
+ * How a voice device's conversation is answered (spec/16 § A conversation): by
+ * the account's voice agent, or directly, with speech on the chat's host.
+ */
+function VoiceDeviceAnswer(): React.ReactElement {
+  const [busy, setBusy] = React.useState(false);
+  return (
+    <WithSettings testID="voice-device-answer">
+      {(data) => {
+        const voiceConfig = data.preferences.voiceConfig;
+        const direct = voiceConfig.device.backend === 'local';
+        const choose = (next: 'agent' | 'direct'): void => {
+          setBusy(true);
+          const device =
+            next === 'direct'
+              ? { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const }
+              : voiceConfig.call;
+          void useSettingsStore
+            .getState()
+            .updatePreferences({ voiceConfig: { ...voiceConfig, device } })
+            .catch((e: Error) => Alert.alert('Settings failed', e.message))
+            .finally(() => setBusy(false));
+        };
+        return (
+          <>
+            <Row title="Answer with" testID="voice-device-answer-row" stack>
+              <Chips
+                options={['agent', 'direct'] as const}
+                selected={direct ? 'direct' : 'agent'}
+                labelOf={(v) => (v === 'agent' ? 'Voice agent' : 'Direct')}
+                disabled={busy}
+                testIDPrefix="voice-device-answer"
+                labelPrefix="Voice device answers with"
+                onSelect={choose}
+              />
+            </Row>
+            {direct ? <LocalCallRows preferences={data.preferences} /> : null}
+          </>
+        );
+      }}
+    </WithSettings>
+  );
+}
+
+/**
+ * The voice agent setup (spec/07 § The voice agent): it drives calls,
+ * hands-free, and a voice device answered by the voice agent. A device
+ * answered directly keeps its own host-speech cell (VoiceDeviceAnswer).
  */
 function VoiceEngine(): React.ReactElement {
   const colors = useTheme();
@@ -389,20 +423,17 @@ function VoiceEngine(): React.ReactElement {
         const voiceConfig = prefs.voiceConfig;
         const cell = voiceConfig.call;
         const { backend, layer, handoff } = cell;
-        const write = (next: {
-          backend: VoiceBackend;
-          layer: VoiceLayer;
-          handoff: VoiceHandoff;
-        }): void => {
+        const write = (next: VoiceAgentCellConfig): void => {
           setBusy(true);
-          const all = Object.fromEntries(VOICE_SURFACES.map((k) => [k, next]));
+          const device = voiceConfig.device.backend === 'local' ? voiceConfig.device : next;
           void useSettingsStore
             .getState()
-            .updatePreferences({ voiceConfig: { ...voiceConfig, ...all } })
+            .updatePreferences({
+              voiceConfig: { ...voiceConfig, call: next, handsFree: next, device },
+            })
             .catch((e: Error) => Alert.alert('Settings failed', e.message))
             .finally(() => setBusy(false));
         };
-        const status = voiceCellStatus(backend, layer);
         const keyStatus = voiceKeyHostStatus(backend, hostReports);
         return (
           <>
@@ -410,15 +441,10 @@ function VoiceEngine(): React.ReactElement {
               title="Provider"
               testID="voice-provider"
               subtitle={
-                status || keyStatus ? (
-                  <View style={{ gap: space.xs }}>
-                    {status ? <Muted testID="voice-status">{status}</Muted> : null}
-                    {keyStatus ? (
-                      <Text testID="voice-keys" style={{ ...typography.meta, color: colors.red }}>
-                        {keyStatus}
-                      </Text>
-                    ) : null}
-                  </View>
+                keyStatus ? (
+                  <Text testID="voice-keys" style={{ ...typography.meta, color: colors.red }}>
+                    {keyStatus}
+                  </Text>
                 ) : undefined
               }
               stack
@@ -433,15 +459,13 @@ function VoiceEngine(): React.ReactElement {
                 onSelect={(b) =>
                   write({
                     backend: b,
-                    layer: b === 'local' ? 'direct' : variantOf(layer),
+                    layer: variantOf(layer),
                     handoff: handoff === 'never' ? 'never' : 'auto',
                   })
                 }
               />
             </Row>
-            {backend === 'local' ? (
-              <LocalCallRows preferences={prefs} />
-            ) : (
+            {
               <>
                 <Row title="Model" testID="voice-model" stack>
                   <Chips
@@ -468,7 +492,7 @@ function VoiceEngine(): React.ReactElement {
                   onChange={(on) => write({ ...cell, handoff: on ? 'auto' : 'never' })}
                 />
               </>
-            )}
+            }
           </>
         );
       }}
@@ -481,7 +505,7 @@ function HostedVoiceRow({
   backend,
   preferences,
 }: {
-  backend: Exclude<VoiceBackend, 'local'>;
+  backend: VoiceAgentBackend;
   preferences: AccountPreferences;
 }): React.ReactElement {
   if (backend === 'elevenlabs') return <ElevenLabsVoiceRow preferences={preferences} />;

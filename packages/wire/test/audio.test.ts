@@ -364,8 +364,15 @@ describe('a voice surface whose backend has no key on the host', () => {
     expect(
       voiceSurfacesMissingKey(config, { gemini: false, openai: false, deepgram: true }),
     ).toEqual([{ surface: 'device', backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' }]);
-    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, { gemini: false, openai: false })).toEqual(
+    // A call and hands-free default to the Gemini voice agent; only the device is on host speech.
+    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, { gemini: true, openai: false })).toEqual(
       [],
+    );
+    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, { gemini: false, openai: false })).toEqual(
+      [
+        { surface: 'hands-free', backend: 'gemini', env: 'GEMINI_API_KEY' },
+        { surface: 'call', backend: 'gemini', env: 'GEMINI_API_KEY' },
+      ],
     );
   });
   test('Settings names each host that cannot run a hosted cell; unreported hosts say nothing', () => {
@@ -457,7 +464,7 @@ describe('meeting engine', () => {
       await import('../src/audio.js');
     expect(DEFAULT_VOICE_CONFIG.meeting).toBe('local');
     expect(MeetingEngine.options).toEqual(['local', 'elevenlabs', 'deepgram', 'assemblyai']);
-    const keys = { gemini: false, openai: false };
+    const keys = { gemini: true, openai: false };
     expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, keys)).toEqual([]);
     expect(
       voiceSurfacesMissingKey({ ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' }, keys),

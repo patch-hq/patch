@@ -133,20 +133,20 @@ afterEach(async () => {
   restoreWebSocket();
 });
 
-const ENGINE_LABEL: Record<VoiceBackend, (layer: VoiceLayer) => string | null> = {
-  local: () => null,
+const ENGINE_LABEL: Record<'gemini' | 'openai', (layer: VoiceLayer) => string | null> = {
   gemini: (l) => `Gemini Live · ${l === 'heavy' ? 'heavy' : 'light'}`,
   openai: (l) => `OpenAI Realtime · ${l === 'heavy' ? 'heavy' : 'light'}`,
 };
 
-const FAILURE: Record<Exclude<VoiceBackend, 'local'>, { code: string; engine: string }> = {
+const FAILURE: Record<'gemini' | 'openai', { code: string; engine: string }> = {
   gemini: { code: 'gemini_unavailable', engine: 'Gemini Live' },
   openai: { code: 'openai_unavailable', engine: 'OpenAI Realtime' },
 };
 
 for (const mode of ['call', 'hands-free'] as const) {
-  for (const backend of ['local', 'gemini', 'openai'] as const) {
-    const layers: VoiceLayer[] = backend === 'local' ? ['direct'] : ['direct', 'light', 'heavy'];
+  // A call is always a voice agent call (spec/07 § Two kinds of call).
+  for (const backend of ['gemini', 'openai'] as const) {
+    const layers: VoiceLayer[] = ['direct', 'light', 'heavy'];
     for (const layer of layers) {
       describe(`${mode} on ${backend}/${layer}`, () => {
         it('opens the same host session as every other backend and plays its audio', async () => {
@@ -184,13 +184,13 @@ for (const mode of ['call', 'hands-free'] as const) {
           expect(useVoiceStore.getState().callPhase).toBe('listening');
         });
 
-        it('names the engine on the call bar only when it is hosted', async () => {
+        it('names the voice agent on the call bar', async () => {
           seedConfig(withCell(mode, backend, layer));
           await openCall('c1', mode);
           expect(useVoiceStore.getState().callEngine).toBe(ENGINE_LABEL[backend](layer));
         });
 
-        if (backend !== 'local') {
+        {
           it('no key for it on the host: the call bar says exactly which key and where to switch', async () => {
             seedConfig(withCell(mode, backend, layer));
             const sock = await openCall('c1', mode);
@@ -262,7 +262,7 @@ describe('switching mode', () => {
     seedConfig({
       ...DEFAULT_VOICE_CONFIG,
       call: { backend: 'gemini', layer: 'heavy', handoff: 'auto' },
-      handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
+      handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
     });
     const first = await openCall('c1', 'call');
     expect(useVoiceStore.getState().callEngine).toBe('Gemini Live · heavy');
@@ -286,7 +286,7 @@ describe('switching mode', () => {
     });
     const st = useVoiceStore.getState();
     expect(st.callMode).toBe('hands-free');
-    expect(st.callEngine).toBeNull();
+    expect(st.callEngine).toBe('OpenAI Realtime · light');
     expect(st.activeSession?.chatId).toBe('c1');
   });
 

@@ -6,8 +6,14 @@
 
 import type { JSX } from 'react';
 import { useState } from 'react';
-import { GEMINI_VOICES, OPENAI_VOICES, voiceKeyHostStatus } from '@patch/wire/audio';
-import { type VoiceBackend, type VoiceLayer, type VoiceSurfaceConfig } from '../../api/rest.js';
+import {
+  GEMINI_VOICES,
+  OPENAI_VOICES,
+  VoiceAgentBackend,
+  voiceKeyHostStatus,
+  type VoiceAgentCellConfig,
+} from '@patch/wire/audio';
+import { type VoiceLayer, type VoiceSurfaceConfig } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
@@ -21,36 +27,20 @@ import { failed } from '../../lib/errorCopy.js';
 import { DEFAULT_VOICE_DEVICE_PROMPT, DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { PromptRow } from './PromptRow.js';
 
-const PROVIDERS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
-const PROVIDER_LABELS: Record<VoiceBackend, string> = {
-  local: 'Local',
+const PROVIDERS = VoiceAgentBackend.options;
+const PROVIDER_LABELS: Record<VoiceAgentBackend, string> = {
   gemini: 'Gemini',
   openai: 'OpenAI',
   elevenlabs: 'ElevenLabs',
 };
 type Variant = Exclude<VoiceLayer, 'direct'>;
 const VARIANTS: readonly Variant[] = ['light', 'heavy'];
-const VARIANT_NAMES: Record<Exclude<VoiceBackend, 'local'>, Record<Variant, string>> = {
+const VARIANT_NAMES: Record<VoiceAgentBackend, Record<Variant, string>> = {
   gemini: { light: 'Flash 2.5 Native Audio', heavy: 'Gemini 3.8 Live Thinking' },
   openai: { light: 'GPT Realtime 2.1 mini', heavy: 'GPT Realtime 2.1' },
   elevenlabs: { light: 'Claude Haiku 4.5', heavy: 'Claude Sonnet 4.5' },
 };
 const variantOf = (layer: VoiceLayer): Variant => (layer === 'heavy' ? 'heavy' : 'light');
-
-/** The three conversation entries share one config; `call` is the one shown. */
-const SURFACES = ['call', 'handsFree', 'device'] as const;
-
-/**
- * What actually happens for a config, right now. Mirrors
- * `packages/host/src/audio/server.ts`'s branching, so this never claims a
- * config works when the host would refuse it.
- */
-export function voiceCellStatus(backend: VoiceBackend, layer?: VoiceLayer): string | null {
-  if (backend === 'local' && layer !== undefined && layer !== 'direct') {
-    return 'Not implemented yet — no front model built for local. Refused at connect time.';
-  }
-  return null;
-}
 
 const fmtInt = (n: number): string => Math.round(n).toLocaleString('en-GB');
 const calls = (n: number): string => `${n} ${n === 1 ? 'call' : 'calls'}`;
@@ -87,32 +77,25 @@ function ConversationGroup(): JSX.Element {
   );
   const cell = voiceConfig.call;
   const { backend, layer, handoff } = cell;
-  const write = (next: VoiceSurfaceConfig): void => {
-    const all = Object.fromEntries(SURFACES.map((k) => [k, next]));
-    void update({ voiceConfig: { ...voiceConfig, ...all } }).catch((e: Error) =>
-      pushError(failed('settings'), undefined, e.message),
+  // The voice agent setup drives calls and hands-free, and a voice device
+  // answered by the voice agent (spec/07 § The voice agent); a device answered
+  // directly keeps its own host-speech cell.
+  const write = (next: VoiceAgentCellConfig): void => {
+    const device = voiceConfig.device.backend === 'local' ? voiceConfig.device : next;
+    void update({ voiceConfig: { ...voiceConfig, call: next, handsFree: next, device } }).catch(
+      (e: Error) => pushError(failed('settings'), undefined, e.message),
     );
   };
-  const status = voiceCellStatus(backend, layer);
   const keyStatus = voiceKeyHostStatus(backend, hostReports);
   return (
     <Group label="Engine" testid="settings-voice-config">
       <Row
         title="Provider"
         sub={
-          status || keyStatus ? (
-            <>
-              {status ? (
-                <span className="set-sub-line" data-testid="voice-status">
-                  {status}
-                </span>
-              ) : null}
-              {keyStatus ? (
-                <span className="set-sub-line set-sub-error" data-testid="voice-keys">
-                  {keyStatus}
-                </span>
-              ) : null}
-            </>
+          keyStatus ? (
+            <span className="set-sub-line set-sub-error" data-testid="voice-keys">
+              {keyStatus}
+            </span>
           ) : undefined
         }
         testid="voice-provider"
@@ -128,15 +111,13 @@ function ConversationGroup(): JSX.Element {
           onChange={(next) =>
             write({
               backend: next,
-              layer: next === 'local' ? 'direct' : variantOf(layer),
+              layer: variantOf(layer),
               handoff: handoff === 'never' ? 'never' : 'auto',
             })
           }
         />
       </Row>
-      {backend === 'local' ? (
-        <LocalCallRows />
-      ) : (
+      {
         <>
           <Row title="Model" testid="voice-model" className="stack set-row-choices">
             <Pills
@@ -167,13 +148,13 @@ function ConversationGroup(): JSX.Element {
             />
           </Row>
         </>
-      )}
+      }
     </Group>
   );
 }
 
 /** The voice a hosted provider speaks in. */
-function HostedVoiceRow({ backend }: { backend: Exclude<VoiceBackend, 'local'> }): JSX.Element {
+function HostedVoiceRow({ backend }: { backend: VoiceAgentBackend }): JSX.Element {
   if (backend === 'elevenlabs') return <ElevenLabsVoiceRow />;
   return <PresetVoiceRow backend={backend} />;
 }
@@ -441,6 +422,7 @@ function VoiceDevicesGroup(): JSX.Element {
           <AddVoiceDevice onClose={() => setPairing(false)} />
         </div>
       ) : null}
+      <DeviceAnswerRows />
       <SpeakingAloudPromptRow />
     </Group>
   );
@@ -463,6 +445,41 @@ function VoiceInstructionsGroup(): JSX.Element {
         }
       />
     </Group>
+  );
+}
+
+/**
+ * How a voice device's conversation is answered (spec/16 § A conversation): by
+ * the account's voice agent, or directly, with speech on the chat's host.
+ */
+function DeviceAnswerRows(): JSX.Element {
+  const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  const direct = voiceConfig.device.backend === 'local';
+  const choose = (next: 'agent' | 'direct'): void => {
+    const device: VoiceSurfaceConfig =
+      next === 'direct' ? { backend: 'local', layer: 'direct', handoff: 'auto' } : voiceConfig.call;
+    void update({ voiceConfig: { ...voiceConfig, device } }).catch((e: Error) =>
+      pushError(failed('settings'), undefined, e.message),
+    );
+  };
+  return (
+    <>
+      <Row title="Answer with" testid="voice-device-answer" className="stack set-row-choices">
+        <Pills
+          label="Voice device answers with"
+          options={['agent', 'direct'] as const}
+          labels={{ agent: 'Voice agent', direct: 'Direct' }}
+          value={direct ? 'direct' : 'agent'}
+          disabled={!loaded}
+          testid="voice-device-answer-pills"
+          onChange={choose}
+        />
+      </Row>
+      {direct ? <LocalCallRows /> : null}
+    </>
   );
 }
 

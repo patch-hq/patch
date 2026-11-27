@@ -21,8 +21,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { LimitBehaviour, McpServerList, PermissionMode } from '@patch/wire';
-import { DictationSetting, MeetingEngine, SpeechToTextEngine } from '@patch/wire/audio';
+import { LimitBehaviour, McpServerList, PermissionMode, VoiceConfigSetting } from '@patch/wire';
+import { DEFAULT_VOICE_AGENT_CELL } from '@patch/wire/audio';
 import type { Logger } from 'pino';
 
 const HostStateFile = z
@@ -71,40 +71,11 @@ const HostStateFile = z
       .optional(),
     /**
      * Account's per-surface voice config (`host.settings` → `voiceConfig`),
-     * mirrored down the same way `defaultModel` is. Persisted so a host
-     * that restarts before the server's first push still knows it. Absent
-     * means every surface defaults to `{ backend: 'local', layer: 'direct' }`
-     * (dictation: `{ backend: 'local' }`) — see packages/server/src/settings.ts.
+     * mirrored down the same way `defaultModel` is. Persisted so a host that
+     * restarts before the server's first push still knows it. Absent means
+     * DEFAULT_VOICE_CONFIG.
      */
-    voiceConfig: z
-      .object({
-        speechToText: SpeechToTextEngine.default('groq'),
-        dictation: DictationSetting,
-        meeting: MeetingEngine.default('local'),
-        device: z
-          .object({
-            backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),
-            layer: z.enum(['direct', 'light', 'heavy']),
-            handoff: z.enum(['auto', 'always', 'never']).default('auto'),
-          })
-          .strict(),
-        handsFree: z
-          .object({
-            backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),
-            layer: z.enum(['direct', 'light', 'heavy']),
-            handoff: z.enum(['auto', 'always', 'never']).default('auto'),
-          })
-          .strict(),
-        call: z
-          .object({
-            backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),
-            layer: z.enum(['direct', 'light', 'heavy']),
-            handoff: z.enum(['auto', 'always', 'never']).default('auto'),
-          })
-          .strict(),
-      })
-      .strict()
-      .optional(),
+    voiceConfig: VoiceConfigSetting.optional(),
     /**
      * How many user messages between auto-regen of the chat name
      * (`host.settings` → `chatNameInterval`). `0` disables periodic regen.
@@ -251,7 +222,17 @@ export class HostStateStore {
   constructor(patchHome: string, logger?: Pick<Logger, 'warn'>) {
     this.path = join(patchHome, 'host.json');
     if (existsSync(this.path)) {
-      const raw = HostStateFile.parse(JSON.parse(readFileSync(this.path, 'utf8')));
+      const json = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, unknown>;
+      // A call is always a voice agent call now (spec/07 § Two kinds of call):
+      // a call or hands-free cell saved on the retired host-speech call becomes
+      // the default voice agent, as the server's copy does. A device keeps it.
+      const vc = json['voiceConfig'] as Record<string, { backend?: unknown }> | undefined;
+      if (vc && typeof vc === 'object') {
+        for (const cell of ['call', 'handsFree'] as const) {
+          if (vc[cell]?.backend === 'local') vc[cell] = { ...DEFAULT_VOICE_AGENT_CELL };
+        }
+      }
+      const raw = HostStateFile.parse(json);
       // Drop what this version does not know, and SAY which — a key silently
       // carried forward would be written back on the next update, and a key
       // silently dropped is a setting that stopped applying with no trace.

@@ -14,27 +14,25 @@ import {
   voiceCellFor,
   type AudioErrorCode,
   type AudioSessionMode,
-  type VoiceBackend,
+  type VoiceAgentBackend,
   type VoiceConfig,
   type VoiceLayer,
 } from '@patch/wire/audio';
 
-const ENGINE_NAME: Record<Exclude<VoiceBackend, 'local'>, string> = {
+const ENGINE_NAME: Record<VoiceAgentBackend, string> = {
   gemini: 'Gemini Live',
   openai: 'OpenAI Realtime',
   elevenlabs: 'ElevenLabs Agents',
 };
 
 /**
- * What the call bar names the engine a sustained session in `mode` runs on.
- * Null for `local` — the self-hosted default needs no label — and when the
- * config hasn't loaded (no guess). A hosted `direct` runs as `light`, so it is
- * named that.
+ * What the call bar names the voice agent a sustained session in `mode` runs
+ * on. Null when the config hasn't loaded (no guess). A `direct` layer runs as
+ * `light`, so it is named that.
  */
 export function callEngineLabel(config: VoiceConfig | null, mode: AudioSessionMode): string | null {
   if (config === null) return null;
   const cell = voiceCellFor(config, mode === 'hands-free' ? 'hands-free' : 'call');
-  if (cell.backend === 'local') return null;
   const layer: VoiceLayer = cell.layer === 'heavy' ? 'heavy' : 'light';
   return `${ENGINE_NAME[cell.backend]} · ${layer}`;
 }

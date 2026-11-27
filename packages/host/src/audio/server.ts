@@ -76,8 +76,6 @@ import { HostDictationSession } from './host-dictation.js';
 import type { LiveRecognizer } from './parakeet-live.js';
 import type { DeviceVoiceDeps } from './deviceVoice.js';
 
-/** Spoken once when a local call opens, so the user is never left in silence. */
-const CALL_GREETING = 'Connected.';
 const AUDIO_PATH_PREFIX = '/audio/';
 
 // Explicit WS close codes for rejected audio sessions (E1-d4), mirroring the
@@ -1174,20 +1172,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           announceCall(sessions.get(start.sessionId) as ActiveSession, true);
         }
         if (isAppCall) opts.onCallStarted?.(sessionInit);
-        // spec/07 § Voice call — say something the moment the line is open so
-        // the user is not left in silence. Local only: hosted engines have no
-        // free fixed-text voice, and a greeting there would be a paid response.
-        // A call that answers an agent's ring opens with the reason it rang
-        // instead (spec/07 § Agent-initiated voice); a hosted voice agent opens
-        // with it itself, from the same session init.
-        if (isAppCall && cell.backend === 'local') {
-          void session.speak(sessionInit.callReason ?? CALL_GREETING).catch((err: Error) => {
-            log.warn(
-              { err: err.message, sessionId: start.sessionId },
-              'audio: call greeting failed',
-            );
-          });
-        }
         // spec/14 ## Sidebar — a live device session lights the Speakers-row
         // pill on every surface. `validateDeviceIdCoupling` above guarantees a
         // `device` session carries a deviceId.
