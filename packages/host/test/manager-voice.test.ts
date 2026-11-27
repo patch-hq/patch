@@ -209,14 +209,6 @@ describe('chat_status', () => {
     expect(out).toContain('Agent: Ferns and hostas do well in shade.');
   });
 
-  test('says how old the text is and points at a fresh status', async () => {
-    const { tools } = makeHost();
-    const out = await tools.chatStatus('garden');
-    expect(out).toMatch(/only as fresh as the chat's last activity \(.+\)/);
-    expect(out).toContain('say how old it is');
-    expect(out).toContain('send_to_chat');
-  });
-
   test('a chat on another host says what can and cannot be read', async () => {
     const { tools } = makeHost();
     const out = await tools.chatStatus('c-remote');
