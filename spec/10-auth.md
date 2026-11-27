@@ -162,6 +162,10 @@ A new browser signs in by asking a device that is already signed in, as on an Ap
 
 A request lasts five minutes and at most five wait at once. The code works once; three wrong codes burn the request. The code is revealed only to an authenticated approve, so naming a request is not enough to sign in. The first sign-in of an account has no device to ask and still uses a credential token (`patch auth bootstrap`).
 
+## Local credentials
+
+Something running on the server's own machine (a scheduled check, an agent driving the web app headlessly) gets a surface credential without another device approving it: `patch-server credential --label <name> [--out <file>]`. The server writes a random secret, owner-only, to `local-admin.token` in its data folder on first start, and `POST /api/auth/local/credential` issues a web credential to whoever presents it. Reading that folder already gives the account's signing key, so the secret asks for no more trust than the machine already holds. One device per label: issuing again renews it, and a label removed from Linked devices is refused rather than restored.
+
 ## Relay
 
 A server with no address of its own — one running on a laptop, or behind a home router — is reached through a relay: a rendezvous both sides dial out to. The relay forwards bytes it cannot read.

@@ -27,7 +27,7 @@ REL=$(cd "$(dirname "$0")" && pwd -P)
 # pairing code, so it works without the unit's environment: the home is the one
 # this release is installed in, the node the one the installer provisioned (or
 # the one on PATH), and the config is server.env, as the unit would load it.
-if [ "${1:-}" = "pair" ] || [ "${1:-}" = "channel" ]; then
+if [ "${1:-}" = "pair" ] || [ "${1:-}" = "channel" ] || [ "${1:-}" = "credential" ]; then
   SUBCOMMAND="$1"
   shift
   PATCH_SERVER_HOME="${PATCH_SERVER_HOME:-$(cd "${REL}/../.." && pwd -P)}"
