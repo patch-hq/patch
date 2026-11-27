@@ -613,7 +613,7 @@ export function startVoiceCall(
         // spec/07 § A call can move between devices — the host closed this
         // session because the call was taken over elsewhere. That is not a
         // failure: end the call here and let the remote-call pill say where it is.
-        if (ev?.reason === 'transferred') {
+        if (ev?.reason === 'transferred' || ev?.reason === 'ended_by_agent') {
           void endVoiceCall();
           return;
         }

@@ -6560,6 +6560,8 @@ async function startHost(
     // message as speech instead of a ring. Late-bound: the audio server starts
     // after buildControl, and is up long before any tool call lands.
     interruptOpenCall: (text: string) => audioServer?.interruptOpenCall(text) ?? false,
+    endOpenCall: async (chatId: string, goodbye?: string) =>
+      (await audioServer?.endOpenCall(chatId, goodbye)) ?? false,
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,

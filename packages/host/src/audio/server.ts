@@ -85,6 +85,9 @@ const AUDIO_PATH_PREFIX = '/audio/';
 // be explicit too). Application close codes live in the 4000–4999 range.
 const CLOSE_BAD_FRAME = 4400;
 const CLOSE_AUTH_FAILED = 4401;
+const CLOSE_NORMAL = 1000;
+/** Close reason the clients read as 'the agent hung up' (spec/07). */
+const END_BY_AGENT = 'ended_by_agent';
 
 /** Map an audio error code to its WS close code. Auth/token failures → 4401; everything else (frame/session/capacity/backend) → 4400. */
 /**
@@ -386,6 +389,13 @@ export interface AudioServerHandle {
    * no session is open, which is the caller's cue to ring.
    */
   interruptOpenCall(text: string): boolean;
+  /**
+   * The agent hangs up (`patch_end_call`, spec/07 § The agent ends the call):
+   * say `goodbye` if given, then close every open app call on `chatId` with the
+   * reason `ended_by_agent`, which clients treat as a clean hang-up, not a
+   * dropped line. Resolves false when no call is open on that chat.
+   */
+  endOpenCall(chatId: string, goodbye?: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -1373,6 +1383,30 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       }
       if (target === undefined) return false;
       return speakCannedFor(target, text);
+    },
+    async endOpenCall(chatId: string, goodbye?: string): Promise<boolean> {
+      const targets = [...sessions.values()].filter(
+        (a) =>
+          a.role === 'voice-call' &&
+          a.surfaceKind !== 'device' &&
+          a.call !== undefined &&
+          a.call.init.chatId === chatId,
+      );
+      if (targets.length === 0) return false;
+      for (const active of targets) {
+        if (goodbye !== undefined && goodbye.trim() !== '') {
+          // A goodbye that cannot be spoken must not leave the line open: the
+          // agent asked for the call to end, so it ends either way, loudly.
+          await active.session.speak(goodbye).catch((err: Error) => {
+            log.warn({ err: err.message, chatId }, 'audio: endOpenCall goodbye failed');
+          });
+        }
+        if (active.callAnnounced === true) announceCall(active, false);
+        if (active.socket.readyState === active.socket.OPEN) {
+          active.socket.close(CLOSE_NORMAL, END_BY_AGENT);
+        }
+      }
+      return true;
     },
     async close(): Promise<void> {
       for (const [, active] of sessions) {
