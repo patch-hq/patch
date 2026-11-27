@@ -240,6 +240,26 @@ describe('running delegates strip', () => {
     });
   }
 
+  it('shows how long ago a running subagent last did anything', () => {
+    const r = renderRN(<ChatDetailScreen />);
+    const now = Date.now();
+    actSync(() => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.delegate_update',
+        chatId: 'c1',
+        delegateId: 'sub-1',
+        label: 'draft the email',
+        status: 'running',
+        runStartedAt: now - 300_000,
+        lastActivityAt: now - 125_000,
+        seq: 1,
+      });
+    });
+    expect(
+      hasText(findAllHost(r.root, byTestId('delegate-strip-activity'))[0]!, 'active 2:0'),
+    ).toBe(true);
+  });
+
   it('lists running subagents with label and running time, and drops them when done', () => {
     const r = renderRN(<ChatDetailScreen />);
     expect(findAllHost(r.root, byTestId('delegate-strip'))).toHaveLength(0);

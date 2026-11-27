@@ -49,6 +49,8 @@ export interface DelegateUpdateInfo {
   outOfCredit?: { resetsAt?: number };
   /** Epoch ms the current run began — the running-time clock. The host's `runStartedAt`; the time this surface first saw it only against a host that sends none. */
   since: number;
+  /** Epoch ms the subagent last produced anything; the run start while quiet. Absent from older hosts. */
+  lastActivityAt?: number;
   /** The current run is a follow-up wake of a settled subagent. */
   followUp?: boolean;
 }
@@ -1671,6 +1673,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 event.runStartedAt ??
                 delegateUpdates[event.chatId]?.[event.delegateId]?.since ??
                 Date.now(),
+              ...(event.lastActivityAt !== undefined
+                ? { lastActivityAt: event.lastActivityAt }
+                : {}),
               ...(event.followUp ? { followUp: true } : {}),
             },
           };

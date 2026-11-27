@@ -2191,6 +2191,12 @@ export const ChatDelegateUpdateEvent = z
      * clock. Optional: older hosts omit it and surfaces fall back to local time.
      */
     runStartedAt: z.number().int().nonnegative().optional(),
+    /**
+     * Host epoch ms the subagent last produced anything (a message, tool call
+     * or result); the run start while it has been quiet since. Refreshed by
+     * the host about every 15 s while it changes. Present with `runStartedAt`.
+     */
+    lastActivityAt: z.number().int().nonnegative().optional(),
     /** The current run is a follow-up wake of a settled subagent (by its parent or a timer). */
     followUp: z.boolean().optional(),
     /**

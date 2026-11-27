@@ -19305,6 +19305,13 @@ a.drop-target,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.agent-running-bar-time {
+  flex: none;
+  color: var(--ink-3, currentColor);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .agent-running-bar-controls {
   display: flex;
   gap: 2px;
