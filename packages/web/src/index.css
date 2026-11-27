@@ -18789,6 +18789,17 @@ select.permission-mode.is-pending {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.remote-call .rc-end {
+  flex: 0 0 auto;
+  background: transparent;
+  color: #f4f0e4;
+  border: 1px solid #5a5242;
+  border-radius: 6px;
+  padding: 2px 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
 .remote-call .rc-switch {
   flex: 0 0 auto;
   background: #a9d391;

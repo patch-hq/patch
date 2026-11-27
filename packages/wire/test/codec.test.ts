@@ -603,6 +603,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'chat.resume_request': { type: 'chat.resume_request', chatId: 'c1' },
   'chat.focus_change': { type: 'chat.focus_change', chatId: 'c1' },
   'chat.pin_request': { type: 'chat.pin_request', chatId: 'c1', pinned: true },
+  'voice.end_call_request': { type: 'voice.end_call_request', chatId: 'c1' },
   'meeting.control_request': { type: 'meeting.control_request', chatId: 'c1', action: 'start' },
   'meeting.get_request': { type: 'meeting.get_request', chatId: 'c1' },
   'meeting.audio': { type: 'meeting.audio', chatId: 'c1', source: 'mic', audioBase64: 'AA==' },

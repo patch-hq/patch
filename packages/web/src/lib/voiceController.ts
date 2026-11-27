@@ -6,6 +6,7 @@
 // spec/07 ## Voice-input modes / ## Barge-in / ## Permission prompts during
 // voice / ## Focus-follow.
 
+import { getActiveWs } from '../api/ws.js';
 import { playCallSound } from './callSound.js';
 import { openAudioSession, type AudioSessionDeps } from './audioSession.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
@@ -515,6 +516,13 @@ async function openCallSession(
  */
 export function switchCallHere(chatId: string, deps?: AudioSessionDeps): Promise<void> {
   return startVoiceCall(chatId, 'call', deps, { takeOver: true });
+}
+
+/** End the chat's call on whichever other surface holds it (spec/07 § A call can move between devices). */
+export function endRemoteCall(chatId: string): void {
+  const ws = getActiveWs();
+  if (!ws) throw new Error('Cannot end the call: not connected to the server');
+  ws.send({ type: 'voice.end_call_request', chatId });
 }
 
 /**

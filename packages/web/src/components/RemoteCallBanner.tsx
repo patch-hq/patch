@@ -7,7 +7,7 @@ import type { JSX } from 'react';
 import { Phone } from 'lucide-react';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
-import { switchCallHere } from '../lib/voiceController.js';
+import { endRemoteCall, switchCallHere } from '../lib/voiceController.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
@@ -41,6 +41,14 @@ export function RemoteCallBanner(): JSX.Element | null {
         onClick={() => void switchCallHere(remote.chatId)}
       >
         Switch here
+      </button>
+      <button
+        type="button"
+        className="rc-end"
+        data-testid="remote-call-end"
+        onClick={() => endRemoteCall(remote.chatId)}
+      >
+        End call
       </button>
     </div>
   );

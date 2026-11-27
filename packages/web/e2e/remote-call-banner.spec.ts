@@ -34,6 +34,7 @@ test.describe('call in progress on another device', () => {
     await expect(banner).toBeVisible();
     await expect(banner).toContainText('Call in progress on your phone');
     await expect(page.getByTestId('remote-call-switch')).toBeVisible();
+    await expect(page.getByTestId('remote-call-end')).toBeVisible();
     const box = (await banner.boundingBox())!;
     const head = (await page.getByTestId('chat-head').first().boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(head.y + head.height - 1);

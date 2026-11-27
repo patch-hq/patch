@@ -5129,6 +5129,15 @@ export const ChatPinRequestEvent = z
   .strict();
 export type ChatPinRequestEvent = z.infer<typeof ChatPinRequestEvent>;
 
+/** Surface → host: end the chat's call on whichever surface holds it (spec/07 § A call can move between devices). */
+export const VoiceEndCallRequestEvent = z
+  .object({
+    type: z.literal('voice.end_call_request'),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type VoiceEndCallRequestEvent = z.infer<typeof VoiceEndCallRequestEvent>;
+
 export const ChatArchiveRequestEvent = z
   .object({
     type: z.literal('chat.archive_request'),
@@ -10796,6 +10805,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatFocusChangeEvent,
   ChatQuestionActivityEvent,
   ChatPinRequestEvent,
+  VoiceEndCallRequestEvent,
   MeetingControlRequestEvent,
   MeetingGetRequestEvent,
   MeetingAudioEvent,
@@ -11139,6 +11149,7 @@ export const EVENT_SCHEMAS = {
   'chat.focus_change': ChatFocusChangeEvent,
   'chat.question_activity': ChatQuestionActivityEvent,
   'chat.pin_request': ChatPinRequestEvent,
+  'voice.end_call_request': VoiceEndCallRequestEvent,
   'meeting.control_request': MeetingControlRequestEvent,
   'meeting.get_request': MeetingGetRequestEvent,
   'meeting.audio': MeetingAudioEvent,

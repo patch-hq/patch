@@ -8,6 +8,7 @@ import { Phone } from 'lucide-react-native';
 import { useVoiceStore } from '../stores/voiceStore';
 import { useChatStore } from '../stores/chatStore';
 import { startVoiceCall } from '../lib/voiceCall';
+import { getWs } from '../api/ws';
 import { callChatName } from '../lib/callStatus';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
@@ -56,6 +57,17 @@ export function RemoteCallPill(): React.ReactElement | null {
       >
         <Text style={{ color: colors.leaf, fontFamily: fonts.bodyBold, fontSize: textMin }}>
           Switch here
+        </Text>
+      </Pressable>
+      <Pressable
+        testID="remote-call-end"
+        accessibilityRole="button"
+        accessibilityLabel="End the call on the other device"
+        onPress={() => getWs().send({ type: 'voice.end_call_request', chatId: remote.chatId })}
+        style={{ paddingRight: space.md, paddingVertical: space.xs }}
+      >
+        <Text style={{ color: colors.ink, fontFamily: fonts.bodyBold, fontSize: textMin }}>
+          End call
         </Text>
       </Pressable>
     </View>
