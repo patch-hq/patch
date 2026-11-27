@@ -383,24 +383,6 @@ describe('toolCallSummary — background agents name themselves', () => {
 });
 
 describe('agent message rows', () => {
-  const msg = (seq: number, role: 'user' | 'assistant', extra: Partial<ChatEventEntry> = {}) =>
-    ({ seq, kind: 'message', role, content: `m${seq}`, at: seq, ...extra }) as ChatEventEntry;
-
-  it("marks the agent's first own reply after a hand-off as its answer", () => {
-    const rows = groupToolRuns([
-      msg(1, 'user', { voiceHandoff: true }),
-      msg(2, 'assistant', { voice: true }),
-      msg(3, 'assistant'),
-      msg(4, 'assistant'),
-    ]);
-    expect(rows.map((r) => (r.kind === 'entry' ? r.handoffAnswer === true : null))).toEqual([
-      false,
-      false,
-      true,
-      false,
-    ]);
-  });
-
   it('keeps a patch_send_to and its result on one row, out of any run', () => {
     const rows = groupToolRuns([
       { seq: 1, kind: 'tool_call', tool: 'Bash', callId: 'a', toolArgs: { command: 'ls' }, at: 1 },

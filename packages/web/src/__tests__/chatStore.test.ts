@@ -159,7 +159,7 @@ describe('chatStore reducer', () => {
     expect(by(4)?.voiceHandoff).toBe(true);
   });
 
-  it("marks the agent's answer to a hand-off as said in the call, and a typed answer as not", () => {
+  it("keeps each hand-off's latest state on its own row, and the agent's answer is not spoken words", () => {
     const s = useChatStore.getState();
     s.applyEvent({
       type: 'chat.message',
@@ -168,6 +168,19 @@ describe('chatStore reducer', () => {
       content: '[voice hand-off • web] list the files',
       seq: 1,
     });
+    const state = (seq: number, st: 'waiting' | 'working' | 'answered') =>
+      s.applyEvent({
+        type: 'chat.voice_handoff',
+        chatId: 'c1',
+        handoffId: 'h1',
+        rowSeq: 1,
+        request: 'list the files',
+        state: st,
+        sentAt: 10,
+        ...(st === 'answered' ? { answer: 'There are ten files.', answerSeqs: [2] } : {}),
+        seq,
+      });
+    state(3, 'waiting');
     s.applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -175,17 +188,20 @@ describe('chatStore reducer', () => {
       content: 'There are ten files.',
       seq: 2,
     });
-    s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'typed', seq: 3 });
-    s.applyEvent({
-      type: 'chat.message',
-      chatId: 'c1',
-      role: 'assistant',
-      content: 'A typed answer.',
+    state(4, 'answered');
+    // A replay of an older state does not undo the newer one.
+    state(3, 'waiting');
+    const held = useChatStore.getState();
+    expect(held.voiceHandoffs['c1']?.[1]).toMatchObject({
+      state: 'answered',
+      answerSeqs: [2],
       seq: 4,
     });
-    const tl = useChatStore.getState().timelines['c1'] ?? [];
-    expect(tl.find((e) => e.seq === 2)?.voice).toBe(true);
-    expect(tl.find((e) => e.seq === 4)?.voice).toBeUndefined();
+    const tl = held.timelines['c1'] ?? [];
+    expect(tl.find((e) => e.seq === 1)).toMatchObject({ voiceHandoff: true });
+    expect(tl.find((e) => e.seq === 2)?.voice).toBeUndefined();
+    // Not a timeline entry of its own.
+    expect(tl.map((e) => e.seq)).toEqual([1, 2]);
   });
 
   it("your spoken words are marked whichever arrives first: the live echo or the host's tagged copy", () => {

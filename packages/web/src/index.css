@@ -4172,19 +4172,6 @@ button.nav-row {
   color: var(--ink-3);
   padding: 4px 0;
 }
-.call-agent-reply {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 4px 0;
-}
-.call-agent-reply-text {
-  color: var(--ink);
-  line-height: 1.65;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .msg-user.voice-live .content,
 .msg.voice .content {
   font-style: italic;
@@ -4192,7 +4179,8 @@ button.nav-row {
 /* Said in a call: an outline call icon in the gutter, outside the message. It
    hangs off the left edge of the bubble (user) or of the text (agent). */
 .msg.voice,
-.msg.voice-live {
+.msg.voice-live,
+.msg.ho-msg {
   /* The gutter mark hangs outside the box; paint containment would clip it. */
   content-visibility: visible;
 }
@@ -4225,6 +4213,120 @@ button.nav-row {
 }
 .msg-assistant .msg-voice-mark {
   top: calc((1.65em - 14px) / 2);
+}
+/* spec/14 § Main chat panel — Hand-off rows: a quiet row in the voice gutter,
+   not a card in the conversation. */
+.ho-msg {
+  margin-top: -2px;
+  margin-bottom: 6px;
+}
+.ho-msg .msg-voice-row {
+  align-items: stretch;
+  width: 100%;
+}
+.ho-msg .ho-mark {
+  top: 6px;
+}
+.ho-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.ho-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+  text-align: left;
+  cursor: pointer;
+}
+.ho-row:hover {
+  background: var(--bg-elevated);
+  color: var(--ink-2);
+}
+.ho-who,
+.ho-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.ho-arrow {
+  display: inline-flex;
+  color: var(--ink-3);
+}
+.ho-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ho-msg[data-open='true'] .ho-text {
+  visibility: hidden;
+}
+.ho-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.ho-msg[data-state='failed'] .ho-state {
+  color: var(--danger);
+}
+.ho-chev {
+  flex: 0 0 auto;
+  display: inline-flex;
+  transition: transform 0.15s;
+}
+.ho-msg[data-open='true'] .ho-chev {
+  transform: rotate(90deg);
+}
+.ho-body {
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: var(--text-min);
+  color: var(--ink);
+}
+.ho-part p {
+  margin: 3px 0 0;
+  line-height: 1.55;
+}
+.ho-spin {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  border-top-color: var(--ink-3);
+  animation: ho-spin 0.9s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes ho-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ho-spin {
+    animation: none;
+  }
 }
 .msg-user .content {
   /* The full column: a cap below it wrapped lines that fitted with room to

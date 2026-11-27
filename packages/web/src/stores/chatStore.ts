@@ -12,6 +12,7 @@ import type {
   AttachmentRef,
   ChatBranch,
   ChatDelegateUpdateEvent,
+  ChatVoiceHandoffEvent,
   EffortLevel,
   FinishedGoal,
   GoalProgress,
@@ -56,19 +57,7 @@ function isSpokenInCall(s: string): boolean {
   return /^\[voice • [^\]]+\]/.test(s);
 }
 
-/**
- * Whether the reply about to be drawn answers a hand-off: the last thing the user's side said
- * in this timeline was the fast voice's request to the agent, so the agent's answer is spoken.
- */
-function answersHandoff(list: ChatEventEntry[] | undefined): boolean {
-  for (let i = (list?.length ?? 0) - 1; i >= 0; i--) {
-    const e = list![i]!;
-    if (e.kind === 'message' && e.role === 'user') return e.voiceHandoff === true;
-  }
-  return false;
-}
-
-/** A fast voice's hand-off to the chat's agent (spec/07 § The fast voice and the chat's agent). */
+/** The voice agent's hand-off to the chat's agent (spec/07 § The voice agent and the chat's agent). */
 function isVoiceHandoff(s: string): boolean {
   return /^\[voice hand-off • [^\]]+\]/.test(s);
 }
@@ -162,6 +151,13 @@ interface ChatState {
    * the very run it describes.
    */
   toolRunSummaries: Record<string, Record<string, ToolRunSummary>>;
+  /**
+   * spec/14 § Main chat panel — Hand-off rows: where each voice hand-off
+   * stands (`chat.voice_handoff`, the latest per hand-off), keyed by the
+   * hand-off's own message seq under its chat. Not timeline entries: each
+   * labels the hand-off's row, and names the agent messages drawn inside it.
+   */
+  voiceHandoffs: Record<string, Record<number, VoiceHandoffView>>;
   /**
    * spec/14 § Main chat panel — Delegate tool row: a `patch_delegate` call's
    * live state from `chat.delegate_update`, keyed by the subagent's own
@@ -610,6 +606,9 @@ export interface ToolRunSummary {
   live?: boolean;
 }
 
+/** Where a voice hand-off stands (spec/14 § Main chat panel — Hand-off rows). */
+export type VoiceHandoffView = Omit<ChatVoiceHandoffEvent, 'type' | 'chatId' | 'branchId'>;
+
 /** A `patch_delegate` subagent's live state (spec/14 § Main chat panel —
  *  Delegate tool row), from `chat.delegate_update`. */
 export interface DelegateUpdateInfo {
@@ -780,13 +779,11 @@ export interface ChatEventEntry {
   /** A `system` line marking a turn that moved to another account — a status note, not a message. */
   accountSwitch?: boolean;
   /**
-   * spec/07 § The fast voice and the chat's agent — a request the call's fast
-   * voice handed to the agent, not words the user said. Rendered as a quiet
-   * line naming what was asked.
+   * spec/07 § The voice agent and the chat's agent — a request the call's voice
+   * agent handed to the chat's agent, not words the user said. Drawn as the
+   * hand-off's row, with its state from `voiceHandoffs`.
    */
   voiceHandoff?: boolean;
-  /** The agent's own answer to a hand-off (as opposed to the fast voice's spoken words). */
-  handoffAnswer?: boolean;
   /** spec/04 § Send back — the row a side thread posted into this track (`ChatMessageEvent.branchSendBack`). */
   branchSendBack?: { fromBranchId: string; fromBranchName: string | null };
   /**
@@ -1140,6 +1137,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   openKebabFor: null,
   timelines: {},
   toolRunSummaries: {},
+  voiceHandoffs: {},
   delegateUpdates: {},
   folderRoster: [],
   sectionCounts: null,
@@ -1561,6 +1559,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let sideThreadPermissions = state.sideThreadPermissions;
     // Reassigned only by `chat.tool_run_summary`, for the same reason.
     let toolRunSummaries = state.toolRunSummaries;
+    // Reassigned only by `chat.voice_handoff`, for the same reason.
+    let voiceHandoffs = state.voiceHandoffs;
     // Reassigned only by `chat.delegate_update`, for the same reason.
     let delegateUpdates = state.delegateUpdates;
     // Whether anything in this batch actually changed the store. A batch of
@@ -2141,7 +2141,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
               role: 'assistant',
               content: event.delta,
               streaming: true,
-              ...(answersHandoff(list) ? { voice: true, handoffAnswer: true } : {}),
               at: Date.now(),
             });
             // Preview is left untouched here too — see the note above.
@@ -2267,8 +2266,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 content,
                 seq: event.seq,
                 streaming: false,
-                ...(spoken || answersHandoff(existing) ? { voice: true } : {}),
-                ...(!spoken && answersHandoff(existing) ? { handoffAnswer: true } : {}),
+                ...(spoken ? { voice: true } : {}),
                 ...(event.createdAt !== undefined ? { messageAt: event.createdAt } : {}),
               };
               timelines[event.chatId] = updated;
@@ -2470,12 +2468,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...(event.role === 'user' && isVoiceHandoff(event.content)
               ? { voiceHandoff: true }
               : {}),
-            ...(spoken || (event.role === 'assistant' && answersHandoff(timelines[event.chatId]))
-              ? { voice: true }
-              : {}),
-            ...(!spoken && event.role === 'assistant' && answersHandoff(timelines[event.chatId])
-              ? { handoffAnswer: true }
-              : {}),
+            ...(spoken ? { voice: true } : {}),
             at: Date.now(),
           });
           break;
@@ -2721,6 +2714,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...(event.live === true ? { live: true } : {}),
               },
             },
+          };
+          break;
+        }
+        case 'chat.voice_handoff': {
+          const row = ensureRow(event.chatId);
+          chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+          const held = voiceHandoffs[event.chatId]?.[event.rowSeq];
+          // A replayed older state never overwrites a newer one.
+          if (held && held.seq > event.seq) break;
+          const { type: _t, chatId: _c, branchId: _b, ...view } = event;
+          voiceHandoffs = {
+            ...voiceHandoffs,
+            [event.chatId]: { ...voiceHandoffs[event.chatId], [event.rowSeq]: view },
           };
           break;
         }
@@ -3040,6 +3046,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       branchGraphs,
       sideThreadPermissions,
       toolRunSummaries,
+      voiceHandoffs,
       delegateUpdates,
     });
   },
@@ -3623,6 +3630,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       openKebabFor: null,
       timelines: {},
       toolRunSummaries: {},
+      voiceHandoffs: {},
       delegateUpdates: {},
       folderRoster: [],
       sectionCounts: null,

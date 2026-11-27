@@ -112,6 +112,9 @@ export function isTranscriptEvent(event: WireEvent): boolean {
     // A summary marked `live` is a running label, replaced by the final one.
     case 'chat.tool_run_summary':
       return event.live !== true;
+    // Where a voice hand-off stands: drawn on the hand-off's own row.
+    case 'chat.voice_handoff':
+      return true;
     default:
       return false;
   }
@@ -186,6 +189,8 @@ function identityOf(event: WireEvent): string {
       return `${event.type} ${event.artifactId}`;
     case 'chat.tool_run_summary':
       return `${event.type} ${event.callIds.join(',')}`;
+    case 'chat.voice_handoff':
+      return `${event.type} ${event.handoffId}`;
     default:
       return event.type;
   }

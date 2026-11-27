@@ -40,7 +40,7 @@
 import type { WireEvent } from '@patch/wire';
 
 interface Waiter {
-  resolve: (text: string) => void;
+  resolve: (reply: VoiceReply) => void;
   reject: (err: Error) => void;
   onReplyText?: (chunk: string) => void;
   /** Called once, when the waiter is armed: the chat has the turn. */
@@ -55,6 +55,14 @@ interface Waiter {
   armed: boolean;
   /** Assistant messages collected since arming. */
   buf: string[];
+  /** The seqs of the messages in `buf`. */
+  seqs: number[];
+}
+
+/** A settled turn's reply: its text, and the assistant messages it was made of. */
+export interface VoiceReply {
+  text: string;
+  seqs: number[];
 }
 
 export interface VoiceReplyBridge {
@@ -74,7 +82,7 @@ export interface VoiceReplyBridge {
     onReplyText?: (chunk: string) => void,
     localId?: string,
     onAccepted?: () => void,
-  ): Promise<string>;
+  ): Promise<VoiceReply>;
   /**
    * Drop the pending waiter for `chatId`, rejecting it with `err`. Used when
    * submitting the input itself throws — without this the session would wait
@@ -117,6 +125,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
             if (w.localId !== undefined && event.localId === w.localId) {
               w.armed = true;
               w.buf = [];
+              w.seqs = [];
               w.onAccepted?.();
             }
             return;
@@ -125,6 +134,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           // What the voice itself said into the chat while the agent worked is not the agent's answer.
           if (event.content.startsWith('[voice')) return;
           w.buf.push(event.content);
+          w.seqs.push(event.seq);
           return;
         }
         case 'chat.turn_started': {
@@ -137,6 +147,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           if (!w.armed) {
             w.armed = true;
             w.buf = [];
+            w.seqs = [];
             w.onAccepted?.();
           }
           return;
@@ -154,7 +165,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
             return;
           }
           waiters.delete(event.chatId);
-          w.resolve(w.buf.join('\n'));
+          w.resolve({ text: w.buf.join('\n'), seqs: w.seqs });
           return;
         }
         case 'chat.error': {
@@ -174,12 +185,12 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
       onReplyText?: (chunk: string) => void,
       localId?: string,
       onAccepted?: () => void,
-    ): Promise<string> {
+    ): Promise<VoiceReply> {
       // One voice session per chat is the v1 contract. A second registration
       // means the first will never be settled by its own turn — fail it loudly
       // rather than leaving it hanging on a promise nothing resolves.
       settleReject(chatId, new Error(`voice reply superseded by a newer turn on chat ${chatId}`));
-      return new Promise<string>((resolve, reject) => {
+      return new Promise<VoiceReply>((resolve, reject) => {
         waiters.set(chatId, {
           resolve,
           reject,
@@ -188,6 +199,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           ...(localId !== undefined ? { localId } : {}),
           armed: false,
           buf: [],
+          seqs: [],
         });
       });
     },
@@ -201,6 +213,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
       if (!w || w.localId !== localId || w.armed) return;
       w.armed = true;
       w.buf = [];
+      w.seqs = [];
       w.onAccepted?.();
     },
 

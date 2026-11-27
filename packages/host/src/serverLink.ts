@@ -319,6 +319,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let serverAnswersReads = false;
   // A server that keeps subagents' records (`delegateRecord`).
   let serverKeepsDelegates = false;
+  // A server that keeps voice hand-off state (`voiceHandoffs`).
+  let serverKeepsHandoffs = false;
   // Down since the host started until the first auth.ok, then since each loss.
   let offlineSince: number | null = Date.now();
   let lastDrop: LinkDrop | undefined;
@@ -360,7 +362,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
     // An older server's reader refuses what it does not know: it is sent no
     // turn boundaries and no provider ids. The outbox keeps them either way.
     if (!serverKeepsRecord && TURN_BOUNDARY_TYPES.has(outboxed.type)) return;
-    // Nor tool-log entries or subagent entries to a server that does not keep them.
+    // Nor hand-off state, tool-log entries or subagent entries to a server that does not keep them.
+    if (outboxed.type === 'chat.voice_handoff' && !serverKeepsHandoffs) return;
     if (outboxed.type === 'host.delegate_entry') {
       if (!serverKeepsDelegates) return;
     } else if (
@@ -556,6 +559,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         serverDecidesStatus = event.serverStatus === true;
         serverAnswersReads = event.serverReads === true;
         serverKeepsDelegates = event.delegateRecord === true;
+        serverKeepsHandoffs = event.voiceHandoffs === true;
         log.info('server-link: authenticated (auth.ok)');
         if (!serverTakesOutbox) {
           log.error(

@@ -138,7 +138,13 @@ import { StrayProcessBar } from '../components/StrayProcessBar.js';
 import { StatusPill, StatusRow } from '../components/StatusRow.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
-import type { ChatEventEntry, DelegateUpdateInfo, LocalAttachment } from '../stores/chatStore.js';
+import type {
+  ChatEventEntry,
+  DelegateUpdateInfo,
+  LocalAttachment,
+  VoiceHandoffView,
+} from '../stores/chatStore.js';
+import { VoiceHandoffRow } from '../components/VoiceHandoffRow.js';
 import { Markdown, useStreamingMarkdownText } from '../components/Markdown.js';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu.js';
 import {
@@ -507,6 +513,10 @@ export function ChatRoute({
   const branchGraph = useChatStore((s) => s.branchGraphs[chatId]);
   const resolvePermission = useChatStore((s) => s.resolvePermission);
   const timeline = useChatStore((s) => s.timelines[chatId] ?? EMPTY_TIMELINE);
+  // spec/14 § Main chat panel — Hand-off rows: each hand-off's state, by its own message's seq.
+  const voiceHandoffs = useChatStore((s) => s.voiceHandoffs[chatId] ?? EMPTY_HANDOFFS);
+  // The chat's agent's answers, drawn inside their hand-off's row rather than again below.
+  const handoffAnswerSeqs = useMemo(() => answerSeqsOf(voiceHandoffs), [voiceHandoffs]);
   const pushError = useUiStore((s) => s.pushError);
   // Read everything: speak each assistant reply that settles while this chat is
   // open. A reply counts as new only if it is past the seq we saw on arrival AND
@@ -2368,6 +2378,15 @@ export function ChatRoute({
           continue;
         }
       }
+      // An answer to a voice hand-off is drawn on the hand-off's own row.
+      if (
+        entry.kind === 'message' &&
+        entry.role === 'assistant' &&
+        handoffAnswerSeqs.has(entry.seq)
+      ) {
+        i++;
+        continue;
+      }
       // Already drawn inside the file's own row above.
       if (usedByViewFile.has(i) || mergedSends.has(i)) {
         i++;
@@ -2451,7 +2470,7 @@ export function ChatRoute({
           chatId={chatId}
           isJobTrigger={entry.seq === firstUserSeq}
           {...(entry.kind === 'message' && entry.voiceHandoff
-            ? { handoffPending: voiceHandoffPending(timeline, i) }
+            ? { handoff: voiceHandoffs[entry.seq] }
             : {})}
           // spec/04 ## Message queueing — 1-based place within the queued block
           // (which is the timeline tail from `queuedFrom`), so the chip renumbers
@@ -2777,25 +2796,20 @@ export function ChatRoute({
 // stable callbacks from ChatRoute a streaming delta (one per token) re-renders
 // exactly the one entry that changed instead of the whole conversation. Without
 // this the chat page gets slower the longer it runs — the user's "Chat page slow".
-/**
- * spec/07 § The fast voice and the chat's agent — a hand-off is waiting while
- * nothing from the agent (a reply, or the failure line) follows it.
- */
-export function voiceHandoffPending(timeline: ChatEventEntry[], at: number): boolean {
-  for (let j = at + 1; j < timeline.length; j++) {
-    const e = timeline[j]!;
-    if (e.kind !== 'message') continue;
-    if (e.role === 'assistant' && e.handoffAnswer) return false;
-    if (e.role === 'system' && (e.content ?? '').startsWith('[call] <- agent:')) return false;
-  }
-  return true;
+/** The seqs of every agent message drawn inside a hand-off's row. */
+export function answerSeqsOf(handoffs: Record<number, VoiceHandoffView>): Set<number> {
+  const seqs = new Set<number>();
+  for (const h of Object.values(handoffs)) for (const seq of h.answerSeqs ?? []) seqs.add(seq);
+  return seqs;
 }
+
+const EMPTY_HANDOFFS: Record<number, VoiceHandoffView> = {};
 
 const TimelineEntry = memo(function TimelineEntry({
   entry,
   chatId,
   isJobTrigger,
-  handoffPending,
+  handoff,
   queuePos,
   release,
   hostOnline,
@@ -2831,8 +2845,8 @@ const TimelineEntry = memo(function TimelineEntry({
   onContinueInterrupted?(): void;
   /** spec/08 § Action — this is the job-spawned chat's trigger turn (see `firstUserSeq` above). */
   isJobTrigger?: boolean;
-  /** spec/07 § The fast voice and the chat's agent — a hand-off the agent has not answered yet. */
-  handoffPending?: boolean;
+  /** spec/14 § Hand-off rows — where the voice hand-off this entry is stands. */
+  handoff?: VoiceHandoffView | undefined;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -2918,17 +2932,6 @@ const TimelineEntry = memo(function TimelineEntry({
     }
     // spec/07 § Call cost — the one quiet line a finished call leaves.
     if ((entry.content ?? '').startsWith('[call] ')) {
-      const line = (entry.content ?? '').slice('[call] '.length);
-      // The agent's answer to a hand-off is the point of the exchange: full
-      // size, whole text. Only the plumbing around it stays quiet.
-      if (line.startsWith('<- agent:')) {
-        return (
-          <div className="call-agent-reply" data-testid="call-agent-reply">
-            <div className="call-summary-line">agent failed</div>
-            <div className="call-agent-reply-text">{line.slice('<- agent:'.length).trim()}</div>
-          </div>
-        );
-      }
       return (
         <div className="call-summary-line" data-testid="call-summary">
           {(entry.content ?? '').slice('[call] '.length)}
@@ -2974,31 +2977,11 @@ const TimelineEntry = memo(function TimelineEntry({
   // IS the hook's own analysis (spec/20-hooks.md: "no invisible injection"),
   // so showing it collapsed-by-default rather than as a full bubble is the
   // only difference from an ordinary turn.
-  // spec/07 § The fast voice and the chat's agent — what the call's fast voice
-  // asked the agent. Not the user's words (those are their own bubble above).
+  // spec/14 § Main chat panel — Hand-off rows: what the call's voice agent asked
+  // the chat's agent, with its answer inside. Not the user's words (those are
+  // their own bubble above).
   if (entry.kind === 'message' && entry.role === 'user' && entry.voiceHandoff) {
-    return (
-      <AgentMessageCard
-        direction="sent"
-        name="agent"
-        text={stripVoiceTag(entry.content ?? '')}
-        testid={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
-        {...(handoffPending ? { status: 'Waiting' } : {})}
-      />
-    );
-  }
-  // spec/07 § The fast voice and the chat's agent — the agent's answer to a
-  // hand-off is what came back from the exchange: the matching "From" card.
-  if (entry.kind === 'message' && entry.role === 'assistant' && entry.handoffAnswer) {
-    return (
-      <AgentMessageCard
-        direction="from"
-        name="agent"
-        text={entry.content ?? ''}
-        testid="voice-handoff-answer"
-        {...(entry.streaming ? { status: 'Replying' } : {})}
-      />
-    );
+    return <VoiceHandoffRow request={stripVoiceTag(entry.content ?? '')} handoff={handoff} />;
   }
   // Another chat's `patch_send_to` landing here: "From <chat>", opening it.
   if (entry.kind === 'message' && entry.role === 'user') {

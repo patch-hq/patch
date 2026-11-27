@@ -281,31 +281,3 @@ describe('looking back in a chat (spec/07 § Keeping voice and text as one conve
     expect(ctx.goal).toBeNull();
   });
 });
-
-describe('a hand-off that queues behind a running turn', () => {
-  it('keeps the place it was sent from, not the place the turn started', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    const { daemon, events, folder } = setup({ gate });
-    const chatId = await daemon.spawnChat({ folder });
-    const first = daemon.sendInput({ chatId, message: 'first', localId: 'l1', fromUser: true });
-    await new Promise((r) => setTimeout(r, 20));
-    daemon.reserveTurnSeq(chatId, 'h1');
-    await daemon.sendInput({
-      chatId,
-      message: 'list the files',
-      localId: 'h1',
-      voicePrefix: '[voice hand-off • web] ',
-      fromUser: true,
-    });
-    daemon.recordVoiceMessage({ chatId, role: 'user', content: '[voice • web] and then' });
-    release();
-    await first;
-    await new Promise((r) => setTimeout(r, 50));
-    const users = messages(events).filter((m) => m.role === 'user');
-    const handoff = users.find((m) => m.content.includes('hand-off'));
-    const spoken = users.find((m) => m.content.includes('and then'));
-    expect(handoff).toBeDefined();
-    expect(handoff!.seq).toBeLessThan(spoken!.seq);
-  });
-});

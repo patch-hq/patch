@@ -7,6 +7,7 @@ import type {
   AttachmentRef,
   ChatBranch,
   ChatDelegateUpdateEvent,
+  ChatVoiceHandoffEvent,
   PermissionMode,
   ReminderEvery,
   SystemContextItem,
@@ -130,8 +131,9 @@ export interface ChatEventEntry {
    */
   voice?: boolean;
   /**
-   * spec/07 § The fast voice and the chat's agent — a request a call's fast
-   * voice handed to the agent, not the user's words. Drawn as a muted line.
+   * spec/07 § The voice agent and the chat's agent — a request a call's voice
+   * agent handed to the chat's agent, not the user's words. Drawn as the
+   * hand-off's row, with its state from `voiceHandoffs`.
    */
   voiceHandoff?: boolean;
   /** spec/04 § Send back — the row a side thread posted into this track (`ChatMessageEvent.branchSendBack`). */
@@ -255,10 +257,14 @@ export interface ChatSnapshot {
   providerContext: ChatState['providerContext'][string] | undefined;
   toolRunSummaries: ChatState['toolRunSummaries'][string] | undefined;
   delegateUpdates: ChatState['delegateUpdates'][string] | undefined;
+  voiceHandoffs: ChatState['voiceHandoffs'][string] | undefined;
   branchGraph: ChatState['branchGraphs'][string] | undefined;
   sideThreadPermissions: Record<string, PendingPermission[]>;
   visitedAt: number | undefined;
 }
+
+/** Where a voice hand-off stands (spec/15 § Chat detail — hand-off rows). */
+export type VoiceHandoffView = Omit<ChatVoiceHandoffEvent, 'type' | 'chatId' | 'branchId'>;
 
 interface ChatState {
   chats: Record<string, ChatRow>;
@@ -285,6 +291,12 @@ interface ChatState {
    * Mirrors web's store of the same name.
    */
   delegateUpdates: Record<string, Record<string, DelegateUpdateInfo>>;
+  /**
+   * spec/15 § Chat detail — hand-off rows: where each voice hand-off stands
+   * (`chat.voice_handoff`, the latest per hand-off), keyed by the hand-off's
+   * own message seq under its chat. Mirrors web's store of the same name.
+   */
+  voiceHandoffs: Record<string, Record<number, VoiceHandoffView>>;
   /**
    * spec/04 § Branching — each chat's track graph, as published by
    * `chat.branches`. Mirrors web's store of the same name. Absent for a chat
@@ -752,6 +764,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   providerContext: {},
   toolRunSummaries: {},
   delegateUpdates: {},
+  voiceHandoffs: {},
   branchGraphs: {},
   replaying: {},
   historyMore: {},
@@ -800,6 +813,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const providerContext = { ...state.providerContext };
     const toolRunSummaries = { ...state.toolRunSummaries };
     const delegateUpdates = { ...state.delegateUpdates };
+    const voiceHandoffs = { ...state.voiceHandoffs };
     const branchGraphs = { ...state.branchGraphs };
     const sideThreadPermissions = { ...state.sideThreadPermissions };
     // Whether anything in this batch actually changed the store. A batch of
@@ -1662,6 +1676,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           };
           break;
         }
+        case 'chat.voice_handoff': {
+          const held = voiceHandoffs[event.chatId]?.[event.rowSeq];
+          // A replayed older state never overwrites a newer one.
+          if (held && held.seq > event.seq) continue;
+          const { type: _t, chatId: _c, branchId: _b, ...view } = event;
+          voiceHandoffs[event.chatId] = { ...voiceHandoffs[event.chatId], [event.rowSeq]: view };
+          break;
+        }
         case 'chat.delegate_update': {
           delegateUpdates[event.chatId] = {
             ...delegateUpdates[event.chatId],
@@ -1721,6 +1743,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       providerContext,
       toolRunSummaries,
       delegateUpdates,
+      voiceHandoffs,
       branchGraphs,
       sideThreadPermissions,
     });
@@ -1940,6 +1963,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           providerContext: before.providerContext[chatId],
           toolRunSummaries: before.toolRunSummaries[chatId],
           delegateUpdates: before.delegateUpdates[chatId],
+          voiceHandoffs: before.voiceHandoffs[chatId],
           branchGraph: before.branchGraphs[chatId],
           sideThreadPermissions: Object.fromEntries(
             Object.entries(before.sideThreadPermissions).filter(([k]) =>
@@ -1954,6 +1978,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const providerContext = { ...get().providerContext };
     const toolRunSummaries = { ...get().toolRunSummaries };
     const delegateUpdates = { ...get().delegateUpdates };
+    const voiceHandoffs = { ...get().voiceHandoffs };
     const branchGraphs = { ...get().branchGraphs };
     const sideThreadPermissions = { ...get().sideThreadPermissions };
     delete visited[chatId];
@@ -1963,6 +1988,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     delete providerContext[chatId];
     delete toolRunSummaries[chatId];
     delete delegateUpdates[chatId];
+    delete voiceHandoffs[chatId];
     delete branchGraphs[chatId];
     for (const key of Object.keys(sideThreadPermissions)) {
       if (key.startsWith(`${chatId}::`)) delete sideThreadPermissions[key];
@@ -1976,6 +2002,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       providerContext,
       toolRunSummaries,
       delegateUpdates,
+      voiceHandoffs,
       branchGraphs,
       sideThreadPermissions,
     };
@@ -2001,6 +2028,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       providerContext: put(s.providerContext, snap.providerContext),
       toolRunSummaries: put(s.toolRunSummaries, snap.toolRunSummaries),
       delegateUpdates: put(s.delegateUpdates, snap.delegateUpdates),
+      voiceHandoffs: put(s.voiceHandoffs, snap.voiceHandoffs),
       branchGraphs: put(s.branchGraphs, snap.branchGraph),
       sideThreadPermissions: { ...s.sideThreadPermissions, ...snap.sideThreadPermissions },
     });
@@ -2186,6 +2214,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       providerContext: {},
       toolRunSummaries: {},
       delegateUpdates: {},
+      voiceHandoffs: {},
       branchGraphs: {},
       replaying: {},
       historyMore: {},

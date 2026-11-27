@@ -42,7 +42,7 @@ describe('voice reply bridge — a turn identified by its localId', () => {
     bridge.observe(msg('c', 'user', 'ls the folder', 'mine'));
     bridge.observe(msg('c', 'assistant', 'ten files'));
     bridge.observe(ended('c', 'ours'));
-    await expect(reply).resolves.toBe('ten files');
+    await expect(reply).resolves.toMatchObject({ text: 'ten files' });
   });
 
   it('leaves out what the voice itself wrote into the chat while the agent worked', async () => {
@@ -52,7 +52,7 @@ describe('voice reply bridge — a turn identified by its localId', () => {
     bridge.observe(msg('c', 'assistant', "[voice • web] It's started."));
     bridge.observe(msg('c', 'assistant', 'ten files'));
     bridge.observe(ended('c', 't'));
-    await expect(reply).resolves.toBe('ten files');
+    await expect(reply).resolves.toMatchObject({ text: 'ten files' });
   });
 
   it('a turn registered without a localId is armed by the turn starting', async () => {
@@ -62,7 +62,7 @@ describe('voice reply bridge — a turn identified by its localId', () => {
     bridge.observe(started('c', 't'));
     bridge.observe(msg('c', 'assistant', 'hello'));
     bridge.observe(ended('c', 't'));
-    await expect(reply).resolves.toBe('hello');
+    await expect(reply).resolves.toMatchObject({ text: 'hello' });
   });
 
   it("keeps the turn's text when the host emits state after the reply (summaries, status)", async () => {
@@ -72,7 +72,7 @@ describe('voice reply bridge — a turn identified by its localId', () => {
     bridge.observe(msg('c', 'assistant', 'ten files'));
     bridge.observe(frame('c'));
     bridge.observe(ended('c', 't'));
-    await expect(reply).resolves.toBe('ten files');
+    await expect(reply).resolves.toMatchObject({ text: 'ten files' });
   });
 
   it('keeps it for a turn identified by localId too', async () => {
@@ -83,7 +83,21 @@ describe('voice reply bridge — a turn identified by its localId', () => {
     bridge.observe(msg('c', 'assistant', 'ten files'));
     bridge.observe(frame('c'));
     bridge.observe(ended('c', 't'));
-    await expect(reply).resolves.toBe('ten files');
+    await expect(reply).resolves.toMatchObject({ text: 'ten files' });
+  });
+
+  it('names the messages its answer was made of, so the chat can draw them on the hand-off row', async () => {
+    const bridge = createVoiceReplyBridge();
+    const reply = bridge.awaitReply('c', undefined, 'mine');
+    const at = (seq: number, role: 'user' | 'assistant', content: string, localId?: string) =>
+      bridge.observe({ ...(msg('c', role, content, localId) as object), seq } as WireEvent);
+    at(4, 'assistant', 'before it was taken');
+    at(5, 'user', 'ls', 'mine');
+    at(6, 'assistant', 'Looking.');
+    at(7, 'assistant', '[voice • web] Still on it.');
+    at(9, 'assistant', 'ten files');
+    bridge.observe(ended('c', 't'));
+    await expect(reply).resolves.toEqual({ text: 'Looking.\nten files', seqs: [6, 9] });
   });
 
   it('a turn that ends failed or interrupted is not an answer', async () => {

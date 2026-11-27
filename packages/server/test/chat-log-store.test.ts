@@ -251,6 +251,34 @@ describe('ChatLogStore', () => {
     ]);
   });
 
+  test('each state of a voice hand-off is kept, so its row reads the same after a reload', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(message('c1', 1));
+    const handoff = (seq: number, state: 'waiting' | 'working' | 'answered') =>
+      ({
+        type: 'chat.voice_handoff',
+        chatId: 'c1',
+        handoffId: 'h1',
+        rowSeq: 1,
+        request: 'is the build green',
+        state,
+        sentAt: 10,
+        ...(state === 'answered' ? { answer: 'Yes.', answerSeqs: [4], endedAt: 40 } : {}),
+        seq,
+      }) as WireEvent;
+    expect(store.commit(handoff(2, 'waiting'))).toBe('new');
+    expect(store.commit(handoff(3, 'working'))).toBe('new');
+    expect(store.commit(handoff(5, 'answered'))).toBe('new');
+    expect(store.commit(handoff(5, 'answered'))).toBe('duplicate');
+    const read = new ChatLogStore({ dataDir: dir, logger }).read('c1', -1);
+    expect(read.map((e) => [e.type, (e as { state?: string }).state])).toEqual([
+      ['chat.message', undefined],
+      ['chat.voice_handoff', 'waiting'],
+      ['chat.voice_handoff', 'working'],
+      ['chat.voice_handoff', 'answered'],
+    ]);
+  });
+
   test("a question and its answer read at the question's seq; an open one is live state, not history", () => {
     const store = new ChatLogStore({ dataDir: dir, logger });
     store.commit(message('c1', 1));

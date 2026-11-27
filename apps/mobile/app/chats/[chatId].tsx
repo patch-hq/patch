@@ -79,7 +79,10 @@ import {
   useChatStore,
   type ChatEventEntry,
   type LocalAttachment,
+  type VoiceHandoffView,
 } from '../../src/stores/chatStore';
+import { VoiceHandoffRow } from '../../src/components/VoiceHandoffRow';
+import { answerSeqsOf } from '../../src/lib/voiceHandoff';
 import { toolLabel } from '../../src/lib/toolsCatalog';
 import { DelegateTranscript } from '../../src/components/DelegateTranscript';
 import { DelegateStrip } from '../../src/components/DelegateStrip';
@@ -263,6 +266,7 @@ const NO_TIMELINE: ChatEventEntry[] = [];
 // typing indicator with it, for as long as the reply keeps generating.
 // Waits before re-asking for the transcript of an opened chat that is still empty.
 const EMPTY_RETRY_DELAYS_MS = [3000, 9000, 27000];
+const EMPTY_HANDOFFS: Record<number, VoiceHandoffView> = {};
 const SETTLE_DEBOUNCE_MS = 80;
 const SETTLE_MAX_MS = 500;
 
@@ -367,15 +371,27 @@ function ChatDetailBody(): React.ReactElement {
   );
   const snoozeRecords = row?.snoozeRecords;
   const chatModelForRows = row?.model;
+  // spec/15 § Chat detail — hand-off rows: each hand-off's state, by its own message's seq.
+  const voiceHandoffs = useChatStore((s) => s.voiceHandoffs[chatId] ?? EMPTY_HANDOFFS);
   const rows = React.useMemo(() => {
     // spec/04 § Forking — edit and side thread only where the fork would succeed.
     const points = branchPointsOf(visibleTimeline, chatModelForRows);
-    return insertSnoozeDividers(groupToolRuns(visibleTimeline), snoozeRecords).map((r) =>
-      r.kind === 'entry' && points.has(r.entry.seq)
-        ? { ...r, branchPoint: points.get(r.entry.seq)! }
-        : r,
+    // The chat's agent's answers are drawn inside their hand-off's row, not again below.
+    const answers = answerSeqsOf(voiceHandoffs);
+    const drawn = visibleTimeline.filter(
+      (e) => !(e.kind === 'message' && e.role === 'assistant' && answers.has(e.seq)),
     );
-  }, [visibleTimeline, snoozeRecords, chatModelForRows]);
+    return insertSnoozeDividers(groupToolRuns(drawn), snoozeRecords).map((r) => {
+      if (r.kind !== 'entry') return r;
+      const point = points.get(r.entry.seq);
+      const handoff = r.entry.voiceHandoff ? voiceHandoffs[r.entry.seq] : undefined;
+      return {
+        ...r,
+        ...(point ? { branchPoint: point } : {}),
+        ...(handoff ? { handoff } : {}),
+      };
+    });
+  }, [visibleTimeline, snoozeRecords, chatModelForRows, voiceHandoffs]);
   // FlatList's `inverted` mode wants data newest-first (see the block comment
   // above) — `rows` stays chronological for everything else on this screen
   // (badge/title derivation, the send-re-pin effect, ...), this reversal is a
@@ -955,8 +971,7 @@ function ChatDetailBody(): React.ReactElement {
             chatId={chatId}
             result={item.result}
             {...(item.sendTargets ? { sendTargets: item.sendTargets } : {})}
-            handoffPending={item.handoffPending === true}
-            handoffAnswer={item.handoffAnswer === true}
+            {...(item.handoff ? { handoff: item.handoff } : {})}
             {...(item.branchPoint ? { branchPoint: item.branchPoint } : {})}
           />
         );
@@ -1805,8 +1820,6 @@ function ToolCallItem({
   result?: ChatEventEntry;
   /** The same message also went to these chats (a grouped "Sent to" card). */
   sendTargets?: { chatId: string; failed: boolean }[];
-  /** spec/07 — a voice hand-off the agent has not answered yet. */
-  handoffPending?: boolean;
 }): React.ReactElement {
   // spec/15 § Chat detail — Delegate tool row: a `patch_delegate` call is the
   // one tool row that does not collapse like the rest, on web's rules
@@ -3098,8 +3111,7 @@ const TimelineItem = React.memo(function TimelineItem({
   chatId,
   result,
   sendTargets,
-  handoffPending,
-  handoffAnswer,
+  handoff,
   queuePos,
   release,
   queuedDraft,
@@ -3115,10 +3127,8 @@ const TimelineItem = React.memo(function TimelineItem({
   result?: ChatEventEntry;
   /** The same message also went to these chats (a grouped "Sent to" card). */
   sendTargets?: { chatId: string; failed: boolean }[];
-  /** spec/07 — a voice hand-off the agent has not answered yet. */
-  handoffPending?: boolean;
-  /** spec/07 — the agent's answer to a voice hand-off. */
-  handoffAnswer?: boolean;
+  /** spec/15 § Chat detail — hand-off rows: where the voice hand-off this entry is stands. */
+  handoff?: VoiceHandoffView;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -3156,8 +3166,7 @@ const TimelineItem = React.memo(function TimelineItem({
   }
   // spec/02 § Per-turn process / warm sessions — a reply Claude Code wrote
   // itself, not the agent: one muted line that says whose words they are.
-  // spec/07 § The fast voice and the chat's agent — what a call's fast voice
-  // asked the agent; § Call cost — the line a finished call leaves.
+  // spec/07 § Call cost — the line a finished call leaves.
   // A background `patch_agent` finishing: delivered as a machine turn, but
   // nobody typed it — a muted system row (queued or not), not a user bubble.
   if (entry.kind === 'message' && (entry.role ?? 'assistant') === 'user') {
@@ -3167,25 +3176,13 @@ const TimelineItem = React.memo(function TimelineItem({
     const send = parseChatSend(entry.content ?? '');
     if (send) return <FromChatCard send={send} />;
   }
+  // spec/15 § Chat detail — hand-off rows: what the call's voice agent asked the
+  // chat's agent, with its answer inside.
   if (entry.kind === 'message' && entry.voiceHandoff) {
     return (
-      <AgentMessageCard
-        direction="sent"
-        name="agent"
-        text={(entry.content ?? '').replace(/^\[voice[^\]]*\]\s*/, '')}
-        testID={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
-        {...(handoffPending ? { status: 'Waiting' } : {})}
-      />
-    );
-  }
-  // The agent's answer to a hand-off: the matching "From" card.
-  if (entry.kind === 'message' && entry.role === 'assistant' && handoffAnswer) {
-    return (
-      <AgentMessageCard
-        direction="from"
-        name="agent"
-        text={entry.content ?? ''}
-        testID="voice-handoff-answer"
+      <VoiceHandoffRow
+        request={(entry.content ?? '').replace(/^\[voice[^\]]*\]\s*/, '')}
+        handoff={handoff}
       />
     );
   }
@@ -3205,20 +3202,6 @@ const TimelineItem = React.memo(function TimelineItem({
   }
   if (entry.kind === 'message' && entry.role === 'system' && entry.content === INTERRUPTION_LINE) {
     return <CutOffLine chatId={chatId} seq={entry.seq} />;
-  }
-  if (
-    entry.kind === 'message' &&
-    entry.role === 'system' &&
-    (entry.content ?? '').startsWith('[call] <- agent:')
-  ) {
-    return (
-      <View testID="call-agent-reply" style={{ marginBottom: space.sm }}>
-        <Text style={{ fontSize: textMin, color: colors.ink3 }}>agent failed</Text>
-        <Text style={{ color: colors.ink }}>
-          {(entry.content ?? '').slice('[call] <- agent:'.length).trim()}
-        </Text>
-      </View>
-    );
   }
   if (
     entry.kind === 'message' &&

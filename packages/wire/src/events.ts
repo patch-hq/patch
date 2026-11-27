@@ -1392,6 +1392,46 @@ export const ChatToolRunSummaryEvent = z
   .strict();
 export type ChatToolRunSummaryEvent = z.infer<typeof ChatToolRunSummaryEvent>;
 
+// ---------------------------------------------------------------------------
+// Voice hand-offs (spec/07 § The voice agent and the chat's agent, spec/14 §
+// Main chat panel — Hand-off rows). Each time a hand-off's state changes the
+// host records where it stands. It is NOT a transcript row: surfaces hang the
+// latest one for a `handoffId` on the hand-off's own message (`rowSeq`), and
+// draw the messages named in `answerSeqs` inside that row rather than again in
+// the transcript.
+export const VoiceHandoffState = z.enum(['waiting', 'working', 'answered', 'failed']);
+export type VoiceHandoffState = z.infer<typeof VoiceHandoffState>;
+
+export const ChatVoiceHandoffEvent = z
+  .object({
+    type: z.literal('chat.voice_handoff'),
+    chatId: z.string().min(1),
+    handoffId: z.string().min(1),
+    /** The hand-off's own message: where it was made, and where its row is drawn. */
+    rowSeq: z.number().int().nonnegative(),
+    /** What the voice agent asked, as sent. */
+    request: z.string(),
+    /** `waiting` for the chat's agent, `working` once it has the request, then `answered` or `failed`. */
+    state: VoiceHandoffState,
+    sentAt: z.number().int().nonnegative(),
+    /** When the chat's agent took the request. */
+    startedAt: z.number().int().nonnegative().optional(),
+    /** When it was answered or failed. */
+    endedAt: z.number().int().nonnegative().optional(),
+    /** The chat's agent's answer, as the voice agent was given it. */
+    answer: z.string().optional(),
+    /** The chat's agent's messages that make up `answer`. */
+    answerSeqs: z.array(z.number().int().nonnegative()).optional(),
+    /** Why it failed. */
+    error: z.string().min(1).optional(),
+    /** Who sent it, when not this chat's own voice agent (another chat's voice, the Manager's). */
+    from: z.string().min(1).optional(),
+    seq: z.number().int().nonnegative(),
+    ...recordBranchField,
+  })
+  .strict();
+export type ChatVoiceHandoffEvent = z.infer<typeof ChatVoiceHandoffEvent>;
+
 export const ChatPermissionRequestEvent = z
   .object({
     type: z.literal('chat.permission_request'),
@@ -10694,6 +10734,11 @@ export const AuthOkEvent = z
      */
     delegateRecord: z.literal(true).optional(),
     /**
+     * Sent to a host by a server that keeps voice hand-off state
+     * (`chat.voice_handoff`). A host sends it none to a server without it.
+     */
+    voiceHandoffs: z.literal(true).optional(),
+    /**
      * Sent to a surface by a server that answers `chat.history_request` and runs
      * the account feed (`feed.resume`, spec/03 § Account feed). Every current
      * server sends it; surfaces read history only this way, so a surface told
@@ -10771,6 +10816,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatPermissionExpiryUpdateEvent,
   ChatArtifactEvent,
   ChatToolRunSummaryEvent,
+  ChatVoiceHandoffEvent,
   ChatStateEvent,
   ChatStoppedEvent,
   ChatDelegateUpdateEvent,
@@ -11120,6 +11166,7 @@ export const EVENT_SCHEMAS = {
   'chat.permission_expiry_update': ChatPermissionExpiryUpdateEvent,
   'chat.artifact': ChatArtifactEvent,
   'chat.tool_run_summary': ChatToolRunSummaryEvent,
+  'chat.voice_handoff': ChatVoiceHandoffEvent,
   'chat.state': ChatStateEvent,
   'chat.stopped': ChatStoppedEvent,
   'chat.delegate_update': ChatDelegateUpdateEvent,

@@ -134,6 +134,8 @@ const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   'chat.artifact',
   // A tool run's one-line summary labels a row of that transcript.
   'chat.tool_run_summary',
+  // Where a voice hand-off stands labels its row in the same transcript.
+  'chat.voice_handoff',
   // spec/14 § File browser — live updates: only a surface with this chat's
   // file browser/editor actually open needs to know its cached copy of a
   // path just went stale. Every other watching-nothing surface has nothing
@@ -1440,6 +1442,7 @@ export class WsHub {
               serverReads: true as const,
               // patch_agent subagents' records are kept here (host.delegate_entry).
               delegateRecord: true as const,
+              voiceHandoffs: true as const,
             }
           : {}),
         hostOutbox: true,

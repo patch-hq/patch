@@ -20,6 +20,7 @@ import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { useToolsStore } from '../stores/toolsStore.js';
 import { setActiveWs } from '../api/ws.js';
 import type { ChatEventEntry } from '../stores/chatStore.js';
+import type { WireEvent } from '@patch/wire';
 
 // G3-1/G3-4: opening the diff for a tool-call line fetches the FULL current
 // on-disk file content (modified side) from the host so Save commits a whole
@@ -4154,62 +4155,122 @@ describe('ChatRoute regression', () => {
       );
     });
 
-    it('shows a failed call hand-off as readable text under an "agent failed" label', () => {
-      seedChat('c-call-fail', [
-        {
-          seq: 0,
-          kind: 'message',
-          role: 'system',
-          content: '[call] <- agent: failed: boom',
-          at: 0,
-        },
-      ]);
-      renderChat('c-call-fail');
-      const el = screen.getByTestId('call-agent-reply');
-      expect(el.textContent).toContain('agent failed');
-      expect(el.textContent).toContain('failed: boom');
-      expect(el.textContent).not.toContain('<- agent');
-    });
-
-    it('marks a hand-off as asking until the agent answers, then as asked', () => {
+    describe('voice hand-off rows (spec/14 § Main chat panel — Hand-off rows)', () => {
       const handoff = {
-        seq: 0,
+        seq: 1,
         kind: 'message' as const,
         role: 'user' as const,
-        content: 'add milk',
+        content: 'add milk to the list',
         voiceHandoff: true,
         at: 0,
       };
-      seedChat('c-handoff-wait', [
-        handoff,
-        // The voice's own acknowledgement is not the agent's answer.
-        { seq: 1, kind: 'message', role: 'assistant', content: 'On it', voice: true, at: 1 },
-      ]);
-      renderChat('c-handoff-wait');
-      const pending = screen.getByTestId('voice-handoff-pending');
-      expect(pending.textContent).toContain('Sent to');
-      expect(pending.textContent).toContain('add milk');
-      expect(screen.getByTestId('agent-msg-status').textContent).toBe('Waiting');
-      cleanup();
-      seedChat('c-handoff-done', [
-        handoff,
-        {
-          seq: 1,
-          kind: 'message',
-          role: 'assistant',
-          content: 'Done',
-          voice: true,
-          handoffAnswer: true,
-          at: 1,
+      const state = (
+        chatId: string,
+        seq: number,
+        rest: Partial<Extract<WireEvent, { type: 'chat.voice_handoff' }>> & {
+          state: 'waiting' | 'working' | 'answered' | 'failed';
         },
-      ]);
-      renderChat('c-handoff-done');
-      expect(screen.queryByTestId('voice-handoff-pending')).toBeNull();
-      expect(screen.getByTestId('voice-handoff').textContent).toContain('add milk');
-      expect(screen.queryByTestId('agent-msg-status')).toBeNull();
-      const answer = screen.getByTestId('voice-handoff-answer');
-      expect(answer.textContent).toContain('From');
-      expect(answer.textContent).toContain('Done');
+      ) =>
+        act(() =>
+          useChatStore.getState().applyEvent({
+            type: 'chat.voice_handoff',
+            chatId,
+            handoffId: 'h1',
+            rowSeq: 1,
+            request: 'add milk to the list',
+            sentAt: 1_000,
+            seq,
+            ...rest,
+          }),
+        );
+
+      it('is one collapsed row in the voice gutter, saying it was asked and that it is waiting', () => {
+        seedChat('c-ho-wait', [handoff]);
+        renderChat('c-ho-wait');
+        state('c-ho-wait', 2, { state: 'waiting' });
+        const row = screen.getByTestId('voice-handoff');
+        expect(row.textContent).toContain('Asked the agent');
+        expect(row.textContent).toContain('add milk to the list');
+        expect(screen.getByTestId('voice-handoff-state').textContent).toBe('waiting');
+        expect(row.textContent).not.toContain('Sent to');
+        expect(screen.queryByTestId('voice-handoff-body')).toBeNull();
+      });
+
+      it('counts how long the agent has been working on it', () => {
+        seedChat('c-ho-work', [handoff]);
+        renderChat('c-ho-work');
+        state('c-ho-work', 2, { state: 'working', startedAt: Date.now() - 24_000 });
+        expect(screen.getByTestId('voice-handoff-state').textContent).toBe('working 0:24');
+      });
+
+      it("holds the agent's answer: drawn inside the opened row, not again in the transcript", () => {
+        seedChat('c-ho-done', [
+          { seq: 0, kind: 'message', role: 'user', content: 'what is on it', voice: true, at: 0 },
+          handoff,
+          { seq: 3, kind: 'message', role: 'user', content: 'and eggs', voice: true, at: 1 },
+          { seq: 4, kind: 'message', role: 'assistant', content: 'Added milk.', at: 2 },
+        ]);
+        renderChat('c-ho-done');
+        state('c-ho-done', 2, { state: 'waiting' });
+        state('c-ho-done', 5, {
+          state: 'answered',
+          endedAt: 39_000,
+          answer: 'Added milk.',
+          answerSeqs: [4],
+        });
+        expect(screen.getByTestId('voice-handoff-state').textContent).toBe('answered in 38s');
+        expect(screen.queryByText('Added milk.')).toBeNull();
+        // Where it was made: between what was said before and after it.
+        const said = screen.getByText('what is on it');
+        const row = screen.getByTestId('voice-handoff');
+        const after = screen.getByText('and eggs');
+        expect(said.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(row.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+        fireEvent.click(screen.getByTestId('voice-handoff-toggle'));
+        const body = screen.getByTestId('voice-handoff-body');
+        expect(body.textContent).toContain('Voice');
+        expect(body.textContent).toContain('add milk to the list');
+        const answer = screen.getByTestId('voice-handoff-answer');
+        expect(answer.textContent).toContain('Agent');
+        expect(answer.textContent).toContain('Added milk.');
+        expect(screen.getAllByText('Added milk.')).toHaveLength(1);
+      });
+
+      it('an older state replayed after a newer one changes nothing', () => {
+        seedChat('c-ho-replay', [handoff]);
+        renderChat('c-ho-replay');
+        state('c-ho-replay', 5, { state: 'answered', endedAt: 4_000, answer: 'x', answerSeqs: [] });
+        state('c-ho-replay', 2, { state: 'waiting' });
+        expect(screen.getByTestId('voice-handoff-state').textContent).toBe('answered in 3s');
+      });
+
+      it('says when it failed, and why when opened', () => {
+        seedChat('c-ho-fail', [handoff]);
+        renderChat('c-ho-fail');
+        state('c-ho-fail', 2, { state: 'failed', endedAt: 2_000, error: 'the turn ended failed' });
+        expect(screen.getByTestId('voice-handoff-state').textContent).toBe('failed');
+        fireEvent.click(screen.getByTestId('voice-handoff-toggle'));
+        expect(screen.getByTestId('voice-handoff-error').textContent).toContain(
+          'the turn ended failed',
+        );
+      });
+
+      it("names who sent it when it was not this call's voice agent", () => {
+        seedChat('c-ho-from', [handoff]);
+        renderChat('c-ho-from');
+        state('c-ho-from', 2, { state: 'waiting', from: 'Manager' });
+        expect(screen.getByTestId('voice-handoff').textContent).toContain(
+          'Manager asked the agent',
+        );
+      });
+
+      it('a hand-off from before its state was kept still reads as a row, with no state', () => {
+        seedChat('c-ho-old', [handoff]);
+        renderChat('c-ho-old');
+        expect(screen.getByTestId('voice-handoff').textContent).toContain('Asked the agent');
+        expect(screen.queryByTestId('voice-handoff-state')).toBeNull();
+      });
     });
 
     it('renders an impossible outcome labelled distinctly from met', () => {

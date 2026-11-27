@@ -6,11 +6,15 @@
 //   - costing a call when it ends.
 
 import type { Logger } from 'pino';
-import type { WireEvent } from '@patch/wire';
+import type { ChatVoiceHandoffEvent, WireEvent } from '@patch/wire';
 import type { SessionInit } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import { callSummaryLine, costCall, type EngineCosting, type RealCharge } from './voiceCost.js';
+import type { VoiceReply } from './replyBridge.js';
 import type { VoiceLedger } from './voiceLedger.js';
+
+/** Where a hand-off stands, as recorded in the chat. */
+export type VoiceHandoffRecord = Omit<ChatVoiceHandoffEvent, 'type' | 'seq' | 'branchId'>;
 
 /** What the glue needs from the chat host. */
 export interface ChatVoiceHost {
@@ -23,16 +27,29 @@ export interface ChatVoiceHost {
   reserveVoiceSeq(chatId: string): number;
   emitVoiceDelta(chatId: string, messageSeq: number, delta: string): void;
   recordCallSummary(chatId: string, line: string): void;
-  /** A quiet `[call]` line in the chat; used to mark a hand-off going out and its answer coming back. */
+  /** A quiet `[call]` line in the chat (a resumed call). */
   recordCallNote(chatId: string, line: string): void;
+  /** Record where a hand-off stands (`chat.voice_handoff`). */
+  recordVoiceHandoff(handoff: VoiceHandoffRecord): void;
 }
 
 export interface ChatVoice {
   makeTimeline(init: SessionInit): VoiceTimeline;
   /** The fast voice is passing `request` to the chat's agent: mark it in the chat and count it. */
-  handoffSent(info: { sessionId: string; chatId: string; request: string }): void;
-  /** The agent's answer to a hand-off is back (or it failed). */
-  handoffAnswered(info: { chatId: string; reply: string }): void;
+  handoffSent(info: {
+    sessionId: string;
+    chatId: string;
+    handoffId: string;
+    /** The hand-off's own message in the chat. */
+    rowSeq: number;
+    request: string;
+  }): void;
+  /** The chat's agent has taken the hand-off. */
+  handoffStarted(info: { chatId: string; handoffId: string }): void;
+  /** The chat's agent's answer to a hand-off is back, or it failed. */
+  handoffAnswered(
+    info: { chatId: string; handoffId: string } & ({ reply: VoiceReply } | { error: string }),
+  ): void;
   /** Feed every outbound wire event through here. */
   observe(event: WireEvent): void;
   callEnded(info: {
@@ -56,17 +73,23 @@ export function createChatVoice(deps: {
   onCosted: () => void;
   /** What ElevenLabs charged for a conversation; absent when the host has no ElevenLabs key. */
   lookupRealCharge?: (conversationId: string) => Promise<RealCharge>;
+  /** The clock hand-off times are read from. */
+  now?: () => number;
 }): ChatVoice {
   const { daemon, logger } = deps;
   // Hand-offs made so far, per call session; read and cleared when the call is costed.
   const handoffCounts = new Map<string, number>();
-  const note = (chatId: string, line: string): void => {
+  const now = deps.now ?? Date.now;
+  // Hand-offs not yet answered, by id: where each stands.
+  const handoffs = new Map<string, VoiceHandoffRecord>();
+  const publish = (h: VoiceHandoffRecord): void => {
+    if (h.state === 'waiting' || h.state === 'working') handoffs.set(h.handoffId, h);
     try {
-      daemon.recordCallNote(chatId, line);
+      daemon.recordVoiceHandoff(h);
     } catch (err) {
       logger.error(
-        { chatId, err: (err as Error).message },
-        'voice: could not write the hand-off marker into the chat',
+        { chatId: h.chatId, handoffId: h.handoffId, err: (err as Error).message },
+        `voice: could not record the hand-off as ${h.state}`,
       );
     }
   };
@@ -130,15 +153,32 @@ export function createChatVoice(deps: {
   }
 
   return {
-    handoffSent({ sessionId }) {
+    handoffSent({ sessionId, chatId, handoffId, rowSeq, request }) {
       handoffCounts.set(sessionId, (handoffCounts.get(sessionId) ?? 0) + 1);
-      // No line of its own: the request is already in the chat as the hand-off turn.
+      publish({ chatId, handoffId, rowSeq, request, state: 'waiting', sentAt: now() });
     },
 
-    handoffAnswered({ chatId, reply }) {
-      // A good answer is already in the chat as the agent's own reply. Only a
-      // failure has no reply to show, so it is the one thing written here.
-      if (reply.startsWith('failed:')) note(chatId, `<- agent: ${reply.trim()}`);
+    handoffStarted({ handoffId }) {
+      const h = handoffs.get(handoffId);
+      if (!h || h.state !== 'waiting') return;
+      publish({ ...h, state: 'working', startedAt: now() });
+    },
+
+    handoffAnswered(info) {
+      const h = handoffs.get(info.handoffId);
+      if (!h) return;
+      handoffs.delete(info.handoffId);
+      publish(
+        'reply' in info
+          ? {
+              ...h,
+              state: 'answered',
+              endedAt: now(),
+              answer: info.reply.text,
+              answerSeqs: info.reply.seqs,
+            }
+          : { ...h, state: 'failed', endedAt: now(), error: info.error },
+      );
     },
 
     makeTimeline(init) {

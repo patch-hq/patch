@@ -12,6 +12,7 @@ import { z } from 'zod';
 import {
   ChatArtifactEvent,
   ChatToolRunSummaryEvent,
+  ChatVoiceHandoffEvent,
   ChatErrorCode,
   ChatMessageEvent,
   ChatNoteEvent,
@@ -67,6 +68,7 @@ export const LoggedEvent = z.discriminatedUnion('type', [
   ChatToolResultEvent,
   ChatArtifactEvent,
   ChatToolRunSummaryEvent,
+  ChatVoiceHandoffEvent,
 ]);
 export type LoggedEvent = z.infer<typeof LoggedEvent>;
 export const LOGGED_EVENT_TYPES: ReadonlySet<LoggedEvent['type']> = new Set([
@@ -76,6 +78,7 @@ export const LOGGED_EVENT_TYPES: ReadonlySet<LoggedEvent['type']> = new Set([
   'chat.tool_result',
   'chat.artifact',
   'chat.tool_run_summary',
+  'chat.voice_handoff',
 ]);
 
 export const SessionReason = z.enum([
