@@ -14,6 +14,7 @@ import { runtimeVersionOf } from './build-mobile-update.mjs';
 
 const MOBILE = 'apps/mobile';
 const JAVA = join(MOBILE, 'android/app/src/main/java/dev/patchhq/app');
+const JAVA_TEST = join(MOBILE, 'android/app/src/test/java/dev/patchhq/app');
 
 test('the committed Android project runs the runtimeVersion app.config.ts declares', () => {
   const config = readFileSync(join(MOBILE, 'app.config.ts'), 'utf8');
@@ -32,6 +33,27 @@ test('every native source in plugins/native is in the committed Android project,
     } catch {
       assert.fail(`${file} is not in android/: run \`pnpm native:prebuild\` in apps/mobile`);
     }
-    assert.equal(copied, src, `${file} in android/ differs: run \`pnpm native:prebuild\` in apps/mobile`);
+    assert.equal(
+      copied,
+      src,
+      `${file} in android/ differs: run \`pnpm native:prebuild\` in apps/mobile`,
+    );
+  }
+});
+
+test('every JVM test in plugins/native-test is in the committed Android project, unchanged', () => {
+  for (const file of readdirSync(join(MOBILE, 'plugins/native-test'))) {
+    const src = readFileSync(join(MOBILE, 'plugins/native-test', file), 'utf8');
+    let copied;
+    try {
+      copied = readFileSync(join(JAVA_TEST, file), 'utf8');
+    } catch {
+      assert.fail(`${file} is not in android/: run \`pnpm native:prebuild\` in apps/mobile`);
+    }
+    assert.equal(
+      copied,
+      src,
+      `${file} in android/ differs: run \`pnpm native:prebuild\` in apps/mobile`,
+    );
   }
 });
