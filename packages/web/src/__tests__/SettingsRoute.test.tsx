@@ -1027,6 +1027,15 @@ describe('Settings → Dictation and Voice', () => {
     });
   });
 
+  it('the voice instructions are editable, starting from the default', async () => {
+    renderSettings('/settings/voice');
+    const row = await screen.findByTestId('prompt-voice-instructions');
+    expect(row).toHaveTextContent('Voice instructions');
+    // Default until the user writes their own.
+    expect(screen.getByTestId('prompt-voice-instructions-mode')).toHaveTextContent('Default');
+    expect(screen.queryByTestId('prompt-voice-instructions-edit')).toBeNull();
+  });
+
   it('voiceCellStatus mirrors the host’s branching', () => {
     expect(voiceCellStatus('openai', 'light')).toBeNull();
     expect(voiceCellStatus('local', 'light')).toMatch(/no front model built for local/);

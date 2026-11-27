@@ -299,6 +299,7 @@ const SETTING_KEYS: Record<string, string> = {
   'speech-backend': 'speechBackend',
   'voice-device-prompt': 'voiceDevicePrompt',
   'manager-voice-prompt': 'managerVoicePrompt',
+  'voice-instructions': 'voiceInstructions',
   'voice-match-threshold': 'voiceMatchThreshold',
   'sweep-speak': 'sweepSpeak',
 };

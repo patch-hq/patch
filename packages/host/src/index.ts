@@ -330,7 +330,7 @@ import {
 } from './claudeSettings.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CALL_RESUMED_NOTE, startAudioServer, type AudioServerHandle } from './audio/server.js';
-import { createVoiceReplyBridge, type VoiceReply } from './audio/replyBridge.js';
+import { createVoiceReplyBridge } from './audio/replyBridge.js';
 import {
   createManagerVoiceTools,
   MANAGER_CHAT_ID,
@@ -339,7 +339,9 @@ import {
   type ManagerTimerRequest,
 } from './audio/managerVoice.js';
 import { createSmartTurnDetector, pcmFromWav, type TurnDetector } from './audio/smartTurn.js';
-import { createChatVoice } from './audio/chatVoice.js';
+import { createChatVoice, voiceLocalId, voiceTag } from './audio/chatVoice.js';
+import type { StartMessage } from './audio/voiceAgent.js';
+import { makeVoiceCatchUp } from './audio/voiceCatchUp.js';
 import {
   fetchConversationCharge,
   fetchPlanCredits,
@@ -398,13 +400,6 @@ import type { FastifyInstance } from 'fastify';
  * gets paged out on a busy box.
  */
 const KOKORO_KEEP_WARM_MS = 8 * 60_000;
-
-/**
- * How much of a chat's recent conversation a fast voice is seeded with
- * (spec/07 § Keeping voice and text as one conversation — about 8,000
- * tokens), counted in characters at roughly four to a token.
- */
-const VOICE_CONTEXT_MAX_CHARS = 32_000;
 
 /**
  * Test-only boot hook (mirrors the `enableTestHooks` convention in
@@ -1026,6 +1021,8 @@ async function startHost(
   let voiceDevicePrompt: string = DEFAULT_SHARED_SETTINGS.voiceDevicePrompt;
   /** spec/07 § A call to the Manager — `host.settings` → `managerVoicePrompt`. */
   let managerVoicePrompt: string = DEFAULT_SHARED_SETTINGS.managerVoicePrompt;
+  /** spec/07 § Voice instructions — `host.settings` → `voiceInstructions`. */
+  let voiceInstructions: string = DEFAULT_SHARED_SETTINGS.voiceInstructions;
   /** spec/16 § Who is speaking — `host.settings` → `voiceProfiles`. */
   let voiceProfiles: SharedSettings['voiceProfiles'] = [];
   let voiceMatchThreshold: number = DEFAULT_SHARED_SETTINGS.voiceMatchThreshold;
@@ -2449,6 +2446,10 @@ async function startHost(
     if (shared.managerVoicePrompt !== managerVoicePrompt) {
       managerVoicePrompt = shared.managerVoicePrompt;
       logger.info('manager voice prompt changed');
+    }
+    if (shared.voiceInstructions !== voiceInstructions) {
+      voiceInstructions = shared.voiceInstructions;
+      logger.info('voice instructions changed');
     }
     if (JSON.stringify(shared.voiceProfiles) !== JSON.stringify(voiceProfiles)) {
       voiceProfiles = shared.voiceProfiles;
@@ -4531,6 +4532,19 @@ async function startHost(
   // spec/07 § Keeping voice and text as one conversation / § Call cost.
   // `daemon` and `audioServer` are read lazily: both exist by the time a
   // voice session or a chat message reaches this.
+  // spec/07 § Keeping voice and text as one conversation — a call's catch-up, a small job.
+  const voiceCatchUp = (chatId: string, earlier: StartMessage[]): Promise<string> =>
+    makeVoiceCatchUp({
+      sdkBackend,
+      runOnAccountWithCredit: runOnAnyAccount,
+      smallJobModels: () => smallJobModels,
+      folderOf: (id) => {
+        const state = daemon.chatState.get(id);
+        if (!state) throw new Error(`chat ${id} is not on this host`);
+        return state.folder;
+      },
+      logger,
+    })(chatId, earlier);
   const chatVoice = createChatVoice({
     daemon: {
       recordVoiceMessage: (r) => daemon.recordVoiceMessage(r),
@@ -4539,8 +4553,25 @@ async function startHost(
       recordCallSummary: (chatId, line) => daemon.recordCallSummary(chatId, line),
       recordCallNote: (chatId, line) => daemon.recordCallNote(chatId, line),
       recordVoiceHandoff: (handoff) => daemon.recordVoiceHandoff(handoff),
+      sendInput: (req) => daemon.sendInput(req),
+      voiceStartFacts: (chatId, recent) => daemon.voiceStartFacts(chatId, recent),
+      lastAgentMessage: (chatId) => daemon.lastAgentMessage(chatId),
+      chatActivity: (chatId) => daemon.chatActivity(chatId),
+      searchChat: (chatId, query) => daemon.searchChat(chatId, query),
     },
     sessionsOnChat: (chatId) => audioServer?.sessionsOnChat(chatId) ?? [],
+    sessionById: (sessionId) => audioServer?.sessionById(sessionId),
+    catchUp: (chatId, earlier) => voiceCatchUp(chatId, earlier),
+    listChats: () => listAccountChats(),
+    isLocal: (chatId) => daemon.chatState.has(chatId),
+    endCall: (sessionId) => {
+      if (!audioServer) throw new Error('the audio server is not running');
+      audioServer.endSession(sessionId);
+    },
+    retargetCall: (sessionId, chatId) => {
+      if (!audioServer) throw new Error('the audio server is not running');
+      audioServer.retargetCall(sessionId, chatId);
+    },
     ledger: voiceLedger,
     logger,
     onCosted: () => publishHost(),
@@ -4584,31 +4615,32 @@ async function startHost(
         resolve(stdout);
       });
     });
+  // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
+  // would read as "there is no such chat". The status is the server's, for every
+  // chat alike (spec/12 § Chat status); this host's own view never overrides it.
+  const listAccountChats = async (): Promise<ManagerChatEntry[]> => {
+    const account = await requestAccountChats(MANAGER_CHAT_ID);
+    return account.map((e) => {
+      const chatStatus = e['chatStatus'];
+      const state =
+        chatStatus !== null && typeof chatStatus === 'object'
+          ? str((chatStatus as Record<string, unknown>)['state'])
+          : undefined;
+      const lastUpdated = e['lastUpdated'];
+      return {
+        chatId: e.chatId,
+        name: str(e['name']) ?? null,
+        folder: str(e['folder']) ?? '',
+        status: str(e['status']) ?? 'active',
+        ...(state !== undefined ? { chatStatus: state } : {}),
+        ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
+      };
+    });
+  };
   const managerVoice = createManagerVoiceTools({
     logger: logger.child({ component: 'manager-voice' }),
     voicePrompt: () => managerVoicePrompt,
-    // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
-    // would read as "there is no such chat". The status is the server's, for every
-    // chat alike (spec/12 § Chat status); this host's own view never overrides it.
-    listChats: async (): Promise<ManagerChatEntry[]> => {
-      const account = await requestAccountChats(MANAGER_CHAT_ID);
-      return account.map((e) => {
-        const chatStatus = e['chatStatus'];
-        const state =
-          chatStatus !== null && typeof chatStatus === 'object'
-            ? str((chatStatus as Record<string, unknown>)['state'])
-            : undefined;
-        const lastUpdated = e['lastUpdated'];
-        return {
-          chatId: e.chatId,
-          name: str(e['name']) ?? null,
-          folder: str(e['folder']) ?? '',
-          status: str(e['status']) ?? 'active',
-          ...(state !== undefined ? { chatStatus: state } : {}),
-          ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
-        };
-      });
-    },
+    listChats: listAccountChats,
     isLocal: (chatId) => daemon.chatState.has(chatId),
     chatDetail: (chatId) => daemon.voiceContext(chatId, { maxChars: 2_000 }),
     submitInput: async ({ chatId, message, localId }) => {
@@ -5773,7 +5805,10 @@ async function startHost(
         link.dropLink();
       },
     }),
-    onDrawnTurnStarted: (chatId, localId) => voiceReplies.turnStarted(chatId, localId),
+    onDrawnTurnStarted: (chatId, localId) => {
+      voiceReplies.turnStarted(chatId, localId);
+      chatVoice.handoffStarted({ chatId, handoffId: localId });
+    },
     onTurnCommitted: (chatId) => {
       if (!(SPECIAL_THREAD_IDS as readonly string[]).includes(chatId)) return;
       const threadId = chatId as SpecialThreadId;
@@ -7140,100 +7175,35 @@ async function startHost(
         }
       }
     },
-    submitUserTurn: async ({ chatId, message, source, onReplyText, handoff, onAccepted }) => {
+    submitUserTurn: async ({ chatId, message, source, onReplyText }) => {
       // Tag the turn by its ingress. Physical voice devices get
       // `[voice • device:<deviceId>]` (spec/06 ## Speakers thread) so the
       // agent knows which room it's hearing; app surfaces get
       // `[voice • <surfaceKind>]`. The same audio WSS streams the reply's TTS
       // back to the originating session, which IS the originating device.
-      // A fast voice's hand-off (spec/07 § The fast voice and the chat's agent)
-      // is tagged as one: the user's own words are already in the timeline.
-      const voicePrefix =
-        source.kind === 'voice-device'
-          ? `[voice${handoff === true ? ' hand-off' : ''} • device:${source.deviceId}] `
-          : `[voice${handoff === true ? ' hand-off' : ''} • ${source.surfaceKind}] `;
-      // This path is only ever reached from a live audio-WSS session, which
-      // always carries a `sessionId`; the `?? surfaceKind` keeps the localId
-      // well-formed now that `sessionId` is optional on the source type (the
-      // uploaded-note path omits it, but that path never calls submitUserTurn).
-      /* v8 ignore start -- defensive fallback only: this closure is wired exclusively to VoiceSession's live submitUserTurn call, which always constructs its source with a required, non-optional `sessionId` (see the comment above) */
-      const localIdSuffix =
-        source.kind === 'voice-device'
-          ? `device:${source.deviceId}`
-          : (source.sessionId ?? source.surfaceKind);
-      /* v8 ignore stop */
+      const voicePrefix = voiceTag(source, false);
       // Unique per turn: the reply bridge recognises this turn's own message by it.
-      const localId = `voice-${localIdSuffix}-${Date.now()}-${randomUUID().slice(0, 8)}`;
-      // A hand-off is `working` from the moment the chat's agent has it.
-      const accepted = (): void => {
-        if (handoff === true) chatVoice.handoffStarted({ chatId, handoffId: localId });
-        onAccepted?.();
-      };
+      const localId = voiceLocalId(source);
       // Register BEFORE the input is sent, so the bridge sees this turn's very
       // first message and every delta after it. Armed by that message only: the chat
       // may be running some other turn right now, with this one queued behind it.
-      const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId, accepted);
+      const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId);
       // The promise is awaited only after `sendInput` returns. A newer turn can supersede
       // (reject) it before then, with nothing attached yet: Node would treat that as an
       // unhandled rejection and exit the whole daemon. Mark it observed here; the real
       // handling is still the `await replyPromise` below, which sees the same rejection.
       replyPromise.catch(() => {});
-      // A hand-off is written into the chat now, in order with what was said
-      // around it, and delivered under that line when the agent gets to it. Left to
-      // the turn, it would be recorded only when it ran, below everything said since.
-      // Its state (waiting, working, answered) is recorded against that line.
-      let drawnSeq: number | undefined;
-      if (handoff === true) {
-        try {
-          drawnSeq = daemon.recordVoiceMessage({
-            chatId,
-            role: 'user',
-            content: `${voicePrefix}${message}`,
-            owed: false,
-          });
-        } catch (err) {
-          voiceReplies.abandon(chatId, err as Error);
-          throw err;
-        }
-        chatVoice.handoffSent({
-          sessionId: localIdSuffix,
-          chatId,
-          handoffId: localId,
-          rowSeq: drawnSeq,
-          request: message,
-        });
-      }
       // `sendInput` awaits the whole turn (and any turns that queue behind it),
       // so by the time it returns the bridge has normally already settled. If
       // it THROWS, the turn never ran — fail the waiter loudly instead of
       // leaving the session waiting on a promise nothing will ever resolve.
       try {
-        await daemon.sendInput({
-          chatId,
-          message,
-          localId,
-          voicePrefix,
-          fromUser: true,
-          ...(drawnSeq !== undefined ? { deliverDrawn: drawnSeq } : {}),
-        });
+        await daemon.sendInput({ chatId, message, localId, voicePrefix, fromUser: true });
       } catch (err) {
         voiceReplies.abandon(chatId, err as Error);
-        if (handoff === true) {
-          chatVoice.handoffAnswered({ chatId, handoffId: localId, error: (err as Error).message });
-        }
         throw err;
       }
-      let reply: VoiceReply;
-      try {
-        reply = await replyPromise;
-      } catch (err) {
-        if (handoff === true) {
-          chatVoice.handoffAnswered({ chatId, handoffId: localId, error: (err as Error).message });
-        }
-        throw err;
-      }
-      if (handoff === true) chatVoice.handoffAnswered({ chatId, handoffId: localId, reply });
-      return reply.text;
+      return (await replyPromise).text;
     },
     // spec/07 ## Permission prompts during voice — a spoken yes/no mid-call
     // resolves the focused chat's outstanding permission via the STT path.
@@ -7275,43 +7245,10 @@ async function startHost(
     ...(config.audio.openaiRealtimeModelHeavy
       ? { openaiRealtimeModelHeavy: config.audio.openaiRealtimeModelHeavy }
       : {}),
-    // spec/07 § Keeping voice and text as one conversation — what a fast
-    // voice opens with: the chat's name and its most recent messages. A chat
-    // whose history cannot be read fails the session loudly rather than
-    // opening a voice that knows nothing.
-    getChatContext: (chatId: string) => {
-      const { name, opening, status, goal, openTodos, turns } = daemon.voiceContext(chatId, {
-        maxChars: VOICE_CONTEXT_MAX_CHARS,
-      });
-      // Header lines for the call's briefing: what the chat is called and how it began.
-      const header = [
-        ...(name !== null
-          ? [{ role: 'user' as const, text: `(This chat is titled "${name}".)` }]
-          : []),
-        ...(opening !== null
-          ? [
-              {
-                role: 'user' as const,
-                text: `(It began with the user saying: "${opening.replace(/\s+/g, ' ').slice(0, 400)}")`,
-              },
-            ]
-          : []),
-      ];
-      // Where it stands now: the status the host already writes after each turn, the goal and
-      // the open to-dos. Nothing new is generated for a call.
-      const standing = [
-        ...(status !== null
-          ? [{ role: 'user' as const, text: `(Where it stands: ${status})` }]
-          : []),
-        ...(goal !== null ? [{ role: 'user' as const, text: `(Goal: ${goal})` }] : []),
-        ...(openTodos.length > 0
-          ? [{ role: 'user' as const, text: `(Still to do: ${openTodos.slice(0, 6).join('; ')})` }]
-          : []),
-      ];
-      return [...header, ...standing, ...turns];
-    },
-    // A call's `look_back`: the chat's messages that match a few words, searched on the host.
-    lookBack: (chatId, query) => daemon.searchChat(chatId, query),
+    // spec/07 § The voice agent and the chat's agent — the voice agent's tools the host
+    // answers and the chat's start context, the same for every provider.
+    voiceAgentLink: chatVoice.link,
+    getVoiceInstructions: () => voiceInstructions,
     managerVoice,
     // spec/16 — a device is heard out loud, and by whoever is in the room.
     deviceVoice: () => ({

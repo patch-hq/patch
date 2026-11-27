@@ -55,6 +55,11 @@ const startMicCaptureMock = vi.fn(
   },
 );
 const stopMicCaptureMock = vi.fn(async () => undefined);
+const playCallSoundMock = vi.fn(async () => undefined);
+vi.mock('../src/lib/callSounds', () => ({
+  playCallSound: playCallSoundMock,
+  syncCallSoundLoop: vi.fn(),
+}));
 vi.mock('../src/lib/voiceMic', () => ({
   startMicCapture: startMicCaptureMock,
   stopMicCapture: stopMicCaptureMock,
@@ -593,6 +598,41 @@ describe('audio WS message dispatch', () => {
     expect(useVoiceStore.getState().callError).toBe('sdk_error: boom');
     expect(useUiStore.getState().errors.some((e) => e.message.includes('sdk_error: boom'))).toBe(
       true,
+    );
+  });
+
+  it('a failed catch-up is said, but the call carries on: no call error', async () => {
+    const sock = await openCall();
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'audio.error',
+        code: 'catch_up_failed',
+        message: 'the catch-up could not be written',
+        sessionId: 'sess-1',
+      }),
+    );
+    expect(useVoiceStore.getState().callError).toBeNull();
+    expect(
+      useUiStore.getState().errors.some((e) => e.message.includes('catch-up could not be written')),
+    ).toBe(true);
+  });
+
+  it('audio.passed_to_agent plays the passed to agent sound', async () => {
+    const sock = await openCall();
+    playCallSoundMock.mockClear();
+    sock.emitMessage(JSON.stringify({ type: 'audio.passed_to_agent', sessionId: 'sess-1' }));
+    expect(playCallSoundMock).toHaveBeenCalledWith('passed-to-agent');
+  });
+
+  it('audio.chat_switched moves the call, and its notification, to the new chat', async () => {
+    const sock = await openCall();
+    sock.emitMessage(
+      JSON.stringify({ type: 'audio.chat_switched', sessionId: 'sess-1', chatId: 'c2' }),
+    );
+    expect(useVoiceStore.getState().activeSession?.chatId).toBe('c2');
+    expect(updateVoiceAudioServiceMock).toHaveBeenCalledWith(
+      'c2',
+      expect.objectContaining({ mode: 'call' }),
     );
   });
 

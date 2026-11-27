@@ -110,16 +110,3 @@ describe('voice reply bridge — a turn identified by its localId', () => {
     expect(bridge.pendingCount()).toBe(0);
   });
 });
-
-describe('voice reply bridge — acceptance', () => {
-  it('reports the turn as accepted only when its own message arrives, not when another turn runs', () => {
-    const bridge = createVoiceReplyBridge();
-    let accepted = 0;
-    void bridge.awaitReply('c', undefined, 'mine', () => (accepted += 1)).catch(() => undefined);
-    bridge.observe(started('c', 'other'));
-    bridge.observe(msg('c', 'user', 'other', 'theirs'));
-    expect(accepted).toBe(0);
-    bridge.observe(msg('c', 'user', 'ls', 'mine'));
-    expect(accepted).toBe(1);
-  });
-});

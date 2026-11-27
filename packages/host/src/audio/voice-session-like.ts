@@ -29,8 +29,14 @@ export interface VoiceTimeline {
 
 export interface VoiceReplyWriter {
   append(delta: string): void;
-  /** Persist the reply (a reply that never got any text is dropped). */
-  finish(): void;
+  /**
+   * Persist the reply (a reply that never got any text is dropped). `heard`:
+   * the reply was cut off, and this is the part the user heard (spec/07 §
+   * Barge-in); the chat keeps that, not what was never played.
+   */
+  finish(heard?: string): void;
+  /** The reply's text so far. */
+  text(): string;
 }
 
 export interface VoiceSessionLike {
@@ -63,11 +69,12 @@ export interface VoiceSessionLike {
   /** spec/07 § Call cost — what this session's engine used. */
   engineCosting(): EngineCosting;
   /**
-   * A message that landed in the chat from elsewhere while the session is
-   * open: added to a fast voice's context without prompting a reply. A no-op
-   * where there is no fast voice (`local`).
+   * spec/07 § The voice agent and the chat's agent — something from the chat
+   * for the voice agent to speak about (a hand-off's answer, a reply that
+   * ended a turn), held until nobody is talking. `handoffSettled`: it settles
+   * one of this call's hand-offs. A session with no voice agent (the local
+   * tier, dictation) has nobody to tell: there the chat agent's reply is
+   * already what the session speaks or writes, so it ignores this.
    */
-  pushContext(role: 'user' | 'assistant', text: string): void;
-  /** True while a hand-off to the chat's agent is in flight. */
-  isAwaitingHandoff(): boolean;
+  pushMessage(text: string, opts?: { handoffSettled?: boolean }): void;
 }

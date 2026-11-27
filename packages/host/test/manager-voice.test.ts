@@ -12,17 +12,13 @@ import {
   SEND_TO_CHAT_TOOL_NAME,
   FIND_CHATS_TOOL_NAME,
   CHAT_STATUS_TOOL_NAME,
+  ACKNOWLEDGEMENT_RULE,
+  managerHostedInstruction,
+  resolveChat,
   type ManagerChatEntry,
   type ManagerVoiceHostDeps,
 } from '../src/audio/managerVoice.js';
-import {
-  ACKNOWLEDGEMENT_RULE,
-  ASYNC_WAIT_RULE,
-  DISPATCH_TOOL_NAME,
-  WAIT_RULE,
-  hostedVoiceInstruction,
-  managerHostedInstruction,
-} from '../src/audio/gemini-live.js';
+import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 
 const logger = pino({ level: 'silent' });
 const NOW = 1_000_000_000_000;
@@ -331,7 +327,7 @@ describe('prompts', () => {
       expect(text).toContain(SEND_TO_CHAT_TOOL_NAME);
       expect(text).toContain(FIND_CHATS_TOOL_NAME);
       expect(text).toContain(CHAT_STATUS_TOOL_NAME);
-      expect(text).not.toContain(DISPATCH_TOOL_NAME);
+      expect(text).not.toContain(PASS_TO_AGENT_TOOL_NAME);
     }
     expect(managerHostedInstruction(true)).toContain('arrives as a message');
     expect(managerHostedInstruction(false)).toContain('returns once the chat has answered');
@@ -353,12 +349,26 @@ describe('prompts', () => {
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/vary/);
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/Skip it when the answer will be quick/);
     expect(ACKNOWLEDGEMENT_RULE).toMatch(/not always "one sec"/);
-    expect(WAIT_RULE).toContain(ACKNOWLEDGEMENT_RULE);
-    expect(ASYNC_WAIT_RULE).toContain(ACKNOWLEDGEMENT_RULE);
-    expect(hostedVoiceInstruction('auto')).toContain(ACKNOWLEDGEMENT_RULE);
-    expect(hostedVoiceInstruction('auto', true)).toContain(ACKNOWLEDGEMENT_RULE);
-    // The old fixed phrase is no longer the instruction.
-    expect(WAIT_RULE).not.toMatch(/Say at most one brief acknowledgement out loud \("one sec"\)/);
+    expect(managerHostedInstruction(true)).toContain(ACKNOWLEDGEMENT_RULE);
+  });
+});
+
+describe('resolveChat (a chat named on a call)', () => {
+  const chats: ManagerChatEntry[] = [
+    { chatId: 'c1', name: 'Garden planning', folder: '/home/garden', status: 'active' },
+    { chatId: 'c2', name: 'Garden shed', folder: '/home/shed', status: 'active' },
+    { chatId: 'c3', name: 'Tax return', folder: '/home/tax', status: 'archived' },
+    { chatId: MANAGER_CHAT_ID, name: 'Manager', folder: '/', status: 'active' },
+  ];
+  test('an id or an exact name wins; words must pick out one chat', () => {
+    expect(resolveChat(chats, 'c2').chatId).toBe('c2');
+    expect(resolveChat(chats, 'garden planning').chatId).toBe('c1');
+    expect(resolveChat(chats, 'shed').chatId).toBe('c2');
+  });
+  test('none or several is a lookup error naming the choices; archived and the Manager are not names', () => {
+    expect(() => resolveChat(chats, 'garden')).toThrow(/Several chats match "garden"/);
+    expect(() => resolveChat(chats, 'tax')).toThrow(ManagerChatLookupError);
+    expect(() => resolveChat(chats, 'manager')).toThrow(/No chat matches/);
   });
 });
 

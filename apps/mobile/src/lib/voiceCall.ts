@@ -54,6 +54,7 @@ import { playCallSound, syncCallSoundLoop } from './callSounds';
 import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import {
+  AUDIO_NOTICE_CODES,
   decodeAudio,
   type AudioCallLogEvent,
   type AudioEvent,
@@ -256,7 +257,9 @@ export function startVoiceCall(
   // 2) The line dials, and redials whenever it drops.
   const line: CallLine = new CallLine({
     dial: (attempt, resumed) => {
-      void openAttempt(line, chatId, attempt, {
+      // A redial goes to the chat the call is on now: the voice agent may have switched it.
+      const onChat = useVoiceStore.getState().activeSession?.chatId ?? chatId;
+      void openAttempt(line, onChat, attempt, {
         takeOver: opts.takeOver === true && attempt === 1,
         resumed,
         // Never repeated on a redial: the voice already opened with it.
@@ -494,7 +497,26 @@ async function openAttempt(
           useVoiceStore.getState().setCallPhase('listening');
           void flushTtsPlayback().catch(() => undefined);
           break;
+        case 'audio.passed_to_agent':
+          void playCallSound('passed-to-agent');
+          break;
+        case 'audio.chat_switched': {
+          // The voice agent moved the call (spec/07 § A call stays on its chat):
+          // the bar, the notification and any redial follow it.
+          const st = useVoiceStore.getState();
+          if (st.activeSession) {
+            st.upgradeActive({ ...st.activeSession, chatId: frame.chatId });
+            void updateVoiceAudioService(frame.chatId, serviceState()).catch(() => undefined);
+          }
+          break;
+        }
         case 'audio.error': {
+          // A failure the call carries on through (a catch-up, a voice tool): said, not fatal.
+          if (AUDIO_NOTICE_CODES.has(frame.code)) {
+            console.log(`[patch-voice] call notice ${frame.code}: ${frame.message}`);
+            useUiStore.getState().pushError(`voice call: ${frame.message}`);
+            break;
+          }
           // LOUD + visible: the call bar names it. A hosted engine's failure
           // (`gemini_unavailable` / `openai_unavailable`) names the engine.
           console.log(`[patch-voice] call audio.error ${frame.code}: ${frame.message}`);

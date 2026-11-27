@@ -12,7 +12,9 @@ import {
   type OpenAIRealtimeDeps,
   type OpenAIWsCtor,
 } from '../src/audio/openai-realtime.js';
-import { DISPATCH_TOOL_NAME } from '../src/audio/gemini-live.js';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent } from '@patch/wire/audio';
 import { FakeTimeline } from './gemini-live-session.test.js';
@@ -62,14 +64,15 @@ function makeDeps(overrides: Partial<OpenAIRealtimeDeps> = {}): {
   events: AudioEvent[];
   binary: Int16Array[];
   last: { ws?: FakeOpenAIWs };
-  submitUserTurn: ReturnType<typeof vi.fn>;
+  passed: ReturnType<typeof fakeVoiceAgentLink>['passed'];
+  link: ReturnType<typeof fakeVoiceAgentLink>['link'];
   onFatal: ReturnType<typeof vi.fn>;
   timeline: FakeTimeline;
 } {
   const events: AudioEvent[] = [];
   const binary: Int16Array[] = [];
   const last: { ws?: FakeOpenAIWs } = {};
-  const submitUserTurn = vi.fn(async () => 'next train is 14:05');
+  const { link, passed } = fakeVoiceAgentLink();
   const onFatal = vi.fn();
   const timeline = new FakeTimeline();
   const wsCtor = function (this: unknown, url: string, opts: { headers: Record<string, string> }) {
@@ -80,7 +83,8 @@ function makeDeps(overrides: Partial<OpenAIRealtimeDeps> = {}): {
     logger,
     sendAudio: (ev) => events.push(ev),
     sendBinary: (pcm) => binary.push(pcm),
-    submitUserTurn: submitUserTurn as unknown as OpenAIRealtimeDeps['submitUserTurn'],
+    link,
+    instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'o-key',
     model: 'gpt-realtime-2.1-mini',
     wsCtor,
@@ -88,7 +92,7 @@ function makeDeps(overrides: Partial<OpenAIRealtimeDeps> = {}): {
     timeline,
     ...overrides,
   };
-  return { deps, events, binary, last, submitUserTurn, onFatal, timeline };
+  return { deps, events, binary, last, passed, link, onFatal, timeline };
 }
 
 async function open(
@@ -155,7 +159,7 @@ describe('upsample16kTo24k', () => {
 });
 
 describe('OpenAIRealtimeSession', () => {
-  test('connects with a bearer key to the model URL and configures a 24 kHz audio session with the dispatch tool', async () => {
+  test('connects with a bearer key to the model URL and configures a 24 kHz audio session with the voice agent tools', async () => {
     const { deps, last, events } = makeDeps();
     const session = new OpenAIRealtimeSession(makeInit(), deps);
     const ws = await open(session, last);
@@ -175,7 +179,13 @@ describe('OpenAIRealtimeSession', () => {
     expect(update.session.audio.input.format.rate).toBe(24000);
     expect(update.session.audio.output.format.rate).toBe(24000);
     expect(update.session.audio.input.turn_detection.create_response).toBe(true);
-    expect(update.session.tools.map((t) => t.name)).toEqual([DISPATCH_TOOL_NAME]);
+    expect(update.session.tools.map((t) => t.name)).toEqual([
+      PASS_TO_AGENT_TOOL_NAME,
+      'check_status',
+      'look_back',
+      'end_call',
+      'switch_chat',
+    ]);
     expect(events).toContainEqual({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' });
   });
 
@@ -197,18 +207,33 @@ describe('OpenAIRealtimeSession', () => {
     expect(ws.ofType('input_audio_buffer.append')).toHaveLength(2);
   });
 
-  test('the chat briefing goes in the instructions before the mic opens', async () => {
-    const { deps, last } = makeDeps({
-      getChatContext: () => [
-        { role: 'user', text: 'what did I buy' },
-        { role: 'model', text: 'a drill' },
-      ],
-    });
+  test('the instructions are the voice instructions, the tone, then the chat as it stands', async () => {
+    const { deps, last } = makeDeps({ instructions: 'Be this chat.', tone: 'Warm.' });
     const ws = await open(new OpenAIRealtimeSession(makeInit(), deps), last);
     const update = ws.ofType('session.update')[0] as { session: { instructions: string } };
-    expect(update.session.instructions).toContain('User: what did I buy');
-    expect(update.session.instructions).toContain('Agent: a drill');
+    expect(update.session.instructions).toBe(`Be this chat.\n\nWarm.\n\n${FAKE_START_CONTEXT}`);
     expect(ws.ofType('conversation.item.create')).toHaveLength(0);
+  });
+
+  test('a catch-up is added to the conversation when it is written, without asking for a reply', async () => {
+    let write!: (text: string) => void;
+    const { link } = fakeVoiceAgentLink({
+      startContext: () => ({
+        text: FAKE_START_CONTEXT,
+        catchUp: new Promise<string>((r) => (write = r)),
+      }),
+    });
+    const { deps, last } = makeDeps({ link });
+    const ws = await open(new OpenAIRealtimeSession(makeInit(), deps), last);
+    write('They chose the 09:14.');
+    await vi.waitFor(() => expect(ws.ofType('conversation.item.create')).toHaveLength(1));
+    const item = ws.ofType('conversation.item.create')[0]!['item'] as {
+      role: string;
+      content: Array<{ text: string }>;
+    };
+    expect(item.role).toBe('user');
+    expect(item.content[0]!.text).toContain('They chose the 09:14.');
+    expect(ws.ofType('response.create')).toHaveLength(0);
   });
 
   test('a full turn: partial words, final transcript, audio out, tts_end, back to listening', async () => {
@@ -257,29 +282,26 @@ describe('OpenAIRealtimeSession', () => {
     expect(ws.ofType('response.create')).toHaveLength(0);
   });
 
-  test('dispatch_to_patch: the heavy agent runs and its answer goes back as function output + response.create', async () => {
-    const { deps, last, submitUserTurn } = makeDeps();
+  test('pass_to_agent answers "received" at once and the voice carries on', async () => {
+    const { deps, last, passed } = makeDeps();
     const session = new OpenAIRealtimeSession(makeInit(), deps);
     const ws = await open(session, last);
+    ws.serverSend({ type: 'response.created' });
     ws.serverSend({
       type: 'response.function_call_arguments.done',
       call_id: 'call-1',
-      name: DISPATCH_TOOL_NAME,
+      name: PASS_TO_AGENT_TOOL_NAME,
       arguments: JSON.stringify({ request: 'when is my next train' }),
     });
     ws.serverSend({
       type: 'response.done',
       response: { status: 'completed', output: [{ type: 'function_call' }] },
     });
-    expect(session.getState()).toBe('thinking');
+    expect(session.getState()).toBe('listening');
     await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(1));
-    expect(submitUserTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: 'chat-1',
-        message: 'when is my next train',
-        source: { kind: 'voice-app', surfaceKind: 'mobile', sessionId: 'sess-1' },
-      }),
-    );
+    expect(passed).toEqual([
+      { sessionId: 'sess-1', chatId: 'chat-1', request: 'when is my next train' },
+    ]);
     const out = ws.ofType('conversation.item.create').at(-1)!['item'] as {
       type: string;
       call_id: string;
@@ -288,8 +310,26 @@ describe('OpenAIRealtimeSession', () => {
     expect(out).toEqual({
       type: 'function_call_output',
       call_id: 'call-1',
-      output: JSON.stringify({ result: 'next train is 14:05' }),
+      output: JSON.stringify({ result: 'received' }),
     });
+  });
+
+  test("the agent's answer is pushed when the line is quiet, and the voice is asked to speak", async () => {
+    const { deps, last } = makeDeps();
+    const session = new OpenAIRealtimeSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend({ type: 'response.created' });
+    session.pushMessage("Answer from the chat's agent: 14:05", { handoffSettled: true });
+    // A reply is going: the push waits.
+    expect(ws.ofType('conversation.item.create')).toHaveLength(0);
+    ws.serverSend(audioDelta(48));
+    ws.serverSend({ type: 'response.done', response: { status: 'completed' } });
+    await vi.waitFor(() => expect(ws.ofType('conversation.item.create')).toHaveLength(1));
+    const item = ws.ofType('conversation.item.create')[0]!['item'] as {
+      content: Array<{ text: string }>;
+    };
+    expect(item.content[0]!.text).toContain('14:05');
+    expect(ws.ofType('response.create')).toHaveLength(1);
   });
 
   test('a response with only a tool call and no speech is not a lost reply', async () => {
@@ -345,6 +385,39 @@ describe('OpenAIRealtimeSession', () => {
     expect(errors[2]!.message).toContain('bad audio');
     // Mid-session errors are loud but not fatal — the provider socket is still up.
     expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  test('barge-in cuts the reply in OpenAI and in the chat to what had played', async () => {
+    const { deps, last, timeline } = makeDeps();
+    const session = new OpenAIRealtimeSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend({ type: 'response.created' });
+    ws.serverSend({
+      type: 'response.output_audio_transcript.delta',
+      delta: 'Once upon a time there was a very long story indeed.',
+    });
+    // Two seconds of audio for item a1, all sent at once; the user cuts in after a fraction of it.
+    ws.serverSend({ ...audioDelta(48_000), item_id: 'a1' });
+    await new Promise((r) => setTimeout(r, 600));
+    ws.serverSend({ type: 'input_audio_buffer.speech_started' });
+    const truncate = ws.ofType('conversation.item.truncate')[0] as {
+      item_id: string;
+      content_index: number;
+      audio_end_ms: number;
+    };
+    expect(truncate).toMatchObject({ item_id: 'a1', content_index: 0 });
+    expect(truncate.audio_end_ms).toBeGreaterThanOrEqual(500);
+    expect(truncate.audio_end_ms).toBeLessThan(2000);
+    // Whatever still streams of the cancelled reply is not written.
+    ws.serverSend({ type: 'response.output_audio_transcript.delta', delta: ' The end.' });
+    ws.serverSend({ type: 'response.done', response: { status: 'cancelled' } });
+    const written = timeline.log.filter((l) => l.startsWith('reply:'));
+    expect(written).toHaveLength(1);
+    expect(written[0]!).toMatch(/^reply:chat-1:Once upon/);
+    expect(written[0]!).not.toContain('The end.');
+    expect(written[0]!.length).toBeLessThan(
+      'reply:chat-1:Once upon a time there was a very long story indeed.'.length,
+    );
   });
 
   test('barge-in in a call: speech_started while speaking flushes the surface', async () => {
@@ -557,6 +630,8 @@ describe('one conversation with the chat', () => {
     ws.serverSend({ type: 'response.output_audio_transcript.delta', delta: 'of gas.' });
     ws.serverSend({ type: 'response.done', response: { status: 'completed' } });
 
+    // Written once it has played out.
+    await vi.waitFor(() => expect(timeline.log.at(-1)).toMatch(/^reply:/));
     expect(timeline.log).toEqual([
       'user:chat-1:what is a nebula',
       'begin:chat-1',
@@ -566,8 +641,8 @@ describe('one conversation with the chat', () => {
     ]);
   });
 
-  test("a hand-off goes to the chat's agent tagged as a hand-off, and what the voice says of the answer is written too", async () => {
-    const { deps, last, timeline, submitUserTurn } = makeDeps();
+  test("a hand-off goes to the chat's agent, and what the voice says of the answer is written too", async () => {
+    const { deps, last, timeline, passed } = makeDeps();
     const session = new OpenAIRealtimeSession(makeInit(), deps);
     const ws = await open(session, last);
 
@@ -577,67 +652,68 @@ describe('one conversation with the chat', () => {
       item_id: 'i1',
       transcript: 'when is my train',
     });
-    ws.serverSend({ type: 'response.output_audio_transcript.delta', delta: 'One sec.' });
+    ws.serverSend({ type: 'response.created' });
+    ws.serverSend({ type: 'response.output_audio_transcript.delta', delta: 'Passing that on.' });
     ws.serverSend(audioDelta(48));
     ws.serverSend({
       type: 'response.function_call_arguments.done',
-      name: DISPATCH_TOOL_NAME,
+      name: PASS_TO_AGENT_TOOL_NAME,
       call_id: 'c1',
       arguments: JSON.stringify({ request: 'Next train home' }),
     });
     ws.serverSend({ type: 'response.done', response: { status: 'completed' } });
-    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalled());
-    expect(submitUserTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Next train home', handoff: true }),
-    );
+    await vi.waitFor(() => expect(passed).toHaveLength(1));
+    expect(passed[0]!.request).toBe('Next train home');
     await vi.waitFor(() => expect(ws.ofType('response.create').length).toBeGreaterThan(0));
+    ws.serverSend({ type: 'response.created' });
+    ws.serverSend({ type: 'response.output_audio_transcript.delta', delta: 'Passed on.' });
+    ws.serverSend(audioDelta(48));
+    ws.serverSend({ type: 'response.done', response: { status: 'completed' } });
+    session.pushMessage("Answer from the chat's agent: 14:05", { handoffSettled: true });
+    await vi.waitFor(() => expect(ws.ofType('response.create').length).toBe(2));
     ws.serverSend({ type: 'response.created' });
     ws.serverSend({ type: 'response.output_audio_transcript.delta', delta: 'It is at 14:05.' });
     ws.serverSend(audioDelta(48));
     ws.serverSend({ type: 'response.done', response: { status: 'completed' } });
 
+    // Each reply is written once it has played out.
+    await vi.waitFor(() =>
+      expect(timeline.log.filter((l) => l.startsWith('reply:'))).toHaveLength(3),
+    );
     expect(timeline.log.filter((l) => l.startsWith('reply:') || l.startsWith('user:'))).toEqual([
       'user:chat-1:when is my train',
-      'reply:chat-1:One sec.',
+      'reply:chat-1:Passing that on.',
+      'reply:chat-1:Passed on.',
       'reply:chat-1:It is at 14:05.',
     ]);
   });
 
-  test('a message landing in the chat is a short quiet note, not a request for a response', async () => {
-    const { deps, last } = makeDeps();
-    const session = new OpenAIRealtimeSession(makeInit(), deps);
-    const ws = await open(session, last);
-    const before = ws.ofType('response.create').length;
-    session.pushContext('assistant', 'The build finished.');
-    const item = (ws.sent.at(-1) as { item: { role: string; content: Array<{ text: string }> } })
-      .item;
-    expect(item.role).toBe('user');
-    expect(item.content[0]!.text).toContain('the agent wrote in the chat: "The build finished."');
-    expect(ws.ofType('response.create').length).toBe(before);
-  });
-
-  test('look_back: declared when the host can search, answered at once from the chat', async () => {
-    const lookBack = vi.fn(() => 'Agent: it was archived by a client');
-    const { deps, last } = makeDeps({ lookBack });
+  test('look_back and check_status are answered at once from the host', async () => {
+    const { deps, last, link } = makeDeps();
     const ws = await open(new OpenAIRealtimeSession(makeInit({ chatId: 'chat-9' }), deps), last);
-    const update = ws.ofType('session.update')[0] as {
-      session: { tools: Array<{ name: string }>; instructions: string };
-    };
-    expect(update.session.tools.map((t) => t.name)).toContain('look_back');
-    expect(update.session.instructions).toContain('call look_back');
     ws.serverSend({
       type: 'response.function_call_arguments.done',
       name: 'look_back',
       call_id: 'lb1',
       arguments: JSON.stringify({ query: 'archived' }),
     });
-    await vi.waitFor(() => expect(lookBack).toHaveBeenCalledWith('chat-9', 'archived'));
-    const out = ws
+    ws.serverSend({
+      type: 'response.function_call_arguments.done',
+      name: 'check_status',
+      call_id: 'cs1',
+      arguments: '{}',
+    });
+    await vi.waitFor(() => expect(link.lookBack).toHaveBeenCalledWith('chat-9', 'archived'));
+    await vi.waitFor(() => expect(link.checkStatus).toHaveBeenCalledWith('sess-1', 'chat-9'));
+    const outs = ws
       .ofType('conversation.item.create')
       .map((m) => m['item'] as { type: string; output?: string })
-      .find((i) => i.type === 'function_call_output');
-    expect(JSON.parse(out!.output!)).toEqual({ result: 'Agent: it was archived by a client' });
-    expect(ws.ofType('response.create').length).toBeGreaterThan(0);
+      .filter((i) => i.type === 'function_call_output')
+      .map((i) => JSON.parse(i.output!) as { result: string });
+    expect(outs).toEqual([
+      { result: 'found in chat-9: dentist on Tuesday' },
+      { result: 'status of chat-9' },
+    ]);
   });
 
   test('tallies the usage each response reports', async () => {
@@ -710,7 +786,9 @@ describe('a voice device session', () => {
     const recent = new RecentVoices();
     const made = makeDeps({
       device: { prompt: () => 'SPOKEN ALOUD RULES', profiles: () => profiles, embed, recent },
-      getChatContext: () => [{ role: 'user', text: 'my bank balance is private' }],
+      link: fakeVoiceAgentLink({
+        startContext: () => ({ text: 'User: my bank balance is private', catchUp: null }),
+      }).link,
       ...extra,
     });
     return { ...made, recent };
@@ -771,7 +849,7 @@ describe('a voice device session', () => {
     const first = instructions(ws, 0);
     expect(first).toContain('someone you do not recognise');
     expect(first).not.toContain('my bank balance is private');
-    expect(toolNames(ws, 0)).not.toContain(DISPATCH_TOOL_NAME);
+    expect(toolNames(ws, 0)).not.toContain(PASS_TO_AGENT_TOOL_NAME);
     const update = ws.ofType('session.update')[0] as {
       session: { audio: { input: { turn_detection: { create_response: boolean } } } };
     };
@@ -789,7 +867,7 @@ describe('a voice device session', () => {
     expect(order.slice(-2)).toEqual(['session.update', 'response.create']);
     expect(instructions(ws, 1)).toContain("Tom, the account's owner");
     expect(instructions(ws, 1)).toContain('my bank balance is private');
-    expect(toolNames(ws, 1)).toContain(DISPATCH_TOOL_NAME);
+    expect(toolNames(ws, 1)).toContain(PASS_TO_AGENT_TOOL_NAME);
     expect(session.getSpeaker()?.name).toBe('Tom');
     ws.serverSend({
       type: 'conversation.item.input_audio_transcription.completed',
@@ -800,21 +878,27 @@ describe('a voice device session', () => {
   });
 
   test("a household member's hand-off tells the agent who asked; the history stays out", async () => {
-    const { deps, last, submitUserTurn } = deviceDeps([TOM, ELEANOR]);
+    const passed: Array<{ request: string }> = [];
+    const { deps, last } = deviceDeps([TOM, ELEANOR], {
+      link: fakeVoiceAgentLink({
+        startContext: () => ({ text: 'User: my bank balance is private', catchUp: null }),
+        passToAgent: (req) => passed.push(req),
+      }).link,
+    });
     const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
     const ws = await open(session, last);
     await speak(session, ws, 2000, 'i1', 0);
     await vi.waitFor(() => expect(session.getSpeaker()?.name).toBe('Eleanor'));
     expect(instructions(ws, 1)).not.toContain('my bank balance is private');
-    expect(toolNames(ws, 1)).toContain(DISPATCH_TOOL_NAME);
+    expect(toolNames(ws, 1)).toContain(PASS_TO_AGENT_TOOL_NAME);
     ws.serverSend({
       type: 'response.function_call_arguments.done',
-      name: DISPATCH_TOOL_NAME,
+      name: PASS_TO_AGENT_TOOL_NAME,
       call_id: 'c1',
       arguments: JSON.stringify({ request: 'when is my dentist' }),
     });
-    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalledTimes(1));
-    const message = (submitUserTurn.mock.calls[0]![0] as { message: string }).message;
+    await vi.waitFor(() => expect(passed).toHaveLength(1));
+    const message = passed[0]!.request;
     expect(message).toMatch(
       /^\[Spoken by Eleanor, a member of the household\. About Eleanor: Has a dentist/,
     );
@@ -822,7 +906,10 @@ describe('a voice device session', () => {
   });
 
   test("a stranger's hand-off is refused in code and never reaches the agent", async () => {
-    const { deps, last, submitUserTurn } = deviceDeps([TOM]);
+    const passed: Array<{ request: string }> = [];
+    const { deps, last } = deviceDeps([TOM], {
+      link: fakeVoiceAgentLink({ passToAgent: (req) => passed.push(req) }).link,
+    });
     const session = new OpenAIRealtimeSession(makeInit({ surfaceKind: 'device' }), deps);
     const ws = await open(session, last);
     await speak(session, ws, 5000, 'i1', 0);
@@ -830,12 +917,12 @@ describe('a voice device session', () => {
     expect(session.getSpeaker()).toBeNull();
     ws.serverSend({
       type: 'response.function_call_arguments.done',
-      name: DISPATCH_TOOL_NAME,
+      name: PASS_TO_AGENT_TOOL_NAME,
       call_id: 'c1',
       arguments: JSON.stringify({ request: "what is Tom's bank balance" }),
     });
     await vi.waitFor(() => expect(ws.ofType('response.create')).toHaveLength(2));
-    expect(submitUserTurn).not.toHaveBeenCalled();
+    expect(passed).toHaveLength(0);
     const out = ws.ofType('conversation.item.create').at(-1) as {
       item: { type: string; output: string };
     };

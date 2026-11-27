@@ -199,8 +199,5 @@ export class HostDictationSession implements VoiceSessionLike {
   engineCosting(): EngineCosting {
     return { backend: 'local', model: 'parakeet', tokens: null, stt: null };
   }
-  pushContext(): void {}
-  isAwaitingHandoff(): boolean {
-    return false;
-  }
+  pushMessage(): void {}
 }

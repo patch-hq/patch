@@ -1337,6 +1337,7 @@ import {
 } from '@patch/wire';
 import { ChatLog, HistoryWriteError } from './chatLog.js';
 import { readTrack, readTrackRecords } from './readTrack.js';
+import type { StartFacts, StartMessage } from './audio/voiceAgent.js';
 import { recordEntries, turnBoundaryOf } from './recordEntries.js';
 import {
   ChatMoveError,
@@ -9555,6 +9556,78 @@ export class Daemon {
       openTodos: state.todos.filter((t) => t.status !== 'completed').map((t) => t.text),
       turns,
     };
+  }
+
+  /**
+   * spec/07 § Keeping voice and text as one conversation — what a call's start
+   * context is written from: the chat's name and goal, the questions to the
+   * user still open, its last `recent` messages with their times, and every
+   * message before them (what the catch-up summarises). Only what the user and
+   * the agent said: tool calls, tool output and notes are left out, and so are
+   * the voice agent's own hand-off rows.
+   */
+  voiceStartFacts(chatId: string, recent: number): StartFacts {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta) throw new ChatNotFoundError(chatId);
+    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
+    const messages: StartMessage[] = [];
+    for (const { record, event } of readTrack(this.chatLog, chatId, meta, branchId, -1)) {
+      const e = event as WireEvent;
+      if (e.type !== 'chat.message' || (e.role !== 'user' && e.role !== 'assistant')) continue;
+      const text = stripVoiceTag(e.content).trim();
+      if (text.length === 0) continue;
+      messages.push({ role: e.role, text, at: record.at });
+    }
+    const split = Math.max(0, messages.length - recent);
+    return {
+      name: meta.name ?? null,
+      goal: meta.goal ?? null,
+      openQuestions: this.openQuestions(chatId, state),
+      recent: messages.slice(split),
+      earlier: messages.slice(0, split),
+    };
+  }
+
+  /** The questions a chat has put to the user and not had answered. */
+  private openQuestions(chatId: string, state: ChatState): string[] {
+    const out: string[] = [];
+    for (const ev of this.pendingPermissionEvents.values()) {
+      if (ev.chatId !== chatId) continue;
+      const args = ev.request.args as { questions?: Array<{ question?: unknown }> } | undefined;
+      const asked = (args?.questions ?? [])
+        .map((q) => (typeof q.question === 'string' ? q.question : ''))
+        .filter((q) => q !== '');
+      if (asked.length > 0) out.push(...asked);
+      else
+        out.push(
+          `May it run ${ev.request.tool}${ev.request.description ? `: ${ev.request.description}` : ''}?`,
+        );
+    }
+    if (state.declaredStatus?.kind === 'question') out.push(state.declaredStatus.text);
+    return out;
+  }
+
+  /** The chat agent's last message and when it was written, from the chat's own record. */
+  lastAgentMessage(chatId: string): { text: string; at: number } | null {
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta || !this.chatState.has(chatId)) throw new ChatNotFoundError(chatId);
+    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
+    const all = readTrack(this.chatLog, chatId, meta, branchId, -1);
+    for (let i = all.length - 1; i >= 0; i--) {
+      const e = all[i]!.event as WireEvent;
+      if (e.type !== 'chat.message' || e.role !== 'assistant') continue;
+      // The voice agent's words are written as assistant messages too, tagged; they are not the agent's.
+      if (e.content.startsWith('[voice')) continue;
+      return { text: e.content, at: all[i]!.record.at };
+    }
+    return null;
+  }
+
+  /** What a chat is doing now; null for one this host does not have. */
+  chatActivity(chatId: string): ChatActivity | null {
+    return this.chatState.get(chatId)?.activity ?? null;
   }
 
   /**

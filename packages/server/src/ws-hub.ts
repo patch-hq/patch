@@ -1445,7 +1445,6 @@ export class WsHub {
               serverReads: true as const,
               // patch_agent subagents' records are kept here (host.delegate_entry).
               delegateRecord: true as const,
-              voiceHandoffs: true as const,
             }
           : {}),
         hostOutbox: true,

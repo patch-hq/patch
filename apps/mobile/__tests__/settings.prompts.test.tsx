@@ -81,7 +81,7 @@ describe('Settings prompts', () => {
     const pages: Array<[React.ReactElement, string[]]> = [
       [<AgentPage key="a" />, ['question-expired', 'watch-check-in', 'job-autonomy']],
       [<ManagerPage key="m" />, ['manager-voice', 'sweep']],
-      [<VoicePage key="v" />, ['voice-device']],
+      [<VoicePage key="v" />, ['voice-instructions', 'voice-device']],
       [<MeetingsPage key="me" />, ['meeting-now', 'meeting-notes', 'meeting-actions']],
     ];
     for (const [el, layers] of pages) {

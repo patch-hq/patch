@@ -22,6 +22,7 @@ import {
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_SWEEP_PROMPT,
   DEFAULT_VOICE_DEVICE_PROMPT,
+  DEFAULT_VOICE_INSTRUCTIONS,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
@@ -88,6 +89,7 @@ export type Layer =
   | 'manager-voice'
   | 'job-autonomy'
   | 'voice-device'
+  | 'voice-instructions'
   | 'question-expired'
   | 'meeting-now'
   | 'meeting-notes'
@@ -103,6 +105,7 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'manager-voice': 'Voice',
   'job-autonomy': 'How jobs work on their own',
   'voice-device': 'Speaking aloud',
+  'voice-instructions': 'Voice instructions',
   'question-expired': 'When a question times out',
   'meeting-now': 'Now',
   'meeting-notes': 'Notes',
@@ -120,6 +123,7 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'manager-voice': 'Manager voice prompt',
   'job-autonomy': 'Autonomy prompt',
   'voice-device': 'Speaking aloud prompt',
+  'voice-instructions': 'Voice instructions',
   'question-expired': 'Question timeout prompt',
   'meeting-now': 'Meeting Now prompt',
   'meeting-notes': 'Meeting notes prompt',
@@ -135,6 +139,7 @@ export const TEXT_PROMPTS = {
   'manager-voice': { key: 'managerVoicePrompt', fallback: DEFAULT_MANAGER_VOICE_PROMPT },
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
   'voice-device': { key: 'voiceDevicePrompt', fallback: DEFAULT_VOICE_DEVICE_PROMPT },
+  'voice-instructions': { key: 'voiceInstructions', fallback: DEFAULT_VOICE_INSTRUCTIONS },
   'question-expired': {
     key: 'questionExpiredPrompt',
     fallback: DEFAULT_QUESTION_EXPIRED_PROMPT,

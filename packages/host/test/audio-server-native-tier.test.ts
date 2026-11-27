@@ -12,6 +12,8 @@
 //   - call surface, backend='local', layer='light' -> voice_config_not_implemented (no front model yet)
 //   - default voiceConfig (local/direct everywhere) -> never dials Gemini
 
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
@@ -123,7 +125,12 @@ describe('audio server — voice config matrix selection', () => {
   }): Promise<AudioServerHandle & { port: number }> {
     const voiceConfig: VoiceConfig = { ...DEFAULT_VOICE_CONFIG, ...opts.voiceConfig };
     const handle = await startAudioServer({
-      makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
+      makeTimeline: () => ({
+        userSaid() {},
+        beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+      }),
+      voiceAgentLink: fakeVoiceAgentLink().link,
+      getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
       host: '127.0.0.1',
       port: 0,
       logger,

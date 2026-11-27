@@ -707,6 +707,33 @@ export const AudioBargeInEvent = z
   .strict();
 export type AudioBargeInEvent = z.infer<typeof AudioBargeInEvent>;
 
+/**
+ * Host -> surface: the voice agent moved the call to another chat with its
+ * switch chat tool (spec/07 § A call stays on its chat). The call carries on;
+ * the surface's call bar names the new chat from here on.
+ */
+export const AudioChatSwitchedEvent = z
+  .object({
+    type: z.literal('audio.chat_switched'),
+    sessionId: z.string().min(1),
+    chatId: z.string().min(1),
+  })
+  .strict();
+export type AudioChatSwitchedEvent = z.infer<typeof AudioChatSwitchedEvent>;
+
+/**
+ * Host -> surface: the voice agent passed a request to the chat's agent and it
+ * is queued (pass to agent answered "received"). The device plays the passed
+ * to agent sound (spec/07 § Call sounds).
+ */
+export const AudioPassedToAgentEvent = z
+  .object({
+    type: z.literal('audio.passed_to_agent'),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+export type AudioPassedToAgentEvent = z.infer<typeof AudioPassedToAgentEvent>;
+
 export const AudioErrorCode = z.enum([
   'auth_failed',
   'token_expired',
@@ -778,8 +805,29 @@ export const AudioErrorCode = z.enum([
   'deepgram_unavailable',
   /** The same, for dictation on the `elevenlabs` (Scribe) engine. */
   'elevenlabs_unavailable',
+  /**
+   * The catch-up on a chat's earlier messages, written by a small job while a
+   * voice agent call connects (spec/07 § Keeping voice and text as one
+   * conversation), failed. The call carries on without it; the surface shows it.
+   */
+  'catch_up_failed',
+  /**
+   * One of the voice agent's tools failed (a request could not be passed to
+   * the chat's agent, a chat could not be read). The voice agent is told too;
+   * the call carries on.
+   */
+  'voice_tool_failed',
 ]);
 export type AudioErrorCode = z.infer<typeof AudioErrorCode>;
+
+/**
+ * The errors a call carries on through: shown on the call bar, never a reason
+ * to end the call. Every other `audio.error` ends it.
+ */
+export const AUDIO_NOTICE_CODES: ReadonlySet<AudioErrorCode> = new Set([
+  'catch_up_failed',
+  'voice_tool_failed',
+]);
 
 export const AudioErrorEvent = z
   .object({
@@ -930,6 +978,8 @@ export const AudioEvent = z.discriminatedUnion('type', [
   AudioErrorEvent,
   AudioHeartbeatEvent,
   AudioCallLogEvent,
+  AudioChatSwitchedEvent,
+  AudioPassedToAgentEvent,
 ]);
 export type AudioEvent = z.infer<typeof AudioEvent>;
 export type AudioEventType = AudioEvent['type'];
@@ -950,6 +1000,8 @@ export const AUDIO_EVENT_SCHEMAS = {
   'audio.error': AudioErrorEvent,
   'audio.heartbeat': AudioHeartbeatEvent,
   'audio.call_log': AudioCallLogEvent,
+  'audio.chat_switched': AudioChatSwitchedEvent,
+  'audio.passed_to_agent': AudioPassedToAgentEvent,
 } as const satisfies Record<AudioEventType, z.ZodTypeAny>;
 
 export function encodeAudio(event: AudioEvent): string {

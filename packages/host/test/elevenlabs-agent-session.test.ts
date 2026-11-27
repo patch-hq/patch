@@ -11,8 +11,9 @@ import {
   type ElevenLabsAgentDeps,
   type ElevenLabsWsCtor,
 } from '../src/audio/elevenlabs-agent.js';
-import { DISPATCH_TOOL_NAME } from '../src/audio/gemini-live.js';
-import { LOOK_BACK_TOOL_NAME, RESULT_GIST_NOTE } from '../src/audio/chatBriefing.js';
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { LOOK_BACK_TOOL_NAME, PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent, AudioSessionMode } from '@patch/wire/audio';
 import { FakeTimeline } from './gemini-live-session.test.js';
@@ -64,7 +65,7 @@ function makeDeps(overrides: Partial<ElevenLabsAgentDeps> = {}, failPath?: strin
   const binary: Int16Array[] = [];
   const rest: RestCall[] = [];
   const last: { ws?: FakeWs } = {};
-  const submitUserTurn = vi.fn(async () => 'next train is 14:05');
+  const { link, passed } = fakeVoiceAgentLink();
   const onFatal = vi.fn();
   const timeline = new FakeTimeline();
   let n = 0;
@@ -94,17 +95,17 @@ function makeDeps(overrides: Partial<ElevenLabsAgentDeps> = {}, failPath?: strin
     logger,
     sendAudio: (ev) => events.push(ev),
     sendBinary: (pcm) => binary.push(pcm),
-    submitUserTurn: submitUserTurn as unknown as ElevenLabsAgentDeps['submitUserTurn'],
+    link,
+    instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'e-key',
     llm: 'claude-haiku-4-5',
     wsCtor,
     fetchImpl: fetchImpl as unknown as ElevenLabsAgentDeps['fetchImpl'],
     onFatal,
     timeline,
-    lookBack: () => 'found: dentist on Tuesday',
     ...overrides,
   };
-  return { deps, events, binary, rest, last, submitUserTurn, onFatal, timeline };
+  return { deps, events, binary, rest, last, passed, link, onFatal, timeline };
 }
 
 const metadata = (out = 'pcm_24000', inp = 'pcm_16000') => ({
@@ -159,24 +160,34 @@ describe('front LLM per layer', () => {
 });
 
 describe('ElevenLabsAgentSession — provisioning', () => {
-  test('creates both client tools and an agent on the chosen LLM, then dials the signed URL', async () => {
-    const { deps, rest, last } = makeDeps({
-      getChatContext: () => [{ role: 'user', text: 'we are planning the garden' }],
-    });
+  test('creates the voice agent tools and an agent on the chosen LLM, then dials the signed URL', async () => {
+    const { deps, rest, last } = makeDeps({ instructions: 'Be this chat.' });
     const session = new ElevenLabsAgentSession(makeInit(), deps);
     const ws = await open(session, last);
     expect(rest.every((r) => r.key === 'e-key')).toBe(true);
     const tools = rest.filter((r) => r.path === '/v1/convai/tools');
     expect(tools.map((t) => t.body!['tool_config'].name)).toEqual([
-      DISPATCH_TOOL_NAME,
+      PASS_TO_AGENT_TOOL_NAME,
+      'check_status',
       LOOK_BACK_TOOL_NAME,
+      'end_call',
+      'switch_chat',
     ]);
     expect(tools[0]!.body!['tool_config'].type).toBe('client');
     expect(tools[0]!.body!['tool_config'].expects_response).toBe(true);
     const agent = rest.find((r) => r.path === '/v1/convai/agents/create')!.body!;
     expect(agent['conversation_config'].agent.prompt.llm).toBe('claude-haiku-4-5');
-    expect(agent['conversation_config'].agent.prompt.tool_ids).toEqual(['tool-1', 'tool-2']);
-    expect(agent['conversation_config'].agent.prompt.prompt).toContain('garden');
+    expect(agent['conversation_config'].agent.prompt.tool_ids).toEqual([
+      'tool-1',
+      'tool-2',
+      'tool-3',
+      'tool-4',
+      'tool-5',
+    ]);
+    // The user's instructions, then the chat as it stands: nothing else.
+    expect(agent['conversation_config'].agent.prompt.prompt).toBe(
+      `Be this chat.\n\n${FAKE_START_CONTEXT}`,
+    );
     expect(agent['conversation_config'].agent.first_message).toBe('');
     expect(agent['conversation_config'].conversation.max_duration_seconds).toBe(3600);
     expect(agent['conversation_config'].asr.user_input_audio_format).toBe('pcm_16000');
@@ -185,24 +196,12 @@ describe('ElevenLabsAgentSession — provisioning', () => {
     expect(ws.url).toBe('wss://signed.example/conv?token=t');
   });
 
-  test("a call answering an agent's ring opens with its reason as the agent's first message", async () => {
-    const { deps, rest, last } = makeDeps();
-    await open(
-      new ElevenLabsAgentSession(makeInit({ callReason: 'The deploy failed; roll back?' }), deps),
-      last,
-    );
-    const agent = rest.find((r) => r.path === '/v1/convai/agents/create')!.body!;
-    expect(agent['conversation_config'].agent.first_message).toBe('The deploy failed; roll back?');
-  });
-
-  test('handoff never registers no dispatch tool', async () => {
-    const { deps, rest, last } = makeDeps({ handoff: 'never', lookBack: undefined });
+  test('handoff never registers no pass-to-agent or status tool', async () => {
+    const { deps, rest, last } = makeDeps({ handoff: 'never' });
     await open(new ElevenLabsAgentSession(makeInit(), deps), last);
-    expect(rest.filter((r) => r.path === '/v1/convai/tools')).toHaveLength(0);
     expect(
-      rest.find((r) => r.path === '/v1/convai/agents/create')!.body!['conversation_config'].agent
-        .prompt.tool_ids,
-    ).toEqual([]);
+      rest.filter((r) => r.path === '/v1/convai/tools').map((t) => t.body!['tool_config'].name),
+    ).toEqual([LOOK_BACK_TOOL_NAME, 'end_call', 'switch_chat']);
   });
 
   test('close deletes the throwaway agent and its tools', async () => {
@@ -215,6 +214,9 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       '/v1/convai/agents/agent-1',
       '/v1/convai/tools/tool-1?force=true',
       '/v1/convai/tools/tool-2?force=true',
+      '/v1/convai/tools/tool-3?force=true',
+      '/v1/convai/tools/tool-4?force=true',
+      '/v1/convai/tools/tool-5?force=true',
     ]);
   });
 
@@ -298,6 +300,8 @@ describe('ElevenLabsAgentSession — conversation', () => {
     expect(binary.map((b) => b.length)).toEqual([480, 480]);
     expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(1);
     expect(session.getState()).toBe('listening');
+    // Written once it has played out.
+    await vi.waitFor(() => expect(timeline.log.at(-1)).toMatch(/^reply:/));
     expect(timeline.log).toEqual([
       'user:chat-1:what time is it',
       'begin:chat-1',
@@ -367,7 +371,8 @@ describe('ElevenLabsAgentSession — conversation', () => {
     const ws = await open(session, last);
     ws.serverSend(transcript('say banana'));
     ws.serverSend(response('[happy] Banana! [laughs]'));
-    expect(timeline.log).toContain('reply:chat-1:Banana!');
+    ws.serverSend(audioChunk(480, true));
+    await vi.waitFor(() => expect(timeline.log).toContain('reply:chat-1:Banana!'));
   });
 
   test('a ping is answered with a pong carrying its event id', async () => {
@@ -389,52 +394,82 @@ describe('ElevenLabsAgentSession — conversation', () => {
     expect(session.getState()).toBe('listening');
   });
 
-  test('dispatch_to_patch goes to the chat and its answer returns as a client_tool_result', async () => {
-    const { deps, submitUserTurn, last } = makeDeps();
+  test('an interruption keeps only what was heard of the reply in the chat', async () => {
+    const { deps, timeline, last } = makeDeps();
     const session = new ElevenLabsAgentSession(makeInit(), deps);
     const ws = await open(session, last);
-    ws.serverSend(toolCall(DISPATCH_TOOL_NAME, { request: 'trains to Bath' }));
-    expect(session.isAwaitingHandoff()).toBe(true);
+    ws.serverSend(transcript('tell me a story'));
+    ws.serverSend(response('Once upon a time there was a very long story indeed.'));
+    // Two seconds of audio, all sent at once; the user cuts in after a fraction of it.
+    ws.serverSend(audioChunk(48_000));
+    await new Promise((r) => setTimeout(r, 600));
+    ws.serverSend({ type: 'interruption', interruption_event: { event_id: 2 } });
+    const written = timeline.log.filter((l) => l.startsWith('reply:'));
+    expect(written).toHaveLength(1);
+    expect(written[0]!).toMatch(/^reply:chat-1:Once upon/);
+    expect(written[0]!.length).toBeLessThan(
+      'reply:chat-1:Once upon a time there was a very long story indeed.'.length,
+    );
+  });
+
+  test('pass_to_agent answers "received" at once', async () => {
+    const { deps, passed, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(toolCall(PASS_TO_AGENT_TOOL_NAME, { request: 'trains to Bath' }));
     await vi.waitFor(() => expect(ws.ofType('client_tool_result')).toHaveLength(1));
-    expect(submitUserTurn).toHaveBeenCalledWith({
-      chatId: 'chat-1',
-      message: 'trains to Bath',
-      source: { kind: 'voice-app', surfaceKind: 'mobile', sessionId: 'sess-1' },
-      handoff: true,
-    });
+    expect(passed).toEqual([{ sessionId: 'sess-1', chatId: 'chat-1', request: 'trains to Bath' }]);
     expect(ws.ofType('client_tool_result')[0]).toEqual({
       type: 'client_tool_result',
       tool_call_id: 'call-1',
-      result: `${RESULT_GIST_NOTE}next train is 14:05`,
+      result: 'received',
       is_error: false,
     });
-    expect(session.isAwaitingHandoff()).toBe(false);
     expect(session.engineCosting().backend).toBe('elevenlabs');
   });
 
-  test('a failed dispatch is returned to the agent as an error result, not hidden', async () => {
-    const { deps, last } = makeDeps({
-      submitUserTurn: vi.fn(async () => {
-        throw new Error('chat is busy');
-      }) as unknown as ElevenLabsAgentDeps['submitUserTurn'],
+  test("the agent's answer is pushed as a user_message once the agent is quiet", async () => {
+    const { deps, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('trains please'));
+    ws.serverSend(response('Passing it on.'));
+    ws.serverSend(audioChunk(480));
+    session.pushMessage("Answer from the chat's agent: 14:05", { handoffSettled: true });
+    expect(ws.ofType('user_message')).toHaveLength(0);
+    ws.serverSend(audioChunk(480, true));
+    expect(ws.ofType('user_message')).toEqual([
+      { type: 'user_message', text: "Answer from the chat's agent: 14:05" },
+    ]);
+  });
+
+  test('a request that could not be passed on is said to the agent and on the call bar', async () => {
+    const { link } = fakeVoiceAgentLink({
+      passToAgent: () => {
+        throw new Error('chat is gone');
+      },
     });
+    const { deps, events, last } = makeDeps({ link });
     const ws = await open(new ElevenLabsAgentSession(makeInit(), deps), last);
-    ws.serverSend(toolCall(DISPATCH_TOOL_NAME, { request: 'x' }));
+    ws.serverSend(toolCall(PASS_TO_AGENT_TOOL_NAME, { request: 'x' }));
     await vi.waitFor(() => expect(ws.ofType('client_tool_result')).toHaveLength(1));
-    expect(ws.ofType('client_tool_result')[0]).toMatchObject({
-      result: 'That failed: chat is busy',
-      is_error: true,
-    });
+    expect(String(ws.ofType('client_tool_result')[0]!['result'])).toContain(
+      'Not passed on: chat is gone',
+    );
+    expect(events.some((e) => e.type === 'audio.error' && /chat is gone/.test(e.message))).toBe(
+      true,
+    );
   });
 
   test('look_back answers at once from the host', async () => {
     const { deps, last } = makeDeps();
     const ws = await open(new ElevenLabsAgentSession(makeInit(), deps), last);
     ws.serverSend(toolCall(LOOK_BACK_TOOL_NAME, { query: 'dentist' }, 'call-9'));
+    await vi.waitFor(() => expect(ws.ofType('client_tool_result')).toHaveLength(1));
     expect(ws.ofType('client_tool_result')[0]).toEqual({
       type: 'client_tool_result',
       tool_call_id: 'call-9',
-      result: 'found: dentist on Tuesday',
+      result: 'found in chat-1: dentist on Tuesday',
       is_error: false,
     });
   });
@@ -463,25 +498,19 @@ describe('ElevenLabsAgentSession — conversation', () => {
     expect(session.stats().turns).toBe(1);
   });
 
-  test('a typed message tells the voice not to reply, and notes a running hand-off', async () => {
-    const { deps, last } = makeDeps();
-    const session = new ElevenLabsAgentSession(makeInit(), deps);
-    const ws = await open(session, last);
-    ws.serverSend(toolCall(DISPATCH_TOOL_NAME, { request: 'x' }));
-    session.pushContext('user', 'what is the capital of Peru');
-    const text = String(ws.ofType('contextual_update')[0]!['text']);
-    expect(text).toMatch(/typed this to the agent, which is handling it/);
-    expect(text).toMatch(/hand-off is already running/);
-  });
-
-  test('chat messages from elsewhere go in as a contextual_update', async () => {
-    const { deps, last } = makeDeps();
-    const session = new ElevenLabsAgentSession(makeInit(), deps);
-    const ws = await open(session, last);
-    session.pushContext('assistant', 'The plan is done.');
-    const u = ws.ofType('contextual_update');
-    expect(u).toHaveLength(1);
-    expect(String(u[0]!['text'])).toContain('The plan is done.');
+  test('a catch-up goes in as a contextual_update, which asks for no reply', async () => {
+    let write!: (text: string) => void;
+    const { link } = fakeVoiceAgentLink({
+      startContext: () => ({
+        text: FAKE_START_CONTEXT,
+        catchUp: new Promise<string>((r) => (write = r)),
+      }),
+    });
+    const { deps, last } = makeDeps({ link });
+    const ws = await open(new ElevenLabsAgentSession(makeInit(), deps), last);
+    write('The plan is done.');
+    await vi.waitFor(() => expect(ws.ofType('contextual_update')).toHaveLength(1));
+    expect(String(ws.ofType('contextual_update')[0]!['text'])).toContain('The plan is done.');
   });
 
   test('the provider closing the socket is fatal', async () => {

@@ -385,7 +385,9 @@ async function placeCall(
   let firstDial: Promise<void> = Promise.resolve();
   const l: CallLine = new CallLine({
     dial: (attempt, resumed) => {
-      const opening = openCallSession(l, attempt, chatId, deps, {
+      // A redial goes to the chat the call is on now: the voice agent may have switched it.
+      const onChat = useVoiceStore.getState().call?.chatId ?? chatId;
+      const opening = openCallSession(l, attempt, onChat, deps, {
         takeOver: opts.takeOver === true && attempt === 1,
         resumed,
         // Never repeated on a redial: the voice already opened with it.
@@ -559,6 +561,9 @@ async function openCallSession(
           s.setCallLine('YOU', '');
         },
         onLevel: (lv) => useVoiceStore.getState().setCallLevel(lv),
+        onNotice: (m) => useUiStore.getState().pushError(m),
+        onChatSwitched: (id) => useVoiceStore.getState().setCallChat(id),
+        onPassedToAgent: () => playCallSound('passed-to-agent'),
         onHeartbeat: (frame) => l.heartbeat(attempt, frame),
         onError: (m) => {
           // The host went away under the call (it restarted, or the server

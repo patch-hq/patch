@@ -16,6 +16,8 @@ import { createChatVoice } from '../src/audio/chatVoice.js';
 import { createVoiceLedger } from '../src/audio/voiceLedger.js';
 import type { VoiceSessionLike } from '../src/audio/voice-session-like.js';
 import type { SessionInit } from '../src/audio/session.js';
+import type { StartMessage } from '../src/audio/voiceAgent.js';
+import type { ManagerChatEntry } from '../src/audio/managerVoice.js';
 import { ZERO_TOKENS } from '../src/audio/voiceCost.js';
 
 const silent = pino({ level: 'silent' });
@@ -25,8 +27,6 @@ function setup() {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-chatvoice-folder-')));
   const events: WireEvent[] = [];
   let id = 0;
-  // The glue's clock, moved by `advance` so a hand-off's times can be read.
-  let clock = Date.UTC(2026, 9, 4, 12);
   let release: () => void = () => undefined;
   let turnGate: Promise<void> = Promise.resolve();
   const holdTurns = (): void => {
@@ -36,11 +36,16 @@ function setup() {
   };
   // `emit` routes every wire event through the glue, as main() does.
   let observe: (e: WireEvent) => void = () => undefined;
+  let drawnStarted: (chatId: string, localId: string) => void = () => undefined;
   const daemon = new Daemon({
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: {
-      run: async function* () {
+      run: async function* (args: { prompt?: unknown }) {
+        // A turn asked to show progress writes a message mid-turn before its final one.
+        if (JSON.stringify(args.prompt ?? '').includes('with progress')) {
+          yield { type: 'assistant' as const, content: 'working on it', sessionId: 'S1' };
+        }
         yield { type: 'assistant' as const, content: 'agent says hi', sessionId: 'S1' };
         await turnGate;
         yield {
@@ -58,6 +63,7 @@ function setup() {
     logger: silent,
     now: () => Date.UTC(2026, 9, 4, 12),
     generateChatId: () => `chat-${++id}`,
+    onDrawnTurnStarted: (chatId, localId) => drawnStarted(chatId, localId),
     sessionProbe: createClaudeSessionProbe({
       sessionStoreRoot: mkdtempSync(join(tmpdir(), 'patch-chatvoice-claude-')),
     }),
@@ -65,15 +71,28 @@ function setup() {
   const open: VoiceSessionLike[] = [];
   const ledger = createVoiceLedger(join(home, 'voice-usage.jsonl'));
   const onCosted = vi.fn();
+  const byId = new Map<string, VoiceSessionLike>();
+  const catchUp = vi.fn(
+    async (_chatId: string, earlier: StartMessage[]) => `caught up on ${earlier.length} messages`,
+  );
+  const retargeted: Array<[string, string]> = [];
+  const listing: ManagerChatEntry[] = [];
   const glue = createChatVoice({
     daemon,
     sessionsOnChat: (chatId) => open.filter((s) => s.getCurrentChatId() === chatId),
+    sessionById: (sessionId) => byId.get(sessionId),
+    catchUp,
+    listChats: async () => listing,
+    isLocal: (chatId) => daemon.chatState.has(chatId),
+    retargetCall: (sessionId, chatId) => retargeted.push([sessionId, chatId]),
     ledger,
     logger: silent,
     onCosted,
-    now: () => clock,
+    // The host's clock, so ages read from the record and from events agree.
+    now: () => Date.UTC(2026, 9, 4, 12),
   });
   observe = (e) => glue.observe(e);
+  drawnStarted = (chatId, localId) => glue.handoffStarted({ chatId, handoffId: localId });
   return {
     daemon,
     events,
@@ -84,21 +103,26 @@ function setup() {
     onCosted,
     holdTurns,
     releaseTurns: () => release(),
-    advance: (ms: number) => {
-      clock += ms;
-    },
+    byId,
+    catchUp,
+    retargeted,
+    listing,
   };
 }
 
-function fakeSession(chatId: string, awaitingHandoff = false) {
-  const pushed: Array<[string, string]> = [];
+function fakeSession(chatId: string) {
+  const pushed: Array<{ text: string; settled: boolean }> = [];
+  let current = chatId;
   const session = {
-    getCurrentChatId: () => chatId,
-    isAwaitingHandoff: () => awaitingHandoff,
-    pushContext: (role: string, text: string) => pushed.push([role, text]),
+    getCurrentChatId: () => current,
+    setFocus: (id: string) => (current = id),
+    pushMessage: (text: string, opts?: { handoffSettled?: boolean }) =>
+      pushed.push({ text, settled: opts?.handoffSettled === true }),
   } as unknown as VoiceSessionLike;
   return { session, pushed };
 }
+
+const source = { kind: 'voice-app' as const, surfaceKind: 'desktop' as const, sessionId: 'sess-1' };
 
 const init = (chatId: string): SessionInit => ({
   sessionId: 'sess-1',
@@ -152,33 +176,167 @@ describe('chat voice glue', () => {
     expect(() => glue.makeTimeline(init('nope')).userSaid('nope', 'hi')).not.toThrow();
   });
 
-  it("anything landing in the chat from elsewhere goes into the open call's context — but not the call's own words", async () => {
+  it('a reply that ends a typed turn is pushed into the call; progress and the call’s own words are not', async () => {
     const { daemon, folder, glue, open } = setup();
     const chatId = await daemon.spawnChat({ folder });
     const { session, pushed } = fakeSession(chatId);
     open.push(session);
 
     glue.makeTimeline(init(chatId)).userSaid(chatId, 'my own words');
-    await daemon.sendInput({ chatId, message: 'typed elsewhere', localId: randomUUID() });
+    await daemon.sendInput({ chatId, message: 'typed with progress', localId: randomUUID() });
 
-    expect(pushed).toEqual([
-      ['user', 'typed elsewhere'],
-      ['assistant', 'agent says hi'],
-    ]);
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]!.text).toContain('agent says hi');
+    expect(pushed[0]!.text).toMatch(/not an answer to anything you passed on/);
+    expect(pushed[0]!.settled).toBe(false);
+    expect(pushed.some((p) => p.text.includes('working on it'))).toBe(false);
+    expect(pushed.some((p) => p.text.includes('typed with progress'))).toBe(false);
   });
 
-  it("a hand-off's request and its answer are not pushed back as news", async () => {
-    const { daemon, folder, open } = setup();
+  it('pass to agent: written into the chat at once, and the answer pushed to the call that asked', async () => {
+    const { daemon, events, folder, glue, byId, open, holdTurns, releaseTurns } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const { session, pushed } = fakeSession(chatId, true);
+    const { session, pushed } = fakeSession(chatId);
+    byId.set('sess-1', session);
     open.push(session);
-    await daemon.sendInput({
-      chatId,
-      message: 'Add milk',
-      voicePrefix: '[voice hand-off • desktop] ',
-      localId: randomUUID(),
-    });
+    holdTurns();
+    glue.link.passToAgent({ sessionId: 'sess-1', chatId, request: 'Add milk', source });
+    // The request is in the chat at once, before the agent has done anything.
+    expect(messages(events).map((m) => m.content)).toContain('[voice hand-off • desktop] Add milk');
     expect(pushed).toEqual([]);
+    releaseTurns();
+    await vi.waitFor(() => expect(pushed).toHaveLength(1));
+    expect(pushed[0]).toEqual({
+      text: 'Answer from the chat\'s agent to "Add milk": agent says hi',
+      settled: true,
+    });
+    // The row records it: waiting, working, then answered with the agent's message.
+    const row = messages(events).find((m) => m.content.endsWith('Add milk'))!;
+    const states = handoffs(events);
+    expect(states.map((h) => h.state)).toEqual(['waiting', 'working', 'answered']);
+    expect(states.every((h) => h.rowSeq === row.seq && h.request === 'Add milk')).toBe(true);
+    const answer = messages(events).find((m) => m.content === 'agent says hi')!;
+    expect(states[2]).toMatchObject({ answer: 'agent says hi', answerSeqs: [answer.seq] });
+    expect(states[2]!.from).toBeUndefined();
+  });
+
+  it('a hand-off made after the call moved here says which call it came from', async () => {
+    const { daemon, events, folder, glue, byId } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    const chatB = await daemon.spawnChat({ folder });
+    const { session } = fakeSession(chatB);
+    byId.set('sess-1', session);
+    glue.makeTimeline(init(chatA));
+    glue.link.passToAgent({
+      sessionId: 'sess-1',
+      chatId: chatB,
+      request: 'Water the ferns',
+      source,
+    });
+    expect(handoffs(events)[0]!.from).toMatch(/^the call from "/);
+  });
+
+  it('check status: the hand-off and the chat agent as they stand, from the host', async () => {
+    const { daemon, folder, glue, byId, holdTurns, releaseTurns } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const { session, pushed } = fakeSession(chatId);
+    byId.set('sess-1', session);
+    expect(glue.link.checkStatus('sess-1', chatId)).toContain(
+      'Nothing has been passed to the agent on this call.',
+    );
+    holdTurns();
+    glue.link.passToAgent({ sessionId: 'sess-1', chatId, request: 'Find the receipt', source });
+    await vi.waitFor(() =>
+      expect(glue.link.checkStatus('sess-1', chatId)).toContain(
+        '"Find the receipt": being worked on',
+      ),
+    );
+    const working = glue.link.checkStatus('sess-1', chatId);
+    expect(working).toContain("The chat's agent now: working");
+    expect(working).toContain('Its last message');
+    releaseTurns();
+    await vi.waitFor(() => expect(pushed).toHaveLength(1));
+    const done = glue.link.checkStatus('sess-1', chatId);
+    expect(done).toContain('"Find the receipt": answered');
+    expect(done).toContain("The chat's agent now: idle.");
+    expect(done).toMatch(/Its last message, \d+s ago: agent says hi/);
+  });
+
+  it('a hand-off that cannot run is failed loudly: pushed to the call and recorded on its row', async () => {
+    const { daemon, events, folder, glue, byId } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const { session, pushed } = fakeSession(chatId);
+    byId.set('sess-1', session);
+    expect(() =>
+      glue.link.passToAgent({ sessionId: 'sess-1', chatId: 'no-such-chat', request: 'x', source }),
+    ).toThrow();
+    // A chat the agent will not take: its turn fails, and the call hears it.
+    const failing = vi.spyOn(daemon, 'sendInput').mockRejectedValueOnce(new Error('folder gone'));
+    glue.link.passToAgent({ sessionId: 'sess-1', chatId, request: 'Tidy up', source });
+    await vi.waitFor(() => expect(pushed).toHaveLength(1));
+    expect(pushed[0]!.text).toContain('failed (folder gone)');
+    expect(pushed[0]!.settled).toBe(true);
+    expect(handoffs(events).map((h) => [h.state, h.error])).toEqual([
+      ['waiting', undefined],
+      ['failed', 'folder gone'],
+    ]);
+    failing.mockRestore();
+  });
+
+  it('an answer pushed after the call moved chat is labelled with its own chat', async () => {
+    const { daemon, folder, glue, byId, holdTurns, releaseTurns } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    const chatB = await daemon.spawnChat({ folder });
+    const { session, pushed } = fakeSession(chatA);
+    byId.set('sess-1', session);
+    holdTurns();
+    glue.link.passToAgent({ sessionId: 'sess-1', chatId: chatA, request: 'Add milk', source });
+    session.setFocus(chatB);
+    releaseTurns();
+    await vi.waitFor(() => expect(pushed).toHaveLength(1));
+    expect(pushed[0]!.text).toMatch(/to "Add milk" \(from the chat "/);
+  });
+
+  it('switch chat: moves the call to a chat on this host, with that chat as it stands', async () => {
+    const { daemon, folder, glue, listing, retargeted } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    const chatB = await daemon.spawnChat({ folder });
+    listing.push(
+      { chatId: chatA, name: 'Shopping', folder, status: 'active' },
+      { chatId: chatB, name: 'Garden', folder, status: 'active' },
+      { chatId: 'elsewhere', name: 'Laptop work', folder: '/x', status: 'active' },
+    );
+    const moved = await glue.link.switchChat('sess-1', chatA, 'garden');
+    expect(moved).toMatchObject({ ok: true, chatId: chatB, name: 'Garden' });
+    expect(retargeted).toEqual([['sess-1', chatB]]);
+    expect(await glue.link.switchChat('sess-1', chatB, 'laptop')).toEqual({
+      ok: false,
+      message: '"Laptop work" is on another computer, so the call cannot move there.',
+    });
+    expect(await glue.link.switchChat('sess-1', chatB, 'nothing like it')).toMatchObject({
+      ok: false,
+    });
+    expect(retargeted).toHaveLength(1);
+  });
+
+  it('start context: the last messages in full, and a catch-up written from the rest', async () => {
+    const { daemon, folder, glue, catchUp } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    for (const m of ['one', 'two', 'three']) {
+      await daemon.sendInput({ chatId, message: m, localId: randomUUID() });
+    }
+    const context = glue.link.startContext(chatId);
+    expect(context.text).toContain('User: three');
+    expect(context.text).not.toContain('User: one');
+    expect(await context.catchUp).toBe('caught up on 2 messages');
+    expect(catchUp.mock.calls[0]![1].map((m) => m.text)).toEqual(['one', 'agent says hi']);
+  });
+
+  it('a chat with nothing before its last messages needs no catch-up', async () => {
+    const { daemon, folder, glue, catchUp } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    expect(glue.link.startContext(chatId).catchUp).toBeNull();
+    expect(catchUp).not.toHaveBeenCalled();
   });
 
   it('costs a call on its voice engine alone, leaves the line in the chat, and records it', async () => {
@@ -219,73 +377,6 @@ describe('chat voice glue', () => {
     const tl = glue.makeTimeline(init(chatId));
     for (const blank of ['', '   ', '…', '...', ' . ', '?']) tl.userSaid(chatId, blank);
     expect(messages(events)).toEqual([]);
-  });
-
-  it('counts a hand-off in the call line without writing it twice (the chat already holds the request and the answer)', async () => {
-    const { daemon, events, folder, glue } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const sessionId = init(chatId).sessionId;
-    glue.handoffSent({ sessionId, chatId, handoffId: 'h1', rowSeq: 0, request: 'Add milk' });
-    glue.handoffAnswered({ chatId, handoffId: 'h1', reply: { text: 'Done.', seqs: [2] } });
-    glue.callEnded({
-      init: init(chatId),
-      chatId,
-      startedAt: Date.UTC(2026, 9, 4, 12),
-      endedAt: Date.UTC(2026, 9, 4, 12, 0, 52),
-      engine: {
-        backend: 'gemini',
-        model: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
-        tokens: null,
-        stt: null,
-      },
-    });
-    expect(
-      messages(events)
-        .filter((m) => m.role === 'system')
-        .map((m) => m.content),
-    ).toEqual(['[call] Call 0:52 · Gemini Flash · $0']);
-  });
-
-  it("records a hand-off as waiting, working, then answered with the agent's messages", async () => {
-    const { daemon, events, folder, glue, advance } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const sent = Date.UTC(2026, 9, 4, 12);
-    glue.handoffSent({ sessionId: 's', chatId, handoffId: 'h1', rowSeq: 3, request: 'Add milk' });
-    advance(4_000);
-    glue.handoffStarted({ chatId, handoffId: 'h1' });
-    // Taken once: a second start (a re-armed waiter) does not move it.
-    glue.handoffStarted({ chatId, handoffId: 'h1' });
-    advance(34_000);
-    glue.handoffAnswered({ chatId, handoffId: 'h1', reply: { text: 'Added.', seqs: [5, 7] } });
-    const states = handoffs(events);
-    expect(states.map((h) => h.state)).toEqual(['waiting', 'working', 'answered']);
-    expect(states.every((h) => h.handoffId === 'h1' && h.rowSeq === 3)).toBe(true);
-    expect(states[2]).toMatchObject({
-      request: 'Add milk',
-      sentAt: sent,
-      startedAt: sent + 4_000,
-      endedAt: sent + 38_000,
-      answer: 'Added.',
-      answerSeqs: [5, 7],
-    });
-    // Each record has its own place in the chat's numbering.
-    expect(new Set(states.map((h) => h.seq)).size).toBe(3);
-    // Nothing is written as a message: the row is the hand-off's own line.
-    expect(messages(events)).toEqual([]);
-  });
-
-  it('records a failed hand-off on its row, so a pending one never hangs', async () => {
-    const { daemon, events, folder, glue } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    glue.handoffSent({ sessionId: 's', chatId, handoffId: 'h1', rowSeq: 0, request: 'Add milk' });
-    glue.handoffAnswered({ chatId, handoffId: 'h1', error: 'boom' });
-    expect(handoffs(events).map((h) => [h.state, h.error])).toEqual([
-      ['waiting', undefined],
-      ['failed', 'boom'],
-    ]);
-    // Settled: a late answer for it changes nothing.
-    glue.handoffAnswered({ chatId, handoffId: 'h1', reply: { text: 'late', seqs: [] } });
-    expect(handoffs(events)).toHaveLength(2);
   });
 
   it('puts the line in the chat the moment the call ends, whatever the agent is doing', async () => {

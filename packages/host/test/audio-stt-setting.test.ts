@@ -2,6 +2,8 @@
 // turn-based call reads speech with the engine the account chose, and a host
 // that cannot run it refuses the call by name — never reading with another.
 
+import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
+import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
@@ -119,7 +121,12 @@ describe('audio server — speech to text setting on a turn-based call', () => {
     resolve: ReturnType<typeof createSpeechToTextResolver>,
   ): Promise<number> {
     const handle = await startAudioServer({
-      makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
+      makeTimeline: () => ({
+        userSaid() {},
+        beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+      }),
+      voiceAgentLink: fakeVoiceAgentLink().link,
+      getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
       host: '127.0.0.1',
       port: 0,
       logger,

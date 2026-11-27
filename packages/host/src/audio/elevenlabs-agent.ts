@@ -5,17 +5,17 @@
 // streams the agent's audio back down the surface's existing audio WSS. No
 // surface talks to ElevenLabs or holds a key.
 //
-// The agent IS the light layer and hands real work to the chat through the one
-// `dispatch_to_patch` tool (and `look_back`), registered as CLIENT tools and
-// answered here by the host with `client_tool_result` — the same
-// `submitUserTurn` callback the other tiers use, so a dispatched turn lands in
-// the real chat.
+// The agent IS the voice agent and passes work to the chat's agent with the
+// voice agent's tools (voiceAgent.ts), registered as CLIENT tools and answered
+// here by the host with `client_tool_result` through the shared
+// VoiceAgentCall, exactly as on the other providers.
 //
 // An ElevenLabs agent is a stored object (prompt, LLM, tools, voice), not
 // something a WebSocket configures on the fly, and its tools cannot be
 // overridden per conversation. So each session PROVISIONS a throwaway agent
-// from this host's current settings — front LLM from the layer, instructions
-// with the chat briefing in them, the two client tools — opens a conversation
+// from this host's current settings — front LLM from the layer, the user's
+// voice instructions with the chat's start context after them, the client
+// tools — opens a conversation
 // on a signed URL, and DELETES the agent and tools when the session ends. No
 // agent ids are kept on disk; nothing drifts from the code. A failed delete is
 // logged as an error, never swallowed.
@@ -37,6 +37,12 @@
 // still heard it (it is in its context and billed), unlike the OpenAI tier
 // where the item is deleted.
 //
+// Barge-in (spec/07 § Barge-in): ElevenLabs keeps the agent's record of its
+// own reply on its side and cuts it there when the user interrupts (it reports
+// the cut as `agent_response_correction`); there is no client message to set
+// where. The reply written into the chat is cut on the host to what the user
+// heard: the time since its first audio chunk went to the surface.
+//
 // NO SILENT FALLBACK. Provisioning failure, a failed connect, a provider error
 // or close, a format mismatch: reported as `audio.error {code:
 // 'elevenlabs_unavailable'}`; a closed or never-opened conversation is fatal
@@ -46,45 +52,36 @@ import type { Logger } from 'pino';
 import { WebSocket as WsImpl, type WebSocket as WsSocket } from 'ws';
 import type { AudioEvent, AudioSessionMode, VoiceHandoff, VoiceLayer } from '@patch/wire/audio';
 import { modeRequiresAddress } from '@patch/wire/audio';
-import type { VoiceReplyWriter, VoiceTimeline, VoiceSessionLike } from './voice-session-like.js';
+import type { VoiceTimeline, VoiceSessionLike } from './voice-session-like.js';
+import { SpokenReply } from './spokenReply.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { ZERO_TOKENS, type EngineCosting } from './voiceCost.js';
 import {
   DEFAULT_ADDRESS_WORD,
   isAddressed,
   type SessionInit,
-  type SessionDeps,
   type SessionState,
-  type VoiceTurnSource,
 } from './session.js';
 import {
-  chatBriefing,
-  liveNote,
   isNoiseTranscript,
-  RESULT_GIST_NOTE,
-  withBriefing,
-  LOOK_BACK_DESCRIPTION,
-  LOOK_BACK_RULE,
-  LOOK_BACK_TOOL_NAME,
-} from './chatBriefing.js';
-import {
-  DISPATCH_TOOL_DESCRIPTION,
-  DISPATCH_TOOL_NAME,
-  hostedVoiceInstruction,
-  managerHostedInstruction,
-  type GeminiContextTurn,
-} from './gemini-live.js';
+  voiceAgentInstructions,
+  voiceAgentTools,
+  type VoiceAgentLink,
+} from './voiceAgent.js';
+import { VoiceAgentCall } from './voiceAgentCall.js';
 import {
   CHAT_STATUS_DESCRIPTION,
   CHAT_STATUS_TOOL_NAME,
   FIND_CHATS_DESCRIPTION,
   FIND_CHATS_TOOL_NAME,
   ManagerChatLookupError,
+  managerHostedInstruction,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
   MANAGER_TOOL_NAMES,
   stringArgs,
   MANAGER_TOOL_PARAMS,
+  RESULT_GIST_NOTE,
   SEND_TO_CHAT_BLOCKING_DESCRIPTION,
   SEND_TO_CHAT_TOOL_NAME,
   type ManagerVoiceTools,
@@ -148,22 +145,24 @@ export interface ElevenLabsAgentDeps {
   spokenAloud?: string;
   sendAudio: (ev: AudioEvent) => void;
   sendBinary: (pcm: Int16Array) => void;
-  submitUserTurn: SessionDeps['submitUserTurn'];
   /** Where this session's spoken exchanges are written into the chat. */
   timeline: VoiceTimeline;
+  /** The voice agent's tools the host answers, and the chat's start context. */
+  link: VoiceAgentLink;
+  /** The account's voice instructions (spec/07 § Voice instructions), read at the session's start. */
+  instructions: string;
+  /** How the voice sounds, as the user wrote it; goes in the instructions after them. */
+  tone?: string;
   /** ELEVEN_LABS_API_KEY. The caller refuses to construct this class without one. */
   apiKey: string;
   /** The agent's front LLM — resolved from the layer by the caller (`elevenLabsAgentLlmFor`). */
   llm: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
-  /** The `look_back` tool's search over this chat. Absent means the voice is not given the tool. */
-  lookBack?: (chatId: string, query: string) => string;
   /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
   manager?: ManagerVoiceTools;
   /** An ElevenLabs voice id; absent uses the platform default voice. */
   voiceId?: string;
-  getChatContext?: (chatId: string) => Promise<GeminiContextTurn[]> | GeminiContextTurn[];
   /** The conversation is gone for good; the audio server ends the surface session. */
   onFatal?: (message: string) => void;
   /** Test seams. */
@@ -186,6 +185,10 @@ interface AgentEvent {
   agent_response_event?: { agent_response?: string };
   audio_event?: { audio_base_64?: string; event_id?: number; is_final?: boolean };
   interruption_event?: { event_id?: number };
+  agent_response_correction_event?: {
+    original_agent_response?: string;
+    corrected_agent_response?: string;
+  };
   ping_event?: { event_id?: number; ping_ms?: number };
   client_tool_call?: { tool_name?: string; tool_call_id?: string; parameters?: unknown };
   // Tolerated spellings of a provider-side error.
@@ -197,7 +200,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private readonly init: SessionInit;
   private readonly deps: ElevenLabsAgentDeps;
   private state: SessionState = 'connecting';
-  private currentChatId: string;
+  /** The call's chat, tools and pushes (spec/07 § The voice agent and the chat's agent). */
+  private readonly call: VoiceAgentCall;
   private mode: AudioSessionMode;
   private ws?: WsSocket;
   private setupDone = false;
@@ -220,8 +224,13 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   /** The current reply's full text has arrived (`agent_response`). */
   private replyTextIn = false;
   private quietTimer?: ReturnType<typeof setTimeout>;
-  private dispatchesInFlight = 0;
-  private briefing = '';
+  /** The chat as it stood when the call started; at the end of the agent's prompt. */
+  private startContext = '';
+  // --- the reply as the user hears it (spec/07 § Barge-in) ---
+  /** The reply being spoken now. */
+  private reply?: SpokenReply;
+  /** The reply before it: over for ElevenLabs, maybe still playing on the surface. */
+  private lastReply?: SpokenReply;
   private micFrames = 0;
   private micSamples = 0;
   private turns = 0;
@@ -230,8 +239,23 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   constructor(init: SessionInit, deps: ElevenLabsAgentDeps) {
     this.init = init;
     this.deps = deps;
-    this.currentChatId = init.chatId;
     this.mode = init.mode ?? 'call';
+    this.call = new VoiceAgentCall({
+      link: deps.link,
+      sessionId: init.sessionId,
+      chatId: init.chatId,
+      source:
+        init.surfaceKind === 'device'
+          ? { kind: 'voice-device', deviceId: init.deviceId ?? 'unknown' }
+          : {
+              kind: 'voice-app',
+              surfaceKind: init.surfaceKind as 'web' | 'desktop' | 'mobile',
+              sessionId: init.sessionId,
+            },
+      logger: deps.logger,
+      sendAudio: deps.sendAudio,
+      ...(init.callReason !== undefined ? { callReason: init.callReason } : {}),
+    });
   }
 
   getMode(): AudioSessionMode {
@@ -252,11 +276,12 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   }
 
   getCurrentChatId(): string {
-    return this.currentChatId;
+    return this.call.chatId;
   }
 
+  /** The host moved the call to another chat (switch chat). */
   setFocus(chatId: string): void {
-    this.currentChatId = chatId;
+    this.call.setChat(chatId);
   }
 
   stats(): {
@@ -285,10 +310,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       agentSeconds: this.openedAt === undefined ? 0 : Math.max(0, (end - this.openedAt) / 1000),
       ...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
     };
-  }
-
-  isAwaitingHandoff(): boolean {
-    return this.dispatchesInFlight > 0;
   }
 
   private setState(next: SessionState): void {
@@ -362,9 +383,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   }
 
   private async provision(): Promise<string> {
-    const handoff = this.deps.handoff ?? 'auto';
+    const manager = this.deps.manager;
     const tools: Array<ReturnType<ElevenLabsAgentSession['clientTool']>> = [];
-    if (this.deps.manager) {
+    if (manager) {
       // A Manager call (spec/07 § A call to the Manager): its own tools, no agent behind it.
       tools.push(
         this.clientTool(
@@ -384,20 +405,24 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
           this.clientTool(t.name, t.description, t.params, t.required),
         ),
       );
-    } else if (handoff !== 'never') {
-      tools.push(
-        this.clientTool(DISPATCH_TOOL_NAME, DISPATCH_TOOL_DESCRIPTION, {
-          request: 'What Patch should do or look up, in plain language.',
-        }),
-      );
     }
-    if (this.deps.lookBack !== undefined) {
-      tools.push(
-        this.clientTool(LOOK_BACK_TOOL_NAME, LOOK_BACK_DESCRIPTION, {
-          query: 'A few key words to search the chat for.',
-        }),
-      );
+    for (const t of voiceAgentTools({
+      handoff: manager ? 'never' : (this.deps.handoff ?? 'auto'),
+      lookBack: true,
+      switchChat: !manager,
+    })) {
+      tools.push(this.clientTool(t.name, t.description, t.params, t.required));
     }
+    const prompt = voiceAgentInstructions({
+      instructions: manager
+        ? managerHostedInstruction(false, manager.voicePrompt?.())
+        : this.deps.instructions,
+      extra: this.deps.spokenAloud ? [this.deps.spokenAloud] : [],
+      ...(this.deps.tone !== undefined ? { tone: this.deps.tone } : {}),
+      startContext: this.startContext,
+    });
+    // The full text, so what the voice was told can be read back from the log.
+    this.deps.logger.info({ sessionId: this.init.sessionId, prompt }, 'elevenlabs-agent: prompt');
     for (const t of tools) {
       const made = (await this.api('POST', '/v1/convai/tools', t)) as { id?: string };
       if (!made.id) throw new Error('ElevenLabs created a tool but returned no id');
@@ -407,19 +432,12 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       name: `patch-voice-${this.init.sessionId}`,
       conversation_config: {
         agent: {
-          // Empty: the agent waits for the user to speak first — unless the call answers an
-          // agent's ring, which opens with the reason it rang (spec/07 § Agent-initiated voice).
-          first_message: this.init.callReason ?? '',
+          // Empty: the agent waits for the user to speak first. An agent's call opens
+          // with its reason as the call's first push (VoiceAgentCall), as on every provider.
+          first_message: '',
           language: 'en',
           prompt: {
-            prompt: withBriefing(
-              (this.deps.manager
-                ? managerHostedInstruction(false, this.deps.manager.voicePrompt?.())
-                : hostedVoiceInstruction(handoff)) +
-                (this.deps.lookBack !== undefined ? `\n\n${LOOK_BACK_RULE}` : '') +
-                (this.deps.spokenAloud ? `\n\n${this.deps.spokenAloud}` : ''),
-              this.briefing,
-            ),
+            prompt,
             llm: this.deps.llm,
             tool_ids: this.toolIds,
           },
@@ -482,19 +500,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   }
 
   private async connect(): Promise<void> {
-    // spec/07 § Keeping voice and text as one conversation — the chat's briefing goes
-    // in the agent's prompt. A chat whose history cannot be read fails the session.
-    const context = (await this.deps.getChatContext?.(this.currentChatId)) ?? [];
-    this.briefing = chatBriefing(context);
-    this.deps.logger.info(
-      {
-        sessionId: this.init.sessionId,
-        messages: context.length,
-        chars: this.briefing.length,
-        briefing: this.briefing,
-      },
-      'elevenlabs-agent: chat briefing',
-    );
+    // spec/07 § Keeping voice and text as one conversation — the chat as it stands goes at the
+    // end of the agent's prompt. A chat that cannot be read fails the session.
+    this.startContext = this.call.startContext();
     this.setupStage = 'creating the agent';
     const url = await this.provision();
     if (this.closed) return;
@@ -527,6 +535,14 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     const queued = this.micQueue;
     this.micQueue = [];
     for (const b of queued) this.sendMic(b);
+    this.call.attach({
+      // `contextual_update` informs the agent without prompting a reply.
+      addContext: (text) => this.sendJson({ type: 'contextual_update', text }),
+      // `user_message` is a turn the agent answers.
+      speakAbout: (text) => this.sendJson({ type: 'user_message', text }),
+      isIdle: () => this.setupDone && !this.audioOpen && this.state === 'listening',
+      playbackLeftMs: () => Math.max(this.reply?.leftMs() ?? 0, this.lastReply?.leftMs() ?? 0),
+    });
   }
 
   private sendJson(msg: unknown): void {
@@ -617,6 +633,16 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       case 'interruption':
         this.onInterruption();
         return;
+      case 'agent_response_correction':
+        // ElevenLabs' own record of the interrupted reply, cut on its side.
+        this.deps.logger.info(
+          {
+            sessionId: this.init.sessionId,
+            corrected: ev.agent_response_correction_event?.corrected_agent_response,
+          },
+          'elevenlabs-agent: the provider cut its record of the interrupted reply',
+        );
+        return;
       case 'client_tool_call': {
         const call = ev.client_tool_call ?? {};
         if (!call.tool_call_id) return;
@@ -627,10 +653,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
             call.tool_name,
             call.parameters,
           );
-        } else if (call.tool_name === DISPATCH_TOOL_NAME && !this.deps.manager) {
-          void this.handleDispatch(call.tool_call_id, call.parameters);
-        } else if (call.tool_name === LOOK_BACK_TOOL_NAME && this.deps.lookBack) {
-          this.handleLookBack(call.tool_call_id, call.parameters);
+        } else if (call.tool_name !== undefined && this.call.handles(call.tool_name)) {
+          void this.handleVoiceTool(call.tool_call_id, call.tool_name, call.parameters);
         } else {
           this.toolResult(call.tool_call_id, `Unknown tool ${call.tool_name ?? ''}`, true);
           this.reportError(`ElevenLabs agent called an unknown tool: ${call.tool_name ?? '?'}`);
@@ -664,6 +688,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       // ElevenLabs transcribes noise as "..." — not a turn, not a bubble, and the voice's
       // answer to it is dropped (as in gemini-live.ts).
       this.suppressReply = true;
+      this.call.flush();
       return;
     }
     const addressed =
@@ -683,10 +708,11 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     if (!addressed) {
       // Heard, not for us: never a turn, and the agent's answer to it is dropped.
       this.suppressReply = true;
+      this.call.flush();
       return;
     }
     this.turns += 1;
-    this.deps.timeline.userSaid(this.currentChatId, text);
+    this.deps.timeline.userSaid(this.call.chatId, text);
     this.setState('thinking');
   }
 
@@ -695,10 +721,16 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.armQuiet();
     const text = raw.replace(AUDIO_TAG, '').trim();
     if (this.suppressReply || isNoiseTranscript(text)) return;
-    // What the voice said is written too, apart from the agent's own message in the chat.
-    const reply: VoiceReplyWriter = this.deps.timeline.beginReply(this.currentChatId);
-    reply.append(text);
-    reply.finish();
+    // What the voice said is written into the chat, apart from the agent's own messages,
+    // once the user has heard it.
+    const reply = this.spokenReply();
+    reply.append(reply.hasText() ? ` ${text}` : text);
+  }
+
+  /** The reply being spoken now, begun on its first words or audio. */
+  private spokenReply(): SpokenReply {
+    this.reply ??= new SpokenReply(() => this.deps.timeline.beginReply(this.call.chatId));
+    return this.reply;
   }
 
   /** (Re)start the end-of-reply clock: the text is in and the audio has gone quiet. */
@@ -719,6 +751,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       const pcm = new Int16Array(buf.byteLength >>> 1);
       new Uint8Array(pcm.buffer).set(buf.subarray(0, pcm.byteLength));
       if (pcm.length > 0) {
+        this.spokenReply().audio(pcm.length);
         this.audioOpen = true;
         if (this.state !== 'speaking') this.setState('speaking');
         this.deps.sendAudio({
@@ -733,10 +766,33 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     if (a.is_final === true) this.endAudio(false);
   }
 
-  /** Close the surface's playback of the current reply, if one is open. */
+  /**
+   * The reply is over for ElevenLabs (or, `bargedIn`, cut off): close the
+   * surface's playback of it, and hand it to the chat — whole once it has
+   * played out, or as far as the user heard.
+   */
   private endAudio(bargedIn: boolean): void {
     if (this.quietTimer) clearTimeout(this.quietTimer);
     this.quietTimer = undefined;
+    if (bargedIn) {
+      const target = this.reply ?? this.lastReply;
+      this.lastReply = undefined;
+      const heardMs = target?.cut() ?? null;
+      if (heardMs !== null) {
+        this.deps.logger.info(
+          {
+            sessionId: this.init.sessionId,
+            heardMs: Math.round(heardMs),
+            audioMs: Math.round(target!.audioMs()),
+          },
+          'elevenlabs-agent: reply cut off',
+        );
+      }
+    } else if (this.reply) {
+      this.reply.end();
+      this.lastReply = this.reply;
+    }
+    this.reply = undefined;
     if (!this.audioOpen) return;
     this.audioOpen = false;
     this.replyTextIn = false;
@@ -745,13 +801,14 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       sessionId: this.init.sessionId,
       ...(bargedIn ? { bargedIn: true } : {}),
     });
-    this.setState(this.dispatchesInFlight > 0 ? 'thinking' : 'listening');
+    this.setState('listening');
+    this.call.flush();
   }
 
   private onInterruption(): void {
     // Barge-in: the agent has stopped; stop what the surface is still playing.
     this.suppressReply = false;
-    if (this.state === 'speaking') {
+    if (this.state === 'speaking' || this.lastReply?.playing() === true) {
       this.deps.sendAudio({
         type: 'audio.barge_in',
         sessionId: this.init.sessionId,
@@ -781,62 +838,13 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     return typeof params === 'string' ? params : '';
   }
 
-  /** The `look_back` tool: search the chat on the host and answer at once; no model, no wait. */
-  private handleLookBack(callId: string, params: unknown): void {
-    const query = this.argOf(params, 'query');
-    let result: string;
-    let isError = false;
-    try {
-      result = this.deps.lookBack!(this.currentChatId, query);
-    } catch (err) {
-      result = `Looking back failed: ${(err as Error).message}`;
-      isError = true;
-      this.deps.logger.error(
-        { sessionId: this.init.sessionId, err: (err as Error).message, query },
-        'elevenlabs-agent: look_back failed',
-      );
-    }
-    this.deps.logger.info(
-      { sessionId: this.init.sessionId, query, chars: result.length, result },
-      'elevenlabs-agent: look_back',
-    );
-    this.toolResult(callId, result, isError);
-  }
-
-  private async handleDispatch(callId: string, params: unknown): Promise<void> {
-    const request = this.argOf(params, 'request');
-    this.dispatchesInFlight += 1;
-    this.deps.logger.info(
-      { sessionId: this.init.sessionId, chatId: this.currentChatId, request },
-      'elevenlabs-agent: dispatching to the heavy agent',
-    );
-    const source: VoiceTurnSource = {
-      kind: 'voice-app',
-      surfaceKind: this.init.surfaceKind as 'web' | 'desktop' | 'mobile',
-      sessionId: this.init.sessionId,
-    };
-    let result: string;
-    let isError = false;
-    try {
-      result = await this.deps.submitUserTurn({
-        chatId: this.currentChatId,
-        message: request,
-        source,
-        handoff: true,
-      });
-    } catch (err) {
-      result = `That failed: ${(err as Error).message}`;
-      isError = true;
-      this.deps.logger.error(
-        { sessionId: this.init.sessionId, err: (err as Error).message },
-        'elevenlabs-agent: dispatch failed',
-      );
-    } finally {
-      this.dispatchesInFlight -= 1;
-    }
+  /** The voice agent's own tools (voiceAgent.ts), answered through the shared call. */
+  private async handleVoiceTool(callId: string, name: string, params: unknown): Promise<void> {
+    const args =
+      typeof params === 'object' && params !== null ? (params as Record<string, unknown>) : {};
+    const result = await this.call.runTool(name, args);
     if (this.closed || this.fatal) return;
-    // The agent speaks the answer once it has this.
-    this.toolResult(callId, isError ? result : `${RESULT_GIST_NOTE}${result}`, isError);
+    this.toolResult(callId, result, false);
   }
 
   /** Where a quick tool is being called from: the device this conversation is on, if it is one. */
@@ -855,8 +863,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     name: string,
     params: unknown,
   ): Promise<void> {
-    const isSend = name === SEND_TO_CHAT_TOOL_NAME;
-    if (isSend) this.dispatchesInFlight += 1;
     this.deps.logger.info(
       { sessionId: this.init.sessionId, tool: name, params },
       'elevenlabs-agent: manager tool',
@@ -887,8 +893,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
         isError = true;
         this.reportError(`${name} failed: ${result}`);
       }
-    } finally {
-      if (isSend) this.dispatchesInFlight -= 1;
     }
     if (this.closed || this.fatal) return;
     this.toolResult(callId, result, isError);
@@ -896,13 +900,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   // --- other VoiceSessionLike surface ------------------------------------------
 
-  pushContext(role: 'user' | 'assistant', text: string): void {
-    if (this.closed || !this.setupDone) return;
-    // `contextual_update` informs the agent without prompting a reply.
-    this.sendJson({
-      type: 'contextual_update',
-      text: liveNote(role, text, { handoffRunning: this.dispatchesInFlight > 0 }),
-    });
+  pushMessage(text: string, opts: { handoffSettled?: boolean } = {}): void {
+    this.call.push(text, opts);
   }
 
   /** Not a note engine — this class only backs `role: 'voice-call'` (audio/server.ts). */
@@ -938,6 +937,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   async close(): Promise<void> {
     if (this.closed) return;
+    this.reply?.flush();
+    this.lastReply?.flush();
+    this.call.close();
     this.closed = true;
     this.closedAt = Date.now();
     if (this.quietTimer) clearTimeout(this.quietTimer);

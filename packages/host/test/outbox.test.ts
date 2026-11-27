@@ -423,7 +423,7 @@ describe('server link with an outbox', () => {
     });
   });
 
-  describe('voice hand-off state: kept by a server that keeps it', () => {
+  describe('voice hand-off state: always sent to the server', () => {
     const handoff: WireEvent = {
       type: 'chat.voice_handoff',
       chatId: 'c1',
@@ -435,20 +435,12 @@ describe('server link with an outbox', () => {
       seq: 1,
     };
 
-    it('goes through the outbox to a server with `voiceHandoffs`', () => {
-      link.start();
-      const s = connect(authOk({ hostOutbox: true, recordComplete: true, voiceHandoffs: true }));
-      s.sent.length = 0;
-      link.send(handoff);
-      expect(s.sent).toEqual([{ type: 'host.outbox', position: 0, event: handoff }]);
-    });
-
-    it('is not sent to a server without it, which would refuse the frame', () => {
+    it('goes through the outbox', () => {
       link.start();
       const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
       s.sent.length = 0;
       link.send(handoff);
-      expect(s.sent).toEqual([]);
+      expect(s.sent).toEqual([{ type: 'host.outbox', position: 0, event: handoff }]);
     });
   });
 
