@@ -32,6 +32,8 @@ vi.mock('../src/api/rest', () => ({
     setPreferences: vi.fn(),
     models: vi.fn(),
     managerHome: vi.fn(async () => ({ hostId: null })),
+    getChatSession: vi.fn(async () => ({ session: null })),
+    rotateChat: vi.fn(async () => ({ ok: true })),
     voiceUsage: vi.fn(async () => null),
     devices: vi.fn(async () => ({ devices: [] })),
   },
@@ -80,7 +82,7 @@ describe('Settings prompts', () => {
   it('every prompt sits on its own page as Default, and opens its editor', async () => {
     const pages: Array<[React.ReactElement, string[]]> = [
       [<AgentPage key="a" />, ['question-expired', 'watch-check-in', 'job-autonomy']],
-      [<ManagerPage key="m" />, ['manager-voice', 'sweep']],
+      [<ManagerPage key="m" />, ['manager', 'manager-voice']],
       [<VoicePage key="v" />, ['voice-instructions', 'voice-device']],
       [<MeetingsPage key="me" />, ['meeting-now', 'meeting-notes', 'meeting-actions']],
     ];

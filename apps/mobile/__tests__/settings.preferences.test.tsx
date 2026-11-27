@@ -52,6 +52,8 @@ vi.mock('../src/api/rest', () => ({
     managerHome: vi.fn(),
     managerHomeDraft: vi.fn(),
     setManagerHome: vi.fn(),
+    getChatSession: vi.fn(),
+    rotateChat: vi.fn(),
   },
 }));
 
@@ -69,6 +71,8 @@ beforeEach(() => {
     }));
   vi.mocked(api.models).mockReset().mockResolvedValue({ models: CATALOGUE });
   vi.mocked(api.managerHome).mockReset().mockResolvedValue({ hostId: 'home' });
+  vi.mocked(api.getChatSession).mockReset().mockResolvedValue({ session: null });
+  vi.mocked(api.rotateChat).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(api.managerHomeDraft).mockReset().mockResolvedValue({ message: 'user: hello' });
   vi.mocked(api.setManagerHome)
     .mockReset()
@@ -148,7 +152,7 @@ describe('sections before the settings have loaded', () => {
       await flush();
     });
     expect(api.settings).toHaveBeenCalled();
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false);
+    expect(findHost(r.root, byTestId('manager-wake-mode-off'))).toBeTruthy();
   });
 });
 
@@ -491,8 +495,7 @@ describe('Manager page', () => {
     const r = renderRN(<ManagerPage />);
     expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Manager');
     const manager = findHost(r.root, byTestId('settings-manager'));
-    expect(textOf(manager)).toContain('Enabled');
-    expect(textOf(manager)).not.toContain('Watching');
+    expect(textOf(manager)).not.toContain('Enabled');
     expect(textOf(manager)).toContain('Quiet hours');
     expect(textOf(manager)).toContain('Address word');
     const threads = findHost(r.root, byTestId('settings-special-threads'));
@@ -551,24 +554,33 @@ describe('Manager page', () => {
     expect(findHost(r.root, byTestId('manager-home-handover'))).toBeTruthy();
   });
 
-  it('Enabled writes sweepEnabled', async () => {
+  const selected = (r: ReturnType<typeof renderRN>, id: string): boolean =>
+    (findHost(r.root, byTestId(id)).props.accessibilityState as { selected: boolean }).selected;
+
+  it('Finished chats: off by default; Batched writes managerWake and offers Every', async () => {
     seedSettings();
     const r = renderRN(<ManagerPage />);
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false); // off by default
+    expect(selected(r, 'manager-wake-mode-off')).toBe(true);
+    expect(queryHost(r.root, byTestId('manager-wake-interval'))).toBeNull();
     await actAsync(async () => {
-      findHost(r.root, byTestId('manager-watching')).props.onValueChange(true);
+      findHost(r.root, byTestId('manager-wake-mode-batched')).props.onPress();
       await flush();
     });
-    expect(api.setPreferences).toHaveBeenCalledWith({ sweepEnabled: true });
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(true);
+    expect(api.setPreferences).toHaveBeenCalledWith({ managerWake: 'batched' });
+    expect(selected(r, 'manager-wake-interval-30')).toBe(true);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-wake-interval-60')).props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ managerWakeIntervalMinutes: 60 });
   });
 
-  it('a failed write is reported and the switch keeps what the server holds', async () => {
+  it('a failed write is reported and the choice keeps what the server holds', async () => {
     vi.mocked(api.setPreferences).mockRejectedValue(new Error('HTTP 503'));
     seedSettings();
     const r = renderRN(<ManagerPage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('manager-watching')).props.onValueChange(true);
+      findHost(r.root, byTestId('manager-wake-mode-each')).props.onPress();
       await flush();
     });
     expect(__getLastAlert()).toEqual({
@@ -576,7 +588,26 @@ describe('Manager page', () => {
       message: 'HTTP 503',
       buttons: undefined,
     });
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false);
+    expect(selected(r, 'manager-wake-mode-off')).toBe(true);
+  });
+
+  it('Context: This session from the server, Clear with nothing carried, and the window', async () => {
+    vi.mocked(api.getChatSession).mockResolvedValue({
+      session: { messages: 34, startedAt: Date.now() },
+    });
+    vi.mocked(api.rotateChat).mockResolvedValue({ ok: true });
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('manager-session')))).toContain('34 messages');
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-clear')).props.onPress();
+      await flush();
+    });
+    expect(api.rotateChat).toHaveBeenCalledWith('thread_manager', { carry: false });
+    expect(textOf(findHost(r.root, byTestId('manager-context-window-row')))).toContain(
+      'messages, keeping the last 40',
+    );
   });
 
   it('quiet hours commit a valid HH:MM on blur, and refuse anything else', async () => {

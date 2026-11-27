@@ -352,16 +352,6 @@ export interface LinkSummaryData {
   summary: string;
 }
 
-/** spec/06 § Sweep — one completed sweep run. */
-export interface SweepRun {
-  at: number;
-  runId: string;
-  candidateCount: number;
-  actions: { chatId: string; action: 'nudge' | 'wake' | 'flag' | 'leave' }[];
-  tokensUsed: number;
-  error?: string;
-}
-
 export type ComputerUseHost = {
   hostId: string;
   name: string | null;
@@ -434,10 +424,6 @@ export const api = {
       chats: (ChatTokenUsage & { hostId: string })[];
     }>(`/api/usage-report?since=${params.since}&until=${params.until}`),
   webBotAuthStatus: () => request<WebBotAuthStatus>('/api/web-bot-auth'),
-  getSweepRuns: (limit?: number) =>
-    request<{ runs: SweepRun[] }>(`/api/manager/sweeps${limit ? `?limit=${limit}` : ''}`),
-  checkSweepNow: () =>
-    request<{ fired: boolean }>('/api/manager/sweep/check-now', { method: 'POST' }),
   listPads: () => request<{ pads: PadView[] }>('/api/pads'),
   getPad: (id: string) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`),
   padLibrary: () => request<PadLibrary>('/api/pads/library'),
@@ -641,8 +627,17 @@ export const api = {
   // spec/06 § Session rotation — manual trigger for a reserved special thread
   // (same route as web): retire its Claude session and start fresh, seeded
   // with a handoff digest.
-  rotateChat: (chatId: string) =>
-    request<{ ok: true }>(`/api/chats/${chatId}/rotate`, { method: 'POST' }),
+  rotateChat: (chatId: string, opts?: { carry: false }) =>
+    request<{ ok: true }>(`/api/chats/${chatId}/rotate`, {
+      method: 'POST',
+      ...(opts ? { body: opts } : {}),
+    }),
+  // spec/06 § Bounded context — a special thread's current session, from the
+  // server's chat index (Settings → Manager → Context).
+  getChatSession: (chatId: string) =>
+    request<{ session?: { messages: number; startedAt: number } | null }>(
+      `/api/chats/${encodeURIComponent(chatId)}`,
+    ),
   // `/goal` — set (or clear, with null) the chat's goal (same route as web).
   setGoal: (chatId: string, goal: string | null, plan: GoalPlan = {}) =>
     request<unknown>(`/api/chats/${chatId}/goal`, { method: 'POST', body: { goal, ...plan } }),

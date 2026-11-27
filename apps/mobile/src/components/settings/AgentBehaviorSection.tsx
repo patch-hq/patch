@@ -20,7 +20,7 @@ import {
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
-  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_MANAGER_PROMPT,
   DEFAULT_VOICE_DEVICE_PROMPT,
   DEFAULT_VOICE_INSTRUCTIONS,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
@@ -85,7 +85,7 @@ export type Layer =
   | 'goal-judge'
   | 'link-summary'
   | 'watch-check-in'
-  | 'sweep'
+  | 'manager'
   | 'manager-voice'
   | 'job-autonomy'
   | 'voice-device'
@@ -101,7 +101,7 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'goal-judge': 'Judge prompt',
   'link-summary': 'Summarise prompt',
   'watch-check-in': 'Check-in message',
-  sweep: 'Standing instructions',
+  manager: 'Prompt',
   'manager-voice': 'Voice',
   'job-autonomy': 'How jobs work on their own',
   'voice-device': 'Speaking aloud',
@@ -119,7 +119,7 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'goal-judge': 'Judge prompt',
   'link-summary': 'Summarise prompt',
   'watch-check-in': 'Check-in prompt',
-  sweep: 'Standing instructions',
+  manager: 'Manager prompt',
   'manager-voice': 'Manager voice prompt',
   'job-autonomy': 'Autonomy prompt',
   'voice-device': 'Speaking aloud prompt',
@@ -135,7 +135,7 @@ export const TEXT_PROMPTS = {
   'goal-judge': { key: 'goalEvalPrompt', fallback: DEFAULT_GOAL_EVAL_PROMPT },
   'link-summary': { key: 'linkSummaryPrompt', fallback: DEFAULT_LINK_SUMMARY_PROMPT },
   'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
-  sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
+  manager: { key: 'managerPrompt', fallback: DEFAULT_MANAGER_PROMPT },
   'manager-voice': { key: 'managerVoicePrompt', fallback: DEFAULT_MANAGER_VOICE_PROMPT },
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
   'voice-device': { key: 'voiceDevicePrompt', fallback: DEFAULT_VOICE_DEVICE_PROMPT },
