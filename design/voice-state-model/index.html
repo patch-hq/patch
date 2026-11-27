@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice call: who knows what (today)</title>
+<style>
+  :root { --ink:#1b1813; --ink2:#423b32; --ink3:#645c50; --line:#ddd6c6; --soft:#e8e2d4; --paper:#f6f4ee; --card:#fff; --leaf:#46802f; --tint:#e7f0dd; --warn:#9a4a2f; --warn-tint:#f6e3dc; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 20px 48px; background: var(--paper); color: var(--ink); font: 15px/1.45 -apple-system, system-ui, sans-serif; }
+  h1 { font-size: 22px; margin: 0 0 18px; }
+  h2 { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink3); margin: 28px 0 10px; }
+  .lanes { display: grid; grid-template-columns: 110px 1fr 1fr 1fr; gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; max-width: 1100px; }
+  .lanes > div { padding: 12px 14px; border-top: 1px solid var(--soft); }
+  .hd { font-weight: 700; background: var(--soft); border-top: 0 !important; }
+  .step { font-weight: 600; color: var(--ink3); font-size: 14px; }
+  .k { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 999px; font-size: 13px; background: var(--tint); color: var(--leaf); }
+  .gap { display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 999px; font-size: 13px; background: var(--warn-tint); color: var(--warn); }
+  .muted { color: var(--ink3); }
+  .knows { max-width: 1100px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .box h3 { margin: 0 0 8px; font-size: 16px; }
+  .box ul { margin: 0; padding-left: 18px; }
+  .box li { margin: 4px 0; }
+  @media (max-width: 760px) {
+    .lanes { grid-template-columns: 1fr; }
+    .lanes > .hd { display: none; }
+    .lanes > div { border-top: 0; padding-top: 4px; }
+    .lanes > .step { border-top: 1px solid var(--line); padding-top: 14px; font-size: 15px; color: var(--ink); }
+    .lanes > div[data-who]::before { content: attr(data-who); display: block; font-size: 12px; font-weight: 700; color: var(--ink3); text-transform: uppercase; letter-spacing: .06em; }
+    .knows { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<h1>Voice call: who knows what, today</h1>
+
+<h2>One hand-off, step by step</h2>
+<div class="lanes">
+  <div class="hd"></div><div class="hd">You</div><div class="hd">Voice agent (ElevenLabs)</div><div class="hd">Chat agent (Claude)</div>
+
+  <div class="step">Call starts</div>
+  <div data-who="You">Tap call</div>
+  <div data-who="Voice agent">Gets Patch's built-in instructions and a snapshot of the chat: its opening and the last ~7,000 characters.
+    <br><span class="k">Knows the chat as of now</span></div>
+  <div data-who="Chat agent" class="muted">Carries on with whatever it was doing</div>
+
+  <div class="step">You ask</div>
+  <div data-who="You">"Where are we with WS3?"</div>
+  <div data-who="Voice agent">Answers itself from the snapshot, or uses its one tool, "pass to agent", with the request in its own words.
+    <br><span class="gap">May answer from old text</span></div>
+  <div data-who="Chat agent" class="muted">—</div>
+
+  <div class="step">Hand-off sent</div>
+  <div data-who="You" class="muted">Waiting</div>
+  <div data-who="Voice agent">The tool call stays open. No reply comes back until the chat agent has finished its whole answer.
+    <br><span class="gap">Doesn't know it arrived</span></div>
+  <div data-who="Chat agent">Patch puts the request in the chat as a message, marked as from the voice. If the agent is mid-step, it waits in a queue until that step ends.
+    <br><span class="gap">Queued, maybe for minutes</span></div>
+
+  <div class="step">While it waits</div>
+  <div data-who="You">Speak again: "did that go through?"</div>
+  <div data-who="Voice agent">Sees any text the chat agent writes, as background notes. Sees nothing about the queue or which step is running. Guesses, or passes the request again.
+    <br><span class="gap">Can't tell busy from lost</span> <span class="gap">Resends</span></div>
+  <div data-who="Chat agent">Still in its step: a test run, a long wait</div>
+
+  <div class="step">Agent picks it up</div>
+  <div data-who="You" class="muted">—</div>
+  <div data-who="Voice agent">Nothing changes.
+    <br><span class="gap">Doesn't know it started</span></div>
+  <div data-who="Chat agent">Reads the queued message, and any resends, at the end of its step. Works on it.</div>
+
+  <div class="step">Answer</div>
+  <div data-who="You">Hears the gist</div>
+  <div data-who="Voice agent">The tool call finally returns with the chat agent's whole reply, and it says the gist.
+    <br><span class="k">Knows the answer</span></div>
+  <div data-who="Chat agent">Writes its reply in the chat</div>
+</div>
+
+<h2>What each side has</h2>
+<div class="knows">
+  <div class="box">
+    <h3>Voice agent</h3>
+    <ul>
+      <li>Patch's instructions (yours to edit, after the undo)</li>
+      <li>A snapshot of the chat from when the call started</li>
+      <li>The chat agent's new messages, as background notes</li>
+      <li>Its own open hand-offs: only "open", nothing else</li>
+      <li>One tool: pass to agent</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h3>Chat agent</h3>
+    <ul>
+      <li>The whole chat, as always</li>
+      <li>Your hand-offs as messages, read between its steps</li>
+      <li>Each hand-off is marked as spoken on a call, with "answer in a sentence or two"</li>
+      <li>What you and the voice agent said since its last turn, as a note on its next message</li>
+      <li>Not that you're waiting on the line right now</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

@@ -1034,9 +1034,9 @@ the same operations (§ Control IPC).
 ## Provider keys
 
 The paid services the host itself calls each need an API key: Gemini
-(`GEMINI_API_KEY`) and OpenAI Realtime (`OPENAI_REALTIME_API_KEY`) for hosted
-voice, Groq (`GROQ_API_KEY`) for Whisper when the speech engine is Groq
-(`07-voice-app.md` § Voice is a config matrix), and Deepgram
+(`GEMINI_API_KEY`) and OpenAI Realtime (`OPENAI_REALTIME_API_KEY`) for the voice
+agent (`07-voice-app.md` § Provider keys and failures), Groq (`GROQ_API_KEY`) for Whisper when the speech engine is Groq
+(`07-voice-app.md` § Speech to text), and Deepgram
 (`DEEPGRAM_API_KEY`) for live dictation (`07-voice-app.md` § Dictation engines). These are the host's own
 keys, not the agent's (the agent's credentials are its provider's, `10-auth.md`),
 and not Secrets (which are injected into chats, `15-design-mobile.md` §

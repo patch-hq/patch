@@ -68,9 +68,9 @@ The target chat is persistent, so everything said by voice is there in text afte
 
 ## Answering engines
 
-The device setting in Settings → Voice chooses how a device's conversation is answered, the same matrix as the app surfaces (`07-voice-app.md` § Voice is a config matrix). The device is unaffected by the choice: it streams the same audio either way.
+The device's setting in Settings → Hosts & devices → Voice devices chooses how a device's conversation is answered: by the account's voice agent, or directly, with speech on the chat's host (`07-voice-app.md` § Two kinds of call). The device is unaffected by the choice: it streams the same audio either way.
 
-A hosted engine (OpenAI, Gemini, ElevenLabs) answers the device itself and hands real work to the Manager, so a reply does not wait for a Manager turn. OpenAI is the fastest of the three for a device: its session is ready in about a second, where ElevenLabs creates an agent per conversation and Gemini waits seconds for the end of speech.
+The voice agent (OpenAI, Gemini, ElevenLabs) answers the device itself and passes real work to the Manager, so a reply does not wait for a Manager turn. OpenAI is the fastest of the three for a device: its session is ready in about a second, where ElevenLabs creates an agent per conversation and Gemini waits seconds for the end of speech.
 
 ## Speaking aloud
 
@@ -80,11 +80,11 @@ A device is heard out loud in a room, by whoever is there. Every device conversa
 
 A voice profile is a person Patch recognises by voice (`voiceProfiles` in the shared settings, at most 20): a name, an access level, notes for when they speak, and a voiceprint. A voiceprint is the mean speaker embedding of the person's samples: 256 numbers from WeSpeaker's ResNet34 model, run by sherpa-onnx on the host, which sit close together for the same voice. A match needs a cosine similarity of at least `voiceMatchThreshold` and a lead of 0.05 over the next profile; otherwise the speaker is not recognised. Settings offers it as How sure to be: Relaxed (0.65), Normal (0.75, the default) or Strict (0.85). The default leans strict because a wrong match hands a stranger someone else's access, where a missed one only treats a person as a guest until they speak again. Measured on synthetic voices, which sit closer together than real people: the same voice scores 0.92 or more across sentences, different voices up to 0.83. Recent voices show their score, so the level can be chosen from what the devices actually hear.
 
-| Access                   | The voice                                           | The agent                                                                                           |
-| ------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Owner                    | Has the chat's briefing, `look_back` and live notes | Hand-offs go through, headed `[Spoken by <name>, the account's owner. …]`                           |
-| Household                | No chat history                                     | Hand-offs go through, headed `[Spoken by <name>, a member of the household. About <name>: <notes>]` |
-| Guest, or not recognised | No chat history                                     | No hand-off tool; a hand-off that arrives anyway is refused by the host and never reaches the agent |
+| Access                   | The voice                                          | The agent                                                                                           |
+| ------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Owner                    | Has the chat's start context, look back and pushes | Hand-offs go through, headed `[Spoken by <name>, the account's owner. …]`                           |
+| Household                | No chat history                                    | Hand-offs go through, headed `[Spoken by <name>, a member of the household. About <name>: <notes>]` |
+| Guest, or not recognised | No chat history                                    | No hand-off tool; a hand-off that arrives anyway is refused by the host and never reaches the agent |
 
 Recognising speakers applies when the account has at least one profile with a voiceprint, the device runs on OpenAI, and the host has the speaker model (the `speaker` component, `02-host.md` § Optional components). Then:
 
@@ -114,7 +114,7 @@ The voice has `set_timer`, `list_timers`, `change_timer` and `cancel_timer`. The
 
 ## Cross-refs
 
-- App-surface voice and the voice config matrix: `07-voice-app.md`
+- App-surface voice, the voice agent and direct calls: `07-voice-app.md`
 - The Manager: `06-threads-manager-speakers.md`
 - Audio relay over the host link: `03-wire-protocol.md`
 - Surface credentials and revocation: `10-auth.md`
