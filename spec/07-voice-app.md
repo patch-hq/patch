@@ -1,59 +1,71 @@
 # Voice — App Surfaces (Phone + Web)
 
-## Voice is a config matrix, not a fixed architecture
+## Two kinds of call
 
-Every voice interaction is fundamentally the same shape — a two-way exchange with Manager — whatever triggers it. What varies is only the ENTRY (how a session opens) and, independently, which engine handles it. Four surfaces, each configured separately (`01-server.md` § Settings → `voiceConfig`):
+Every voice interaction is a two-way exchange with a chat. A call comes in two kinds, and dictation sits beside them:
 
-| Surface        | Entry                                                     | Layer axis applies?                   |
-| -------------- | --------------------------------------------------------- | ------------------------------------- |
-| **Dictation**  | Composer mic / gesture-bounded voice note                 | No — STT only, no agent turn to front |
-| **Device**     | The physical voice device's on-device wake word (spec/16) | Yes                                   |
-| **Hands-free** | An explicit toggle on phone/web/desktop                   | Yes                                   |
-| **Call**       | An explicit call button                                   | Yes                                   |
+| Kind             | Who listens and speaks                                                                         | Where its speech engines run                      |
+| ---------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Voice agent call | A hosted realtime voice agent, which talks with the user and passes work to the chat's agent   | The provider's cloud, relayed by the chat's host  |
+| Direct call      | Nobody but the chat's agent: speech to text, a turn for the chat's agent, the reply read aloud | The device the call is made from (§ Direct calls) |
+| Dictation        | Nobody: words into the composer                                                                | Per device (§ Dictation engines)                  |
 
-Each conversational surface independently picks a `backend` (`local` / `gemini` / `openai` / `elevenlabs`) and a `layer` (`direct` / `light` / `heavy`). Dictation is not a cell of this matrix: it picks where its words come from instead (§ Dictation engines). Every surface starts on `local`/`direct`, so none defaults to a paid backend.
+The call button always starts a voice agent call; hands-free (§ Session modes) and a call an agent makes (§ Agent-initiated voice) are voice agent calls too. A direct call is chosen from the call button's menu (§ 2. Voice call). A voice device (`16-voice-device.md`) answers on the voice agent or directly, by its own setting; it has no speech engines of its own, so its direct conversations run speech on the chat's host (§ Host speech engines).
 
-Settings → Voice shows ONE config for the three conversational surfaces and writes every choice to all three cells (the schema keeps the three cells, so a surface can still be configured on its own through the API). It reads: **Provider** (`Local` · `Gemini` · `OpenAI` · `ElevenLabs`); for a hosted provider, **Model** (`Flash`/`Thinking`, `mini`/`full`, `Haiku`/`Sonnet` — `light`/`heavy`), **Voice** — that provider's own voices (`geminiVoice`, `openaiVoice`, `elevenLabsVoice`; absent is the provider's default) — and **Pass work to the chat's agent** (on = `handoff: auto`, off = `never`); for Local, **Read replies with** (Kokoro or ElevenLabs, `ttsBackend`) and its voice. Settings no longer offers `handoff: always`: a hosted voice model decides itself whether to call its tool, so "always" cannot be guaranteed there (OpenAI can force the call; Gemini and ElevenLabs only follow an instruction). A turn that must always reach the agent is what `local` is. A stored `always` still runs as before.
+### The voice agent
 
-- **`backend: local`** — the self-hosted pipeline: Whisper → (see `layer` below) → Kokoro, all on the host. Free beyond Groq's few-dollars-a-month STT cost.
-- **`backend: gemini` / `openai`** — on hands-free and call, a hosted realtime speech-to-speech session (Gemini Live / OpenAI Realtime) IS the fast voice end to end: it hears and speaks directly, no separate STT/TTS steps. Real per-minute spend; see § The fast voice and the chat's agent.
-- **`backend: elevenlabs`** — ElevenLabs Agents: the host provisions a throwaway agent per session (front LLM from the layer — Claude Haiku for `light`, Claude Sonnet for `heavy`, overridable per host; the chat briefing in its prompt; `dispatch_to_patch` and `look_back` as client tools answered by the host), opens a conversation on a signed URL over a server-side WebSocket, relays 16 kHz mic PCM in and 24 kHz agent audio out, and deletes the agent and its tools when the session ends. Billed by the call minute ($0.08/min on every plan, plus the LLM's own per-minute charge from credits), recorded in the voice cost ledger by call length. Hands-free cannot stop the agent answering, so an unaddressed transcript is reported heard-but-not-sent and the agent's reply to it is dropped (its audio and words never reach the surface or the chat); unlike `openai` it is still in the agent's context and still billed. Key: `ELEVEN_LABS_API_KEY`; failures reach the surface as `elevenlabs_unavailable`.
-- **`layer: direct`** — the turn talks straight to Manager, unfronted. Manager stays exactly as configured elsewhere (`defaultModel`, folder, tools) — this axis never changes what Manager is, only whether something sits in front of it. Only meaningful for `backend: local`: `gemini`/`openai` are hosted speech-to-speech sessions, so choosing one already means routing through their model first — there is no "direct" bypass of it, and `direct` on a hosted backend runs as `light` (Settings says so on that cell).
-- **`layer: light` / `heavy`** — a front model fields the turn and hands off to the chat's agent (§ The fast voice and the chat's agent) when it needs real data or action. For `gemini`/`openai` this selects the model in that provider's realtime family: OpenAI's mini realtime model vs. its flagship realtime model; Gemini's default Live model vs. its extended-thinking Live model. Each is overridable per host. `local` has no front model: a fast but weak model in front of the agent is a barrier nearly every turn steps over, not worth the extra hop. Selecting `light`/`heavy` for `local` is accepted by the settings schema and refused at connection time (`audio.error {code: 'voice_config_not_implemented'}`).
+The account has one voice agent setup, used by every voice agent call: a provider, a model, a voice, how it sounds (`14-design-web.md` § Voice), and the voice instructions (§ Voice instructions). The providers:
 
-- **`handoff: auto` / `always` / `never`** — a third, independent choice on every conversational surface with a hosted backend: who does the work. `auto` (the default): the fast voice answers what it can and hands the rest to the chat's agent (§ The fast voice and the chat's agent). `always`: the fast voice answers nothing itself — every utterance is a hand-off and it only speaks the agent's reply. `never`: the fast voice has no agent and no dispatch tool, and answers everything itself. It is enforced by the voice's instructions and its tool list (`always` also sets OpenAI's `tool_choice` to `required`), not by the host. Settings shows it as its own row (“pass to the chat’s agent”: Voice decides / Always / Never) under each hosted engine; it does not apply to `local`, where every utterance is the agent's turn. Changing it, like the engine, means a fresh session.
+- Gemini — a Gemini Live session is the voice agent end to end: it hears and speaks directly, with no separate speech to text or text to speech step.
+- OpenAI — an OpenAI Realtime session, the same way.
+- ElevenLabs — ElevenLabs Agents: the host provisions a throwaway agent per session (its LLM is the chosen model; the start context in its prompt; its tools as client tools answered by the host), opens a conversation on a signed URL over a server-side WebSocket, relays 16 kHz mic PCM in and 24 kHz agent audio out, and deletes the agent and its tools when the session ends. Billed by the call minute ($0.08/min on every plan, plus the LLM's own per-minute charge from credits), recorded in the voice cost ledger by call length. Hands-free cannot stop the agent answering, so an unaddressed transcript is reported heard-but-not-sent and the agent's reply to it is dropped (its audio and words never reach the surface or the chat); unlike OpenAI it is still in the agent's context and still billed.
 
-Every backend runs on hands-free and call from every app surface (phone, web, desktop), at every layer except the two below. Voice devices run every backend too; the host upsamples hosted engines' 24 kHz audio to the 48 kHz a device plays (`16-voice-device.md` § Audio WSS). Refused loudly rather than silently downgraded (NO SILENT FALLBACK): `local`/`light` or `local`/`heavy` on any surface (no front model exists) — `audio.error {code: 'voice_config_not_implemented'}`.
+The model and voice lists are read from each provider's API, not built in, and Settings refreshes them on request. A stored model or voice the provider no longer lists is refused at session start, naming it, never swapped. Changing any part of the setup applies to the next session.
 
-The host relays every backend. A surface opens the same audio WSS with the same `audio.session_start`, streams the same 16 kHz PCM16 up and plays the same 24 kHz PCM16 down whatever the backend; the host reads the surface's cell at session start and runs Whisper/Kokoro, or holds its own server-side connection to the provider and relays audio both ways (resampling where the provider's rate differs). No surface ever talks to a provider or holds a provider key or ephemeral token — so a phone on a hosted backend needs nothing native beyond what `local` already uses. The provider keys (`GEMINI_API_KEY`, `OPENAI_REALTIME_API_KEY`) are shared by every host: set once from Settings → Keys, which fans the write out to every host that's online, and each host stores its own copy (or reads it from its own environment, with the Settings one winning) — `02-host.md` § Provider keys. A key set or revoked there applies to the next session on every host, with no restart. `OPENAI_REALTIME_API_KEY` is deliberately not `OPENAI_API_KEY`, which the agent processes a host runs would pick up and bill. A missing key never stops the host — voice is one setting, and every chat on the host would go down with it, and a host that is down cannot be given the key from Settings. Instead:
+How it sounds is the provider's own controls and nothing more:
 
-- **At boot, whenever the voice config changes, and whenever a key is set or revoked**, the host logs an error for each surface whose backend has no key on that host, naming the surface and the key.
-- **Every session on such a surface is refused at its start** with `audio.error {code: 'voice_key_missing'}` (the voice-note / transcribe route answers the same code), and the message is one fixed sentence every surface shows as is: _"Call is set to gemini, but GEMINI_API_KEY is not set on this host. Switch Call to another backend in Settings → Voice."_ — surface name, backend, key, and the fix. Nothing falls back to `local`.
-- **Surfaces fail at the press.** A call or hands-free session shows the sentence on the call bar. Dictation and a voice note, which would otherwise only reach the host on release, are refused before recording when the chat's host has already reported that it lacks the key (below); a composer dictation also stops the moment the host refuses its preview session.
-- **Each host reports which keys it holds** on `host.host.voiceKeys: {gemini, openai, elevenlabs, deepgram}`, re-published whenever one is set or revoked. Settings → Voice (web and mobile) marks a hosted cell _"Not configured on <host>: <KEY> is missing. Sessions there are refused."_ for each host that lacks it, and the line clears as soon as that host reports the key. A host that has not reported `voiceKeys` is not called unconfigured.
+- ElevenLabs: speech model, tone, expressive mode, stability (Expressive ↔ Steady), similarity, speed (Slower ↔ Faster) and reply eagerness (Patient / Normal / Eager). Defaults are calm: stability 0.7, speed 0.95, reply eagerness Patient.
+- OpenAI: tone and speed.
+- Gemini: tone and match my tone.
 
-A hosted engine's failure (other than a missing key, above) — it could not open, it errored, a reply failed or produced no audio, a transcription failed — reaches the surface as `audio.error {code: 'gemini_unavailable' | 'openai_unavailable' | 'elevenlabs_unavailable'}` naming what went wrong. If the provider's side of the session is gone (never opened, or closed under the host), the host also ends the surface's session, so the surface stops streaming into a dead engine and shows the failure with a retry (§ 2. Voice call). It is never answered by running `local` instead.
+Tone is raw text, kept per voice. It goes into the voice's instructions as written; on an ElevenLabs v3 speech model any `[tags]` in it are also sent as suggested audio tags.
 
-A session whose microphone delivers nothing but digital silence for its first 5 seconds of audio is failing, not quiet: no backend can hear a word of it. The host says so on the wire (`audio.error {code: 'mic_silent'}`) and the surface shows it, naming the likely cause — on macOS, an app without microphone permission is handed a silent stream rather than an error — and the place to fix it. Every session's closing log records the loudest sample it received.
+### Voice instructions
 
-A sustained session runs one engine. Its two modes can be configured onto different cells, so a mode switch between two cells that differ in backend or layer cannot happen in place: the phone ends the session and opens a fresh one in the new mode on the same chat, and the host refuses an in-place `audio.mode` that would cross engines (`voice_config_not_implemented`) — which is what web/desktop show when their switch crosses engines.
+What the voice agent is told is the user's. The account's voice instructions are a default the user edits in Settings → Voice calls, and the voice agent receives them, then the tone, then the start context (§ Keeping voice and text as one conversation), with nothing added on top. The default says what the voice agent is (the voice of this chat, not an assistant with no knowledge of the user) and gives no tone directions. Everything the voice agent needs to know about a tool is in that tool's own description.
 
-## The fast voice and the chat's agent
+### Provider keys and failures
 
-A call is the chat it was started on, spoken. It is never a separate assistant.
+The host relays every voice agent call. A surface opens the same audio WSS with the same `audio.session_start`, streams the same 16 kHz PCM16 up and plays the same 24 kHz PCM16 down whatever the provider; the host holds its own server-side connection to the provider and relays audio both ways (resampling where the provider's rate differs). No surface ever talks to a voice agent provider or holds a provider key or ephemeral token. The provider keys (`GEMINI_API_KEY`, `OPENAI_REALTIME_API_KEY`, `ELEVEN_LABS_API_KEY`) are shared by every host: set once from Settings → Keys, which fans the write out to every host that's online, and each host stores its own copy (or reads it from its own environment, with the Settings one winning) — `02-host.md` § Provider keys. A key set or revoked there applies to the next session on every host, with no restart. `OPENAI_REALTIME_API_KEY` is deliberately not `OPENAI_API_KEY`, which the agent processes a host runs would pick up and bill. A missing key never stops the host — voice is one setting, and every chat on the host would go down with it, and a host that is down cannot be given the key from Settings. Instead:
 
-On `gemini`/`openai` two models share that one conversation:
+- At boot, whenever the voice setup changes, and whenever a key is set or revoked, the host logs an error if the chosen provider has no key on that host, naming the key.
+- Every voice agent session there is refused at its start with `audio.error {code: 'voice_key_missing'}`, and the message is one fixed sentence every surface shows as is: _"The voice agent is set to Gemini, but GEMINI_API_KEY is not set on this host. Choose another provider in Settings → Voice calls."_ — provider, key, and the fix. Nothing falls back to another provider or to a direct call.
+- Surfaces fail at the press: a call or hands-free session shows the sentence on the call bar.
+- Each host reports which keys it holds on `host.host.voiceKeys: {gemini, openai, elevenlabs, deepgram}`, re-published whenever one is set or revoked. Settings → Voice calls marks the provider _"Not configured on <host>: <KEY> is missing. Calls there are refused."_ for each host that lacks it, and the line clears as soon as that host reports the key. A host that has not reported `voiceKeys` is not called unconfigured.
 
-- The fast voice — the hosted realtime model (Gemini Live / OpenAI Realtime); `layer: light` picks its small, fast model and `layer: heavy` its flagship. It holds the back-and-forth: anything it can answer from the conversation so far and its own knowledge.
-- The chat's agent — the agent the chat already runs on (Claude or Codex, whatever the chat's harness and model are), with its tools, folder and session. The fast voice hands a request to it — a turn on the same chat — whenever it needs something only the agent has: tools, files, the user's data, an action, or real work.
+A provider's failure (other than a missing key) — it could not open, it errored, a reply failed or produced no audio, a transcription failed — reaches the surface as `audio.error {code: 'gemini_unavailable' | 'openai_unavailable' | 'elevenlabs_unavailable'}` naming what went wrong. If the provider's side of the session is gone (never opened, or closed under the host), the host also ends the surface's session, so the surface stops streaming into a dead engine and shows the failure with a retry (§ 2. Voice call).
 
-The fast voice is told it is the voice of this conversation, not an assistant with no knowledge of the user. A brief acknowledgement before a hand-off is optional: the voice skips it when the answer will be quick (a short look-up, or a tool that answers at once) and, when it does say one, varies the words rather than repeating a fixed phrase. On hand-off it may say once, in a few words of its own, that it has passed the request on, then carries on talking: anything else the user says gets a normal reply while the agent works. On Gemini the dispatch call is answered at once with "started", so nothing stays pending on Gemini's side (a call left open can be cancelled when the user speaks over the model), and the agent's answer arrives later as a message from the agent. A message interrupts whatever the model is saying, so the host holds the answer until neither the user nor the model is talking, then sends it; answers queue in the order they finish. Speech the model starts on its own while a hand-off is running ("still working on it") is dropped beyond one acknowledgement per hand-off, neither played nor written into the chat; replies to what the user says are never dropped. Every utterance gets a spoken reply: on Gemini, if the user says something while a hand-off runs and the model stays silent, the host tells it once to answer; if that reply is silent too, the call shows an error. OpenAI's function call is answered when the result is ready. The hand-off line is written into the chat the moment it is made, in order with what was said around it, even when the agent is busy and takes it later (the agent's turn is delivered under that line, never as a second copy at the bottom, and no pending chip is drawn for it). A hand-off never waits long behind the agent's work: if the agent has been inside one tool call (a sleep, a long test wait) for 10 seconds, the turn is interrupted so the hand-off runs as its own turn; other queued messages keep the 3-minute window. The hand-off shows in the chat as one line naming what was asked, followed by the agent's own reply (not a second copy of it); the line reads "Asking the agent…" until that reply arrives, then "Asked the agent". A hand-off that fails leaves an "agent failed" line instead. Silence or noise heard as an empty or punctuation-only utterance is never written as the user speaking. Web and mobile draw all of this the same way.
+A session whose microphone delivers nothing but digital silence for its first 5 seconds of audio is failing, not quiet: any working microphone delivers a non-zero sample well within that time. The host says so on the wire (`audio.error {code: 'mic_silent'}`) and the surface shows it, naming the likely cause — on macOS, an app without microphone permission is handed a silent stream rather than an error — and the place to fix it. Every session's closing log records the loudest sample it received.
 
-On `local`/`direct` there is no fast voice: every utterance is a turn for the chat's agent.
+## The voice agent and the chat's agent
+
+A call is the chat it was started on, spoken. It is never a separate assistant. On a voice agent call two models share that one conversation:
+
+- The voice agent holds the back-and-forth: anything it can answer from the conversation so far and its own knowledge.
+- The chat's agent — the agent the chat already runs on (Claude or Codex, whatever the chat's harness and model are), with its tools, folder and session. The voice agent passes a request to it whenever it needs something only the chat's agent has: tools, files, the user's data, an action, or real work.
+
+This works the same on every provider. The voice agent has two tools for it:
+
+- Pass to agent — answers at once with "received". The request becomes a message in the chat for the chat's agent, which takes it when it is free; nothing interrupts the chat's agent's work, whatever it is doing. The voice agent says, in a few words of its own, that it has passed the request on, and carries on talking: anything else the user says gets a normal reply.
+- Check status — called only when the voice agent needs it. Returns each open hand-off (what was asked; waiting, being worked on or answered; time since it was sent) and the chat agent now (idle or working; the step it is in and for how long; its last message and how old it is).
+
+When the chat's agent answers a hand-off, Patch pushes the answer into the voice agent's conversation and the voice agent says the gist. A reply from the chat's agent that ends a turn during the call, not in answer to a hand-off (a typed message, a job, another surface), is pushed in the same way. Progress messages mid-turn are not pushed, and nothing else the chat's agent writes reaches the voice agent while the call is open. A pushed message would cut across speech, so the host holds it until neither the user nor the voice agent is talking, then sends it; pushes queue in the order they arrive. Speech the voice agent starts unprompted — not in reply to the user or to a push — is dropped beyond one acknowledgement per hand-off, neither played nor written into the chat.
+
+Each hand-off is written into the chat the moment it is made, in order with what was said around it, as one row (`14-design-web.md` § Main chat panel — Hand-off rows); the chat's agent's answer belongs to that row, never a second copy at the bottom. A hand-off reaches the chat's agent as an ordinary message saying the request was spoken and to do only that. A hand-off that fails says so on its row. Silence or noise heard as an empty or punctuation-only utterance is never written as the user speaking.
 
 ### A call to the Manager
 
-A hosted call (`gemini`, `openai` or `elevenlabs`) opened on the Manager chat works differently: the fast voice is the manager itself, and the Manager's own agent is not in the loop. The Manager's work is talking to other chats, so handing each request to the Manager's agent, which then sends it on with `patch_send_to`, put two agent hops between the user and the chat they meant. Instead the voice has no `dispatch_to_patch`; it has tools of its own, answered by the host. The voice answers questions itself from the conversation (the Manager chat's briefing) and acts directly on common requests; it hands real work to the Manager's agent only through `ask_agent`. Three of the tools concern chats:
+A voice agent call opened on the Manager chat works differently: the voice agent is the manager itself, and the Manager's own agent is not in the loop. The Manager's work is talking to other chats, so handing each request to the Manager's agent, which then sends it on with `patch_send_to`, put two agent hops between the user and the chat they meant. Instead the voice has no pass to agent or check status; it has tools of its own, answered by the host. The voice answers questions itself from the conversation (the Manager chat's start context) and acts directly on common requests; it hands real work to the Manager's agent only through `ask_agent`. Three of the tools concern chats:
 
 - `find_chats` — the account's chats (every host, as `patch_list_chats` lists them), or those whose name or folder matches a few words, each with its name, id, whether it is working and when it was last active. The Manager itself and archived chats are left out. A list the host cannot get (the server link is down) is an error, never a shorter list.
 - `chat_status` — where one chat stands: its status line, goal, open to-dos and last few messages. For a chat on another host only what the listing knows is available, and the answer says so.
@@ -63,51 +75,62 @@ Four more are quick actions, answered at once and never a search for a chat: `ad
 
 A chat is named by its id or by what the user called it. An exact name wins; otherwise the words must pick out one chat. A name that fits none or several is handed back to the voice to ask the user, naming the choices, and nothing is sent; that is not an error. A message that was not delivered is an error the call shows.
 
-A chat's reply comes back into the call the way an agent's hand-off result does: on Gemini the send is answered once the chat has the message and the reply arrives later as a message naming the chat, held until neither the user nor the model is talking; on OpenAI Realtime and ElevenLabs the send's tool call returns with the reply. The reply is caught by the delivered message's own id, so a reply belongs to the message that asked for it even when the chat was busy and took it later. One message per chat is awaited at a time: a second message to a chat still answering the first is handed back to the voice to say so. A chat on another host is sent to, but its reply stays in that chat and does not come back into the call; the voice is told so.
+A chat's reply comes back into the call the way a hand-off answer does: the send is answered once the chat has the message, and the reply is pushed in later naming the chat. The reply is caught by the delivered message's own id, so a reply belongs to the message that asked for it even when the chat was busy and took it later. One message per chat is awaited at a time: a second message to a chat still answering the first is handed back to the voice to say so. A chat on another host is sent to, but its reply stays in that chat and does not come back into the call; the voice is told so.
 
-The Manager chat records the call as any call is recorded — the user's words and the voice's replies — plus one quiet line for each message sent (`-> "<chat>": <message>`) and one for each reply or failure (`<- "<chat>": <reply>`). The `handoff` setting does not apply to a Manager call. Whether a call is a Manager call is fixed when it opens. A host that cannot provide the tools refuses a hosted call to the Manager rather than opening it with the usual hand-off.
+The Manager chat records the call as any call is recorded — the user's words and the voice's replies — plus one quiet line for each message sent (`-> "<chat>": <message>`) and one for each reply or failure (`<- "<chat>": <reply>`). Whether a call is a Manager call is fixed when it opens. A host that cannot provide the tools refuses a voice agent call to the Manager rather than opening it with the usual hand-off.
 
-Who the voice is told it is comes from the account's `managerVoicePrompt` (Settings → Manager → Prompts → Voice), read at the start of each call; the host adds the rules for these three tools and for replies after it, so an edit cannot remove them. A blank prompt uses the built-in one.
+Who the voice is told it is comes from the account's `managerVoicePrompt` (Settings → Manager → Prompts → Voice), read at the start of each call, in place of the voice instructions and with nothing added on top; what the voice needs to know about each tool is in the tool's own description. A blank prompt uses the built-in one.
 
 Calls on any other chat are unchanged.
 
-On `gemini` the address rule (§ Session modes) is applied before the audio reaches the provider, because Gemini Live cannot transcribe an utterance without answering it: the host turns Gemini's own activity detection off, cuts the mic into utterances with its local VAD, and sends Gemini an utterance (`activityStart`, audio, `activityEnd`) only once it is addressed. An utterance inside the 30-second follow-up window, and every utterance in `call`, streams live; any other is held, transcribed on the host's own speech-to-text, and either released whole (addressed, so its first word is delayed by that transcription) or reported as heard-but-not-sent and never sent to Gemini. If the host cannot transcribe a held utterance it reports the failure rather than guessing. On `openai` it is: the provider is told not to answer on its own in `hands-free`, each finished transcript is run through the address rule, an addressed one is answered, and an unaddressed one is reported as heard-but-not-sent and removed from the provider's conversation. Barge-in on a hosted backend comes from the provider's own VAD; in `hands-free` on `openai` another voice in the room does not cut a reply off.
+On Gemini the address rule (§ Session modes) is applied before the audio reaches the provider, because Gemini Live cannot transcribe an utterance without answering it: the host turns Gemini's own activity detection off, cuts the mic into utterances with its local VAD, and sends Gemini an utterance (`activityStart`, audio, `activityEnd`) only once it is addressed. An utterance inside the 30-second follow-up window, and every utterance in `call`, streams live; any other is held, transcribed on the host's own speech-to-text, and either released whole (addressed, so its first word is delayed by that transcription) or reported as heard-but-not-sent and never sent to Gemini. If the host cannot transcribe a held utterance it reports the failure rather than guessing. On OpenAI it is: the provider is told not to answer on its own in `hands-free`, each finished transcript is run through the address rule, an addressed one is answered, and an unaddressed one is reported as heard-but-not-sent and removed from the provider's conversation. Barge-in on a voice agent call comes from the provider's own VAD; in `hands-free` on OpenAI another voice in the room does not cut a reply off.
 
 ### Keeping voice and text as one conversation
 
-The fast voice and the agent are separate models, so neither inherits the other's memory. Patch keeps them on one conversation:
+The voice agent and the chat's agent are separate models, so neither inherits the other's memory. Patch keeps them on one conversation:
 
-- At session start the fast voice is given a briefing in its instructions, built by the host from what it already knows (no model call for it): the chat's name, how it began (the user's first message), where it stands now (the one-line status the host writes after each turn, the goal, the open to-dos), and the most recent messages, oldest first, each shortened, within a budget of a few thousand characters however long the chat is. Tool calls and their output are left out. It is background the voice answers "what is this chat about" from, not a transcript replayed as turns (a replayed history of hundreds of short messages came back as "this is just a new chat", and cost most of a call's price in input tokens).
-- Anything the briefing leaves out, the voice gets with `look_back`: the host searches the chat's saved messages for a few key words and answers at once (plain keyword matching; no model, no cost beyond the call's own tokens). Work or fresh data still goes to the agent as a hand-off.
-- While the session is open, every message that lands in the chat from anywhere else — a typed turn, another surface, an agent reply, a job result — reaches the fast voice as one short quiet note from the user's side (the first 400 characters, labelled as typed or as written by the agent), without prompting it to speak. The top of the instructions is never rewritten mid-call, so the provider's input caching keeps working.
-- Every spoken exchange is written into the chat's timeline as ordinary messages: the user's utterance as their message, tagged `[voice • <surfaceKind>]`, and the fast voice's reply as an agent message, streamed into the chat as it speaks.
-- The agent never ran for exchanges the fast voice answered alone, so they are not in its session. The next turn the agent does run on that chat — a hand-off or a typed message — carries the voice exchanges it has not seen, in order, as a note ahead of the new input (`04-chats-and-folders.md` § Notes to the agent), so the user can open it and read exactly what the agent was given.
+- Start context. At session start the voice agent's instructions end with the chat as it stands: its name and goal; questions to the user still open; a catch-up of everything before the last 4 messages (what the chat is for, decisions made, what is done, what is in progress, what is open); and the last 4 messages in full, each with its time. Tool calls and their output are left out. The catch-up is written by a small job (`02-host.md` § Small jobs) while the call connects, so it costs the call no waiting and only cheap tokens; a catch-up that fails is shown on the call bar and the call opens without it. It is background the voice agent answers "what is this chat about" from, not a transcript replayed as turns (a replayed history of hundreds of short messages came back as "this is just a new chat", and cost most of a call's price in input tokens).
+- Anything older, the voice agent gets with look back: the host searches the chat's saved messages for a few key words and answers at once (plain keyword matching; no model, no cost beyond the call's own tokens). Work or fresh data still goes to the chat's agent as a hand-off.
+- The top of the instructions is never rewritten mid-call, so the provider's input caching keeps working; what changes reaches the voice agent as pushes (§ The voice agent and the chat's agent).
+- Every spoken exchange is written into the chat's timeline as ordinary messages: the user's utterance as their message, tagged `[voice • <surfaceKind>]`, and the voice agent's reply as an agent message, streamed into the chat as it speaks. Everything the voice agent says is written, including its words about a pushed answer.
+- The chat's agent never ran for exchanges the voice agent answered alone, so they are not in its session. The next turn the chat's agent does run on that chat — a hand-off or a typed message — carries the voice exchanges it has not seen, in order, as a note ahead of the new input (`04-chats-and-folders.md` § Notes to the agent), so the user can open it and read exactly what the chat's agent was given.
 
-Open the chat in text later and the whole conversation, including the parts the fast voice handled alone, is there, and the agent knows about them.
+Open the chat in text later and the whole conversation, including the parts the voice agent handled alone, is there, and the chat's agent knows about them.
 
-Words said in a call read differently from typed ones. On web, the user's spoken words, the fast voice's replies and the agent's answer to a hand-off are drawn in italics with a filled round call badge, level with the first line, leading the text, on the message's own side; a hand-off's request keeps its own quiet line. Everything the voice says is written into the chat, including its words about an agent's answer. A hand-off reaches the agent as an ordinary message saying the request was spoken and to do only that, visible in the chat as the hand-off line's content. Web plays a short rising sound when a call connects and a falling one when it ends.
+Words said in a call read differently from typed ones. On web, the user's spoken words, the voice agent's replies and a direct call's read-aloud replies are drawn in italics with a filled round call badge, level with the first line, leading the text, on the message's own side. Web and mobile draw all of this the same way.
 
 ### Call cost
 
-Every sustained session is costed when it ends, on every backend:
+Every call is costed when it ends, on every kind of call:
 
-- The engine: backend and model, the session's length, and the tokens it used by kind (text and audio, in and out) as the provider reports them. `local` counts the transcription requests and audio seconds sent to the STT backend.
-- A cost in US dollars for the engine, from a fixed per-model price table on the host. The agent turns a call runs (hand-offs, or every turn on `local`) are the chat's own and are not costed: they ride on the subscription, and a call's expense is the voice alone. A model missing from the table shows its tokens and no price rather than a guess. An engine that reports no token usage, or an ElevenLabs balance that cannot be read, is left off the line rather than announced.
+- The engine: provider and model, the session's length, and the tokens it used by kind (text and audio, in and out) as the provider reports them. A direct call or host-speech conversation counts what its cloud speech engines were sent (audio seconds, characters); on-device engines cost nothing.
+- A cost in US dollars for the engine, from a fixed per-model price table on the host. The chat agent's turns a call runs (hand-offs, or every turn of a direct call) are the chat's own and are not costed, and neither is the start context's catch-up, a small job like any other: they ride on the subscription, and a call's expense is the voice alone. A model missing from the table shows its tokens and no price rather than a guess. An engine that reports no token usage, or an ElevenLabs balance that cannot be read, is left off the line rather than announced.
 
-The summary lands in the chat as one quiet line when the session ends — `Call 0:52 · Gemini Flash · $0.012`, at the moment the call ends, with nothing to wait for. The host keeps every session's costing on disk and reports this month's and all-time totals per host on `host.host.voiceUsage` — calls, tokens (Gemini and OpenAI, as the providers reported them) and ElevenLabs credits (as ElevenLabs charged them, plus speech at its per-character rate), and the ElevenLabs plan's credits used this period as last read. Settings → Voice → Usage shows them summed across every host, in those units rather than dollars.
+The summary lands in the chat as one quiet line when the session ends — `Call 0:52 · Gemini Flash · $0.012`, at the moment the call ends, with nothing to wait for. The host keeps every session's costing on disk and reports this month's and all-time totals per host on `host.host.voiceUsage` — calls, tokens (Gemini and OpenAI, as the providers reported them) and ElevenLabs credits (as ElevenLabs charged them, plus speech at its per-character rate), and the ElevenLabs plan's credits used this period as last read. Settings → Voice calls → Usage shows them summed across every host, in those units rather than dollars.
 
-## `local`-backend engines
+## Direct calls
 
-The host runs, for any surface on `backend: local`:
+A direct call has no voice agent. What the user says is turned into text on the device the call is made from, sent to the chat as the user's turn (tagged `[voice • <surfaceKind>]`), and the chat agent's reply is read aloud on the same device. It opens no audio session to the host, so it is held on its device only: it is not announced to other devices and does not move between them. It is chosen from the call button's menu (§ 2. Voice call) and runs in `call` mode only.
 
-- STT — switchable in Settings → Voice: Groq Whisper (`whisper-large-v3-turbo`, cloud, faster, offers partials) or local `faster-whisper medium.en` (no cloud dependency, ~400ms slower, no partials — see § Live transcript for why).
-- Agent — Manager, on `layer: direct` (the only implemented `local` layer today — see § Voice is a config matrix above).
-- TTS — Kokoro (`hexgrad/Kokoro-82M`), 24 kHz PCM16 output.
+Each linked device has its own direct-call setup: a speech to text engine and its model, then a text to speech engine, its model, its voice and its sound controls (ElevenLabs: tone, stability, similarity, style, speed; OpenAI: tone, speed; Kokoro: speed). Only the engines the device reports having are offered (`05-surfaces.md` § Speech engines): on-device engines it has installed, and cloud engines the account has a key for. A cloud engine is reached through the chat's host, which holds the key, so the device never holds one. A device that reports no engine shows "No speech engine" and cannot make a direct call; Call direct says why rather than starting.
+
+- End of turn. The device cuts the microphone into utterances and decides the user has finished with Smart Turn run on the device itself, on the same rule as dictation mode (§ Dictation mode → Knowing when the speaker has finished).
+- While the chat's agent works, the call plays the agent-working sound (§ Call sounds) and the bar says `Agent working · 0:42`. Anything the user says meanwhile is sent as a queued message, as typing would be.
+- Barge-in. Speech while a reply is being read stops the reading; the rest of that reply is not read.
+- A failed engine (it could not load, a cloud request failed) shows on the call bar naming the engine, and the call stays open to retry. It is never answered by another engine.
+
+## Host speech engines
+
+A voice device's direct conversations (`16-voice-device.md`) run speech on the chat's host:
+
+- Speech to text — `voiceConfig.speechToText` (§ Speech to text).
+- Agent — the chat's agent, every utterance its turn.
+- Text to speech — Kokoro (`hexgrad/Kokoro-82M`), 24 kHz PCM16 output.
 - VAD — Silero (`silero_vad.onnx`), for end-of-utterance and barge-in.
 
 The large model files are downloaded per host, on demand, from the app (`02-host.md` § Optional components). Kokoro is ~340 MB including voices; a local Whisper model is ~1.5 GB. `silero_vad.onnx` is ~2 MB and sits inside the host artifact instead (`02-host.md` § Installation), so VAD and barge-in work on every host with nothing downloaded.
 
-Voice is a per-host capability: a host advertises the components it has, and a chat's voice runs on that chat's own host, so speaking to it needs Kokoro installed there (backend `local`) or a Gemini/OpenAI key configured (`gemini`/`openai`). A surface disables the affordance where a component is missing and names the host and the component; on first use it offers the download or the key prompt in place, in a single prompt naming the size/cost and the host.
+A chat's voice agent calls and host-speech conversations run on that chat's own host, so they need the provider's key there, or Kokoro installed there. A surface disables the affordance where a component is missing and names the host and the component; on first use it offers the download or the key prompt in place, in a single prompt naming the size/cost and the host.
 
 **Reaching a non-Manager host's audio WSS.** A surface only ever reaches the server, and a host is never itself internet-reachable (`02-host.md` § Runtime and installation — it only dials out and holds the connection), so `/audio/:sessionId` cannot be proxied straight to one host's port. `POST /api/voice/token` records which host minted the session (the chat's own host, from the server's chat index); `/audio/:sessionId` then carries it over whichever of two paths is available, in priority order:
 
@@ -122,18 +145,18 @@ The Groq transcription request pins `language=en` and `temperature=0`.
 
 ### Latency
 
-On `backend: local`, time-to-first-audio for a reply is dominated by the same floor as before — the model's own response latency plus CPU-bound Kokoro synthesis, roughly ~600ms–1s — because the agent's turn is the reply. Two optimisations still apply:
+On a host-speech conversation or a direct call, time-to-first-audio for a reply is the chat agent's own response latency plus synthesis, roughly ~600ms–1s, because the chat agent's turn is the reply. Two optimisations apply:
 
-- Kokoro kept warm — a host that has the Kokoro component installed synthesises a throwaway phrase at startup, and again on a slow timer while it is idle, so the model load never lands on a call's critical path. Warming only at startup is not enough: the weights get paged out while the host does something else, and the first call after a quiet hour then waits out the whole load before it can say anything, which the user experiences as a call that never speaks.
+- Kokoro kept warm — a host (or a device, for its own on-device Kokoro) that has the Kokoro component installed synthesises a throwaway phrase at startup, and again on a slow timer while it is idle, so the model load never lands on a call's critical path. Warming only at startup is not enough: the weights get paged out while the host does something else, and the first call after a quiet hour then waits out the whole load before it can say anything, which the user experiences as a call that never speaks.
 - Warm agent session for the duration of a call (`02-host.md` § Per-turn process / warm sessions) — the agent process is opened when the call starts and kept alive across turns instead of being re-spawned every utterance. Barge-in interrupts the current turn without killing it.
 
-On `backend: gemini`/`openai` there is no separate STT/TTS stage to warm — the hosted session is already speech-to-speech — so the same floor applies without needing either optimisation, and a hand-off to the chat's agent is the only thing that can add real latency.
+A voice agent call has no separate speech stage to warm — the provider's session is already speech-to-speech — so the voice agent answers at its own speed, and a hand-off never delays it.
 
-The user's words appear in the chat timeline as they speak, on every backend. On web and desktop that is an in-progress user message at the end of the call's chat, its text the live partial transcript in italics; on mobile it is the call bar docked above that chat's composer (`15-design-mobile.md` § Voice states). It becomes an ordinary user message when the transcript is final, and is replaced by the persisted message when that arrives, with the `[voice • …]` tag stripped for display. An utterance a hands-free session discarded is removed from the timeline rather than kept. The reply streams into the timeline beneath it like any agent reply.
+The user's words appear in the chat timeline as they speak, on every kind of call. On web and desktop that is an in-progress user message at the end of the call's chat, its text the live partial transcript in italics; on mobile it is the call bar docked above that chat's composer (`15-design-mobile.md` § Voice states). It becomes an ordinary user message when the transcript is final, and is replaced by the persisted message when that arrives, with the `[voice • …]` tag stripped for display. An utterance a hands-free session discarded is removed from the timeline rather than kept. The reply streams into the timeline beneath it like any agent reply.
 
 ### Live transcript
 
-`backend: local` and dictation on Whisper only — a hosted session (`gemini`/`openai`) streams the user's words as the provider transcribes them, and the live dictation engines stream theirs (§ Dictation engines), each sent as `audio.transcript_partial` with no workaround needed.
+Host speech on Whisper and dictation on Whisper only — a voice agent call streams the user's words as the provider transcribes them, and the live dictation engines stream theirs (§ Dictation engines), each sent as `audio.transcript_partial` with no workaround needed.
 
 No Whisper backend streams — each answers one whole clip at a time. An interim transcript is therefore produced by re-transcribing the growing utterance prefix about once a second while the user is still speaking, each answer going out as `audio.transcript_partial` (`03-wire-protocol.md`).
 
@@ -155,7 +178,7 @@ The standalone voice device (`16-voice-device.md`) runs the same two tiers and t
 - Web app — voice button in any chat. WSS audio session to host when active.
 - Phone app (Android) — tap-to-talk button. Foreground service while voice is active. WSS audio session to host. Manager-call ringing via ConnectionService.
 
-## Architecture
+## Architecture (host speech)
 
 ```
 phone/web ──audio WSS (PCM16 mic in, PCM16 audio out)──▶ patch host
@@ -187,21 +210,35 @@ Latency:
 
 ## A call stays on its chat
 
-A call or hands-free session is aimed at the chat it was started on and stays there, whatever the surface goes on to look at. Every surface still emits `chat.focus_change {chatId}` on every navigation (`03-wire-protocol.md`; read by `09-notifications.md` § Chat completion), but the host does not use it to re-target a voice session: navigating to chat B mid-call leaves the call on chat A, and starting a call from another chat while one is live does nothing. To talk to another chat, end the call and start one there. The call bar names the chat the call is on.
+A call or hands-free session is aimed at the chat it was started on and stays there, whatever the surface goes on to look at. Every surface still emits `chat.focus_change {chatId}` on every navigation (`03-wire-protocol.md`; read by `09-notifications.md` § Chat completion), but the host does not use it to re-target a voice session: navigating to chat B mid-call leaves the call on chat A, and starting a call from another chat while one is live does nothing. The call bar names the chat the call is on.
+
+The voice agent moves the call itself with its switch chat tool, when the user asks to talk to another chat: the call carries on, on the other chat, and the voice agent is given that chat's start context (§ Keeping voice and text as one conversation) as a push. The call bar and the announced call (§ A call can move between devices) name the new chat. An answer still pending from the old chat arrives as before, labelled with its chat, and lands in the old chat's record. A chat on another host is not a switch target; the voice agent is told so.
 
 ## A call can move between devices
 
-A `call` session is on one device at a time. When an app surface (phone, web, desktop) opens or closes one, the host announces it to every surface as `voice.call {sessionId, surfaceId, surfaceKind, chatId, active, startedAt}` (`03-wire-protocol.md` § Audio session). A surface that is not on a call itself and sees one live elsewhere shows a call-in-progress strip naming the device and the chat — web and desktop as a slim strip under the focused chat's header (never across the window's top row, where it would sit on the desktop's window controls and the header's buttons), mobile as a pill on the tab layout and above a chat's composer — with a **Switch here** button. A surface never shows its own call, and the strip goes the moment the host reports the call ended. The server is the record of which calls are live: it keeps each host's `voice.call` changes, replaces them with the host's `voice.calls` snapshot on every link (re)connect, and drops a host's calls when that host goes offline. Every surface gets the whole set as `voice.calls` in its greeting and whenever the set changes that way, and replaces its list with it, so a missed `active: false` cannot leave a strip up for a call that no longer exists. Hands-free sessions are not announced: hands-free is a mode left on, not a call.
+A `call` session is on one device at a time. When an app surface (phone, web, desktop) opens or closes one, the host announces it to every surface as `voice.call {sessionId, surfaceId, surfaceKind, chatId, active, startedAt}` (`03-wire-protocol.md` § Audio session). A surface that is not on a call itself and sees one live elsewhere shows a call-in-progress strip naming the device and the chat — web and desktop as a slim strip under the focused chat's header (never across the window's top row, where it would sit on the desktop's window controls and the header's buttons), mobile as a pill on the tab layout and above a chat's composer — with Switch here and End buttons. A surface never shows its own call, and the strip goes the moment the host reports the call ended. The server is the record of which calls are live: it keeps each host's `voice.call` changes, replaces them with the host's `voice.calls` snapshot on every link (re)connect, and drops a host's calls when that host goes offline. Every surface gets the whole set as `voice.calls` in its greeting and whenever the set changes that way, and replaces its list with it, so a missed `active: false` cannot leave a strip up for a call that no longer exists. Hands-free sessions are not announced: hands-free is a mode left on, not a call.
 
 Switch here opens a normal call on that chat with `takeOver: true` on `audio.session_start`. Once the new session is established, the host closes every other `call` session on the same chat with the close reason `transferred` and announces them ended before announcing the new one. A session that is refused (missing key, unreachable host) never takes anything over. The surface that was closed with `transferred` ends its call quietly — no "call dropped" error — and its strip then shows where the call went. Sessions on other chats are untouched, and a session opened without `takeOver` never closes another.
 
+End hangs the call up wherever it is held: the host closes that session as the user ending it, and the device holding it plays the ended sound and clears its bar.
+
 ## A dropped call comes back
 
-A call that drops after it was live is redialled by the surface itself: a closed audio connection, or the host going away mid-call (`host_unreachable`), during a server or host restart or a network change. The host only ends a call on its own when it moves to another device (`transferred`) or after an error it has already reported, so every other close is treated as a drop. Redials back off over about two minutes (1, 2, 4, 8, 15, 20, 30 and 30 seconds), long enough to ride out a release restarting the server and the host; after that it keeps trying every 30 seconds until the user ends the call, saying once that it is still trying; bringing the app to the foreground redials at once. The call bar shows Connecting while it waits, and the surface plays its usual pick-up sound when the line is back.
+While a voice agent call is open the host sends a heartbeat on the audio socket every second. A surface that has heard nothing from the host for about 3 seconds (three missed heartbeats, so one late frame is not a drop) treats the line as lost, as it does a closed audio connection or the host going away mid-call (`host_unreachable`) during a server or host restart or a network change. The host only ends a call on its own when it moves to another device (`transferred`), when the agent ends it (`ended_by_agent`) or after an error it has already reported, so every other close is a drop.
+
+The surface plays the reconnecting sound (§ Call sounds), the call bar shows `Reconnecting…`, and it redials, backing off over about two minutes (1, 2, 4, 8, 15, 20, 30 and 30 seconds), long enough to ride out a release restarting the server and the host; after that it keeps trying every 30 seconds until the user ends the call, saying once that it is still trying. Bringing the app to the foreground redials at once. When the line is back it plays the reconnected sound. Nothing said while the line was down is kept or sent.
 
 A redial's `audio.session_start` carries `resumed: true`, and the host writes one line into the chat: `The call was interrupted, so Patch started a new one`. A call that was cut and picked up again is never silently a different call.
 
-## Turn semantics
+### Call logs
+
+The phone records, for each call: why audio stopped whenever it did (signal lost, audio focus taken, output device changed), the connection's quality (round trip, lost and late heartbeats) and how long each step of each turn took. It sends the log to the host when it reconnects and when the call ends, and the host keeps it with the session's closing log.
+
+## Fixed timings
+
+Every fixed time in a call is either a setting or carries its reason beside it here. Anything a real signal can tell — the host's heartbeat, the provider's own events, the device's audio and headphone events — is taken from that signal, not timed.
+
+## Turn semantics (host speech)
 
 | Event                 | Direction            | Handling                                                                                            |
 | --------------------- | -------------------- | --------------------------------------------------------------------------------------------------- |
@@ -224,11 +261,11 @@ The permission round-trip is text-only on the wire, but the user can answer it e
 
 ### Mechanism
 
-- Any chat or job calling `patch_call({ reason })` (`09-notifications.md` § `patch_call`) adds an entry to the per-user voice event queue on the server. The call routes directly to the user's active voice surfaces — it does not delegate through the Manager thread.
-- Active session present → host synthesises the message via Kokoro and streams it on the active audio WSS at the next pause in agent output.
-- No active session → server sends a high-priority push data message to the Android device via Expo's push API → app raises a `ConnectionService` incoming call (see `15-design-mobile.md`). On desktop: window raise + audible chime + accept/dismiss UI (see `14-design-web.md`).
-- On user accept → voice session opens, host streams Kokoro audio for the queued events in order. Queue clears.
-- Decline / no answer (30s) → each queued event becomes its own push notification with text + deep-link to the originating chat. Voicemail.
+- Every chat's agent, and every job, has the call tool `patch_call({ reason })` (`09-notifications.md` § `patch_call`) and decides for itself when to use it. The call is for the calling chat; it does not go through the Manager thread.
+- With Agents can call you off (Settings → Voice calls), the tool answers that the user has turned calls off and nothing rings.
+- A voice session already open → the reason is pushed into it (§ Which surface it reaches).
+- Otherwise it rings every linked device (`09-notifications.md` § `patch_call`), with the agent-calling sound (§ Call sounds). On accept, a voice agent call opens on the calling chat with the reason at the end of its start context, and the voice agent opens with it.
+- With Answer automatically in hands-free on, the device answers by itself instead of ringing: other playback pauses, the call opens in `hands-free`, the voice agent says why it called, waits for the answer, then hangs up, and playback resumes. On Android this takes full audio focus through a native audio-focus module, so the other app pauses rather than ducks and resumes when focus is released.
 
 Manager initiates a voice call by exercising the same `patch_call` path any chat has.
 
@@ -257,6 +294,8 @@ The user can interrupt a streaming agent response by speaking. Mechanism (host-s
 - Continue feeding mic audio to Silero-VAD even while Kokoro is streaming TTS to the surface.
 - When VAD fires (user is speaking), host stops the Kokoro stream, drops in-flight TTS audio, and routes the new utterance to Whisper.
 - Phone and web speakers have hardware/OS-level AEC, so the agent's own TTS playback isn't picked up as user speech. Voice device needs host-side AEC (see `16-voice-device.md`).
+
+On every kind of call, an interrupted reply is cut in the record to what the user actually heard: the voice agent's own record of its reply (on a voice agent call, truncated in the provider's conversation at the point playback stopped) and the reply written into the chat both end there, so the voice agent never believes it said what was never played.
 
 ## Voice-input modes — four gestures
 
@@ -309,18 +348,20 @@ A continuous voice session, like a phone call. The user opens it by:
 - Tapping the hands-free control, which opens the same session in `hands-free` (below) — on the Manager from the web sidebar and the phone's Manager card, and on any chat from the phone's chat-detail top bar.
 - Accepting an agent-initiated incoming call (see Agent-initiated voice).
 
+The call control always starts a voice agent call. Its menu — right-click on desktop and web, long-press on the phone — offers Call, Call direct (§ Direct calls), Hands-free and Voice settings, which opens Settings → Voice calls.
+
 The host keeps the WSS audio stream open; the agent speaks via TTS, the user replies, repeated until the user ends the call.
 
-The moment a `local`-backend call or hands-free session is open the host says one short fixed word aloud — "Connected." — so the user is never left in silence wondering whether the line is live. It is the host's own TTS and not a chat turn: nothing is written to the chat and no agent is involved. Hosted engines (`gemini`, `openai`) do not get it: they have no free fixed-text voice, and a spoken greeting there would be a paid model response.
+The device plays a sound for each change in the call's state (§ Call sounds), so the user is never left in silence wondering whether the line is live.
 
 A sustained session is NOT a floating capsule. It is a **voice bar**: a strip in flow at the top of the window, present for as long as the session is, in both modes. A capsule was a call UI, and hands-free is not a call — it is a mode left switched on, in which most of what the mic hears is deliberately dropped. Shown as a floating "on call" pill it read as a call that ignored the user.
 
 The bar carries, left to right:
 
-- `ON CALL` / `HANDS-FREE` · `<chat>`, naming the mode and the target. The target is the chat's title; a chat that has no title yet reads `New chat`, never its id, and the label does not change while the session is open.
-- What the line is doing right now, as one short status: `Connecting…`, `Listening` (call at rest) / `Waiting for you to say “<address word>”` (hands-free at rest), `Hearing you`, `Thinking…`, `Speaking`, or `<what it heard> — not addressed, so not sent` greyed for 8s when a hands-free session discarded an utterance. The words themselves are in the chat timeline (§ Latency), not the bar.
+- `ON CALL` / `ON CALL · DIRECT` / `HANDS-FREE` · `<chat>`, naming the mode and the target. The target is the chat's title; a chat that has no title yet reads `New chat`, never its id, and the label does not change while the session is open.
+- What the line is doing right now, as one short status: `Connecting…`, `Listening` (call at rest) / `Waiting for you to say “<address word>”` (hands-free at rest), `Hearing you`, `Thinking…`, `Speaking`, `Agent working · 0:42` (a direct call), `Reconnecting…`, `Paused`, or `<what it heard> — not addressed, so not sent` greyed for 8s, long enough to read, when a hands-free session discarded an utterance. The words themselves are in the chat timeline (§ Latency), not the bar.
 - Running session timer (`02:14`).
-- A mute-mic button, a mode switch, and an end (red phone) button.
+- A mute-mic button, a mode switch (not on a direct call), a pause button, and an end (red phone) button beside it.
 
 Being in flow, the bar pushes the app down rather than covering the transcript, and it persists across alt-tab. On desktop the bar starts clear of the window controls and is draggable like the title bar it sits in. Its text is high-contrast on its background in every state. Mobile foreground service keeps audio alive when the app backgrounds.
 
@@ -328,7 +369,33 @@ While a session is open on a chat, that chat's call control shows it: lit in the
 
 On mobile the session lives inside the chat it is on rather than across the top of the window. The chat's own message stream is the transcript — spoken turns and replies land in it as ordinary messages — and the bar docks above that chat's composer. Away from the chat, a small pill stands in for it (`15-design-mobile.md` § Voice states).
 
-On mobile, until the host has acknowledged the session the line is connecting, not listening, and the bar says so in a neutral colour distinct from the live states. A session not acknowledged within 15 seconds, or whose audio connection closes without the user ending it, has failed: its audio is released and the bar stays up naming the failure, with retry and end.
+On mobile, until the host has acknowledged the session the line is connecting, not listening, and the bar says so in a neutral colour distinct from the live states. A session not acknowledged within 15 seconds (long enough for the host to open a provider's session over a slow network) has failed: its audio is released and the bar stays up naming the failure, with retry and end. A connection lost after that is a drop (§ A dropped call comes back).
+
+#### Pause
+
+Pause is a soft hang-up. The voice session closes, so nothing is listening and nothing is billed, but the call stays in the UI — the bar (or pill) reads `Paused` with Resume and End — and the paused sound plays. Resume opens a new session on the same chat, with a fresh start context, and plays the connected sound. A call pauses:
+
+- from the pause button;
+- when headphones are taken out, resuming when they are put back in;
+- after the silence timeout, when it is on: Pause when quiet for (Settings → Voice calls; off by default) pauses a call in which nothing has been said by either side for that long. Resume is then by the button only.
+
+A paused call is not announced as live to other devices, and an agent's call rings rather than speaking into it.
+
+#### Call sounds
+
+The device plays each sound itself; none comes from the provider or costs anything.
+
+| State                             | Sound                                                  |
+| --------------------------------- | ------------------------------------------------------ |
+| Connecting                        | A soft single-note pulse, repeating until connected    |
+| Connected                         | A short rising two-note                                |
+| Passed to agent                   | A single low tick                                      |
+| Reconnecting                      | A muted two-tone, repeating, like a line searching     |
+| Reconnected                       | The connected sound                                    |
+| Paused                            | Two soft descending notes                              |
+| Ended                             | A descending three-note                                |
+| Agent calling you                 | A rising three-note triplet, repeated while it rings   |
+| Agent working (direct calls only) | Two quiet alternating notes, continuous while it works |
 
 #### Session modes
 
@@ -381,7 +448,7 @@ An in-flight dictation is discarded without transcribing by `esc` on web/desktop
 
 ### Speech to text
 
-What reads speech on a turn-based call (a `local` cell) is the account setting `voiceConfig.speechToText`, not the host's `WHISPER_BACKEND`. Settings → Dictation → Speech to text offers `Groq Whisper` (`groq`, the default), `Whisper on host` (`whisper`), `Parakeet on host` (`parakeet`) and `ElevenLabs Scribe` (`elevenlabs`). It is read on every new session, so a change applies to the next call. The dictation tidy-up row (**Tidy up each phrase with …**) uses the same engine.
+What reads speech in a host-speech conversation (§ Host speech engines) is the account setting `voiceConfig.speechToText`, not the host's `WHISPER_BACKEND`. Settings → Dictation → Speech to text offers `Groq Whisper` (`groq`, the default), `Whisper on host` (`whisper`), `Parakeet on host` (`parakeet`) and `ElevenLabs Scribe` (`elevenlabs`). It is read on every new session, so a change applies to the next call. The dictation tidy-up row (**Tidy up each phrase with …**) uses the same engine.
 
 Each host resolves the choice itself: `groq` and `elevenlabs` need that key on the host, `whisper` needs the Whisper component installed (its model present), `parakeet` needs `PARAKEET_MODEL_DIR`. A host that cannot run the chosen engine refuses the session with `audio.error {whisper_unavailable}` whose message names the engine and what is missing — never answered by another engine. `WHISPER_BACKEND` still decides the host's own Whisper for dictation, voice notes and meetings.
 
@@ -430,6 +497,7 @@ The same overlay vocabulary applies wherever voice is initiated:
 | Chat-header voice control                            | Voice bar in `call` (target = current chat)                |
 | Composer mic (mobile or web/desktop chat)            | None — dictation lands in the composer input               |
 | Chat-detail phone icon (mobile)                      | Call bar docked in that chat (target = current chat)       |
+| Call menu → Call direct (any surface)                | Call bar in `call`, direct (target = current chat)         |
 | Hands-free control (web sidebar, mobile chat detail) | Voice bar (mobile: call bar) in `hands-free` (Manager)     |
 | Long-press the bottom Voice tab (mobile)             | Voice-note overlay (target = Manager)                      |
 | Agent-initiated incoming call (Manager)              | Incoming-call banner → on accept, the voice bar / call bar |
@@ -446,7 +514,7 @@ The host STT/TTS engine above is shared, but the surface→host transport differ
 ### Voice call (sustained)
 
 - All surfaces get a one-shot token from `POST /api/voice/token`, where the server mints it, open the audio WSS, exchange `audio.session_start`, then stream PCM16 both directions (`audio.pcm16` up, `audio.tts_chunk` down) alongside `audio.transcript_*`, `audio.barge_in`, and `audio.session_end`.
-- On mobile the PCM transport is native (`expo-av` alone cannot stream PCM): the up leg is `PatchVoiceMic` (an `AudioRecord` PCM16 tap) and the down leg is `PatchVoiceTts` (an `AudioTrack` streaming sink that plays the host's 24 kHz PCM as it arrives, so the user hears the reply — barge-in flushes it). The same two modules carry every backend: a hosted engine's audio arrives as the same 24 kHz PCM on the same socket. If either native module can't init, the call is torn down with a surfaced error. Mobile voice calls also request Android `AUDIOFOCUS_GAIN` (full, not duck), which still awaits a native audio-focus module rather than `expo-av`'s duck-only flag.
+- On mobile the PCM transport is native (`expo-av` alone cannot stream PCM): the up leg is `PatchVoiceMic` (an `AudioRecord` PCM16 tap) and the down leg is `PatchVoiceTts` (an `AudioTrack` streaming sink that plays the host's 24 kHz PCM as it arrives, so the user hears the reply — barge-in flushes it). The same two modules carry every backend: a hosted engine's audio arrives as the same 24 kHz PCM on the same socket. If either native module can't init, the call is torn down with a surfaced error. Mobile voice calls also take Android `AUDIOFOCUS_GAIN` (full, not duck) through a native audio-focus module, since `expo-av` only offers ducking.
 
 ## Cross-refs
 

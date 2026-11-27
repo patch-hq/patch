@@ -110,9 +110,9 @@ Because the agent elects it, the bar belongs in each job's own prompt: a run tha
 
 `patch_notify` is one-way speech / text. When an agent wants to engage the user in a sustained voice conversation — Manager ringing you on a walk, an urgent build-failure escalation, a chat saying "I need a decision before I keep going" — it calls `patch_call` instead. See `06-threads-manager-speakers.md` § Cross-chat toolset for the full signature.
 
-`patch_call` rings concurrently on phone (Android `ConnectionService`) and desktop (window-raise + chime banner); first surface to accept wins, the others stop ringing. On accept, the call drops directly into the voice-call overlay (see `07-voice-app.md` § Voice-input modes) targeting the calling chat — not Manager, the chat that called. So a project chat can ring you and you end up in voice with that project chat's agent.
+Every chat's agent has `patch_call` and decides for itself when to use it. It rings every linked device at once — the phone through Android `ConnectionService`, desktop and web with a window-raise and banner (`14-design-web.md` § Incoming call) — and the first to accept wins; the others stop ringing. On accept, a voice agent call opens on the calling chat — not Manager, the chat that called (`07-voice-app.md` § Agent-initiated voice). So a project chat can ring you and you end up in voice with that project chat's agent. Settings → Voice calls → Agents calling you turns calls off for the account (the tool then says so and nothing rings) and can have a device answer on its own in hands-free.
 
-If everyone misses (decline / 30s timeout / all surfaces offline), `patch_call` falls back to a `push` notification carrying the original `reason` text. The failback push is the user's prompt to open the chat manually.
+If everyone misses (decline, 30 s of ringing — about as long as a phone rings — or all surfaces offline), `patch_call` falls back to a `push` notification carrying the original `reason` text. The failback push is the user's prompt to open the chat manually.
 
 A call demands attention in a way a notification doesn't, so agents reach for it sparingly. CLAUDE.md guidance for Manager and other proactive chats specifies when calling is appropriate ("only ring if I haven't replied for an hour and the question blocks progress").
 

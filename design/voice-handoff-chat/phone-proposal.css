@@ -1,0 +1,51 @@
+/* Hand-off rows: small, in the voice gutter, collapsed by default. */
+.ph-ho { display: flex; align-items: flex-start; gap: 8px; margin: -4px 0; color: var(--ink3); font-size: 14px; }
+.ph-ho .vm { color: var(--ink3); opacity: .8; margin-top: 2px; flex: none; }
+.ph-main { flex: 1; min-width: 0; }
+.ph-top { display: flex; align-items: center; gap: 8px; }
+.ph-dir { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; color: var(--ink2); }
+.ph-arrow { display: inline-flex; color: var(--ink3); }
+.ph-state { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.ph-state .p-spin { width: 10px; height: 10px; }
+.ph-chev { display: inline-flex; }
+.ph-ho[data-open="true"] .ph-chev { transform: rotate(90deg); }
+.ph-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.ph-body { margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--bg-soft); color: var(--ink);
+  display: flex; flex-direction: column; gap: 10px; }
+.ph-body p { margin: 3px 0 0; line-height: 1.5; }
+
+/* Call panel: who you talk to, beside Mute and End. */
+.ph-who span { font-size: 14px; padding: 6px 10px; white-space: nowrap; }
+.ph-status { flex: 1; display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink2); }
+
+/* Direct mode in the transcript */
+.ph-divider { align-self: center; font-size: 13px; color: var(--ink3); }
+.ph-working { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink3); }
+.ph-queued { align-self: flex-end; font-size: 13px; color: var(--ink3); margin-top: -10px; }
+
+/* Settings, stepped */
+.vs-psub { font-size: 13px; color: var(--ink3); margin-top: 2px; }
+.p-pills span .vs-where, .p-pills span i.vs-where { display: block; font-style: normal; font-size: 11px; color: var(--ink3); }
+.vs-psel { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; padding: 8px 12px;
+  border: 1px solid var(--divider); border-radius: 10px; font-size: 15px; }
+.vs-psel span { color: var(--ink3); }
+.vs-menu-hint { margin-left: auto; padding-left: 10px; color: var(--ink3); font-size: 13px; }
+.ph-status b { font-weight: 600; color: var(--leaf); margin-right: 4px; }
+.vs-pdev { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.vs-pdev-sum { font-size: 14px; color: var(--ink2); text-align: right; }
+.vs-pdev-sum.vs-dev-no { color: var(--ink3); }
+.vs-pdev-body { background: var(--bg-soft); padding-left: 12px; border-top: 1px solid var(--line-soft); }
+.vs-dev-no { color: var(--ink3); }
+.vs-psound { padding: 12px 15px 0; font-size: 13px; font-weight: 600; color: var(--ink3); border-top: 1px solid var(--line-soft); }
+.vs-pslider { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.vs-pslider .tr { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--divider); }
+.vs-pslider .tr i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--leaf); }
+.vs-pslider .tr b { position: absolute; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--leaf); }
+.vs-pslider .v { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink2); }
+.vs-ptags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.vs-ptags span { padding: 3px 10px; border-radius: 999px; background: var(--accent-tint); color: var(--leaf); font-size: 14px; }
+.vs-ptags span.add { background: none; border: 1px dashed var(--divider); color: var(--ink3); }
+.p-pills span i.vs-where, .p-pills span .vs-where { font-size: 12px; }
+.vs-ptext { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--divider); border-radius: 10px; font-size: 15px; line-height: 1.45; }
+.vs-pends { display: flex; justify-content: space-between; margin: 4px 52px 0 0; font-size: 13px; color: var(--ink3); }
+.ph-ho, .ph-divider, .ph-queued, .vs-psub { font-size: 14px; }

@@ -64,6 +64,10 @@ Actions that depend on the provider follow the chat's provider capabilities (`02
 
 A provider switch, and a move to another host, starts a new chat linked to the old one (`04-chats-and-folders.md` § Provider switches, § Moving to another host). Surfaces show the linked chats as one continuing thread: the new chat opens with a divider naming the chat it continues and both models or hosts, the earlier chat ends with a divider naming the chat that continues it, and each divider opens the other chat. The new chat's first message is the visible carried-over context. The chat list shows the thread once, as its newest chat.
 
+## Speech engines
+
+Every app surface reports the speech engines it can run for a direct call (`07-voice-app.md` § Direct calls) when it connects and whenever that changes: for speech to text and for text to speech, each engine with where it runs (on the device, or a cloud provider), its models and, for text to speech, its voices. On-device engines are those installed on the device (on a Mac, Parakeet and Kokoro; on a phone, Android's own recogniser and voices); cloud engines are those the account has a key for. The server keeps each surface's last report, so Settings shows every linked device's engines, including a device that is offline. A surface that has never reported shows as such, not as having none.
+
 ## Handover
 
 The server keeps one account-wide view position: the page the user is on and, in a chat, the message at the top of the viewport. Pages that exist on every surface are covered — a chat, jobs, a job, pads, a pad and settings; anything else (new chat, lifecycle screens) reports nothing.

@@ -1,0 +1,94 @@
+{
+ "screens": [
+  {
+   "id": "settings-sound-elevenlabs",
+   "name": "Settings \u00b7 voice agent sound, ElevenLabs",
+   "path": "settings-sound-elevenlabs.html"
+  },
+  {
+   "id": "settings-sound-openai",
+   "name": "Settings \u00b7 voice agent sound, OpenAI",
+   "path": "settings-sound-openai.html"
+  },
+  {
+   "id": "settings-sound-gemini",
+   "name": "Settings \u00b7 voice agent sound, Gemini",
+   "path": "settings-sound-gemini.html"
+  },
+  {
+   "id": "phone-settings",
+   "name": "Phone \u00b7 settings, every device",
+   "path": "phone-settings.html"
+  },
+  {
+   "id": "settings-devices",
+   "name": "Settings \u00b7 devices collapsed",
+   "path": "settings-devices.html"
+  },
+  {
+   "id": "settings-direct",
+   "name": "Settings \u00b7 every device in one place",
+   "path": "settings-direct.html"
+  },
+  {
+   "id": "settings-direct-partway",
+   "name": "Settings \u00b7 a device partway set up",
+   "path": "settings-direct-partway.html"
+  },
+  {
+   "id": "settings-agent-models",
+   "name": "Settings \u00b7 voice agent, model list",
+   "path": "settings-agent-models.html"
+  },
+  {
+   "id": "call-menu",
+   "name": "Call button menu \u00b7 right-click",
+   "path": "call-menu.html"
+  },
+  {
+   "id": "phone-call-menu",
+   "name": "Phone \u00b7 long-press the call button",
+   "path": "phone-call-menu.html"
+  },
+  {
+   "id": "index",
+   "name": "A \u00b7 one row per direction, collapsed",
+   "path": "index.html"
+  },
+  {
+   "id": "phone-a",
+   "name": "Phone \u00b7 A \u00b7 one row per direction",
+   "path": "phone-a.html"
+  },
+  {
+   "id": "b-paired",
+   "name": "B \u00b7 one row per hand-off, collapsed",
+   "path": "b-paired.html"
+  },
+  {
+   "id": "phone-b",
+   "name": "Phone \u00b7 B \u00b7 one row per hand-off",
+   "path": "phone-b.html"
+  },
+  {
+   "id": "b-paired-open",
+   "name": "B \u00b7 hand-off opened",
+   "path": "b-paired-open.html"
+  },
+  {
+   "id": "phone-b-open",
+   "name": "Phone \u00b7 B \u00b7 hand-off opened",
+   "path": "phone-b-open.html"
+  },
+  {
+   "id": "direct",
+   "name": "Direct call \u00b7 agent working",
+   "path": "direct.html"
+  },
+  {
+   "id": "phone-direct",
+   "name": "Phone \u00b7 direct call, agent working",
+   "path": "phone-direct.html"
+  }
+ ]
+}

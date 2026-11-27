@@ -58,7 +58,7 @@ Shared by every host, stored on the server:
 - Two host behaviours that were environment variables are settings: `smallJobModels`, the ordered model list for small one-shot jobs (`02-host.md` § Small jobs), and `speechBackend`, the speech-to-text engine (`02-host.md` § Speech set-up). The server refuses an empty or repeated model list and a `speechBackend` that is not `auto`, `off`, `groq`, `elevenlabs`, `local` or `parakeet`. `toolPromptOverrides` is the third such setting (`06-threads-manager-speakers.md` § Tool prompts). No host reads any of the three from its environment (`principles.md` § Configuration).
 - Agent behaviour: default model, default permission mode, the limit behaviour (`10-auth.md` § Limits), automatic continue (`12-error-and-offline.md` § Continue), question expiry, chat-name interval, and the layers in `14-design-web.md` § Agent behavior.
 - Experimental features: one on/off switch, off by default, that shows or hides the half-finished features (`14-design-web.md` § `/settings` details → Experimental features). Account-wide, so every surface agrees.
-- Voice: the Kokoro voice and the voice config matrix (`07-voice-app.md`).
+- Voice: the voice agent setup and voice instructions, each device's direct-call setup, whether agents can call and the call settings (`07-voice-app.md`).
 - The Manager's home host, the Manager sweep and quiet hours, the voice address word, and the special threads' model and rotation schedule.
 - `Send to my phone after`: how long a computer may sit idle before notifications go to the phone instead (`09-notifications.md` § Presence heuristic). 1 minute (the default), 5 minutes, or `Only when I lock`.
 

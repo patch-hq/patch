@@ -1,0 +1,14 @@
+{
+ "screens": [
+  {
+   "id": "index",
+   "name": "Today",
+   "path": "index.html"
+  },
+  {
+   "id": "proposed",
+   "name": "Proposed",
+   "path": "proposed.html"
+  }
+ ]
+}

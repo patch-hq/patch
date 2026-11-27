@@ -1,0 +1,107 @@
+/* Voice hand-offs: a quiet row in the voice gutter, not a card in the conversation. */
+.ho-msg { margin-top: -2px; margin-bottom: 6px; }
+.ho-mark { color: var(--ink-3); }
+.ho-wrap { flex: 1 1 auto; min-width: 0; }
+.ho-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
+  padding: 3px 8px; margin-left: -8px; border: 0; border-radius: 6px; background: none;
+  font: inherit; font-size: var(--text-min); color: var(--ink-3); text-align: left; cursor: pointer;
+}
+.ho-row:hover { background: var(--bg-elevated); color: var(--ink-2, var(--ink)); }
+.ho-dir { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; font-weight: 600; color: var(--ink-2, var(--ink)); }
+.ho-arrow { display: inline-flex; color: var(--ink-3); }
+.ho-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ho-state { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.ho-chev { flex: 0 0 auto; display: inline-flex; transition: transform .15s; }
+.ho-msg[data-open="true"] .ho-chev { transform: rotate(90deg); }
+.ho-msg[data-open="true"] .ho-text { visibility: hidden; }
+.ho-body {
+  margin: 4px 0 4px 0; padding: 10px 12px; border-radius: var(--radius); background: var(--bg-elevated);
+  display: flex; flex-direction: column; gap: 10px; font-size: var(--text-min); color: var(--ink);
+}
+.ho-part p { margin: 3px 0 0; line-height: 1.55; }
+.ho-spin {
+  width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--ink-3);
+  animation: ho-spin 0.9s linear infinite; flex: 0 0 auto;
+}
+@keyframes ho-spin { to { transform: rotate(360deg); } }
+
+/* Call bar: Voice | Direct to agent */
+.vb-switch { display: inline-flex; flex: 0 0 auto; padding: 2px; border: 1px solid var(--line); border-radius: 999px; margin-right: 6px; }
+.vb-seg { border: 0; background: none; padding: 3px 10px; border-radius: 999px; font: inherit; font-size: var(--text-min); color: var(--ink-3); cursor: pointer; white-space: nowrap; }
+.vb-seg[aria-checked="true"] { background: var(--bg-elevated); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
+.vb-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-min); color: var(--ink-3); white-space: nowrap; overflow: hidden; }
+
+/* Direct mode in the transcript */
+.dm-divider { text-align: center; font-size: var(--text-min); color: var(--ink-3); margin: 10px 0 12px; }
+.dm-working { display: flex; align-items: center; gap: 6px; font-size: var(--text-min); color: var(--ink-3); margin: 0 0 12px; }
+.dm-spoken { color: var(--ink-3); }
+.dm-queued { display: block; text-align: right; font-size: var(--text-min); color: var(--ink-3); margin-top: 2px; }
+
+@media (max-width: 760px) {
+  .sb, .sidebar-backdrop, .set-nav { display: none !important; }
+  .vb-seg { padding: 3px 7px; }
+}
+.ho-msg .msg-voice-row { align-items: stretch; width: 100%; }
+.ho-msg .ho-mark { top: 6px; padding-top: 0; }
+.ho-wrap { overflow: hidden; }
+
+/* Settings → Voice, stepped */
+.vs-step { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 8px; border-radius: 50%;
+  border: 1px solid var(--line); font-size: 11px; color: var(--ink-3); vertical-align: 1px; }
+.vs-where { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; margin-top: 1px; }
+.set-pills button .vs-where { line-height: 1.2; }
+.vs-refresh { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; }
+.vs-select-wrap { position: relative; }
+.vs-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 240px; padding: 4px;
+  background: var(--bg-elevated); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: rgba(0,0,0,.12) 0 8px 24px; }
+.vs-opt { padding: 6px 10px; border-radius: var(--radius-sm); white-space: nowrap; }
+.vs-opt.on { background: var(--accent-tint); color: var(--accent-strong); }
+
+/* Call button menu */
+.vs-callmenu { left: 453px; bottom: 70px; top: auto; }
+.vs-menu-hint { margin-left: 14px; color: var(--ink-3); font-size: var(--text-min); }
+.context-menu-item[data-focus="true"] { background: var(--accent-tint); color: var(--accent-strong); }
+@media (max-width: 760px) { .vs-callmenu { left: 16px; } }
+.set-card:has(.vs-list), .set-row:has(.vs-list) { overflow: visible; }
+.vs-opt { font-size: 14px; }
+
+/* Direct calls: every linked device in one list */
+.vs-dev { cursor: pointer; }
+.vs-dev-sum { color: var(--ink-2, var(--ink)); font-size: var(--text-min); }
+.vs-dev-no { color: var(--ink-3); }
+.vs-dev-chev { display: inline-flex; color: var(--ink-3); margin-left: 8px; transition: transform .15s; }
+.vs-dev[data-open="true"] .vs-dev-chev { transform: rotate(90deg); }
+.vs-dev-body { background: var(--bg-soft, var(--bg-elevated)); padding-left: 24px; }
+.vs-dev-body .set-row { background: transparent; }
+
+/* How it sounds: the provider's own voice controls */
+.vs-sound { background: var(--bg-soft, var(--bg-elevated)); }
+.vs-sound-head { padding: 12px 16px 0; font-size: var(--text-min); font-weight: 600; color: var(--ink-3); }
+.vs-sound .set-row { background: transparent; }
+.vs-slider { display: inline-flex; align-items: center; gap: 10px; }
+.vs-slider input { width: 200px; accent-color: var(--accent-strong); }
+.vs-val { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2, var(--ink)); }
+.vs-toggle { display: inline-block; width: 36px; height: 20px; border-radius: 999px; background: var(--line); position: relative; }
+.vs-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+.vs-toggle.on { background: var(--accent-strong); }
+.vs-toggle.on::after { left: 18px; }
+.vs-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.vs-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-tint); color: var(--accent-strong); font-size: var(--text-min); }
+.vs-tag b { font-weight: 400; color: var(--ink-3); cursor: pointer; }
+.vs-tag-add, .vs-text { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 5px 10px; font: inherit; background: var(--bg-elevated); color: var(--ink); }
+.vs-tag-add { width: 130px; font-size: var(--text-min); }
+.vs-text { width: 100%; box-sizing: border-box; }
+.vs-exp { margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--warn-tint, #f6ecd2); color: var(--warn, #9a6b00); font-size: 11px; letter-spacing: 0; text-transform: none; font-weight: 600; }
+.set-row-ctrl:has(.vs-text) { width: 100%; } .set-row-ctrl:has(.vs-text) .vs-text { width: 100%; }
+
+/* design pass */
+.vs-where { font-size: 12px; }
+.vs-end { font-size: var(--text-min); color: var(--ink-3); white-space: nowrap; }
+.vs-slider input { width: 160px; }
+textarea.vs-text { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.5; }
+.ho-row, .ho-body, .dm-divider, .dm-working, .dm-queued { font-size: 14px; }
+textarea.vs-text { min-height: 0; height: auto; padding: 8px 12px; }
+.vs-end { display: inline-block; width: 74px; }
+.vs-end:first-child { text-align: right; }
+.vs-val { min-width: 48px; }
