@@ -791,6 +791,127 @@ export const AudioErrorEvent = z
   .strict();
 export type AudioErrorEvent = z.infer<typeof AudioErrorEvent>;
 
+// --- line liveness + call log (spec/07 § A dropped call comes back) ---------
+
+/** How often the host sends a heartbeat on a call. */
+export const HEARTBEAT_INTERVAL_MS = 1_000;
+/**
+ * A surface that has heard nothing from the host for this long treats the line
+ * as lost: three missed heartbeats, so one late frame is not a drop.
+ */
+export const HEARTBEAT_LOST_AFTER_MS = 3 * HEARTBEAT_INTERVAL_MS;
+
+/**
+ * Both ways on a call. The host sends one every `HEARTBEAT_INTERVAL_MS`,
+ * numbered from 0 per session and carrying the round trip it last measured;
+ * the surface echoes each back with the same `n` and no `rttMs`, which is how
+ * the host measures it.
+ */
+export const AudioHeartbeatEvent = z
+  .object({
+    type: z.literal('audio.heartbeat'),
+    sessionId: z.string().min(1),
+    /** The heartbeat's number, from 0 per session. */
+    n: z.number().int().nonnegative(),
+    /** Host → surface: the last round trip the host measured, in ms. */
+    rttMs: z.number().nonnegative().optional(),
+  })
+  .strict();
+export type AudioHeartbeatEvent = z.infer<typeof AudioHeartbeatEvent>;
+
+/** Why a call's audio stopped (spec/07 § Call logs). */
+export const CallStopReason = z.enum([
+  /** No heartbeat from the host for `HEARTBEAT_LOST_AFTER_MS`. */
+  'signal_lost',
+  /** The audio connection closed under a live call. */
+  'connection_closed',
+  /** The server reported the chat's host gone mid-call. */
+  'host_unreachable',
+  /** A redial was not acknowledged in time. */
+  'connect_timeout',
+  /** Another app took the audio focus (Android). */
+  'audio_focus_taken',
+  /** An audio device was added or removed (headset, Bluetooth). */
+  'output_device_changed',
+]);
+export type CallStopReason = z.infer<typeof CallStopReason>;
+
+const callLogBase = {
+  /** ms since epoch, on the surface's clock. */
+  at: z.number().int().nonnegative(),
+  /** The session the entry is about — not necessarily the one it is sent on. */
+  sessionId: z.string().min(1),
+};
+
+/** One record in a call's log (spec/07 § Call logs). */
+export const CallLogEntry = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('audio_stopped'),
+      ...callLogBase,
+      reason: CallStopReason,
+      detail: z.string().max(500).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('quality'),
+      ...callLogBase,
+      /** Heartbeats heard on the session. */
+      heartbeats: z.number().int().nonnegative(),
+      /** Heartbeats never heard (gaps in their numbers). */
+      lost: z.number().int().nonnegative(),
+      /** Heartbeats that came more than half an interval late. */
+      late: z.number().int().nonnegative(),
+      /** The longest the surface went without one, in ms. */
+      maxGapMs: z.number().int().nonnegative(),
+      /** Round trips the host reported, in ms. */
+      rttMs: z.object({ min: z.number(), avg: z.number(), max: z.number() }).strict().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('reconnected'),
+      ...callLogBase,
+      /** How long the line was down, in ms. */
+      downMs: z.number().int().nonnegative(),
+      /** How many dials it took. */
+      attempts: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('turn'),
+      ...callLogBase,
+      /** End of the user's speech to their words coming back. */
+      speechToTextMs: z.number().int().nonnegative().optional(),
+      /** Their words to the first audio of the reply. */
+      modelMs: z.number().int().nonnegative().optional(),
+      /** The first audio of the reply to its end. */
+      voiceMs: z.number().int().nonnegative().optional(),
+    })
+    .strict(),
+]);
+export type CallLogEntry = z.infer<typeof CallLogEntry>;
+
+/** Most entries one `audio.call_log` carries. */
+export const CALL_LOG_MAX_ENTRIES = 500;
+
+/**
+ * Surface → host: the call's log since it was last sent, on reconnect and at
+ * the end (spec/07 § Call logs). The host writes it to its own log.
+ */
+export const AudioCallLogEvent = z
+  .object({
+    type: z.literal('audio.call_log'),
+    sessionId: z.string().min(1),
+    entries: z.array(CallLogEntry).max(CALL_LOG_MAX_ENTRIES),
+    /** Entries the surface dropped because the log outgrew `CALL_LOG_MAX_ENTRIES`. */
+    dropped: z.number().int().positive().optional(),
+  })
+  .strict();
+export type AudioCallLogEvent = z.infer<typeof AudioCallLogEvent>;
+
 // --- union -----------------------------------------------------------------
 
 export const AudioEvent = z.discriminatedUnion('type', [
@@ -807,6 +928,8 @@ export const AudioEvent = z.discriminatedUnion('type', [
   AudioStateEvent,
   AudioBargeInEvent,
   AudioErrorEvent,
+  AudioHeartbeatEvent,
+  AudioCallLogEvent,
 ]);
 export type AudioEvent = z.infer<typeof AudioEvent>;
 export type AudioEventType = AudioEvent['type'];
@@ -825,6 +948,8 @@ export const AUDIO_EVENT_SCHEMAS = {
   'audio.state': AudioStateEvent,
   'audio.barge_in': AudioBargeInEvent,
   'audio.error': AudioErrorEvent,
+  'audio.heartbeat': AudioHeartbeatEvent,
+  'audio.call_log': AudioCallLogEvent,
 } as const satisfies Record<AudioEventType, z.ZodTypeAny>;
 
 export function encodeAudio(event: AudioEvent): string {

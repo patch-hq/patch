@@ -61,6 +61,11 @@
       "types": "./dist/direct-call-runtime.d.ts",
       "import": "./dist/direct-call-runtime.js",
       "default": "./dist/direct-call-runtime.js"
+    },
+    "./call-line": {
+      "types": "./dist/call-line.d.ts",
+      "import": "./dist/call-line.js",
+      "default": "./dist/call-line.js"
     }
   },
   "scripts": {

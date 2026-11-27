@@ -15,6 +15,7 @@ function fakeSession(over: Partial<AudioSession> = {}): AudioSession {
     setMuted: () => {},
     finishDictation: () => {},
     isMuted: () => false,
+    send: () => true,
     setSessionMode: () => {},
     speak: () => {},
     sendPcm: () => {},

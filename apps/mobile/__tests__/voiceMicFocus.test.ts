@@ -22,6 +22,12 @@ describe('PatchVoiceMic audio focus', () => {
   it('abandons focus on start failure, stop and invalidate', () => {
     expect(plugin.match(/abandonFocus\(\)/g)!.length).toBe(4); // 3 call sites + definition
   });
+  it('reports focus taken and devices coming or going, and stops watching on stop, failure and teardown', () => {
+    expect(plugin).toContain('.setOnAudioFocusChangeListener(focusListener)');
+    expect(plugin).toContain('emitAudioStopped("audio_focus_taken"');
+    expect(plugin).toContain('emitAudioStopped("output_device_changed"');
+    expect(plugin.match(/unwatchDevices\(\)/g)!.length).toBe(4); // 3 call sites + definition
+  });
   it('keeps the android copy identical to the plugin source', () => {
     expect(android).toBe(plugin);
   });

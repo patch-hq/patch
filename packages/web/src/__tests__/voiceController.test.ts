@@ -36,8 +36,8 @@ import {
   toggleCallMute,
   endVoiceCall,
   describeCallError,
-  CALL_REDIAL_DELAYS_MS,
 } from '../lib/voiceController.js';
+import { CALL_REDIAL_DELAYS_MS } from '@patch/wire/call-line';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -54,6 +54,7 @@ import type {
 let lastCallbacks: AudioSessionCallbacks | null = null;
 let endSpy: ReturnType<typeof vi.fn>;
 let muteSpy: ReturnType<typeof vi.fn>;
+const sendSpy = vi.fn((_frame: unknown) => true);
 
 function stubOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
   lastCallbacks = opts.callbacks;
@@ -67,6 +68,7 @@ function stubOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
     },
     finishDictation: () => {},
     isMuted: () => muted,
+    send: sendSpy,
     setSessionMode: () => {},
     speak: () => {},
     sendPcm: () => {},
@@ -496,11 +498,15 @@ describe('voiceController', () => {
     const sound = vi.mocked(playCallSound);
     sound.mockClear();
     await startVoiceCall('c1');
+    // Connected is the host acknowledging the session, not the socket opening.
+    expect(sound.mock.calls).toEqual([]);
+    lastCallbacks?.onState?.('listening', 'sess-1');
     expect(sound.mock.calls).toEqual([['connected']]);
     endVoiceCall();
     expect(sound.mock.calls).toEqual([['connected'], ['ended']]);
     // The call moving to another device sounds too, and a call that is not live makes no sound.
     await startVoiceCall('c1');
+    lastCallbacks?.onState?.('listening', 'sess-1');
     lastCallbacks?.onClose('transferred');
     expect(sound.mock.calls.map((c) => c[0])).toEqual(['connected', 'ended', 'connected', 'ended']);
     endVoiceCall();
@@ -525,6 +531,7 @@ describe('voiceController', () => {
         return stubOpener(o);
       });
       await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
       lastCallbacks?.onClose();
       expect(useVoiceStore.getState().call).not.toBeNull();
       expect(useVoiceStore.getState().call?.phase).toBe('connecting');
@@ -542,6 +549,7 @@ describe('voiceController', () => {
     try {
       const sound = vi.mocked(playCallSound);
       await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
       sound.mockClear();
       vi.mocked(syncCallSoundLoop).mockClear();
       lastCallbacks?.onClose();
@@ -550,6 +558,8 @@ describe('voiceController', () => {
       // A redial is not a first dial: the connecting pulse stays off.
       expect(looping('connecting')).toBe(false);
       await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS[0] ?? 0);
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
+      lastCallbacks?.onState?.('listening', 'sess-1');
       expect(useVoiceStore.getState().call?.reconnecting).toBe(false);
       expect(looping('reconnecting')).toBe(false);
       expect(sound.mock.calls).toEqual([['reconnected']]);
@@ -581,6 +591,7 @@ describe('voiceController', () => {
     vi.useFakeTimers();
     try {
       await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
       lastCallbacks?.onError('host_unreachable: h1 went offline mid-session');
       lastCallbacks?.onClose();
       expect(useVoiceStore.getState().call?.phase).toBe('connecting');
@@ -590,20 +601,109 @@ describe('voiceController', () => {
     }
   });
 
-  it('gives up and says so once every redial has failed', async () => {
+  it('never gives up redialling a dropped call, saying once that it is still trying', async () => {
     vi.useFakeTimers();
     try {
-      useUiStore.getState().clearToasts();
+      const push = vi.spyOn(useUiStore.getState(), 'pushError');
       await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
+      let tries = 0;
       __setAudioOpenerForTests(async () => {
+        tries++;
         throw new Error('host unreachable');
       });
       lastCallbacks?.onClose();
       for (const d of CALL_REDIAL_DELAYS_MS) await vi.advanceTimersByTimeAsync(d);
-      expect(useVoiceStore.getState().call).toBeNull();
-      expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+      await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS.at(-1)! * 3);
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
+      expect(tries).toBeGreaterThan(CALL_REDIAL_DELAYS_MS.length);
+      // Toasts expire, so the one said is read from the call that said it.
+      expect(push.mock.calls.map((c) => c[0])).toEqual([
+        'voice call: host unreachable — still trying',
+      ]);
+      push.mockRestore();
     } finally {
       vi.useRealTimers();
+      endVoiceCall();
+    }
+  });
+
+  it('a heartbeat is echoed, and the call log goes to the host before the call ends', async () => {
+    sendSpy.mockClear();
+    await startVoiceCall('c1');
+    lastCallbacks?.onState?.('listening', 'sess-1');
+    lastCallbacks?.onHeartbeat?.({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
+    expect(sendSpy).toHaveBeenCalledWith({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
+    lastCallbacks?.onState?.('transcribing', 'sess-1');
+    lastCallbacks?.onTranscriptFinal('hello', true);
+    lastCallbacks?.onReplyAudio?.();
+    lastCallbacks?.onTtsEnd(false);
+    endSpy.mockClear();
+    endVoiceCall();
+    const log = sendSpy.mock.calls
+      .map((c) => c[0] as { type: string; entries?: Array<{ kind: string }> })
+      .find((f) => f.type === 'audio.call_log');
+    expect(log?.entries?.map((e) => e.kind)).toEqual(['turn', 'quality']);
+    expect(endSpy).toHaveBeenCalledWith('ended');
+  });
+
+  it('a heartbeat that stops hangs the dead session up and redials', async () => {
+    vi.useFakeTimers();
+    try {
+      await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
+      lastCallbacks?.onHeartbeat?.({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
+      endSpy.mockClear();
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(endSpy).toHaveBeenCalledWith('lost');
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      endVoiceCall();
+    }
+  });
+
+  it("the browser's audio devices changing mid-call goes into the call log", async () => {
+    const devices = new EventTarget();
+    Object.defineProperty(navigator, 'mediaDevices', { value: devices, configurable: true });
+    try {
+      sendSpy.mockClear();
+      await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
+      lastCallbacks?.onHeartbeat?.({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
+      devices.dispatchEvent(new Event('devicechange'));
+      endVoiceCall();
+      // Once the call is over, a change is nobody's business.
+      devices.dispatchEvent(new Event('devicechange'));
+      const log = sendSpy.mock.calls
+        .map((c) => c[0] as { type: string; entries?: Array<{ kind: string; reason?: string }> })
+        .find((f) => f.type === 'audio.call_log');
+      expect(log?.entries?.[0]).toMatchObject({
+        kind: 'audio_stopped',
+        reason: 'output_device_changed',
+      });
+    } finally {
+      Reflect.deleteProperty(navigator, 'mediaDevices');
+    }
+  });
+
+  it('a call that drops while the page is hidden redials as soon as it is seen again', async () => {
+    vi.useFakeTimers();
+    try {
+      const opened: number[] = [];
+      __setAudioOpenerForTests(async (o) => {
+        opened.push(Date.now());
+        return stubOpener(o);
+      });
+      await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
+      lastCallbacks?.onClose();
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opened).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+      endVoiceCall();
     }
   });
 
@@ -623,7 +723,7 @@ describe('voiceController', () => {
     });
     await startVoiceCall('c1');
     expect(useVoiceStore.getState().call).toBeNull();
-    expect(useUiStore.getState().errors[0]?.message).toBe('Voice call failed. Try again.');
+    expect(useUiStore.getState().errors[0]?.message).toBe('voice call: mic denied');
   });
 
   it('D3: a kokoro_unavailable audio error reports the TTS infra dependency and ends the call', async () => {
@@ -670,6 +770,7 @@ describe('voiceController', () => {
       sendPcm: () => {},
       finishDictation: () => {},
       isMuted: () => false,
+      send: () => true,
       end: (reason?: string) => endSpy(reason),
     });
     await p;

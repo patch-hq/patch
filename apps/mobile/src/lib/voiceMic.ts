@@ -25,6 +25,9 @@ interface MicFrameEvent {
   samples?: number;
   /** Set when the native read loop failed mid-stream (NO FALLBACK). */
   error?: string;
+  /** Set when the phone's audio stopped under the capture: focus taken, a device came or went. */
+  audioStopped?: 'audio_focus_taken' | 'output_device_changed';
+  detail?: string;
 }
 
 const MODULE_NAME = 'PatchVoiceMic';
@@ -105,11 +108,14 @@ function serial<T>(op: () => Promise<T>): Promise<T> {
  * Int16Array (little-endian, matching the host's wire order) and handed to
  * `onFrame`. A mid-stream native failure, or a recorder that opens but never
  * delivers a frame, calls `onError` (the caller ends the call and surfaces it —
- * NO FALLBACK). No-op on non-Android.
+ * NO FALLBACK). Audio stopping under the capture without it failing — another
+ * app taking the focus, a headset coming or going — goes to `onAudioStopped`,
+ * for a call's log. No-op on non-Android.
  */
 export function startMicCapture(
   onFrame: (pcm: Int16Array) => void,
   onError: (message: string) => void,
+  onAudioStopped?: (reason: 'audio_focus_taken' | 'output_device_changed', detail: string) => void,
 ): Promise<void> {
   return serial(async () => {
     const m = getModule();
@@ -122,6 +128,10 @@ export function startMicCapture(
     const mine = emitter.addListener(EVENT, (ev: MicFrameEvent) => {
       if (ev.error) {
         onError(ev.error);
+        return;
+      }
+      if (ev.audioStopped) {
+        onAudioStopped?.(ev.audioStopped, ev.detail ?? '');
         return;
       }
       if (!ev.base64) return;

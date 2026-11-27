@@ -126,11 +126,7 @@ interface VoiceState {
   setRemoteCall(call: RemoteCall, active: boolean): void;
   /** Replace every remote call at once, from the server's `voice.calls` snapshot. */
   setRemoteCalls(calls: RemoteCall[]): void;
-  /**
-   * Open (or clear) the call. A redial keeps what belongs to the call rather
-   * than the session: when it connected, that it is reconnecting, and mute.
-   */
-  setActive(session: ActiveVoiceSession | null, opts?: { redial?: boolean }): void;
+  setActive(session: ActiveVoiceSession | null): void;
   setCallReconnecting(on: boolean): void;
   /**
    * The open session got its real id and audio URL: swap them in WITHOUT
@@ -188,19 +184,18 @@ export const useVoiceStore = create<VoiceState>((set) => ({
       return { remoteCalls: next };
     });
   },
-  setActive(session, opts) {
-    const redial = opts?.redial === true && session !== null;
-    set((st) => ({
+  setActive(session) {
+    set({
       activeSession: session,
-      callMuted: redial ? st.callMuted : false,
+      callMuted: false,
       callError: null,
       callPhase: 'connecting',
       callTranscriptPartial: '',
       callUnaddressed: null,
-      callConnectedAt: redial ? st.callConnectedAt : null,
-      callReconnectingSince: redial ? st.callReconnectingSince : null,
+      callConnectedAt: null,
+      callReconnectingSince: null,
       callPaused: null,
-    }));
+    });
   },
   setCallReconnecting(on) {
     set((st) => ({

@@ -6,6 +6,7 @@
 // below asserts that a layer which is stale, unstamped or unreadable is reported as
 // SUCH, never as agreement.
 
+import { MIN_SUPPORTED_HOST_VERSION } from '../src/host-compat.js';
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -672,7 +673,7 @@ describe('drift between hosts', () => {
     hostId: 'host-a',
     hostName: 'host-a',
     online: true,
-    version: '1.1.1703',
+    version: MIN_SUPPORTED_HOST_VERSION,
     gitSha: 'abc1234',
     builtAt: '2026-08-05T10:00:00.000Z',
     ...over,
