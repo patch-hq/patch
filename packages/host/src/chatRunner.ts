@@ -8341,7 +8341,7 @@ export class Daemon {
               chatId,
               role: 'user',
               content,
-              seq: this.bumpSeq(chatId),
+              seq: this.takeReservedTurnSeq(item.localId) ?? this.bumpSeq(chatId),
               createdAt: this.opts.now(),
               localId: item.localId,
               midTurn: true,
@@ -9460,6 +9460,25 @@ export class Daemon {
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     });
+  }
+
+  /** Seqs reserved for turns that may queue, by the turn's localId. */
+  private readonly reservedTurnSeqs = new Map<string, number>();
+
+  /**
+   * Reserve the seq a turn's own message will land on, at the moment it is
+   * requested rather than when it starts. A fast voice's hand-off can queue
+   * behind a running turn; without this its bubble is written when the turn
+   * starts, after everything said in the call since, and reads out of order.
+   */
+  reserveTurnSeq(chatId: string, localId: string): void {
+    this.reservedTurnSeqs.set(localId, this.reserveVoiceSeq(chatId));
+  }
+
+  private takeReservedTurnSeq(localId: string): number | undefined {
+    const seq = this.reservedTurnSeqs.get(localId);
+    this.reservedTurnSeqs.delete(localId);
+    return seq;
   }
 
   /** Reserve the seq a streamed fast-voice reply will finalise on. */
@@ -11141,7 +11160,9 @@ export class Daemon {
         chatId,
         role: 'user',
         content: userContent,
-        seq: this.bumpSeq(chatId),
+        seq:
+          (localId !== undefined ? this.takeReservedTurnSeq(localId) : undefined) ??
+          this.bumpSeq(chatId),
         createdAt: this.opts.now(),
         // Echo the surface's id so it reconciles its optimistic bubble with
         // this persisted copy instead of rendering the turn twice.

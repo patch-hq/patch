@@ -7124,6 +7124,7 @@ async function startHost(
       // Mark a hand-off in the chat, so a spoken "I've passed that on" can be checked against it.
       if (handoff === true) {
         chatVoice.handoffSent({ sessionId: localIdSuffix, chatId, request: message });
+        daemon.reserveTurnSeq(chatId, localId);
       }
       // `sendInput` awaits the whole turn (and any turns that queue behind it),
       // so by the time it returns the bridge has normally already settled. If
