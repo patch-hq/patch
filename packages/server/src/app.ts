@@ -1045,10 +1045,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     idGenerator,
     reach: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).reach,
-    agentCalls: () => {
-      const settings = accountSettings?.current() ?? DEFAULT_SETTINGS;
-      return { canCall: settings.agentsCanCall, autoAnswer: settings.agentCallAutoAnswer };
-    },
+    autoAnswer: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).agentCallAutoAnswer,
     userAtComputer: () => {
       const account = registry?.getAccount();
       if (!account) return false;

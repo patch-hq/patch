@@ -56,10 +56,11 @@ export interface CallOrchestratorDeps {
   /** A snoozed chat never rings or speaks (spec/09 § Snoozed chats): its call resolves as unanswered. */
   isChatSnoozed?: (chatId: string) => boolean;
   /**
-   * The account's Agents calling you settings (spec/07 § Agent-initiated
-   * voice). Unset behaves as calls on, never answered automatically.
+   * Answer automatically in hands-free (spec/07 § Agent-initiated voice).
+   * Unset: never answered automatically. Whether agents may call at all is the
+   * host's to enforce, where the tool answers.
    */
-  agentCalls?: () => { canCall: boolean; autoAnswer: boolean };
+  autoAnswer?: () => boolean;
   /**
    * Whether the user is at a computer now (spec/09 § Presence heuristic). An
    * automatic answer is the phone's, for a user away from a desk: at a
@@ -111,21 +112,6 @@ export class CallOrchestrator {
       return callId;
     }
 
-    // spec/07 § Agent-initiated voice — with Agents can call you off nothing
-    // rings and nothing is spoken. The host's tool has already told the agent;
-    // this is the server's own record of the setting, so a host holding an
-    // older settings snapshot cannot ring past it. A feed line (`speakOnly`) is
-    // not an agent calling, so it is not stopped here.
-    const agentCalls = this.deps.agentCalls?.() ?? { canCall: true, autoAnswer: false };
-    if (!agentCalls.canCall && event.speakOnly !== true) {
-      state.status = 'declined';
-      const ev: ChatCallTimeoutEvent = { type: 'chat.call_timeout', callId };
-      this.deps.wsHub.sendToAll(ev);
-      this.scheduleGc(callId);
-      this.deps.logger.info({ callId, chatId: event.chatId }, 'call: not placed, calls are off');
-      return callId;
-    }
-
     // spec/09 § Reaching the user — under `auto-notify` a call does not ring.
     // The message is spoken aloud on the surface the user is at, in a short
     // session that holds no microphone, and nothing is accepted or answered.
@@ -160,7 +146,7 @@ export class CallOrchestrator {
     // The phone answers on its own; nothing rings on a computer, and the push
     // carries the flag so a phone woken by it answers too. At a computer the
     // call rings as usual.
-    if (agentCalls.autoAnswer && this.deps.userAtComputer?.() !== true) {
+    if (this.deps.autoAnswer?.() === true && this.deps.userAtComputer?.() !== true) {
       const answer: ChatCallRequestEvent = {
         type: 'chat.call_request',
         callId,

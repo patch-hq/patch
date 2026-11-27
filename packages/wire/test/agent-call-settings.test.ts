@@ -1,5 +1,5 @@
 // Agents calling you and Pause when quiet for (spec/07 § Agent-initiated voice,
-// § Pause): new shared settings an older server's snapshot does not carry.
+// § Pause).
 
 import { describe, expect, it } from 'vitest';
 import { AudioSessionStartEvent } from '../src/audio.js';
@@ -8,7 +8,6 @@ import {
   DEFAULT_SHARED_SETTINGS,
   NotifyEvent,
   PAUSE_WHEN_QUIET_CHOICES,
-  SharedSettings,
   SharedSettingsPatch,
 } from '../src/index.js';
 
@@ -17,19 +16,6 @@ describe('agent call settings', () => {
     expect(DEFAULT_SHARED_SETTINGS.agentsCanCall).toBe(true);
     expect(DEFAULT_SHARED_SETTINGS.agentCallAutoAnswer).toBe(false);
     expect(DEFAULT_SHARED_SETTINGS.pauseWhenQuietMinutes).toBe(0);
-  });
-
-  it('a snapshot from a server older than them still reads, with the defaults', () => {
-    const {
-      agentsCanCall: _a,
-      agentCallAutoAnswer: _b,
-      pauseWhenQuietMinutes: _c,
-      ...older
-    } = DEFAULT_SHARED_SETTINGS;
-    const parsed = SharedSettings.parse(older);
-    expect(parsed.agentsCanCall).toBe(true);
-    expect(parsed.agentCallAutoAnswer).toBe(false);
-    expect(parsed.pauseWhenQuietMinutes).toBe(0);
   });
 
   it('a write that does not name them leaves them alone', () => {

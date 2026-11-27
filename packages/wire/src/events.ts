@@ -2940,20 +2940,20 @@ export const SharedSettings = z
     /**
      * Whether an agent's `patch_call` rings (spec/07 § Agent-initiated voice).
      * Off: the tool answers that the user has turned calls off and nothing
-     * rings. Defaulted so a settings snapshot from an older server still reads.
+     * rings.
      */
-    agentsCanCall: z.boolean().default(true),
+    agentsCanCall: z.boolean(),
     /**
      * Answer automatically in hands-free: an agent's call is answered by the
      * phone on its own instead of ringing — other playback pauses, the call
      * opens in hands-free, and playback resumes when it ends.
      */
-    agentCallAutoAnswer: z.boolean().default(false),
+    agentCallAutoAnswer: z.boolean(),
     /**
      * Pause when quiet for (spec/07 § Pause): minutes with nothing said by
      * either side after which a call pauses. 0 is off.
      */
-    pauseWhenQuietMinutes: PauseWhenQuietMinutes.default(0),
+    pauseWhenQuietMinutes: PauseWhenQuietMinutes,
   })
   .strict();
 export type SharedSettings = z.infer<typeof SharedSettings>;
