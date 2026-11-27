@@ -141,6 +141,59 @@ describe('TooltipHost', () => {
     expect(btn.getAttribute('title')).toBe('Archive');
   });
 
+  it('shows nothing after a tap: the emulated hover and focus belong to the press', () => {
+    render(
+      <>
+        <Fixture />
+        <TooltipHost />
+      </>,
+    );
+    const btn = screen.getByTestId('plain-btn');
+    fireEvent.pointerDown(btn, { pointerType: 'touch' });
+    fireEvent.mouseOver(btn);
+    fireEvent.focusIn(btn);
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(screen.queryByTestId('app-tooltip')).toBeNull();
+    expect(btn.getAttribute('title')).toBe('Archive');
+  });
+
+  it('does not name a button just clicked with the mouse', () => {
+    render(
+      <>
+        <Fixture />
+        <TooltipHost />
+      </>,
+    );
+    const btn = screen.getByTestId('plain-btn');
+    fireEvent.pointerDown(btn, { pointerType: 'mouse' });
+    fireEvent.focusIn(btn);
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(screen.queryByTestId('app-tooltip')).toBeNull();
+  });
+
+  it('still names a control on Tab once the press is long past', () => {
+    render(
+      <>
+        <Fixture />
+        <TooltipHost />
+      </>,
+    );
+    const btn = screen.getByTestId('plain-btn');
+    fireEvent.pointerDown(document.body, { pointerType: 'touch' });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    fireEvent.focusIn(btn);
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(screen.getByTestId('app-tooltip').textContent).toBe('Archive');
+  });
+
   it('keeps ONE tooltip when the title is rewritten while shown', async () => {
     render(
       <>

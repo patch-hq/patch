@@ -9012,6 +9012,10 @@ button.view-file-download {
 }
 
 .pairing-screen {
+  /* A phone is narrower than the card: keep a margin either side rather than
+     letting its border and corners sit on the screen edge. */
+  box-sizing: border-box;
+  width: calc(100% - 32px);
   max-width: 420px;
   margin: 80px auto;
   padding: 32px;
@@ -9028,6 +9032,15 @@ button.view-file-download {
   font-size: 32px;
   color: var(--accent-strong);
   margin: 0 0 12px;
+}
+.pairing-screen p {
+  margin: 0 0 12px;
+}
+@media (max-width: 600px) {
+  .pairing-screen {
+    margin-top: 48px;
+    padding: 24px;
+  }
 }
 .pairing-screen ol {
   list-style: decimal outside;
@@ -10955,6 +10968,12 @@ button.set-row-open:focus-visible {
   .set-nav h1 {
     font-size: 26px;
     margin: 0 4px 8px;
+  }
+  /* On a phone the sidebar's expand chevron sits in the tab strip, not over
+     the page, so the titles keep the same left edge as the group labels. */
+  .three-col.sidebar-collapsed .set-nav h1,
+  .three-col.sidebar-collapsed .set-head {
+    padding-left: 0;
   }
   .set-nav .set-label {
     margin: 18px 4px 6px;
@@ -18335,6 +18354,16 @@ select.permission-mode.is-pending {
   .pads-route .route-head .pads-new {
     margin-left: auto;
   }
+  /* Same shape as Jobs: arrows and New Pad on the first row, search full
+     width beneath, instead of all three squeezed into one row past the edge. */
+  .pads-route .route-head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .pads-route .route-head .jobs-search {
+    flex: 1 1 100%;
+    order: 1;
+  }
   .jobs-route .route-head .primary-btn {
     grid-column: 3;
     grid-row: 1;
@@ -18420,7 +18449,9 @@ select.permission-mode.is-pending {
 }
 .status-row {
   display: grid;
-  grid-template-columns: 16px 72px minmax(0, 1fr) auto 20px;
+  /* The action column grows for a worded action ("Reset" beside the close
+     cross); a fixed 20px made it spill left over the time. */
+  grid-template-columns: 16px 72px minmax(0, 1fr) auto minmax(20px, auto);
   column-gap: 12px;
   align-items: center;
   min-height: 32px;
@@ -18499,6 +18530,16 @@ select.permission-mode.is-pending {
 .status-row-wrap .status-row-content {
   white-space: normal;
   overflow-wrap: anywhere;
+  align-items: flex-start;
+}
+/* An opened row keeps its icon, time and actions on the first line instead of
+   floating halfway down a long wrapped goal. */
+.status-row-wrap {
+  align-items: start;
+  padding-top: 6px;
+}
+.status-row-wrap .status-row-icon {
+  padding-top: 2px;
 }
 .status-row-wrap .status-row-content > .status-grow {
   white-space: normal;
@@ -18506,6 +18547,7 @@ select.permission-mode.is-pending {
 .status-row-action {
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
   color: var(--ink-3);
 }
 .status-row-action button,
@@ -18605,7 +18647,7 @@ select.permission-mode.is-pending {
 }
 @media (max-width: 600px) {
   .status-row {
-    grid-template-columns: 16px minmax(0, 1fr) auto 20px;
+    grid-template-columns: 16px minmax(0, 1fr) auto minmax(20px, auto);
     padding: 0 16px;
   }
   .status-row-label,
