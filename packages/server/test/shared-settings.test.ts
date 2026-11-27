@@ -26,7 +26,6 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
-import { DEFAULT_VOICE_AGENT } from '@patch/wire/audio';
 import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
@@ -182,30 +181,6 @@ describe('SharedSettingsService', () => {
     expect(loaded.sweepPrompt).toBe(DEFAULT_SHARED_SETTINGS.sweepPrompt);
     expect(loaded.sweepIntervalMinutes).toBe(10);
     expect('stalledThresholdMinutes' in loaded).toBe(false);
-  });
-
-  it('a call or hands-free saved on host speech becomes the default voice agent; a device keeps it', () => {
-    const local = { backend: 'local', layer: 'direct', handoff: 'auto' };
-    writeFileSync(
-      join(dir, 'settings.json'),
-      JSON.stringify({
-        voiceConfig: {
-          ...DEFAULT_SHARED_SETTINGS.voiceConfig,
-          device: local,
-          handsFree: local,
-          call: { backend: 'openai', layer: 'heavy', handoff: 'never' },
-        },
-      }),
-    );
-    const vc = make().current().voiceConfig;
-    expect(vc.device).toEqual(local);
-    expect(vc.handsFree).toEqual({ backend: 'gemini', layer: 'light', handoff: 'auto' });
-    expect(vc.call).toEqual({ backend: 'openai', layer: 'heavy', handoff: 'never' });
-    expect(() =>
-      service.update({
-        voiceConfig: { ...vc, call: local as never },
-      }),
-    ).toThrow();
   });
 
   it('gives every deployment a stable public name from its generated identity key', () => {
@@ -404,31 +379,19 @@ describe('SharedSettingsService', () => {
     expect(make().current().modelEndpoints).toBeUndefined();
   });
 
-  it('drops the retired per-surface voice cells and voices on read; the device keeps its answer', () => {
+  it('a file with settings the schema no longer has stops the server, naming them — nothing is rewritten', () => {
     writeFileSync(
       join(dir, 'settings.json'),
       JSON.stringify({
         voiceConfig: {
-          speechToText: 'groq',
-          dictation: { phone: 'device', computer: 'whisper', tidy: false },
-          meeting: 'local',
-          device: { backend: 'openai', layer: 'light', handoff: 'auto' },
-          handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-          call: { backend: 'elevenlabs', layer: 'heavy', handoff: 'auto' },
+          ...DEFAULT_SHARED_SETTINGS.voiceConfig,
+          call: { backend: 'local', layer: 'direct', handoff: 'auto' },
         },
         geminiVoice: 'Kore',
-        openaiVoice: 'marin',
       }),
     );
-    const read = make().current();
-    expect(read.voiceConfig).toEqual({
-      speechToText: 'groq',
-      dictation: { phone: 'device', computer: 'whisper', tidy: false },
-      meeting: 'local',
-      deviceAnswer: 'agent',
-    });
-    expect(read).not.toHaveProperty('geminiVoice');
-    expect(read.voiceAgent).toEqual(DEFAULT_VOICE_AGENT);
+    expect(() => make()).toThrow(/geminiVoice/);
+    expect(() => make()).toThrow(/call/);
   });
 
   it('merges two hosts’ accounts, dropping a second copy of the same Claude account', () => {

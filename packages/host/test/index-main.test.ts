@@ -477,7 +477,7 @@ function geminiHarness(): {
       say({ serverContent: { inputTranscription: { text: request } } });
       say({
         toolCall: {
-          functionCalls: [{ id: 'call-1', name: 'pass_to_agent', args: { request } }],
+          functionCalls: [{ id: 'call-1', name: PASS_TO_AGENT_TOOL_NAME, args: { request } }],
         },
       });
       say({ serverContent: { turnComplete: true } });

@@ -461,20 +461,6 @@ export class SharedSettingsService {
         ];
       }
     }
-    // The per-surface provider cells and per-provider voices are gone: the
-    // voice agent setup replaced them (spec/07 § The voice agent). Their keys
-    // are dropped on read, like `claudeSettings` above, and the voice device's
-    // cell becomes its answer.
-    delete raw['geminiVoice'];
-    delete raw['openaiVoice'];
-    const voice = raw['voiceConfig'] as Record<string, unknown> | undefined;
-    if (voice && 'device' in voice) {
-      const device = voice['device'] as { backend?: unknown } | undefined;
-      voice['deviceAnswer'] = device?.backend === 'local' ? 'direct' : 'agent';
-      delete voice['device'];
-      delete voice['handsFree'];
-      delete voice['call'];
-    }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);
