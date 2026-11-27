@@ -573,6 +573,12 @@ export interface HostOptions {
   preprocessInput?: (req: SendInputOptions) => string | undefined;
   /** Hook called once the agent has committed a response on a chat (per turn). */
   onTurnCommitted?: (chatId: string) => void;
+  /**
+   * A turn whose message was already written into the chat (`deliverDrawn`) has
+   * started. Such a turn writes no user message of its own, so this is how a
+   * waiter that knows its `localId` learns its turn is the one now running.
+   */
+  onDrawnTurnStarted?: (chatId: string, localId: string) => void;
   /** Held from the start of a chat's pump until it settles, so the host cannot sleep mid-turn. */
   sleepGuard?: SleepGuard;
   /**
@@ -8278,7 +8284,9 @@ export class Daemon {
       if (!item) return;
       // It was announced via chat.queued → tell surfaces it's now running, so
       // they flip it from a pending chip to a live user turn.
-      this.emit({ type: 'chat.dequeued', chatId, localId: item.localId, reason: 'running' });
+      if (!this.isDrawnDelivery(chatId, item.localId)) {
+        this.emit({ type: 'chat.dequeued', chatId, localId: item.localId, reason: 'running' });
+      }
       const committed = await this.runQuery(
         chatId,
         item.message,
@@ -8317,7 +8325,12 @@ export class Daemon {
       if (item.fork || item.jobTrigger || item.hookTrigger || item.goalTrigger || item.afterTurn)
         break;
       const content = persistedUserContent(item.message);
-      if (content !== null) {
+      const drawn = this.isDrawnDelivery(chatId, item.localId);
+      if (drawn) {
+        // Already in the chat where it was said; delivered here, recorded once.
+        this.drawnDeliveries.delete(`${chatId}\u0000${item.localId}`);
+        this.opts.onDrawnTurnStarted?.(chatId, item.localId);
+      } else if (content !== null) {
         try {
           this.emitNotes(chatId, extractNotes(item.message));
           // Same as the turn-opening message: lift the `[Attachments]` block into
@@ -8343,13 +8356,15 @@ export class Daemon {
       }
       queue.shift();
       delivered.push(item);
-      this.emit({
-        type: 'chat.dequeued',
-        chatId,
-        localId: item.localId,
-        reason: 'running',
-        delivered: true,
-      });
+      if (!drawn) {
+        this.emit({
+          type: 'chat.dequeued',
+          chatId,
+          localId: item.localId,
+          reason: 'running',
+          delivered: true,
+        });
+      }
       if (item.origin !== 'machine') {
         this.drainHadUserTurn.add(chatId);
         this.unattendedTurns.delete(chatId);
@@ -8402,6 +8417,11 @@ export class Daemon {
     this.persistPendingTurns(chatId);
   }
 
+  /** True for a turn whose message is already in the chat (`deliverDrawn`) and has not started yet. */
+  private isDrawnDelivery(chatId: string, localId: string | undefined): boolean {
+    return localId !== undefined && this.drawnDeliveries.has(`${chatId}\u0000${localId}`);
+  }
+
   /** Append a turn to the chat's queue and announce it (`chat.queued`). */
   private enqueueQueued(
     chatId: string,
@@ -8439,6 +8459,8 @@ export class Daemon {
     this.turnQueues.set(chatId, q);
     this.ensureQueuedStallSweep();
     this.persistPendingTurns(chatId);
+    // Already in the chat where it was said: a pending chip at the bottom would draw it twice.
+    if (this.isDrawnDelivery(chatId, localId)) return;
     this.emit({
       type: 'chat.queued',
       chatId,
@@ -9394,6 +9416,8 @@ export class Daemon {
     role: 'user' | 'assistant';
     content: string;
     seq?: number;
+    /** False for a line the agent is about to be given itself (a hand-off), so it is not also owed as a note. */
+    owed?: boolean;
   }): number {
     if (!this.chatState.has(req.chatId)) throw new ChatNotFoundError(req.chatId);
     const seq = req.seq ?? this.bumpSeq(req.chatId);
@@ -9405,6 +9429,7 @@ export class Daemon {
       seq,
       createdAt: this.opts.now(),
     });
+    if (req.owed === false) return seq;
     let owed = this.pendingVoiceExchanges.get(req.chatId);
     if (!owed) {
       owed = [];
@@ -11106,6 +11131,7 @@ export class Daemon {
       userMessageSeq = retryOfSeq;
     } else if (deliversDrawnTurn) {
       userMessageSeq = deliverDrawn;
+      if (localId !== undefined) this.opts.onDrawnTurnStarted?.(chatId, localId);
     } else if (userContent !== null) {
       // spec/04 § Notes to the agent — each note this turn carries is its own
       // entry, ahead of the message it went with.

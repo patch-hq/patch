@@ -81,6 +81,11 @@ export interface VoiceReplyBridge {
    * forever on a turn that never started.
    */
   abandon(chatId: string, err: Error): void;
+  /**
+   * A turn whose message was already in the chat has started (it writes no user
+   * message of its own): arms the waiter that asked for that `localId`.
+   */
+  turnStarted(chatId: string, localId: string): void;
   /** Number of outstanding waiters (test/diagnostic). */
   pendingCount(): number;
 }
@@ -189,6 +194,14 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
 
     abandon(chatId: string, err: Error): void {
       settleReject(chatId, err);
+    },
+
+    turnStarted(chatId: string, localId: string): void {
+      const w = waiters.get(chatId);
+      if (!w || w.localId !== localId || w.armed) return;
+      w.armed = true;
+      w.buf = [];
+      w.onAccepted?.();
     },
 
     pendingCount(): number {
