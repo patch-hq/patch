@@ -14397,7 +14397,8 @@ input.browse-filter {
 }
 /* Waiting is the resting state — it should read as an instruction, not noise. */
 .voice-bar[data-state='waiting'] .vb-text,
-.voice-bar[data-state='connecting'] .vb-text {
+.voice-bar[data-state='connecting'] .vb-text,
+.voice-bar[data-state='reconnecting'] .vb-text {
   color: #cfc8b8;
 }
 /* Heard but not sent: the mic worked, the words were dropped for want of the

@@ -50,19 +50,19 @@ vi.mock('../src/lib/voiceTts', () => ({
   flushTtsPlayback: vi.fn(async () => undefined),
   stopTtsPlayback: stopTtsPlaybackMock,
 }));
-const { cueMock, playCueMock } = vi.hoisted(() => ({
-  cueMock: vi.fn(async () => undefined),
+const { playCueMock, loopMock } = vi.hoisted(() => ({
   playCueMock: vi.fn(async (_cue: string) => undefined),
+  loopMock: vi.fn((_name: string, _on: boolean) => undefined),
 }));
-const { ringStart, ringStop } = vi.hoisted(() => ({
-  ringStart: vi.fn(async () => undefined),
-  ringStop: vi.fn(async () => undefined),
+vi.mock('../src/lib/callSounds', () => ({
+  playCallSound: playCueMock,
+  syncCallSoundLoop: loopMock,
 }));
-vi.mock('../src/lib/voiceRingback', () => ({ startRingback: ringStart, stopRingback: ringStop }));
-vi.mock('../src/lib/voiceLiveCue', () => ({
-  playVoiceLiveCue: cueMock,
-  playVoiceCue: playCueMock,
-}));
+/** Whether the last sync left `name` looping. */
+function looping(name: string): boolean {
+  const calls = loopMock.mock.calls.filter((c) => c[0] === name);
+  return calls.length > 0 && calls[calls.length - 1]![1];
+}
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => prefs.addressWord,
   voiceConfigOrNull: () => null,
@@ -100,6 +100,7 @@ beforeEach(() => {
     callTranscriptPartial: '',
     callMode: 'call',
     callConnectedAt: null,
+    callReconnectingSince: null,
     callAddressWord: null,
   });
   useUiStore.setState({ errors: [] });
@@ -159,33 +160,32 @@ describe('connecting → failed after the timeout', () => {
     const sock = FakeWebSocket.last();
     sock.emitOpen();
     await flush();
-    expect(ringStart).toHaveBeenCalled();
-    ringStop.mockClear();
+    expect(looping('connecting')).toBe(true);
     sock.emitMessage(stateFrame('listening'));
-    expect(ringStop).toHaveBeenCalled();
+    expect(looping('connecting')).toBe(false);
   });
 
   it('stops ringing when the connect times out', async () => {
     startVoiceCall('c1');
     await flush();
-    ringStop.mockClear();
+    expect(looping('connecting')).toBe(true);
     vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
     await flush();
-    expect(ringStop).toHaveBeenCalled();
+    expect(looping('connecting')).toBe(false);
   });
 
-  it('plays the live cue once, when the line first leaves connecting', async () => {
-    cueMock.mockClear();
+  it('plays the connected sound once, when the line first leaves connecting', async () => {
+    playCueMock.mockClear();
     startVoiceCall('c1');
     await flush();
     const sock = FakeWebSocket.last();
     sock.emitOpen();
     await flush();
     sock.emitMessage(stateFrame('connecting'));
-    expect(cueMock).not.toHaveBeenCalled();
+    expect(playCueMock).not.toHaveBeenCalled();
     sock.emitMessage(stateFrame('listening'));
     sock.emitMessage(stateFrame('thinking'));
-    expect(cueMock).toHaveBeenCalledTimes(1);
+    expect(playCueMock.mock.calls).toEqual([['connected']]);
   });
 
   it('plays the error cue once when the call fails, and the ended cue only for a clean hang-up', async () => {
@@ -194,9 +194,9 @@ describe('connecting → failed after the timeout', () => {
     await flush();
     vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
     await flush();
-    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['error']);
+    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['failed']);
     await endVoiceCall();
-    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['error']);
+    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['failed']);
 
     playCueMock.mockClear();
     startVoiceCall('c1');
@@ -205,7 +205,7 @@ describe('connecting → failed after the timeout', () => {
     await flush();
     FakeWebSocket.last().emitMessage(stateFrame('listening'));
     await endVoiceCall();
-    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['ended']);
+    expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['connected', 'ended']);
   });
 
   it('a dropped call that redials does not play the error cue', async () => {
@@ -217,7 +217,43 @@ describe('connecting → failed after the timeout', () => {
     await flush();
     sock.emitMessage(stateFrame('listening'));
     sock.emitClose(1006);
-    expect(playCueMock).not.toHaveBeenCalledWith('error');
+    expect(playCueMock).not.toHaveBeenCalledWith('failed');
+  });
+
+  it('a dropped call plays reconnecting (not connecting) while it redials, then reconnected', async () => {
+    startVoiceCall('c1');
+    await flush();
+    FakeWebSocket.last().emitOpen();
+    await flush();
+    FakeWebSocket.last().emitMessage(stateFrame('listening'));
+    const connectedAt = useVoiceStore.getState().callConnectedAt;
+    playCueMock.mockClear();
+    loopMock.mockClear();
+    FakeWebSocket.last().emitClose(1006);
+    expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
+    expect(looping('reconnecting')).toBe(true);
+    expect(looping('connecting')).toBe(false);
+    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    await flush();
+    // The redial is the same call: its timer still counts from the first connect.
+    expect(useVoiceStore.getState().callConnectedAt).toBe(connectedAt);
+    expect(looping('reconnecting')).toBe(true);
+    FakeWebSocket.last().emitOpen();
+    await flush();
+    FakeWebSocket.last().emitMessage(stateFrame('listening'));
+    expect(useVoiceStore.getState().callReconnectingSince).toBeNull();
+    expect(looping('reconnecting')).toBe(false);
+    expect(playCueMock.mock.calls).toEqual([['reconnected']]);
+  });
+
+  it('an agent calling rings until the call is answered or dismissed', () => {
+    loopMock.mockClear();
+    useVoiceStore
+      .getState()
+      .setIncoming({ callId: 'k1', chatId: 'c1', message: undefined, receivedAt: 0 });
+    expect(looping('agent-calling')).toBe(true);
+    useVoiceStore.getState().setIncoming(null);
+    expect(looping('agent-calling')).toBe(false);
   });
 
   it('a setup failure already on screen is not overwritten by the timeout', async () => {

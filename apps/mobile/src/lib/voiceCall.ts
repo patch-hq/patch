@@ -50,8 +50,7 @@
 // engine when one fails (`describeVoiceError`) — a hosted engine's failure is
 // never answered by running local instead.
 
-import { playVoiceCue, playVoiceLiveCue } from './voiceLiveCue';
-import { startRingback, stopRingback } from './voiceRingback';
+import { playCallSound, syncCallSoundLoop } from './callSounds';
 import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent, type AudioSessionMode } from '@patch/wire/audio';
@@ -138,9 +137,11 @@ function reconnectOrGiveUp(chatId: string, mode: AudioSessionMode, reason: strin
   }
   console.log(`[patch-voice] call dropped (${reason}) → redial ${attempt + 1} in ${delay}ms`);
   _reconnect = { attempt: attempt + 1, chatId, mode };
-  // Phase first: clearing the error while the phase still reads live would
-  // look to the subscription above like a redial that had come up.
+  // Phase first: clearing the error (or any other change) while the phase
+  // still reads live would look to the subscription above like a redial that
+  // had come up.
   st.setCallPhase('connecting');
+  st.setCallReconnecting(true);
   st.setError(null);
   const gen = _callGen;
   if (_reconnectTimer !== null) clearTimeout(_reconnectTimer);
@@ -176,11 +177,16 @@ useVoiceStore.subscribe((s) => {
   }
 });
 
-// Ring while a call is being placed (first dial or a redial); silent the
-// moment it goes live, fails or ends.
+// The looping call sounds follow the call's state (spec/07 § Call sounds):
+// connecting while a call is first placed, reconnecting while a dropped line
+// redials (from the bundled file, so it plays with no signal), and the agent
+// ringing while an incoming call waits. Each stops the moment its state ends.
 useVoiceStore.subscribe((s) => {
-  const ringing = s.activeSession !== null && s.callPhase === 'connecting' && s.callError === null;
-  void (ringing ? startRingback() : stopRingback());
+  const placing = s.activeSession !== null && s.callError === null;
+  const reconnecting = placing && s.callReconnectingSince !== null;
+  syncCallSoundLoop('connecting', placing && !reconnecting && s.callPhase === 'connecting');
+  syncCallSoundLoop('reconnecting', reconnecting);
+  syncCallSoundLoop('agent-calling', s.incomingCall !== null && s.activeSession === null);
 });
 
 // A call that has failed for good says so aloud. A redial clears its error
@@ -195,7 +201,7 @@ useVoiceStore.subscribe(() => {
   }
   if (_errorCued) return;
   _errorCued = true;
-  void playVoiceCue('error');
+  void playCallSound('failed');
 });
 
 function clearConnectTimer(): void {
@@ -228,14 +234,20 @@ export function startVoiceCall(
   opts: { takeOver?: boolean; reconnect?: boolean } = {},
 ): void {
   if (opts.reconnect !== true) clearReconnect();
-  // 1) Mount the call bar synchronously — CONNECTING state, empty session.
+  // 1) Mount the call bar synchronously — CONNECTING state, empty session. A
+  // redial is the same call: it keeps its start, its timer and its mute.
   const gen = ++_callGen;
-  useVoiceStore.getState().setActive({
-    sessionId: '',
-    chatId,
-    audioUrl: '',
-    startedAt: Date.now(),
-  });
+  useVoiceStore.getState().setActive(
+    {
+      sessionId: '',
+      chatId,
+      audioUrl: '',
+      startedAt:
+        (opts.reconnect === true ? useVoiceStore.getState().activeSession?.startedAt : undefined) ??
+        Date.now(),
+    },
+    { redial: opts.reconnect === true },
+  );
   useVoiceStore.getState().setCallMode(mode);
   useVoiceStore.getState().setCallAddressWord(addressWordOrNull());
   useVoiceStore.getState().setCallEngine(callEngineLabel(voiceConfigOrNull(), mode));
@@ -407,10 +419,16 @@ export function startVoiceCall(
             // call bar's LISTENING → TRANSCRIBING → THINKING → SPEAKING indicator.
             console.log(`[patch-voice] call state → ${frame.state}`);
             if (frame.state !== 'connecting') clearConnectTimer();
-            {
-              const wasLive = useVoiceStore.getState().callConnectedAt !== null;
+            if (frame.state !== 'connecting') {
+              const st = useVoiceStore.getState();
+              const wasLive = st.callConnectedAt !== null;
+              const wasReconnecting = st.callReconnectingSince !== null;
+              st.setCallReconnecting(false);
+              st.setCallPhase(frame.state);
+              if (wasReconnecting) void playCallSound('reconnected');
+              else if (!wasLive) void playCallSound('connected');
+            } else {
               useVoiceStore.getState().setCallPhase(frame.state);
-              if (!wasLive && frame.state !== 'connecting') void playVoiceLiveCue();
             }
             break;
           case 'audio.transcript_partial':
@@ -698,7 +716,7 @@ export async function endVoiceCall(): Promise<void> {
   // A call hung up while failed has already said so with the error cue.
   const endedState = useVoiceStore.getState();
   if (endedState.activeSession !== null && endedState.callError === null) {
-    void playVoiceCue('ended');
+    void playCallSound('ended');
   }
   clearConnectTimer();
   clearReconnect();

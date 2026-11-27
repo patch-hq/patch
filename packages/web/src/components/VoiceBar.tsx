@@ -12,6 +12,7 @@
 // top of the shell, and that strip always states what the line is doing:
 //
 //   connecting   Connecting…
+//   reconnecting Reconnecting… — the line dropped and the call is redialling
 //   waiting      hands-free: Waiting for you to say “patch”   ·  call: Listening
 //   hearing      Hearing you — the words themselves are in the chat, as your bubble
 //   heard        what it heard, greyed — dropped, because it wasn't addressed
@@ -93,8 +94,8 @@ export function VoiceBar(): JSX.Element | null {
           {formatElapsed(Math.max(0, now - call.startedAt))}
         </span>
         <span className="vb-line" data-testid="voice-bar-line">
-          {state === 'connecting' ? (
-            <ConnectingLabel />
+          {state === 'connecting' || state === 'reconnecting' ? (
+            <ConnectingLabel word={state === 'reconnecting' ? 'Reconnecting' : 'Connecting'} />
           ) : state === 'thinking' ? (
             <span className="vb-text">Agent working</span>
           ) : (
@@ -148,8 +149,8 @@ export function VoiceBar(): JSX.Element | null {
   );
 }
 
-/** `Connecting` with dots that count up, as on the phone. */
-function ConnectingLabel(): JSX.Element {
+/** `Connecting` (or `Reconnecting`) with dots that count up, as on the phone. */
+function ConnectingLabel({ word }: { word: 'Connecting' | 'Reconnecting' }): JSX.Element {
   const [dots, setDots] = useState(1);
   useEffect(() => {
     const id = window.setInterval(() => setDots((d) => (d % 3) + 1), 400);
@@ -157,7 +158,8 @@ function ConnectingLabel(): JSX.Element {
   }, []);
   return (
     <span className="vb-text" data-testid="voice-bar-connecting">
-      Connecting{'.'.repeat(dots)}
+      {word}
+      {'.'.repeat(dots)}
     </span>
   );
 }
@@ -168,7 +170,7 @@ function callNote(
   state: Line['state'],
   word: string,
 ): string | null {
-  if (state === 'connecting') return null;
+  if (state === 'connecting' || state === 'reconnecting') return null;
   if (call.transcript !== '') return `You: ${call.transcript}`;
   if (call.unaddressed !== null) {
     return `Heard “${call.unaddressed}” — not addressed, so not sent`;
@@ -212,7 +214,15 @@ interface Line {
   tag: string | null;
   text: string;
   /** Drives the bar's styling, and what a test asserts on. */
-  state: 'connecting' | 'listening' | 'waiting' | 'hearing' | 'heard' | 'thinking' | 'speaking';
+  state:
+    | 'connecting'
+    | 'reconnecting'
+    | 'listening'
+    | 'waiting'
+    | 'hearing'
+    | 'heard'
+    | 'thinking'
+    | 'speaking';
 }
 
 interface LineInput {
@@ -222,6 +232,7 @@ interface LineInput {
   transcript: string;
   unaddressed: string | null;
   lastLine: string;
+  reconnecting: boolean;
 }
 
 /**
@@ -231,6 +242,8 @@ interface LineInput {
  * because in hands-free it has to name the word that wakes it.
  */
 export function describeLine(call: LineInput, _chatName: string, addressWord: string): Line {
+  // A dropped line says so above anything it was doing when it dropped.
+  if (call.reconnecting) return { tag: null, text: 'Reconnecting…', state: 'reconnecting' };
   if (call.agentSpeaking || call.phase === 'speaking') {
     return { tag: null, text: 'Speaking', state: 'speaking' };
   }

@@ -27,6 +27,7 @@ function base(mode: AudioSessionMode) {
     mode,
     unaddressed: null as string | null,
     phase: 'listening' as const,
+    reconnecting: false,
   };
 }
 
@@ -171,6 +172,14 @@ describe('voice bar', () => {
     expect(screen.queryByTestId('voice-bar-wave')).toBeNull();
   });
 
+  it('says Reconnecting… while a dropped line redials, over whatever it was doing', () => {
+    open('call', { phase: 'speaking' as never, reconnecting: true, agentSpeaking: true });
+    render(<VoiceBar />);
+    expect(state()).toBe('reconnecting');
+    expect(screen.getByTestId('voice-bar-connecting').textContent).toBe('Reconnecting.');
+    expect(note()).toBeNull();
+  });
+
   it('reports the turn cycle: thinking, then speaking — the reply itself streams into the chat', () => {
     const rest = {
       mode: 'call' as const,
@@ -178,6 +187,7 @@ describe('voice bar', () => {
       unaddressed: null,
       lastLine: '',
       agentSpeaking: false,
+      reconnecting: false,
     };
     expect(describeLine({ ...rest, phase: 'thinking' }, 'Manager', 'patch').state).toBe('thinking');
     const speaking = describeLine(
@@ -198,6 +208,7 @@ describe('voice bar', () => {
         transcript: 'patch stop',
         unaddressed: 'earlier chatter',
         lastLine: '',
+        reconnecting: false,
       },
       'Manager',
       'patch',

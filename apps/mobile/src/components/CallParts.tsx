@@ -23,7 +23,14 @@ export function useNow(active: boolean, intervalMs = 1000): number {
  * `Connecting` with dots that count up — motion that says "working on it",
  * in the neutral ink, so it can never be mistaken for the live states.
  */
-export function ConnectingLabel({ color }: { color: string }): React.ReactElement {
+export function ConnectingLabel({
+  color,
+  word = 'Connecting',
+}: {
+  color: string;
+  /** `Reconnecting` while a dropped line redials (spec/07 § A dropped call comes back). */
+  word?: 'Connecting' | 'Reconnecting';
+}): React.ReactElement {
   const [dots, setDots] = React.useState(1);
   React.useEffect(() => {
     const t = setInterval(() => setDots((d) => (d % 3) + 1), 400);
@@ -31,7 +38,8 @@ export function ConnectingLabel({ color }: { color: string }): React.ReactElemen
   }, []);
   return (
     <Text testID="call-connecting" style={{ color, fontFamily: fonts.bodyMedium, fontSize: 15 }}>
-      Connecting{'.'.repeat(dots)}
+      {word}
+      {'.'.repeat(dots)}
     </Text>
   );
 }

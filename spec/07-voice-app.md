@@ -383,7 +383,7 @@ A paused call is not announced as live to other devices, and an agent's call rin
 
 #### Call sounds
 
-The device plays each sound itself; none comes from the provider or costs anything.
+The device plays each sound itself; none comes from the provider or costs anything. The sounds are defined once (`packages/web/src/lib/callSoundSynth.ts`): the web and desktop app play them from that definition, and the phone plays the same definitions rendered to files.
 
 | State                             | Sound                                                  |
 | --------------------------------- | ------------------------------------------------------ |
@@ -396,6 +396,7 @@ The device plays each sound itself; none comes from the provider or costs anythi
 | Ended                             | A descending three-note                                |
 | Agent calling you                 | A rising three-note triplet, repeated while it rings   |
 | Agent working (direct calls only) | Two quiet alternating notes, continuous while it works |
+| Failed (the call cannot go on)    | A low falling triple                                   |
 
 #### Session modes
 
