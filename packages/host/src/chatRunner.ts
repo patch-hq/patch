@@ -2579,6 +2579,8 @@ export class Daemon {
   private snoozeSweep: ReturnType<typeof setInterval> | null = null;
   /** Activity last seen for each snoozed chat, to spot a turn finishing or failing. */
   private readonly snoozeLastActivity = new Map<string, ChatActivity>();
+  /** Snoozed chats that were already waiting on a person when the snooze began. */
+  private readonly snoozeWaitingAtStart = new Set<string>();
   /** When each chat's current run began, from the first state emit that showed it running. */
   private readonly runningSince = new Map<string, number>();
   private queuedStallSweep: ReturnType<typeof setInterval> | null = null;
@@ -7026,6 +7028,12 @@ export class Daemon {
         };
         state.snoozeRecords = [...state.snoozeRecords, record].slice(-MAX_SNOOZE_RECORDS);
         this.snoozeLastActivity.set(chatId, this.aggregateActivity(chatId));
+        if (
+          this.aggregateActivity(chatId) === 'awaiting-permission' ||
+          this.isAskingQuestion(state)
+        ) {
+          this.snoozeWaitingAtStart.add(chatId);
+        }
       }
     } else if (open) {
       // Unsnoozed by a person: they are interacting, so nothing is left to say.
@@ -7090,10 +7098,14 @@ export class Daemon {
     const activity = this.aggregateActivity(chatId);
     // An errored turn the retry ladder is about to run again is not waiting on
     // a person: only an error the ladder has given up on is.
+    // A chat already waiting on a person when it was snoozed (a goal parked on
+    // something in the world) would otherwise wake the moment it is snoozed.
+    // Only a stop that begins after the snooze counts.
+    const waiting = activity === 'awaiting-permission' || this.isAskingQuestion(state);
+    if (!waiting) this.snoozeWaitingAtStart.delete(chatId);
     const needsPerson =
-      activity === 'awaiting-permission' ||
-      (activity === 'errored' && !state.turnRetrying) ||
-      this.isAskingQuestion(state);
+      (waiting && !this.snoozeWaitingAtStart.has(chatId)) ||
+      (activity === 'errored' && !state.turnRetrying);
     if (needsPerson) {
       this.wakeFromSnooze(chatId);
       return;
@@ -7145,6 +7157,7 @@ export class Daemon {
     const open = state ? openSnoozeRecord(state.snoozeRecords) : null;
     if (!state || !open) return;
     this.snoozeLastActivity.delete(chatId);
+    this.snoozeWaitingAtStart.delete(chatId);
     this.replaceLastSnoozeRecord(chatId, {
       ...open,
       endedAt,
