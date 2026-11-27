@@ -72,6 +72,7 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 import { filesFromDataTransfer } from './Composer.js';
+import { SIDEBAR_AUTO_COLLAPSE_WIDTH } from '../lib/responsiveShell.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { connectionSummary, hostsDown } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
@@ -1338,9 +1339,21 @@ function BottomNav(): JSX.Element {
   const onSettings = section(['settings'], '/settings');
   const onTriage = section(['triage'], '/triage');
   const onInbox = section(['inbox'], '/inbox');
+  // Below the breakpoint the sidebar is a drawer over the page: picking a page
+  // from here must dismiss it or the page opens hidden behind it. Modified
+  // clicks open a new window and leave this one as it was; the standalone
+  // sidebar window has nothing to collapse.
+  const closeDrawerAfterPick = (e: ReactMouseEvent<HTMLElement>): void => {
+    if (e.metaKey || e.ctrlKey) return;
+    if (window.innerWidth >= SIDEBAR_AUTO_COLLAPSE_WIDTH) return;
+    const row = (e.target as HTMLElement).closest('.nav-row');
+    if (row === null || row.matches('[data-testid="nav-getting-started"]')) return;
+    if (row.closest('.sidebar-window') !== null) return;
+    useUiStore.getState().setSidebarCollapsed(true);
+  };
   return (
     <>
-      <nav className="sb-bottom" data-testid="bottom-nav">
+      <nav className="sb-bottom" data-testid="bottom-nav" onClick={closeDrawerAfterPick}>
         <div className="nav-tabs" data-testid="nav-tabs">
           {experimentalNav && (
             <button
