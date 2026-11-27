@@ -13,7 +13,7 @@ const LAYERS: readonly Layer[] = [
   'goal-judge',
   'link-summary',
   'watch-check-in',
-  'sweep',
+  'manager',
   'manager-voice',
   'job-autonomy',
   'voice-device',

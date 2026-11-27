@@ -29,7 +29,13 @@ import {
   type DictationEngine,
   type MeetingEngine,
 } from '@patch/wire/audio';
-import { DICTATION_PAUSE_CHOICES, SpeechBackendSetting } from '@patch/wire';
+import {
+  DICTATION_PAUSE_CHOICES,
+  MANAGER_WAKE_INTERVAL_CHOICES,
+  ManagerWake,
+  SPECIAL_THREAD_IDS,
+  SpeechBackendSetting,
+} from '@patch/wire';
 type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
 import { SettingsSection } from '../SettingsSection';
 import { VoiceDevicesSection } from './DevicesSections';
@@ -39,7 +45,7 @@ import { ModelChoice } from './ModelChoice';
 import { ManagerHomeSection } from './ManagerHomeSection';
 import { SettingsPage } from './SettingsPage';
 import { MeetingControls, TextPromptLink } from './PromptRows';
-import { Chips, Field, Muted, Row, ToggleRow, WithSettings } from './ui';
+import { Chips, Field, Muted, Row, SettingsButton, ToggleRow, WithSettings } from './ui';
 
 /** Write a preferences patch; a failure is reported, never swallowed. */
 export function writePreferences(patch: Partial<AccountPreferences>): void {
@@ -101,8 +107,15 @@ export function ManagerPage(): React.ReactElement {
           <>
             <ManagerHomeSection />
             <SettingsSection title="Prompts" testID="settings-manager-prompts">
+              <TextPromptLink layer="manager" preferences={data.preferences} />
               <TextPromptLink layer="manager-voice" preferences={data.preferences} />
-              <TextPromptLink layer="sweep" preferences={data.preferences} />
+            </SettingsSection>
+            <SettingsSection title="Finished chats" testID="settings-manager-wake">
+              <FinishedChatsControls preferences={data.preferences} />
+            </SettingsSection>
+            <SettingsSection title="Context" testID="settings-manager-context">
+              <ManagerSessionRow />
+              <ContextWindowRow value={data.preferences.managerContextWindow} />
             </SettingsSection>
             <SettingsSection title="Manager" testID="settings-manager">
               <ManagerControls preferences={data.preferences} />
@@ -146,12 +159,6 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
   React.useEffect(() => setAddressWord(preferences.addressWord), [preferences.addressWord]);
   return (
     <>
-      <ToggleRow
-        label="Enabled"
-        testID="manager-watching"
-        value={preferences.sweepEnabled}
-        onChange={(next) => writePreferences({ sweepEnabled: next })}
-      />
       <Row
         title="Quiet hours"
         right={
@@ -193,6 +200,137 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
         }
       />
     </>
+  );
+}
+
+const WAKE_LABELS: Record<ManagerWake, string> = {
+  off: 'Off',
+  each: 'Each one',
+  batched: 'Batched',
+};
+
+/** A batch interval as Settings names it: 30 min, 2 h, a day. */
+export function intervalLabel(minutes: number): string {
+  if (minutes < 60 || minutes % 60 !== 0) return `${minutes} min`;
+  return minutes === 1440 ? 'a day' : `${minutes / 60} h`;
+}
+
+/** Finished chats → the Manager (spec/06 § Finished chats): when, and how often batched. */
+function FinishedChatsControls({
+  preferences,
+}: {
+  preferences: AccountPreferences;
+}): React.ReactElement {
+  const intervals = MANAGER_WAKE_INTERVAL_CHOICES.map(String);
+  const current = String(preferences.managerWakeIntervalMinutes);
+  return (
+    <>
+      <Row testID="manager-wake" title="Send to the Manager" stack>
+        <Muted>Chats with a goal running are left out</Muted>
+        <Chips
+          options={ManagerWake.options}
+          selected={preferences.managerWake}
+          labelOf={(w) => WAKE_LABELS[w]}
+          testIDPrefix="manager-wake-mode"
+          labelPrefix="Send finished chats"
+          onSelect={(w) => writePreferences({ managerWake: w })}
+        />
+      </Row>
+      {preferences.managerWake === 'batched' ? (
+        <Row testID="manager-wake-interval" title="Every" stack>
+          <Chips
+            options={intervals.includes(current) ? intervals : [...intervals, current]}
+            selected={current}
+            labelOf={(m) => intervalLabel(Number(m))}
+            testIDPrefix="manager-wake-interval"
+            labelPrefix="Batch every"
+            onSelect={(m) => writePreferences({ managerWakeIntervalMinutes: Number(m) })}
+          />
+        </Row>
+      ) : null}
+    </>
+  );
+}
+
+/** Context → This session (spec/06 § Bounded context), with Clear. */
+function ManagerSessionRow(): React.ReactElement {
+  const [session, setSession] = React.useState<
+    { messages: number; startedAt: number } | null | undefined | 'error'
+  >(undefined);
+  const load = React.useCallback(() => {
+    api
+      .getChatSession(SPECIAL_THREAD_IDS.manager)
+      .then((r) => setSession(r.session ?? null))
+      .catch(() => setSession('error'));
+  }, []);
+  React.useEffect(load, [load]);
+  const text =
+    session === 'error'
+      ? 'Could not read the session'
+      : session === undefined
+        ? 'Loading…'
+        : session === null
+          ? 'No session yet'
+          : `${session.messages} message${session.messages === 1 ? '' : 's'} · started ${new Date(
+              session.startedAt,
+            ).toLocaleString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+              day: 'numeric',
+              month: 'short',
+            })}`;
+  return (
+    <Row
+      testID="manager-session"
+      title="This session"
+      subtitle={text}
+      right={
+        <SettingsButton
+          label="Clear"
+          testID="manager-clear"
+          disabled={session === null || session === undefined || session === 'error'}
+          onPress={() => {
+            api
+              .rotateChat(SPECIAL_THREAD_IDS.manager, { carry: false })
+              .then(load)
+              .catch((e: Error) => Alert.alert('Could not clear the session', e.message));
+          }}
+        />
+      }
+    />
+  );
+}
+
+/** Context → Start fresh after N messages, keeping half (spec/06 § Bounded context). */
+function ContextWindowRow({ value }: { value: number }): React.ReactElement {
+  const [draft, setDraft] = React.useState(String(value));
+  React.useEffect(() => setDraft(String(value)), [value]);
+  return (
+    <Row
+      testID="manager-context-window-row"
+      title="Start fresh after"
+      subtitle={`messages, keeping the last ${Math.max(1, Math.floor(value / 2))}`}
+      right={
+        <Field
+          testID="manager-context-window"
+          accessibilityLabel="Start a fresh session after (messages)"
+          value={draft}
+          onChangeText={setDraft}
+          keyboardType="number-pad"
+          style={{ width: 72, textAlign: 'center' }}
+          onBlur={() => {
+            const next = draft.trim();
+            if (next === String(value)) return;
+            if (!/^[1-9]\d*$/.test(next)) {
+              Alert.alert('Invalid number', 'Start fresh after must be a whole number above 0.');
+              setDraft(String(value));
+              return;
+            }
+            writePreferences({ managerContextWindow: Number(next) });
+          }}
+        />
+      }
+    />
   );
 }
 

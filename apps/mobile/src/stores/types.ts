@@ -157,8 +157,7 @@ export interface ChatRow {
   /**
    * The chat's one-line status summary and what it is to the user (spec/06 §
    * The watch loop), mirrored from `chat.state` and the roster exactly as web
-   * holds them. The Manager's Chats tab ranks and describes rows by them
-   * (`threadRows` in `@patch/wire`). `null` until one lands.
+   * holds them. `null` until one lands.
    */
   statusSummary: string | null;
   statusKind: StatusKind | null;

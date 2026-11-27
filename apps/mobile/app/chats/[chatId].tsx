@@ -45,6 +45,7 @@ import {
   LayoutTemplate,
   Clock,
   CloudOff,
+  Settings,
 } from 'lucide-react-native';
 import {
   ArrowUp,
@@ -125,11 +126,6 @@ import { SnoozeDivider } from '../../src/components/SnoozeDivider';
 import { editQueuedMessage, promoteMessage, unqueueMessage } from '../../src/lib/queuedActions';
 import { getComposerDraft, setComposerDraft } from '../../src/lib/composerDraft';
 import { useUiStore } from '../../src/stores/uiStore';
-import {
-  ManagerChatsList,
-  ManagerSegments,
-  type ManagerTab,
-} from '../../src/components/ManagerChats';
 import { BrowserLiveCard } from '../../src/components/browser/BrowserLiveCard';
 import { ChatBars } from '../../src/components/ChatBars';
 import { JobTickChip } from '../../src/components/chatBars/JobTickBar';
@@ -423,10 +419,6 @@ function ChatDetailBody(): React.ReactElement {
     );
   }, [liveTimeline]);
   const working = row ? deriveBadge(row) === 'working' && !assistantResponded : false;
-
-  // The Manager chat's Conversation | Chats switch (spec/15 § Voice tab (Manager));
-  // only ever 'conversation' on any other chat.
-  const [managerTab, setManagerTab] = React.useState<ManagerTab>('conversation');
 
   // spec/06 ## Composer policy: Speakers is a read-only mirror —
   // no composer, no mic. Manager keeps its full composer. Typing on a mirror
@@ -1284,6 +1276,18 @@ function ChatDetailBody(): React.ReactElement {
             else router.push('/settings/voice' as Href);
           }}
         />
+        {/* The Manager's own settings (spec/15 § Voice tab (Manager)). */}
+        {chatId === SPECIAL_THREAD_IDS.manager ? (
+          <Pressable
+            testID="chat-manager-settings"
+            onPress={() => router.push('/settings/manager' as Href)}
+            style={{ padding: space.sm }}
+            accessibilityRole="button"
+            accessibilityLabel="Manager settings"
+          >
+            <Settings size={20} color={colors.ink} />
+          </Pressable>
+        ) : null}
         {/* Find in this chat (spec/15 § Find in chat). */}
         <Pressable
           testID="chat-find-toggle"
@@ -1311,8 +1315,6 @@ function ChatDetailBody(): React.ReactElement {
           onClose={closeFind}
         />
       ) : null}
-      {/* Manager only: Conversation | Chats (spec/15 § Voice tab (Manager)). */}
-      <ManagerSegments chatId={chatId} value={managerTab} onChange={setManagerTab} />
       {/* Connection banners + goal / tasks / reminder / wake / monitors /
           background tasks / archived / snoozed / sign-in bars (spec/15 §
           Chat detail → Status bars). */}
@@ -1322,7 +1324,7 @@ function ChatDetailBody(): React.ReactElement {
           behavior is needed; iOS pads. The scrollToNewest re-assert on
           keyboardDidShow (see above) covers the list shrinking. */}
       <KeyboardAvoidingView
-        style={{ flex: 1, display: managerTab === 'chats' ? 'none' : 'flex' }}
+        style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <FlatList
@@ -1546,7 +1548,6 @@ function ChatDetailBody(): React.ReactElement {
           </>
         )}
       </KeyboardAvoidingView>
-      {managerTab === 'chats' ? <ManagerChatsList /> : null}
       <MessageActionsHost />
       <ArtifactViewerHost chatId={chatId} />
       <Modal
