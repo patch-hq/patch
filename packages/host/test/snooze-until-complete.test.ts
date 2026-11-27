@@ -120,6 +120,20 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
+  it('a chat already waiting on the user when snoozed stays snoozed until a new stop', async () => {
+    const { backend } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    await daemon.setGoal(id, 'wait for Apple');
+    await daemon.declareStatus(id, 'question', 'waiting on Apple');
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    await sleep(40);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    await daemon.setGoal(id, null);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
+
   it('refuses a chat whose only wake is a loop', async () => {
     const { backend } = gated();
     const { daemon, folder } = setup(backend);
