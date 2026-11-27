@@ -52,6 +52,7 @@
 
 import { playVoiceCue, playVoiceLiveCue } from './voiceLiveCue';
 import { startRingback, stopRingback } from './voiceRingback';
+import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent, type AudioSessionMode } from '@patch/wire/audio';
 import { api } from '../api/rest';
@@ -120,17 +121,20 @@ function clearReconnect(): void {
   _reconnect = null;
 }
 
-/** The line dropped (or a redial failed): redial after a delay, or give up loudly. */
+/**
+ * The line dropped (or a redial failed): redial after a delay. A call never
+ * gives up by itself — an interruption can outlast any fixed budget, and
+ * Android may refuse to restart the mic until the phone wakes — so after the
+ * schedule it keeps trying at the last delay until the user ends the call. The
+ * failure is said once, loudly, when the schedule runs out.
+ */
 function reconnectOrGiveUp(chatId: string, mode: AudioSessionMode, reason: string): void {
   const attempt = _reconnect?.attempt ?? 0;
-  const delay = CALL_RECONNECT_DELAYS_MS[attempt];
+  const delay = CALL_RECONNECT_DELAYS_MS[Math.min(attempt, CALL_RECONNECT_DELAYS_MS.length - 1)];
   const st = useVoiceStore.getState();
-  if (delay === undefined) {
-    console.log(`[patch-voice] call reconnect gave up after ${attempt} attempts: ${reason}`);
-    clearReconnect();
-    st.setError(reason);
-    useUiStore.getState().pushError(`voice call: ${reason}`);
-    return;
+  if (attempt === CALL_RECONNECT_DELAYS_MS.length) {
+    console.log(`[patch-voice] call redial still failing after ${attempt} attempts: ${reason}`);
+    useUiStore.getState().pushError(`voice call: ${reason} — still trying`);
   }
   console.log(`[patch-voice] call dropped (${reason}) → redial ${attempt + 1} in ${delay}ms`);
   _reconnect = { attempt: attempt + 1, chatId, mode };
@@ -140,12 +144,25 @@ function reconnectOrGiveUp(chatId: string, mode: AudioSessionMode, reason: strin
   st.setError(null);
   const gen = _callGen;
   if (_reconnectTimer !== null) clearTimeout(_reconnectTimer);
-  _reconnectTimer = setTimeout(() => {
-    _reconnectTimer = null;
-    if (gen !== _callGen) return; // the user ended the call while we waited
-    startVoiceCall(chatId, mode, { reconnect: true });
-  }, delay);
+  _reconnectTimer = setTimeout(redialNow, delay);
+  _redialGen = gen;
 }
+
+let _redialGen = 0;
+
+function redialNow(): void {
+  if (_reconnect === null || _reconnectTimer === null) return;
+  clearTimeout(_reconnectTimer);
+  _reconnectTimer = null;
+  if (_redialGen !== _callGen) return; // the user ended the call while we waited
+  startVoiceCall(_reconnect.chatId, _reconnect.mode, { reconnect: true });
+}
+
+// Coming back to the foreground is the moment Android allows the mic to start
+// again: redial now rather than wait out the backoff.
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') redialNow();
+});
 
 // A redial that fails (token mint, connect timeout, immediate close) sets
 // callError; while redialling that means try again. One that gets the host's
