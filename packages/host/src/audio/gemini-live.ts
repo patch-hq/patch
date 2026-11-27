@@ -634,10 +634,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
   private dispatchCovers = false;
   /** The model was already told off for a false claim since the user last spoke. */
   private correctionSent = false;
-  /** The model was already told to answer an utterance it left unanswered. */
-  private silenceNudged = false;
-  /** The model was told to answer: its next unprompted speech is that answer, not filler. */
-  private nudgeAnswerPending = false;
   /** What the filler guard threw away this turn, for the log. */
   private droppedText = '';
   private droppedChunks = 0;
@@ -1037,7 +1033,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
         this.log('user speaking');
         this.dispatchCovers = false;
         this.correctionSent = false;
-        this.silenceNudged = false;
       }
       this.inputTranscriptBuf += heard;
       this.turnHadInput = true;
@@ -1090,8 +1085,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
       (hasAudio || outText) &&
       this.handoffsInFlight > 0 &&
       !this.turnHadInput &&
-      !this.relaying &&
-      !this.nudgeAnswerPending
+      !this.relaying
     ) {
       // The model is talking on its own while the agent works. One acknowledgement per
       // hand-off is wanted; more is the "still working on it" loop, which no prompt has
@@ -1149,19 +1143,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
   /** The model finished a turn: close it out for the chat, the surface and the usage count. */
   private endTurn(): void {
     const wasRelaying = this.relaying;
-    if (this.nudgeAnswerPending && !this.turnHadInput) {
-      this.nudgeAnswerPending = false;
-      if (!this.turnHadAudioOut && !this.turnInterrupted) {
-        const message = 'the voice did not answer what the user said while the agent worked';
-        this.deps.logger.error({ sessionId: this.init.sessionId }, `gemini-live: ${message}`);
-        this.deps.sendAudio({
-          type: 'audio.error',
-          code: 'gemini_unavailable',
-          message,
-          sessionId: this.init.sessionId,
-        });
-      }
-    }
     this.turnSeq += 1;
     this.log('turn', {
       seq: this.turnSeq,
@@ -1208,14 +1189,11 @@ export class GeminiLiveSession implements VoiceSessionLike {
       }
       this.relaying = false;
     }
-    const unanswered = this.answerSilence();
     // NO SILENT FAILURES (CLAUDE.md): a turn that had audible user input but
     // produced no TTS audio has lost its reply somewhere — say so, mirroring
     // VoiceSession.endStream's identical guard. A turn that handed off to the
     // agent is waiting on it, not lost.
-    if (unanswered) {
-      // Handled by answerSilence: the model has been told to reply, or the failure was shown.
-    } else if (
+    if (
       this.turnHadInput &&
       !this.turnHadAudioOut &&
       !this.turnInterrupted &&
@@ -1265,53 +1243,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.droppedChunks = 0;
     this.setState(this.handoffsInFlight > 0 ? 'thinking' : 'listening');
     this.flushResults('turn ended');
-  }
-
-  /**
-   * Every utterance gets a spoken reply. While a hand-off runs the model sometimes hears the
-   * user and says nothing ("waiting on the agent"): tell it, once, to answer. A second
-   * silence (the nudge's own reply) is an error the surface shows. Returns true when the turn was such a silence.
-   */
-  private answerSilence(): boolean {
-    const heard = this.inputTranscriptBuf.trim();
-    if (
-      !this.turnHadInput ||
-      !/[\p{L}\p{N}]/u.test(heard) ||
-      this.turnHadAudioOut ||
-      this.turnInterrupted ||
-      this.dispatchCovers ||
-      this.handoffsInFlight === 0
-    ) {
-      return false;
-    }
-    if (this.silenceNudged) return false;
-    this.silenceNudged = true;
-    this.nudgeAnswerPending = true;
-    this.deps.logger.warn(
-      { sessionId: this.init.sessionId, heard },
-      'gemini-live: the model said nothing to the user while a hand-off ran; told to answer',
-    );
-    this.sendFrame(
-      {
-        clientContent: {
-          turns: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text:
-                    `You did not answer what the user just said: "${heard}". Answer it now, out loud, ` +
-                    'in a sentence. If it needs the agent, say the agent is still working.',
-                },
-              ],
-            },
-          ],
-          turnComplete: true,
-        },
-      },
-      'silence nudge',
-    );
-    return true;
   }
 
   /**
