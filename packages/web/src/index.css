@@ -4152,6 +4152,11 @@ button.nav-row {
   margin: 0.6em 0;
   padding-left: 1.4em;
 }
+/* Room for a two-digit number ("17.") outside the text edge: at 1.4em it was
+   clipped by the message's own edge. */
+.msg .content ol {
+  padding-left: 2.1em;
+}
 .msg .content li {
   margin: 0.25em 0;
 }
@@ -18656,6 +18661,26 @@ select.permission-mode.is-pending {
   }
   .status-row-sub {
     grid-column: 2 / 4;
+  }
+  /* Opened on a phone, the long text takes the full width beneath the time
+     and actions instead of a narrow column between them. */
+  .status-row-wrap .status-row-content {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    padding-bottom: 6px;
+  }
+  .status-row-wrap .status-row-sub {
+    grid-column: 2 / -1;
+  }
+  /* With the text moved down, pin the time and actions to their own columns,
+     or auto-placement slides them one column left. */
+  .status-row-wrap .status-row-meta {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .status-row-wrap .status-row-action {
+    grid-column: 4;
+    grid-row: 1;
   }
 }
 
