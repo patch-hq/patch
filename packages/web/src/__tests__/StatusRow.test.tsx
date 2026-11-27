@@ -84,7 +84,7 @@ describe('StatusPill', () => {
 describe('status list stylesheet', () => {
   it('uses the specified grid, one divider and the phone rule', () => {
     expect(css).toMatch(
-      /\.status-row\s*{[^}]*grid-template-columns:\s*16px 72px minmax\(0, 1fr\) auto 20px/,
+      /\.status-row\s*{[^}]*grid-template-columns:\s*16px 72px minmax\(0, 1fr\) auto minmax\(20px, auto\)/,
     );
     expect(css).toMatch(/\.status-row\s*{[^}]*min-height:\s*32px/);
     expect(css).toMatch(/\.status-list\s*{[^}]*border-bottom:\s*1px solid var\(--line\)/);
