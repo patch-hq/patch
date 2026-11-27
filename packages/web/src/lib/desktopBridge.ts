@@ -196,16 +196,15 @@ export interface PatchDesktopBridge {
     push(pcm: Int16Array): void;
     finish(): Promise<string>;
     cancel(): void;
-    /** A direct call's speech to text: one utterance read once. Absent on shells that predate it. */
-    read?(pcm: Int16Array): Promise<string>;
+    /** A direct call's speech to text: one utterance read once. */
+    read(pcm: Int16Array): Promise<string>;
   };
   /**
    * spec/07 § Direct calls — Kokoro run by the desktop app on this computer,
    * from its own downloaded copy of the model. `speak` rejects, naming what is
-   * missing, when it is not downloaded. Absent in a browser and on shells that
-   * predate it.
+   * missing, when it is not downloaded. Absent in a browser.
    */
-  localTts?: {
+  localTts: {
     status(): Promise<{
       installed: boolean;
       missing: string[];

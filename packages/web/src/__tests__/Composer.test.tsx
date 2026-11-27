@@ -24,6 +24,10 @@ vi.mock('../lib/voiceController.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/voiceController.js')>();
   return { ...actual, startVoiceCall: vi.fn(async () => {}) };
 });
+vi.mock('../lib/direct/directCall.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/direct/directCall.js')>();
+  return { ...actual, startDirectCall: vi.fn(async () => {}) };
+});
 
 // The real ImageAnnotator decodes via createImageBitmap + a real canvas, which
 // jsdom can't back — it's exercised for real in ImageAnnotator.test.tsx and
@@ -3199,7 +3203,11 @@ describe('Composer', () => {
       );
       fireEvent.contextMenu(screen.getByTestId('call-btn'));
       const menu = screen.getByTestId('call-menu');
-      expect(menu.textContent).toMatch(/Call.*Hands-free.*Voice settings/);
+      expect(menu.textContent).toMatch(/Call.*Call direct.*Hands-free.*Voice settings/);
+      fireEvent.click(screen.getByText('Call direct'));
+      const { startDirectCall } = await import('../lib/direct/directCall.js');
+      await waitFor(() => expect(startDirectCall).toHaveBeenCalledWith('c1'));
+      fireEvent.contextMenu(screen.getByTestId('call-btn'));
       fireEvent.click(screen.getByText('Hands-free'));
       await waitFor(() => expect(startVoiceCall).toHaveBeenCalledWith('c1', 'hands-free'));
       fireEvent.contextMenu(screen.getByTestId('call-btn'));

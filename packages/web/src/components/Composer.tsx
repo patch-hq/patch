@@ -57,6 +57,7 @@ import {
   Paperclip,
   PenLine,
   Phone,
+  PhoneForwarded,
   FileText,
   Pencil,
   AudioLines,
@@ -118,6 +119,7 @@ import {
   endVoiceCall,
   TAP_THRESHOLD_MS,
 } from '../lib/voiceController.js';
+import { startDirectCall } from '../lib/direct/directCall.js';
 import {
   startRecording,
   type VoiceRecording,
@@ -1845,25 +1847,32 @@ export const Composer = forwardRef(function Composer(
   // On a not-yet-spawned chat (`resolveChatId` provided), the chat is created
   // first, same create-then-act shape as an attachment upload above; a chat
   // that already exists just calls straight through.
-  async function handleCall(mode: AudioSessionMode = 'call'): Promise<void> {
+  // A call from the composer's Call control or its menu: a voice agent call in
+  // either mode, or a direct call (spec/07 § Direct calls).
+  async function handleCall(kind: AudioSessionMode | 'direct' = 'call'): Promise<void> {
     // spec/07 § 2. Voice call — the control shows the call is on, and ends it.
     if (onCall) {
       endVoiceCall();
       return;
     }
     // `onStartCall` hands over to a caller that opens a plain call itself; a
-    // hands-free start from the menu always goes straight to the session.
-    if (onStartCall && mode === 'call') {
+    // hands-free or direct start from the menu always goes straight to the call.
+    if (onStartCall && kind === 'call') {
       onStartCall();
       return;
     }
+    const start = (id: string): Promise<void> =>
+      kind === 'direct'
+        ? startDirectCall(id)
+        : kind === 'call'
+          ? startVoiceCall(id)
+          : startVoiceCall(id, kind);
     if (resolveChatId) {
       const target = await resolveChatId();
-      if (target !== null)
-        void (mode === 'call' ? startVoiceCall(target) : startVoiceCall(target, mode));
+      if (target !== null) void start(target);
       return;
     }
-    void (mode === 'call' ? startVoiceCall(chatId) : startVoiceCall(chatId, mode));
+    void start(chatId);
   }
 
   // ⌘⇧D drives this mic (lib/composerMic.ts) in transcribe mode. Read through a
@@ -1993,6 +2002,12 @@ export const Composer = forwardRef(function Composer(
       label: 'Call',
       icon: <Phone size={14} aria-hidden />,
       run: () => void handleCall('call'),
+    },
+    {
+      id: 'direct',
+      label: 'Call direct',
+      icon: <PhoneForwarded size={14} aria-hidden />,
+      run: () => void handleCall('direct'),
     },
     {
       id: 'hands-free',

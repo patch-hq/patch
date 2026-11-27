@@ -49,25 +49,31 @@ export const TTS_ENGINE_LABEL: Record<DirectTtsEngine, string> = {
   openai: 'OpenAI',
 };
 
-/**
- * One engine a surface reports. Not strict, and the engine id is a plain
- * string: a surface newer than the server must not have its whole report
- * refused over an engine this build has not heard of.
- */
-const ReportedStt = z.object({
-  engine: z.string().min(1),
-  where: SpeechEngineWhere,
-  models: z.array(z.string().min(1)),
-});
-const ReportedTts = ReportedStt.extend({ voices: z.array(z.string().min(1)) });
+const ReportedStt = z
+  .object({
+    engine: DirectSttEngine,
+    where: SpeechEngineWhere,
+    models: z.array(z.string().min(1)),
+  })
+  .strict();
+const ReportedTts = z
+  .object({
+    engine: DirectTtsEngine,
+    where: SpeechEngineWhere,
+    models: z.array(z.string().min(1)),
+    voices: z.array(z.string().min(1)),
+  })
+  .strict();
 export type ReportedSttEngine = z.infer<typeof ReportedStt>;
 export type ReportedTtsEngine = z.infer<typeof ReportedTts>;
 
 /** `surface.speech_engines` body: what this surface can run for a direct call. */
-export const SpeechEngineReport = z.object({
-  stt: z.array(ReportedStt),
-  tts: z.array(ReportedTts),
-});
+export const SpeechEngineReport = z
+  .object({
+    stt: z.array(ReportedStt),
+    tts: z.array(ReportedTts),
+  })
+  .strict();
 export type SpeechEngineReport = z.infer<typeof SpeechEngineReport>;
 
 /**
@@ -188,13 +194,6 @@ export type DirectCallResolution =
   | { ok: true; call: ResolvedDirectCall }
   | { ok: false; reason: string };
 
-function knownStt(e: ReportedSttEngine): e is ReportedSttEngine & { engine: DirectSttEngine } {
-  return (DirectSttEngine.options as readonly string[]).includes(e.engine);
-}
-function knownTts(e: ReportedTtsEngine): e is ReportedTtsEngine & { engine: DirectTtsEngine } {
-  return (DirectTtsEngine.options as readonly string[]).includes(e.engine);
-}
-
 /** On-device engines first: free, and no network trip. */
 function preferDevice<T extends { where: SpeechEngineWhere }>(xs: T[]): T[] {
   return [...xs.filter((x) => x.where === 'device'), ...xs.filter((x) => x.where === 'cloud')];
@@ -216,8 +215,8 @@ export function resolveDirectCall(
   report: SpeechEngineReport,
   setup: DirectCallSetup | undefined,
 ): DirectCallResolution {
-  const stts = preferDevice(report.stt.filter(knownStt));
-  const ttss = preferDevice(report.tts.filter(knownTts));
+  const stts = preferDevice(report.stt);
+  const ttss = preferDevice(report.tts);
   if (stts.length === 0 || ttss.length === 0) return { ok: false, reason: NO_SPEECH_ENGINE };
   const fix = 'Pick another in Settings → Voice calls → Direct calls.';
 

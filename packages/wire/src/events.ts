@@ -2831,7 +2831,7 @@ export const SharedSettings = z
      * (spec/07 § Direct calls). A device absent here runs on the first engines
      * it reports. Written whole; synced to every device.
      */
-    deviceDirectCall: z.record(z.string().min(1), DirectCallSetup).optional(),
+    deviceDirectCall: z.record(z.string().min(1), DirectCallSetup),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -3041,6 +3041,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   voiceMatchThreshold: VOICE_MATCH_THRESHOLD,
   dictationPauseSeconds: 10,
   dictationTurnDetection: true,
+  deviceDirectCall: {},
   permissionModeDefault: 'auto',
   providerPermissionDefaults: {},
   providerSettings: {},
