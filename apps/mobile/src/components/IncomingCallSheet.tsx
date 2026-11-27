@@ -16,8 +16,10 @@ import { fixed, fonts, radii, space, useTheme } from '../lib/theme';
 export function IncomingCallSheet(): React.ReactElement | null {
   const colors = useTheme();
   const incoming = useVoiceStore((s) => s.incomingCall);
-  const active = useVoiceStore((s) => s.activeSession);
-  if (!incoming || active) return null;
+  // A paused call is not live: an agent's call rings over it (spec/07 § Pause).
+  const active = useVoiceStore((s) => s.activeSession !== null && s.callPaused === null);
+  // A call answered on its own never rings (spec/07 § Agent-initiated voice).
+  if (!incoming || active || incoming.autoAnswer === true) return null;
 
   const accept = (): void => {
     try {
@@ -32,7 +34,11 @@ export function IncomingCallSheet(): React.ReactElement | null {
         .pushError(`failed to send call response — retry: ${(e as Error).message}`);
       return;
     }
-    startVoiceCall(incoming.chatId);
+    startVoiceCall(
+      incoming.chatId,
+      'call',
+      incoming.message !== undefined ? { callReason: incoming.message } : {},
+    );
     useVoiceStore.getState().setIncoming(null);
   };
   const decline = (): void => {

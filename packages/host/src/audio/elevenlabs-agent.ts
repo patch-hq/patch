@@ -407,8 +407,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       name: `patch-voice-${this.init.sessionId}`,
       conversation_config: {
         agent: {
-          // Empty: the agent waits for the user to speak first.
-          first_message: '',
+          // Empty: the agent waits for the user to speak first — unless the call answers an
+          // agent's ring, which opens with the reason it rang (spec/07 § Agent-initiated voice).
+          first_message: this.init.callReason ?? '',
           language: 'en',
           prompt: {
             prompt: withBriefing(

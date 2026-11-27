@@ -135,6 +135,27 @@ async function openSession(
 }
 
 describe('GeminiLiveSession — connect + setup', () => {
+  test("a call answering an agent's ring opens with its reason once setup is done", async () => {
+    const { deps, lastWs } = makeDeps();
+    const session = new GeminiLiveSession(
+      makeInit({ callReason: 'The deploy failed; shall I roll back?' }),
+      deps,
+    );
+    const ws = await openSession(session, lastWs);
+    const turns = clientTurns(ws);
+    expect(turns.at(-1)).toContain('The deploy failed; shall I roll back?');
+    expect(turns.at(-1)).toContain('just answered');
+    await session.close();
+  });
+
+  test('a call the user placed opens with nothing: the model waits for them', async () => {
+    const { deps, lastWs } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    expect(clientTurns(ws).some((t) => t.includes('just answered'))).toBe(false);
+    await session.close();
+  });
+
   test('waits out filler pauses: long end-of-speech silence and a no-reply-to-fragments rule', async () => {
     const { deps, lastWs } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);

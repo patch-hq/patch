@@ -87,6 +87,17 @@ export function liveNote(
   return `(Note, not for you to answer: the agent wrote in the chat: "${short}")`;
 }
 
+/**
+ * The first turn of a call that answers an agent's ring (spec/07 § Agent-initiated voice): the
+ * voice opens by telling the user why the agent called, then waits for their answer.
+ */
+export function callOpening(reason: string): string {
+  return (
+    "(The chat's agent called the user and they have just answered. Open the call by telling " +
+    `them why it called, in a sentence or two, then wait for their answer: "${reason.trim()}")`
+  );
+}
+
 /** Added to a hand-off's result so the voice gives the gist rather than reading it out. */
 export const RESULT_GIST_NOTE =
   '(Give the user the gist of this in one short sentence; do not read it out.)\n\n';

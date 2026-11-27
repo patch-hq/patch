@@ -206,7 +206,15 @@ async function register(): Promise<void> {
         const callId = String(data['callId'] ?? '');
         const chatId = String(data['chatId'] ?? '');
         if (callId && chatId) {
-          showIncomingCall(callId, chatId, String(data['callerLabel'] ?? 'Manager'));
+          // The body is the agent's reason, empty when it gave none.
+          const reason = n.request.content.body ?? '';
+          showIncomingCall({
+            callId,
+            chatId,
+            message: reason === '' ? undefined : reason,
+            receivedAt: Date.now(),
+            ...(data['autoAnswer'] === 'true' ? { autoAnswer: true } : {}),
+          });
         }
       }
     }),

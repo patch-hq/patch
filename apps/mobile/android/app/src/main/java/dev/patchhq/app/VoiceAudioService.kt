@@ -32,10 +32,23 @@ import android.util.Log
  * a lie about what the call is doing.
  *
  * Audio focus is requested as AUDIOFOCUS_GAIN, so music and navigation prompts
- * duck for the session rather than playing over it. A hands-free session holds
+ * duck for the session rather than playing over it. A call answered on its own
+ * for an agent (Answer automatically in hands-free) takes
+ * AUDIOFOCUS_GAIN_TRANSIENT instead: the other app pauses for it and resumes by
+ * itself when the call ends and focus is abandoned. A hands-free session holds
  * the same service and the same focus: silence is not the same as being
  * finished, and a session Android drops while the phone is in a pocket is the
  * failure this prevents.
+ *
+ * A paused call (spec/07 § Pause) keeps the service: the voice session is
+ * closed, focus and the headset route are released so other audio plays again,
+ * and the notification reads Paused with Resume and End. The service stays so
+ * that headphones going back in can resume the call from the background —
+ * Android only lets the microphone start again under a service that is
+ * already running.
+ *
+ * Headphones coming and going are reported to JS ("headset_removed" /
+ * "headset_added"), which pauses and resumes the call.
  *
  * Started/stopped from JS via PatchVoiceAudioServiceModule. NO FALLBACK: if
  * the platform refuses to promote us to foreground we throw, surfacing the
@@ -48,6 +61,8 @@ class VoiceAudioService : Service() {
     const val EXTRA_CHAT = "chat"
     const val EXTRA_MODE = "mode"
     const val EXTRA_MUTED = "muted"
+    const val EXTRA_PAUSED = "paused"
+    const val EXTRA_TRANSIENT_FOCUS = "transientFocus"
     const val ACTION_START = "dev.patchhq.app.voice.START"
     const val ACTION_STOP = "dev.patchhq.app.voice.STOP"
     /**
@@ -59,6 +74,7 @@ class VoiceAudioService : Service() {
     const val ACTION_END_FROM_NOTIFICATION = "dev.patchhq.app.voice.END"
     const val ACTION_MUTE = "dev.patchhq.app.voice.MUTE"
     const val ACTION_MODE = "dev.patchhq.app.voice.MODE"
+    const val ACTION_RESUME = "dev.patchhq.app.voice.RESUME"
 
     /**
      * Set by PatchVoiceAudioServiceModule while the React context is alive.
@@ -75,6 +91,9 @@ class VoiceAudioService : Service() {
   private var chat: String? = null
   private var mode: String = "call"
   private var muted: Boolean = false
+  private var paused: Boolean = false
+  private var transientFocus: Boolean = false
+  private var inForeground = false
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -84,6 +103,7 @@ class VoiceAudioService : Service() {
         // A press on End call has to end the CALL, not just the service —
         // otherwise the app is left holding a session with no notification.
         actionListener?.invoke("stop")
+        stopWatchingHeadsets()
         releaseHeadsetRoute()
         abandonAudioFocus()
         stopForegroundCompat()
@@ -91,6 +111,7 @@ class VoiceAudioService : Service() {
         return START_NOT_STICKY
       }
       ACTION_STOP -> {
+        stopWatchingHeadsets()
         releaseHeadsetRoute()
         abandonAudioFocus()
         stopForegroundCompat()
@@ -105,21 +126,43 @@ class VoiceAudioService : Service() {
         actionListener?.invoke("mode")
         return START_STICKY
       }
+      ACTION_RESUME -> {
+        actionListener?.invoke("resume")
+        return START_STICKY
+      }
     }
     if (intent != null) {
       chat = intent.getStringExtra(EXTRA_CHAT)
       mode = intent.getStringExtra(EXTRA_MODE) ?: "call"
       muted = intent.getBooleanExtra(EXTRA_MUTED, false)
+      paused = intent.getBooleanExtra(EXTRA_PAUSED, false)
+      transientFocus = intent.getBooleanExtra(EXTRA_TRANSIENT_FOCUS, false)
     }
     ensureChannel()
-    requestAudioFocus()
-    routeToHeadset()
     watchHeadsetChanges()
-    startForeground(NOTIFICATION_ID, buildNotification())
+    if (paused) {
+      // Nothing is listening or speaking: give the audio back to everything else.
+      releaseHeadsetRoute()
+      abandonAudioFocus()
+    } else {
+      requestAudioFocus()
+      routeToHeadset()
+    }
+    if (!inForeground) {
+      startForeground(NOTIFICATION_ID, buildNotification())
+      inForeground = true
+    } else {
+      // Already foreground: redraw the notification only. Promoting again would
+      // re-check the microphone type, which Android refuses from the background —
+      // and headphones going back in resumes a paused call from exactly there.
+      val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      mgr.notify(NOTIFICATION_ID, buildNotification())
+    }
     return START_STICKY
   }
 
   override fun onDestroy() {
+    stopWatchingHeadsets()
     releaseHeadsetRoute()
     abandonAudioFocus()
     super.onDestroy()
@@ -135,7 +178,7 @@ class VoiceAudioService : Service() {
           .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
           .build()
       val request =
-        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        AudioFocusRequest.Builder(focusGain())
           .setAudioAttributes(attributes)
           .setWillPauseWhenDucked(false)
           .build()
@@ -146,15 +189,21 @@ class VoiceAudioService : Service() {
       manager.requestAudioFocus(
         null,
         AudioManager.STREAM_VOICE_CALL,
-        AudioManager.AUDIOFOCUS_GAIN,
+        focusGain(),
       )
     }
   }
+
+  // Transient for a call answered on its own for an agent: the app it paused
+  // resumes when focus is abandoned at the end of the call.
+  private fun focusGain(): Int =
+    if (transientFocus) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT else AudioManager.AUDIOFOCUS_GAIN
 
   // VOICE_COMMUNICATION audio follows the call route, which only reaches a
   // wired or Bluetooth headset once Android is in communication mode and that
   // device is chosen. Without this the reply plays from the phone speaker.
   private fun routeToHeadset() {
+    if (paused) return
     val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
     if (previousMode == null) previousMode = manager.mode
     manager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -177,23 +226,33 @@ class VoiceAudioService : Service() {
     }
   }
 
-  // A headset pulled out (or plugged in) mid-call must move the call with it.
-  // The route is otherwise chosen once at start, so unplugging left it pointing
-  // at a device that no longer exists and the call went quiet; plugging back in
-  // never took the call back. Re-run the same routing on every headset change.
+  // Headphones out pauses the call and back in resumes it (spec/07 § Pause):
+  // JS owns that decision and is told of each change. A headset connected while
+  // the call is live also takes the call onto it now, since the route is
+  // otherwise chosen once at start. A headset removed is not rerouted to the
+  // phone's speaker: the call is pausing, and the reply must not play out loud
+  // in the meantime. With no JS to tell (the React context gone), the call is
+  // moved to the phone's own route rather than left on a device that is gone.
   private val deviceCallback =
     object : AudioDeviceCallback() {
       override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
         if (removed.any { it.type in headsetTypes }) {
-          Log.i("PatchVoiceAudio", "headset removed mid-call; moving to the phone's own route")
-          rerouteAfterDeviceChange()
+          val listener = actionListener
+          if (listener != null) {
+            Log.i("PatchVoiceAudio", "headset removed (paused=$paused); telling JS")
+            listener.invoke("headset_removed")
+          } else if (!paused) {
+            Log.w("PatchVoiceAudio", "headset removed with no JS listening; moving to the phone's route")
+            rerouteAfterDeviceChange()
+          }
         }
       }
 
       override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
         if (added.any { it.type in headsetTypes }) {
-          Log.i("PatchVoiceAudio", "headset connected mid-call; moving the call onto it")
-          rerouteAfterDeviceChange()
+          Log.i("PatchVoiceAudio", "headset connected (paused=$paused)")
+          if (!paused) rerouteAfterDeviceChange()
+          actionListener?.invoke("headset_added")
         }
       }
     }
@@ -216,12 +275,15 @@ class VoiceAudioService : Service() {
     routeToHeadset()
   }
 
+  private fun stopWatchingHeadsets() {
+    if (!deviceCallbackRegistered) return
+    val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    manager.unregisterAudioDeviceCallback(deviceCallback)
+    deviceCallbackRegistered = false
+  }
+
   private fun releaseHeadsetRoute() {
     val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    if (deviceCallbackRegistered) {
-      manager.unregisterAudioDeviceCallback(deviceCallback)
-      deviceCallbackRegistered = false
-    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       manager.clearCommunicationDevice()
     } else if (scoStarted) {
@@ -292,7 +354,7 @@ class VoiceAudioService : Service() {
       )
 
     val handsFree = mode == "hands-free"
-    val label = if (handsFree) "Hands-free" else "On call"
+    val label = if (paused) "Paused" else if (handsFree) "Hands-free" else "On call"
     val status = if (chat.isNullOrBlank()) label else "$label · $chat"
 
     val builder =
@@ -302,12 +364,24 @@ class VoiceAudioService : Service() {
         @Suppress("DEPRECATION") Notification.Builder(this)
       }
 
-    return builder
+    builder
       .setContentTitle("Patch")
       .setContentText(status)
       .setSmallIcon(applicationInfo.icon)
       .setOngoing(true)
       .setContentIntent(contentIntent)
+    if (paused) {
+      return builder
+        .addAction(
+          Notification.Action.Builder(0, "Resume", serviceAction(ACTION_RESUME, 4)).build()
+        )
+        .addAction(
+          Notification.Action.Builder(0, "End call", serviceAction(ACTION_END_FROM_NOTIFICATION, 1))
+            .build()
+        )
+        .build()
+    }
+    return builder
       .addAction(
         Notification.Action.Builder(
             0,
@@ -336,6 +410,7 @@ class VoiceAudioService : Service() {
   }
 
   private fun stopForegroundCompat() {
+    inForeground = false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
       stopForeground(STOP_FOREGROUND_REMOVE)
     } else {

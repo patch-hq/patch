@@ -412,6 +412,7 @@ describe('AppShell', () => {
         unaddressed: null,
         phase: 'listening',
         reconnecting: false,
+        paused: null,
       },
     });
     cleanup();
@@ -466,6 +467,7 @@ describe('AppShell', () => {
         unaddressed: null,
         phase: 'listening',
         reconnecting: false,
+        paused: null,
       },
     });
     sessionStorage.setItem(AUTO_CALL_KEY, 'c-auto2');
@@ -1525,7 +1527,23 @@ describe('AppShell', () => {
     });
     expect(useVoiceStore.getState().incomingCall).toBeNull();
     await waitFor(() => expect(useChatStore.getState().activeChatId).toBe('c-incoming'));
-    expect(startVoiceCall).toHaveBeenCalledWith('c-incoming');
+    expect(startVoiceCall).toHaveBeenCalledWith('c-incoming', 'call', undefined, {});
+  });
+
+  it('accepting an agent call opens the call with the reason it rang', async () => {
+    await renderShell('/', [makeRow('c-incoming')]);
+    act(() => {
+      useVoiceStore.getState().setIncoming({
+        callId: 'call-r',
+        chatId: 'c-incoming',
+        message: 'The deploy failed; shall I roll back?',
+        receivedAt: Date.now(),
+      });
+    });
+    fireEvent.click(await screen.findByTestId('incoming-accept'));
+    expect(startVoiceCall).toHaveBeenCalledWith('c-incoming', 'call', undefined, {
+      callReason: 'The deploy failed; shall I roll back?',
+    });
   });
 
   it('dismissing an incoming call sends a decline response and clears it', async () => {

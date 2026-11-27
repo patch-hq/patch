@@ -31,7 +31,7 @@ const { stopVoiceAudioServiceMock, stopMicCaptureMock, stopTtsPlaybackMock, pref
     stopVoiceAudioServiceMock: vi.fn(async () => undefined),
     stopMicCaptureMock: vi.fn(async () => undefined),
     stopTtsPlaybackMock: vi.fn(async () => undefined),
-    prefs: { addressWord: 'patch' as string | null },
+    prefs: { addressWord: 'patch' as string | null, pauseWhenQuietMinutes: 0 },
   }),
 );
 vi.mock('../src/lib/voiceAudioService', () => ({
@@ -66,6 +66,7 @@ function looping(name: string): boolean {
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => prefs.addressWord,
   voiceConfigOrNull: () => null,
+  pauseWhenQuietMinutes: () => prefs.pauseWhenQuietMinutes,
 }));
 
 import {
@@ -92,6 +93,7 @@ beforeEach(() => {
   installFakeWebSocket();
   vi.clearAllMocks();
   prefs.addressWord = 'patch';
+  prefs.pauseWhenQuietMinutes = 0;
   useVoiceStore.setState({
     activeSession: null,
     callMuted: false,
@@ -537,7 +539,10 @@ describe('switching mode while the call is still connecting', () => {
 
     const start = JSON.parse(String(FakeWebSocket.last().sent[0])) as { mode: string };
     expect(start.mode).toBe('hands-free');
-    expect(startVoiceAudioService).toHaveBeenCalledWith('c1', 'hands-free', expect.anything());
+    expect(startVoiceAudioService).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({ mode: 'hands-free' }),
+    );
   });
 });
 
@@ -580,6 +585,9 @@ describe('muting while the call is still connecting', () => {
 
     expect(useVoiceStore.getState().activeSession?.sessionId).toBe('sess-1');
     expect(useVoiceStore.getState().callMuted).toBe(true);
-    expect(startVoiceAudioService).toHaveBeenCalledWith('c1', expect.anything(), true);
+    expect(startVoiceAudioService).toHaveBeenCalledWith(
+      'c1',
+      expect.objectContaining({ muted: true }),
+    );
   });
 });

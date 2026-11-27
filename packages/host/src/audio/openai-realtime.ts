@@ -76,6 +76,7 @@ import {
 } from './session.js';
 import type { VoiceSessionLike } from './voice-session-like.js';
 import {
+  callOpening,
   chatBriefing,
   liveNote,
   withBriefing,
@@ -543,6 +544,18 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     // Load the speaker model now, so the first utterance does not wait for it.
     this.deps.device?.warm?.();
     for (const b64 of queued) this.sendJson({ type: 'input_audio_buffer.append', audio: b64 });
+    // spec/07 § Agent-initiated voice — a call answering an agent's ring opens with its reason.
+    if (this.init.callReason !== undefined) {
+      this.sendJson({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: callOpening(this.init.callReason) }],
+        },
+      });
+      this.sendJson({ type: 'response.create' });
+    }
   }
 
   async onMicFrame(pcm: Int16Array): Promise<void> {

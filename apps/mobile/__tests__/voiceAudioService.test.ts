@@ -15,7 +15,9 @@ beforeEach(() => {
 describe('voiceAudioService — non-Android is a no-op', () => {
   it('startVoiceAudioService no-ops off-Android', async () => {
     const { startVoiceAudioService } = await import('../src/lib/voiceAudioService');
-    await expect(startVoiceAudioService('chat')).resolves.toBeUndefined();
+    await expect(
+      startVoiceAudioService('chat', { mode: 'call', muted: false, transientFocus: false }),
+    ).resolves.toBeUndefined();
   });
 
   it('stopVoiceAudioService no-ops off-Android', async () => {
@@ -28,7 +30,9 @@ describe('voiceAudioService — Android, module missing (NO FALLBACK)', () => {
   it('start throws when the native module is not registered', async () => {
     Platform.OS = 'android';
     const { startVoiceAudioService } = await import('../src/lib/voiceAudioService');
-    await expect(startVoiceAudioService('chat')).rejects.toThrow(/native module missing/);
+    await expect(
+      startVoiceAudioService('chat', { mode: 'call', muted: false, transientFocus: false }),
+    ).rejects.toThrow(/native module missing/);
   });
 
   it('stop throws when the native module is not registered', async () => {
@@ -44,9 +48,13 @@ describe('voiceAudioService — Android, module present', () => {
     const start = vi.fn(async () => undefined);
     NativeModules['PatchVoiceAudioService'] = { start, stop: vi.fn(async () => undefined) };
     const { startVoiceAudioService } = await import('../src/lib/voiceAudioService');
-    await startVoiceAudioService('Manager', 'hands-free');
+    await startVoiceAudioService('Manager', {
+      mode: 'hands-free',
+      muted: false,
+      transientFocus: false,
+    });
     // The notification names the mode it is running in (spec/15 § Voice tab).
-    expect(start).toHaveBeenCalledWith('Manager', 'hands-free', false);
+    expect(start).toHaveBeenCalledWith('Manager', 'hands-free', false, false);
   });
 
   it('start forwards a null chat name', async () => {
@@ -54,8 +62,9 @@ describe('voiceAudioService — Android, module present', () => {
     const start = vi.fn(async () => undefined);
     NativeModules['PatchVoiceAudioService'] = { start, stop: vi.fn(async () => undefined) };
     const { startVoiceAudioService } = await import('../src/lib/voiceAudioService');
-    await startVoiceAudioService(null, 'call');
-    expect(start).toHaveBeenCalledWith(null, 'call', false);
+    await startVoiceAudioService(null, { mode: 'call', muted: false, transientFocus: true });
+    // A call answered on its own for an agent takes transient focus.
+    expect(start).toHaveBeenCalledWith(null, 'call', false, true);
   });
 
   it('update re-renders the notification for a session already running', async () => {
@@ -67,8 +76,31 @@ describe('voiceAudioService — Android, module present', () => {
       update,
     };
     const { updateVoiceAudioService } = await import('../src/lib/voiceAudioService');
-    await updateVoiceAudioService('Manager', 'call', true);
-    expect(update).toHaveBeenCalledWith('Manager', 'call', true);
+    await updateVoiceAudioService('Manager', {
+      mode: 'call',
+      muted: true,
+      paused: false,
+      transientFocus: false,
+    });
+    expect(update).toHaveBeenCalledWith('Manager', 'call', true, false, false);
+  });
+
+  it('update carries a pause to the service, which releases the audio', async () => {
+    Platform.OS = 'android';
+    const update = vi.fn(async () => undefined);
+    NativeModules['PatchVoiceAudioService'] = {
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+      update,
+    };
+    const { updateVoiceAudioService } = await import('../src/lib/voiceAudioService');
+    await updateVoiceAudioService('Manager', {
+      mode: 'hands-free',
+      muted: false,
+      paused: true,
+      transientFocus: true,
+    });
+    expect(update).toHaveBeenCalledWith('Manager', 'hands-free', false, true, true);
   });
 
   it('stop calls the native stop()', async () => {

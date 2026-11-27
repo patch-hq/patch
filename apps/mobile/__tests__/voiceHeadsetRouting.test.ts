@@ -36,4 +36,26 @@ describe('VoiceAudioService headset routing', () => {
     expect(kt).toContain('onAudioDevicesAdded');
     expect(kt).toContain('unregisterAudioDeviceCallback');
   });
+
+  it('tells JS when headphones come and go, which pauses and resumes the call', () => {
+    expect(kt).toContain('"headset_removed"');
+    expect(kt).toContain('"headset_added"');
+  });
+  it('a paused call keeps watching headphones but releases focus and the route', () => {
+    expect(kt).toContain('EXTRA_PAUSED');
+    expect(kt).toMatch(
+      /if \(paused\) \{[\s\S]*?releaseHeadsetRoute\(\)[\s\S]*?abandonAudioFocus\(\)/,
+    );
+    // Watching stops only when the service does.
+    expect(kt).toMatch(/fun stopWatchingHeadsets/);
+    expect(kt).toContain('"Resume"');
+  });
+  it('a call answered on its own takes transient focus, so paused playback resumes after', () => {
+    expect(kt).toContain('AUDIOFOCUS_GAIN_TRANSIENT');
+    expect(kt).toContain('EXTRA_TRANSIENT_FOCUS');
+  });
+  it('promotes to the foreground once and only redraws after, so a resume works from the background', () => {
+    expect(kt).toMatch(/if \(!inForeground\) \{\s*startForeground/);
+    expect(kt).toContain('mgr.notify(NOTIFICATION_ID');
+  });
 });

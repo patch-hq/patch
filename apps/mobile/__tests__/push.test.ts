@@ -160,11 +160,20 @@ describe('initPush — listeners', () => {
     Notifications.__emitNotificationReceived({
       request: {
         content: {
-          data: { kind: 'call', callId: 'call1', chatId: 'chat1', callerLabel: 'Manager' },
+          body: 'The deploy failed; roll back?',
+          data: { kind: 'call', callId: 'call1', chatId: 'chat1' },
         },
       },
     });
-    expect(showIncomingCall).toHaveBeenCalledWith('call1', 'chat1', 'Manager');
+    // The body is the agent's reason, which the call opens with.
+    expect(showIncomingCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callId: 'call1',
+        chatId: 'chat1',
+        message: 'The deploy failed; roll back?',
+      }),
+    );
+    expect(showIncomingCall.mock.calls[0]![0].autoAnswer).toBeUndefined();
   });
 
   it('a call notification with no data at all is ignored (data ?? {} branch)', async () => {
@@ -179,16 +188,23 @@ describe('initPush — listeners', () => {
     expect(showIncomingCall).not.toHaveBeenCalled();
   });
 
-  it('a call notification with no callerLabel defaults to "Manager"', async () => {
+  it('a call push with no reason and answer-automatically set answers it on its own', async () => {
     const showIncomingCall = vi.fn();
     vi.doMock('../src/lib/callkeep', () => ({ showIncomingCall }));
     const Notifications = await import('./stubs/expo-notifications');
     const { initPush } = await import('../src/lib/push');
     await initPush();
     Notifications.__emitNotificationReceived({
-      request: { content: { data: { kind: 'call', callId: 'call1', chatId: 'chat1' } } },
+      request: {
+        content: {
+          body: '',
+          data: { kind: 'call', callId: 'call1', chatId: 'chat1', autoAnswer: 'true' },
+        },
+      },
     });
-    expect(showIncomingCall).toHaveBeenCalledWith('call1', 'chat1', 'Manager');
+    expect(showIncomingCall).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: 'call1', message: undefined, autoAnswer: true }),
+    );
   });
 
   it('a call notification missing callId/chatId is ignored', async () => {

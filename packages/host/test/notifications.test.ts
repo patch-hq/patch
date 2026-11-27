@@ -416,6 +416,61 @@ describe('UDS /internal/call', () => {
       await app.close();
     }
   });
+  it('with Agents can call you off, rings nothing, speaks nothing, and tells the agent why', async () => {
+    const { daemon, jobs, folder, upstream } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const spoken: string[] = [];
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      emitWire: (e) => upstream.push(e),
+      interruptOpenCall: (text) => {
+        spoken.push(text);
+        return true;
+      },
+      agentsCanCall: () => false,
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/call',
+        headers: AUTH,
+        payload: { callerChatId: chatId, message: 'need a decision' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { ok: boolean; rang: boolean; message: string };
+      expect(body.rang).toBe(false);
+      expect(body.message).toMatch(/turned off agent calls/);
+      expect(upstream.some((e) => e.type === 'patch.call')).toBe(false);
+      expect(spoken).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('with Agents can call you on, rings as before', async () => {
+    const { daemon, jobs, folder, upstream } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      emitWire: (e) => upstream.push(e),
+      agentsCanCall: () => true,
+    });
+    try {
+      await app.inject({
+        method: 'POST',
+        url: '/internal/call',
+        headers: AUTH,
+        payload: { callerChatId: chatId, message: 'need a decision' },
+      });
+      expect(upstream.some((e) => e.type === 'patch.call')).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('preprocessInput injects the broadcast note on next user reply', () => {

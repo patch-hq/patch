@@ -486,6 +486,12 @@ export const AudioSessionStartEvent = z
      * picked back up (`07-voice-app.md` § A dropped call comes back).
      */
     resumed: z.boolean().optional(),
+    /**
+     * The reason an agent gave when it called the user (`patch_call`), on the
+     * call that answers it. The voice agent opens the call by saying it
+     * (`07-voice-app.md` § Agent-initiated voice).
+     */
+    callReason: z.string().min(1).max(2000).optional(),
   })
   .strict();
 export type AudioSessionStartEvent = z.infer<typeof AudioSessionStartEvent>;

@@ -1680,7 +1680,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_call',
     {
       description:
-        'Ring the user phone-style (concurrent push + desktop ring; first surface to accept wins). On accept, drops the user into a sustained voice call against the calling chat. On decline / 30s timeout / all surfaces missed, falls back to a push notification carrying the reason text. Use sparingly — a call demands attention. Pass chatId to ring on behalf of another chat; otherwise rings for the calling chat.',
+        'Ring the user phone-style (concurrent push + desktop ring; first surface to accept wins). On accept, drops the user into a sustained voice call against the calling chat, which opens with your message as the reason you called. On decline / 30s timeout / all surfaces missed, falls back to a push notification carrying the reason text. When the user has turned agent calls off, nothing rings and the result says so (rang: false). Use sparingly — a call demands attention. Pass chatId to ring on behalf of another chat; otherwise rings for the calling chat.',
       inputSchema: {
         chatId: z.string().min(1).optional(),
         message: z.string().min(1).optional(),

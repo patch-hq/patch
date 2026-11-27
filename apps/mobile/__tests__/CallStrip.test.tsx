@@ -19,15 +19,19 @@ import { useVoiceStore } from '../src/stores/voiceStore';
 import { useMicLevelStore } from '../src/stores/micLevelStore';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 
-const { endVoiceCallSpy, retrySpy, setCallMutedSpy } = vi.hoisted(() => ({
+const { endVoiceCallSpy, retrySpy, setCallMutedSpy, pauseSpy, resumeSpy } = vi.hoisted(() => ({
   endVoiceCallSpy: vi.fn().mockResolvedValue(undefined),
   retrySpy: vi.fn().mockResolvedValue(undefined),
   setCallMutedSpy: vi.fn(),
+  pauseSpy: vi.fn(),
+  resumeSpy: vi.fn(),
 }));
 vi.mock('../src/lib/voiceCall', () => ({
   endVoiceCall: endVoiceCallSpy,
   retryVoiceCall: retrySpy,
   setCallMuted: setCallMutedSpy,
+  pauseVoiceCall: pauseSpy,
+  resumeVoiceCall: resumeSpy,
 }));
 
 import { CallStrip } from '../src/components/CallStrip';
@@ -52,6 +56,7 @@ function call(extra: Partial<ReturnType<typeof useVoiceStore.getState>> = {}): v
     callConnectedAt: T0,
     callReconnectingSince: null,
     callAddressWord: 'patch',
+    callPaused: null,
     ...extra,
   });
 }
@@ -186,6 +191,27 @@ describe('CallStrip', () => {
     expect(queryHost(r.root, byTestId('call-partial'))).toBeNull();
     findHost(r.root, byLabel('Retry call')).props['onPress']();
     expect(retrySpy).toHaveBeenCalledTimes(1);
+    findHost(r.root, byLabel('End call')).props['onPress']();
+    expect(endVoiceCallSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('pause sits beside end and pauses the call', () => {
+    call();
+    const r = renderRN(<CallStrip />);
+    findHost(r.root, byLabel('Pause call')).props['onPress']();
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a paused call reads Paused with Resume and End, and nothing else', () => {
+    call({ callPaused: 'headphones', callTranscriptPartial: 'x' });
+    const r = renderRN(<CallStrip />);
+    expect(textOf(findHost(r.root, byTestId('call-paused')))).toBe('Paused');
+    expect(queryHost(r.root, byTestId('call-wave'))).toBeNull();
+    expect(queryHost(r.root, byTestId('call-mute'))).toBeNull();
+    expect(queryHost(r.root, byTestId('call-pause'))).toBeNull();
+    expect(queryHost(r.root, byTestId('call-partial'))).toBeNull();
+    findHost(r.root, byLabel('Resume call')).props['onPress']();
+    expect(resumeSpy).toHaveBeenCalledTimes(1);
     findHost(r.root, byLabel('End call')).props['onPress']();
     expect(endVoiceCallSpy).toHaveBeenCalledTimes(1);
   });

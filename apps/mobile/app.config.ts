@@ -14,7 +14,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.2.0',
+  version: '0.2.1',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -76,7 +76,12 @@ const config: ExpoConfig = {
   // Bumped to 0.2.0 for capture-this-screen (react-native-view-shot photographs
   // the window, expo-sensors feeds the shake that triggers it): neither native
   // module is in a 0.1.9 APK, so the JS that calls them must not reach one by OTA.
-  runtimeVersion: '0.2.0',
+  //
+  // Bumped to 0.2.1 for pausing a call (spec/07 § Pause) and calls answered on
+  // their own: the voice service's start/update take new arguments (paused,
+  // transient focus) and report headphones coming and going, so this JS must
+  // not reach a 0.2.0 APK.
+  runtimeVersion: '0.2.1',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no

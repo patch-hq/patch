@@ -222,7 +222,9 @@ describe('bootstrap()', () => {
       message: undefined,
       receivedAt: Date.now(),
     });
-    expect(showIncomingCall).toHaveBeenCalledWith('call1', 'chat1', 'Manager');
+    expect(showIncomingCall).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: 'call1', chatId: 'chat1' }),
+    );
   });
 
   it('bootstrapping again after a teardown (re-pair) bridges an incoming call once, not twice', async () => {

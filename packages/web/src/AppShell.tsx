@@ -942,12 +942,15 @@ function acceptCall(
   navigate: (to: string) => void,
 ): void {
   ws?.send({ type: 'chat.call_response', callId, response: 'accept' });
+  // The reason the agent rang opens the call (spec/07 § Agent-initiated voice).
+  const incoming = useVoiceStore.getState().incomingCall;
+  const callReason = incoming?.callId === callId ? incoming.message : undefined;
   useVoiceStore.getState().setIncoming(null);
   navigate(`/chats/${chatId}`);
   // Accept → open the voice-call overlay (spec/14 ## Manager incoming-call UX:
   // "Accept → opens Manager voice session"). The controller mints a voice-call
   // token and opens the audio WSS for the agent-initiated call.
-  void startVoiceCall(chatId);
+  void startVoiceCall(chatId, 'call', undefined, callReason ? { callReason } : {});
 }
 
 function dismissCall(ws: PatchWs | null, callId: string): void {

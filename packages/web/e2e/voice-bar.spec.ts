@@ -53,7 +53,23 @@ test.describe('voice bar', () => {
     // clickable, and the bar must not lose it.
     await expect(page.getByTestId('voice-bar-mute')).toBeVisible();
     await expect(page.getByTestId('voice-bar-mode')).toBeVisible();
+    await expect(page.getByTestId('voice-bar-pause')).toBeVisible();
     await expect(page.getByTestId('voice-bar-end')).toBeVisible();
+  });
+
+  test('pause keeps the call on the bar, reading Paused with Resume and End', async ({ page }) => {
+    await page.goto(CALL);
+    await page.getByTestId('voice-bar-pause').click();
+    const bar = page.getByTestId('voice-bar');
+    await expect(bar).toHaveAttribute('data-state', 'paused');
+    await expect(page.getByTestId('voice-bar-line')).toHaveText('Paused');
+    await expect(page.getByTestId('voice-bar-head')).toContainText('On call');
+    await expect(page.getByTestId('voice-bar-resume')).toBeVisible();
+    await expect(page.getByTestId('voice-bar-end')).toBeVisible();
+    await expect(page.getByTestId('voice-bar-mute')).toHaveCount(0);
+    // Still a strip in flow, not removed.
+    const box = await bar.boundingBox();
+    expect(box!.y).toBeLessThan(4);
   });
 
   test('on a phone a long transcript wraps and the bar grows instead of overflowing', async ({

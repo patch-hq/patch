@@ -1,7 +1,8 @@
 // Call strip (spec/15 § Voice states — Voice call). While a call runs, one
 // strip is pinned to the top of EVERY screen:
 //
-//   On call · 1:23 · ▏▎▍▌▍▎▏▎▍ (live waveform) · [mute] [end]
+//   On call · 1:23 · ▏▎▍▌▍▎▏▎▍ (live waveform) · [mute] [pause] [end]
+//   On call · 1:23 · Paused · [resume] [end]
 //
 // Tapping the strip returns to the call's chat. The chat's own message stream
 // is the transcript, so the strip carries only what the stream cannot say: the
@@ -12,10 +13,16 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { MicOff, PhoneOff } from 'lucide-react-native';
+import { MicOff, Pause, PhoneOff, Play } from 'lucide-react-native';
 import { useVoiceStore } from '../stores/voiceStore';
 import { useMicLevelStore } from '../stores/micLevelStore';
-import { endVoiceCall, retryVoiceCall, setCallMuted } from '../lib/voiceCall';
+import {
+  endVoiceCall,
+  pauseVoiceCall,
+  resumeVoiceCall,
+  retryVoiceCall,
+  setCallMuted,
+} from '../lib/voiceCall';
 import { callModeLabel, formatElapsed, handsFreeHint } from '../lib/callStatus';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 import { ConnectingLabel, useNow } from './CallParts';
@@ -79,6 +86,7 @@ export function CallStrip(): React.ReactElement | null {
   const connectedAt = useVoiceStore((s) => s.callConnectedAt);
   const reconnectingSince = useVoiceStore((s) => s.callReconnectingSince);
   const addressWord = useVoiceStore((s) => s.callAddressWord);
+  const paused = useVoiceStore((s) => s.callPaused) !== null;
   const now = useNow(session !== null && connectedAt !== null);
 
   if (!session) return null;
@@ -90,7 +98,7 @@ export function CallStrip(): React.ReactElement | null {
   const head = failed ? (connecting ? 'Could not connect' : 'Call problem') : callModeLabel(mode);
   const headLabel = mode === 'call' && !failed ? 'On call' : head;
   const note =
-    failed || connecting
+    failed || connecting || paused
       ? null
       : partial.length > 0
         ? `You: ${partial}`
@@ -131,7 +139,11 @@ export function CallStrip(): React.ReactElement | null {
               {formatElapsed((reconnectingSince ?? now) - connectedAt)}
             </Text>
           ) : null}
-          {reconnecting ? (
+          {paused ? (
+            <Text testID="call-paused" style={{ color: fixed.stripText, fontSize: 14 }}>
+              Paused
+            </Text>
+          ) : reconnecting ? (
             <ConnectingLabel color={fixed.stripText} word="Reconnecting" />
           ) : connecting && !failed ? (
             <ConnectingLabel color={fixed.stripText} />
@@ -163,13 +175,14 @@ export function CallStrip(): React.ReactElement | null {
               Retry
             </Text>
           </Pressable>
-        ) : (
+        ) : paused ? (
           <Pressable
-            testID="call-mute"
-            onPress={() => setCallMuted(!muted)}
+            testID="call-resume"
+            onPress={() => {
+              resumeVoiceCall();
+            }}
             accessibilityRole="button"
-            accessibilityLabel={muted ? 'Unmute' : 'Mute'}
-            accessibilityState={{ selected: muted }}
+            accessibilityLabel="Resume call"
             hitSlop={6}
             style={{
               width: 32,
@@ -177,11 +190,51 @@ export function CallStrip(): React.ReactElement | null {
               borderRadius: 16,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: muted ? fixed.stripButtonMuted : fixed.stripButton,
+              backgroundColor: fixed.stripButton,
             }}
           >
-            <MicOff size={16} color={fixed.stripOn} />
+            <Play size={16} color={fixed.stripOn} />
           </Pressable>
+        ) : (
+          <>
+            <Pressable
+              testID="call-mute"
+              onPress={() => setCallMuted(!muted)}
+              accessibilityRole="button"
+              accessibilityLabel={muted ? 'Unmute' : 'Mute'}
+              accessibilityState={{ selected: muted }}
+              hitSlop={6}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: muted ? fixed.stripButtonMuted : fixed.stripButton,
+              }}
+            >
+              <MicOff size={16} color={fixed.stripOn} />
+            </Pressable>
+            <Pressable
+              testID="call-pause"
+              onPress={() => {
+                pauseVoiceCall();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Pause call"
+              hitSlop={6}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: fixed.stripButton,
+              }}
+            >
+              <Pause size={16} color={fixed.stripOn} />
+            </Pressable>
+          </>
         )}
         <Pressable
           onPress={() => {

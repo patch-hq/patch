@@ -265,7 +265,7 @@ The permission round-trip is text-only on the wire, but the user can answer it e
 - With Agents can call you off (Settings → Voice calls), the tool answers that the user has turned calls off and nothing rings.
 - A voice session already open → the reason is pushed into it (§ Which surface it reaches).
 - Otherwise it rings every linked device (`09-notifications.md` § `patch_call`), with the agent-calling sound (§ Call sounds). On accept, a voice agent call opens on the calling chat with the reason at the end of its start context, and the voice agent opens with it.
-- With Answer automatically in hands-free on, the device answers by itself instead of ringing: other playback pauses, the call opens in `hands-free`, the voice agent says why it called, waits for the answer, then hangs up, and playback resumes. On Android this takes full audio focus through a native audio-focus module, so the other app pauses rather than ducks and resumes when focus is released.
+- With Answer automatically in hands-free on, the device answers by itself instead of ringing: other playback pauses, the call opens in `hands-free`, the voice agent says why it called, waits for the answer, then hangs up, and playback resumes. On Android this takes transient audio focus for the call (`AUDIOFOCUS_GAIN_TRANSIENT`, held by the voice service), so the other app pauses rather than ducks and resumes when focus is released. Answering automatically is the phone's, for a user away from a desk: while the user is at a computer (`09-notifications.md` § Presence heuristic) the call rings as usual, because a computer cannot pause another app's playback for it — macOS offers no way to know whether something is playing, and the media key toggles, so it could start music rather than stop it.
 
 Manager initiates a voice call by exercising the same `patch_call` path any chat has.
 
@@ -376,7 +376,7 @@ On mobile, until the host has acknowledged the session the line is connecting, n
 Pause is a soft hang-up. The voice session closes, so nothing is listening and nothing is billed, but the call stays in the UI — the bar (or pill) reads `Paused` with Resume and End — and the paused sound plays. Resume opens a new session on the same chat, with a fresh start context, and plays the connected sound. A call pauses:
 
 - from the pause button;
-- when headphones are taken out, resuming when they are put back in;
+- when headphones are taken out, resuming when they are put back in — on the phone from Android's audio-device events, which the voice service keeps watching while the call is paused so it can resume from the background; on web and desktop when the output device the call was heard on disappears (and comes back), so a call on built-in speakers never pauses this way;
 - after the silence timeout, when it is on: Pause when quiet for (Settings → Voice calls; off by default) pauses a call in which nothing has been said by either side for that long. Resume is then by the button only.
 
 A paused call is not announced as live to other devices, and an agent's call rings rather than speaking into it.

@@ -62,6 +62,38 @@ describe('IncomingCallSheet — mount gating', () => {
   });
 });
 
+describe('IncomingCallSheet — agent calls', () => {
+  it('a call answered on its own never shows the sheet', () => {
+    useVoiceStore.setState({
+      incomingCall: {
+        callId: 'c1',
+        chatId: 'thread_manager',
+        message: 'Quick question',
+        receivedAt: Date.now(),
+        autoAnswer: true,
+      },
+    });
+    const r = renderRN(<IncomingCallSheet />);
+    expect(r.toJSON()).toBeNull();
+  });
+
+  it('accepting opens the call with the reason the agent rang', () => {
+    useVoiceStore.setState({
+      incomingCall: {
+        callId: 'c1',
+        chatId: 'thread_manager',
+        message: 'The build is red; roll back?',
+        receivedAt: Date.now(),
+      },
+    });
+    const r = renderRN(<IncomingCallSheet />);
+    findHost(r.root, byLabel('Accept call')).props['onPress']();
+    expect(startVoiceCall).toHaveBeenCalledWith('thread_manager', 'call', {
+      callReason: 'The build is red; roll back?',
+    });
+  });
+});
+
 describe('IncomingCallSheet — rendering the incoming call', () => {
   it('shows the caption and the message body when a message is present', () => {
     useVoiceStore.setState({
@@ -109,7 +141,7 @@ describe('IncomingCallSheet — accept', () => {
       callId: 'c1',
       response: 'accept',
     });
-    expect(startVoiceCall).toHaveBeenCalledWith('thread_manager');
+    expect(startVoiceCall).toHaveBeenCalledWith('thread_manager', 'call', {});
     expect(useVoiceStore.getState().incomingCall).toBeNull();
     expect(useUiStore.getState().errors).toEqual([]);
   });

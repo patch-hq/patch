@@ -309,6 +309,7 @@ export class NotificationRouter {
     const data: Record<string, string> = { chatId: event.chatId };
     if (event.kind) data['kind'] = event.kind;
     if (event.callId) data['callId'] = event.callId;
+    if (event.autoAnswer === true) data['autoAnswer'] = 'true';
     if (event.deepLink) data['deepLink'] = event.deepLink;
     // spec/09 § Notification actions — Expo/FCM data values are strings
     // only, so the whole object travels as one JSON string the phone parses

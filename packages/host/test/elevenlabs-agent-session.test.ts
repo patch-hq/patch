@@ -185,6 +185,16 @@ describe('ElevenLabsAgentSession — provisioning', () => {
     expect(ws.url).toBe('wss://signed.example/conv?token=t');
   });
 
+  test("a call answering an agent's ring opens with its reason as the agent's first message", async () => {
+    const { deps, rest, last } = makeDeps();
+    await open(
+      new ElevenLabsAgentSession(makeInit({ callReason: 'The deploy failed; roll back?' }), deps),
+      last,
+    );
+    const agent = rest.find((r) => r.path === '/v1/convai/agents/create')!.body!;
+    expect(agent['conversation_config'].agent.first_message).toBe('The deploy failed; roll back?');
+  });
+
   test('handoff never registers no dispatch tool', async () => {
     const { deps, rest, last } = makeDeps({ handoff: 'never', lookBack: undefined });
     await open(new ElevenLabsAgentSession(makeInit(), deps), last);

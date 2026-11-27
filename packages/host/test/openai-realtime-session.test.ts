@@ -111,6 +111,29 @@ function audioDelta(samples: number): { type: string; delta: string } {
 }
 
 describe('model per layer', () => {
+  test("a call answering an agent's ring opens with its reason: an item, then a response", async () => {
+    const { deps, last } = makeDeps();
+    const session = new OpenAIRealtimeSession(
+      makeInit({ callReason: 'The deploy failed; shall I roll back?' }),
+      deps,
+    );
+    const ws = await open(session, last);
+    const items = ws.ofType('conversation.item.create') as Array<{
+      item: { content: Array<{ text: string }> };
+    }>;
+    expect(items.at(-1)!.item.content[0]!.text).toContain('The deploy failed; shall I roll back?');
+    expect(ws.ofType('response.create')).toHaveLength(1);
+    await session.close();
+  });
+
+  test('a call the user placed asks for no response until they speak', async () => {
+    const { deps, last } = makeDeps();
+    const session = new OpenAIRealtimeSession(makeInit(), deps);
+    const ws = await open(session, last);
+    expect(ws.ofType('response.create')).toHaveLength(0);
+    await session.close();
+  });
+
   test('light and direct run the mini model; heavy runs the flagship', () => {
     expect(openaiRealtimeModelFor('light')).toBe(DEFAULT_OPENAI_REALTIME_MODELS.light);
     expect(openaiRealtimeModelFor('direct')).toBe(DEFAULT_OPENAI_REALTIME_MODELS.light);

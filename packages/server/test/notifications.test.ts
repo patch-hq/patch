@@ -1000,6 +1000,89 @@ describe('NotificationRouter — desktop / speakers', () => {
 });
 
 describe('CallOrchestrator', () => {
+  function callRig(agentCalls: { canCall: boolean; autoAnswer: boolean }, atComputer: boolean) {
+    const { dir, registry } = makeRegistryDir();
+    registry.upsertSurface({ surfaceId: 'srf-p', surfaceKind: 'mobile', label: 'p', issuedAt: 1 });
+    registry.registerPushToken({
+      surfaceId: 'srf-p',
+      accountId: ACCOUNT.publicKey,
+      token: 'tok-p',
+      registeredAt: 1,
+    });
+    const wsHub = makeFakeWsHub();
+    const push = fakePush();
+    const router = new NotificationRouter({
+      logger: silent,
+      registry,
+      presence: new PresenceTracker(),
+      wsHub: wsHub as never,
+      dataDir: dir,
+      pushBackend: push.backend,
+    });
+    const orch = new CallOrchestrator({
+      logger: silent,
+      wsHub: wsHub as never,
+      router,
+      timeoutMs: 60_000,
+      idGenerator: () => 'call-a',
+      agentCalls: () => agentCalls,
+      userAtComputer: () => atComputer,
+    });
+    return { orch, wsHub, push };
+  }
+
+  it('with Agents can call you off, nothing rings and no push goes out', async () => {
+    const { orch, wsHub, push } = callRig({ canCall: false, autoAnswer: false }, false);
+    await orch.startCall({ type: 'patch.call', chatId: 'c1', message: 'decide?' });
+    expect(wsHub.delivered.some((d) => d.event.type === 'chat.call_request')).toBe(false);
+    expect(wsHub.delivered.some((d) => d.event.type === 'notify')).toBe(false);
+    expect(push.sent).toHaveLength(0);
+    expect(orch.getCall('call-a')?.status).toBe('declined');
+    orch.shutdown();
+  });
+
+  it('with calls off a feed line is still spoken (it is not an agent calling)', async () => {
+    const { orch, wsHub } = callRig({ canCall: false, autoAnswer: false }, false);
+    await orch.startCall({ type: 'patch.call', chatId: 'c1', message: 'line', speakOnly: true });
+    expect(orch.getCall('call-a')?.status).not.toBe('declined');
+    expect(wsHub.delivered.some((d) => d.event.type === 'chat.call_request')).toBe(false);
+    orch.shutdown();
+  });
+
+  it('answer automatically, away from a computer: the phone answers, nothing rings elsewhere', async () => {
+    const { orch, wsHub, push } = callRig({ canCall: true, autoAnswer: true }, false);
+    await orch.startCall({ type: 'patch.call', chatId: 'c1', message: 'quick question' });
+    const answer = wsHub.delivered.find((d) => d.event.type === 'chat.call_request');
+    expect(answer?.event).toMatchObject({ autoAnswer: true, message: 'quick question' });
+    expect([...(answer?.kinds ?? [])]).toEqual(['mobile']);
+    expect(wsHub.delivered.some((d) => d.kind === 'desktop')).toBe(false);
+    // The push wakes a phone whose app is not running, and answers there too.
+    expect(push.sent).toHaveLength(1);
+    expect(push.sent[0]?.payload).toMatchObject({
+      body: 'quick question',
+      data: { kind: 'call', callId: 'call-a', autoAnswer: 'true' },
+    });
+    orch.shutdown();
+  });
+
+  it('answer automatically, at a computer: it rings as usual', async () => {
+    const { orch, wsHub } = callRig({ canCall: true, autoAnswer: true }, true);
+    await orch.startCall({ type: 'patch.call', chatId: 'c1', message: 'quick question' });
+    const ring = wsHub.delivered.find((d) => d.event.type === 'chat.call_request');
+    expect((ring?.event as ChatCallRequestEvent).autoAnswer).toBeUndefined();
+    expect(wsHub.delivered.some((d) => d.kind === 'desktop' && d.event.type === 'notify')).toBe(
+      true,
+    );
+    orch.shutdown();
+  });
+
+  it("a call push's body is the agent's reason, empty when it gave none", async () => {
+    const { orch, push } = callRig({ canCall: true, autoAnswer: false }, false);
+    await orch.startCall({ type: 'patch.call', chatId: 'c1' });
+    expect(push.sent[0]?.payload).toMatchObject({ title: 'Patch is calling', body: '' });
+    orch.shutdown();
+  });
+
   it('starts a call: ringing event + concurrent push (urgent) + desktop notify', async () => {
     const { dir, registry } = makeRegistryDir();
     registry.upsertSurface({
