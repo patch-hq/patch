@@ -112,6 +112,7 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
   const resolved = resolveDirectCall(
     await currentSpeechEngines(),
     surfaceId ? prefs.deviceDirectCall[surfaceId] : undefined,
+    prefs.voiceTones,
   );
   if (!resolved.ok) {
     useUiStore.getState().pushError(`Cannot call direct: ${resolved.reason}`);

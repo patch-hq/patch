@@ -6,6 +6,7 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { DeviceAnswer } from '@patch/wire/audio';
+import { HOST_KOKORO_VOICES, kokoroVoiceLabel } from '@patch/wire/direct-call';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { AddVoiceDevice } from '../../components/AddVoiceDevice.js';
@@ -14,6 +15,7 @@ import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
 import { VoiceProfilesGroup } from './VoiceProfilesGroup.js';
 import { VoiceAgentGroup } from './VoiceAgentGroup.js';
+import { DirectCallsGroup } from './DirectCallsGroup.js';
 import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { DEFAULT_VOICE_DEVICE_PROMPT, PAUSE_WHEN_QUIET_CHOICES } from '@patch/wire';
 import { PromptRow } from './PromptRow.js';
@@ -32,6 +34,7 @@ export function VoicePage(): JSX.Element {
       <VoiceAgentGroup />
       <AgentsCallingGroup />
       <CallsGroup />
+      <DirectCallsGroup />
       <UsageGroup />
       <VoiceDevicesGroup />
       <VoiceProfilesGroup />
@@ -102,26 +105,6 @@ function CallsGroup(): JSX.Element {
     </Group>
   );
 }
-
-/**
- * Standard Kokoro v1 voice options. Names match the `.pt` files in the
- * kokoro model's `voices/` directory — the sidecar loads the pack by name.
- * af_ = American Female, am_ = American Male, bf_ = British Female,
- * bm_ = British Male.
- */
-const KOKORO_VOICES: { id: string; label: string }[] = [
-  { id: 'af_heart', label: 'Heart (American F)' },
-  { id: 'af_bella', label: 'Bella (American F)' },
-  { id: 'af_sky', label: 'Sky (American F)' },
-  { id: 'af_sarah', label: 'Sarah (American F)' },
-  { id: 'af_nicole', label: 'Nicole (American F)' },
-  { id: 'am_adam', label: 'Adam (American M)' },
-  { id: 'am_michael', label: 'Michael (American M)' },
-  { id: 'bf_emma', label: 'Emma (British F)' },
-  { id: 'bf_isabella', label: 'Isabella (British F)' },
-  { id: 'bm_george', label: 'George (British M)' },
-  { id: 'bm_lewis', label: 'Lewis (British M)' },
-];
 
 const ELEVENLABS_MODELS = [
   { id: 'eleven_flash_v2_5', label: 'Flash v2.5 (fastest)' },
@@ -239,9 +222,9 @@ function DeviceDirectRows(): JSX.Element {
             onChange={(e) => void patchShared('voice', { kokoroVoice: e.target.value })}
           >
             {kokoroVoice === undefined ? <option value="">—</option> : null}
-            {KOKORO_VOICES.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
+            {HOST_KOKORO_VOICES.map((id) => (
+              <option key={id} value={id}>
+                {kokoroVoiceLabel(id)}
               </option>
             ))}
           </select>

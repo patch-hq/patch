@@ -34,6 +34,7 @@ type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
 import { SettingsSection } from '../SettingsSection';
 import { VoiceDevicesSection } from './DevicesSections';
 import { AgentsCallingSection, CallsSection, VoiceAgentSection } from './VoiceAgentSection';
+import { DirectCallsSection } from './DirectCallsSection';
 import { patchShared } from './sharedWrite';
 import { ModelChoice } from './ModelChoice';
 import { ManagerHomeSection } from './ManagerHomeSection';
@@ -319,6 +320,7 @@ export function VoicePage(): React.ReactElement {
       <VoiceAgentSection />
       <AgentsCallingSection />
       <CallsSection />
+      <DirectCallsSection />
       <VoiceUsage />
       <VoiceDevicesSection />
       <WithSettings testID="voice-device-prompt">

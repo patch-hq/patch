@@ -215,6 +215,68 @@ test.describe('Settings — Voice calls', () => {
   });
 });
 
+test.describe('Settings — Direct calls', () => {
+  const mac = {
+    surfaceId: 'mac-1',
+    surfaceKind: 'desktop',
+    label: 'MacBook Pro',
+    status: 'online',
+    lastHeartbeat: 1,
+    isCurrent: true,
+    speechEngines: {
+      stt: [
+        { engine: 'parakeet', where: 'device', models: ['parakeet-tdt-0.6b-v3'] },
+        { engine: 'groq', where: 'cloud', models: ['whisper-large-v3-turbo'] },
+      ],
+      tts: [
+        { engine: 'kokoro', where: 'device', models: ['kokoro-82m'], voices: ['af_heart'] },
+        {
+          engine: 'elevenlabs',
+          where: 'cloud',
+          models: ['eleven_flash_v2_5'],
+          voices: ['v-rachel'],
+        },
+      ],
+    },
+  };
+  const linux = {
+    surfaceId: 'linux-1',
+    surfaceKind: 'web',
+    label: 'Linux laptop',
+    status: 'offline',
+    lastHeartbeat: 1,
+    isCurrent: false,
+    speechEngines: { stt: [], tts: [] },
+  };
+
+  test('each device in one line; a row opens to its steps, and a change is written', async ({
+    page,
+  }) => {
+    const server = await stubSettingsApi(page, { payload: { devices: [mac, linux] } });
+    await page.goto(settingsUrl('voice'));
+    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → Kokoro');
+    await expect(page.getByTestId('direct-linux-1-summary')).toHaveText('No speech engine');
+    await page.getByTestId('direct-mac-1-row').getByRole('button').click();
+    await expect(page.getByTestId('direct-mac-1-stt').locator('button')).toHaveText([
+      'Parakeet · On device',
+      'Groq Whisper · Cloud',
+    ]);
+    await expect(page.getByTestId('direct-mac-1-speed-value')).toHaveText('1×');
+    await page.getByTestId('direct-mac-1-tts-elevenlabs').click();
+    await expect.poll(() => server.patches.length).toBe(1);
+    expect(server.patches[0]).toEqual({
+      deviceDirectCall: {
+        'mac-1': {
+          stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
+          tts: { engine: 'elevenlabs' },
+        },
+      },
+    });
+    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → ElevenLabs');
+    await expect(page.getByTestId('direct-mac-1-stability')).toBeVisible();
+  });
+});
+
 test.describe('Settings — Dictation, one engine per device', () => {
   test('every device is listed with only the engines it can run', async ({ page }) => {
     await stubSettingsApi(page);
