@@ -1409,6 +1409,23 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     parent: '/Users/tom/.claude',
     entries: [{ name: 'plant', type: 'dir' }],
   },
+  'patch.mcp_app.request': {
+    type: 'patch.mcp_app.request',
+    requestId: 'ma1',
+    hostId: 'host-a',
+    chatId: 'c1',
+    op: 'call',
+    server: 'dash',
+    tool: 'refresh',
+    arguments: { id: 1 },
+  },
+  'patch.mcp_app.response': {
+    type: 'patch.mcp_app.response',
+    requestId: 'ma1',
+    hostId: 'host-a',
+    ok: true,
+    result: { content: [{ type: 'text', text: 'ok' }] },
+  },
   'patch.voiceprint.request': {
     type: 'patch.voiceprint.request',
     requestId: 'vp1',

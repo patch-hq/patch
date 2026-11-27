@@ -1630,6 +1630,23 @@ export const api = {
   // filesystem by ABSOLUTE path, with no chat in between — climbing above a
   // chat's folder, or browsing without a chat at all. No `path` lists the
   // host user's home, and the answer says where that is.
+  /** MCP Apps (SEP-1865): a tool's UI template (`resource`) or a call its UI makes (`call`). */
+  mcpApp: (
+    hostId: string,
+    body: {
+      chatId: string;
+      op: 'resource' | 'call';
+      server: string;
+      tool: string;
+      arguments?: Record<string, unknown>;
+    },
+  ) =>
+    request<{
+      hasUi?: boolean;
+      html?: string;
+      uiMeta?: Record<string, unknown>;
+      result?: Record<string, unknown>;
+    }>(`/api/hosts/${encodeURIComponent(hostId)}/mcp-app`, { method: 'POST', body }),
   hostFilesList: (
     hostId: string,
     path?: string,

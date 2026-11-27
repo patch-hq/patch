@@ -8809,6 +8809,67 @@ export const PatchHostFilesResponseEvent = z
 export type PatchHostFilesResponseEvent = z.infer<typeof PatchHostFilesResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// MCP Apps (SEP-1865) — a tool's UI template and the calls its UI makes
+//
+// A chat's tool result may belong to an MCP server whose tool declares
+// `_meta.ui.resourceUri`. The surface asks the chat's host for that template
+// (`resource`) and renders it in a sandboxed frame; the frame's buttons call
+// tools on the same server (`call`). The host is the MCP client — it connects
+// to the server the same way the chat's agent does. One request, one answer,
+// over REST like host files.
+// ---------------------------------------------------------------------------
+
+export const PatchMcpAppRequestEvent = z
+  .object({
+    type: z.literal('patch.mcp_app.request'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    /** The chat the tool call happened in: its folder decides which servers exist. */
+    chatId: z.string().min(1),
+    /** `resource`: the UI template for `tool`. `call`: run `tool` for the UI. */
+    op: z.enum(['resource', 'call']),
+    /** The MCP server's name, without the `mcp__` prefix. */
+    server: z.string().min(1),
+    /** The tool's own name on that server, without the `mcp__<server>__` prefix. */
+    tool: z.string().min(1),
+    /** `call` only. */
+    arguments: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+export type PatchMcpAppRequestEvent = z.infer<typeof PatchMcpAppRequestEvent>;
+
+export const PatchMcpAppResponseEvent = z
+  .object({
+    type: z.literal('patch.mcp_app.response'),
+    requestId: z.string().min(1),
+    ...hostIdField,
+    ok: z.boolean(),
+    /** `resource`: false when the tool declares no UI (a plain tool). */
+    hasUi: z.boolean().optional(),
+    /** `resource`: the template's HTML. */
+    html: z.string().optional(),
+    /** `resource`: the template's `_meta.ui` (csp, permissions, prefersBorder, domain). */
+    uiMeta: z.record(z.string(), z.unknown()).optional(),
+    /** `call`: the server's CallToolResult, untouched. */
+    result: z.record(z.string(), z.unknown()).optional(),
+    error: z
+      .object({
+        code: z.enum([
+          'server_not_found',
+          'tool_not_found',
+          'not_app_visible',
+          'bad_resource',
+          'server_failed',
+        ]),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchMcpAppResponseEvent = z.infer<typeof PatchMcpAppResponseEvent>;
+
+// ---------------------------------------------------------------------------
 // Fetching one blob's bytes (spec/04 § History — blobs)
 //
 // Replay sends tool output as a REFERENCE, never a body, because tool output
@@ -10668,6 +10729,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'patch.terminal.open',
   'patch.folders.browse.request',
   'patch.host_files.request',
+  'patch.mcp_app.request',
   'patch.host_search.request',
   'patch.voiceprint.request',
 ] as const satisfies readonly WireEventType[];
@@ -10930,6 +10992,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchFoldersBrowseResponseEvent,
   PatchHostFilesRequestEvent,
   PatchHostFilesResponseEvent,
+  PatchMcpAppRequestEvent,
+  PatchMcpAppResponseEvent,
   PatchVoiceprintRequestEvent,
   PatchVoiceprintResponseEvent,
   PatchHostSearchRequestEvent,
@@ -11272,6 +11336,8 @@ export const EVENT_SCHEMAS = {
   'patch.folders.browse.response': PatchFoldersBrowseResponseEvent,
   'patch.host_files.request': PatchHostFilesRequestEvent,
   'patch.host_files.response': PatchHostFilesResponseEvent,
+  'patch.mcp_app.request': PatchMcpAppRequestEvent,
+  'patch.mcp_app.response': PatchMcpAppResponseEvent,
   'patch.voiceprint.request': PatchVoiceprintRequestEvent,
   'patch.voiceprint.response': PatchVoiceprintResponseEvent,
   'patch.host_search.request': PatchHostSearchRequestEvent,

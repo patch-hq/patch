@@ -75,6 +75,7 @@ import { BatchNotifier } from './notifications/batch.js';
 import { FolderRegistry } from './folder-registry.js';
 import { registerFolderRoutes, requireAuth } from './folder-routes.js';
 import { registerHostFilesRoutes } from './host-files-routes.js';
+import { registerMcpAppRoutes } from './mcp-app-routes.js';
 import { registerChatContinueRoutes } from './chat-continue-routes.js';
 import { registerVoiceprintRoutes } from './voiceprint-routes.js';
 import { registerChatSearchRoutes } from './chat-search-routes.js';
@@ -2234,6 +2235,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // ---- host files REST (spec/03 § Host files) ----
   registerHostFilesRoutes(app, {
     logger: log.child({ component: 'host-files-routes' }),
+    registry,
+    hostLink,
+    idGenerator,
+  });
+
+  // ---- MCP Apps REST (SEP-1865) ----
+  registerMcpAppRoutes(app, {
+    logger: log.child({ component: 'mcp-app-routes' }),
     registry,
     hostLink,
     idGenerator,

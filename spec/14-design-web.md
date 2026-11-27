@@ -790,6 +790,10 @@ Wire frames: `chat.artifact` (host → server → surfaces, slim — no page bod
 and the `patch.artifact.publish_{request,response}` pair (host ↔ server),
 both in `03-wire-protocol.md`.
 
+## MCP Apps
+
+A tool result from an MCP server whose tool declares `_meta.ui.resourceUri` (SEP-1865) is drawn as that server's HTML template in a frame under the tool's row, outside any collapsed run. The chat's host is the MCP client: it reads the template and runs the tool calls the app makes. The frame is `sandbox="allow-scripts"` with an opaque origin and a CSP built from the template's declared domains. It speaks JSON-RPC over postMessage: `ui/initialize`, `tools/call` (same server, app-visible tools), `ui/message` (sent into the chat as the user), `ui/open-link`, size changes and theme changes. A tool with no UI draws nothing extra; a template that cannot load shows its error. Web and desktop only; mobile does not draw apps yet.
+
 ## Triage
 
 Experimental: shown only while Settings → Experimental features is on (sidebar link, and a `Triage` entry in the new-tab picker). `/triage` is a page tab like Jobs.

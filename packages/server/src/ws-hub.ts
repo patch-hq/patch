@@ -2162,6 +2162,8 @@ export class WsHub {
       event.type === 'patch.events.unsubscribe' ||
       event.type === 'patch.events.event' ||
       event.type === 'patch.host_files.response' ||
+      // A tool's UI and its results are one caller's answer, never fanned out.
+      event.type === 'patch.mcp_app.response' ||
       // The summary is answered over REST to the one caller that asked.
       event.type === 'patch.link_summary.response' ||
       event.type === 'patch.chat_move.response' ||
