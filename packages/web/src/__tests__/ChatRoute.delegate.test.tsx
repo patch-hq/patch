@@ -380,14 +380,48 @@ describe('ChatRoute — patch_delegate tool row', () => {
       renderChat();
       expect(screen.queryByTestId('agent-running-bar')).toBeNull();
       update('sub-1', 'draft the email', 'running', 1);
-      expect(screen.getByTestId('agent-running-bar').textContent).toBe(
-        'Agent running · draft the email',
+      expect(screen.getByTestId('agent-running-bar').textContent).toMatch(
+        /^Agent running · draft the email\d+s/,
       );
       update('sub-2', 'build the design', 'running', 2);
       expect(screen.getByTestId('agent-running-bar').textContent).toBe('2 agents running');
       update('sub-1', 'draft the email', 'done', 3);
       update('sub-2', 'build the design', 'done', 4);
       expect(screen.queryByTestId('agent-running-bar')).toBeNull();
+    });
+
+    it('the bar shows running time and how long ago the agent last did anything', () => {
+      seed();
+      renderChat();
+      const now = Date.now();
+      act(() => {
+        useChatStore.getState().applyEvent({
+          type: 'chat.delegate_update',
+          chatId: 'c1',
+          delegateId: 'sub-1',
+          label: 'draft the email',
+          status: 'running',
+          runStartedAt: now - 120_000,
+          lastActivityAt: now - 65_000,
+          seq: 1,
+        });
+      });
+      expect(screen.getByTestId('agent-running-time').textContent).toMatch(
+        /^[12]m \d\ds · active 1m \d\ds ago$/,
+      );
+      act(() => {
+        useChatStore.getState().applyEvent({
+          type: 'chat.delegate_update',
+          chatId: 'c1',
+          delegateId: 'sub-1',
+          label: 'draft the email',
+          status: 'running',
+          runStartedAt: now - 120_000,
+          lastActivityAt: now - 2_000,
+          seq: 2,
+        });
+      });
+      expect(screen.getByTestId('agent-running-time').textContent).toMatch(/· active now$/);
     });
 
     it('expanding the bar lists agents above the header and hides its icon', () => {

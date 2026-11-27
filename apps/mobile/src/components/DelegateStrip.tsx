@@ -63,6 +63,16 @@ export function DelegateStrip({ chatId }: { chatId: string }): React.ReactElemen
                   : 'out of credit'
                 : formatElapsed(now - d.since)}
             </Text>
+            {!d.outOfCredit && d.lastActivityAt !== undefined ? (
+              <Text
+                testID="delegate-strip-activity"
+                style={{ ...typography.meta, color: colors.ink3 }}
+              >
+                {now - d.lastActivityAt < 10_000
+                  ? 'active now'
+                  : `active ${formatElapsed(now - d.lastActivityAt)} ago`}
+              </Text>
+            ) : null}
           </Pressable>
           {openId === id ? <DelegateTranscript chatId={chatId} delegateId={id} /> : null}
         </View>

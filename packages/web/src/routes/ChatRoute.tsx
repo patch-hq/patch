@@ -5623,10 +5623,33 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const live = Object.entries(updates).filter(
     ([, d]) => d.status === 'running' || d.status === 'awaiting-permission',
   );
+  const anyLive = live.length > 0;
+  useEffect(() => {
+    if (!anyLive) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [anyLive]);
   if (live.length === 0) return null;
+  // Running time and how long since it last did anything: a stuck child shows
+  // a climbing "quiet" figure beside a running clock that keeps going.
+  const timing = (d: DelegateUpdateInfo): JSX.Element | null => {
+    if (d.paused) return null;
+    const quiet = d.lastActivityAt === undefined ? null : Math.max(0, now - d.lastActivityAt);
+    return (
+      <span className="agent-running-bar-time" data-testid="agent-running-time">
+        {formatElapsed(d.since, now)}
+        {quiet === null
+          ? ''
+          : quiet < 10_000
+            ? ' · active now'
+            : ` · active ${formatElapsed(d.lastActivityAt as number, now)} ago`}
+      </span>
+    );
+  };
 
   const control = async (
     id: string,
@@ -5696,6 +5719,7 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
               <div className="agent-running-bar-row" key={id} data-testid="agent-running-row">
                 {icon(d)}
                 <span className="agent-running-bar-text">{d.label}</span>
+                {timing(d)}
                 {controls(id, d)}
               </div>
             ))
@@ -5703,6 +5727,7 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
         <div className="agent-running-bar-row">
           {open && live.length > 1 ? null : icon(first)}
           <span className="agent-running-bar-text">{text}</span>
+          {live.length === 1 ? timing(first) : null}
           {live.length === 1 ? (
             controls(firstId, first)
           ) : (

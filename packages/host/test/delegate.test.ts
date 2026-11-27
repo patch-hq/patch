@@ -479,6 +479,46 @@ describe('patch_delegate', () => {
     return { daemon, events, folder };
   }
 
+  it('restates a live subagent with its last activity as the clock moves, quiet since start otherwise', async () => {
+    const events: WireEvent[] = [];
+    let clock = 1_700_000_000_000;
+    const daemon = new Daemon({
+      delegateActivityRefreshMs: 20,
+      hostId: 'd1',
+      metaStore: createMetaStore(mkdtempSync(join(tmpdir(), 'patch-delegate-act-'))),
+      sdkBackend: hangingBackend(),
+      oauthAccessToken: 'tok',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => clock,
+      generateChatId: (() => {
+        let n = 0;
+        return () => `act-${++n}`;
+      })(),
+      discoverMcpServers: () => [],
+    });
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-act-folder-')));
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    const updates = () =>
+      events.filter(
+        (e): e is Extract<WireEvent, { type: 'chat.delegate_update' }> =>
+          e.type === 'chat.delegate_update' && e.delegateId === id,
+      );
+    const first = updates().at(-1)!;
+    expect(first.lastActivityAt).toBe(first.runStartedAt);
+
+    // The subagent produces something later: the refresh restates it.
+    clock += 90_000;
+    (daemon as unknown as { delegateLastActivity: Map<string, number> }).delegateLastActivity.set(
+      id,
+      clock,
+    );
+    await flushUntil(() => updates().at(-1)!.lastActivityAt === clock);
+    expect(updates().at(-1)).toMatchObject({ status: 'running', runStartedAt: first.runStartedAt });
+    await daemon.stopChat(parentChatId);
+  });
+
   it('patch_delegate_stop stops a running subagent and delivers nothing for it', async () => {
     const { daemon, events, folder } = setupHanging();
     const parentChatId = await daemon.spawnChat({ folder });

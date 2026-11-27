@@ -764,6 +764,8 @@ export interface HostOptions {
   queuedStallSweepMs?: number;
   /** Test seam: how often unsettled subagents are checked for a dead session. */
   delegateOrphanSweepMs?: number;
+  /** How often a live subagent's last-activity time is restated; default 15 s. */
+  delegateActivityRefreshMs?: number;
   /**
    * How long a turn may sit silent after the provider reports a window
    * `rejected` before it is failed as a hit limit. Defaults to
@@ -1360,6 +1362,8 @@ const QUEUED_STALL_MS = 180_000;
 const QUEUED_STALL_SWEEP_MS = 15_000;
 /** How often unsettled subagents are checked for a dead session. */
 const DELEGATE_ORPHAN_SWEEP_MS = 60_000;
+/** How often a live subagent's last-activity time is restated to its parent's surfaces. */
+const DELEGATE_ACTIVITY_REFRESH_MS = 15_000;
 
 /** The agent's built-in question tool (spec/02 § Questions are not approvals). */
 const ASK_USER_QUESTION = 'AskUserQuestion';
@@ -2561,6 +2565,11 @@ export class Daemon {
   private readonly runningSince = new Map<string, number>();
   private queuedStallSweep: ReturnType<typeof setInterval> | null = null;
   private delegateOrphanSweep: ReturnType<typeof setInterval> | null = null;
+  private delegateActivityRefresh: ReturnType<typeof setInterval> | null = null;
+  /** Subagent chatId → host epoch ms of the last event it produced. */
+  private readonly delegateLastActivity = new Map<string, number>();
+  /** Subagent chatId → the last-activity value most recently sent to surfaces. */
+  private readonly delegateActivitySent = new Map<string, number>();
   /** Unsettled subagents seen with no turn running on the previous sweep. */
   private readonly delegateOrphanSeen = new Set<string>();
   /** chatId → callId → start time of tool calls that have not returned yet. */
@@ -3292,6 +3301,8 @@ export class Daemon {
     this.queuedStallSweep = null;
     if (this.delegateOrphanSweep !== null) clearInterval(this.delegateOrphanSweep);
     this.delegateOrphanSweep = null;
+    if (this.delegateActivityRefresh !== null) clearInterval(this.delegateActivityRefresh);
+    this.delegateActivityRefresh = null;
     for (const t of this.rateLimitTimers.values()) clearTimeout(t);
     this.rateLimitTimers.clear();
     for (const t of this.sdkRetryTimers.values()) clearTimeout(t);
@@ -5615,13 +5626,19 @@ export class Daemon {
   private delegateRunFields(
     delegateId: string,
     status: DelegateStatus,
-  ): { runStartedAt?: number; followUp?: boolean } {
+  ): { runStartedAt?: number; lastActivityAt?: number; followUp?: boolean } {
     if (status !== 'running' && status !== 'awaiting-permission') return {};
     const sub =
       this.chatState.get(delegateId)?.subagent ?? this.opts.metaStore.read(delegateId)?.subagent;
     const startedAt = sub?.runStartedAt ?? this.opts.metaStore.read(delegateId)?.createdAt;
+    // Quiet since the run began counts as "last active at the start".
+    const seen = this.delegateLastActivity.get(delegateId);
+    const lastActivityAt =
+      seen !== undefined && (startedAt === undefined || seen >= startedAt) ? seen : startedAt;
+    if (lastActivityAt !== undefined) this.delegateActivitySent.set(delegateId, lastActivityAt);
     return {
       ...(startedAt !== undefined ? { runStartedAt: startedAt } : {}),
+      ...(lastActivityAt !== undefined ? { lastActivityAt } : {}),
       ...(sub?.followUp ? { followUp: true } : {}),
     };
   }
@@ -5641,6 +5658,10 @@ export class Daemon {
     if (!this.chatState.has(parentChatId)) return;
     if (outOfCredit) this.pausedDelegates.add(delegateId);
     else this.pausedDelegates.delete(delegateId);
+    if (status !== 'running' && status !== 'awaiting-permission') {
+      this.delegateLastActivity.delete(delegateId);
+      this.delegateActivitySent.delete(delegateId);
+    }
     const userPaused =
       status === 'running' && this.chatState.get(delegateId)?.subagent?.userPaused === true;
     const ev: ChatDelegateUpdateEvent = {
@@ -7256,7 +7277,31 @@ export class Daemon {
    * waiting on approval or credit, still unsettled on two sweeps in a row, is
    * failed to its parent.
    */
+  /**
+   * Restate each live subagent whose last-activity time has moved, so a
+   * surface can tell a working child from a stuck one without any chat event
+   * of its own (subagent events never reach the wire).
+   */
+  private ensureDelegateActivityRefresh(): void {
+    if (this.delegateActivityRefresh !== null) return;
+    this.delegateActivityRefresh = setInterval(() => {
+      for (const state of this.chatState.list()) {
+        const sub = state.subagent;
+        if (!sub || sub.outcome !== undefined || sub.userPaused) continue;
+        // Parked on a usage limit: the update would have to restate the park.
+        if (this.pausedDelegates.has(state.chatId)) continue;
+        const seen = this.delegateLastActivity.get(state.chatId);
+        if (seen === undefined || seen === this.delegateActivitySent.get(state.chatId)) continue;
+        const status: DelegateStatus =
+          state.activity === 'awaiting-permission' ? 'awaiting-permission' : 'running';
+        this.emitDelegateUpdate(sub.parentChatId, state.chatId, sub.label, status);
+      }
+    }, this.opts.delegateActivityRefreshMs ?? DELEGATE_ACTIVITY_REFRESH_MS);
+    this.delegateActivityRefresh.unref?.();
+  }
+
   private ensureDelegateOrphanSweep(): void {
+    this.ensureDelegateActivityRefresh();
     if (this.delegateOrphanSweep !== null) return;
     this.delegateOrphanSweep = setInterval(() => {
       const seen = new Set<string>();
@@ -16172,6 +16217,7 @@ export class Daemon {
     // notifications, badges — with nothing to filter at each of them.
     const subagent = typeof chatId === 'string' ? this.chatState.get(chatId)?.subagent : undefined;
     if (subagent) {
+      this.delegateLastActivity.set(chatId as string, this.opts.now());
       if (isOutboxEvent(event)) {
         this.opts.emit({
           type: 'host.delegate_entry',
