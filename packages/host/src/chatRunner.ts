@@ -82,6 +82,7 @@ import type {
   ChatActivity,
   ChatErrorEvent,
   ChatMessageEvent,
+  ChatVoiceHandoffEvent,
   ChatMessageDeltaEvent,
   ChatToolCallEvent,
   ChatToolResultEvent,
@@ -8355,7 +8356,7 @@ export class Daemon {
               chatId,
               role: 'user',
               content,
-              seq: this.takeReservedTurnSeq(item.localId) ?? this.bumpSeq(chatId),
+              seq: this.bumpSeq(chatId),
               createdAt: this.opts.now(),
               localId: item.localId,
               midTurn: true,
@@ -9476,23 +9477,14 @@ export class Daemon {
     });
   }
 
-  /** Seqs reserved for turns that may queue, by the turn's localId. */
-  private readonly reservedTurnSeqs = new Map<string, number>();
-
   /**
-   * Reserve the seq a turn's own message will land on, at the moment it is
-   * requested rather than when it starts. A fast voice's hand-off can queue
-   * behind a running turn; without this its bubble is written when the turn
-   * starts, after everything said in the call since, and reads out of order.
+   * spec/07 § The voice agent and the chat's agent — where a hand-off stands,
+   * recorded so every surface draws it on the hand-off's own row, now and on
+   * reload.
    */
-  reserveTurnSeq(chatId: string, localId: string): void {
-    this.reservedTurnSeqs.set(localId, this.reserveVoiceSeq(chatId));
-  }
-
-  private takeReservedTurnSeq(localId: string): number | undefined {
-    const seq = this.reservedTurnSeqs.get(localId);
-    this.reservedTurnSeqs.delete(localId);
-    return seq;
+  recordVoiceHandoff(handoff: Omit<ChatVoiceHandoffEvent, 'type' | 'seq' | 'branchId'>): void {
+    if (!this.chatState.has(handoff.chatId)) throw new ChatNotFoundError(handoff.chatId);
+    this.emit({ type: 'chat.voice_handoff', ...handoff, seq: this.bumpSeq(handoff.chatId) });
   }
 
   /** Reserve the seq a streamed fast-voice reply will finalise on. */
@@ -11174,9 +11166,7 @@ export class Daemon {
         chatId,
         role: 'user',
         content: userContent,
-        seq:
-          (localId !== undefined ? this.takeReservedTurnSeq(localId) : undefined) ??
-          this.bumpSeq(chatId),
+        seq: this.bumpSeq(chatId),
         createdAt: this.opts.now(),
         // Echo the surface's id so it reconciles its optimistic bubble with
         // this persisted copy instead of rendering the turn twice.

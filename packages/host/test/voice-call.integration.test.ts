@@ -178,7 +178,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
           replies.abandon(chatId, err as Error);
           throw err;
         }
-        return reply;
+        return (await reply).text;
       },
       onCallEnded: (info) => glue.callEnded(info),
     });

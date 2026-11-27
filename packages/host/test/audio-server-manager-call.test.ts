@@ -194,7 +194,8 @@ describe('audio server — a hosted call to the Manager', () => {
       submitInput: async (req) => {
         delivered.push(req);
       },
-      awaitReply: (chatId, localId) => bridge.awaitReply(chatId, undefined, localId),
+      awaitReply: (chatId, localId) =>
+        bridge.awaitReply(chatId, undefined, localId).then((reply) => reply.text),
       abandonReply: (chatId, err) => bridge.abandon(chatId, err),
       sendRemote: async () => {
         throw new Error('no other hosts in this test');

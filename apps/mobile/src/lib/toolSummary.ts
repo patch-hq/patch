@@ -18,7 +18,7 @@ import {
   type SnoozeRecord,
 } from '@patch/wire';
 
-import type { ChatEventEntry } from '../stores/chatStore';
+import type { ChatEventEntry, VoiceHandoffView } from '../stores/chatStore';
 
 /** Longest description we'll put on a row before eliding — the row is one line. */
 const MAX_DESCRIPTION = 60;
@@ -252,10 +252,8 @@ export type TimelineRow =
       key: string;
       entry: ChatEventEntry;
       result?: ChatEventEntry;
-      /** A voice hand-off the agent has not answered yet. */
-      handoffPending?: boolean;
-      /** The agent's answer to a voice hand-off (the matching "From" card). */
-      handoffAnswer?: boolean;
+      /** Where the voice hand-off this entry is stands (spec/15 § Chat detail — hand-off rows). */
+      handoff?: VoiceHandoffView;
       /** spec/04 § Forking — whether an edit or a side thread here would fork. */
       branchPoint?: { edit: boolean; side: boolean };
       /** The same message also went to these chats: one "Sent to" card names them all. */
@@ -430,45 +428,8 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
       kind: 'entry',
       key: `${entry.seq}-${i}`,
       entry,
-      ...(entry.kind === 'message' && entry.voiceHandoff
-        ? { handoffPending: voiceHandoffPending(timeline, i) }
-        : {}),
-      ...(answersVoiceHandoff(timeline, i) ? { handoffAnswer: true } : {}),
     });
     i++;
   }
   return rows;
-}
-
-/**
- * spec/07 § The fast voice and the chat's agent — is this entry the agent's
- * answer to a hand-off? The first reply of the agent's own (not the voice's
- * spoken words) after the hand-off turn is.
- */
-export function answersVoiceHandoff(timeline: ChatEventEntry[], at: number): boolean {
-  const e = timeline[at];
-  if (!e || e.kind !== 'message' || e.role !== 'assistant' || e.voice) return false;
-  for (let j = at - 1; j >= 0; j--) {
-    const prev = timeline[j]!;
-    if (prev.kind !== 'message') continue;
-    // The agent's first reply after the hand-off answers it; a later one does not.
-    if (prev.role === 'assistant' && !prev.voice) return false;
-    if (prev.role === 'user') return prev.voiceHandoff === true;
-  }
-  return false;
-}
-
-/**
- * spec/07 § The fast voice and the chat's agent — a hand-off is waiting while
- * nothing from the agent follows it: an assistant message that is not the
- * voice's own spoken words, or the call's failure line.
- */
-export function voiceHandoffPending(timeline: ChatEventEntry[], at: number): boolean {
-  for (let j = at + 1; j < timeline.length; j++) {
-    const e = timeline[j]!;
-    if (e.kind !== 'message') continue;
-    if (e.role === 'assistant' && !e.voice) return false;
-    if (e.role === 'system' && (e.content ?? '').startsWith('[call] <- agent:')) return false;
-  }
-  return true;
 }

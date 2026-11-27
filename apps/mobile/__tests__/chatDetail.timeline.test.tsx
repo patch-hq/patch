@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, type WireEvent } from '@patch/wire';
 import {
   renderRN,
   actSync,
@@ -18,6 +18,7 @@ import {
   byTestId,
   byLabel,
   hasText,
+  textOf,
 } from './testUtils/render';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { useChatStore } from '../src/stores/chatStore';
@@ -1408,56 +1409,96 @@ describe('account switch line', () => {
 });
 
 describe('voice call lines', () => {
-  it("a hand-off reads as what the voice asked the agent, not the user's bubble", () => {
+  const handoffMessage = (seq = 1) =>
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
-      seq: 1,
+      seq,
       role: 'user',
       content: '[voice hand-off • mobile] Add milk to the shopping list',
     });
+  const handoffState = (
+    seq: number,
+    rest: Partial<Extract<WireEvent, { type: 'chat.voice_handoff' }>> & {
+      state: 'waiting' | 'working' | 'answered' | 'failed';
+    },
+  ) =>
+    useChatStore.getState().applyEvent({
+      type: 'chat.voice_handoff',
+      chatId: 'c1',
+      handoffId: 'h1',
+      rowSeq: 1,
+      request: 'Add milk to the shopping list',
+      sentAt: 1_000,
+      seq,
+      ...rest,
+    });
+
+  it("a hand-off is one collapsed row saying it was asked and is waiting, not the user's bubble", () => {
+    handoffMessage();
+    handoffState(2, { state: 'waiting' });
     const r = renderRN(<ChatDetailScreen />);
-    // Unanswered: the row says the agent is being asked.
-    const pending = findHost(r.root, byTestId('voice-handoff-pending'));
-    expect(hasText(pending, 'Sent to')).toBe(true);
-    expect(hasText(pending, 'Add milk to the shopping list')).toBe(true);
-    expect(hasText(pending, 'Waiting')).toBe(true);
+    const row = findHost(r.root, byTestId('voice-handoff'));
+    expect(hasText(row, 'Asked the agent')).toBe(true);
+    expect(hasText(row, 'Add milk to the shopping list')).toBe(true);
+    expect(textOf(findHost(r.root, byTestId('voice-handoff-state')))).toBe('waiting');
+    expect(hasText(row, 'Sent to')).toBe(false);
     expect(findAllHost(r.root, byTestId('message-user'))).toHaveLength(0);
+    expect(findAllHost(r.root, byTestId('voice-handoff-body'))).toHaveLength(0);
   });
 
-  it('a hand-off reads as asked once the agent has answered', () => {
-    const { applyEvent } = useChatStore.getState();
-    applyEvent({
-      type: 'chat.message',
-      chatId: 'c1',
-      seq: 1,
-      role: 'user',
-      content: '[voice hand-off • mobile] Add milk to the shopping list',
-    });
-    applyEvent({ type: 'chat.message', chatId: 'c1', seq: 2, role: 'assistant', content: 'Done' });
+  it('counts how long the agent has been working on it', () => {
+    handoffMessage();
+    handoffState(2, { state: 'working', startedAt: Date.now() - 24_000 });
     const r = renderRN(<ChatDetailScreen />);
-    expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
-    expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(0);
-    expect(findAllHost(r.root, byTestId('agent-msg-status'))).toHaveLength(0);
-    // The agent's answer is the matching "From" card, not a plain reply.
-    const answer = findHost(r.root, byTestId('voice-handoff-answer'));
-    expect(hasText(answer, 'From')).toBe(true);
-    expect(hasText(answer, 'Done')).toBe(true);
-    expect(findAllHost(r.root, byTestId('message-assistant'))).toHaveLength(0);
+    expect(textOf(findHost(r.root, byTestId('voice-handoff-state')))).toBe('working 0:24');
   });
 
-  it('a failed hand-off shows under an agent failed label', () => {
+  it("holds the agent's answer inside the opened row, not as a reply of its own", () => {
+    handoffMessage();
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
-      seq: 1,
-      role: 'system',
-      content: '[call] <- agent: failed: boom',
+      seq: 3,
+      role: 'assistant',
+      content: 'Done',
     });
+    handoffState(2, { state: 'waiting' });
+    handoffState(4, { state: 'answered', endedAt: 39_000, answer: 'Done', answerSeqs: [3] });
     const r = renderRN(<ChatDetailScreen />);
-    expect(findAllHost(r.root, byTestId('call-agent-reply'))).toHaveLength(1);
-    expect(hasText(r.root, 'agent failed')).toBe(true);
-    expect(hasText(r.root, 'failed: boom')).toBe(true);
+    expect(textOf(findHost(r.root, byTestId('voice-handoff-state')))).toBe('answered in 38s');
+    expect(findAllHost(r.root, byTestId('message-assistant'))).toHaveLength(0);
+    actSync(() => findHost(r.root, byTestId('voice-handoff-toggle')).props.onPress());
+    const body = findHost(r.root, byTestId('voice-handoff-body'));
+    expect(hasText(body, 'Voice')).toBe(true);
+    expect(hasText(body, 'Add milk to the shopping list')).toBe(true);
+    expect(hasText(findHost(r.root, byTestId('voice-handoff-answer')), 'Done')).toBe(true);
+  });
+
+  it('a failed hand-off says so on its row, and why when opened', () => {
+    handoffMessage();
+    handoffState(2, { state: 'failed', endedAt: 2_000, error: 'boom' });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(textOf(findHost(r.root, byTestId('voice-handoff-state')))).toBe('failed');
+    actSync(() => findHost(r.root, byTestId('voice-handoff-toggle')).props.onPress());
+    expect(hasText(findHost(r.root, byTestId('voice-handoff-error')), 'boom')).toBe(true);
+  });
+
+  it("names who sent it when it was not this call's voice agent", () => {
+    handoffMessage();
+    handoffState(2, { state: 'waiting', from: 'Manager' });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(hasText(findHost(r.root, byTestId('voice-handoff')), 'Manager asked the agent')).toBe(
+      true,
+    );
+  });
+
+  it('an older state replayed after a newer one changes nothing', () => {
+    handoffMessage();
+    handoffState(5, { state: 'answered', endedAt: 4_000, answer: 'x', answerSeqs: [] });
+    handoffState(2, { state: 'waiting' });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(textOf(findHost(r.root, byTestId('voice-handoff-state')))).toBe('answered in 3s');
   });
 
   it("a finished call's cost is a muted line, not the agent's reply", () => {

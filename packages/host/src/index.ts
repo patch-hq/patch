@@ -330,7 +330,7 @@ import {
 } from './claudeSettings.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CALL_RESUMED_NOTE, startAudioServer, type AudioServerHandle } from './audio/server.js';
-import { createVoiceReplyBridge } from './audio/replyBridge.js';
+import { createVoiceReplyBridge, type VoiceReply } from './audio/replyBridge.js';
 import {
   createManagerVoiceTools,
   MANAGER_CHAT_ID,
@@ -4518,6 +4518,7 @@ async function startHost(
       emitVoiceDelta: (chatId, seq, delta) => daemon.emitVoiceDelta(chatId, seq, delta),
       recordCallSummary: (chatId, line) => daemon.recordCallSummary(chatId, line),
       recordCallNote: (chatId, line) => daemon.recordCallNote(chatId, line),
+      recordVoiceHandoff: (handoff) => daemon.recordVoiceHandoff(handoff),
     },
     sessionsOnChat: (chatId) => audioServer?.sessionsOnChat(chatId) ?? [],
     ledger: voiceLedger,
@@ -4601,7 +4602,8 @@ async function startHost(
         revealTarget: true,
       });
     },
-    awaitReply: (chatId, localId) => managerVoiceReplies.awaitReply(chatId, undefined, localId),
+    awaitReply: (chatId, localId) =>
+      managerVoiceReplies.awaitReply(chatId, undefined, localId).then((reply) => reply.text),
     abandonReply: (chatId, err) => managerVoiceReplies.abandon(chatId, err),
     sendRemote: ({ chatId, message }) =>
       sendToRemoteChat({
@@ -7141,27 +7143,24 @@ async function startHost(
       /* v8 ignore stop */
       // Unique per turn: the reply bridge recognises this turn's own message by it.
       const localId = `voice-${localIdSuffix}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      // A hand-off is `working` from the moment the chat's agent has it.
+      const accepted = (): void => {
+        if (handoff === true) chatVoice.handoffStarted({ chatId, handoffId: localId });
+        onAccepted?.();
+      };
       // Register BEFORE the input is sent, so the bridge sees this turn's very
       // first message and every delta after it. Armed by that message only: the chat
       // may be running some other turn right now, with this one queued behind it.
-      const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId, onAccepted);
+      const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId, accepted);
       // The promise is awaited only after `sendInput` returns. A newer turn can supersede
       // (reject) it before then, with nothing attached yet: Node would treat that as an
       // unhandled rejection and exit the whole daemon. Mark it observed here; the real
       // handling is still the `await replyPromise` below, which sees the same rejection.
       replyPromise.catch(() => {});
-      // Mark a hand-off in the chat, so a spoken "I've passed that on" can be checked against it.
-      if (handoff === true) {
-        chatVoice.handoffSent({ sessionId: localIdSuffix, chatId, request: message });
-        daemon.reserveTurnSeq(chatId, localId);
-      }
-      // `sendInput` awaits the whole turn (and any turns that queue behind it),
-      // so by the time it returns the bridge has normally already settled. If
-      // it THROWS, the turn never ran — fail the waiter loudly instead of
-      // leaving the session waiting on a promise nothing will ever resolve.
       // A hand-off is written into the chat now, in order with what was said
       // around it, and delivered under that line when the agent gets to it. Left to
       // the turn, it would be recorded only when it ran, below everything said since.
+      // Its state (waiting, working, answered) is recorded against that line.
       let drawnSeq: number | undefined;
       if (handoff === true) {
         try {
@@ -7175,7 +7174,18 @@ async function startHost(
           voiceReplies.abandon(chatId, err as Error);
           throw err;
         }
+        chatVoice.handoffSent({
+          sessionId: localIdSuffix,
+          chatId,
+          handoffId: localId,
+          rowSeq: drawnSeq,
+          request: message,
+        });
       }
+      // `sendInput` awaits the whole turn (and any turns that queue behind it),
+      // so by the time it returns the bridge has normally already settled. If
+      // it THROWS, the turn never ran — fail the waiter loudly instead of
+      // leaving the session waiting on a promise nothing will ever resolve.
       try {
         await daemon.sendInput({
           chatId,
@@ -7188,21 +7198,21 @@ async function startHost(
       } catch (err) {
         voiceReplies.abandon(chatId, err as Error);
         if (handoff === true) {
-          chatVoice.handoffAnswered({ chatId, reply: `failed: ${(err as Error).message}` });
+          chatVoice.handoffAnswered({ chatId, handoffId: localId, error: (err as Error).message });
         }
         throw err;
       }
-      let reply: string;
+      let reply: VoiceReply;
       try {
         reply = await replyPromise;
       } catch (err) {
         if (handoff === true) {
-          chatVoice.handoffAnswered({ chatId, reply: `failed: ${(err as Error).message}` });
+          chatVoice.handoffAnswered({ chatId, handoffId: localId, error: (err as Error).message });
         }
         throw err;
       }
-      if (handoff === true) chatVoice.handoffAnswered({ chatId, reply });
-      return reply;
+      if (handoff === true) chatVoice.handoffAnswered({ chatId, handoffId: localId, reply });
+      return reply.text;
     },
     // spec/07 ## Permission prompts during voice — a spoken yes/no mid-call
     // resolves the focused chat's outstanding permission via the STT path.

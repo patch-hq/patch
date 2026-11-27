@@ -25,6 +25,8 @@ function setup() {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-chatvoice-folder-')));
   const events: WireEvent[] = [];
   let id = 0;
+  // The glue's clock, moved by `advance` so a hand-off's times can be read.
+  let clock = Date.UTC(2026, 9, 4, 12);
   let release: () => void = () => undefined;
   let turnGate: Promise<void> = Promise.resolve();
   const holdTurns = (): void => {
@@ -69,6 +71,7 @@ function setup() {
     ledger,
     logger: silent,
     onCosted,
+    now: () => clock,
   });
   observe = (e) => glue.observe(e);
   return {
@@ -81,6 +84,9 @@ function setup() {
     onCosted,
     holdTurns,
     releaseTurns: () => release(),
+    advance: (ms: number) => {
+      clock += ms;
+    },
   };
 }
 
@@ -103,6 +109,11 @@ const init = (chatId: string): SessionInit => ({
   role: 'voice-call',
   surfaceHasAec: true,
 });
+
+const handoffs = (events: WireEvent[]) =>
+  events.filter(
+    (e): e is Extract<WireEvent, { type: 'chat.voice_handoff' }> => e.type === 'chat.voice_handoff',
+  );
 
 const messages = (events: WireEvent[]) =>
   events.filter(
@@ -214,8 +225,8 @@ describe('chat voice glue', () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
     const sessionId = init(chatId).sessionId;
-    glue.handoffSent({ sessionId, chatId, request: 'Add  milk\nto the list' });
-    glue.handoffAnswered({ chatId, reply: 'Done.' });
+    glue.handoffSent({ sessionId, chatId, handoffId: 'h1', rowSeq: 0, request: 'Add milk' });
+    glue.handoffAnswered({ chatId, handoffId: 'h1', reply: { text: 'Done.', seqs: [2] } });
     glue.callEnded({
       init: init(chatId),
       chatId,
@@ -235,11 +246,46 @@ describe('chat voice glue', () => {
     ).toEqual(['[call] Call 0:52 · Gemini Flash · $0']);
   });
 
-  it('writes a failed hand-off into the chat, so a pending one never hangs', async () => {
+  it("records a hand-off as waiting, working, then answered with the agent's messages", async () => {
+    const { daemon, events, folder, glue, advance } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const sent = Date.UTC(2026, 9, 4, 12);
+    glue.handoffSent({ sessionId: 's', chatId, handoffId: 'h1', rowSeq: 3, request: 'Add milk' });
+    advance(4_000);
+    glue.handoffStarted({ chatId, handoffId: 'h1' });
+    // Taken once: a second start (a re-armed waiter) does not move it.
+    glue.handoffStarted({ chatId, handoffId: 'h1' });
+    advance(34_000);
+    glue.handoffAnswered({ chatId, handoffId: 'h1', reply: { text: 'Added.', seqs: [5, 7] } });
+    const states = handoffs(events);
+    expect(states.map((h) => h.state)).toEqual(['waiting', 'working', 'answered']);
+    expect(states.every((h) => h.handoffId === 'h1' && h.rowSeq === 3)).toBe(true);
+    expect(states[2]).toMatchObject({
+      request: 'Add milk',
+      sentAt: sent,
+      startedAt: sent + 4_000,
+      endedAt: sent + 38_000,
+      answer: 'Added.',
+      answerSeqs: [5, 7],
+    });
+    // Each record has its own place in the chat's numbering.
+    expect(new Set(states.map((h) => h.seq)).size).toBe(3);
+    // Nothing is written as a message: the row is the hand-off's own line.
+    expect(messages(events)).toEqual([]);
+  });
+
+  it('records a failed hand-off on its row, so a pending one never hangs', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    glue.handoffAnswered({ chatId, reply: 'failed: boom' });
-    expect(messages(events).map((m) => m.content)).toEqual(['[call] <- agent: failed: boom']);
+    glue.handoffSent({ sessionId: 's', chatId, handoffId: 'h1', rowSeq: 0, request: 'Add milk' });
+    glue.handoffAnswered({ chatId, handoffId: 'h1', error: 'boom' });
+    expect(handoffs(events).map((h) => [h.state, h.error])).toEqual([
+      ['waiting', undefined],
+      ['failed', 'boom'],
+    ]);
+    // Settled: a late answer for it changes nothing.
+    glue.handoffAnswered({ chatId, handoffId: 'h1', reply: { text: 'late', seqs: [] } });
+    expect(handoffs(events)).toHaveLength(2);
   });
 
   it('puts the line in the chat the moment the call ends, whatever the agent is doing', async () => {

@@ -423,6 +423,35 @@ describe('server link with an outbox', () => {
     });
   });
 
+  describe('voice hand-off state: kept by a server that keeps it', () => {
+    const handoff: WireEvent = {
+      type: 'chat.voice_handoff',
+      chatId: 'c1',
+      handoffId: 'h1',
+      rowSeq: 0,
+      request: 'is the build green',
+      state: 'waiting',
+      sentAt: 1,
+      seq: 1,
+    };
+
+    it('goes through the outbox to a server with `voiceHandoffs`', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true, voiceHandoffs: true }));
+      s.sent.length = 0;
+      link.send(handoff);
+      expect(s.sent).toEqual([{ type: 'host.outbox', position: 0, event: handoff }]);
+    });
+
+    it('is not sent to a server without it, which would refuse the frame', () => {
+      link.start();
+      const s = connect(authOk({ hostOutbox: true, recordComplete: true }));
+      s.sent.length = 0;
+      link.send(handoff);
+      expect(s.sent).toEqual([]);
+    });
+  });
+
   // spec/12 § Chat status: a server that decides status itself says
   // `serverStatus`; until a host sees it, it sends chat.state exactly as before,
   // so a host that updates first still works with the server it finds.

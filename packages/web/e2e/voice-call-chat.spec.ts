@@ -85,10 +85,20 @@ test.describe('a call is the chat, spoken', () => {
     await expect(page.getByTestId('voice-live-bubble')).toHaveCount(0);
   });
 
-  test('a hand-off shows what the voice asked the agent; a finished call leaves its cost', async ({
+  test('a hand-off is one row in the voice gutter that opens to both sides; a finished call leaves its cost', async ({
     page,
   }) => {
     await page.goto(CALL);
+    const handoff = (seq: number, rest: Record<string, unknown>) => ({
+      type: 'chat.voice_handoff',
+      chatId: CHAT,
+      handoffId: 'h1',
+      rowSeq: 9001,
+      request: 'Add milk to the shopping list',
+      sentAt: 1_000,
+      seq,
+      ...rest,
+    });
     await emit(page, {
       type: 'chat.message',
       chatId: CHAT,
@@ -97,30 +107,56 @@ test.describe('a call is the chat, spoken', () => {
       seq: 9001,
       createdAt: Date.now(),
     });
-    await expect(page.getByTestId('voice-handoff-pending')).toContainText('Waiting');
+    await emit(page, handoff(9002, { state: 'waiting' }));
+    const row = page.getByTestId('voice-handoff');
+    await expect(row).toContainText('Asked the agent');
+    await expect(row).toContainText('Add milk to the shopping list');
+    await expect(row).not.toContainText('[voice');
+    await expect(page.getByTestId('voice-handoff-state')).toHaveText('waiting');
+    // A row, not a bubble or a card: one line, its mark in the gutter beside it.
+    await expect(row).not.toHaveClass(/msg-user/);
+    const line = await page.getByTestId('voice-handoff-toggle').boundingBox();
+    expect(line!.height).toBeLessThan(40);
+    const mark = await row.locator('.ho-mark').boundingBox();
+    expect(mark!.x + mark!.width).toBeLessThanOrEqual(line!.x + 8);
+
+    await emit(page, handoff(9003, { state: 'working', startedAt: Date.now() - 24_000 }));
+    await expect(page.getByTestId('voice-handoff-state')).toContainText('working 0:2');
     await emit(page, {
       type: 'chat.message',
       chatId: CHAT,
       role: 'assistant',
       content: 'Added milk.',
-      seq: 9003,
+      seq: 9004,
       createdAt: Date.now(),
     });
+    await emit(
+      page,
+      handoff(9005, {
+        state: 'answered',
+        endedAt: 39_000,
+        answer: 'Added milk.',
+        answerSeqs: [9004],
+      }),
+    );
+    await expect(page.getByTestId('voice-handoff-state')).toHaveText('answered in 38s');
+    // The answer belongs to the row: not a second copy in the transcript.
+    await expect(page.getByTestId('chat-stream').getByText('Added milk.')).toHaveCount(0);
+    await page.getByTestId('voice-handoff-toggle').click();
+    await expect(page.getByTestId('voice-handoff-body')).toContainText('Voice');
+    await expect(page.getByTestId('voice-handoff-body')).toContainText(
+      'Add milk to the shopping list',
+    );
+    await expect(page.getByTestId('voice-handoff-answer')).toContainText('Added milk.');
+
     await emit(page, {
       type: 'chat.message',
       chatId: CHAT,
       role: 'system',
       content: '[call] Call 0:52 · Gemini Flash · $0.017',
-      seq: 9002,
+      seq: 9006,
       createdAt: Date.now(),
     });
-    const handoff = page.getByTestId('voice-handoff');
-    await expect(handoff).toBeVisible();
-    await expect(handoff).toContainText('Sent to');
-    await expect(handoff).toContainText('Add milk to the shopping list');
-    await expect(handoff).not.toContainText('[voice');
-    await expect(page.getByTestId('voice-handoff-answer')).toContainText('Added milk.');
-    await expect(handoff).not.toHaveClass(/msg-user/);
     const summary = page.getByTestId('call-summary');
     await expect(summary).toHaveText('Call 0:52 · Gemini Flash · $0.017');
   });

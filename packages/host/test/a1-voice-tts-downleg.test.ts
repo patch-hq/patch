@@ -133,7 +133,7 @@ describe('A1-17 — voice reply bridge (root cause)', () => {
     bridge.observe(assistantMessage('Banana.', 7));
     bridge.observe(turnEnd());
 
-    await expect(promise).resolves.toBe('Banana.');
+    await expect(promise).resolves.toMatchObject({ text: 'Banana.' });
     expect(chunks.join('')).toBe('Banana.');
     expect(bridge.pendingCount()).toBe(0);
   });
@@ -149,7 +149,7 @@ describe('A1-17 — voice reply bridge (root cause)', () => {
     bridge.observe(delta('mine', 7));
     bridge.observe(assistantMessage('mine', 7));
     bridge.observe(turnEnd());
-    await expect(promise).resolves.toBe('mine');
+    await expect(promise).resolves.toMatchObject({ text: 'mine' });
     expect(chunks).toEqual(['mine']);
   });
 
@@ -254,7 +254,7 @@ async function startServer(o: {
       expect(chatId).toBe(CHAT);
       const promise = bridge.awaitReply(chatId, onReplyText);
       await replayTurn((e) => bridge.observe(e), o.reply, { deltas: o.deltas !== false });
-      return promise;
+      return (await promise).text;
     },
   });
   const h = Object.assign(handle, { port: handle.address().port });
