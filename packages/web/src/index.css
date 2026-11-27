@@ -19307,7 +19307,7 @@ a.drop-target,
 }
 .agent-running-bar-time {
   flex: none;
-  color: var(--ink-3, currentColor);
+  color: var(--ink-3);
   font-size: var(--text-min);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
