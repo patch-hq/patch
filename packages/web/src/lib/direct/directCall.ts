@@ -106,7 +106,7 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
   const surfaceId = usePresenceStore.getState().surfaceId;
   const resolved = resolveDirectCall(
     await currentSpeechEngines(),
-    surfaceId ? prefs.deviceDirectCall?.[surfaceId] : undefined,
+    surfaceId ? prefs.deviceDirectCall[surfaceId] : undefined,
   );
   if (!resolved.ok) {
     useUiStore.getState().pushError(`Cannot call direct: ${resolved.reason}`);
