@@ -57,6 +57,7 @@ function call(extra: Partial<ReturnType<typeof useVoiceStore.getState>> = {}): v
     callReconnectingSince: null,
     callAddressWord: 'patch',
     callPaused: null,
+    callDirect: null,
     ...extra,
   });
 }
@@ -214,5 +215,35 @@ describe('CallStrip', () => {
     expect(resumeSpy).toHaveBeenCalledTimes(1);
     findHost(r.root, byLabel('End call')).props['onPress']();
     expect(endVoiceCallSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a direct call on the strip', () => {
+  const status = { line: 'listening' as const, workingSince: null, failure: null, pending: 0 };
+  it('says direct, shows the setup, and counts the agent working', () => {
+    call({ callDirect: { setup: 'Android → ElevenLabs', status } });
+    const r = renderRN(<CallStrip />);
+    expect(textOf(findHost(r.root, byTestId('call-phase')))).toBe('On call · direct');
+    expect(textOf(findHost(r.root, byTestId('call-direct-setup')))).toBe('Android → ElevenLabs');
+    actSync(() =>
+      useVoiceStore
+        .getState()
+        .setDirectStatus({ ...status, line: 'working', workingSince: T0 - 42_000 }),
+    );
+    expect(textOf(findHost(r.root, byTestId('call-direct-status')))).toBe('Agent working · 0:42');
+  });
+
+  it('names a failed engine, and the call stays up with its controls', () => {
+    call({
+      callDirect: {
+        setup: 'Android → OpenAI',
+        status: { ...status, failure: 'OpenAI failed — HTTP 429' },
+      },
+    });
+    const r = renderRN(<CallStrip />);
+    expect(textOf(findHost(r.root, byTestId('call-direct-failure')))).toBe(
+      'OpenAI failed — HTTP 429',
+    );
+    expect(queryHost(r.root, byTestId('call-mute'))).not.toBeNull();
   });
 });

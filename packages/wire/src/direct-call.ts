@@ -331,3 +331,43 @@ export function mergeSpeechEngines(
 ): SpeechEngineReport {
   return { stt: [...device.stt, ...cloud.stt], tts: [...device.tts, ...cloud.tts] };
 }
+
+export interface SpeechEngineReporter {
+  /** Send the report now, changed or not (a fresh connection). */
+  report(): void;
+  /** Send it if it has changed (a host gained a key, a model was downloaded). */
+  refresh(): void;
+  stop(): void;
+}
+
+/**
+ * Reports a surface's speech engines to the server (spec/05 § Speech engines):
+ * on every connect, and whenever they change. The same on every surface; each
+ * supplies how to read its engines, how to send, and when its hosts change.
+ */
+export function createSpeechEngineReporter(deps: {
+  read: () => Promise<SpeechEngineReport>;
+  send: (e: { type: 'surface.speech_engines' } & SpeechEngineReport) => void;
+  onHostsChange: (cb: () => void) => () => void;
+  onError: (e: unknown) => void;
+}): SpeechEngineReporter {
+  let last: string | null = null;
+  let stopped = false;
+  const run = (force: boolean): void => {
+    deps.read().then((r) => {
+      const key = JSON.stringify(r);
+      if (stopped || (!force && key === last)) return;
+      last = key;
+      deps.send({ type: 'surface.speech_engines', stt: r.stt, tts: r.tts });
+    }, deps.onError);
+  };
+  const unsub = deps.onHostsChange(() => run(false));
+  return {
+    report: () => run(true),
+    refresh: () => run(false),
+    stop: () => {
+      stopped = true;
+      unsub();
+    },
+  };
+}

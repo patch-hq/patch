@@ -181,7 +181,7 @@ import { EmptyChatArt } from '../../src/components/EmptyChatArt';
 import { draftLinkedChat, linkedChatError } from '../../src/lib/linkedChat';
 import { ContinuationDivider } from '../../src/components/ContinuationDivider';
 import { fixed, fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
-import { startVoiceCall } from '../../src/lib/voiceCall';
+import { startDirectVoiceCall, startVoiceCall } from '../../src/lib/voiceCall';
 import { getWs } from '../../src/api/ws';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../../src/lib/askUserQuestion';
 import { goHome } from '../../src/lib/goBack';
@@ -1266,18 +1266,20 @@ function ChatDetailBody(): React.ReactElement {
             <Phone size={20} color={colors.ink} />
           </Pressable>
         ) : null}
-        {/* Long-press the call button: Call, Hands-free, Voice settings. */}
+        {/* Long-press the call button: Call, Call direct, Hands-free, Voice settings. */}
         <AnchoredMenu
           visible={callMenuOpen}
           onDismiss={() => setCallMenuOpen(false)}
           items={[
             { id: 'call', label: 'Call', testID: 'call-menu-call' },
+            { id: 'direct', label: 'Call direct', testID: 'call-menu-direct' },
             { id: 'hands-free', label: 'Hands-free', testID: 'call-menu-hands-free' },
             { id: 'voice-settings', label: 'Voice settings', testID: 'call-menu-settings' },
           ]}
           onSelect={(id) => {
             setCallMenuOpen(false);
             if (id === 'call') startVoiceCall(chatId);
+            else if (id === 'direct') void startDirectVoiceCall(chatId);
             else if (id === 'hands-free') startVoiceCall(chatId, 'hands-free');
             else router.push('/settings/voice' as Href);
           }}

@@ -49,7 +49,11 @@ const wsMock = { send: vi.fn(), safeSend: vi.fn(), requestHistory: vi.fn() };
 vi.mock('../src/api/ws', () => ({ getWs: () => wsMock }));
 
 const startVoiceCallMock = vi.fn();
-vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: startVoiceCallMock }));
+const startDirectVoiceCallMock = vi.fn(async () => {});
+vi.mock('../src/lib/voiceCall', () => ({
+  startVoiceCall: startVoiceCallMock,
+  startDirectVoiceCall: startDirectVoiceCallMock,
+}));
 
 // A screen left mounted would answer later tests' store changes (it listens for
 // its chat being archived elsewhere), so every render is torn down after its test.
@@ -386,6 +390,17 @@ describe('chat-detail header', () => {
     expect(hasText(r.root, 'Voice settings')).toBe(true);
     actSync(() => findHost(r.root, byTestId('call-menu-hands-free')).props.onPress());
     expect(startVoiceCallMock).toHaveBeenCalledWith('c1', 'hands-free');
+  });
+
+  it("the menu's Call direct starts a direct call on this chat", () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => findHost(r.root, byLabel('Start voice call')).props.onLongPress());
+    expect(hasText(r.root, 'Call direct')).toBe(true);
+    actSync(() => findHost(r.root, byTestId('call-menu-direct')).props.onPress());
+    expect(startDirectVoiceCallMock).toHaveBeenCalledWith('c1');
+    expect(startVoiceCallMock).not.toHaveBeenCalled();
   });
 
   it("the menu's Voice settings opens the voice settings page", () => {

@@ -4,6 +4,14 @@
 
 import { create } from 'zustand';
 import type { AudioSessionStateName, AudioSessionMode } from '@patch/wire/audio';
+import type { DirectCallStatus } from '@patch/wire/direct-call-runtime';
+
+/** A direct call's own half of the strip (spec/07 § Direct calls). */
+export interface DirectCallBarState {
+  /** The phone's setup in one line (`Android → ElevenLabs`). */
+  setup: string;
+  status: DirectCallStatus;
+}
 
 /**
  * Surface-visible call phase (spec/15 § Voice states). Mirrors the host's
@@ -120,6 +128,8 @@ interface VoiceState {
    * call they paused.
    */
   callPaused: PauseReason | null;
+  /** Set on a direct call: no voice agent and no session; speech runs on this phone. */
+  callDirect: DirectCallBarState | null;
 
   setIncoming(call: IncomingCall | null): void;
   /** Apply a `voice.call` event: add on active, remove on end. */
@@ -147,6 +157,8 @@ interface VoiceState {
   setCallAddressWord(w: string | null): void;
   setCallEngine(e: string | null): void;
   setCallPaused(p: PauseReason | null): void;
+  setCallDirect(d: DirectCallBarState | null): void;
+  setDirectStatus(status: DirectCallStatus): void;
 }
 
 export const useVoiceStore = create<VoiceState>((set) => ({
@@ -170,6 +182,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   callAddressWord: null,
   callEngine: null,
   callPaused: null,
+  callDirect: null,
   setIncoming(call) {
     set({ incomingCall: call });
   },
@@ -195,6 +208,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
       callConnectedAt: null,
       callReconnectingSince: null,
       callPaused: null,
+      callDirect: null,
     });
   },
   setCallReconnecting(on) {
@@ -260,6 +274,12 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   },
   setCallEngine(e) {
     set({ callEngine: e });
+  },
+  setCallDirect(d) {
+    set({ callDirect: d });
+  },
+  setDirectStatus(status) {
+    set((st) => (st.callDirect ? { callDirect: { ...st.callDirect, status } } : {}));
   },
   setCallPaused(p) {
     set({ callPaused: p });
