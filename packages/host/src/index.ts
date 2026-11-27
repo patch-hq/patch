@@ -204,7 +204,6 @@ import {
   makeMeetingResearcher,
   makeMeetingWriteup,
 } from './meetingGen.js';
-import { makeSweepDecider } from './managerSweepGen.js';
 import { makeGoalEvaluator } from './goalEval.js';
 import { makeToolRunSummarizer } from './toolRunGen.js';
 import { makeBranchSendBackSummarizer } from './branchSendBackGen.js';
@@ -212,6 +211,7 @@ import { makeRecurrenceTranslator } from './recurrenceTranslate.js';
 import { makeLinkSummariser } from './linkSummary.js';
 import {
   ensureSpecialThreads,
+  specialThreadFolder,
   appendBroadcast,
   isBroadcastSelfLoop,
   readPendingBroadcasts,
@@ -1034,13 +1034,16 @@ async function startHost(
   let titleGenerationEnabled = persistedHostState.titleGenerationEnabled ?? true;
   let statusGenerationEnabled = persistedHostState.statusGenerationEnabled ?? true;
   /**
-   * The Manager's bounded context window (spec/06 § Manager conversation).
+   * The Manager's bounded context window (spec/06 § Bounded context).
    * A generous built-in default so a host that hasn't yet heard the
    * account's own setting from the server doesn't truncate aggressively.
    */
   let managerContextWindow: number = persistedHostState.managerContextWindow ?? 200;
   /** spec/16 § Speaking aloud — `host.settings` → `voiceDevicePrompt`. */
   let voiceDevicePrompt: string = DEFAULT_SHARED_SETTINGS.voiceDevicePrompt;
+  /** spec/06 § Manager prompt and folder — the last the server sent; absent until the first snapshot. */
+  let managerPrompt: string | undefined = persistedHostState.managerPrompt;
+  let managerFolder: string | undefined = persistedHostState.managerFolder;
   /** spec/07 § A call to the Manager — `host.settings` → `managerVoicePrompt`. */
   let managerVoicePrompt: string = DEFAULT_SHARED_SETTINGS.managerVoicePrompt;
   /** spec/07 § Voice instructions — `host.settings` → `voiceInstructions`. */
@@ -2231,11 +2234,6 @@ async function startHost(
     targetChatId: string;
     message: string;
     voicePrefix?: string;
-    // Optional only so this one function also serves runManagerSweep's nudge
-    // (chatRunner.ts's narrower sendToRemoteChat, sourceChatId:
-    // 'thread_manager'), which the receiving host always routes as a nudge
-    // regardless of this field. A real patch_send_to (control.ts) always
-    // passes it explicitly.
     revealTarget?: boolean;
   }): Promise<void> =>
     remoteSendTos
@@ -2493,6 +2491,13 @@ async function startHost(
     if (shared.voiceMatchThreshold !== voiceMatchThreshold) {
       voiceMatchThreshold = shared.voiceMatchThreshold;
       logger.info({ voiceMatchThreshold }, 'voice match threshold changed');
+    }
+    if (shared.managerPrompt !== managerPrompt || shared.managerFolder !== managerFolder) {
+      managerPrompt = shared.managerPrompt;
+      managerFolder = shared.managerFolder;
+      hostStateStore.update({ managerPrompt, managerFolder });
+      applyManagerSettings();
+      logger.info({ managerFolder }, 'manager prompt or folder changed');
     }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
@@ -4293,16 +4298,13 @@ async function startHost(
             localId: requestId,
             ...(event.voicePrefix !== undefined ? { voicePrefix: event.voicePrefix } : {}),
             origin: 'machine',
-            // The Manager's sweep reaches a remote chat through this same relay.
-            // Otherwise the origin host already decided whether its caller was
+            // The origin host already decided whether its caller was
             // visible — carried over the wire as `revealTarget` rather than
             // re-derived here, since this host cannot see that chat's state.
             // Absent (a sender on an older build) must NOT default to reveal —
             // the whole point of this field is that an unknown caller stays
             // hidden rather than leaking into the main list.
-            ...(event.sourceChatId === 'thread_manager'
-              ? { nudge: true }
-              : { fromAgent: event.revealTarget === true }),
+            fromAgent: event.revealTarget === true,
           })
           .then(() => {
             sender({
@@ -5771,19 +5773,9 @@ async function startHost(
     // spec/06 § Session rotation — the handoff digest a scheduled rotation
     // asks the outgoing special-thread session to write for itself before
     // it's retired.
-    // spec/06 § Sweep — the sweep's one decision call, plus the cross-host
-    // relays it uses to read a non-local candidate's recent messages and to
-    // nudge/wake one (same relays `patch_history`/`patch_send_to` use).
-    decideSweep: makeSweepDecider({ sdkBackend, runOnAccountWithCredit, logger }),
-    // spec/06 § The feed — a run's spoken lines go into an open call on this
-    // host if there is one (as `patch_call` does), otherwise to the server as a
-    // speak-only call: read out under `auto-notify`, never a ring.
-    speakFeed: (text: string) => {
-      if (audioServer?.interruptOpenCall(text) === true) return;
-      emit({ type: 'patch.call', chatId: 'thread_manager', message: text, speakOnly: true });
-    },
+    // spec/06 § Finished chats — a finished chat on another host is read
+    // through the same relay `patch_history` uses.
     historyRemoteChat: historyFromServer,
-    sendToRemoteChat,
     emit,
     // A side branch's entries go to the server's record only: never through the
     // observers above, and only to a server that keeps branches (spec/04 §
@@ -5857,7 +5849,7 @@ async function startHost(
     // spec/20-hooks.md § On the agent's response — check `agent_response`
     // hooks after every turn settles.
     checkAgentResponseHooks: true,
-    // spec/06 § Manager conversation — persisted global preference.
+    // spec/06 § Bounded context — persisted global preference.
     managerContextWindow,
     // spec/16 § Speaking aloud — a turn heard on a voice device is answered in a room.
     voiceDevicePrompt: () => voiceDevicePrompt,
@@ -6147,6 +6139,15 @@ async function startHost(
       permissionModeDefault: daemon.permissionModeDefault(),
     });
     applySpecialThreadModel();
+    applyManagerSettings();
+  }
+  /** The Manager's prompt and folder, onto the Manager chat if this host runs it. */
+  function applyManagerSettings(): void {
+    if (managerPrompt !== undefined) daemon.setManagerPrompt(managerPrompt);
+    if (managerFolder === undefined) return;
+    daemon.setManagerFolder(
+      managerFolder === '' ? specialThreadFolder(hostCwd, 'thread_manager') : managerFolder,
+    );
   }
   if (runsManager) createSpecialThreads();
   /** Tell the server about one chat: that it exists, and its current state. */
@@ -9003,7 +9004,7 @@ export async function handleServerEvent(
         // rather than propagated, since there is no request-side connection
         // waiting on an answer.
         try {
-          await daemon.rotateThread(event.chatId);
+          await daemon.rotateThread(event.chatId, event.carry === false ? { carry: false } : {});
         } catch (err) {
           logger.warn(
             { chatId: event.chatId, err: (err as Error).message },
@@ -9012,15 +9013,10 @@ export async function handleServerEvent(
         }
         return;
       }
-      case 'manager.sweep_run': {
-        // Fire-and-forget from the server's gate (spec/06 § Sweep) — the
+      case 'manager.finished_run': {
+        // Fire-and-forget from the server (spec/06 § Finished chats) — the
         // result goes back over the SAME link, never blocking the sender.
-        const result = await daemon.runManagerSweep(event);
-        sender(result);
-        return;
-      }
-      case 'manager.sweep_cancel': {
-        daemon.cancelManagerSweep();
+        sender(await daemon.deliverFinishedChats(event));
         return;
       }
       case 'chat.snooze_request': {
@@ -9173,17 +9169,11 @@ export async function handleServerEvent(
       { op, chatId: chatId ?? 'none', errorCode: code, err: message },
       'ws-control: op rejected',
     );
-    // A manager sweep is not about any chat: its failure goes back as its own
-    // result, so the server settles the run. A `chat.error` for a made-up chat
-    // id is drawn by every surface as a new empty "New chat" row.
-    if (event.type === 'manager.sweep_run') {
-      sender({
-        type: 'manager.sweep_result',
-        runId: event.runId,
-        actions: [],
-        tokensUsed: 0,
-        error: message,
-      });
+    // A finished-chats delivery is not about any one chat: its failure goes
+    // back as its own result, so the server settles it. A `chat.error` for a
+    // made-up chat id is drawn by every surface as a new empty "New chat" row.
+    if (event.type === 'manager.finished_run') {
+      sender({ type: 'manager.finished_result', runId: event.runId, delivered: 0, error: message });
       return;
     }
     // Any other chat-less op has nothing to attach an error to; logged above.

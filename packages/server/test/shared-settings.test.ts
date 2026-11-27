@@ -26,7 +26,7 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
-import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
+import { DEFAULT_MANAGER_PROMPT, DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
@@ -151,19 +151,72 @@ describe('SharedSettingsService', () => {
     expect(() => service.update({ limitBehaviour: 'sometimes' as never })).toThrow(SettingsError);
   });
 
-  it('accepts 0 for the sweep interval (Instant) and refuses a negative one', () => {
-    expect(service.update({ sweepIntervalMinutes: 0 }).sweepIntervalMinutes).toBe(0);
-    expect(() => service.update({ sweepIntervalMinutes: -5 })).toThrow();
+  it('finished chats: off by default, and a mode write keeps the retired sweep pair in step', () => {
+    expect(service.current().managerWake).toBe('off');
+    expect(service.current().managerWakeIntervalMinutes).toBe(30);
+    service.update({ managerWake: 'batched', managerWakeIntervalMinutes: 60 });
+    expect(service.current()).toMatchObject({ sweepEnabled: true, sweepIntervalMinutes: 60 });
+    service.update({ managerWake: 'each' });
+    expect(service.current()).toMatchObject({ sweepEnabled: true, sweepIntervalMinutes: 0 });
+    service.update({ managerWake: 'off' });
+    expect(service.current().sweepEnabled).toBe(false);
+    expect(() => service.update({ managerWakeIntervalMinutes: 0 })).toThrow(SettingsError);
+  });
+
+  it('finished chats: an older surface writing the sweep pair gets the mode it meant', () => {
+    service.update({ sweepEnabled: true, sweepIntervalMinutes: 0 });
+    expect(service.current().managerWake).toBe('each');
+    service.update({ sweepIntervalMinutes: 15 });
+    expect(service.current()).toMatchObject({
+      managerWake: 'batched',
+      managerWakeIntervalMinutes: 15,
+    });
+    service.update({ sweepEnabled: false });
+    expect(service.current().managerWake).toBe('off');
+  });
+
+  it('finished chats: a file from before them gains the mode its sweep meant', () => {
+    const load = (raw: object) => {
+      writeFileSync(join(dir, 'settings.json'), JSON.stringify(raw));
+      return make().current();
+    };
+    expect(load({ sweepEnabled: false, sweepIntervalMinutes: 0 }).managerWake).toBe('off');
+    expect(load({ sweepEnabled: true, sweepIntervalMinutes: 0 }).managerWake).toBe('each');
+    expect(load({ sweepEnabled: true, sweepIntervalMinutes: 120 })).toMatchObject({
+      managerWake: 'batched',
+      managerWakeIntervalMinutes: 120,
+    });
+    // A file that already has the mode is taken at its word.
+    expect(load({ sweepEnabled: true, managerWake: 'off' }).managerWake).toBe('off');
+  });
+
+  it('the Manager prompt: the default, or a customised sweep prompt carried over once', () => {
+    expect(service.current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ sweepPrompt: DEFAULT_SHARED_SETTINGS.sweepPrompt }),
+    );
+    expect(make().current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepPrompt: 'Say yes to tests.' }));
+    const seeded = make();
+    expect(seeded.current().managerPrompt).toBe('Say yes to tests.');
+    // Once: an edit made after it is what stays.
+    seeded.update({ managerPrompt: 'Edited.' });
+    expect(make().current().managerPrompt).toBe('Edited.');
+  });
+
+  it('the Manager folder: empty or absolute, anything else refused', () => {
+    expect(service.current().managerFolder).toBe('');
+    expect(service.update({ managerFolder: '/srv/work' }).managerFolder).toBe('/srv/work');
+    expect(service.update({ managerFolder: 'C:\\work' }).managerFolder).toBe('C:\\work');
+    expect(service.update({ managerFolder: '' }).managerFolder).toBe('');
+    expect(() => service.update({ managerFolder: 'work' })).toThrow(SettingsError);
   });
 
   it('has experimental features off by default, and a write persists across a restart', () => {
     expect(service.current().experimentalFeatures).toBe(false);
     expect(service.update({ experimentalFeatures: true }).experimentalFeatures).toBe(true);
     expect(make().current().experimentalFeatures).toBe(true);
-  });
-
-  it('has the sweep off by default', () => {
-    expect(service.current().sweepEnabled).toBe(false);
   });
 
   it('a settings file from before the Manager redesign loads, with the sweep off and the old prompt replaced', () => {
@@ -180,6 +233,7 @@ describe('SharedSettingsService', () => {
     expect(loaded.sweepEnabled).toBe(false);
     expect(loaded.sweepPrompt).toBe(DEFAULT_SHARED_SETTINGS.sweepPrompt);
     expect(loaded.sweepIntervalMinutes).toBe(10);
+    expect(loaded.managerWake).toBe('off');
     expect('stalledThresholdMinutes' in loaded).toBe(false);
   });
 

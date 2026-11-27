@@ -590,6 +590,9 @@ async function handleServerEvent(
       case 'file.write':
         daemon.writeFile(event.chatId, event.path, event.content);
         return;
+      case 'manager.finished_run':
+        send(await daemon.deliverFinishedChats(event));
+        return;
       default:
         return;
     }

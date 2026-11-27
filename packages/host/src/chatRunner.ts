@@ -200,12 +200,10 @@ import {
   QUESTION_EXPIRY_SECONDS_MAX,
   LOGGED_EVENT_TYPES,
   SPECIAL_THREAD_IDS,
-  type ManagerSweepAction,
-  type ManagerSweepCandidate,
-  type ManagerSweepResultEvent,
+  type ManagerFinishedChat,
+  type ManagerFinishedResultEvent,
 } from '@patch/wire';
 import { modelHasCapability, patchToolsOmittedFor, type ProviderCapability } from '@patch/wire';
-import type { SweepDecisionResult } from './managerSweepGen.js';
 import { permissionModeChangeLine } from './permissionMode.js';
 import { isAccountExhausted, parseLimitResetsAt } from './accountFailover.js';
 import { isModelOutput, setLiveRunPermissionMode, TurnFailedError } from './sdkBackend.js';
@@ -695,25 +693,9 @@ export interface HostOptions {
     lastAssistantText: string;
   }) => Promise<string>;
   /**
-   * The Manager sweep's one decision call (spec/06 § Sweep;
-   * `managerSweepGen.ts`). OPTIONAL — `runManagerSweep` refuses rather than
-   * guessing when it's unset (NO FALLBACK).
-   */
-  decideSweep?: (input: {
-    digest: string;
-    prompt: string;
-    model: string;
-  }) => Promise<SweepDecisionResult | null>;
-  /**
-   * Speak a sweep run's feed (spec/06 § The feed): into an open call, or as a
-   * speak-only call. Unset, a run asked to speak records the failure in its
-   * result rather than staying silent unnoticed.
-   */
-  speakFeed?: (text: string) => void;
-  /**
    * Cross-host history read (spec/03 § Cross-chat tools — same relay
-   * `patch_history` uses). `runManagerSweep` uses this for a candidate whose
-   * `hostId` is not this host's own.
+   * `patch_history` uses). A finished-chats delivery reads a chat on another
+   * host through this.
    */
   historyRemoteChat?: (req: {
     sourceChatId: string;
@@ -722,17 +704,7 @@ export interface HostOptions {
     limit?: number;
   }) => Promise<{ events: WireEvent[]; nextFromSeq?: number }>;
   /**
-   * Cross-host turn delivery (spec/03 § Cross-chat tools — same relay
-   * `patch_send_to` uses). `runManagerSweep` uses this to nudge/wake a
-   * candidate not on this host.
-   */
-  sendToRemoteChat?: (req: {
-    sourceChatId: string;
-    targetChatId: string;
-    message: string;
-  }) => Promise<void>;
-  /**
-   * The Manager's bounded context window (spec/06 § Manager conversation) —
+   * The Manager's bounded context window (spec/06 § Bounded context) —
    * how many of its own messages the model sees, reconstructed fresh from
    * that window once the full track grows past it. Mutable at runtime via
    * `setManagerContextWindow` (`host.settings` → `managerContextWindow`),
@@ -1108,8 +1080,46 @@ export function continueOwedTurnMessage(cause: OwedTurnCause): string {
 /** Longest stretch of one message a handover note carries. */
 const MANAGER_HANDOVER_MESSAGE_CHARS = 4_000;
 
-/** Messages a session rotation carries over when no `managerContextWindow` is set. */
-const ROTATION_CARRY_MESSAGES = 40;
+/** The window a special thread is bounded to when no `managerContextWindow` is set. */
+const DEFAULT_CONTEXT_WINDOW = 80;
+
+/**
+ * How many messages a fresh special-thread session is handed (spec/06 §
+ * Bounded context): half the window, so the next trim is half a window away
+ * and the prompt stays cacheable in between.
+ */
+export function carriedMessages(window: number): number {
+  return Math.max(1, Math.floor(window / 2));
+}
+
+/** `1 message`, `2 messages`. */
+function carriedWords(n: number): string {
+  return `${n} message${n === 1 ? '' : 's'}`;
+}
+
+/** A batch interval as the finished-chats line says it. */
+function intervalWords(minutes: number): string {
+  if (minutes % 1440 === 0) return minutes === 1440 ? 'day' : `${minutes / 1440} days`;
+  if (minutes % 60 === 0) return minutes === 60 ? 'hour' : `${minutes / 60} hours`;
+  return `${minutes} min`;
+}
+
+/**
+ * The plain line after a finished-chats delivery's notes (spec/06 §
+ * Finished chats): the chat by name for one, a count otherwise, and the
+ * interval when it was a batch.
+ */
+export function finishedLine(
+  chats: readonly { name: string; folder: string }[],
+  windowMinutes?: number,
+): string {
+  const within = windowMinutes !== undefined ? ` in the last ${intervalWords(windowMinutes)}` : '';
+  if (chats.length === 1) {
+    const only = chats[0]!;
+    return `${only.name.trim() || only.folder} finished${within}.`;
+  }
+  return `${chats.length} chats finished${within}.`;
+}
 
 /**
  * spec/04 § Goals — check-in. A goal set without a check-in cadence gets this
@@ -1605,14 +1615,6 @@ export interface SendInputOptions {
    */
   goalTrigger?: GoalTriggerInfo;
   /**
-   * This is a Manager-sweep check-in nudge (spec/06 § Sweep). If it has to
-   * queue behind a running turn it replaces any nudge already queued, and it is
-   * not queued at all when the chat already has a queued message — nudges must
-   * never stack up behind each other. Queued nudges are flushed when the chat's
-   * goal is met or cleared (`flushQueuedNudges`).
-   */
-  nudge?: boolean;
-  /**
    * Hold this message until the running turn has finished, instead of handing
    * it over at the next tool boundary ("Send, wait until agent finished").
    * Behind an idle chat it changes nothing: the turn starts at once.
@@ -1721,8 +1723,6 @@ interface QueuedTurn {
   hookTrigger?: HookTriggerInfo;
   /** {@link SendInputOptions.goalTrigger} — carried through the queue with the turn. */
   goalTrigger?: GoalTriggerInfo;
-  /** {@link SendInputOptions.nudge} — marks a sweep answer so it can be replaced or flushed. */
-  nudge?: boolean;
   /** {@link SendInputOptions.afterTurn} — carried through the queue with the turn. */
   afterTurn?: boolean;
   /**
@@ -2165,8 +2165,10 @@ export class Daemon {
    * the pump in arrival order once the current turn finishes.
    */
   private readonly turnQueues = new Map<string, QueuedTurn[]>();
-  /** Bumped when the sweep is switched off; a run that started under an older one stops delivering. */
-  private sweepEpoch = 0;
+  /** The Manager prompt (`managerPrompt`); unset until the first settings snapshot. */
+  private managerPrompt: string | undefined;
+  /** A Manager folder waiting for the Manager to be idle (`setManagerFolder`). */
+  private wantedManagerFolder: string | undefined;
   /**
    * Chats with an active serial pump — a turn is running OR its queue is
    * draining. This is the SINGLE guard that gates "enqueue behind the running
@@ -5868,7 +5870,6 @@ export class Daemon {
     // spec/04 § Goals — the agent is told on its next turn.
     state.goalNotice = { goal };
     state.lastUpdated = now;
-    if (goal === null) this.flushQueuedNudges(chatId);
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       goal,
@@ -6318,8 +6319,8 @@ export class Daemon {
   /**
    * Turn a special thread on/off (spec/06 § Disabled) — the real "off" switch
    * special threads use instead of archive (which `setArchived` refuses for
-   * them). Disabling Manager stops the sweep raising candidates or flagging
-   * into it (`manager-sweep.ts` checks this flag); disabling Speakers stops
+   * them). Disabling Manager stops finished chats being sent to it (the
+   * server's collector and `deliverFinishedChats` check this flag); disabling Speakers stops
    * its own ingress handlers from delivering a turn. The chat itself is
    * untouched otherwise — still openable, still in its fixed sidebar slot,
    * just greyed out with its composer inactive.
@@ -6335,7 +6336,6 @@ export class Daemon {
       return;
     }
     state.disabled = disabled;
-    if (disabled && chatId === SPECIAL_THREAD_IDS.manager) this.cancelManagerSweep();
     state.lastUpdated = this.opts.now();
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
@@ -6478,7 +6478,7 @@ export class Daemon {
   }
 
   /**
-   * The Manager's bounded context (spec/06 § Manager conversation), through
+   * The Manager's bounded context (spec/06 § Bounded context), through
    * what the provider supports: a fresh session, never a rebuilt one. Once
    * the current session has carried more than `managerContextWindow`
    * messages, the session is retired, a divider marks it, and the last
@@ -6493,13 +6493,13 @@ export class Daemon {
     if (window === undefined || window <= 0 || !state?.sessionId || !meta) return '';
     const from = meta.sessionFromSeq ?? 0;
     if (this.recordMessages(chatId).filter((m) => m.seq >= from).length <= window) return '';
-    const handoff = this.recordHandoff(chatId, window);
+    const handoff = this.recordHandoff(chatId, carriedMessages(window));
     this.retireSession(chatId);
     this.emit({
       type: 'chat.message',
       chatId,
       role: 'system',
-      content: `New session · the last ${handoff.carried} messages carried over`,
+      content: `New session · the last ${carriedWords(handoff.carried)} carried over`,
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     });
@@ -6569,9 +6569,11 @@ export class Daemon {
    * provider's own compaction. The fresh session's first message carries the
    * last messages of Patch's record as a visible `Handoff` note. `chatId` never
    * changes: only the session underneath it does. Refuses a chat that's
-   * mid-turn (the caller retries next cycle).
+   * mid-turn (the caller retries next cycle). `carry: false` is Clear
+   * (spec/06 § Bounded context): the session is retired with no carry-over and
+   * nothing is sent; the next turn starts fresh with only the Manager prompt.
    */
-  async rotateThread(chatId: string): Promise<void> {
+  async rotateThread(chatId: string, opts: { carry?: boolean } = {}): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
     if (!isReservedSpecialThread(chatId)) {
@@ -6586,11 +6588,25 @@ export class Daemon {
       this.opts.logger.info({ chatId }, 'rotateThread: no session yet, nothing to rotate');
       return;
     }
+    if (opts.carry === false) {
+      this.emit({
+        type: 'chat.message',
+        chatId,
+        role: 'system',
+        content: 'Cleared · new session',
+        seq: this.bumpSeq(chatId),
+        createdAt: this.opts.now(),
+      });
+      this.retireSession(chatId);
+      this.emitState(chatId);
+      this.opts.logger.info({ chatId }, 'rotateThread: session cleared, nothing carried');
+      return;
+    }
     // What the fresh session is given comes from Patch's own record, never
     // from a request to the outgoing session the user would not see.
     const handoff = this.recordHandoff(
       chatId,
-      this.opts.managerContextWindow ?? ROTATION_CARRY_MESSAGES,
+      carriedMessages(this.opts.managerContextWindow ?? DEFAULT_CONTEXT_WINDOW),
     );
     // Boundary marker, same arrangement a compaction boundary uses — a system
     // chat.message, so it shows with the rest of the chat.
@@ -6598,7 +6614,7 @@ export class Daemon {
       type: 'chat.message',
       chatId,
       role: 'system',
-      content: `Session rotated · the last ${handoff.carried} messages carried over`,
+      content: `Session rotated · the last ${carriedWords(handoff.carried)} carried over`,
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     });
@@ -6618,342 +6634,108 @@ export class Daemon {
   }
 
   /**
-   * Read a candidate's most recent `limit` `chat.message` events (user/
-   * assistant only — a sweep flag is not the model's own conversation, spec/06
-   * § Sweep). Local candidates read straight off this host's log; a candidate
-   * on another host rides the same cross-host relay `patch_history` uses.
-   * `readHistory`/`historyRemoteChat` only page OLDEST-first, so this walks
-   * forward collecting a rolling tail rather than asking for the end
-   * directly — bounded to 10 pages (2000 events) so one huge chat can't make
-   * a sweep hang collecting history nobody asked for.
+   * A finished chat's last assistant message, from the record on whichever
+   * host the chat is on (the same relay `patch_history` uses for another
+   * host). History pages oldest-first, so this walks forward keeping the
+   * latest — bounded to 10 pages so one huge chat cannot hold a delivery up.
    */
-  private async recentMessagesFor(
-    candidate: ManagerSweepCandidate,
-    limit: number,
-  ): Promise<{ role: 'user' | 'assistant'; content: string }[]> {
-    const tail: { role: 'user' | 'assistant'; content: string }[] = [];
+  private async lastAssistantText(chat: ManagerFinishedChat): Promise<string> {
+    let last = '';
     let fromSeq: number | undefined;
     for (let page = 0; page < 10; page++) {
-      let slice: { events: WireEvent[]; nextFromSeq?: number } | undefined;
-      try {
-        slice =
-          candidate.hostId === this.opts.hostId
-            ? this.readHistory({ chatId: candidate.chatId, ...(fromSeq ? { fromSeq } : {}) })
-            : await this.opts.historyRemoteChat?.({
-                sourceChatId: SPECIAL_THREAD_IDS.manager,
-                targetChatId: candidate.chatId,
-                ...(fromSeq ? { fromSeq } : {}),
-              });
-      } catch (err) {
-        // A candidate the gate saw a moment ago but has since vanished
-        // (archived, deleted, host dropped) is not worth failing the whole
-        // sweep over — it just gets no transcript in the digest.
-        this.opts.logger.warn(
-          { chatId: candidate.chatId, err: (err as Error).message },
-          'manager-sweep: history read failed; digest will have no transcript for this chat',
-        );
-        break;
-      }
-      if (!slice) break;
+      const slice =
+        chat.hostId === this.opts.hostId
+          ? this.readHistory({ chatId: chat.chatId, ...(fromSeq ? { fromSeq } : {}) })
+          : await this.remoteHistory(chat.chatId, fromSeq);
       for (const event of slice.events) {
-        if (event.type !== 'chat.message' || event.role === 'system') continue;
-        tail.push({ role: event.role, content: event.content });
-        if (tail.length > limit) tail.shift();
+        if (event.type === 'chat.message' && event.role === 'assistant' && event.content.trim()) {
+          last = event.content;
+        }
       }
       if (slice.nextFromSeq === undefined) break;
       fromSeq = slice.nextFromSeq;
     }
-    return tail;
+    return last;
   }
 
-  /** Render the facts the sweep run is handed (spec/06 § The sweep — "Facts"): the chats that went idle, each with its last messages, and the reply format. */
-  private async buildSweepDigest(
-    candidates: readonly ManagerSweepCandidate[],
-    messagesPerChat: number,
-    speak = false,
-  ): Promise<string> {
-    const sections = await Promise.all(
-      candidates.map(async (c) => {
-        const messages = await this.recentMessagesFor(c, messagesPerChat);
-        // The tail, not the head: a chat asking a question asks at the end.
-        const lines = messages.map((m) => `  ${m.role}: ${m.content.slice(-600)}`);
-        return [
-          `- ${c.chatId} (${c.folder} on ${c.hostId}) — idle ${Math.round(c.idleMinutes)}m`,
-          ...lines,
-        ].join('\n');
-      }),
-    );
-    return (
-      `${candidates.length} chat${candidates.length === 1 ? '' : 's'} went idle:\n\n${sections.join('\n\n')}` +
-      '\n\nReply with ONLY a JSON object, one entry per chat above:\n' +
-      '{"decisions": [{"chatId": "...", "folder": "...", "action": "answer|digest|leave", "message": "...", "question": "...", "reason": "..."}]}\n' +
-      '"answer": the standing instructions cover the question; "message" is what to send the chat. ' +
-      '"digest": it ends in a question you cannot answer; "question" is that question in one plain line and "reason" says why you could not answer it (e.g. the standing instructions do not cover it, or it needs a person to decide). ' +
-      '"leave": no question. Give "chatId" and "folder" exactly as listed above. No prose outside the JSON.' +
-      (speak
-        ? '\nEvery entry, whatever its action, also has "summary": one short spoken sentence on what that chat just did, ' +
-          'naming the chat the way a person would (not its id), to be read aloud to the user. Plain words, no markdown, no paths.'
-        : '')
-    );
-  }
-
-  /** Deliver a sweep's answer — local chats via `sendInput`, a
-   * remote candidate via the same cross-host relay `patch_send_to` uses. */
-  private async deliverSweepMessage(
-    candidate: ManagerSweepCandidate,
-    message: string,
-  ): Promise<boolean> {
-    const at = this.opts.now();
-    try {
-      if (candidate.hostId === this.opts.hostId) {
-        // A chat with a turn running (or a queue draining) isn't idle: the
-        // message would only park in its queue until the turn ends, by which
-        // time it's stale — and every later sweep would stack another behind
-        // it. Not delivered; the next sweep reconsiders once the chat settles.
-        if (this.pumping.has(candidate.chatId)) return false;
-        await this.sendInput({
-          chatId: candidate.chatId,
-          message,
-          localId: `sweep-${candidate.chatId}-${at}`,
-          origin: 'machine',
-          nudge: true,
-        });
-      } else {
-        if (!this.opts.sendToRemoteChat) return false;
-        await this.opts.sendToRemoteChat({
-          sourceChatId: SPECIAL_THREAD_IDS.manager,
-          targetChatId: candidate.chatId,
-          message,
-        });
-      }
-      return true;
-    } catch (err) {
-      this.opts.logger.warn(
-        { chatId: candidate.chatId, err: (err as Error).message },
-        'manager-sweep: delivery failed',
-      );
-      return false;
+  private async remoteHistory(
+    chatId: string,
+    fromSeq: number | undefined,
+  ): Promise<{ events: WireEvent[]; nextFromSeq?: number }> {
+    if (!this.opts.historyRemoteChat) {
+      throw new Error('this host cannot read another host’s history');
     }
-  }
-
-  /**
-   * The sweep has been switched off (the sweep setting, or Manager disabled):
-   * a run already deciding stops short of delivering, and every nudge still
-   * waiting in a chat's queue is dropped rather than arriving later.
-   */
-  cancelManagerSweep(): void {
-    this.sweepEpoch++;
-    for (const chatId of [...this.turnQueues.keys()]) this.flushQueuedNudges(chatId);
+    return this.opts.historyRemoteChat({
+      sourceChatId: SPECIAL_THREAD_IDS.manager,
+      targetChatId: chatId,
+      ...(fromSeq ? { fromSeq } : {}),
+    });
   }
 
   private managerDisabled(): boolean {
     return this.chatState.get(SPECIAL_THREAD_IDS.manager)?.disabled === true;
   }
 
-  /** Quiet note on the Manager thread's own log (spec/06 § The sweep): a
-   * `system` `chat.message`, same arrangement a rotation boundary uses — never
-   * a turn, so it never reaches the Manager's own model context. Every
-   * message the sweep sends to a chat, and each digest, shows up here. */
-  private noteOnManager(text: string): void {
-    this.emit({
-      type: 'chat.message',
-      chatId: SPECIAL_THREAD_IDS.manager,
-      role: 'system',
-      content: `[sweep] ${text}`,
-      seq: this.bumpSeq(SPECIAL_THREAD_IDS.manager),
-      createdAt: this.opts.now(),
-    });
-  }
-
-  /** A link to a chat, as the Manager thread renders it. */
-  private chatLink(candidate: ManagerSweepCandidate): string {
-    return `[${candidate.folder}](patch://chats/${candidate.chatId})`;
-  }
-
   /**
-   * Run one Manager sweep (spec/06 § The sweep). The server has already
-   * decided a check is due and handed over the chats that went idle; this
-   * method makes the one decision call, then executes it — an answer by
-   * delivering a message (and noting it on the Manager thread), the open
-   * questions as one digest note on the Manager thread, leave by doing
-   * nothing. NO FALLBACK: no decider configured, or the decision call itself
-   * failing, ends the run with `error` set and touches nothing.
-   *
-   * Whether a question is one the standing instructions cover is the prompt's call;
-   * nothing here ranks or second-guesses it. Code only checks that a message
-   * reaches the chat it was written for, and that the chat is idle.
+   * Tell the Manager which chats finished (spec/06 § Finished chats): one
+   * machine turn into its own conversation, a `Finished · <name>` note per
+   * chat (id, host, folder, link, last reply) and a plain line after them.
+   * A Manager mid-turn queues it like any other message. A chat whose
+   * record cannot be read still gets its note, saying so, so nothing is
+   * dropped unseen.
    */
-  async runManagerSweep(req: {
+  async deliverFinishedChats(req: {
     runId: string;
-    candidates: ManagerSweepCandidate[];
-    messagesPerChat: number;
-    prompt: string;
-    model: string;
-    speak?: boolean;
-  }): Promise<ManagerSweepResultEvent> {
-    if (!this.opts.decideSweep) {
-      return {
-        type: 'manager.sweep_result',
-        runId: req.runId,
-        actions: [],
-        tokensUsed: 0,
-        error: 'manager-sweep: no decider configured',
-      };
-    }
-    // spec/06 § Disabled — a disabled Manager sends nothing. The server stops
-    // raising sweeps, but a run already on its way here still arrives.
-    const idle = (tokensUsed: number): ManagerSweepResultEvent => ({
-      type: 'manager.sweep_result',
+    chats: ManagerFinishedChat[];
+    windowMinutes?: number;
+  }): Promise<ManagerFinishedResultEvent> {
+    const result = (delivered: number, error?: string): ManagerFinishedResultEvent => ({
+      type: 'manager.finished_result',
       runId: req.runId,
-      actions: req.candidates.map((c) => ({
-        chatId: c.chatId,
-        action: 'leave' as const,
-        edge: c.edge,
-        detail: 'sweep is off',
-      })),
-      tokensUsed,
+      delivered,
+      ...(error !== undefined ? { error } : {}),
     });
-    const epoch = this.sweepEpoch;
-    const cancelled = (): boolean => this.sweepEpoch !== epoch || this.managerDisabled();
-    if (cancelled()) return idle(0);
-    const speak = req.speak === true;
-    const digest = await this.buildSweepDigest(req.candidates, req.messagesPerChat, speak);
-    const result = await this.opts.decideSweep({
-      digest,
-      prompt: req.prompt,
-      model: req.model,
-    });
-    if (result === null) {
-      return {
-        type: 'manager.sweep_result',
-        runId: req.runId,
-        actions: [],
-        tokensUsed: 0,
-        error: 'manager-sweep: decision call failed or returned an unparseable reply',
-      };
+    if (!this.chatState.has(SPECIAL_THREAD_IDS.manager)) {
+      return result(0, 'this host does not run the Manager');
     }
-    // Switched off while the decision call was running.
-    if (cancelled()) return idle(result.tokensUsed);
-    const byChatId = new Map(req.candidates.map((c) => [c.chatId, c]));
-    const actions: ManagerSweepAction[] = [];
-    const digestLines: string[] = [];
-    const digestPlain: string[] = [];
-    const seen = new Set<string>();
-    /** The spoken feed, in the order the run answered (spec/06 § The feed). */
-    const spoken: string[] = [];
-    for (const decision of result.decisions) {
-      const candidate = byChatId.get(decision.chatId);
-      if (!candidate || seen.has(decision.chatId)) continue; // not asked about, or a duplicate — ignore
-      seen.add(decision.chatId);
-      if (speak) {
-        const summary = decision.summary?.trim();
-        if (summary) spoken.push(summary);
-        if (decision.action === 'digest' && decision.question?.trim()) {
-          spoken.push(`It asks: ${decision.question.trim()}`);
-        }
-      }
-      const edge = candidate.edge;
-      const leave = (detail: string): void => {
-        actions.push({ chatId: candidate.chatId, action: 'leave', edge, detail });
-      };
-      if (decision.action === 'answer') {
-        // The reply must name the chat it means by its folder as well as its id,
-        // and both must be the chat the digest listed: a message written for one
-        // chat is never delivered to another.
-        if (decision.folder !== candidate.folder) {
+    // The server stops collecting for a disabled Manager, but a delivery
+    // already on its way still arrives.
+    if (this.managerDisabled()) return result(0, 'the Manager is disabled');
+    const notes = await Promise.all(
+      req.chats.map(async (chat) => {
+        let reply: string;
+        try {
+          reply = (await this.lastAssistantText(chat)) || '(no reply in its record)';
+        } catch (err) {
           this.opts.logger.warn(
-            { chatId: candidate.chatId, expected: candidate.folder, got: decision.folder },
-            'manager-sweep: decision does not match its target chat; not delivered',
+            { chatId: chat.chatId, err: (err as Error).message },
+            'manager-finished: could not read the chat’s last reply',
           );
-          leave(
-            `not sent: reply named folder ${decision.folder ?? '(none)'}, chat is ${candidate.folder}`,
-          );
-          continue;
+          reply = `(its last reply could not be read: ${(err as Error).message})`;
         }
-        const localFolder = this.chatState.get(candidate.chatId)?.folder;
-        if (candidate.hostId === this.opts.hostId && localFolder !== candidate.folder) {
-          leave(`not sent: chat folder is now ${localFolder ?? '(gone)'}`);
-          continue;
-        }
-        const message = decision.message?.trim();
-        if (!message) {
-          leave('not sent: the answer had no message');
-          continue;
-        }
-        if (cancelled()) {
-          leave('not sent: sweep was switched off');
-          continue;
-        }
-        const delivered = await this.deliverSweepMessage(candidate, message);
-        if (delivered) {
-          this.noteOnManager(`Sent to ${this.chatLink(candidate)}: ${message}`);
-          actions.push({ chatId: candidate.chatId, action: 'answer', edge, detail: message });
-        } else {
-          leave(`not sent: chat was busy or unreachable (${message})`);
-        }
-      } else if (decision.action === 'digest') {
-        const question = decision.question?.trim();
-        if (!question) {
-          leave('no question given');
-          continue;
-        }
-        // Every question passed on says why it was not answered; a reply that
-        // gives none is shown as having given none, not left out.
-        const reason = decision.reason?.trim() || 'no reason given';
-        digestLines.push(`- ${this.chatLink(candidate)}: ${question} (not answered: ${reason})`);
-        digestPlain.push(`${candidate.folder}: ${question} (not answered: ${reason})`);
-        actions.push({
-          chatId: candidate.chatId,
-          action: 'digest',
-          edge,
-          detail: `${question} (not answered: ${reason})`,
-        });
-      } else {
-        leave('nothing needed');
-      }
-    }
-    // A chat the decision never addressed is left alone: it is not asked about
-    // again until it goes idle again.
-    for (const candidate of req.candidates) {
-      if (seen.has(candidate.chatId)) continue;
-      actions.push({
-        chatId: candidate.chatId,
-        action: 'leave',
-        edge: candidate.edge,
-        detail: 'no decision returned',
-      });
-    }
-    // One message listing everything open, however the run was timed: with the
-    // slider at "instant" it is a run per idle chat, so a list of one; batched,
-    // it is the whole interval's questions (spec/06 § The sweep — job 3). The
-    // same list goes on the Manager thread and out as a notification that opens it.
-    if (digestLines.length > 0 && !cancelled()) {
-      const heading = `${digestLines.length} open question${digestLines.length === 1 ? '' : 's'}`;
-      this.noteOnManager(`${heading}:\n${digestLines.join('\n')}`);
-      this.emit({
-        type: 'notify',
-        chatId: SPECIAL_THREAD_IDS.manager,
-        message: `${heading}:\n${digestPlain.join('\n')}`,
-      });
-    }
-    let speakError: string | undefined;
-    if (speak && spoken.length > 0 && !cancelled()) {
-      if (this.opts.speakFeed) {
-        const text = spoken.join(' ');
-        this.noteOnManager(`Spoken: ${text}`);
-        this.opts.speakFeed(text);
-      } else {
-        speakError = 'manager-sweep: feed is on but this host cannot speak it';
-        this.opts.logger.warn({ runId: req.runId }, speakError);
-      }
-    }
-    return {
-      type: 'manager.sweep_result',
-      runId: req.runId,
-      actions,
-      tokensUsed: result.tokensUsed,
-      ...(speakError !== undefined ? { error: speakError } : {}),
-    };
+        const name = chat.name.trim() || chat.folder;
+        const label = `Finished · ${name.replace(/[\]\n]/g, ' ')}`;
+        return noteBlock(
+          label,
+          [
+            `Chat: ${chat.chatId}`,
+            `Host: ${chat.hostId}`,
+            `Folder: ${chat.folder}`,
+            `Link: patch://chats/${chat.chatId}`,
+            '',
+            'Last reply:',
+            reply,
+          ].join('\n'),
+        );
+      }),
+    );
+    await this.sendInput({
+      chatId: SPECIAL_THREAD_IDS.manager,
+      message: notes.join('') + finishedLine(req.chats, req.windowMinutes),
+      localId: `finished-${req.runId}`,
+      origin: 'machine',
+    });
+    return result(req.chats.length);
   }
 
   /**
@@ -7923,11 +7705,6 @@ export class Daemon {
     // A chat parked for credit has no pump but is not free: a new message waits
     // its turn behind the parked one instead of overwriting it.
     if (this.pumping.has(req.chatId) || this.creditParked(req.chatId)) {
-      if (req.nudge) {
-        // A nudge replaces a queued nudge, and yields to any real queued message.
-        this.flushQueuedNudges(req.chatId);
-        if (this.hasQueuedTurns(req.chatId)) return;
-      }
       this.enqueueQueued(
         req.chatId,
         message,
@@ -7942,7 +7719,6 @@ export class Daemon {
           text: req.message,
           ...(compose ? { compose } : {}),
         },
-        req.nudge,
         req.afterTurn,
       );
       // A turn that was parked on a question was not working, so the message
@@ -7973,7 +7749,6 @@ export class Daemon {
         req.hookTrigger,
         req.goalTrigger,
         { text: req.message, ...(compose ? { compose } : {}) },
-        req.nudge,
         req.afterTurn,
       );
       return;
@@ -7994,7 +7769,6 @@ export class Daemon {
         req.hookTrigger,
         req.goalTrigger,
         { text: req.message, ...(compose ? { compose } : {}) },
-        req.nudge,
         req.afterTurn,
       );
       return;
@@ -8398,20 +8172,6 @@ export class Daemon {
       .join('\n\n');
   }
 
-  /** Drop every queued sweep nudge from the chat's queue, announcing each as cancelled. */
-  private flushQueuedNudges(chatId: string): void {
-    const q = this.turnQueues.get(chatId);
-    if (!q?.some((it) => it.nudge)) return;
-    const kept: QueuedTurn[] = [];
-    for (const it of q) {
-      if (it.nudge)
-        this.emit({ type: 'chat.dequeued', chatId, localId: it.localId, reason: 'cancelled' });
-      else kept.push(it);
-    }
-    this.turnQueues.set(chatId, kept);
-    this.persistPendingTurns(chatId);
-  }
-
   /**
    * Drop every queued turn that came from another agent or the harness
    * (`origin: 'machine'`), announcing each as cancelled. A user Stop ends the
@@ -8450,7 +8210,6 @@ export class Daemon {
     hookTrigger: HookTriggerInfo | undefined,
     goalTrigger: GoalTriggerInfo | undefined,
     typed: { text: string; compose?: (text: string) => string },
-    nudge?: boolean,
     afterTurn?: boolean,
   ): void {
     const q = this.turnQueues.get(chatId) ?? [];
@@ -8469,7 +8228,6 @@ export class Daemon {
       ...(jobTrigger ? { jobTrigger } : {}),
       ...(hookTrigger ? { hookTrigger } : {}),
       ...(goalTrigger ? { goalTrigger } : {}),
-      ...(nudge ? { nudge } : {}),
       ...(afterTurn ? { afterTurn } : {}),
     });
     this.turnQueues.set(chatId, q);
@@ -10753,10 +10511,13 @@ export class Daemon {
     // first turn never delays the title landing. Fire-and-forget.
     this.maybeGenerateTitle(chatId, prompt);
 
-    // spec/06 § Manager conversation — the Manager's session carries at most
+    // spec/06 § Bounded context — the Manager's session carries at most
     // its window of messages. Past that it starts a fresh session, and the
     // recent conversation goes in as a visible note on this turn.
     if (chatId === SPECIAL_THREAD_IDS.manager && !fork) {
+      // A folder change waiting for the Manager to be idle lands first, so
+      // this turn starts its fresh session in the new folder.
+      this.applyManagerFolder();
       prompt = this.managerHandover(chatId) + prompt;
     }
 
@@ -11258,7 +11019,7 @@ export class Daemon {
         // spec/04 § Goals — this turn IS a goal's `not_met` resubmit.
         ...(goalTrigger ? { goalTrigger } : {}),
         // spec/09 § Whose turn it was, spec/06 § patch_activity — the host
-        // started this turn itself (self-wake, Manager sweep, a delegate
+        // started this turn itself (self-wake, a finished-chats delivery, a delegate
         // relay, the todo list advancing), not a person. Never 'user', which
         // is the default and so omitted.
         ...(origin === 'machine' ? { origin } : {}),
@@ -11431,8 +11192,9 @@ export class Daemon {
       // Per-host harness config (Task 3): system prompt and skill list overrides.
       ...(this.harnessConfig.systemPrompt ? { systemPrompt: this.harnessConfig.systemPrompt } : {}),
       // The patch-tools guidance rides alongside as an APPEND, so it adds to
-      // whichever prompt is in force rather than replacing it.
-      ...(this.harnessConfig.toolsPrompt ? { toolsPrompt: this.harnessConfig.toolsPrompt } : {}),
+      // whichever prompt is in force rather than replacing it; the Manager's
+      // turns also carry the Manager prompt (spec/06 § Manager prompt and folder).
+      ...this.appendedPromptFor(chatId),
       ...(this.harnessConfig.skills !== undefined ? { skills: this.harnessConfig.skills } : {}),
       // spec/14 § Agent behavior — the Memory toggle, applied by the adapter
       // as a per-turn override rather than a settings-file write.
@@ -13007,7 +12769,6 @@ export class Daemon {
     const upcoming = result.verdict === 'met' ? state.goalQueue : [];
     const unstarted = result.verdict === 'met' ? 0 : state.goalQueue.length;
     const carried = { remindEvery: state.goalReminderEvery, checkInEvery: state.goalCheckInEvery };
-    if (upcoming.length === 0) this.flushQueuedNudges(chatId);
     state.goal = null;
     state.goalQueue = [];
     state.goalReminderEvery = null;
@@ -13456,6 +13217,7 @@ export class Daemon {
           ...m,
           sessionId: env.sessionId,
           sessionFromSeq,
+          sessionStartedAt: this.opts.now(),
           ...(cur.sessionAccountId !== undefined ? { sessionAccountId: cur.sessionAccountId } : {}),
           // spec/04 § Branching — `sessionId` always mirrors the ACTIVE
           // branch's session, so a session id captured here (a first turn, or a
@@ -14151,8 +13913,7 @@ export class Daemon {
     if (
       tool === ASK_USER_QUESTION &&
       (this.turnQueues.get(chatId) ?? []).some(
-        (q) =>
-          q.origin !== 'machine' && !q.jobTrigger && !q.hookTrigger && !q.goalTrigger && !q.nudge,
+        (q) => q.origin !== 'machine' && !q.jobTrigger && !q.hookTrigger && !q.goalTrigger,
       )
     ) {
       this.opts.logger.info(
@@ -16677,6 +16438,66 @@ export class Daemon {
     this.opts.managerContextWindow = window;
   }
 
+  /** The Manager prompt (`managerPrompt`), appended to the Manager's turns from its next one. */
+  setManagerPrompt(prompt: string): void {
+    this.managerPrompt = prompt;
+  }
+
+  /**
+   * Point the Manager at a folder (spec/06 § Manager prompt and folder). Done
+   * now when the Manager is idle, else at the start of its next turn, so a
+   * running turn is never moved under itself.
+   */
+  setManagerFolder(folder: string): void {
+    this.wantedManagerFolder = folder;
+    const state = this.chatState.get(SPECIAL_THREAD_IDS.manager);
+    if (state && state.activity !== 'running' && state.activity !== 'awaiting-permission') {
+      this.applyManagerFolder();
+    }
+  }
+
+  /**
+   * Move the Manager to the wanted folder: its chat folder changes and its
+   * provider session is retired (a session belongs to its folder), with a
+   * divider saying so. A path that is not a folder on this host is refused
+   * in the Manager's record, and the folder stays as it was.
+   */
+  private applyManagerFolder(): void {
+    const chatId = SPECIAL_THREAD_IDS.manager;
+    const wanted = this.wantedManagerFolder;
+    const state = this.chatState.get(chatId);
+    if (wanted === undefined || !state || state.folder === wanted) return;
+    this.wantedManagerFolder = undefined;
+    const say = (content: string): void => {
+      this.emit({
+        type: 'chat.message',
+        chatId,
+        role: 'system',
+        content,
+        seq: this.bumpSeq(chatId),
+        createdAt: this.opts.now(),
+      });
+    };
+    let isFolder = false;
+    try {
+      isFolder = statSync(wanted).isDirectory();
+    } catch {
+      isFolder = false;
+    }
+    if (!isFolder) {
+      this.opts.logger.error({ folder: wanted }, 'manager: folder refused, not a folder here');
+      say(`Folder not changed: ${wanted} is not a folder on ${this.opts.hostId}`);
+      return;
+    }
+    state.folder = wanted;
+    this.opts.metaStore.update(chatId, (m) => ({ ...m, folder: wanted }));
+    const hadSession = state.sessionId !== undefined;
+    this.retireSession(chatId);
+    say(`Folder changed · ${wanted}${hadSession ? ' · new session' : ''}`);
+    this.opts.logger.info({ folder: wanted }, 'manager: folder changed');
+    this.emitState(chatId);
+  }
+
   /**
    * Change this chat's permission mode (spec/02 § Permission mode). There is no
    * clearing it: a chat always has a mode, so the only thing this can do is
@@ -17001,6 +16822,43 @@ export class Daemon {
     return queued + starting;
   }
 
+  /**
+   * What a turn appends to the system prompt: the patch-tools guidance, then
+   * on the Manager's turns only the Manager prompt.
+   */
+  private appendedPromptFor(chatId: string): { toolsPrompt?: string } {
+    const parts = [
+      this.harnessConfig.toolsPrompt,
+      chatId === SPECIAL_THREAD_IDS.manager ? this.managerPrompt : undefined,
+    ].filter((p): p is string => p !== undefined && p.trim() !== '');
+    return parts.length > 0 ? { toolsPrompt: parts.join('\n\n') } : {};
+  }
+
+  /** {@link sessionInfo}'s last answer per chat, recomputed only when the record grows. */
+  private readonly sessionInfoCache = new Map<
+    string,
+    { lastSeq: number; sessionId: string; info: NonNullable<ChatStateEvent['session']> }
+  >();
+
+  /**
+   * A special thread's current provider session: the messages it has carried
+   * since it began and when that was; `null` with no session.
+   */
+  private sessionInfo(chatId: string, lastSeq: number): ChatStateEvent['session'] {
+    const sessionId = this.chatState.get(chatId)?.sessionId;
+    const meta = this.opts.metaStore.read(chatId);
+    if (sessionId === undefined || !meta) return null;
+    const cached = this.sessionInfoCache.get(chatId);
+    if (cached && cached.lastSeq === lastSeq && cached.sessionId === sessionId) return cached.info;
+    const from = meta.sessionFromSeq ?? 0;
+    const info = {
+      messages: this.recordMessages(chatId).filter((m) => m.seq >= from).length,
+      startedAt: meta.sessionStartedAt ?? meta.updatedAt,
+    };
+    this.sessionInfoCache.set(chatId, { lastSeq, sessionId, info });
+    return info;
+  }
+
   /** One-line snippet of the chat's latest user/assistant message, or null. */
   private lastMessagePreview(chatId: string): string | null {
     const head = this.chatLog.lastMessage(chatId);
@@ -17045,6 +16903,8 @@ export class Daemon {
       // A fact the server counts as owed work: turns this host holds queued
       // to run once the current one ends, and one it is already setting up.
       queuedTurns: this.turnsOwed(chatId),
+      // spec/06 § Bounded context — a special thread's current session.
+      ...(isReservedSpecialThread(chatId) ? { session: this.sessionInfo(chatId, lastSeq) } : {}),
       // spec/12 § Continue — a fact for the server: the last turn's process died
       // with the machine and nothing has continued it yet.
       ...(this.interruptedChats.has(chatId) ? { interrupted: true } : {}),

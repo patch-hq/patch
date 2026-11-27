@@ -157,7 +157,7 @@ export class ServerQueue {
    * Runs after the chat registry's gate, so a `chat.state`'s `activity` is the
    * server's own reading of the chat, never a host's. A chat that goes idle
    * while it still has messages waiting is not finished, so the idle report
-   * becomes `running` (the completion push and the sweep read idle as "done"),
+   * becomes `running` (the completion push and finished chats read idle as "done"),
    * and the next message is released. Its status already says running: the
    * registry counts what this queue owes (`owes`).
    */

@@ -73,8 +73,9 @@ describe('the Manager’s bounded context', () => {
     const opts = sdk.lastOptions()!;
     expect(opts.resumeSessionId).toBeUndefined();
     expect(opts.prompt).toMatch(/^\[Note: Handoff\]/);
-    expect(opts.prompt).toContain('User: msg 2');
+    // Half the window is carried: the newest message only.
     expect(opts.prompt).toContain('Manager: reply 2');
+    expect(opts.prompt).not.toContain('User: msg 2');
     expect(opts.prompt).not.toContain('msg 1');
     expect(opts.prompt.endsWith('msg 3')).toBe(true);
     // What the model received is in the record: the note is its own entry.
@@ -85,7 +86,7 @@ describe('the Manager’s bounded context', () => {
         (e) =>
           e.type === 'chat.message' &&
           e.role === 'system' &&
-          e.content === 'New session · the last 2 messages carried over',
+          e.content === 'New session · the last 1 message carried over',
       ),
     ).toBe(true);
     // The user's own message is recorded as they sent it.

@@ -725,30 +725,14 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'chat.archive_request': { type: 'chat.archive_request', chatId: 'c1', archived: true },
   'chat.hide_request': { type: 'chat.hide_request', chatId: 'c1', hidden: true },
   'chat.disable_request': { type: 'chat.disable_request', chatId: 'c1', disabled: true },
-  'chat.rotate_request': { type: 'chat.rotate_request', chatId: 'c1' },
-  'manager.sweep_run': {
-    type: 'manager.sweep_run',
+  'chat.rotate_request': { type: 'chat.rotate_request', chatId: 'c1', carry: false },
+  'manager.finished_run': {
+    type: 'manager.finished_run',
     runId: 'run-1',
-    candidates: [
-      {
-        chatId: 'c1',
-        hostId: 'd1',
-        folder: '/home/tom/project',
-        edge: 'settled',
-        idleMinutes: 120,
-      },
-    ],
-    messagesPerChat: 20,
-    prompt: 'Answer only what the standing instructions cover.',
-    model: 'claude-opus-4',
+    chats: [{ chatId: 'c1', hostId: 'd1', folder: '/home/user/project', name: 'Bus tracker' }],
+    windowMinutes: 30,
   },
-  'manager.sweep_cancel': { type: 'manager.sweep_cancel' },
-  'manager.sweep_result': {
-    type: 'manager.sweep_result',
-    runId: 'run-1',
-    actions: [{ chatId: 'c1', action: 'answer' }],
-    tokensUsed: 1200,
-  },
+  'manager.finished_result': { type: 'manager.finished_result', runId: 'run-1', delivered: 1 },
   'chat.snooze_request': {
     type: 'chat.snooze_request',
     chatId: 'c1',

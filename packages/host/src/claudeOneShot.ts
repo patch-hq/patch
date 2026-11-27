@@ -1,5 +1,5 @@
 // One-shot Claude calls on the host's accounts (spec/10 § Choosing an
-// account): titles, status summaries, labels, the sweep. A one-shot has no
+// account): titles, status summaries, labels. A one-shot has no
 // next turn, so it walks the accounts itself and marks what it learns on the
 // way, so the calls behind it skip a spent account rather than each
 // rediscovering it.

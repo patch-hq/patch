@@ -246,6 +246,8 @@ export interface ChatSummary {
    * cold-start reason as `backgroundTasks`. `null` means nothing measured.
    */
   context: ChatContextUsage | null;
+  /** A special thread's current provider session, as its host last reported (spec/06 § Bounded context). */
+  session?: ChatStateEvent['session'];
   /** Latest host-reported branch graph, retained for server-copy takeover. */
   branches: ChatBranch[];
   activeBranchId: string | null;
@@ -817,6 +819,11 @@ export class ChatRegistry {
             ? event.runningAgents
             : (existing?.runningAgents ?? null),
         context: event.context !== undefined ? event.context : (existing?.context ?? null),
+        ...(event.session !== undefined
+          ? { session: event.session }
+          : existing?.session !== undefined
+            ? { session: existing.session }
+            : {}),
         lastError: existing?.lastError ?? null,
         branches: existing?.branches ?? [],
         activeBranchId: existing?.activeBranchId ?? null,
@@ -1133,6 +1140,7 @@ export class ChatRegistry {
         : {}),
       ...(typeof next.runningAgents === 'number' ? { runningAgents: next.runningAgents } : {}),
       context: next.context,
+      ...(next.session !== undefined ? { session: next.session } : {}),
       disabled: next.disabled,
       lastUserActivity: next.lastUserActivity,
       ...(next.createdAt !== undefined ? { createdAt: next.createdAt } : {}),
