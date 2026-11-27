@@ -63,19 +63,38 @@ const tableScrollContent = { flexGrow: 1 };
 // Narrowest a column may get before the table scrolls instead.
 const TABLE_CELL_MIN_WIDTH = 104;
 
-// A wide table scrolls sideways inside its own horizontal scroller.
-function TableScroll({ children }: { children: React.ReactNode }): React.ReactElement {
+// A table is held to the width of the message so its cells wrap; only one with
+// more columns than fit at TABLE_CELL_MIN_WIDTH each scrolls sideways. A fenced
+// block passes no column count and always scrolls at its natural width.
+function TableScroll({
+  children,
+  columns,
+}: {
+  children: React.ReactNode;
+  columns?: number;
+}): React.ReactElement {
+  const [width, setWidth] = React.useState(0);
+  const fitted = columns !== undefined;
+  const contentStyle = fitted
+    ? { width: Math.max(width, columns * TABLE_CELL_MIN_WIDTH) }
+    : tableScrollContent;
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator
-      nestedScrollEnabled
-      contentContainerStyle={tableScrollContent}
-      style={tableScroll}
-    >
-      {children}
-    </ScrollView>
+    <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator
+        nestedScrollEnabled
+        contentContainerStyle={contentStyle}
+        style={tableScroll}
+      >
+        {children}
+      </ScrollView>
+    </View>
   );
+}
+function tableColumns(node: { children?: any[] }): number {
+  const firstRow = node.children?.[0]?.children?.[0];
+  return Math.max(1, firstRow?.children?.length ?? 1);
 }
 function leafRules(selectable: boolean): RenderRules {
   return {
@@ -83,7 +102,7 @@ function leafRules(selectable: boolean): RenderRules {
     // screen's width (spec/15 § Chat detail — Wide tables). `flexGrow` on both
     // the scroller's content and the table lets a narrow one still fill the row.
     table: (node, children, _parent, styles) => (
-      <TableScroll key={node.key}>
+      <TableScroll key={node.key} columns={tableColumns(node)}>
         <View style={styles._VIEW_SAFE_table}>{children}</View>
       </TableScroll>
     ),
@@ -128,8 +147,20 @@ function leafRules(selectable: boolean): RenderRules {
         </Text>
       );
     },
-    text: (node: ASTNode, _children, _parent, styles, inheritedStyles = {}) => (
-      <Text key={node.key} selectable={selectable} style={[inheritedStyles, styles.text]}>
+    // Plain text inside a table cell lets touches fall through to the cell, so a
+    // sideways drag anywhere on the table reaches the horizontal scroller (a
+    // text leaf took the touch and only the gaps between cells scrolled). Links
+    // are their own Text and stay tappable.
+    text: (node: ASTNode, _children, parent, styles, inheritedStyles = {}) => (
+      <Text
+        key={node.key}
+        selectable={selectable}
+        style={[
+          inheritedStyles,
+          styles.text,
+          parent.some((p) => p.type === 'td' || p.type === 'th') ? { pointerEvents: 'none' } : null,
+        ]}
+      >
         {node.content}
       </Text>
     ),

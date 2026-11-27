@@ -118,6 +118,18 @@ describe('ChatMarkdown tables — wide', () => {
     styles: Record<string, unknown>,
   ) => React.ReactElement<{ horizontal?: boolean; style?: unknown; children?: unknown }>;
 
+  it('holds a table to the message width so cells wrap, widening only past the column minimum', () => {
+    const r = renderIn('light', lightColors);
+    const table = r.rules['table'] as unknown as CellRule;
+    const row = { children: [{}, {}, {}] };
+    const node = { key: 't', index: 0, children: [{ children: [row] }] };
+    const tree = renderRN(table(node, [], [], r.style));
+    const scroller = tree.root.findByProps({ horizontal: true });
+    const flat = scroller.props.contentContainerStyle as { width: number };
+    // 3 columns at the minimum fit a phone, so the content is never wider than that.
+    expect(flat.width).toBe(3 * 104);
+  });
+
   it('scrolls a table sideways instead of squashing its columns into the screen', () => {
     const r = renderIn('light', lightColors);
     const table = r.rules['table'] as unknown as CellRule;
@@ -134,5 +146,41 @@ describe('ChatMarkdown tables — wide', () => {
       expect(typeof min).toBe('number');
       expect(min as number).toBeGreaterThanOrEqual(96);
     }
+  });
+});
+
+describe('ChatMarkdown tables — touch', () => {
+  type TextRule = (
+    node: { key: string; content: string },
+    children: React.ReactNode[],
+    parent: Array<{ type: string }>,
+    styles: Record<string, unknown>,
+  ) => React.ReactElement<{ style: unknown }>;
+
+  function textStyle(parent: Array<{ type: string }>): Record<string, unknown> {
+    const r = renderIn('light', lightColors);
+    const el = (r.rules['text'] as unknown as TextRule)(
+      { key: 'k', content: 'x' },
+      [],
+      parent,
+      r.style,
+    );
+    return ([] as unknown[])
+      .concat(el.props.style)
+      .flat()
+      .reduce<Record<string, unknown>>((acc, s) => ({ ...acc, ...((s as object) ?? {}) }), {});
+  }
+
+  it('text inside a cell lets touches through so a drag on it scrolls the table', () => {
+    expect(textStyle([{ type: 'td' }, { type: 'tr' }, { type: 'table' }])['pointerEvents']).toBe(
+      'none',
+    );
+    expect(textStyle([{ type: 'th' }, { type: 'tr' }, { type: 'table' }])['pointerEvents']).toBe(
+      'none',
+    );
+  });
+
+  it('text outside a table keeps its touches', () => {
+    expect(textStyle([{ type: 'paragraph' }])['pointerEvents']).toBeUndefined();
   });
 });
