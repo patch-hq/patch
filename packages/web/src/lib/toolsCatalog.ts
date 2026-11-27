@@ -229,6 +229,28 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'padId: string',
   },
   {
+    name: patchToolId('patch_view_set'),
+    label: 'patch_view_set',
+    category: 'patch',
+    description:
+      'Creates a View, or replaces one, with a full copy of its data: a lasting screen you mark yes, no or with a note.',
+    params: 'title: string, template: "review-list", data: object, viewId?: string',
+  },
+  {
+    name: patchToolId('patch_view_patch'),
+    label: 'patch_view_patch',
+    category: 'patch',
+    description: 'Changes a View with small edits (JSON Patch); the open View updates in place.',
+    params: 'viewId: string, ops: { op, path, value? }[], baseRev?: number',
+  },
+  {
+    name: patchToolId('patch_view_read'),
+    label: 'patch_view_read',
+    category: 'patch',
+    description: "Reads a View and your marks on it, or lists this chat's Views.",
+    params: 'viewId?: string',
+  },
+  {
     name: patchToolId('view_file'),
     label: 'view_file',
     category: 'patch',

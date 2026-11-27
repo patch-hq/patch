@@ -874,6 +874,9 @@ const SUBAGENT_DISALLOWED_PATCH_TOOLS = [
   'mcp__patch__patch_pad_reply',
   'mcp__patch__patch_pad_list',
   'mcp__patch__patch_pad_collect',
+  'mcp__patch__patch_view_set',
+  'mcp__patch__patch_view_patch',
+  'mcp__patch__patch_view_read',
   // Only a chat the user is in starts agents: nesting is invisible to them.
   'mcp__patch__patch_agent',
   'mcp__patch__patch_spawn',
@@ -1515,7 +1518,11 @@ export function chatInputToSendOptions(event: ChatInputEvent): SendInputOptions 
     // flags the turn itself as transcript furniture rather than a user bubble.
     // A Pad's delivery is system input too (not typed), but the user's own Send
     // started it, so it still counts as the user's activity.
-    ...(event.source?.kind === 'job' || event.source?.kind === 'pad' ? { jobTrigger: true } : {}),
+    ...(event.source?.kind === 'job' ||
+    event.source?.kind === 'pad' ||
+    event.source?.kind === 'view'
+      ? { jobTrigger: true }
+      : {}),
     // A `host` origin is an agent's CLI send-to, not a person: it must not
     // move the chat up the sidebar (spec/14 § Sidebar ordering).
     ...(event.source?.kind === 'job' || event.origin === 'machine' ? {} : { fromUser: true }),

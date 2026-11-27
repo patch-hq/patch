@@ -831,6 +831,18 @@ Sharing. A Pad is private until shared. A Share control in the pane header sets 
 
 Screen capture. The photograph of a screen other than the one on show is taken by loading that route in an off-screen frame of the app with a throwaway layout that persists nothing and marks nothing read, which is why the app may be framed by its own origin.
 
+## Views
+
+A View is a lasting screen an agent keeps current and the user marks up. Where a Pad is a one-off design to react to and an artifact is a page to read, a View is a standing list the agent and the user work through together over days: a shortlist, a review queue, a set of options to decide.
+
+It is two things. A template draws it; a data document holds what it shows. The first template is `review-list`: `{ heading?, items: [{ id, title, detail? }] }`, each item marked Yes, No, or with a note. Item ids belong to the agent and must stay stable, because the user's marks hang off them. A new template is a new screen in the web app plus a rule in the server that checks its data; the document itself stays plain JSON.
+
+The agent changes a View the way AG-UI shared state does: one full copy, then small changes. `patch_view_set` sends the whole document (creating the View, or replacing one this chat made); `patch_view_patch` sends JSON Patch operations (add, replace, remove) against it, optionally with `baseRev` so a change made from a stale copy is refused. Every change bumps `rev`. A change the template cannot draw, a path that does not exist or a duplicate item id is refused and nothing changes. `patch_view_read` returns the document with the user's marks, or lists the chat's Views. Only the owning chat may change a View.
+
+The server owns the View (`<data>/views/<id>.json`, written atomically). Marks are the user's and are kept across the agent's changes; a mark on an item the agent removes goes with it. A mark is saved the moment it is made and shows as waiting. Send (the button in the View) delivers every mark changed since the last send into the owning chat as one `[View]` message, listing each item by id and title with its verdict and note. The message arrives as a system-written turn (`chat.input` source `view`), the same way a Pad's batch does; sent marks stay on the screen. With nothing changed there is nothing to send, and a chat that no longer exists fails the send with the marks left unsent.
+
+It opens as a tab like a Pad: the agent's first `patch_view_set` stamps a card in the chat (`chat.artifact` with id `view-<id>`) and Open puts the View in the pane to the right of the chat, or as its own tab. An open View updates in place: it asks the server for what changed since the `rev` it holds and redraws only on a newer one, keeping any note being typed. The agent's calls travel the host's existing server API relay (`/api/views`), so Views add no host-to-server wire event.
+
 ## Viewing files
 
 `view_file({ file_path })` shows a file to the USER. It is the inverse of

@@ -149,6 +149,7 @@ import {
 import { openDiffForFile } from '../lib/openDiff.js';
 import { openArtifact } from '../lib/openArtifact.js';
 import { PadCard, padIdOfArtifact } from '../components/PadCard.js';
+import { ViewCard, viewIdOfArtifact } from '../components/ViewCard.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { stripControlTokens } from '../lib/controlTokens.js';
@@ -4279,6 +4280,10 @@ function ArtifactCard({ entry, chatId }: { entry: ChatEventEntry; chatId: string
   const padId = padIdOfArtifact(entry.artifactId);
   if (padId !== null) {
     return <PadCard padId={padId} title={entry.artifactTitle ?? padId} chatId={chatId} />;
+  }
+  const viewId = viewIdOfArtifact(entry.artifactId);
+  if (viewId !== null) {
+    return <ViewCard viewId={viewId} title={entry.artifactTitle ?? viewId} chatId={chatId} />;
   }
   const url = entry.artifactUrl ?? '';
   return (

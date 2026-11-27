@@ -1,9 +1,0 @@
-{ "screens": [
-  { "id": "index", "name": "Settings · Usage", "path": "index.html" },
-  { "id": "add-choice", "name": "Add account", "path": "add-choice.html" },
-  { "id": "add", "name": "Add Bedrock account", "path": "add.html" },
-  { "id": "menu", "name": "Account actions", "path": "menu.html" },
-  { "id": "chats", "name": "Settings · Chats", "path": "chats.html" },
-  { "id": "chat", "name": "Chat account picker", "path": "chat.html" },
-  { "id": "new-chat", "name": "New chat", "path": "new-chat.html" }
-] }

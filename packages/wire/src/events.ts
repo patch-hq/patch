@@ -4185,6 +4185,16 @@ export const ChatInputSource = z.discriminatedUnion('kind', [
       padId: z.string().min(1),
     })
     .strict(),
+  /**
+   * A view's Send delivering the user's marks into the view's chat (spec/14 §
+   * Views). Set only by the server's view routes; written by Patch, not typed.
+   */
+  z
+    .object({
+      kind: z.literal('view'),
+      viewId: z.string().min(1),
+    })
+    .strict(),
 ]);
 export type ChatInputSource = z.infer<typeof ChatInputSource>;
 

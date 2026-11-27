@@ -40,6 +40,7 @@ import {
   Settings as SettingsIcon,
   TerminalSquare,
   Layers,
+  ListChecks,
   Plus,
 } from 'lucide-react';
 import {
@@ -86,6 +87,7 @@ import { TriagePage } from './TriagePage.js';
 import { InboxPage } from './InboxPage.js';
 import { PadsPage } from './PadsPage.js';
 import { PadPane } from './PadPane.js';
+import { ViewPane } from './ViewPane.js';
 import { NewPadPage } from './NewPadPage.js';
 import type { PatchWs } from '../api/ws.js';
 import { useContextMenu, ContextMenu, type ContextMenuItem } from './ContextMenu.js';
@@ -147,6 +149,7 @@ function tabTitle(
   jobs: { jobs: { id: string; name: string }[] } | undefined,
   padName?: string,
   artifactTitle?: string,
+  viewName?: string,
 ): string {
   const d = tab.descriptor;
   switch (d.kind) {
@@ -182,6 +185,8 @@ function tabTitle(
           return padName ?? 'Pad';
         case 'new-pad':
           return 'New Pad';
+        case 'view':
+          return viewName ?? 'View';
         case 'artifact':
           return artifactTitle ?? 'Artifact';
       }
@@ -227,6 +232,8 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
         case 'pad':
         case 'new-pad':
           return <Layers size={16} aria-hidden />;
+        case 'view':
+          return <ListChecks size={16} aria-hidden />;
         case 'artifact':
           return <LayoutTemplate size={16} aria-hidden />;
       }
@@ -787,6 +794,8 @@ function TabContent({
           return <InboxPage />;
         case 'pad':
           return <PadPane padId={d.padId} />;
+        case 'view':
+          return <ViewPane viewId={d.viewId} />;
         case 'new-pad':
           return <NewPadPage chatId={d.chatId} />;
         case 'artifact':
@@ -993,6 +1002,13 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
     queryFn: () => api.getPad(padId as string),
     enabled: padId !== null,
   });
+  const viewId =
+    tab.descriptor.kind === 'page' && tab.descriptor.page === 'view' ? tab.descriptor.viewId : null;
+  const { data: view } = useQuery({
+    queryKey: ['view', viewId],
+    queryFn: () => api.getView(viewId as string),
+    enabled: viewId !== null,
+  });
   const artifactTitle = useChatStore((st) => {
     const d = tab.descriptor;
     if (d.kind !== 'page' || d.page !== 'artifact') return undefined;
@@ -1000,7 +1016,7 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
       (e) => e.kind === 'artifact' && e.artifactId === d.artifactId,
     )?.artifactTitle;
   });
-  const title = tabTitle(tab, row?.name, jobs, pad?.name, artifactTitle);
+  const title = tabTitle(tab, row?.name, jobs, pad?.name, artifactTitle, view?.title);
   const dirty = isTabDirty(tab);
   return (
     <div

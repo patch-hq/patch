@@ -1033,6 +1033,29 @@ const PadBody = z
   })
   .strict();
 
+const ViewBody = z
+  .object({
+    op: z.enum(['set', 'patch', 'read', 'list']),
+    callerChatId: z.string().min(1),
+    viewId: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    template: z.string().min(1).optional(),
+    data: z.unknown().optional(),
+    ops: z
+      .array(
+        z
+          .object({
+            op: z.enum(['add', 'replace', 'remove']),
+            path: z.string(),
+            value: z.unknown().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    baseRev: z.number().int().optional(),
+  })
+  .strict();
+
 const ArtifactBody = z
   .object({
     path: z.string().min(1),
@@ -3843,6 +3866,78 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     toolLog({ tool: `patch_pad_${op}`, callerChatId, durationMs: Date.now() - start, ok: true });
     return result;
+  });
+
+  // patch_view_* (spec/14 § Views). The server owns the view; this validates the
+  // call, names the calling chat itself (never the model) and relays it. A set
+  // also stamps a card into the chat (a `chat.artifact` whose id is `view-<id>`).
+  app.post('/internal/view', async (req, reply) => {
+    const start = Date.now();
+    if (require503(reply)) return;
+    const parsed = ViewBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const { callerChatId, ...call } = parsed.data;
+    if (!opts.daemon!.chatState.get(callerChatId)) {
+      return reply.code(404).send({
+        error: 'chat_not_found',
+        message: `chat not found: ${callerChatId}`,
+      } satisfies ErrorEnvelope);
+    }
+    if (!opts.serverApi) {
+      return reply.code(503).send({
+        error: 'views_unavailable',
+        message: 'views are not wired on this host',
+      } satisfies ErrorEnvelope);
+    }
+    let ans;
+    try {
+      ans = await opts.serverApi({
+        method: 'POST',
+        path: '/api/views/agent',
+        body: { ...call, chatId: callerChatId },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toolLog({
+        tool: `patch_view_${call.op}`,
+        callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'view_failed',
+      });
+      return reply.code(502).send({ error: 'view_failed', message } satisfies ErrorEnvelope);
+    }
+    const body = ans.body as { error?: string; id?: string; title?: string } | undefined;
+    if (ans.status >= 400) {
+      toolLog({
+        tool: `patch_view_${call.op}`,
+        callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'view_refused',
+      });
+      return reply.code(ans.status === 409 ? 409 : 400).send({
+        error: 'view_refused',
+        message: body?.error ?? `server answered ${ans.status}`,
+      } satisfies ErrorEnvelope);
+    }
+    if (call.op === 'set' && body?.id) {
+      opts.daemon!.emitArtifact(callerChatId, {
+        artifactId: `view-${body.id}`,
+        title: body.title ?? 'View',
+        url: `/views/${body.id}`,
+        path: `view:${body.id}`,
+      });
+    }
+    toolLog({
+      tool: `patch_view_${call.op}`,
+      callerChatId,
+      durationMs: Date.now() - start,
+      ok: true,
+    });
+    return ans.body;
   });
 
   // patch_meeting_notes — the agent adds to or edits the notes of the meeting

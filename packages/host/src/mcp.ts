@@ -1521,6 +1521,65 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     },
   );
 
+  // ---- patch_view_* --------------------------------------------------------
+  const viewCall = async (body: Record<string, unknown>): Promise<ReturnType<typeof toolResult>> =>
+    toolResult(
+      await uds<unknown>({
+        method: 'POST',
+        path: '/internal/view',
+        body: { ...body, callerChatId },
+      }),
+    );
+
+  server.registerTool(
+    'patch_view_set',
+    {
+      description:
+        'Create a View, or replace one this chat made, with a full copy of its data. A View is a lasting screen the user keeps open beside this chat: a template that draws it plus a data document you change over time. Template "review-list": data is { heading?: string, items: [{ id, title, detail? }] } and the user marks each item yes, no or with a note. Item ids are yours and must stay stable (marks hang off them). Send the whole document here once, then change it with patch_view_patch. Without viewId it creates a View and a card appears in this chat; with viewId it replaces that View. Returns { id, rev, data, marks }.',
+      inputSchema: {
+        title: z.string().min(1).describe("The View's name."),
+        template: z.enum(['review-list']).describe('Which template draws the data.'),
+        data: z.record(z.string(), z.unknown()).describe('The whole data document.'),
+        viewId: z.string().min(1).optional().describe('An existing View of this chat to replace.'),
+      },
+    },
+    async ({ title, template, data, viewId }) =>
+      viewCall({ op: 'set', title, template, data, ...(viewId ? { viewId } : {}) }),
+  );
+
+  server.registerTool(
+    'patch_view_patch',
+    {
+      description:
+        'Change a View with small edits instead of resending it: JSON Patch operations (add, replace, remove) on its data, e.g. [{"op":"replace","path":"/items/2/title","value":"New"},{"op":"add","path":"/items/-","value":{"id":"x","title":"..."}}]. The open View updates in place. Pass baseRev (the rev you last saw) to refuse the edit if the View has moved on. A bad path or data the template cannot draw is refused and nothing changes. Removing an item drops the user\'s mark on it. Returns { id, rev, data, marks }.',
+      inputSchema: {
+        viewId: z.string().min(1),
+        ops: z
+          .array(
+            z.object({
+              op: z.enum(['add', 'replace', 'remove']),
+              path: z.string().describe('JSON Pointer into the data, e.g. /items/0/title.'),
+              value: z.unknown().optional(),
+            }),
+          )
+          .min(1),
+        baseRev: z.number().int().optional(),
+      },
+    },
+    async ({ viewId, ops, baseRev }) =>
+      viewCall({ op: 'patch', viewId, ops, ...(baseRev !== undefined ? { baseRev } : {}) }),
+  );
+
+  server.registerTool(
+    'patch_view_read',
+    {
+      description:
+        "Read a View of this chat — its data and the user's marks on every item (verdict yes/no and note) — or, without viewId, list this chat's Views. Marks the user has not sent yet are counted as unsent; they only reach you as a [View] message when the user presses Send in the View.",
+      inputSchema: { viewId: z.string().min(1).optional() },
+    },
+    async ({ viewId }) => viewCall(viewId ? { op: 'read', viewId } : { op: 'list' }),
+  );
+
   // ---- patch_pad_* ---------------------------------------------------------
   const padCall = async (body: Record<string, unknown>): Promise<ReturnType<typeof toolResult>> =>
     toolResult(

@@ -141,6 +141,7 @@ import { registerVoiceNoteRoute } from './voice/note.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerArtifactRoutes } from './artifacts.js';
 import { registerPadRoutes } from './pads/routes.js';
+import { registerViewRoutes } from './views/routes.js';
 import { CaptureStore, registerCaptureRoutes } from './captures.js';
 import { registerBlobRoutes } from './blob-routes.js';
 import {
@@ -2484,6 +2485,16 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     publicUrl: () => process.env['PATCH_PUBLIC_URL'] ?? process.env['PATCH_SERVER_URL'] ?? '',
     padsDir: process.env['PATCH_PADS_DIR'] ?? join(accountDir, 'pads'),
     secretDir: process.env['PATCH_ARTIFACTS_DIR'] ?? join(accountDir, 'artifacts'),
+  });
+
+  // ---- views (spec/14 § Views) ----
+  registerViewRoutes(app, {
+    logger: log.child({ component: 'views' }),
+    hostLink,
+    registry,
+    chatRegistry,
+    idGenerator,
+    viewsDir: process.env['PATCH_VIEWS_DIR'] ?? join(accountDir, 'views'),
   });
 
   // ---- auth + presence REST routes ----

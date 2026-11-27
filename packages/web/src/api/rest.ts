@@ -177,6 +177,31 @@ const HOOK_CHECK_TIMEOUT_MS = 20_000;
 /** Whole-request ceiling for one attachment upload (body transfer + host store). */
 const ATTACHMENT_UPLOAD_TIMEOUT_MS = 60_000;
 
+/** A lasting view (spec/14 § Views). */
+export interface ViewMark {
+  verdict: 'yes' | 'no' | null;
+  note: string;
+  unsent: boolean;
+  at: number;
+}
+export interface ViewJson {
+  id: string;
+  chatId: string;
+  title: string;
+  template: 'review-list';
+  rev: number;
+  data: { heading?: string; items: { id: string; title: string; detail?: string }[] };
+  marks: Record<string, ViewMark>;
+  unsent: number;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface ViewUnchanged {
+  rev: number;
+  unchanged: true;
+  unsent: number;
+}
+
 async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const cred = loadCredential();
@@ -460,6 +485,17 @@ export const api = {
         updatedAt: number;
       }[];
     }>(`/api/chats/${encodeURIComponent(chatId)}/artifacts`),
+  getView: (id: string) => request<ViewJson>(`/api/views/${encodeURIComponent(id)}`),
+  pollView: (id: string, since: number) =>
+    request<ViewJson | ViewUnchanged>(`/api/views/${encodeURIComponent(id)}?since=${since}`),
+  markView: (id: string, body: { itemId: string; verdict?: 'yes' | 'no' | null; note?: string }) =>
+    request<ViewJson>(`/api/views/${encodeURIComponent(id)}/marks`, { method: 'POST', body }),
+  sendView: (id: string) =>
+    request<{ sent: number; view: ViewJson }>(`/api/views/${encodeURIComponent(id)}/send`, {
+      method: 'POST',
+    }),
+  deleteView: (id: string) =>
+    request<{ ok: true }>(`/api/views/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getPad: (id: string) => request<PadView>(`/api/pads/${encodeURIComponent(id)}`),
   createPad: (body: PadCreateBody) => request<PadView>('/api/pads', { method: 'POST', body }),
   addPadScreens: (id: string, screens: { name: string; html: string; width?: number }[]) =>

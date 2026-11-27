@@ -27,6 +27,7 @@ export type PageKind =
   | 'inbox'
   | 'pad'
   | 'new-pad'
+  | 'view'
   | 'artifact';
 
 export type TabDescriptor =
@@ -46,6 +47,8 @@ export type TabDescriptor =
   | { kind: 'page'; page: 'inbox' }
   | { kind: 'page'; page: 'pad'; padId: string }
   | { kind: 'page'; page: 'new-pad'; chatId?: string }
+  /** A lasting view the agent keeps current (spec/14 § Views). */
+  | { kind: 'page'; page: 'view'; viewId: string }
   /** A page the chat published with `patch_artifact` (spec/14 § Artifacts). `url` is the signed, server-served URL. */
   | { kind: 'page'; page: 'artifact'; chatId: string; artifactId: string; url: string };
 
@@ -175,9 +178,11 @@ export function tabKey(descriptor: TabDescriptor): string {
           ? `page:files:${descriptor.chatId}`
           : descriptor.page === 'pad'
             ? `page:pad:${descriptor.padId}`
-            : descriptor.page === 'artifact'
-              ? `page:artifact:${descriptor.chatId}:${descriptor.artifactId}`
-              : `page:${descriptor.page}`;
+            : descriptor.page === 'view'
+              ? `page:view:${descriptor.viewId}`
+              : descriptor.page === 'artifact'
+                ? `page:artifact:${descriptor.chatId}:${descriptor.artifactId}`
+                : `page:${descriptor.page}`;
   }
 }
 
@@ -456,6 +461,8 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
           return typeof d['jobId'] === 'string';
         case 'pad':
           return typeof d['padId'] === 'string';
+        case 'view':
+          return typeof d['viewId'] === 'string';
         case 'new-pad':
           return d['chatId'] === undefined || typeof d['chatId'] === 'string';
         case 'files':

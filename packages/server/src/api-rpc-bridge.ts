@@ -30,6 +30,8 @@ const ALLOWED_PREFIXES = [
   '/api/usage-report',
   // spec/16 § Who is speaking — `patch voice recent`/`enrol`, so the Manager can enrol someone.
   '/api/voice',
+  // spec/14 § Views — the agent's patch_view_* tools.
+  '/api/views',
 ];
 
 export function isRelayablePath(path: string): boolean {
