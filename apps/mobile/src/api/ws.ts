@@ -6,6 +6,8 @@
 // and the account feed, spec/03); a host is never asked. NO FALLBACK on auth —
 // bad/missing JWT throws at hello-time.
 
+import { createSpeechEngineReporter, type SpeechEngineReporter } from '@patch/wire/direct-call';
+import { currentSpeechEngines } from '../lib/directCall';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useViewPositionStore } from '../stores/viewPositionStore';
 import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
@@ -99,6 +101,7 @@ export const SERVER_LOST_MS = 60_000;
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export class PatchWs {
+  private speechEngines: SpeechEngineReporter | null = null;
   private ws: WebSocket | null = null;
   private backoff = INITIAL_BACKOFF_MS;
   /** Until when redials stay fast after a going-away notice (0 = not restarting). */
@@ -806,6 +809,16 @@ export class PatchWs {
       deliveryTracker.onReconnect();
       permissionDeliveryTracker.onReconnect();
       if (this.currentAppState === 'active') this.startHeartbeat();
+      // spec/05 § Speech engines — what this phone can run for a direct call.
+      (this.speechEngines ??= createSpeechEngineReporter({
+        read: currentSpeechEngines,
+        send: (e) => this.safeSend(e),
+        onHostsChange: (cb) =>
+          usePresenceStore.subscribe((st, prev) => {
+            if (st.hosts !== prev.hosts) cb();
+          }),
+        onError: (err) => console.warn('[patch] could not read this phone’s speech engines', err),
+      })).report();
       return;
     }
     if (event.type === 'auth.revoked') {

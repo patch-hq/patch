@@ -1,53 +1,28 @@
 // Reports this surface's speech engines to the server (spec/05 § Speech
-// engines): on every connect, and whenever they change — a host gains or loses
-// a key, or a model is downloaded on this computer.
+// engines), with the reporter every surface shares.
 
 import type { WireEvent } from '@patch/wire';
-import type { SpeechEngineReport } from '@patch/wire/direct-call';
+import {
+  createSpeechEngineReporter,
+  type SpeechEngineReport,
+  type SpeechEngineReporter,
+} from '@patch/wire/direct-call';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { currentSpeechEngines } from './engines.js';
 
-type Send = (e: Extract<WireEvent, { type: 'surface.speech_engines' }>) => void;
-
-export interface SpeechEngineReporter {
-  /** Send the report now, changed or not (a fresh connection). */
-  report(): void;
-  stop(): void;
-}
+export type { SpeechEngineReporter };
 
 export function startSpeechEngineReports(
-  send: Send,
+  send: (e: Extract<WireEvent, { type: 'surface.speech_engines' }>) => void,
   read: () => Promise<SpeechEngineReport> = currentSpeechEngines,
 ): SpeechEngineReporter {
-  let last: string | null = null;
-  let stopped = false;
-  const run = (force: boolean): void => {
-    read().then(
-      (r) => {
-        const key = JSON.stringify(r);
-        if (stopped || (!force && key === last)) return;
-        last = key;
-        send({ type: 'surface.speech_engines', stt: r.stt, tts: r.tts });
-      },
-      (err: unknown) => console.error('[patch] could not read this device’s speech engines', err),
-    );
-  };
-  const unsub = usePresenceStore.subscribe((s, prev) => {
-    if (s.hosts !== prev.hosts) run(false);
+  return createSpeechEngineReporter({
+    read,
+    send,
+    onHostsChange: (cb) =>
+      usePresenceStore.subscribe((s, prev) => {
+        if (s.hosts !== prev.hosts) cb();
+      }),
+    onError: (err) => console.error('[patch] could not read this device’s speech engines', err),
   });
-  refreshers.add(() => run(false));
-  return {
-    report: () => run(true),
-    stop: () => {
-      stopped = true;
-      unsub();
-    },
-  };
-}
-
-const refreshers = new Set<() => void>();
-
-/** Report again after something on this device changed (a model downloaded). */
-export function refreshSpeechEngines(): void {
-  for (const r of refreshers) r();
 }

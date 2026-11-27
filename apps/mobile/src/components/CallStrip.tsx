@@ -26,6 +26,16 @@ import {
 import { callModeLabel, formatElapsed, handsFreeHint } from '../lib/callStatus';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 import { ConnectingLabel, useNow } from './CallParts';
+import { agentWorkingLabel } from '@patch/wire/direct-call';
+import type { DirectCallStatus } from '@patch/wire/direct-call-runtime';
+
+/** What a direct call's line is doing, when it is not just listening. */
+export function directLine(status: DirectCallStatus, now: number): string {
+  if (status.line === 'speaking') return 'Speaking';
+  if (status.line === 'sending') return 'Thinking';
+  if (status.line === 'working') return agentWorkingLabel(now - (status.workingSince ?? now));
+  return 'Listening';
+}
 
 const BARS = 40;
 const TICK_MS = 80;
@@ -87,6 +97,7 @@ export function CallStrip(): React.ReactElement | null {
   const reconnectingSince = useVoiceStore((s) => s.callReconnectingSince);
   const addressWord = useVoiceStore((s) => s.callAddressWord);
   const paused = useVoiceStore((s) => s.callPaused) !== null;
+  const direct = useVoiceStore((s) => s.callDirect);
   const now = useNow(session !== null && connectedAt !== null);
 
   if (!session) return null;
@@ -96,15 +107,20 @@ export function CallStrip(): React.ReactElement | null {
   const reconnecting = reconnectingSince !== null && !failed;
   const hint = handsFreeHint(mode, addressWord);
   const head = failed ? (connecting ? 'Could not connect' : 'Call problem') : callModeLabel(mode);
-  const headLabel = mode === 'call' && !failed ? 'On call' : head;
+  const headLabel =
+    direct && !failed ? 'On call · direct' : mode === 'call' && !failed ? 'On call' : head;
+  // A direct call's failed engine is named on the strip, and the call stays open.
+  const directFailure = direct?.status.failure ?? null;
   const note =
     failed || connecting || paused
       ? null
-      : partial.length > 0
-        ? `You: ${partial}`
-        : unaddressed !== null
-          ? `Heard “${unaddressed}” — not addressed, so not sent`
-          : hint;
+      : directFailure !== null
+        ? directFailure
+        : partial.length > 0
+          ? `You: ${partial}`
+          : unaddressed !== null
+            ? `Heard “${unaddressed}” — not addressed, so not sent`
+            : hint;
 
   return (
     <View
@@ -139,6 +155,11 @@ export function CallStrip(): React.ReactElement | null {
               {formatElapsed((reconnectingSince ?? now) - connectedAt)}
             </Text>
           ) : null}
+          {direct ? (
+            <Text testID="call-direct-setup" style={{ color: fixed.stripText, fontSize: textMin }}>
+              {direct.setup}
+            </Text>
+          ) : null}
           {paused ? (
             <Text testID="call-paused" style={{ color: fixed.stripText, fontSize: 14 }}>
               Paused
@@ -147,6 +168,10 @@ export function CallStrip(): React.ReactElement | null {
             <ConnectingLabel color={fixed.stripText} word="Reconnecting" />
           ) : connecting && !failed ? (
             <ConnectingLabel color={fixed.stripText} />
+          ) : direct && direct.status.line !== 'listening' && direct.status.line !== 'hearing' ? (
+            <Text testID="call-direct-status" style={{ color: fixed.stripText, fontSize: 14 }}>
+              {directLine(direct.status, now)}
+            </Text>
           ) : phase === 'thinking' && !failed ? (
             <Text testID="call-working" style={{ color: fixed.stripText, fontSize: 14 }}>
               Agent working
@@ -264,13 +289,18 @@ export function CallStrip(): React.ReactElement | null {
       {note !== null ? (
         <Text
           testID={
-            partial.length > 0
-              ? 'call-partial'
-              : unaddressed !== null
-                ? 'call-unaddressed'
-                : 'call-hint'
+            directFailure !== null
+              ? 'call-direct-failure'
+              : partial.length > 0
+                ? 'call-partial'
+                : unaddressed !== null
+                  ? 'call-unaddressed'
+                  : 'call-hint'
           }
-          style={{ color: fixed.stripText, fontSize: textMin }}
+          style={{
+            color: directFailure !== null ? fixed.stripOn : fixed.stripText,
+            fontSize: textMin,
+          }}
         >
           {note}
         </Text>

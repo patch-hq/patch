@@ -74,6 +74,13 @@ import {
   type VoiceServiceState,
 } from './voiceAudioService';
 import { startMicCapture, stopMicCapture } from './voiceMic';
+import {
+  endDirectCall,
+  pauseDirectCall,
+  resumeDirectCall,
+  setDirectCallMuted,
+  startDirectCall,
+} from './directCall';
 import { addressWordOrNull, pauseWhenQuietMinutes, voiceConfigOrNull } from './preferences';
 import {
   callEngineLabel,
@@ -126,6 +133,11 @@ useVoiceStore.subscribe((s) => {
   const reconnecting = placing && s.callReconnectingSince !== null;
   syncCallSoundLoop('connecting', placing && !reconnecting && s.callPhase === 'connecting');
   syncCallSoundLoop('reconnecting', reconnecting);
+  // A direct call's agent at work (spec/07 § Direct calls).
+  syncCallSoundLoop(
+    'agent-working',
+    placing && (s.callDirect?.status.workingSince ?? null) !== null,
+  );
   // An agent's call rings over a paused call (spec/07 § Pause), never over a live one.
   syncCallSoundLoop(
     'agent-calling',
@@ -651,6 +663,7 @@ export function setCallMuted(muted: boolean): void {
   const store = useVoiceStore.getState();
   if (!store.activeSession) return;
   store.setMuted(muted);
+  setDirectCallMuted(muted);
   void updateVoiceAudioService(store.activeSession.chatId, serviceState({ muted })).catch(
     () => undefined,
   );
@@ -711,6 +724,7 @@ export async function endVoiceCall(): Promise<void> {
   _ws = null;
   _serviceActions?.();
   _serviceActions = null;
+  await endDirectCall();
   await stopMicCapture().catch(() => undefined);
   await stopTtsPlayback().catch(() => undefined);
   try {
@@ -814,6 +828,7 @@ export function pauseVoiceCall(reason: PauseReason = 'button'): void {
   }
   _ws?.close();
   _ws = null;
+  void pauseDirectCall();
   void stopMicCapture().catch(() => undefined);
   void stopTtsPlayback().catch(() => undefined);
   store.setCallPaused(reason);
@@ -838,7 +853,32 @@ export function resumeVoiceCall(): void {
   const session = st.activeSession;
   if (session === null || st.callPaused === null) return;
   console.log('[patch-voice] call resuming');
+  if (st.callDirect !== null) {
+    st.setCallPaused(null);
+    st.setCallPhase('connecting');
+    void updateVoiceAudioService(session.chatId, serviceState({ paused: false })).catch(
+      (e: Error) => useUiStore.getState().pushError(`voice call: resume: ${e.message}`),
+    );
+    void resumeDirectCall();
+    return;
+  }
   startVoiceCall(session.chatId, st.callMode, { resume: true });
+}
+
+/**
+ * Start a direct call (spec/07 § Direct calls) with the same foreground service
+ * and notification controls a voice agent call holds, so it keeps listening
+ * with the phone in a pocket and the notification's buttons drive it.
+ */
+export function startDirectVoiceCall(chatId: string): Promise<void> {
+  return startDirectCall(chatId, {
+    holdAudio: async (id) => {
+      await startVoiceAudioService(id, serviceState());
+      _serviceActions?.();
+      _serviceActions = onVoiceServiceAction(onServiceAction);
+    },
+    hangUp: endVoiceCall,
+  });
 }
 
 /**

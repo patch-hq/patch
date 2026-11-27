@@ -806,6 +806,20 @@ export const api = {
    * spec/07 § Dictation mode — ask whether the speaker has finished: the host
    * runs Smart Turn on the clip so far. Any non-2xx throws with its reason.
    */
+  // POST /api/voice/direct/* — a direct call's cloud speech and its turns
+  // (spec/07 § Direct calls). Rejects with the server's own sentence, which
+  // the call strip shows after the engine's name.
+  voiceDirect: async <T>(path: string, body: object): Promise<T> => {
+    try {
+      return await request<T>(path, { method: 'POST', body });
+    } catch (e) {
+      const b = e instanceof ApiError ? e.body : null;
+      if (b && typeof b === 'object' && typeof (b as { message?: unknown }).message === 'string') {
+        throw new Error((b as { message: string }).message);
+      }
+      throw e;
+    }
+  },
   voiceTurnCheck: async (fileUri: string): Promise<{ ok: true; probability: number }> => {
     const cred = loadCredential();
     const headers = new Headers();
