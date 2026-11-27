@@ -90,7 +90,18 @@ export interface VoiceCallState {
    * back): the bar reads `Reconnecting…` and the reconnecting sound plays.
    */
   reconnecting: boolean;
+  /**
+   * Paused (spec/07 § Pause): the voice session is closed — nothing listens and
+   * nothing is billed — but the call stays on the bar to resume on the same chat.
+   * Null while the call is live; otherwise why it paused, since a call paused by
+   * the headphones coming out resumes when they go back in and the others only
+   * from the button.
+   */
+  paused: PauseReason | null;
 }
+
+/** Why a call paused: the button, the headphones coming out, or the silence timeout. */
+export type PauseReason = 'button' | 'headphones' | 'quiet';
 
 /** Mid-voice permission prompt (spec/07 ## Permission prompts during voice). */
 export interface VoicePermission {
@@ -168,6 +179,7 @@ interface VoiceState {
   setCallSpeaking(speaking: boolean): void;
   setCallTranscript(text: string): void;
   setCallLevel(level: number): void;
+  setCallPaused(paused: PauseReason | null): void;
   endCall(): void;
 
   // --- permission-during-voice ---
@@ -245,6 +257,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
         unaddressed: null,
         phase: 'connecting',
         reconnecting: false,
+        paused: null,
       },
     });
   },
@@ -277,6 +290,9 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   },
   setCallLevel(level) {
     set((s) => (s.call ? { call: { ...s.call, level } } : {}));
+  },
+  setCallPaused(paused) {
+    set((s) => (s.call ? { call: { ...s.call, paused } } : {}));
   },
   endCall() {
     set({ call: null });

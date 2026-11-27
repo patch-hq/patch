@@ -2676,6 +2676,17 @@ export function limitBehaviourFromAutoResume(autoResume: boolean): LimitBehaviou
   return autoResume ? 'other_account' : 'switch_provider';
 }
 
+/** The choices Settings offers for Pause when quiet for, in minutes; 0 is off. */
+export const PAUSE_WHEN_QUIET_CHOICES = [0, 2, 5, 10, 30] as const;
+export const PauseWhenQuietMinutes = z.union([
+  z.literal(0),
+  z.literal(2),
+  z.literal(5),
+  z.literal(10),
+  z.literal(30),
+]);
+export type PauseWhenQuietMinutes = z.infer<typeof PauseWhenQuietMinutes>;
+
 /** `SharedSettings.backgroundAccount` when no account is named. */
 export const BACKGROUND_ACCOUNT_AUTO = 'auto';
 
@@ -2926,6 +2937,23 @@ export const SharedSettings = z
      * does. Absent from an older server's settings, so it reads as `auto`.
      */
     backgroundAccount: z.string().min(1).default(BACKGROUND_ACCOUNT_AUTO),
+    /**
+     * Whether an agent's `patch_call` rings (spec/07 § Agent-initiated voice).
+     * Off: the tool answers that the user has turned calls off and nothing
+     * rings. Defaulted so a settings snapshot from an older server still reads.
+     */
+    agentsCanCall: z.boolean().default(true),
+    /**
+     * Answer automatically in hands-free: an agent's call is answered by the
+     * phone on its own instead of ringing — other playback pauses, the call
+     * opens in hands-free, and playback resumes when it ends.
+     */
+    agentCallAutoAnswer: z.boolean().default(false),
+    /**
+     * Pause when quiet for (spec/07 § Pause): minutes with nothing said by
+     * either side after which a call pauses. 0 is off.
+     */
+    pauseWhenQuietMinutes: PauseWhenQuietMinutes.default(0),
   })
   .strict();
 export type SharedSettings = z.infer<typeof SharedSettings>;
@@ -3028,6 +3056,9 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   accountStrategy: { claude: 'priority', codex: 'priority' },
   backgroundAccount: BACKGROUND_ACCOUNT_AUTO,
   jobAutonomyPrompt: DEFAULT_JOB_AUTONOMY_PROMPT,
+  agentsCanCall: true,
+  agentCallAutoAnswer: false,
+  pauseWhenQuietMinutes: 0,
 };
 
 /**
@@ -10295,6 +10326,12 @@ export const NotifyEvent = z
     /** When kind='call', the active callId so surfaces can correlate. */
     callId: z.string().min(1).optional(),
     /**
+     * When kind='call': the phone answers it on its own in hands-free instead
+     * of ringing (Answer automatically in hands-free, spec/07 § Agent-initiated
+     * voice). Carried into the push's data so a phone woken by it answers too.
+     */
+    autoAnswer: z.boolean().optional(),
+    /**
      * External-app URI (custom scheme or https) a `push` tap should open
      * instead of the source chat — only acted on by channel='push' per
      * spec/09 § `### push`. Carried through on every channel so the chat
@@ -10349,6 +10386,12 @@ export const ChatCallRequestEvent = z
     callId: z.string().min(1),
     chatId: z.string().min(1),
     message: z.string().optional(),
+    /**
+     * Answer this on its own in hands-free rather than ringing (spec/07 §
+     * Agent-initiated voice). Only sent to the phone, and only while the user
+     * is away from a computer. Absent: ring.
+     */
+    autoAnswer: z.boolean().optional(),
   })
   .strict();
 export type ChatCallRequestEvent = z.infer<typeof ChatCallRequestEvent>;

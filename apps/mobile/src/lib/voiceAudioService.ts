@@ -13,13 +13,55 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import type { AudioSessionMode } from '@patch/wire/audio';
 
-/** What the notification's buttons ask JS to do. */
-export type VoiceServiceAction = 'mute' | 'mode' | 'stop';
+/**
+ * What the notification's buttons ask JS to do, and the headphones coming and
+ * going (spec/07 § Pause), which JS turns into a pause or a resume.
+ */
+export type VoiceServiceAction =
+  | 'mute'
+  | 'mode'
+  | 'stop'
+  | 'resume'
+  | 'headset_removed'
+  | 'headset_added';
+
+const ACTIONS: ReadonlySet<string> = new Set<VoiceServiceAction>([
+  'mute',
+  'mode',
+  'stop',
+  'resume',
+  'headset_removed',
+  'headset_added',
+]);
 
 interface PatchVoiceAudioServiceModule {
-  start: (chatName: string | null, mode: string, muted: boolean) => Promise<void>;
-  update: (chatName: string | null, mode: string, muted: boolean) => Promise<void>;
+  start: (
+    chatName: string | null,
+    mode: string,
+    muted: boolean,
+    transientFocus: boolean,
+  ) => Promise<void>;
+  update: (
+    chatName: string | null,
+    mode: string,
+    muted: boolean,
+    paused: boolean,
+    transientFocus: boolean,
+  ) => Promise<void>;
   stop: () => Promise<void>;
+}
+
+/** How the session holds audio, as the service is told on every start and update. */
+export interface VoiceServiceState {
+  mode: AudioSessionMode;
+  muted: boolean;
+  /** Paused (spec/07 § Pause): audio focus and the headset route are released. */
+  paused: boolean;
+  /**
+   * AUDIOFOCUS_GAIN_TRANSIENT rather than GAIN: a call answered on its own for
+   * an agent, so other playback pauses and resumes when it ends.
+   */
+  transientFocus: boolean;
 }
 
 function getModule(): PatchVoiceAudioServiceModule | null {
@@ -35,23 +77,21 @@ function getModule(): PatchVoiceAudioServiceModule | null {
 
 export async function startVoiceAudioService(
   chatName: string | null,
-  mode: AudioSessionMode,
-  muted = false,
+  state: Omit<VoiceServiceState, 'paused'>,
 ): Promise<void> {
   const m = getModule();
   if (!m) return;
-  await m.start(chatName, mode, muted);
+  await m.start(chatName, state.mode, state.muted, state.transientFocus);
 }
 
-/** Re-render the notification for a session that is already running. */
+/** Re-render the notification (and pause or retake the audio) for a running service. */
 export async function updateVoiceAudioService(
   chatName: string | null,
-  mode: AudioSessionMode,
-  muted: boolean,
+  state: VoiceServiceState,
 ): Promise<void> {
   const m = getModule();
   if (!m) return;
-  await m.update(chatName, mode, muted);
+  await m.update(chatName, state.mode, state.muted, state.paused, state.transientFocus);
 }
 
 export async function stopVoiceAudioService(): Promise<void> {
@@ -70,7 +110,7 @@ export function onVoiceServiceAction(handler: (action: VoiceServiceAction) => vo
   if (!mod) return () => {};
   const emitter = new NativeEventEmitter(mod as never);
   const sub = emitter.addListener('PatchVoiceAudioAction', (action: string) => {
-    if (action === 'mute' || action === 'mode' || action === 'stop') handler(action);
+    if (ACTIONS.has(action)) handler(action as VoiceServiceAction);
   });
   return () => sub.remove();
 }

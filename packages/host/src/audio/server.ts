@@ -776,6 +776,10 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           ...(start.mode !== undefined ? { mode: start.mode } : {}),
           ...(start.addressWord !== undefined ? { addressWord: start.addressWord } : {}),
           ...(start.resumed === true ? { resumed: true } : {}),
+          // Said once, when the call first connects — never again on a redial.
+          ...(start.callReason !== undefined && start.resumed !== true
+            ? { callReason: start.callReason }
+            : {}),
         };
         // spec/07 § Voice — a config matrix. Which surface this session
         // belongs to, then that surface's own {backend, layer} choice, read
@@ -1122,8 +1126,11 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // spec/07 § Voice call — say something the moment the line is open so
         // the user is not left in silence. Local only: hosted engines have no
         // free fixed-text voice, and a greeting there would be a paid response.
+        // A call that answers an agent's ring opens with the reason it rang
+        // instead (spec/07 § Agent-initiated voice); a hosted voice agent opens
+        // with it itself, from the same session init.
         if (isAppCall && cell.backend === 'local') {
-          void session.speak(CALL_GREETING).catch((err: Error) => {
+          void session.speak(sessionInit.callReason ?? CALL_GREETING).catch((err: Error) => {
             log.warn(
               { err: err.message, sessionId: start.sessionId },
               'audio: call greeting failed',

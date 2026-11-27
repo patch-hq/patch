@@ -18,7 +18,15 @@ export interface IncomingCall {
   chatId: string;
   message: string | undefined;
   receivedAt: number;
+  /**
+   * Answer it on its own in hands-free instead of ringing (Answer automatically
+   * in hands-free, spec/07 § Agent-initiated voice).
+   */
+  autoAnswer?: boolean;
 }
+
+/** Why a call paused: the button, the headphones coming out, or the silence timeout. */
+export type PauseReason = 'button' | 'headphones' | 'quiet';
 
 /** A call live on ANOTHER surface (`voice.call` wire event), keyed by session id. */
 export interface RemoteCall {
@@ -105,6 +113,13 @@ interface VoiceState {
    * (`Gemini Live · heavy`), or null on the local pipeline / config not loaded.
    */
   callEngine: string | null;
+  /**
+   * Paused (spec/07 § Pause): the voice session is closed — nothing listens and
+   * nothing is billed — but the call stays in the chat to resume. Null while
+   * live; otherwise why it paused, since headphones going back in resume only a
+   * call they paused.
+   */
+  callPaused: PauseReason | null;
 
   setIncoming(call: IncomingCall | null): void;
   /** Apply a `voice.call` event: add on active, remove on end. */
@@ -135,6 +150,7 @@ interface VoiceState {
   setCallUnaddressed(t: string | null): void;
   setCallAddressWord(w: string | null): void;
   setCallEngine(e: string | null): void;
+  setCallPaused(p: PauseReason | null): void;
 }
 
 export const useVoiceStore = create<VoiceState>((set) => ({
@@ -157,6 +173,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   callReconnectingSince: null,
   callAddressWord: null,
   callEngine: null,
+  callPaused: null,
   setIncoming(call) {
     set({ incomingCall: call });
   },
@@ -182,6 +199,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
       callUnaddressed: null,
       callConnectedAt: redial ? st.callConnectedAt : null,
       callReconnectingSince: redial ? st.callReconnectingSince : null,
+      callPaused: null,
     }));
   },
   setCallReconnecting(on) {
@@ -247,5 +265,8 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   },
   setCallEngine(e) {
     set({ callEngine: e });
+  },
+  setCallPaused(p) {
+    set({ callPaused: p });
   },
 }));

@@ -8,6 +8,7 @@
 
 import { getActiveWs } from '../api/ws.js';
 import { playCallSound, syncCallSoundLoop } from './callSound.js';
+import { watchCallHeadphones } from './callHeadphones.js';
 import { openAudioSession, type AudioSessionDeps } from './audioSession.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { startDictationPreview, type DictationPreview } from './dictationPreview.js';
@@ -18,7 +19,8 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { voiceCapability } from './voiceCapability.js';
-import { addressWordOrNull } from '../stores/preferencesStore.js';
+import { addressWordOrNull, usePreferencesStore } from '../stores/preferencesStore.js';
+import type { PauseReason } from '../stores/voiceStore.js';
 import { failed } from './errorCopy.js';
 
 // The looping call sounds follow the call's state (spec/07 § Call sounds):
@@ -26,9 +28,12 @@ import { failed } from './errorCopy.js';
 // line redials, and the agent ringing while an incoming call waits.
 useVoiceStore.subscribe((s) => {
   const call = s.call;
-  syncCallSoundLoop('connecting', call !== null && !call.reconnecting && s.session === null);
-  syncCallSoundLoop('reconnecting', call !== null && call.reconnecting);
-  syncCallSoundLoop('agent-calling', s.incomingCall !== null && call === null);
+  // A paused call holds no session and is not being placed: it makes no sound,
+  // and an agent's call rings over it (spec/07 § Pause).
+  const live = call !== null && call.paused === null;
+  syncCallSoundLoop('connecting', live && !call.reconnecting && s.session === null);
+  syncCallSoundLoop('reconnecting', live && call.reconnecting);
+  syncCallSoundLoop('agent-calling', s.incomingCall !== null && !live);
 });
 
 /** Test seam: inject the audio-session opener (defaults to the real one). Used
@@ -324,7 +329,7 @@ export async function startVoiceCall(
   chatId: string,
   mode: AudioSessionMode = 'call',
   deps?: AudioSessionDeps,
-  opts: { takeOver?: boolean } = {},
+  opts: { takeOver?: boolean; callReason?: string } = {},
 ): Promise<void> {
   // Voice happens on a HOST (plan H1): the chat's own. Refuse before opening
   // an audio session that would fail at the moment of speaking, and name both
@@ -343,6 +348,8 @@ export async function startVoiceCall(
       return;
     }
   }
+  // A paused call holds no session (spec/07 § Pause): a new call replaces it.
+  if (useVoiceStore.getState().call?.paused != null) useVoiceStore.getState().endCall();
   const store = useVoiceStore.getState();
   if (store.call) {
     // Already on a call: it stays on the chat it was started on, wherever the user goes.
@@ -394,13 +401,22 @@ function redialOrGiveUp(chatId: string, deps: AudioSessionDeps | undefined, reas
   }, delay);
 }
 
+/**
+ * Bumped by every session this surface opens, and by a pause: a session's
+ * callbacks act only while it is still the current one, so the close of a
+ * session the user paused is not taken for a dropped line and redialled.
+ */
+let sessionGen = 0;
+
 async function openCallSession(
   chatId: string,
   mode: AudioSessionMode,
   deps: AudioSessionDeps | undefined,
-  opts: { takeOver?: boolean; resumed?: boolean },
+  opts: { takeOver?: boolean; resumed?: boolean; callReason?: string },
 ): Promise<void> {
   const addressWord = addressWordOrNull();
+  const gen = ++sessionGen;
+  const current = (): boolean => gen === sessionGen;
   try {
     const session = await openImpl({
       chatId,
@@ -409,14 +425,20 @@ async function openCallSession(
       ...(addressWord !== null ? { addressWord } : {}),
       ...(opts.takeOver === true ? { takeOver: true } : {}),
       ...(opts.resumed === true ? { resumed: true } : {}),
+      ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
       deps: deps ?? {},
       callbacks: {
         onTranscriptPartial: (t) => {
+          if (!current()) return;
+          heardSomething();
           const s = useVoiceStore.getState();
           s.setCallTranscript(t);
           s.setCallLine('YOU', t);
         },
         onTranscriptFinal: (t, addressed) => {
+          // Not gated on the session being current: words the host already
+          // committed land in the chat even if the call was paused or ended.
+          if (current()) heardSomething();
           const s = useVoiceStore.getState();
           s.setCallTranscript('');
           // Heard but not sent (spec/07 § Session modes): show it greyed so the
@@ -447,14 +469,21 @@ async function openCallSession(
             store.clearDelivery(target, localId);
           }
         },
-        onState: (st) => useVoiceStore.getState().setCallPhase(st),
+        onState: (st) => {
+          if (current()) useVoiceStore.getState().setCallPhase(st);
+        },
         onTtsStart: () => {
+          if (current()) heardSomething();
           const s = useVoiceStore.getState();
           const target = s.call?.chatId ?? chatId;
           s.setCallSpeaking(true);
           s.setCallLine(speakerFor(target), '');
         },
-        onTtsEnd: () => useVoiceStore.getState().setCallSpeaking(false),
+        onTtsEnd: () => {
+          if (!current()) return;
+          heardSomething();
+          useVoiceStore.getState().setCallSpeaking(false);
+        },
         onBargeIn: () => {
           // User spoke over the agent — TTS is cut host-side; reflect the
           // 'listening' state so the user never sees a hung audio session.
@@ -464,6 +493,7 @@ async function openCallSession(
         },
         onLevel: (l) => useVoiceStore.getState().setCallLevel(l),
         onError: (m) => {
+          if (!current()) return;
           // The host went away under the call (it restarted, or the server
           // lost it): redial rather than hang up.
           if (m.startsWith('host_unreachable')) {
@@ -489,10 +519,14 @@ async function openCallSession(
           // The host only ends a call itself when it moves to another device
           // ('transferred'); any other close the user did not ask for is a
           // dropped call (a restart, the network), so redial it.
+          // A session this surface already let go of (paused, or replaced by a
+          // newer one) closing is expected, not a drop.
+          if (!current()) return;
           const store = useVoiceStore.getState();
           if (store.call === null) return;
           if (reason === 'transferred' || reason === 'ended_by_agent') {
             clearRedial();
+            clearQuietTimer();
             playCallSound('ended');
             store.endCall();
             store.setSession(null);
@@ -502,7 +536,7 @@ async function openCallSession(
         },
       },
     });
-    if (useVoiceStore.getState().call === null) {
+    if (useVoiceStore.getState().call === null || !current()) {
       session.end('cancelled');
       return;
     }
@@ -511,7 +545,9 @@ async function openCallSession(
     useVoiceStore.getState().setSession(session);
     redialAttempt = 0;
     playCallSound(wasReconnecting ? 'reconnected' : 'connected');
+    heardSomething();
   } catch (err) {
+    if (!current()) return;
     // A redial that cannot connect yet tries again; a first dial fails loudly.
     if (opts.resumed === true) {
       redialOrGiveUp(chatId, deps, (err as Error).message);
@@ -549,6 +585,7 @@ export function setCallMode(next: AudioSessionMode): void {
   store.setCallMode(next);
   store.setCallUnaddressed(null);
   store.session?.setSessionMode(next);
+  heardSomething();
 }
 
 export function toggleCallMute(): void {
@@ -561,6 +598,8 @@ export function toggleCallMute(): void {
 
 export function endVoiceCall(opts: { silent?: boolean } = {}): void {
   clearRedial();
+  clearQuietTimer();
+  sessionGen++;
   const store = useVoiceStore.getState();
   if (store.call !== null && opts.silent !== true) playCallSound('ended');
   // Clear the call first: ending the session can close its socket, and the close
@@ -570,3 +609,98 @@ export function endVoiceCall(opts: { silent?: boolean } = {}): void {
   store.setSession(null);
   session?.end('ended');
 }
+
+// --------------------------------------------------------------------------
+// Pause (spec/07 § Pause)
+// --------------------------------------------------------------------------
+
+/**
+ * Pause the call: a soft hang-up. The voice session closes, so nothing listens
+ * and nothing is billed, but the call stays on the bar to resume on the same
+ * chat. The host announces the session ended, so other devices do not show a
+ * paused call as live, and an agent's call rings rather than speaking into it.
+ */
+export function pauseVoiceCall(reason: PauseReason = 'button'): void {
+  const store = useVoiceStore.getState();
+  if (store.call === null || store.call.paused !== null) return;
+  clearRedial();
+  clearQuietTimer();
+  sessionGen++; // the closing session's callbacks are no longer this call's
+  const session = store.session;
+  store.setSession(null);
+  store.setCallPaused(reason);
+  store.setCallReconnecting(false);
+  store.setCallSpeaking(false);
+  store.setCallTranscript('');
+  store.setCallUnaddressed(null);
+  playCallSound('paused');
+  session?.end('paused');
+}
+
+/**
+ * Resume a paused call: a new session on the same chat with a fresh start
+ * context, so a resume is not a redial (`resumed` stays off — nothing dropped).
+ */
+export async function resumeVoiceCall(deps?: AudioSessionDeps): Promise<void> {
+  const store = useVoiceStore.getState();
+  const call = store.call;
+  if (call === null || call.paused === null) return;
+  store.setCallPaused(null);
+  store.setCallPhase('connecting');
+  await openCallSession(call.chatId, call.mode, deps, {});
+}
+
+/**
+ * Pause when quiet for (Settings → Voice calls; spec/07 § Pause): a live call in
+ * which nothing has been said by either side for that long pauses. Every word
+ * heard or spoken re-arms it. Hands-free is left alone — it is a line left open
+ * on purpose and never ends itself on silence (spec/07 § Session modes).
+ */
+let quietTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearQuietTimer(): void {
+  if (quietTimer !== null) clearTimeout(quietTimer);
+  quietTimer = null;
+}
+
+/** Something was said on the call (or it just went live): start the quiet clock again. */
+function heardSomething(): void {
+  clearQuietTimer();
+  const minutes = usePreferencesStore.getState().preferences.pauseWhenQuietMinutes;
+  const call = useVoiceStore.getState().call;
+  if (minutes === 0 || call === null || call.paused !== null || call.mode !== 'call') return;
+  quietTimer = setTimeout(() => {
+    quietTimer = null;
+    const now = useVoiceStore.getState().call;
+    // A reply still playing is not silence; look again once it has finished.
+    if (now?.agentSpeaking === true) {
+      heardSomething();
+      return;
+    }
+    pauseVoiceCall('quiet');
+  }, minutes * 60_000);
+}
+
+/**
+ * Headphones out pauses the call and back in resumes it (spec/07 § Pause). The
+ * watch lasts as long as the call does — through a pause, since putting the
+ * headphones back is what resumes it.
+ */
+let stopHeadphoneWatch: (() => void) | null = null;
+useVoiceStore.subscribe((s, prev) => {
+  if (s.call !== null && prev.call === null) {
+    const mediaDevices = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices;
+    if (mediaDevices === undefined) return; // no audio devices at all: nothing to come or go
+    stopHeadphoneWatch = watchCallHeadphones({
+      mediaDevices,
+      onGone: () => pauseVoiceCall('headphones'),
+      onBack: () => {
+        if (useVoiceStore.getState().call?.paused === 'headphones') void resumeVoiceCall();
+      },
+    });
+  } else if (s.call === null && prev.call !== null) {
+    stopHeadphoneWatch?.();
+    stopHeadphoneWatch = null;
+    clearQuietTimer();
+  }
+});

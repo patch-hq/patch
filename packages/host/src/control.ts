@@ -407,6 +407,11 @@ export interface BuildOptions {
   interruptOpenCall?: (text: string) => boolean;
   /** Backs `patch_end_call`: hang up the open app call on a chat. Unset in smoke tests. */
   endOpenCall?: (chatId: string, goodbye?: string) => Promise<boolean>;
+  /**
+   * Agents can call you (Settings → Voice calls), from the last settings
+   * snapshot. Off: `patch_call` rings nothing and says so. Unset reads as on.
+   */
+  agentsCanCall?: () => boolean;
 }
 
 const SendToBody = z
@@ -4405,6 +4410,24 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         error: 'chat_not_found',
         message: `chat not found: ${targetChatId}`,
       } satisfies ErrorEnvelope);
+    }
+    // spec/07 § Agent-initiated voice — the user has turned agent calls off:
+    // nothing rings, nothing is spoken, and the agent is told why.
+    if (opts.agentsCanCall?.() === false) {
+      toolLog({
+        tool: 'patch_call',
+        callerChatId,
+        targetChatId,
+        durationMs: Date.now() - start,
+        ok: true,
+        err: 'calls_off',
+      });
+      return {
+        ok: true,
+        rang: false,
+        message:
+          'The user has turned off agent calls (Settings → Voice calls), so nothing rang. Reach them another way if it matters.',
+      };
     }
     // spec/07 § Agent-initiated voice: a session already open takes the message
     // as speech at the next pause — ringing a surface the user is demonstrably

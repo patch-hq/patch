@@ -56,16 +56,18 @@ import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent, type AudioSessionMode } from '@patch/wire/audio';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
-import { useVoiceStore } from '../stores/voiceStore';
+import { useVoiceStore, type PauseReason } from '../stores/voiceStore';
 import { useUiStore } from '../stores/uiStore';
 import {
   startVoiceAudioService,
   stopVoiceAudioService,
   updateVoiceAudioService,
   onVoiceServiceAction,
+  type VoiceServiceAction,
+  type VoiceServiceState,
 } from './voiceAudioService';
 import { startMicCapture, stopMicCapture } from './voiceMic';
-import { addressWordOrNull, voiceConfigOrNull } from './preferences';
+import { addressWordOrNull, pauseWhenQuietMinutes, voiceConfigOrNull } from './preferences';
 import {
   callEngineLabel,
   describeMicSilent,
@@ -85,6 +87,12 @@ export class VoiceAudioConnectError extends Error {
 }
 
 let _ws: WebSocket | null = null;
+/**
+ * The call was answered on its own for an agent (Answer automatically in
+ * hands-free): it holds transient audio focus, so the playback it paused
+ * resumes when it ends. Kept for the call's life, across a pause.
+ */
+let _transientFocus = false;
 /** Unsubscribe for the notification-button listener, while a session is open. */
 let _serviceActions: (() => void) | null = null;
 // Bumped each time a call starts; lets a stale async setup detect that the
@@ -182,11 +190,15 @@ useVoiceStore.subscribe((s) => {
 // redials (from the bundled file, so it plays with no signal), and the agent
 // ringing while an incoming call waits. Each stops the moment its state ends.
 useVoiceStore.subscribe((s) => {
-  const placing = s.activeSession !== null && s.callError === null;
+  const placing = s.activeSession !== null && s.callError === null && s.callPaused === null;
   const reconnecting = placing && s.callReconnectingSince !== null;
   syncCallSoundLoop('connecting', placing && !reconnecting && s.callPhase === 'connecting');
   syncCallSoundLoop('reconnecting', reconnecting);
-  syncCallSoundLoop('agent-calling', s.incomingCall !== null && s.activeSession === null);
+  // An agent's call rings over a paused call (spec/07 § Pause), never over a live one.
+  syncCallSoundLoop(
+    'agent-calling',
+    s.incomingCall !== null && (s.activeSession === null || s.callPaused !== null),
+  );
 });
 
 // A call that has failed for good says so aloud. A redial clears its error
@@ -231,11 +243,27 @@ async function releaseAudio(): Promise<void> {
 export function startVoiceCall(
   chatId: string,
   mode: AudioSessionMode = 'call',
-  opts: { takeOver?: boolean; reconnect?: boolean } = {},
+  opts: {
+    takeOver?: boolean;
+    reconnect?: boolean;
+    /** Why the agent rang, on a call answering its `patch_call`: the voice opens with it. */
+    callReason?: string;
+    /** Answered on its own for an agent: take transient audio focus (see `_transientFocus`). */
+    transientFocus?: boolean;
+    /** Resuming this paused call: same call, so the same timer and the service already up. */
+    resume?: boolean;
+  } = {},
 ): void {
   if (opts.reconnect !== true) clearReconnect();
+  clearQuietTimer();
+  // A new call (not this one coming back) sets how it holds focus.
+  if (opts.reconnect !== true && opts.resume !== true)
+    _transientFocus = opts.transientFocus === true;
+  // A paused call kept its foreground service: resuming updates it, not starts it.
+  const serviceUp = opts.resume === true;
   // 1) Mount the call bar synchronously — CONNECTING state, empty session. A
-  // redial is the same call: it keeps its start, its timer and its mute.
+  // redial is the same call: it keeps its start, its timer and its mute. A
+  // resume keeps its start, and connects afresh (the connected sound plays).
   const gen = ++_callGen;
   useVoiceStore.getState().setActive(
     {
@@ -243,8 +271,9 @@ export function startVoiceCall(
       chatId,
       audioUrl: '',
       startedAt:
-        (opts.reconnect === true ? useVoiceStore.getState().activeSession?.startedAt : undefined) ??
-        Date.now(),
+        (opts.reconnect === true || opts.resume === true
+          ? useVoiceStore.getState().activeSession?.startedAt
+          : undefined) ?? Date.now(),
     },
     { redial: opts.reconnect === true },
   );
@@ -331,30 +360,24 @@ export function startVoiceCall(
       // to keep the mic alive while CallKeep's UI is in foreground.
       // The mode and mute as they stand NOW: the bar is up from the tap, so the
       // user may have changed either while the token minted.
-      await startVoiceAudioService(
-        chatId,
-        useVoiceStore.getState().callMode,
-        useVoiceStore.getState().callMuted,
-      );
+      const serviceState = {
+        mode: useVoiceStore.getState().callMode,
+        muted: useVoiceStore.getState().callMuted,
+        transientFocus: _transientFocus,
+      };
+      await (serviceUp
+        ? updateVoiceAudioService(chatId, { ...serviceState, paused: false })
+        : startVoiceAudioService(chatId, serviceState));
       // The notification's own buttons are the control surface for a phone in a
       // pocket (spec/15 § Voice tab). Route them into the same state the
       // call bar drives, so the two can never disagree about what the session is
       // doing.
       _serviceActions?.();
-      _serviceActions = onVoiceServiceAction((action) => {
-        const store = useVoiceStore.getState();
-        if (!store.activeSession) return;
-        if (action === 'stop') {
-          void endVoiceCall();
-          return;
-        }
-        if (action === 'mute') {
-          setCallMuted(!store.callMuted);
-          return;
-        }
-        setCallMode(store.callMode === 'hands-free' ? 'call' : 'hands-free');
-      });
+      _serviceActions = onVoiceServiceAction(onServiceAction);
       if (gen !== _callGen) {
+        // Paused while the service came up: the call goes on, and its service and
+        // listener are what headphones going back in will resume it through.
+        if (useVoiceStore.getState().callPaused !== null) return;
         // Superseded while the service came up: the listener taken just above
         // is this attempt's own (nothing awaited since), and nobody else will
         // ever release it.
@@ -427,11 +450,14 @@ export function startVoiceCall(
               st.setCallPhase(frame.state);
               if (wasReconnecting) void playCallSound('reconnected');
               else if (!wasLive) void playCallSound('connected');
+              // Live, or the agent started speaking: either way the quiet clock restarts.
+              if (frame.state === 'speaking' || !wasLive || wasReconnecting) heardSomething();
             } else {
               useVoiceStore.getState().setCallPhase(frame.state);
             }
             break;
           case 'audio.transcript_partial':
+            heardSomething();
             // Live interim STT — the call bar shows it as the trailing line of the
             // running transcript until the committed turn lands over the main WS.
             console.log(`[patch-voice] call transcript_partial: "${frame.text}"`);
@@ -451,6 +477,7 @@ export function startVoiceCall(
             useVoiceStore.getState().setCallTranscriptPartial(frame.text);
             break;
           case 'audio.transcript_final':
+            heardSomething();
             // Final for this utterance; the committed user turn arrives as a
             // normal chat.message, so drop the interim line. The host has moved
             // to 'thinking' (it emits audio.state), but set it here too so the UI
@@ -469,6 +496,7 @@ export function startVoiceCall(
             useVoiceStore.getState().setCallPhase('thinking');
             break;
           case 'audio.tts_end':
+            heardSomething();
             // Speaking finished (or barge-in) → back to listening. This is the
             // canonical end-of-turn signal; the host does NOT emit an
             // audio.state after tts_end (see session.ts speak() finally).
@@ -547,6 +575,9 @@ export function startVoiceCall(
           ...(addressWord !== null ? { addressWord } : {}),
           ...(opts.takeOver === true ? { takeOver: true } : {}),
           ...(opts.reconnect === true ? { resumed: true } : {}),
+          ...(opts.callReason !== undefined && opts.reconnect !== true
+            ? { callReason: opts.callReason }
+            : {}),
         };
         try {
           ws.send(JSON.stringify(start));
@@ -674,7 +705,7 @@ export function setCallMuted(muted: boolean): void {
   const store = useVoiceStore.getState();
   if (!store.activeSession) return;
   store.setMuted(muted);
-  void updateVoiceAudioService(store.activeSession.chatId, store.callMode, muted).catch(
+  void updateVoiceAudioService(store.activeSession.chatId, serviceState({ muted })).catch(
     () => undefined,
   );
 }
@@ -698,7 +729,8 @@ export function setCallMode(next: AudioSessionMode): void {
     return;
   }
   store.setCallMode(next);
-  void updateVoiceAudioService(store.activeSession.chatId, next, store.callMuted).catch(
+  heardSomething();
+  void updateVoiceAudioService(store.activeSession.chatId, serviceState({ mode: next })).catch(
     () => undefined,
   );
   const sessionId = store.activeSession.sessionId;
@@ -720,6 +752,8 @@ export async function endVoiceCall(): Promise<void> {
   }
   clearConnectTimer();
   clearReconnect();
+  clearQuietTimer();
+  _transientFocus = false;
   const sessionId = useVoiceStore.getState().activeSession?.sessionId;
   try {
     _ws?.send(JSON.stringify({ type: 'audio.session_end', ...(sessionId ? { sessionId } : {}) }));
@@ -762,4 +796,131 @@ export async function retryVoiceCall(): Promise<void> {
 
 export function audioWs(): WebSocket | null {
   return _ws;
+}
+
+/** The service's view of the call as it stands, with any field about to change. */
+function serviceState(change: Partial<VoiceServiceState> = {}): VoiceServiceState {
+  const st = useVoiceStore.getState();
+  return {
+    mode: st.callMode,
+    muted: st.callMuted,
+    paused: st.callPaused !== null,
+    transientFocus: _transientFocus,
+    ...change,
+  };
+}
+
+/**
+ * The notification's buttons, and the headphones coming and going, routed into
+ * the same state the call bar drives so the two can never disagree.
+ */
+function onServiceAction(action: VoiceServiceAction): void {
+  const store = useVoiceStore.getState();
+  if (!store.activeSession) return;
+  switch (action) {
+    case 'stop':
+      void endVoiceCall();
+      return;
+    case 'mute':
+      setCallMuted(!store.callMuted);
+      return;
+    case 'mode':
+      setCallMode(store.callMode === 'hands-free' ? 'call' : 'hands-free');
+      return;
+    case 'resume':
+      resumeVoiceCall();
+      return;
+    case 'headset_removed':
+      pauseVoiceCall('headphones');
+      return;
+    case 'headset_added':
+      if (store.callPaused === 'headphones') resumeVoiceCall();
+      return;
+  }
+}
+
+/**
+ * Pause the call (spec/07 § Pause): a soft hang-up. The voice session closes,
+ * so nothing listens and nothing is billed, but the call stays in the chat and
+ * the foreground service stays up — it is what lets headphones going back in
+ * resume the call from the background. The service releases audio focus and
+ * the headset route, so whatever else was playing can play again.
+ */
+export function pauseVoiceCall(reason: PauseReason = 'button'): void {
+  const store = useVoiceStore.getState();
+  const session = store.activeSession;
+  if (session === null || store.callPaused !== null) return;
+  // The closing session's socket and any setup still in flight are not this call's any more.
+  _callGen++;
+  clearConnectTimer();
+  clearReconnect();
+  clearQuietTimer();
+  try {
+    _ws?.send(
+      JSON.stringify({
+        type: 'audio.session_end',
+        ...(session.sessionId ? { sessionId: session.sessionId } : {}),
+        reason: 'paused',
+      }),
+    );
+  } catch {
+    // The socket may already be closed; closing below is the source of truth.
+  }
+  _ws?.close();
+  _ws = null;
+  void stopMicCapture().catch(() => undefined);
+  void stopTtsPlayback().catch(() => undefined);
+  store.setCallPaused(reason);
+  store.setCallReconnecting(false);
+  store.setCallTranscriptPartial('');
+  store.setCallUnaddressed(null);
+  store.setError(null);
+  console.log(`[patch-voice] call paused (${reason})`);
+  void playCallSound('paused');
+  void updateVoiceAudioService(session.chatId, serviceState({ paused: true })).catch((e: Error) =>
+    useUiStore.getState().pushError(`voice call: pause: ${e.message}`),
+  );
+}
+
+/**
+ * Resume a paused call: a new session on the same chat with a fresh start
+ * context — not a redial, since nothing dropped. The connected cue plays when
+ * the host answers.
+ */
+export function resumeVoiceCall(): void {
+  const st = useVoiceStore.getState();
+  const session = st.activeSession;
+  if (session === null || st.callPaused === null) return;
+  console.log('[patch-voice] call resuming');
+  startVoiceCall(session.chatId, st.callMode, { resume: true });
+}
+
+/**
+ * Pause when quiet for (Settings → Voice calls; spec/07 § Pause): a live call
+ * in which nothing has been said by either side for that long pauses. Every
+ * word heard or spoken restarts the clock. Hands-free is left alone: it is a
+ * line left open on purpose and never ends itself on silence.
+ */
+let _quietTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearQuietTimer(): void {
+  if (_quietTimer !== null) clearTimeout(_quietTimer);
+  _quietTimer = null;
+}
+
+function heardSomething(): void {
+  clearQuietTimer();
+  const minutes = pauseWhenQuietMinutes();
+  const st = useVoiceStore.getState();
+  if (minutes === 0 || st.activeSession === null || st.callPaused !== null) return;
+  if (st.callMode !== 'call') return;
+  _quietTimer = setTimeout(() => {
+    _quietTimer = null;
+    // A reply still playing is not silence; look again once it has finished.
+    if (useVoiceStore.getState().callPhase === 'speaking') {
+      heardSomething();
+      return;
+    }
+    pauseVoiceCall('quiet');
+  }, minutes * 60_000);
 }

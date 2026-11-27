@@ -18,16 +18,23 @@
 //   heard        what it heard, greyed — dropped, because it wasn't addressed
 //   thinking     Thinking…
 //   speaking     Speaking — the reply streams into the chat
+//   paused       Paused — the line is closed, Resume opens it again on the same chat
 //
 // Same bar, same controls, one mode switch between them.
 
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { Ear, MicOff, MessageSquare, PhoneOff } from 'lucide-react';
+import { Ear, MicOff, MessageSquare, Pause, PhoneOff, Play } from 'lucide-react';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
-import { toggleCallMute, endVoiceCall, setCallMode } from '../lib/voiceController.js';
+import {
+  toggleCallMute,
+  endVoiceCall,
+  setCallMode,
+  pauseVoiceCall,
+  resumeVoiceCall,
+} from '../lib/voiceController.js';
 
 /** How long a dropped utterance stays on the bar before it returns to waiting. */
 export const HEARD_LINGER_MS = 8_000;
@@ -94,7 +101,9 @@ export function VoiceBar(): JSX.Element | null {
           {formatElapsed(Math.max(0, now - call.startedAt))}
         </span>
         <span className="vb-line" data-testid="voice-bar-line">
-          {state === 'connecting' || state === 'reconnecting' ? (
+          {state === 'paused' ? (
+            <span className="vb-text">Paused</span>
+          ) : state === 'connecting' || state === 'reconnecting' ? (
             <ConnectingLabel word={state === 'reconnecting' ? 'Reconnecting' : 'Connecting'} />
           ) : state === 'thinking' ? (
             <span className="vb-text">Agent working</span>
@@ -102,34 +111,59 @@ export function VoiceBar(): JSX.Element | null {
             <Waveform level={call.muted ? 0 : call.level} />
           )}
         </span>
-        <button
-          type="button"
-          className={`vb-action ${call.muted ? 'muted' : ''}`}
-          data-testid="voice-bar-mute"
-          aria-label={call.muted ? 'unmute' : 'mute'}
-          onClick={toggleCallMute}
-        >
-          <MicOff size={16} aria-hidden />
-        </button>
-        {/* One control switches the two modes without tearing the session down. */}
-        <button
-          type="button"
-          className="vb-action"
-          data-testid="voice-bar-mode"
-          aria-label={`switch to ${MODE_HEAD[next].toLowerCase()}`}
-          title={
-            next === 'hands-free'
-              ? `Switch to hands-free — it then only answers when you say “${word}”`
-              : 'Switch to a call — it answers everything you say'
-          }
-          onClick={() => setCallMode(next)}
-        >
-          {next === 'hands-free' ? (
-            <Ear size={16} aria-hidden />
-          ) : (
-            <MessageSquare size={16} aria-hidden />
-          )}
-        </button>
+        {state === 'paused' ? (
+          <button
+            type="button"
+            className="vb-action"
+            data-testid="voice-bar-resume"
+            aria-label="resume call"
+            title="Resume"
+            onClick={() => void resumeVoiceCall()}
+          >
+            <Play size={16} aria-hidden />
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className={`vb-action ${call.muted ? 'muted' : ''}`}
+              data-testid="voice-bar-mute"
+              aria-label={call.muted ? 'unmute' : 'mute'}
+              onClick={toggleCallMute}
+            >
+              <MicOff size={16} aria-hidden />
+            </button>
+            {/* One control switches the two modes without tearing the session down. */}
+            <button
+              type="button"
+              className="vb-action"
+              data-testid="voice-bar-mode"
+              aria-label={`switch to ${MODE_HEAD[next].toLowerCase()}`}
+              title={
+                next === 'hands-free'
+                  ? `Switch to hands-free — it then only answers when you say “${word}”`
+                  : 'Switch to a call — it answers everything you say'
+              }
+              onClick={() => setCallMode(next)}
+            >
+              {next === 'hands-free' ? (
+                <Ear size={16} aria-hidden />
+              ) : (
+                <MessageSquare size={16} aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
+              className="vb-action"
+              data-testid="voice-bar-pause"
+              aria-label="pause call"
+              title="Pause"
+              onClick={() => pauseVoiceCall()}
+            >
+              <Pause size={16} aria-hidden />
+            </button>
+          </>
+        )}
         <button
           type="button"
           className="vb-action end"
@@ -170,7 +204,7 @@ function callNote(
   state: Line['state'],
   word: string,
 ): string | null {
-  if (state === 'connecting' || state === 'reconnecting') return null;
+  if (state === 'connecting' || state === 'reconnecting' || state === 'paused') return null;
   if (call.transcript !== '') return `You: ${call.transcript}`;
   if (call.unaddressed !== null) {
     return `Heard “${call.unaddressed}” — not addressed, so not sent`;
@@ -222,7 +256,8 @@ interface Line {
     | 'hearing'
     | 'heard'
     | 'thinking'
-    | 'speaking';
+    | 'speaking'
+    | 'paused';
 }
 
 interface LineInput {
@@ -233,6 +268,8 @@ interface LineInput {
   unaddressed: string | null;
   lastLine: string;
   reconnecting: boolean;
+  /** Set while the call is paused (spec/07 § Pause). */
+  paused?: string | null;
 }
 
 /**
@@ -242,6 +279,7 @@ interface LineInput {
  * because in hands-free it has to name the word that wakes it.
  */
 export function describeLine(call: LineInput, _chatName: string, addressWord: string): Line {
+  if (call.paused != null) return { tag: null, text: 'Paused', state: 'paused' };
   // A dropped line says so above anything it was doing when it dropped.
   if (call.reconnecting) return { tag: null, text: 'Reconnecting…', state: 'reconnecting' };
   if (call.agentSpeaking || call.phase === 'speaking') {

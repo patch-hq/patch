@@ -578,6 +578,61 @@ describe('audio WSS server', () => {
     }
   });
 
+  test("a local call answering an agent's ring opens with its reason; a redial does not repeat it", async () => {
+    const spoken: string[] = [];
+    const kokoro: KokoroBackend = {
+      isReady: () => true,
+      async close() {},
+      async synthesize(text: string): Promise<KokoroSynthesis> {
+        spoken.push(text);
+        async function* gen() {
+          yield { pcm: new Int16Array(240), first: true };
+        }
+        return { iterator: gen(), async cancel() {} };
+      },
+    };
+    const handle = await startAudioServer({
+      host: '127.0.0.1',
+      port: 0,
+      logger,
+      internalToken: SECRET,
+      whisper: createWhisper({ backend: 'mock', logger }),
+      kokoro,
+      makeVad: () => new MockVad(),
+      submitUserTurn: async () => 'ok',
+      chatExists: (): boolean => true,
+    });
+    try {
+      for (const [sid, resumed] of [
+        ['sess-reason', false],
+        ['sess-reason-redial', true],
+      ] as const) {
+        const ws = await openSocket(handle.address().port, sid);
+        ws.send(
+          encodeAudio({
+            type: 'audio.session_start',
+            sessionId: sid,
+            accountId: 'a',
+            surfaceId: `s-${sid}`,
+            surfaceKind: 'mobile',
+            chatId: 'c',
+            role: 'voice-call',
+            mode: 'hands-free',
+            token: mintToken({ accountId: 'a', surfaceId: `s-${sid}`, sessionId: sid }),
+            surfaceHasAec: true,
+            callReason: 'The deploy failed; shall I roll back?',
+            ...(resumed ? { resumed: true } : {}),
+          }),
+        );
+        await new Promise((r) => setTimeout(r, 100));
+        ws.close();
+      }
+      expect(spoken).toEqual(['The deploy failed; shall I roll back?', 'Connected.']);
+    } finally {
+      await handle.close();
+    }
+  });
+
   test('fires onSessionClosed({wasPhoneCall}) correctly for a phone voice-call vs a device session', async () => {
     const closedEvents: { wasPhoneCall: boolean }[] = [];
     // `startServer()` doesn't thread `onSessionClosed` through — build a

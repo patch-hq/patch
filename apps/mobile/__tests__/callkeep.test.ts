@@ -10,7 +10,7 @@ import RNCallKeep, { __emitCallKeepEvent } from './stubs/callkeep';
 import { initCallKeep, showIncomingCall, endActiveCall } from '../src/lib/callkeep';
 import { getWs } from '../src/api/ws';
 import { useUiStore } from '../src/stores/uiStore';
-import { useVoiceStore } from '../src/stores/voiceStore';
+import { useVoiceStore, type IncomingCall } from '../src/stores/voiceStore';
 import { startVoiceCall } from '../src/lib/voiceCall';
 
 vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
@@ -25,7 +25,19 @@ beforeEach(async () => {
   send = vi.fn();
   vi.mocked(getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
   await initCallKeep();
+  endActiveCall(); // every test rings afresh
 });
+
+/** Ring as the WS and push paths do. */
+function ring(over: Partial<IncomingCall> = {}): void {
+  showIncomingCall({
+    callId: 'call1',
+    chatId: 'chat1',
+    message: undefined,
+    receivedAt: Date.now(),
+    ...over,
+  });
+}
 
 describe('initCallKeep', () => {
   it('is idempotent — a second call does not re-run setup()', async () => {
@@ -42,26 +54,33 @@ describe('showIncomingCall — not yet initialised', () => {
     // import has already been initialised by every other test's beforeEach.
     vi.resetModules();
     const fresh = await import('../src/lib/callkeep');
-    expect(() => fresh.showIncomingCall('call1', 'chat1', 'Manager')).toThrow(/not initialised/);
+    expect(() =>
+      fresh.showIncomingCall({
+        callId: 'call1',
+        chatId: 'chat1',
+        message: undefined,
+        receivedAt: 0,
+      }),
+    ).toThrow(/not initialised/);
   });
 });
 
 describe('showIncomingCall / endActiveCall', () => {
   it('displays the incoming call and generates a fresh v4-ish uuid each time', () => {
     const display = vi.spyOn(RNCallKeep, 'displayIncomingCall');
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     expect(display).toHaveBeenCalledTimes(1);
     const [uuid, chatId, label, kind, hasVideo] = display.mock.calls[0]!;
     expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(chatId).toBe('chat1');
-    expect(label).toBe('Manager');
+    expect(label).toBe('Patch');
     expect(kind).toBe('generic');
     expect(hasVideo).toBe(false);
   });
 
   it('endActiveCall ends the active call and is idempotent after', () => {
     const endCall = vi.spyOn(RNCallKeep, 'endCall');
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     endActiveCall();
     expect(endCall).toHaveBeenCalledWith(uuid);
@@ -79,7 +98,7 @@ describe('answerCall event', () => {
       message: undefined,
       receivedAt: Date.now(),
     });
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
     __emitCallKeepEvent('answerCall', { callUUID: uuid });
     expect(send).toHaveBeenCalledWith({
@@ -87,7 +106,7 @@ describe('answerCall event', () => {
       callId: 'call1',
       response: 'accept',
     });
-    expect(startVoiceCall).toHaveBeenCalledWith('chat1');
+    expect(startVoiceCall).toHaveBeenCalledWith('chat1', 'call', {});
     expect(useVoiceStore.getState().incomingCall).toBeNull();
   });
 
@@ -101,13 +120,54 @@ describe('answerCall event', () => {
     send.mockImplementation(() => {
       throw new Error('ws down');
     });
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
     __emitCallKeepEvent('answerCall', { callUUID: uuid });
     expect(
       useUiStore.getState().errors.some((e) => e.message.includes('failed to send call response')),
     ).toBe(true);
-    expect(startVoiceCall).toHaveBeenCalledWith('chat1');
+    expect(startVoiceCall).toHaveBeenCalledWith('chat1', 'call', {});
+  });
+});
+
+describe('agent calls', () => {
+  it('answering opens the call with the reason the agent rang', () => {
+    ring({ message: 'The build is red; roll back?' });
+    const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
+    __emitCallKeepEvent('answerCall', { callUUID: uuid });
+    expect(startVoiceCall).toHaveBeenCalledWith('chat1', 'call', {
+      callReason: 'The build is red; roll back?',
+    });
+  });
+
+  it('answer automatically: answered at once, in hands-free, holding transient focus', () => {
+    const display = vi.spyOn(RNCallKeep, 'displayIncomingCall');
+    const answer = vi.spyOn(RNCallKeep, 'answerIncomingCall').mockImplementation((uuid) => {
+      __emitCallKeepEvent('answerCall', { callUUID: uuid });
+    });
+    ring({ message: 'Quick question', autoAnswer: true });
+    const uuid = display.mock.calls.at(-1)![0];
+    expect(answer).toHaveBeenCalledWith(uuid);
+    expect(send).toHaveBeenCalledWith({
+      type: 'chat.call_response',
+      callId: 'call1',
+      response: 'accept',
+    });
+    expect(startVoiceCall).toHaveBeenCalledWith('chat1', 'hands-free', {
+      callReason: 'Quick question',
+      transientFocus: true,
+    });
+    answer.mockRestore();
+  });
+
+  it('the same ring over the live connection and as a push is shown and answered once', () => {
+    const display = vi.spyOn(RNCallKeep, 'displayIncomingCall');
+    const answer = vi.spyOn(RNCallKeep, 'answerIncomingCall');
+    ring({ autoAnswer: true });
+    ring({ autoAnswer: true });
+    expect(display).toHaveBeenCalledTimes(1);
+    expect(answer).toHaveBeenCalledTimes(1);
+    answer.mockRestore();
   });
 });
 
@@ -119,7 +179,7 @@ describe('endCall event', () => {
       message: undefined,
       receivedAt: Date.now(),
     });
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
     __emitCallKeepEvent('endCall', { callUUID: uuid });
     expect(send).toHaveBeenCalledWith({
@@ -136,7 +196,7 @@ describe('endCall event', () => {
   });
 
   it('endCall with no active callId does not send, just clears incoming', () => {
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
     endActiveCall(); // clears _activeCallId without touching listeners
     __emitCallKeepEvent('endCall', { callUUID: uuid });
@@ -147,7 +207,7 @@ describe('endCall event', () => {
     send.mockImplementation(() => {
       throw new Error('ws down');
     });
-    showIncomingCall('call1', 'chat1', 'Manager');
+    ring();
     const uuid = (RNCallKeep.displayIncomingCall as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
     __emitCallKeepEvent('endCall', { callUUID: uuid });
     expect(

@@ -34,6 +34,14 @@ export function addressWordOrNull(): string | null {
   return useSettingsStore.getState().data?.preferences.addressWord ?? addressWord;
 }
 
+/**
+ * Pause when quiet for, in minutes (spec/07 § Pause): 0 (off) until the
+ * preferences have loaded, so a call never pauses on a guess.
+ */
+export function pauseWhenQuietMinutes(): number {
+  return useSettingsStore.getState().data?.preferences.pauseWhenQuietMinutes ?? 0;
+}
+
 /** The account's voice config, or null until the preferences have loaded. Same precedence. */
 export function voiceConfigOrNull(): VoiceConfig | null {
   return useSettingsStore.getState().data?.preferences.voiceConfig ?? voiceConfig;

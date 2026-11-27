@@ -964,6 +964,8 @@ async function startHost(
   /** Does the server have this host running the Manager (`host.set_manager`)? */
   let runsManager = persistedHostState.runsManager ?? false;
   /** Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`). */
+  /** Agents can call you, from the last shared-settings snapshot (spec/07 § Agent-initiated voice). */
+  let agentsCanCall = true;
   let kokoroVoice: string | undefined = persistedHostState.kokoroVoice;
   /** Which engine speaks (`host.settings` → `ttsBackend`); absent is Kokoro. */
   let ttsBackend: 'kokoro' | 'elevenlabs' = persistedHostState.ttsBackend ?? 'kokoro';
@@ -2402,6 +2404,7 @@ async function startHost(
       specialThreadModel = shared.specialThreadModel;
       applySpecialThreadModel();
     }
+    agentsCanCall = shared.agentsCanCall;
     if (JSON.stringify(shared.voiceConfig) !== JSON.stringify(voiceConfig)) {
       voiceConfig = shared.voiceConfig;
       hostStateStore.update({ voiceConfig });
@@ -6591,6 +6594,7 @@ async function startHost(
     interruptOpenCall: (text: string) => audioServer?.interruptOpenCall(text) ?? false,
     endOpenCall: async (chatId: string, goodbye?: string) =>
       (await audioServer?.endOpenCall(chatId, goodbye)) ?? false,
+    agentsCanCall: () => agentsCanCall,
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,

@@ -138,7 +138,7 @@ export async function bootstrap(): Promise<void> {
   stopCallBridge = useVoiceStore.subscribe((state, prev) => {
     if (state.incomingCall && state.incomingCall !== prev.incomingCall) {
       try {
-        showIncomingCall(state.incomingCall.callId, state.incomingCall.chatId, 'Manager');
+        showIncomingCall(state.incomingCall);
       } catch (e) {
         useUiStore.getState().pushError(`incoming call: ${(e as Error).message}`);
       }

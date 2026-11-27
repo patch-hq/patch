@@ -2,7 +2,12 @@
 // - chat.call_request arrives via FCM data message OR live WS.
 // - We trigger the native ConnectionService UI (full-screen incoming call).
 // - On accept → emit chat.call_response { decision: 'accept' } and open the
-//   voice-call overlay.
+//   voice-call overlay, opening with the reason the agent rang.
+// - Answer automatically in hands-free (spec/07 § Agent-initiated voice): the
+//   same call is answered on its own the moment it arrives — through
+//   ConnectionService like a tapped answer, so the call runs as a phone call
+//   in the background — in hands-free, holding transient audio focus so the
+//   playback it pauses resumes when it ends.
 // - On decline / 30s timeout → fall through to the in-app inbox (push).
 //
 // NO FALLBACK: setup() throws if the native module is missing — that means
@@ -12,13 +17,13 @@
 import RNCallKeep from 'react-native-callkeep';
 import { getWs } from '../api/ws';
 import { useUiStore } from '../stores/uiStore';
-import { useVoiceStore } from '../stores/voiceStore';
+import { useVoiceStore, type IncomingCall } from '../stores/voiceStore';
 import { startVoiceCall } from './voiceCall';
 
 let _initialised = false;
 let _activeCallUuid: string | null = null;
-let _activeChatId: string | null = null;
-let _activeCallId: string | null = null;
+/** The ring being shown (or answered on its own), until it is answered or ends. */
+let _activeCall: IncomingCall | null = null;
 
 export async function initCallKeep(): Promise<void> {
   if (_initialised) return;
@@ -52,11 +57,12 @@ export async function initCallKeep(): Promise<void> {
   RNCallKeep.setAvailable(true);
 
   RNCallKeep.addEventListener('answerCall', ({ callUUID }) => {
-    if (callUUID !== _activeCallUuid || !_activeChatId || !_activeCallId) return;
+    const call = _activeCall;
+    if (callUUID !== _activeCallUuid || call === null) return;
     try {
       getWs().send({
         type: 'chat.call_response',
-        callId: _activeCallId,
+        callId: call.callId,
         response: 'accept',
       });
     } catch (e) {
@@ -67,17 +73,21 @@ export async function initCallKeep(): Promise<void> {
         .getState()
         .pushError(`failed to send call response — retry: ${(e as Error).message}`);
     }
-    startVoiceCall(_activeChatId);
+    const auto = call.autoAnswer === true;
+    startVoiceCall(call.chatId, auto ? 'hands-free' : 'call', {
+      ...(call.message !== undefined ? { callReason: call.message } : {}),
+      ...(auto ? { transientFocus: true } : {}),
+    });
     useVoiceStore.getState().setIncoming(null);
   });
 
   RNCallKeep.addEventListener('endCall', ({ callUUID }) => {
     if (callUUID !== _activeCallUuid) return;
     try {
-      if (_activeCallId) {
+      if (_activeCall) {
         getWs().send({
           type: 'chat.call_response',
-          callId: _activeCallId,
+          callId: _activeCall.callId,
           response: 'decline',
         });
       }
@@ -87,31 +97,34 @@ export async function initCallKeep(): Promise<void> {
         .pushError(`failed to send call response — retry: ${(e as Error).message}`);
     }
     _activeCallUuid = null;
-    _activeChatId = null;
-    _activeCallId = null;
+    _activeCall = null;
     useVoiceStore.getState().setIncoming(null);
   });
 
   _initialised = true;
 }
 
-/** Display the incoming-call UI for a chat.call_request. */
-export function showIncomingCall(callId: string, chatId: string, callerLabel: string): void {
+/**
+ * Display the incoming-call UI for a chat.call_request, or answer it on its own
+ * when it says to. The same ring can arrive twice — over the live connection
+ * and as a push — and is shown (and answered) once.
+ */
+export function showIncomingCall(call: IncomingCall): void {
   if (!_initialised) {
     throw new Error('callkeep: not initialised — call initCallKeep() at app start');
   }
+  if (_activeCall?.callId === call.callId) return;
   const uuid = makeUuid();
   _activeCallUuid = uuid;
-  _activeChatId = chatId;
-  _activeCallId = callId;
-  RNCallKeep.displayIncomingCall(uuid, chatId, callerLabel, 'generic', false);
+  _activeCall = call;
+  RNCallKeep.displayIncomingCall(uuid, call.chatId, 'Patch', 'generic', false);
+  if (call.autoAnswer === true) RNCallKeep.answerIncomingCall(uuid);
 }
 
 export function endActiveCall(): void {
   if (_activeCallUuid) RNCallKeep.endCall(_activeCallUuid);
   _activeCallUuid = null;
-  _activeChatId = null;
-  _activeCallId = null;
+  _activeCall = null;
 }
 
 function makeUuid(): string {

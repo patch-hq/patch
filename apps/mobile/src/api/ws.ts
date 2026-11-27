@@ -1033,6 +1033,7 @@ export class PatchWs {
         chatId: event.chatId,
         message: event.message,
         receivedAt: Date.now(),
+        ...(event.autoAnswer === true ? { autoAnswer: true } : {}),
       });
       return;
     }

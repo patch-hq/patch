@@ -61,6 +61,7 @@ import type { VoiceSessionLike, VoiceReplyWriter, VoiceTimeline } from './voice-
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { addTokens, ZERO_TOKENS, type EngineCosting, type EngineTokens } from './voiceCost.js';
 import {
+  callOpening,
   chatBriefing,
   liveNote,
   withBriefing,
@@ -882,7 +883,17 @@ export class GeminiLiveSession implements VoiceSessionLike {
     for (const b64 of queued) this.sendAudioChunk(b64);
     const gated = this.gateQueue;
     this.gateQueue = [];
-    for (const f of gated) this.sendRawFrame(f);
+    for (const f of gated) this.sendRawFrame(f); // spec/07 § Agent-initiated voice — a call answering an agent's ring opens with its reason.
+    if (this.init.callReason !== undefined) {
+      this.ws?.send(
+        JSON.stringify({
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text: callOpening(this.init.callReason) }] }],
+            turnComplete: true,
+          },
+        }),
+      );
+    }
   }
 
   private sendAudioChunk(b64: string): void {

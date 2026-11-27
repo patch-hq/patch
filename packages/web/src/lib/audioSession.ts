@@ -71,6 +71,8 @@ export interface OpenAudioSessionOpts {
   takeOver?: boolean;
   /** Redialling a call that dropped (spec/07 § A dropped call comes back). */
   resumed?: boolean;
+  /** Why the agent rang, on a call answering its `patch_call`: the voice opens with it. */
+  callReason?: string;
   /**
    * Whether to capture the microphone. False opens a session that only plays —
    * the `auto-notify` interrupt of spec/07 § Speaking with no session open,
@@ -311,6 +313,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         ...(opts.addressWord !== undefined ? { addressWord: opts.addressWord } : {}),
         ...(opts.takeOver === true ? { takeOver: true } : {}),
         ...(opts.resumed === true ? { resumed: true } : {}),
+        ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
       };
       ws.send(JSON.stringify(start));
       settled = true;

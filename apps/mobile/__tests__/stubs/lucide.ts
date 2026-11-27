@@ -61,6 +61,7 @@ export const PenLine = icon('PenLine');
 export const Phone = icon('Phone');
 export const PhoneIncoming = icon('PhoneIncoming');
 export const PhoneOff = icon('PhoneOff');
+export const Pause = icon('Pause');
 export const Pin = icon('Pin');
 export const Monitor = icon('Monitor');
 export const Plus = icon('Plus');

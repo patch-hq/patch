@@ -118,7 +118,11 @@ describe('startVoiceCall — happy path', () => {
       audioUrl: '/audio/sess-1',
     });
     // The notification names the mode it is running in (spec/15 § Voice tab).
-    expect(startVoiceAudioServiceMock).toHaveBeenCalledWith('c1', 'call', false);
+    expect(startVoiceAudioServiceMock).toHaveBeenCalledWith('c1', {
+      mode: 'call',
+      muted: false,
+      transientFocus: false,
+    });
 
     const sock = FakeWebSocket.last();
     expect(sock.url).toContain('/audio/sess-1');
@@ -710,7 +714,11 @@ describe('session modes + the notification as a control surface', () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1', 'hands-free');
     await flush();
-    expect(startVoiceAudioServiceMock).toHaveBeenCalledWith('c1', 'hands-free', false);
+    expect(startVoiceAudioServiceMock).toHaveBeenCalledWith('c1', {
+      mode: 'hands-free',
+      muted: false,
+      transientFocus: false,
+    });
     FakeWebSocket.last().emitOpen();
     await flush();
     expect(JSON.parse(FakeWebSocket.last().sent[0] as string).mode).toBe('hands-free');
@@ -730,7 +738,12 @@ describe('session modes + the notification as a control surface', () => {
       type: 'audio.mode',
       mode: 'hands-free',
     });
-    expect(updateVoiceAudioServiceMock).toHaveBeenCalledWith('c1', 'hands-free', false);
+    expect(updateVoiceAudioServiceMock).toHaveBeenCalledWith('c1', {
+      mode: 'hands-free',
+      muted: false,
+      paused: false,
+      transientFocus: false,
+    });
     // Flipping to what it already is does nothing at all.
     sock.sent.length = 0;
     setCallMode('hands-free');
@@ -768,7 +781,12 @@ describe('session modes + the notification as a control surface', () => {
 
     serviceActionHandler!('mute');
     expect(useVoiceStore.getState().callMuted).toBe(true);
-    expect(updateVoiceAudioServiceMock).toHaveBeenCalledWith('c1', 'call', true);
+    expect(updateVoiceAudioServiceMock).toHaveBeenCalledWith('c1', {
+      mode: 'call',
+      muted: true,
+      paused: false,
+      transientFocus: false,
+    });
 
     serviceActionHandler!('mode');
     expect(useVoiceStore.getState().callMode).toBe('hands-free');

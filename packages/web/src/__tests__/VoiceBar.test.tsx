@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act, cleanup, fireEvent } from '@testing-library/react';
 import { VoiceBar, describeLine, HEARD_LINGER_MS } from '../components/VoiceBar.js';
-import { useVoiceStore } from '../stores/voiceStore.js';
+import { useVoiceStore, type PauseReason } from '../stores/voiceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import * as voiceController from '../lib/voiceController.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
@@ -28,6 +28,7 @@ function base(mode: AudioSessionMode) {
     unaddressed: null as string | null,
     phase: 'listening' as const,
     reconnecting: false,
+    paused: null as PauseReason | null,
   };
 }
 
@@ -162,6 +163,31 @@ describe('voice bar', () => {
     // Hands-free switches to a call, and vice versa.
     expect(mode).toHaveBeenCalledWith('call');
     expect(end).toHaveBeenCalled();
+  });
+
+  it('pause sits beside end and pauses the call', () => {
+    const pause = vi.spyOn(voiceController, 'pauseVoiceCall').mockImplementation(() => {});
+    open('call');
+    render(<VoiceBar />);
+    fireEvent.click(screen.getByTestId('voice-bar-pause'));
+    expect(pause).toHaveBeenCalled();
+  });
+
+  it('a paused call reads Paused with Resume and End only', () => {
+    const resume = vi
+      .spyOn(voiceController, 'resumeVoiceCall')
+      .mockImplementation(() => Promise.resolve());
+    open('call', { paused: 'button' });
+    render(<VoiceBar />);
+    expect(screen.getByTestId('voice-bar').dataset.state).toBe('paused');
+    expect(line()).toBe('Paused');
+    expect(note()).toBeNull();
+    expect(screen.queryByTestId('voice-bar-mute')).toBeNull();
+    expect(screen.queryByTestId('voice-bar-mode')).toBeNull();
+    expect(screen.queryByTestId('voice-bar-pause')).toBeNull();
+    expect(screen.getByTestId('voice-bar-end')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('voice-bar-resume'));
+    expect(resume).toHaveBeenCalled();
   });
 
   it('says Connecting… with no note and no waveform until the host answers', () => {
