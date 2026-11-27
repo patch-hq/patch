@@ -18,7 +18,7 @@ import { createClaudeSessionProbe } from '../src/history.js';
 
 const silent = pino({ level: 'silent' });
 
-function setup(opts: { costPerTurn?: number } = {}) {
+function setup(opts: { costPerTurn?: number; gate?: Promise<void> } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'patch-voicetl-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-voicetl-folder-')));
   const metaStore = createMetaStore(home);
@@ -27,12 +27,14 @@ function setup(opts: { costPerTurn?: number } = {}) {
   let id = 0;
   let reply = 0;
   const costPerTurn = opts.costPerTurn;
+  const gate = opts.gate;
   const daemon = new Daemon({
     hostId: 'd1',
     metaStore,
     sdkBackend: {
       run: async function* (opts: { prompt: string }) {
         capturedPrompts.push(opts.prompt);
+        if (capturedPrompts.length === 1 && gate) await gate;
         yield { type: 'assistant' as const, content: `reply ${++reply}`, sessionId: 'S1' };
         if (costPerTurn !== undefined) {
           yield {
@@ -277,5 +279,33 @@ describe('looking back in a chat (spec/07 § Keeping voice and text as one conve
     expect(ctx.openTodos).toEqual(['deploy it']);
     expect(ctx.status).toBeNull();
     expect(ctx.goal).toBeNull();
+  });
+});
+
+describe('a hand-off that queues behind a running turn', () => {
+  it('keeps the place it was sent from, not the place the turn started', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { daemon, events, folder } = setup({ gate });
+    const chatId = await daemon.spawnChat({ folder });
+    const first = daemon.sendInput({ chatId, message: 'first', localId: 'l1', fromUser: true });
+    await new Promise((r) => setTimeout(r, 20));
+    daemon.reserveTurnSeq(chatId, 'h1');
+    await daemon.sendInput({
+      chatId,
+      message: 'list the files',
+      localId: 'h1',
+      voicePrefix: '[voice hand-off • web] ',
+      fromUser: true,
+    });
+    daemon.recordVoiceMessage({ chatId, role: 'user', content: '[voice • web] and then' });
+    release();
+    await first;
+    await new Promise((r) => setTimeout(r, 50));
+    const users = messages(events).filter((m) => m.role === 'user');
+    const handoff = users.find((m) => m.content.includes('hand-off'));
+    const spoken = users.find((m) => m.content.includes('and then'));
+    expect(handoff).toBeDefined();
+    expect(handoff!.seq).toBeLessThan(spoken!.seq);
   });
 });
