@@ -768,12 +768,6 @@ export interface HostOptions {
   queuedStallMs?: number;
   /** How often the stall check runs. Defaults to {@link QUEUED_STALL_SWEEP_MS}. */
   queuedStallSweepMs?: number;
-  /**
-   * How long a voice hand-off may sit behind a tool call that has not returned
-   * before the turn is interrupted so it can run. Defaults to
-   * {@link VOICE_HANDOFF_STALL_MS}.
-   */
-  voiceHandoffStallMs?: number;
   /** Test seam: how often unsettled subagents are checked for a dead session. */
   delegateOrphanSweepMs?: number;
   /** How often a live subagent's last-activity time is restated; default 15 s. */
@@ -1372,12 +1366,7 @@ const SNOOZE_SWEEP_MS = 30_000;
 /** A queued message waits this long behind an unreturned tool call before the turn is interrupted. */
 const QUEUED_STALL_MS = 180_000;
 /** How often queued messages are checked against {@link QUEUED_STALL_MS}. */
-const QUEUED_STALL_SWEEP_MS = 5_000;
-/**
- * A voice hand-off is a person waiting on a call: it only waits this long behind
- * a tool call before the turn is interrupted (a sleep or a long test wait).
- */
-const VOICE_HANDOFF_STALL_MS = 10_000;
+const QUEUED_STALL_SWEEP_MS = 15_000;
 /** How often unsettled subagents are checked for a dead session. */
 const DELEGATE_ORPHAN_SWEEP_MS = 60_000;
 /** How often a live subagent's last-activity time is restated to its parent's surfaces. */
@@ -2584,8 +2573,6 @@ export class Daemon {
   /** When each chat's current run began, from the first state emit that showed it running. */
   private readonly runningSince = new Map<string, number>();
   private queuedStallSweep: ReturnType<typeof setInterval> | null = null;
-  /** `chatId:localId` of queued voice hand-offs, which stall-interrupt sooner than other messages. */
-  private readonly queuedVoiceHandoffs = new Set<string>();
   private delegateOrphanSweep: ReturnType<typeof setInterval> | null = null;
   private delegateActivityRefresh: ReturnType<typeof setInterval> | null = null;
   /** Subagent chatId → host epoch ms of the last event it produced. */
@@ -7277,35 +7264,21 @@ export class Daemon {
       const now = this.opts.now();
       const stallMs = this.opts.queuedStallMs ?? QUEUED_STALL_MS;
       let waiting = false;
-      const voiceStallMs = this.opts.voiceHandoffStallMs ?? VOICE_HANDOFF_STALL_MS;
-      for (const key of this.queuedVoiceHandoffs) {
-        const [id, ...rest] = key.split(':');
-        const local = rest.join(':');
-        if (!(this.turnQueues.get(id!) ?? []).some((q) => q.localId === local)) {
-          this.queuedVoiceHandoffs.delete(key);
-        }
-      }
       for (const [chatId, queue] of this.turnQueues) {
         if (queue.length === 0) continue;
         waiting = true;
         const oldestTool = Math.min(...(this.toolsInFlight.get(chatId)?.values() ?? [Infinity]));
-        const stalled = queue.find((q) => {
-          const window = this.queuedVoiceHandoffs.has(`${chatId}:${q.localId}`)
-            ? voiceStallMs
-            : stallMs;
-          return now - oldestTool >= window && now - q.queuedAt >= window;
-        });
-        if (!stalled) continue;
+        if (now - oldestTool < stallMs || now - queue[0]!.queuedAt < stallMs) continue;
         const paused = [...this.pendingPermissionEvents.values()].some(
           (ev) => ev.chatId === chatId,
         );
         if (paused) continue;
         this.opts.logger.warn(
-          { chatId, localId: stalled.localId },
+          { chatId, localId: queue[0]!.localId },
           'queued message stalled behind a tool call that has not returned: interrupting the turn',
         );
         this.toolsInFlight.delete(chatId);
-        void this.promoteInput(chatId, stalled.localId).catch((err) =>
+        void this.promoteInput(chatId, queue[0]!.localId).catch((err) =>
           this.opts.logger.error({ chatId, err }, 'stalled-queue interrupt failed'),
         );
       }
@@ -7970,9 +7943,6 @@ export class Daemon {
         req.nudge,
         req.afterTurn,
       );
-      if (req.voicePrefix?.startsWith('[voice hand-off')) {
-        this.queuedVoiceHandoffs.add(`${req.chatId}:${req.localId}`);
-      }
       // A turn that was parked on a question was not working, so the message
       // that replaced the question must not wait for the agent to finish its
       // reply to the refusal: interrupt it and let the queue drain now.

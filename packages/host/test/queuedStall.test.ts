@@ -52,7 +52,6 @@ function setup(backend: SdkBackend, clock: { t: number }) {
     generateChatId: () => `chat-${++id}`,
     queuedStallMs: 1000,
     queuedStallSweepMs: 10,
-    voiceHandoffStallMs: 100,
   });
   return { daemon, events, folder };
 }
@@ -74,30 +73,6 @@ describe('queued message behind a tool call that never returns', () => {
     await tick(80);
     expect(b.prompts).toHaveLength(2);
     expect(b.prompts[1]).toContain('hello?');
-    daemon.shutdown();
-  });
-
-  it('interrupts for a voice hand-off after the short window, well inside the normal one', async () => {
-    const clock = { t: 1_700_000_000_000 };
-    const b = hangingToolBackend({ hang: true });
-    const { daemon, folder } = setup(b.backend, clock);
-    const chatId = await daemon.spawnChat({ folder });
-
-    void daemon.sendInput({ chatId, message: 'wait', localId: 'L1' });
-    await tick();
-    void daemon.sendInput({
-      chatId,
-      message: 'status?',
-      localId: 'L2',
-      voicePrefix: '[voice hand-off • call] ',
-    });
-    await tick(40);
-    expect(b.prompts).toEqual(['wait']);
-
-    clock.t += 200; // past the voice window, far short of the normal one
-    await tick(80);
-    expect(b.prompts).toHaveLength(2);
-    expect(b.prompts[1]).toContain('status?');
     daemon.shutdown();
   });
 
