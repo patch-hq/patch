@@ -14,8 +14,8 @@ async function expectChosen(page: Page, testid: string, label: string): Promise<
 
 // Real-browser e2e for Settings → Voice (spec/07 § Voice): ONE config for
 // every voice conversation — calls, hands-free and voice devices — a provider,
-// its model and voice, and the hand-off switch; Local nests what reads the
-// replies out. Dictation lists every device with its own engine.
+// its model and voice, and the hand-off switch. Dictation lists every device
+// with its own engine.
 test.describe('Settings — Voice', () => {
   test.beforeEach(async ({ page }) => {
     await stubSettingsApi(page);
@@ -23,18 +23,16 @@ test.describe('Settings — Voice', () => {
     await expect(page.getByTestId('settings-voice-config')).toBeVisible();
   });
 
-  test('one provider choice, named for people, with Local the default', async ({ page }) => {
+  test('one provider choice, the three voice agents, with Gemini the default', async ({ page }) => {
     await expect(page.getByTestId('voice-engine').locator('button')).toHaveText([
-      'Local',
       'Gemini',
       'OpenAI',
       'ElevenLabs',
     ]);
-    await expectChosen(page, 'voice-engine', 'Local');
-    // Local nests what reads the replies out.
-    await expect(page.getByTestId('voice-local-tts')).toBeVisible();
-    await expect(page.getByTestId('kokoro-voice')).toBeVisible();
-    await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);
+    await expectChosen(page, 'voice-engine', 'Gemini');
+    // Calls are voice agent calls: Local is no longer a choice here (a voice
+    // device answered directly keeps its own host-speech rows, further down).
+    await expect(page.getByTestId('voice-engine-local')).toHaveCount(0);
     // No per-surface rows, no chat title, no "Speaking" section.
     for (const surface of ['device', 'handsFree', 'call']) {
       await expect(page.getByTestId(`voice-${surface}-engine`)).toHaveCount(0);
