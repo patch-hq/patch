@@ -92,7 +92,8 @@ function TableScroll({
     </View>
   );
 }
-function tableColumns(node: { children?: any[] }): number {
+type AstNode = { children?: AstNode[] };
+function tableColumns(node: AstNode): number {
   const firstRow = node.children?.[0]?.children?.[0];
   return Math.max(1, firstRow?.children?.length ?? 1);
 }
