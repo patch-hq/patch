@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
+import { __emitAppStateChange } from './stubs/react-native';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 
@@ -337,19 +338,32 @@ describe('a dropped call says so', () => {
     expect(total).toBeGreaterThanOrEqual(90_000);
   });
 
-  it('gives up with "Call dropped" once every redial has failed', async () => {
+  it('keeps redialling after the schedule runs out, saying once that it is still trying', async () => {
     startVoiceCall('c1');
     let sock = await liveCall();
     sock.emitClose(1006);
     for (const delay of CALL_RECONNECT_DELAYS_MS) {
-      expect(useVoiceStore.getState().callError).toBeNull();
       vi.advanceTimersByTime(delay);
       await flush();
       sock = FakeWebSocket.last();
       sock.emitClose(1006);
     }
-    expect(useVoiceStore.getState().callError).toBe('Call dropped — the audio connection closed');
     expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+    expect(useVoiceStore.getState().callPhase).toBe('connecting');
+    const before = FakeWebSocket.instances.length;
+    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[CALL_RECONNECT_DELAYS_MS.length - 1]);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+  });
+
+  it('opening the app redials at once instead of waiting out the backoff', async () => {
+    startVoiceCall('c1');
+    const sock = await liveCall();
+    sock.emitClose(1006);
+    const before = FakeWebSocket.instances.length;
+    __emitAppStateChange('active');
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
   });
 
   it('ending the call while waiting to redial cancels the redial', async () => {
