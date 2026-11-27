@@ -64,6 +64,7 @@ import { ThreadRotator } from './thread-rotation.js';
 import { type HostLink, InboundHostLink } from './host-link.js';
 import { WsHub } from './ws-hub.js';
 import { registerAuthRoutes } from './auth-routes.js';
+import { ensureLocalAdminToken } from './local-admin.js';
 import type { RelayService } from './relay-service.js';
 import { ChatRegistry } from './chat-registry.js';
 import { registerCrossHostBridge } from './cross-host.js';
@@ -2508,6 +2509,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   registerAuthRoutes(app, {
     logger: log.child({ component: 'auth-routes' }),
     registry,
+    ...(opts.dataDir ? { localAdminToken: ensureLocalAdminToken(serverDir) } : {}),
     presence,
     ...(opts.internalToken ? { internalToken: opts.internalToken } : {}),
     ...(opts.relay ? { relay: opts.relay } : {}),

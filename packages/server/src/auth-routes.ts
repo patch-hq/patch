@@ -30,6 +30,7 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import { SignInRequestStore, TooManySignInRequestsError } from './signin-requests.js';
+import { LOCAL_ADMIN_HEADER, localAdminTokenMatches, localSurfaceId } from './local-admin.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SettingsError, type SharedSettingsService } from './shared-settings.js';
 import { ManagerHomeError } from './manager-home-error.js';
@@ -284,6 +285,11 @@ export interface AuthRoutesDeps {
   pushSignInRequest?: (req: { id: string; label: string }) => Promise<void>;
   /** Override clock — tests inject deterministic time. */
   nowMs?: () => number;
+  /**
+   * The data folder's local-admin secret (`local-admin.ts`). Absent: the
+   * local credential route answers 404, as on a server that predates it.
+   */
+  localAdminToken?: string;
   /** Optional pre-existing nonce store (tests). */
   nonceStore?: PairingNonceStore;
   /**
@@ -632,6 +638,59 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       });
       deps.broadcast?.({ type: 'signin.resolved', id });
       deps.logger.info({ surfaceId, ...SIGNIN_LOG_FIELDS(id) }, 'surface signed in by approval');
+      return reply.code(200).send({ credential, accountId: account.accountId, surfaceId });
+    },
+  );
+
+  // POST /api/auth/local/credential — a credential for something running on
+  // the server's own machine, issued without another device's approval
+  // (spec/10 § Local credentials). The caller proves it can read the data
+  // folder by presenting `local-admin.token`. One surface per label: issuing
+  // again renews it, and a label whose device was removed stays removed.
+  const LocalCredentialBody = z.object({ label: z.string().trim().min(1).max(64) });
+  app.post(
+    '/api/auth/local/credential',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      if (!deps.localAdminToken) return reply.code(404).send({ error: 'not available' });
+      if (!localAdminTokenMatches(deps.localAdminToken, req.headers[LOCAL_ADMIN_HEADER])) {
+        return reply.code(401).send({ error: 'local-admin secret missing or wrong' });
+      }
+      const parsed = LocalCredentialBody.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
+      }
+      let surfaceId: string;
+      try {
+        surfaceId = localSurfaceId(parsed.data.label);
+      } catch (e) {
+        return reply.code(400).send({ error: (e as Error).message });
+      }
+      if (deps.registry.isRevoked(surfaceId)) {
+        return reply.code(409).send({
+          error: `"${parsed.data.label}" was removed from Linked devices; issue one under another label`,
+        });
+      }
+      const account = deps.registry.getAccount();
+      const accountPrivateKey = deps.registry.getAccountPrivateKey();
+      if (!account || !accountPrivateKey) {
+        return reply.code(409).send({ error: 'this server has no account yet' });
+      }
+      const issuedAt = Math.floor(now() / 1000);
+      const credential = await mintSurfaceCredential({
+        userPrivateKey: accountPrivateKey,
+        surfaceId,
+        surfaceKind: 'web',
+        label: parsed.data.label,
+        now: issuedAt,
+      });
+      deps.registry.upsertSurface({
+        surfaceId,
+        surfaceKind: 'web',
+        label: parsed.data.label,
+        issuedAt,
+      });
+      deps.logger.info({ surfaceId }, 'local credential issued');
       return reply.code(200).send({ credential, accountId: account.accountId, surfaceId });
     },
   );
