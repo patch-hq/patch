@@ -1,44 +1,113 @@
-// The short sounds of a call: a rising pair when it connects, a falling pair when it
-// ends, a low double beep when it fails, and one soft note each time a dropped line is redialled. Played in the page, on the same output the call's audio uses, so they are heard
-// where the call is heard and cost nothing.
+// Plays the sounds of a call (spec/07 § Call sounds) in the page, on the same
+// output the call's audio uses, so they are heard where the call is heard and
+// cost nothing. The sounds are defined once, in callSoundSynth.ts; the phone
+// plays the same definitions rendered to files.
+//
+// Every sound is rendered once into a buffer and played from it. A looping one
+// (connecting, reconnecting, agent calling, agent working) is looped by the
+// audio clock until it is stopped, which keeps time in a background tab where
+// page timers are throttled.
 
-type Kind = 'pickup' | 'hangup' | 'error' | 'reconnecting';
+import { CALL_SOUNDS, renderCallSound, type CallSoundName } from './callSoundSynth.js';
 
-const NOTES: Record<Kind, number[]> = {
-  pickup: [660, 880],
-  hangup: [880, 523],
-  error: [330, 330, 247],
-  reconnecting: [523],
-};
-const NOTE_SECONDS = 0.09;
-const GAIN = 0.1;
+export type LoopingSound = 'connecting' | 'reconnecting' | 'agent-calling' | 'agent-working';
+/** A one-off sound: any call sound that does not loop. */
+export type CallCue = Exclude<CallSoundName, LoopingSound>;
 
-export function playCallSound(kind: Kind): void {
-  const Ctx: typeof AudioContext | undefined =
-    window.AudioContext ??
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (Ctx === undefined) {
-    console.error(`call sound (${kind}): this browser has no AudioContext`);
-    return;
+let ctx: AudioContext | null = null;
+const buffers = new Map<CallSoundName, Promise<AudioBuffer>>();
+
+function audio(what: string): AudioContext | null {
+  if (ctx === null) {
+    const Ctx: typeof AudioContext | undefined =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (Ctx === undefined) {
+      console.error(`call sound (${what}): this browser has no AudioContext`);
+      return null;
+    }
+    ctx = new Ctx();
   }
-  const ctx = new Ctx();
-  const out = ctx.createGain();
-  out.gain.value = GAIN;
-  out.connect(ctx.destination);
-  const start = ctx.currentTime;
-  NOTES[kind].forEach((hz, i) => {
-    const osc = ctx.createOscillator();
-    const env = ctx.createGain();
-    const at = start + i * NOTE_SECONDS;
-    osc.type = 'sine';
-    osc.frequency.value = hz;
-    // A short fade in and out, so each note starts and stops without a click.
-    env.gain.setValueAtTime(0, at);
-    env.gain.linearRampToValueAtTime(1, at + 0.01);
-    env.gain.linearRampToValueAtTime(0, at + NOTE_SECONDS);
-    osc.connect(env).connect(out);
-    osc.start(at);
-    osc.stop(at + NOTE_SECONDS);
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch((e: unknown) => console.error(`call sound (${what}): ${String(e)}`));
+  }
+  return ctx;
+}
+
+/**
+ * Start `name` playing; resolves to its source, or null when it did not play.
+ * `wanted` is asked again once the buffer is ready, so a sound stopped while it
+ * rendered never starts.
+ */
+async function play(
+  name: CallSoundName,
+  wanted: () => boolean = () => true,
+): Promise<AudioBufferSourceNode | null> {
+  const c = audio(name);
+  if (c === null) return null;
+  let buffer = buffers.get(name);
+  if (buffer === undefined) {
+    buffer = renderCallSound(name, c.sampleRate);
+    buffers.set(name, buffer);
+  }
+  try {
+    const rendered = await buffer;
+    if (!wanted()) return null;
+    const source = c.createBufferSource();
+    source.buffer = rendered;
+    source.loop = CALL_SOUNDS[name].loop;
+    source.connect(c.destination);
+    source.start(c.currentTime + 0.03);
+    return source;
+  } catch (e) {
+    buffers.delete(name);
+    console.error(`call sound (${name}): could not play: ${String(e)}`);
+    return null;
+  }
+}
+
+export function playCallSound(cue: CallCue): void {
+  void play(cue);
+}
+
+interface Loop {
+  source: AudioBufferSourceNode | null;
+  stopped: boolean;
+}
+const loops = new Map<LoopingSound, Loop>();
+
+/** Start a looping sound; starting one already playing does nothing. */
+export function startCallSoundLoop(name: LoopingSound): void {
+  if (loops.has(name)) return;
+  const loop: Loop = { source: null, stopped: false };
+  loops.set(name, loop);
+  void play(name, () => !loop.stopped).then((source) => {
+    if (source !== null) loop.source = source;
+    else if (loops.get(name) === loop) loops.delete(name);
   });
-  window.setTimeout(() => void ctx.close(), NOTES[kind].length * NOTE_SECONDS * 1000 + 100);
+}
+
+export function stopCallSoundLoop(name: LoopingSound): void {
+  const loop = loops.get(name);
+  if (loop === undefined) return;
+  loops.delete(name);
+  loop.stopped = true;
+  loop.source?.stop();
+}
+
+/** Start or stop a looping sound to match whether its state holds. */
+export function syncCallSoundLoop(name: LoopingSound, on: boolean): void {
+  if (on) startCallSoundLoop(name);
+  else stopCallSoundLoop(name);
+}
+
+/** Every looping sound playing now. */
+export function playingCallSoundLoops(): LoopingSound[] {
+  return [...loops.keys()];
+}
+
+export function __resetCallSoundForTests(): void {
+  for (const name of [...loops.keys()]) stopCallSoundLoop(name);
+  buffers.clear();
+  ctx = null;
 }

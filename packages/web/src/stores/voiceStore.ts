@@ -85,6 +85,11 @@ export interface VoiceCallState {
    * between utterances (spec/07 § Session modes).
    */
   phase: AudioSessionStateName;
+  /**
+   * The line dropped and the call is redialling (spec/07 § A dropped call comes
+   * back): the bar reads `Reconnecting…` and the reconnecting sound plays.
+   */
+  reconnecting: boolean;
 }
 
 /** Mid-voice permission prompt (spec/07 ## Permission prompts during voice). */
@@ -155,6 +160,7 @@ interface VoiceState {
   setCallMode(mode: AudioSessionMode): void;
   setCallUnaddressed(text: string | null): void;
   setCallPhase(phase: AudioSessionStateName): void;
+  setCallReconnecting(reconnecting: boolean): void;
   /** Focus-follow: route subsequent utterances to a different chat mid-call. */
   setCallChat(chatId: string): void;
   setCallMuted(muted: boolean): void;
@@ -238,6 +244,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
         mode,
         unaddressed: null,
         phase: 'connecting',
+        reconnecting: false,
       },
     });
   },
@@ -249,6 +256,9 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   },
   setCallPhase(phase) {
     set((s) => (s.call ? { call: { ...s.call, phase } } : {}));
+  },
+  setCallReconnecting(reconnecting) {
+    set((s) => (s.call ? { call: { ...s.call, reconnecting } } : {}));
   },
   setCallChat(chatId) {
     set((s) => (s.call ? { call: { ...s.call, chatId } } : {}));

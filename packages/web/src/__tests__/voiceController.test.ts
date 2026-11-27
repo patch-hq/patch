@@ -10,8 +10,17 @@
 // stubbed via the audio-opener seam.
 
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
-import { playCallSound } from '../lib/callSound.js';
-vi.mock('../lib/callSound.js', () => ({ playCallSound: vi.fn() }));
+import { playCallSound, syncCallSoundLoop } from '../lib/callSound.js';
+
+/** Whether the last sync left `name` looping. */
+function looping(name: string): boolean {
+  const calls = vi.mocked(syncCallSoundLoop).mock.calls.filter((c) => c[0] === name);
+  return calls.length > 0 && calls[calls.length - 1]![1];
+}
+vi.mock('../lib/callSound.js', () => ({
+  playCallSound: vi.fn(),
+  syncCallSoundLoop: vi.fn(),
+}));
 
 import {
   __setAudioOpenerForTests,
@@ -487,13 +496,13 @@ describe('voiceController', () => {
     const sound = vi.mocked(playCallSound);
     sound.mockClear();
     await startVoiceCall('c1');
-    expect(sound.mock.calls).toEqual([['pickup']]);
+    expect(sound.mock.calls).toEqual([['connected']]);
     endVoiceCall();
-    expect(sound.mock.calls).toEqual([['pickup'], ['hangup']]);
+    expect(sound.mock.calls).toEqual([['connected'], ['ended']]);
     // The call moving to another device sounds too, and a call that is not live makes no sound.
     await startVoiceCall('c1');
     lastCallbacks?.onClose('transferred');
-    expect(sound.mock.calls.map((c) => c[0])).toEqual(['pickup', 'hangup', 'pickup', 'hangup']);
+    expect(sound.mock.calls.map((c) => c[0])).toEqual(['connected', 'ended', 'connected', 'ended']);
     endVoiceCall();
     expect(sound).toHaveBeenCalledTimes(4);
   });
@@ -504,7 +513,7 @@ describe('voiceController', () => {
     sound.mockClear();
     lastCallbacks?.onClose('ended_by_agent');
     expect(useVoiceStore.getState().call).toBeNull();
-    expect(sound.mock.calls).toEqual([['hangup']]);
+    expect(sound.mock.calls).toEqual([['ended']]);
   });
 
   it('a call that drops redials by itself, telling the host it is picking the call back up', async () => {
@@ -526,6 +535,46 @@ describe('voiceController', () => {
       vi.useRealTimers();
       endVoiceCall();
     }
+  });
+
+  it('a dropped call plays reconnecting while it redials, then reconnected', async () => {
+    vi.useFakeTimers();
+    try {
+      const sound = vi.mocked(playCallSound);
+      await startVoiceCall('c1');
+      sound.mockClear();
+      vi.mocked(syncCallSoundLoop).mockClear();
+      lastCallbacks?.onClose();
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
+      expect(looping('reconnecting')).toBe(true);
+      // A redial is not a first dial: the connecting pulse stays off.
+      expect(looping('connecting')).toBe(false);
+      await vi.advanceTimersByTimeAsync(CALL_REDIAL_DELAYS_MS[0] ?? 0);
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(false);
+      expect(looping('reconnecting')).toBe(false);
+      expect(sound.mock.calls).toEqual([['reconnected']]);
+    } finally {
+      vi.useRealTimers();
+      endVoiceCall();
+    }
+  });
+
+  it('the connecting pulse plays from the tap until the session opens', async () => {
+    vi.mocked(syncCallSoundLoop).mockClear();
+    const opening = startVoiceCall('c1');
+    expect(looping('connecting')).toBe(true);
+    await opening;
+    expect(looping('connecting')).toBe(false);
+    endVoiceCall();
+  });
+
+  it('an incoming agent call rings until it is answered or dismissed', () => {
+    useVoiceStore
+      .getState()
+      .setIncoming({ callId: 'k1', chatId: 'c1', message: undefined, receivedAt: 0 });
+    expect(looping('agent-calling')).toBe(true);
+    useVoiceStore.getState().setIncoming(null);
+    expect(looping('agent-calling')).toBe(false);
   });
 
   it('the host going away mid-call redials rather than hanging up', async () => {
@@ -594,7 +643,7 @@ describe('voiceController', () => {
     await startVoiceCall('c1');
     vi.mocked(playCallSound).mockClear();
     lastCallbacks?.onError('backend unavailable');
-    expect(vi.mocked(playCallSound).mock.calls).toEqual([['error']]);
+    expect(vi.mocked(playCallSound).mock.calls).toEqual([['failed']]);
     expect(useVoiceStore.getState().call).toBeNull();
     expect(endSpy).toHaveBeenCalledWith('ended');
     expect(useUiStore.getState().errors[0]?.message).toBe('voice call: backend unavailable');

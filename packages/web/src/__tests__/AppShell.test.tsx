@@ -411,6 +411,7 @@ describe('AppShell', () => {
         mode: 'call',
         unaddressed: null,
         phase: 'listening',
+        reconnecting: false,
       },
     });
     cleanup();
@@ -464,6 +465,7 @@ describe('AppShell', () => {
         mode: 'call',
         unaddressed: null,
         phase: 'listening',
+        reconnecting: false,
       },
     });
     sessionStorage.setItem(AUTO_CALL_KEY, 'c-auto2');

@@ -89,6 +89,12 @@ interface VoiceState {
    */
   callConnectedAt: number | null;
   /**
+   * When the line dropped, while the call is redialling it (spec/07 § A
+   * dropped call comes back); null otherwise. The bar reads `Reconnecting…`
+   * and its timer holds at this moment until the line is back.
+   */
+  callReconnectingSince: number | null;
+  /**
    * The address word the open session was started with, or null when the
    * preferences had not loaded (the host then applies its own default).
    * The hands-free hint names it.
@@ -105,7 +111,12 @@ interface VoiceState {
   setRemoteCall(call: RemoteCall, active: boolean): void;
   /** Replace every remote call at once, from the server's `voice.calls` snapshot. */
   setRemoteCalls(calls: RemoteCall[]): void;
-  setActive(session: ActiveVoiceSession | null): void;
+  /**
+   * Open (or clear) the call. A redial keeps what belongs to the call rather
+   * than the session: when it connected, that it is reconnecting, and mute.
+   */
+  setActive(session: ActiveVoiceSession | null, opts?: { redial?: boolean }): void;
+  setCallReconnecting(on: boolean): void;
   /**
    * The open session got its real id and audio URL: swap them in WITHOUT
    * resetting what the user has done since the bar came up (mute, phase).
@@ -143,6 +154,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   callMode: 'call',
   callUnaddressed: null,
   callConnectedAt: null,
+  callReconnectingSince: null,
   callAddressWord: null,
   callEngine: null,
   setIncoming(call) {
@@ -159,16 +171,23 @@ export const useVoiceStore = create<VoiceState>((set) => ({
       return { remoteCalls: next };
     });
   },
-  setActive(session) {
-    set({
+  setActive(session, opts) {
+    const redial = opts?.redial === true && session !== null;
+    set((st) => ({
       activeSession: session,
-      callMuted: false,
+      callMuted: redial ? st.callMuted : false,
       callError: null,
       callPhase: 'connecting',
       callTranscriptPartial: '',
       callUnaddressed: null,
-      callConnectedAt: null,
-    });
+      callConnectedAt: redial ? st.callConnectedAt : null,
+      callReconnectingSince: redial ? st.callReconnectingSince : null,
+    }));
+  },
+  setCallReconnecting(on) {
+    set((st) => ({
+      callReconnectingSince: on ? (st.callReconnectingSince ?? Date.now()) : null,
+    }));
   },
   upgradeActive(session) {
     set({ activeSession: session });

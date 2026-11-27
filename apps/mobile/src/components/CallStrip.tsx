@@ -77,6 +77,7 @@ export function CallStrip(): React.ReactElement | null {
   const unaddressed = useVoiceStore((s) => s.callUnaddressed);
   const error = useVoiceStore((s) => s.callError);
   const connectedAt = useVoiceStore((s) => s.callConnectedAt);
+  const reconnectingSince = useVoiceStore((s) => s.callReconnectingSince);
   const addressWord = useVoiceStore((s) => s.callAddressWord);
   const now = useNow(session !== null && connectedAt !== null);
 
@@ -84,6 +85,7 @@ export function CallStrip(): React.ReactElement | null {
 
   const connecting = phase === 'connecting';
   const failed = error !== null;
+  const reconnecting = reconnectingSince !== null && !failed;
   const hint = handsFreeHint(mode, addressWord);
   const head = failed ? (connecting ? 'Could not connect' : 'Call problem') : callModeLabel(mode);
   const headLabel = mode === 'call' && !failed ? 'On call' : head;
@@ -125,10 +127,13 @@ export function CallStrip(): React.ReactElement | null {
               testID="call-timer"
               style={{ color: fixed.stripText, fontSize: 14, fontVariant: ['tabular-nums'] }}
             >
-              {formatElapsed(now - connectedAt)}
+              {/* Held at the moment the line dropped until it is back. */}
+              {formatElapsed((reconnectingSince ?? now) - connectedAt)}
             </Text>
           ) : null}
-          {connecting && !failed ? (
+          {reconnecting ? (
+            <ConnectingLabel color={fixed.stripText} word="Reconnecting" />
+          ) : connecting && !failed ? (
             <ConnectingLabel color={fixed.stripText} />
           ) : phase === 'thinking' && !failed ? (
             <Text testID="call-working" style={{ color: fixed.stripText, fontSize: 14 }}>

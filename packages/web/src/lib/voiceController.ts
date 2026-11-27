@@ -7,7 +7,7 @@
 // voice / ## Focus-follow.
 
 import { getActiveWs } from '../api/ws.js';
-import { playCallSound } from './callSound.js';
+import { playCallSound, syncCallSoundLoop } from './callSound.js';
 import { openAudioSession, type AudioSessionDeps } from './audioSession.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { startDictationPreview, type DictationPreview } from './dictationPreview.js';
@@ -20,6 +20,16 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { voiceCapability } from './voiceCapability.js';
 import { addressWordOrNull } from '../stores/preferencesStore.js';
 import { failed } from './errorCopy.js';
+
+// The looping call sounds follow the call's state (spec/07 § Call sounds):
+// connecting until the first session is open, reconnecting while a dropped
+// line redials, and the agent ringing while an incoming call waits.
+useVoiceStore.subscribe((s) => {
+  const call = s.call;
+  syncCallSoundLoop('connecting', call !== null && !call.reconnecting && s.session === null);
+  syncCallSoundLoop('reconnecting', call !== null && call.reconnecting);
+  syncCallSoundLoop('agent-calling', s.incomingCall !== null && call === null);
+});
 
 /** Test seam: inject the audio-session opener (defaults to the real one). Used
  *  by the CALL path (mode 2/3), which is genuinely bidirectional/streaming. */
@@ -364,16 +374,17 @@ function redialOrGiveUp(chatId: string, deps: AudioSessionDeps | undefined, reas
   const store = useVoiceStore.getState();
   if (store.call === null || redialTimer !== null) return;
   const delay = CALL_REDIAL_DELAYS_MS[redialAttempt];
-  store.setSession(null);
   if (delay === undefined) {
     clearRedial();
     useUiStore.getState().pushError(describeCallError(reason));
-    playCallSound('error');
+    playCallSound('failed');
     store.endCall();
+    store.setSession(null);
     return;
   }
   redialAttempt += 1;
-  playCallSound('reconnecting');
+  store.setCallReconnecting(true);
+  store.setSession(null);
   store.setCallPhase('connecting');
   const mode = store.call.mode;
   redialTimer = setTimeout(() => {
@@ -460,7 +471,7 @@ async function openCallSession(
             return;
           }
           useUiStore.getState().pushError(describeCallError(m));
-          playCallSound('error');
+          playCallSound('failed');
           endVoiceCall({ silent: true });
         },
         onClose: (reason) => {
@@ -482,9 +493,9 @@ async function openCallSession(
           if (store.call === null) return;
           if (reason === 'transferred' || reason === 'ended_by_agent') {
             clearRedial();
-            playCallSound('hangup');
-            store.setSession(null);
+            playCallSound('ended');
             store.endCall();
+            store.setSession(null);
             return;
           }
           redialOrGiveUp(chatId, deps, 'Call dropped — the audio connection closed');
@@ -495,16 +506,18 @@ async function openCallSession(
       session.end('cancelled');
       return;
     }
+    const wasReconnecting = useVoiceStore.getState().call?.reconnecting === true;
+    useVoiceStore.getState().setCallReconnecting(false);
     useVoiceStore.getState().setSession(session);
     redialAttempt = 0;
-    playCallSound('pickup');
+    playCallSound(wasReconnecting ? 'reconnected' : 'connected');
   } catch (err) {
     // A redial that cannot connect yet tries again; a first dial fails loudly.
     if (opts.resumed === true) {
       redialOrGiveUp(chatId, deps, (err as Error).message);
       return;
     }
-    playCallSound('error');
+    playCallSound('failed');
     useUiStore.getState().pushError(failed('voice call'), undefined, (err as Error).message);
     useVoiceStore.getState().endCall();
   }
@@ -549,11 +562,11 @@ export function toggleCallMute(): void {
 export function endVoiceCall(opts: { silent?: boolean } = {}): void {
   clearRedial();
   const store = useVoiceStore.getState();
-  if (store.call !== null && opts.silent !== true) playCallSound('hangup');
+  if (store.call !== null && opts.silent !== true) playCallSound('ended');
   // Clear the call first: ending the session can close its socket, and the close
   // handler must find no call left to announce a second time.
   const session = store.session;
-  store.setSession(null);
   store.endCall();
+  store.setSession(null);
   session?.end('ended');
 }

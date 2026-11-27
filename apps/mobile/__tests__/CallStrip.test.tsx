@@ -50,6 +50,7 @@ function call(extra: Partial<ReturnType<typeof useVoiceStore.getState>> = {}): v
     callMode: 'call',
     callUnaddressed: null,
     callConnectedAt: T0,
+    callReconnectingSince: null,
     callAddressWord: 'patch',
     ...extra,
   });
@@ -135,6 +136,21 @@ describe('CallStrip', () => {
     expect(textOf(findHost(r.root, byTestId('call-connecting')))).toBe('Connecting.');
     expect(queryHost(r.root, byTestId('call-timer'))).toBeNull();
     expect(queryHost(r.root, byTestId('call-wave'))).toBeNull();
+  });
+
+  it('a dropped line reads Reconnecting… with the clock held where it dropped', () => {
+    call({ callPhase: 'connecting', callReconnectingSince: T0 + 65_000 });
+    vi.setSystemTime(T0 + 90_000);
+    const r = renderRN(<CallStrip />);
+    expect(textOf(findHost(r.root, byTestId('call-connecting')))).toBe('Reconnecting.');
+    expect(textOf(findHost(r.root, byTestId('call-timer')))).toBe('1:05');
+    expect(queryHost(r.root, byTestId('call-wave'))).toBeNull();
+  });
+
+  it('a failure while reconnecting shows the failure, not Reconnecting', () => {
+    call({ callPhase: 'connecting', callReconnectingSince: T0, callError: 'host gone' });
+    const r = renderRN(<CallStrip />);
+    expect(queryHost(r.root, byTestId('call-connecting'))).toBeNull();
   });
 
   it('shows the live words, then the unaddressed line only when there are none', () => {
