@@ -25,6 +25,7 @@ const {
   withDangerousMod,
   withMainApplication,
   withStringsXml,
+  withAppBuildGradle,
   AndroidConfig,
 } = require('expo/config-plugins');
 
@@ -61,7 +62,8 @@ const withManifestNodes = (config) =>
     if (
       !app['meta-data'].some(
         (m) =>
-          m.$ && m.$['android:name'] === 'expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY',
+          m.$ &&
+          m.$['android:name'] === 'expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY',
       )
     ) {
       app['meta-data'].push({
@@ -107,9 +109,7 @@ const withManifestNodes = (config) =>
     const mainActivity = AndroidConfig.Manifest.getMainActivityOrThrow(cfg.modResults);
     mainActivity['meta-data'] = mainActivity['meta-data'] || [];
     if (
-      !mainActivity['meta-data'].some(
-        (m) => m.$ && m.$['android:name'] === 'android.app.shortcuts',
-      )
+      !mainActivity['meta-data'].some((m) => m.$ && m.$['android:name'] === 'android.app.shortcuts')
     ) {
       mainActivity['meta-data'].push({
         $: { 'android:name': 'android.app.shortcuts', 'android:resource': '@xml/shortcuts' },
@@ -190,6 +190,20 @@ const VOICE_MIC_KT = fs.readFileSync(
   'utf8',
 );
 const SPEECH_KT = fs.readFileSync(path.join(__dirname, 'native', 'PatchSpeechModule.kt'), 'utf8');
+// A direct call's on-phone engines (spec/07 § Direct calls) and Smart Turn's
+// features, with their JVM check.
+const DIRECT_CALL_KT = fs.readFileSync(
+  path.join(__dirname, 'native', 'PatchDirectCallModule.kt'),
+  'utf8',
+);
+const SMART_TURN_KT = fs.readFileSync(
+  path.join(__dirname, 'native', 'SmartTurnFeatures.kt'),
+  'utf8',
+);
+const SMART_TURN_TEST_KT = fs.readFileSync(
+  path.join(__dirname, 'native-test', 'SmartTurnFeaturesTest.kt'),
+  'utf8',
+);
 const VOICE_TTS_KT = fs.readFileSync(
   path.join(__dirname, 'native', 'PatchVoiceTtsModule.kt'),
   'utf8',
@@ -203,25 +217,21 @@ const withNativeFiles = (config) =>
       const xmlDir = path.join(root, 'app/src/main/res/xml');
       fs.mkdirSync(xmlDir, { recursive: true });
       fs.writeFileSync(path.join(xmlDir, 'shortcuts.xml'), SHORTCUTS_XML);
-      fs.writeFileSync(
-        path.join(xmlDir, 'network_security_config.xml'),
-        NETWORK_SECURITY_XML,
-      );
+      fs.writeFileSync(path.join(xmlDir, 'network_security_config.xml'), NETWORK_SECURITY_XML);
 
       const javaDir = path.join(root, 'app/src/main/java', PKG_PATH);
       fs.mkdirSync(javaDir, { recursive: true });
       fs.writeFileSync(path.join(javaDir, 'VoiceAudioService.kt'), VOICE_SERVICE_KT);
-      fs.writeFileSync(
-        path.join(javaDir, 'PatchVoiceAudioServiceModule.kt'),
-        VOICE_MODULE_KT,
-      );
-      fs.writeFileSync(
-        path.join(javaDir, 'PatchVoiceAudioServicePackage.kt'),
-        VOICE_PACKAGE_KT,
-      );
+      fs.writeFileSync(path.join(javaDir, 'PatchVoiceAudioServiceModule.kt'), VOICE_MODULE_KT);
+      fs.writeFileSync(path.join(javaDir, 'PatchVoiceAudioServicePackage.kt'), VOICE_PACKAGE_KT);
       fs.writeFileSync(path.join(javaDir, 'PatchVoiceMicModule.kt'), VOICE_MIC_KT);
       fs.writeFileSync(path.join(javaDir, 'PatchVoiceTtsModule.kt'), VOICE_TTS_KT);
       fs.writeFileSync(path.join(javaDir, 'PatchSpeechModule.kt'), SPEECH_KT);
+      fs.writeFileSync(path.join(javaDir, 'PatchDirectCallModule.kt'), DIRECT_CALL_KT);
+      fs.writeFileSync(path.join(javaDir, 'SmartTurnFeatures.kt'), SMART_TURN_KT);
+      const testDir = path.join(root, 'app/src/test/java', PKG_PATH);
+      fs.mkdirSync(testDir, { recursive: true });
+      fs.writeFileSync(path.join(testDir, 'SmartTurnFeaturesTest.kt'), SMART_TURN_TEST_KT);
       return cfg;
     },
   ]);
@@ -251,7 +261,30 @@ const withPackageRegistration = (config) =>
     return cfg;
   });
 
+// ---------------------------------------------------------------------------
+// 5. Smart Turn runs on onnxruntime-android; its feature port has a JVM test.
+// ---------------------------------------------------------------------------
+const DIRECT_CALL_DEPENDENCIES = [
+  '    // Smart Turn on the phone for a direct call (spec/07 § Direct calls).',
+  '    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")',
+  '    testImplementation("junit:junit:4.13.2")',
+].join('\n');
+
+const withDirectCallDependencies = (config) =>
+  withAppBuildGradle(config, (cfg) => {
+    const src = cfg.modResults.contents;
+    if (src.includes('onnxruntime-android')) return cfg;
+    const anchor = 'implementation("com.facebook.react:react-android")';
+    if (!src.includes(anchor)) {
+      throw new Error(
+        'withConnectionService: could not add the direct-call dependencies to app/build.gradle (no react-android line)',
+      );
+    }
+    cfg.modResults.contents = src.replace(anchor, `${anchor}\n\n${DIRECT_CALL_DEPENDENCIES}`);
+    return cfg;
+  });
+
 module.exports = (config) =>
-  withPackageRegistration(
-    withNativeFiles(withShortcutStrings(withManifestNodes(config))),
+  withDirectCallDependencies(
+    withPackageRegistration(withNativeFiles(withShortcutStrings(withManifestNodes(config)))),
   );
