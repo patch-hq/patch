@@ -34,10 +34,10 @@ export async function deviceSpeechEngines(
   bridge: DesktopBridge | undefined = getDesktopBridge(),
 ): Promise<SpeechEngineReport> {
   const report: SpeechEngineReport = { stt: [], tts: [] };
-  if (bridge?.localStt?.read && (await bridge.localStt.status()).installed) {
+  if (bridge?.localStt && (await bridge.localStt.status()).installed) {
     report.stt.push({ engine: 'parakeet', where: 'device', models: [PARAKEET_MODEL] });
   }
-  if (bridge?.localTts) {
+  if (bridge) {
     const s = await bridge.localTts.status();
     if (s.installed) {
       report.tts.push({ engine: 'kokoro', where: 'device', models: [s.model], voices: s.voices });
@@ -73,8 +73,10 @@ export function buildSpeechToText(call: ResolvedDirectCall, ctx: BuildContext): 
   const { engine, model } = call.stt;
   if (isCloudStt(engine))
     return cloudSpeechToText({ post: ctx.post, chatId: ctx.chatId, engine, model });
-  const read = ctx.bridge?.localStt?.read;
-  if (engine === 'parakeet' && read) return { label: STT_ENGINE_LABEL.parakeet, transcribe: read };
+  const local = ctx.bridge?.localStt;
+  if (engine === 'parakeet' && local) {
+    return { label: STT_ENGINE_LABEL.parakeet, transcribe: (pcm) => local.read(pcm) };
+  }
   throw new Error(`${STT_ENGINE_LABEL[engine]} does not run on this device`);
 }
 

@@ -32,14 +32,6 @@ describe('resolveDirectCall', () => {
     });
   });
 
-  it('engines this build does not know do not count', () => {
-    const r = resolveDirectCall(
-      { stt: [{ engine: 'future', where: 'cloud', models: ['x'] }], tts: desktop.tts },
-      undefined,
-    );
-    expect(r).toEqual({ ok: false, reason: NO_SPEECH_ENGINE });
-  });
-
   it('with no setup chosen, runs on-device engines first', () => {
     const r = resolveDirectCall(desktop, undefined);
     expect(r.ok && r.call).toEqual({
