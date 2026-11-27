@@ -30,4 +30,10 @@ describe('VoiceAudioService headset routing', () => {
   it('reports a missing headset route loudly only when one is present but refused', () => {
     expect(kt).toMatch(/setCommunicationDevice\(.*\)[\s\S]*Log\.(w|e)/);
   });
+  it('re-routes when a headset is removed or connected mid-call, and stops watching at the end', () => {
+    expect(kt).toContain('registerAudioDeviceCallback');
+    expect(kt).toContain('onAudioDevicesRemoved');
+    expect(kt).toContain('onAudioDevicesAdded');
+    expect(kt).toContain('unregisterAudioDeviceCallback');
+  });
 });
