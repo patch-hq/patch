@@ -32,6 +32,10 @@ describe('awaitsReply', () => {
   it('takes a finished, unread chat', () => {
     expect(awaitsReply(row())).toBe(true);
   });
+  it('skips the Manager and Speakers threads', () => {
+    expect(awaitsReply(row({ chatId: 'thread_speakers', name: 'speakers' }))).toBe(false);
+    expect(awaitsReply(row({ chatId: 'thread_manager' }))).toBe(false);
+  });
   it('skips a chat already read', () => {
     expect(awaitsReply(row({ lastReadSeq: 5 }))).toBe(false);
   });

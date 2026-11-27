@@ -73,7 +73,7 @@ export interface Grouped {
 
 const MANAGER_THREAD_ID = 'thread_manager';
 
-function isSpecialThread(chatId: string): boolean {
+export function isSpecialThread(chatId: string): boolean {
   return chatId === MANAGER_THREAD_ID || chatId === SPECIAL_THREAD_IDS.speakers;
 }
 
