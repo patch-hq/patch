@@ -1014,6 +1014,20 @@ export const api = {
     }
     return parsed as { ok: true; transcript: string };
   },
+  // POST /api/voice/direct/* — a direct call's cloud speech and its turns
+  // (spec/07 § Direct calls). Rejects with the server's own sentence, which
+  // the call bar shows after the engine's name.
+  voiceDirect: async <T>(path: string, body: object): Promise<T> => {
+    try {
+      return await request<T>(path, { method: 'POST', body });
+    } catch (e) {
+      const b = e instanceof ApiError ? e.body : null;
+      if (b && typeof b === 'object' && typeof (b as { message?: unknown }).message === 'string') {
+        throw new Error((b as { message: string }).message);
+      }
+      throw e;
+    }
+  },
   // POST /api/voice/turn-check — dictation mode asks whether the speaker has
   // finished (spec/07 § Dictation mode). The host's own sentence on failure.
   voiceTurnCheck: async (clip: Blob): Promise<{ ok: true; probability: number }> => {

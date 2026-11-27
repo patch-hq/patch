@@ -54,6 +54,16 @@ export class LocalSttController {
     this.current = new LocalDictation(live, accurate, emit);
   }
 
+  /**
+   * Read one finished utterance with the accurate model — a direct call's
+   * speech to text (spec/07 § Direct calls). Independent of any dictation.
+   */
+  read(pcm: Int16Array): Promise<string> {
+    const status = this.status();
+    if (!status.installed) return Promise.reject(new Error(localSttMissingMessage(status)));
+    return this.deps.engines().accurate.transcribe(pcm);
+  }
+
   push(pcm: Int16Array): void {
     this.current?.push(pcm);
   }

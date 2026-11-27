@@ -22,6 +22,12 @@ import { voiceCapability } from './voiceCapability.js';
 import { addressWordOrNull, usePreferencesStore } from '../stores/preferencesStore.js';
 import type { PauseReason } from '../stores/voiceStore.js';
 import { failed } from './errorCopy.js';
+import {
+  endDirectCall,
+  pauseDirectCall,
+  resumeDirectCall,
+  setDirectCallMuted,
+} from './direct/directCall.js';
 
 // The looping call sounds follow the call's state (spec/07 § Call sounds):
 // connecting until the first session is open, reconnecting while a dropped
@@ -31,9 +37,15 @@ useVoiceStore.subscribe((s) => {
   // A paused call holds no session and is not being placed: it makes no sound,
   // and an agent's call rings over it (spec/07 § Pause).
   const live = call !== null && call.paused === null;
-  syncCallSoundLoop('connecting', live && !call.reconnecting && s.session === null);
+  // Connecting lasts until the line is up: a voice agent call's session, or a
+  // direct call's microphone (it has no session to the host at all).
+  syncCallSoundLoop(
+    'connecting',
+    live && !call.reconnecting && s.session === null && call.phase === 'connecting',
+  );
   syncCallSoundLoop('reconnecting', live && call.reconnecting);
   syncCallSoundLoop('agent-calling', s.incomingCall !== null && !live);
+  syncCallSoundLoop('agent-working', live && (call.direct?.status.workingSince ?? null) !== null);
 });
 
 /** Test seam: inject the audio-session opener (defaults to the real one). Used
@@ -594,6 +606,7 @@ export function toggleCallMute(): void {
   const next = !store.call.muted;
   store.setCallMuted(next);
   store.session?.setMuted(next);
+  setDirectCallMuted(next);
 }
 
 export function endVoiceCall(opts: { silent?: boolean } = {}): void {
@@ -605,6 +618,7 @@ export function endVoiceCall(opts: { silent?: boolean } = {}): void {
   // Clear the call first: ending the session can close its socket, and the close
   // handler must find no call left to announce a second time.
   const session = store.session;
+  endDirectCall();
   store.endCall();
   store.setSession(null);
   session?.end('ended');
@@ -635,6 +649,7 @@ export function pauseVoiceCall(reason: PauseReason = 'button'): void {
   store.setCallUnaddressed(null);
   playCallSound('paused');
   session?.end('paused');
+  pauseDirectCall();
 }
 
 /**
@@ -647,7 +662,8 @@ export async function resumeVoiceCall(deps?: AudioSessionDeps): Promise<void> {
   if (call === null || call.paused === null) return;
   store.setCallPaused(null);
   store.setCallPhase('connecting');
-  await openCallSession(call.chatId, call.mode, deps, {});
+  if (call.direct) await resumeDirectCall();
+  else await openCallSession(call.chatId, call.mode, deps, {});
 }
 
 /**

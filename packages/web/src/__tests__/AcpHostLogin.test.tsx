@@ -98,15 +98,13 @@ describe('signing an ACP agent in on a host', () => {
         }),
       )
       .mockResolvedValue(view({ status: 'complete' }));
-    const callback = vi
-      .spyOn(api, 'acpLoginCallback')
-      .mockResolvedValue(
-        view({
-          status: 'waiting',
-          url: 'https://accounts.google.com/o/oauth2/auth?x=1',
-          loopback: true,
-        }),
-      );
+    const callback = vi.spyOn(api, 'acpLoginCallback').mockResolvedValue(
+      view({
+        status: 'waiting',
+        url: 'https://accounts.google.com/o/oauth2/auth?x=1',
+        loopback: true,
+      }),
+    );
     render(<AcpAccounts />);
     fireEvent.click(screen.getByTestId('acp-login-gemini-h1-start'));
     await waitFor(() => expect(screen.getByTestId('acp-login-gemini-h1-url')).toBeInTheDocument(), {

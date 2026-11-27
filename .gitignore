@@ -26,6 +26,7 @@ __pycache__/
 # Per-surface build outputs
 packages/desktop/release/
 packages/web/dist/
+packages/web/public/models/
 apps/mobile/.expo/
 apps/mobile/dist/
 apps/mobile/android/build/

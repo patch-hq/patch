@@ -66,6 +66,12 @@ export function buildServerRelease({ root, info, out, reuseServer = null, log = 
     ['--filter', '@patch/wire', '--filter', '@patch/auth', '--filter', '@patch/relay', 'build'],
     { cwd: root },
   );
+  // Every surface's direct call runs Smart Turn on the device, from the copy the
+  // SPA serves (spec/07 § Direct calls). Pinned and checksummed; present is kept.
+  log('release → fetching the Smart Turn model for the SPA');
+  sh('node', ['scripts/fetch-vendor.mjs', '--smart-turn-only', '--out=packages/web/public'], {
+    cwd: root,
+  });
   log(`release → building SPA ${info.version} / ${info.gitSha}`);
   sh('pnpm', ['--filter', '@patch/web', 'build'], {
     cwd: root,
@@ -81,6 +87,13 @@ export function buildServerRelease({ root, info, out, reuseServer = null, log = 
     /assets\/index-[A-Za-z0-9_-]+\.js/,
   )?.[0];
   if (!bundle) throw new Error(`no entry bundle in ${webDist}/index.html`);
+  // Every surface's direct call runs Smart Turn on the device, from this copy
+  // (spec/07 § Direct calls). A release without it would fail every direct call.
+  if (!existsSync(join(webDist, 'models', 'smart_turn.onnx'))) {
+    throw new Error(
+      'the SPA has no models/smart_turn.onnx — run `node scripts/fetch-vendor.mjs --smart-turn-only --out=packages/web/public` before building',
+    );
+  }
   cpSync(webDist, join(dir, 'web'), { recursive: true });
 
   let server;

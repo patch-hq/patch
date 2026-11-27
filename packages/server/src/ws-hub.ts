@@ -44,6 +44,7 @@ import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
 import type { ViewPositionStore } from './view-position.js';
+import type { SpeechEngineStore } from './speech-engines.js';
 import { entryBranch, forSurfaces, QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
 import type { CommitAcks } from './commit-acks.js';
 import type { QueueTracker } from './queue-tracker.js';
@@ -221,6 +222,8 @@ export interface WsHubDeps {
    */
   composerDrafts?: ComposerDraftStore;
   viewPosition?: ViewPositionStore;
+  /** Each surface's last speech-engine report (spec/05 § Speech engines). */
+  speechEngines?: SpeechEngineStore;
   /**
    * What each chat is holding behind a running turn. A surface that reads a
    * chat's history is told the waiting messages too, since the host announces
@@ -1675,6 +1678,10 @@ export class WsHub {
           scope: event.scope,
           ...(event.away ? { away: event.away } : {}),
         });
+        return;
+      }
+      case 'surface.speech_engines': {
+        this.deps.speechEngines?.set(conn.surfaceId, { stt: event.stt, tts: event.tts });
         return;
       }
       case 'surface.foregrounded':

@@ -23,6 +23,7 @@ import {
 } from '@patch/auth';
 import { AccountConflictError, type Registry } from './registry.js';
 import type { PresenceTracker } from './presence.js';
+import type { SpeechEngineStore } from './speech-engines.js';
 import {
   encodePairingUri,
   SharedSettingsPatch,
@@ -248,6 +249,8 @@ export interface AuthRoutesDeps {
   logger: Logger;
   registry: Registry;
   presence: PresenceTracker;
+  /** Each device's last speech-engine report, shown in Settings (spec/05 § Speech engines). */
+  speechEngines?: SpeechEngineStore;
   /**
    * spec/10 ## Revocation — used to terminate a revoked surface's live WS.
    * Optional only so unit tests can exercise the registry side in isolation;
@@ -798,6 +801,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
           status: p?.status ?? 'offline',
           lastHeartbeat: p?.lastHeartbeat ?? null,
           isCurrent: s.surfaceId === auth.surfaceId,
+          // Absent: the device has never reported (spec/05 § Speech engines).
+          ...(() => {
+            const r = deps.speechEngines?.get(s.surfaceId);
+            return r ? { speechEngines: r } : {};
+          })(),
           // spec/09 § Presence heuristic — only a computer has input presence.
           ...(s.surfaceKind === 'web' || s.surfaceKind === 'desktop'
             ? { presence: deps.presence.computerOf(auth.accountId, s.surfaceId, s.surfaceKind) }

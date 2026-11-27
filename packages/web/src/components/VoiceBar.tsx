@@ -35,6 +35,7 @@ import {
   pauseVoiceCall,
   resumeVoiceCall,
 } from '../lib/voiceController.js';
+import { directCallLine } from '../lib/direct/directCall.js';
 
 /** How long a dropped utterance stays on the bar before it returns to waiting. */
 export const HEARD_LINGER_MS = 8_000;
@@ -81,9 +82,11 @@ export function VoiceBar(): JSX.Element | null {
 
   const word = addressWord.trim() === '' ? 'patch' : addressWord.trim();
   const next = NEXT_MODE[call.mode];
+  const direct = call.direct;
   const { state } = describeLine(call, '', word);
   // Same rows as the phone's call strip: status row, then one quiet note line.
-  const note = callNote(call, state, word);
+  // A direct call's failed engine is named there, and the call stays open.
+  const note = direct?.status.failure ?? callNote(call, state, word);
 
   return (
     <div
@@ -95,14 +98,27 @@ export function VoiceBar(): JSX.Element | null {
     >
       <div className="vb-row">
         <span className="vb-mode" data-testid="voice-bar-head">
-          {MODE_HEAD[call.mode]}
+          {direct ? 'On call · direct' : MODE_HEAD[call.mode]}
         </span>
         <span className="vb-timer" data-testid="voice-bar-timer">
           {formatElapsed(Math.max(0, now - call.startedAt))}
         </span>
+        {direct ? (
+          <span className="vb-setup" data-testid="voice-bar-setup">
+            {direct.setup}
+          </span>
+        ) : null}
         <span className="vb-line" data-testid="voice-bar-line">
           {state === 'paused' ? (
             <span className="vb-text">Paused</span>
+          ) : direct && call.phase !== 'connecting' ? (
+            direct.status.line === 'listening' || direct.status.line === 'hearing' ? (
+              <Waveform level={call.muted ? 0 : call.level} />
+            ) : (
+              <span className="vb-text" data-testid="voice-bar-direct-status">
+                {directCallLine(direct.status, now)}
+              </span>
+            )
           ) : state === 'connecting' || state === 'reconnecting' ? (
             <ConnectingLabel word={state === 'reconnecting' ? 'Reconnecting' : 'Connecting'} />
           ) : state === 'thinking' ? (
@@ -133,25 +149,27 @@ export function VoiceBar(): JSX.Element | null {
             >
               <MicOff size={16} aria-hidden />
             </button>
-            {/* One control switches the two modes without tearing the session down. */}
-            <button
-              type="button"
-              className="vb-action"
-              data-testid="voice-bar-mode"
-              aria-label={`switch to ${MODE_HEAD[next].toLowerCase()}`}
-              title={
-                next === 'hands-free'
-                  ? `Switch to hands-free — it then only answers when you say “${word}”`
-                  : 'Switch to a call — it answers everything you say'
-              }
-              onClick={() => setCallMode(next)}
-            >
-              {next === 'hands-free' ? (
-                <Ear size={16} aria-hidden />
-              ) : (
-                <MessageSquare size={16} aria-hidden />
-              )}
-            </button>
+            {/* One control switches the two modes without tearing the session down. A direct call has one mode. */}
+            {direct ? null : (
+              <button
+                type="button"
+                className="vb-action"
+                data-testid="voice-bar-mode"
+                aria-label={`switch to ${MODE_HEAD[next].toLowerCase()}`}
+                title={
+                  next === 'hands-free'
+                    ? `Switch to hands-free — it then only answers when you say “${word}”`
+                    : 'Switch to a call — it answers everything you say'
+                }
+                onClick={() => setCallMode(next)}
+              >
+                {next === 'hands-free' ? (
+                  <Ear size={16} aria-hidden />
+                ) : (
+                  <MessageSquare size={16} aria-hidden />
+                )}
+              </button>
+            )}
             <button
               type="button"
               className="vb-action"
@@ -175,7 +193,10 @@ export function VoiceBar(): JSX.Element | null {
         </button>
       </div>
       {note === null ? null : (
-        <div className="vb-note" data-testid="voice-bar-note">
+        <div
+          className={`vb-note${direct?.status.failure ? ' vb-note-error' : ''}`}
+          data-testid="voice-bar-note"
+        >
           {note}
         </div>
       )}

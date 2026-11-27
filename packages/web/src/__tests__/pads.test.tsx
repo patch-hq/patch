@@ -197,7 +197,9 @@ describe('PadPane', () => {
       onLevel: vi.fn(),
       onPcm: vi.fn(),
     });
-    const tx = vi.spyOn(api, 'voiceTranscribe').mockResolvedValue({ ok: true, transcript: ' make it bigger ' });
+    const tx = vi
+      .spyOn(api, 'voiceTranscribe')
+      .mockResolvedValue({ ok: true, transcript: ' make it bigger ' });
     wrap(<PadPane padId="care" />);
     const frame = (await screen.findByTestId('pad-frame')) as HTMLIFrameElement;
     const win = frame.contentWindow!;

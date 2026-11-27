@@ -18,6 +18,7 @@
 // a target with no prebuild stops with the reason. Nothing is guessed at.
 //
 //   node scripts/fetch-vendor.mjs --out=DIR [--targets=darwin-arm64,linux-x64,linux-arm64]
+//   node scripts/fetch-vendor.mjs --smart-turn-only --out=packages/web/public
 //
 // Then:  PATCH_BUILD_VENDOR=DIR node scripts/build-host.mjs
 
@@ -100,7 +101,8 @@ async function fetchNode(out, target) {
   const file = `node-v${NODE_PIN}-${target}.tar.gz`;
   const expected = checksumFor((await download(`${base}/SHASUMS256.txt`)).toString('utf8'), file);
   const tarball = await download(`${base}/${file}`);
-  if (sha256(tarball) !== expected) throw new Error(`${file} does not match its published checksum`);
+  if (sha256(tarball) !== expected)
+    throw new Error(`${file} does not match its published checksum`);
   const work = mkdtempSync(join(tmpdir(), 'patch-vendor-'));
   try {
     writeFileSync(join(work, file), tarball);
@@ -115,7 +117,9 @@ async function fetchNode(out, target) {
 
 function installedOnnx() {
   const pnpm = join(REPO_ROOT, 'node_modules', '.pnpm');
-  const hits = existsSync(pnpm) ? readdirSync(pnpm).filter((n) => n.startsWith('onnxruntime-node@')) : [];
+  const hits = existsSync(pnpm)
+    ? readdirSync(pnpm).filter((n) => n.startsWith('onnxruntime-node@'))
+    : [];
   if (hits.length !== 1) {
     throw new Error(
       `expected exactly one onnxruntime-node in node_modules/.pnpm, found ${hits.length}. Run pnpm install.`,
@@ -133,27 +137,34 @@ function fetchOnnx(out, targets) {
   for (const target of targets) {
     const { platform, arch } = TARGETS[target];
     const prebuilt = join(src, 'bin', 'napi-v6', platform, arch);
-    if (!existsSync(prebuilt)) throw new Error(`onnxruntime-node ships no prebuild for ${target} (${prebuilt})`);
+    if (!existsSync(prebuilt))
+      throw new Error(`onnxruntime-node ships no prebuild for ${target} (${prebuilt})`);
     cpSync(prebuilt, join(dest, target), { recursive: true });
-    console.log(`onnxruntime-node ${target}: ${JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')).version}`);
+    console.log(
+      `onnxruntime-node ${target}: ${JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')).version}`,
+    );
   }
 }
 
 async function fetchSilero(out) {
   const file = join(out, 'models', 'silero_vad.onnx');
-  if (existsSync(file) && sha256(readFileSync(file)) === SILERO.sha256) return console.log('silero_vad.onnx: present');
+  if (existsSync(file) && sha256(readFileSync(file)) === SILERO.sha256)
+    return console.log('silero_vad.onnx: present');
   const body = await download(SILERO.url);
-  if (sha256(body) !== SILERO.sha256) throw new Error('silero_vad.onnx does not match its pinned checksum');
+  if (sha256(body) !== SILERO.sha256)
+    throw new Error('silero_vad.onnx does not match its pinned checksum');
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, body);
   console.log('silero_vad.onnx: v6.2.1');
 }
 
-async function fetchSmartTurn(out) {
+export async function fetchSmartTurn(out) {
   const file = join(out, 'models', 'smart_turn.onnx');
-  if (existsSync(file) && sha256(readFileSync(file)) === SMART_TURN.sha256) return console.log('smart_turn.onnx: present');
+  if (existsSync(file) && sha256(readFileSync(file)) === SMART_TURN.sha256)
+    return console.log('smart_turn.onnx: present');
   const body = await download(SMART_TURN.url);
-  if (sha256(body) !== SMART_TURN.sha256) throw new Error('smart_turn.onnx does not match its pinned checksum');
+  if (sha256(body) !== SMART_TURN.sha256)
+    throw new Error('smart_turn.onnx does not match its pinned checksum');
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, body);
   console.log('smart_turn.onnx: v3.2-cpu');
@@ -164,6 +175,12 @@ async function main() {
   const val = (n) => args.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
   const out = val('out');
   if (!out) throw new Error('--out=DIR is required');
+  // The SPA carries the same model for a direct call's end of turn on the
+  // device (spec/07 § Direct calls): `--smart-turn-only --out=packages/web/public`.
+  if (args.includes('--smart-turn-only')) {
+    await fetchSmartTurn(resolve(out));
+    return;
+  }
   const targets = (val('targets') ?? Object.keys(TARGETS).join(',')).split(',');
   for (const t of targets) if (!TARGETS[t]) throw new Error(`unknown target ${t}`);
   assertNodePinMatchesNvmrc(NODE_PIN, readFileSync(join(REPO_ROOT, '.nvmrc'), 'utf8'));

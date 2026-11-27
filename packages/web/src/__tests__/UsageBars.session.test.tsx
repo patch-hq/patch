@@ -16,7 +16,9 @@ describe('UsageBars 5-hour row', () => {
       />,
     );
     expect(screen.getByTestId('bar-session').textContent).toContain('5-hour');
-    expect(screen.getByTestId('bar-session').textContent).toContain('starts with your first message');
+    expect(screen.getByTestId('bar-session').textContent).toContain(
+      'starts with your first message',
+    );
   });
 
   it('says the 5-hour window is not reported when nothing is reported', () => {
