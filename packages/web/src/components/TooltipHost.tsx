@@ -33,6 +33,8 @@ import {
 const HOVER_DELAY_MS = 350;
 /** A control reached by Tab is already the user's deliberate target. */
 const FOCUS_DELAY_MS = 0;
+/** Mouse and focus events this soon after a press come from that press, not a hover or a Tab. */
+const PRESS_ECHO_MS = 1000;
 
 interface Shown {
   el: HTMLElement;
@@ -64,6 +66,10 @@ export function TooltipHost(): JSX.Element | null {
   // Where the pointer last was, to tell which line of a wrapped inline element
   // (an underlined name inside a sentence) is being hovered.
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  // The last press: a tap fires mouseover and focus after it, which must not
+  // read as a hover or a Tab — on a phone the label would cover whatever the
+  // tap opened, and a clicked button does not need naming twice.
+  const pressRef = useRef<{ type: string; at: number } | null>(null);
 
   useEffect(() => {
     const stash = stashRef.current;
@@ -152,7 +158,13 @@ export function TooltipHost(): JSX.Element | null {
       return related instanceof Node && source.contains(related);
     }
 
+    function pressEcho(): { type: string } | null {
+      const p = pressRef.current;
+      return p && Date.now() - p.at < PRESS_ECHO_MS ? p : null;
+    }
     function onMouseOver(e: MouseEvent): void {
+      const press = pressEcho();
+      if (press && press.type !== 'mouse') return;
       pointerRef.current = { x: e.clientX, y: e.clientY };
       arm(e.target, HOVER_DELAY_MS);
     }
@@ -161,6 +173,7 @@ export function TooltipHost(): JSX.Element | null {
       if (source && !leavingSource(source, e.relatedTarget)) hide(source);
     }
     function onFocusIn(e: FocusEvent): void {
+      if (pressEcho()) return;
       pointerRef.current = null;
       arm(e.target, FOCUS_DELAY_MS);
     }
@@ -174,7 +187,8 @@ export function TooltipHost(): JSX.Element | null {
     function onKeyDown(e: KeyboardEvent): void {
       if (e.key === 'Escape') hide(sourceRef.current);
     }
-    function onPointerDown(): void {
+    function onPointerDown(e: PointerEvent): void {
+      pressRef.current = { type: e.pointerType || 'mouse', at: Date.now() };
       hide(sourceRef.current);
     }
 

@@ -635,7 +635,7 @@ function JobRow({
           opens={{ kind: 'page', page: 'job', jobId: job.id }}
           className="job-link"
         >
-          <span className="job-name display">{job.name}</span>
+          <span className="job-name">{job.name}</span>
           <span className="job-trigger" data-testid={`job-trigger-${job.id}`}>
             {jobTriggerLabel(job)}
           </span>
