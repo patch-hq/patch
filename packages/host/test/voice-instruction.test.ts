@@ -56,6 +56,18 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
   });
 });
 
+describe('unknowable facts', () => {
+  test.each(['auto', 'always'] as const)(
+    '%s: states only what it can see, hands off why-questions, never explains delays',
+    (mode) => {
+      const text = hostedVoiceInstruction(mode, true);
+      expect(text).toMatch(/only what you can see/i);
+      expect(text).toMatch(/"why" question .* always goes to the agent/i);
+      expect(text).toMatch(/never explain a delay/i);
+    },
+  );
+});
+
 describe('task logging', () => {
   test.each(['auto', 'always'] as const)(
     '%s: voice knows the agent can log tasks, Patch ones included',
