@@ -80,7 +80,7 @@ export function speakInterrupt(chatId: string, message: string): void {
     try {
       if (stale()) return;
       const me = await api.me();
-      const tok = await api.voiceToken(chatId, 'voice-call');
+      const tok = await api.voiceToken(chatId, 'announcement');
       if (stale()) return;
       if (!tok.audioUrl) throw new Error('server returned empty audioUrl');
       // Take the audio for the length of the message only. No recording flag:
@@ -131,7 +131,7 @@ export function speakInterrupt(chatId: string, message: string): void {
             surfaceId: me.surface.surfaceId,
             surfaceKind: 'mobile',
             chatId,
-            role: 'voice-call',
+            role: 'announcement',
             token: tok.token,
             surfaceHasAec: true,
           }),

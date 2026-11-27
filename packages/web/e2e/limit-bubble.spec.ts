@@ -35,6 +35,7 @@ async function park(
       };
       w.__presenceStore.getState().setHostReport({
         type: 'host.host',
+        voiceCatalog: {},
         hostId: 'd1',
         hostName: 'box',
         backends: [],

@@ -20,7 +20,7 @@ import type { VoiceServiceAction } from '../src/lib/voiceAudioService';
 const prefs = vi.hoisted(() => ({ quiet: 0 }));
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => 'patch',
-  voiceConfigOrNull: () => null,
+  voiceAgentOrNull: () => null,
   pauseWhenQuietMinutes: () => prefs.quiet,
 }));
 const cues = vi.hoisted(() => ({ played: [] as string[] }));

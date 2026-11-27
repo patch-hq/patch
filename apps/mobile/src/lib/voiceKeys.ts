@@ -8,7 +8,7 @@
 // host yet) → null, and the host decides.
 
 import {
-  voiceCellFor,
+  voiceBackendFor,
   voiceKeyMissingMessage,
   type DictationEngine,
   type VoiceBackend,
@@ -16,7 +16,7 @@ import {
 } from '@patch/wire/audio';
 import { useChatStore } from '../stores/chatStore';
 import { usePresenceStore } from '../stores/presenceStore';
-import { voiceConfigOrNull } from './preferences';
+import { voiceAgentOrNull, voiceConfigOrNull } from './preferences';
 import { useSettingsStore } from '../stores/settingsStore';
 
 export function voiceKeyRefusal(chatId: string, surface: VoiceSurface): string | null {
@@ -30,8 +30,13 @@ export function voiceKeyRefusal(chatId: string, surface: VoiceSurface): string |
     backend =
       (own !== undefined ? settings?.preferences.deviceDictation?.[own] : undefined) ??
       config.dictation.phone;
+  } else if (surface === 'announcement') {
+    // Spoken on the host's own speech engine: no provider key.
+    return null;
   } else {
-    backend = voiceCellFor(config, surface).backend;
+    const agent = voiceAgentOrNull();
+    if (agent === null) return null;
+    backend = voiceBackendFor(config, agent, surface);
   }
   if (backend === 'local' || backend === 'device' || backend === 'host' || backend === 'whisper') {
     return null;

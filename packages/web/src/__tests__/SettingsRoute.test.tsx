@@ -759,9 +759,11 @@ describe('Settings → Dictation and Voice', () => {
             speechToText: 'groq',
             dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             meeting: 'local',
-            device: { backend: 'openai', layer: 'light', handoff: 'auto' },
-            handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
-            call: { backend: 'openai', layer: 'light', handoff: 'auto' },
+            deviceAnswer: 'agent',
+          },
+          voiceAgent: {
+            ...usePreferencesStore.getState().preferences.voiceAgent,
+            provider: 'openai',
           },
         },
         loaded: true,
@@ -801,9 +803,7 @@ describe('Settings → Dictation and Voice', () => {
             speechToText: 'groq',
             dictation: { phone: 'whisper', computer: 'deepgram', tidy: false },
             meeting: 'local',
-            device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-            handsFree: { backend: 'gemini', layer: 'light', handoff: 'auto' },
-            call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+            deviceAnswer: 'direct',
           },
         },
         loaded: true,
@@ -906,78 +906,7 @@ describe('Settings → Dictation and Voice', () => {
     );
   });
 
-  describe('Voice: the voice agent, and how a voice device answers', () => {
-    it('a provider choice is written to calls and hands-free; a device answered directly keeps host speech', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      expect(await screen.findByTestId('voice-engine-gemini')).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      );
-      expect(screen.queryByTestId('voice-engine-local')).toBeNull();
-      fireEvent.click(screen.getByTestId('voice-engine-openai'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      const cfg = server.writes[0]!.voiceConfig as Record<string, unknown>;
-      const cell = { backend: 'openai', layer: 'light', handoff: 'auto' };
-      expect(cfg.call).toEqual(cell);
-      expect(cfg.handsFree).toEqual(cell);
-      expect(cfg.device).toEqual({ backend: 'local', layer: 'direct', handoff: 'auto' });
-      expect(cfg.dictation).toEqual({ phone: 'device', computer: 'whisper', tidy: false });
-    });
-
-    it('a voice device answered by the voice agent follows the voice agent', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      expect(await screen.findByTestId('voice-device-answer-pills-direct')).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      );
-      fireEvent.click(screen.getByTestId('voice-device-answer-pills-agent'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).device).toEqual({
-        backend: 'gemini',
-        layer: 'light',
-        handoff: 'auto',
-      });
-      fireEvent.click(screen.getByTestId('voice-engine-elevenlabs'));
-      await waitFor(() => expect(server.writes).toHaveLength(2));
-      expect((server.writes[1]!.voiceConfig as Record<string, unknown>).device).toEqual({
-        backend: 'elevenlabs',
-        layer: 'light',
-        handoff: 'auto',
-      });
-    });
-
-    it('a voice agent shows its models, its own voices and the hand-off switch', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      expect(await screen.findByTestId('voice-variant-heavy')).toHaveTextContent(
-        'Gemini 3.8 Live Thinking',
-      );
-      expect(screen.getByTestId('voice-handoff-toggle')).toBeInTheDocument();
-      const select = (await screen.findByTestId('voice-gemini-voice')) as HTMLSelectElement;
-      expect(select.value).toBe('');
-      fireEvent.change(select, { target: { value: 'Kore' } });
-      await waitFor(() => expect(server.writes).toContainEqual({ geminiVoice: 'Kore' }));
-    });
-
-    it('the hand-off switch turns the agent off and on, with no “always”', async () => {
-      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
-      vi.stubGlobal('fetch', makeFetch({}, server.handler));
-      renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-handoff-toggle'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).call).toEqual({
-        backend: 'gemini',
-        layer: 'light',
-        handoff: 'never',
-      });
-      expect(screen.queryByTestId('voice-handoff-always')).toBeNull();
-    });
-
+  describe('Voice calls', () => {
     it('a failed write is said', async () => {
       vi.stubGlobal(
         'fetch',
@@ -988,8 +917,8 @@ describe('Settings → Dictation and Voice', () => {
         ),
       );
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-engine-openai'));
-      await waitFor(() => expect(errors()).toContain('Settings failed. Try again.'));
+      fireEvent.click(await screen.findByTestId('voice-agent-provider-openai'));
+      await waitFor(() => expect(errors().some((e) => e.startsWith('voice agent:'))).toBe(true));
     });
 
     it('shows usage in tokens and credits, summed across hosts, with the plan', async () => {
@@ -1057,7 +986,7 @@ describe('Settings → Dictation and Voice', () => {
     await waitFor(() => expect(server.writes).toContainEqual({ dictationTurnDetection: false }));
   });
 
-  describe('A voice device answered directly: speech on the host', () => {
+  describe('Voice devices answering directly (speech on the host)', () => {
     it('writes the chosen Kokoro voice to the account', async () => {
       const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
@@ -1115,7 +1044,7 @@ describe('Settings → Dictation and Voice', () => {
       vi.stubGlobal('fetch', makeFetch());
       loadShared();
       renderSettings('/settings/voice');
-      await screen.findByTestId('settings-voice-config');
+      await screen.findByTestId('settings-voice-devices');
       expect(screen.queryByTestId('chat-name-interval')).toBeNull();
     });
   });

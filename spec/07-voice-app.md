@@ -423,7 +423,7 @@ A deliberate interrupt goes to the surface the user is actually at. When a susta
 
 #### Speaking with no session open
 
-Under `auto-notify` an interrupt is spoken on a surface that is not in a session at all (`09-notifications.md` § Reaching the user). The surface opens a short audio session for it — role `voice-call`, mic never started — plays the synthesised message, and closes. Because no microphone is held, a podcast can play underneath: the surface takes transient-exclusive audio focus for the length of the message, which pauses it, and releases focus when the message ends, at which point it resumes on its own.
+Under `auto-notify` an interrupt is spoken on a surface that is not in a session at all (`09-notifications.md` § Reaching the user). The surface opens a short audio session for it — role `announcement` (the host's own speech engine, never the voice agent, and not a call), mic never started — plays the synthesised message, and closes. Because no microphone is held, a podcast can play underneath: the surface takes transient-exclusive audio focus for the length of the message, which pauses it, and releases focus when the message ends, at which point it resumes on its own.
 
 There is no reply path. `auto-notify` is monitoring, not conversation: to answer, the user opens a session.
 

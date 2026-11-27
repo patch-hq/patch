@@ -32,8 +32,10 @@ import { join } from 'node:path';
 import { createServer, type AddressInfo } from 'node:net';
 import { request as httpRequest, createServer as createHttpServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket as WSClient } from 'ws';
 import pino from 'pino';
+import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 import { generateUserKeypair, mintDaemonKey } from '@patch/auth';
 import { DEFAULT_SHARED_SETTINGS, decode, encode, type WireEvent } from '@patch/wire';
 import type { HostManifest } from '../src/selfUpdate.js';
@@ -439,6 +441,54 @@ interface Boot {
 }
 
 /**
+ * Plays Gemini Live for an app call (the account's voice agent is Gemini out of
+ * the box): every socket opens and completes setup, and `handOff` has the model
+ * hear the user and pass the request to the chat's agent.
+ */
+function geminiHarness(): {
+  ctor: NonNullable<MainTestHooks['geminiWsCtor']>;
+  userSays: (words: string) => void;
+  handOff: (request: string) => void;
+} {
+  const sockets: EventEmitter[] = [];
+  const ctor = function (): EventEmitter {
+    const ws = Object.assign(new EventEmitter(), {
+      send(data: string): void {
+        if ((JSON.parse(data) as { setup?: unknown }).setup) {
+          queueMicrotask(() => ws.emit('message', JSON.stringify({ setupComplete: {} }), false));
+        }
+      },
+      close(): void {},
+    });
+    sockets.push(ws);
+    queueMicrotask(() => ws.emit('open'));
+    return ws;
+  } as unknown as NonNullable<MainTestHooks['geminiWsCtor']>;
+  const say = (msg: unknown): void => {
+    sockets[sockets.length - 1]!.emit('message', JSON.stringify(msg), false);
+  };
+  return {
+    ctor,
+    userSays: (words) => {
+      say({ serverContent: { inputTranscription: { text: words } } });
+      say({ serverContent: { turnComplete: true } });
+    },
+    handOff: (request) => {
+      say({ serverContent: { inputTranscription: { text: request } } });
+      say({
+        toolCall: {
+          functionCalls: [{ id: 'call-1', name: 'pass_to_agent', args: { request } }],
+        },
+      });
+      say({ serverContent: { turnComplete: true } });
+    },
+  };
+}
+
+/** Boot options for a test that makes an app call: a Gemini key and the silent model. */
+const CALL_ENV = { GEMINI_API_KEY: 'test-gemini-key' };
+
+/**
  * Boots the real `main()` against a temp PATCH_HOME + a fake patch-server,
  * with SDK/whisper/kokoro/vad all mocked so no real credentials/models/
  * sidecars are needed. Returns once `testHooks.onReady` fires (full boot
@@ -457,6 +507,8 @@ async function bootMain(
     /** Receives the host's log lines instead of stdout. */
     logStream?: NonNullable<MainTestHooks['logStream']>;
     claudeRetryDelaysMs?: number[];
+    /** Plays Gemini Live for an app call: the account's voice agent is Gemini out of the box. */
+    geminiWsCtor?: NonNullable<MainTestHooks['geminiWsCtor']>;
     /**
      * Served from `fakeServer`'s HTTP port BEFORE `main()` boots, so the
      * host's own on-boot self-update check (spec/02 § Installation) sees it
@@ -569,6 +621,9 @@ async function bootMain(
         },
         ...(opts.logStream ? { logStream: opts.logStream } : {}),
         ...(opts.claudeRetryDelaysMs ? { claudeRetryDelaysMs: opts.claudeRetryDelaysMs } : {}),
+        ...(opts.geminiWsCtor ? { geminiWsCtor: opts.geminiWsCtor } : {}),
+        // The voice agent catalog never reaches a provider from a test.
+        voiceCatalogFetch: async () => new Response('no network in tests', { status: 503 }),
       }).catch(reject);
     },
   );
@@ -1368,8 +1423,90 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
+  it('a call on an app surface is costed when it ends: its line in the chat, its totals on daemon.host (spec/07 § Call cost)', async () => {
+    const gemini = geminiHarness();
+    const boot = await bootMain(CALL_ENV, { geminiWsCtor: gemini.ctor });
+    try {
+      await boot.fakeServer.waitForAuthed();
+      const folder = makeFolder();
+      const spawnRes = await boot.ready.app.inject({
+        method: 'POST',
+        url: '/spawn-chat',
+        headers: { authorization: `Bearer ${boot.localKey}` },
+        payload: { folder, model: 'claude-opus-5' },
+      });
+      const { chatId } = spawnRes.json() as { chatId: string };
+
+      const ws = new WSClient(`ws://127.0.0.1:${boot.audioPort}/audio/call-session-1`);
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', () => resolve());
+        ws.once('error', reject);
+      });
+      const { token } = mintVoiceToken({
+        secret: 'test-internal-token',
+        accountId: 'acct-1',
+        surfaceId: 'web-1',
+        sessionId: 'call-session-1',
+        chatId,
+      });
+      ws.send(
+        encodeAudio({
+          type: 'audio.session_start',
+          sessionId: 'call-session-1',
+          accountId: 'acct-1',
+          surfaceId: 'web-1',
+          surfaceKind: 'web',
+          chatId,
+          role: 'voice-call',
+          token,
+          surfaceHasAec: true,
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 200));
+      gemini.handOff('what is the weather like today');
+      // The spoken turn ran on the chat's agent.
+      await waitFor(
+        () =>
+          boot.fakeServer.received.some(
+            (e) => e.type === 'chat.message' && e.chatId === chatId && e.role === 'assistant',
+          ),
+        10_000,
+      );
+      // Hung up straight after the reply: the call's line lands at once, costing
+      // the voice engine alone.
+      ws.close();
+
+      await waitFor(
+        () =>
+          boot.fakeServer.received.some(
+            (e) =>
+              e.type === 'chat.message' &&
+              e.chatId === chatId &&
+              e.role === 'system' &&
+              typeof e.content === 'string' &&
+              e.content.startsWith('[call] Call 0:') &&
+              e.content.includes('· Gemini') &&
+              !e.content.includes('agent'),
+          ),
+        10_000,
+      );
+      await waitFor(
+        () =>
+          boot.fakeServer.received.some(
+            (e) =>
+              e.type === 'host.host' &&
+              (e as { voiceUsage?: { allCalls: number } }).voiceUsage?.allCalls === 1,
+          ),
+        10_000,
+      );
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
   it('a call stays on the chat it was started on when the surface navigates to another chat (spec/07 § A call stays on its chat)', async () => {
-    const boot = await bootMain();
+    const gemini = geminiHarness();
+    const boot = await bootMain(CALL_ENV, { geminiWsCtor: gemini.ctor });
     try {
       await boot.fakeServer.waitForAuthed();
       const spawn = async (): Promise<string> => {
@@ -1402,10 +1539,9 @@ describe('src/index.ts main() — full host boot', () => {
           sessionId: 'stay-session-1',
           accountId: 'acct-1',
           surfaceId: 'web-1',
-          surfaceKind: 'device',
-          deviceId: 'dev-test',
+          surfaceKind: 'web',
           chatId: chatA,
-          role: 'voice-device-conv',
+          role: 'voice-call',
           token,
           surfaceHasAec: true,
         }),
@@ -1415,15 +1551,7 @@ describe('src/index.ts main() — full host boot', () => {
       boot.fakeServer.send({ type: 'chat.focus_change', chatId: chatB, forSurfaceId: 'web-1' });
       await new Promise((r) => setTimeout(r, 200));
 
-      const samples = 480;
-      const frame = (loud: boolean): void => {
-        ws.send(encodeAudio({ type: 'audio.pcm16', ts: Date.now(), sampleRate: 16000, samples }));
-        const pcm = new Int16Array(samples);
-        if (loud) for (let i = 0; i < samples; i++) pcm[i] = Math.round(8000 * Math.sin(i / 4));
-        ws.send(Buffer.from(pcm.buffer), { binary: true });
-      };
-      frame(true);
-      for (let i = 0; i < 25; i++) frame(false);
+      gemini.handOff('what is the weather like today');
       // The spoken turn ran on the chat the call was started on …
       await waitFor(
         () =>
@@ -1497,11 +1625,11 @@ describe('src/index.ts main() — full host boot', () => {
           accountId: 'acct-1',
           surfaceId: 'surface-disk-only',
           surfaceKind: 'device',
-          deviceId: 'dev-test',
+          deviceId: 'surface-disk-only',
           chatId,
           role: 'voice-device-conv',
           token,
-          surfaceHasAec: true,
+          surfaceHasAec: false,
         }),
       );
       // Accepted (not rejected `session_not_found`) proves `chatExists` found
@@ -1513,6 +1641,169 @@ describe('src/index.ts main() — full host boot', () => {
       );
       expect(events.some((e) => e.type === 'audio.error')).toBe(false);
       ws.close();
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
+  it('a call on the voice agent: a spoken "yes" or "no" answers a waiting permission (spec/07 § Permission prompts during voice)', async () => {
+    const gemini = geminiHarness();
+    const boot = await bootMain(CALL_ENV, { geminiWsCtor: gemini.ctor });
+    try {
+      await boot.fakeServer.waitForAuthed();
+      const spawnRes = await boot.ready.app.inject({
+        method: 'POST',
+        url: '/spawn-chat',
+        headers: { authorization: `Bearer ${boot.localKey}` },
+        payload: { folder: makeFolder(), model: 'claude-opus-5' },
+      });
+      const { chatId } = spawnRes.json() as { chatId: string };
+      const ws = new WSClient(`ws://127.0.0.1:${boot.audioPort}/audio/perm-call-1`);
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', () => resolve());
+        ws.once('error', reject);
+      });
+      const { token } = mintVoiceToken({
+        secret: 'test-internal-token',
+        accountId: 'acct-1',
+        surfaceId: 'phone-1',
+        sessionId: 'perm-call-1',
+        chatId,
+      });
+      ws.send(
+        encodeAudio({
+          type: 'audio.session_start',
+          sessionId: 'perm-call-1',
+          accountId: 'acct-1',
+          surfaceId: 'phone-1',
+          surfaceKind: 'mobile',
+          chatId,
+          role: 'voice-call',
+          token,
+          surfaceHasAec: true,
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 300));
+
+      boot.ready.daemon.injectPermissionRequest(chatId, 'Bash', 'run a command');
+      gemini.userSays('no');
+      await waitFor(
+        () => boot.ready.daemon.getPendingPermissionForChat(chatId) === undefined,
+        10_000,
+      );
+      boot.ready.daemon.injectPermissionRequest(chatId, 'Bash', 'run another command');
+      gemini.userSays('Yes.');
+      await waitFor(
+        () => boot.ready.daemon.getPendingPermissionForChat(chatId) === undefined,
+        10_000,
+      );
+      // Words that are not an answer leave a waiting permission alone.
+      const third = boot.ready.daemon.injectPermissionRequest(chatId, 'Bash', 'a third');
+      gemini.userSays('what does that command do');
+      await new Promise((r) => setTimeout(r, 300));
+      expect(boot.ready.daemon.getPendingPermissionForChat(chatId)).toBe(third);
+      ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
+  it('a host-speech conversation (a voice device answering directly) spoken "yes" resolves a pending permission via resolvePermission', async () => {
+    const boot = await bootMain();
+    try {
+      await boot.fakeServer.waitForAuthed();
+      const folder = makeFolder();
+      const spawnRes = await boot.ready.app.inject({
+        method: 'POST',
+        url: '/spawn-chat',
+        headers: { authorization: `Bearer ${boot.localKey}` },
+        // Named: this boot has read no model catalogue, and a model-less spawn
+        // on such a host is refused rather than guessed (spec/04 § Spawn).
+        payload: { folder, model: 'claude-opus-5' },
+      });
+      const { chatId } = spawnRes.json() as { chatId: string };
+
+      const ws = new WSClient(`ws://127.0.0.1:${boot.audioPort}/audio/mobile-session-1`);
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', () => resolve());
+        ws.once('error', reject);
+      });
+      const { token } = mintVoiceToken({
+        secret: 'test-internal-token',
+        accountId: 'acct-1',
+        surfaceId: 'surface-mobile-1',
+        sessionId: 'mobile-session-1',
+        chatId,
+      });
+      ws.send(
+        encodeAudio({
+          type: 'audio.session_start',
+          sessionId: 'mobile-session-1',
+          accountId: 'acct-1',
+          surfaceId: 'surface-mobile-1',
+          surfaceKind: 'device',
+          deviceId: 'surface-mobile-1',
+          chatId,
+          role: 'voice-device-conv',
+          token,
+          surfaceHasAec: false,
+        }),
+      );
+      // Give the session_start handshake a moment to be accepted before
+      // injecting the utterance.
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+
+      // A spoken "no" first — proves resolvePermission's `approve: false`
+      // (deny) side; the "yes" a moment later proves its `approve: true`
+      // side. patch.diag.voice_inject bypasses STT entirely (injects
+      // transcribed TEXT straight into the open session), so no mock
+      // whisper needs to somehow transcribe real audio as these words.
+      const requestId2 = boot.ready.daemon.injectPermissionRequest(
+        chatId,
+        'Bash',
+        'run another command',
+      );
+      expect(boot.ready.daemon.getPendingPermissionForChat(chatId)).toBe(requestId2);
+      boot.fakeServer.send({
+        type: 'patch.diag.voice_inject',
+        surfaceId: 'surface-mobile-1',
+        text: 'no',
+      });
+      await waitFor(
+        () => boot.ready.daemon.getPendingPermissionForChat(chatId) === undefined,
+        10_000,
+      );
+
+      boot.ready.daemon.injectPermissionRequest(chatId, 'Bash', 'run a third command');
+      boot.fakeServer.send({
+        type: 'patch.diag.voice_inject',
+        surfaceId: 'surface-mobile-1',
+        text: 'yes',
+      });
+      await waitFor(
+        () => boot.ready.daemon.getPendingPermissionForChat(chatId) === undefined,
+        10_000,
+      );
+
+      // An ordinary (non-yes/no) utterance, with no permission left waiting,
+      // falls through to a real turn on the chat's agent.
+      boot.fakeServer.send({
+        type: 'patch.diag.voice_inject',
+        surfaceId: 'surface-mobile-1',
+        text: 'what is the weather like today',
+      });
+      // NOT a `chat.state:activity!=='idle'` wire-frame wait — the earlier
+      // injectPermissionRequest already put an `awaiting-permission` (also
+      // non-idle) chat.state frame in `received`, which would make that
+      // predicate resolve instantly on the WRONG (stale) frame. Poll the
+      // host's own turn-tracking directly instead.
+      await waitFor(() => boot.ready.daemon.chatState.get(chatId)?.activity === 'running', 5_000);
+
+      // Let the server-side close run before the host is torn down.
+      ws.close();
+      await new Promise<void>((resolve) => ws.once('close', () => resolve()));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     } finally {
       await boot.cleanup();
     }
@@ -4172,21 +4463,31 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
       },
     };
     const boot = await bootMain(
-      { DEEPGRAM_API_KEY: undefined, OPENAI_REALTIME_API_KEY: undefined, GEMINI_API_KEY: 'g-test' },
-      {
-        hostJson: {
-          voiceConfig: {
-            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
-            device: { backend: 'openai', layer: 'light' },
-            handsFree: { backend: 'gemini', layer: 'light' },
-            call: { backend: 'gemini', layer: 'light' },
-          },
-        },
-        logStream,
-      },
+      { DEEPGRAM_API_KEY: undefined, OPENAI_REALTIME_API_KEY: undefined },
+      { logStream },
     );
     try {
-      const missing = lines.filter((l) => l['missingKey'] !== undefined);
+      await boot.fakeServer.waitForAuthed();
+      // The voice setup arrives with the shared settings: dictation on Deepgram,
+      // the voice agent on OpenAI, and voice devices answering with it.
+      boot.fakeServer.send({
+        type: 'settings.snapshot',
+        hostId: 'd1',
+        version: 1,
+        settings: {
+          ...DEFAULT_SHARED_SETTINGS,
+          voiceConfig: {
+            ...DEFAULT_SHARED_SETTINGS.voiceConfig,
+            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
+            deviceAnswer: 'agent',
+          },
+          voiceAgent: { ...DEFAULT_SHARED_SETTINGS.voiceAgent, provider: 'openai' },
+        },
+        secrets: { claude: [], codex: [], providerKeys: {} },
+      });
+      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
+      // The last report: what this setup cannot run here.
+      const missing = lines.filter((l) => l['missingKey'] !== undefined).slice(-4);
       expect(missing.map((l) => [l['level'], l['surface'], l['missingKey'], l['msg']])).toEqual([
         [
           50,
@@ -4195,19 +4496,18 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
           'voice: Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
             'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Dictation. Its sessions will be refused.',
         ],
-        [
+        ...(['Voice device', 'Hands-free', 'Call'] as const).map((label) => [
           50,
-          'device',
+          label === 'Voice device' ? 'device' : label === 'Hands-free' ? 'hands-free' : 'call',
           'OPENAI_REALTIME_API_KEY',
-          'voice: Voice device is set to openai, but no OpenAI key is set on this host. ' +
-            'Add it in Settings → Providers, or switch Voice device to another backend in Settings → Voice. Its sessions will be refused.',
-        ],
+          `voice: ${label} is set to openai, but no OpenAI key is set on this host. ` +
+            `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice. Its sessions will be refused.`,
+        ]),
       ]);
 
-      await boot.fakeServer.waitForAuthed();
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host' && e.hostId === 'd1');
       const host = boot.fakeServer.received.find((e) => e.type === 'host.host');
-      expect(host).toMatchObject({ voiceKeys: { gemini: true, openai: false, deepgram: false } });
+      expect(host).toMatchObject({ voiceKeys: { gemini: false, openai: false, deepgram: false } });
 
       const folder = makeFolder();
       const spawnRes = await boot.ready.app.inject({
@@ -4318,17 +4618,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         DEEPGRAM_API_KEY: undefined,
         ELEVEN_LABS_API_KEY: undefined,
       },
-      {
-        hostJson: {
-          voiceConfig: {
-            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
-            device: { backend: 'local', layer: 'direct' },
-            handsFree: { backend: 'gemini', layer: 'light' },
-            call: { backend: 'gemini', layer: 'light' },
-          },
-        },
-        logStream: { write: (chunk: string) => void lines.push(chunk) },
-      },
+      { logStream: { write: (chunk: string) => void lines.push(chunk) } },
     );
     try {
       await boot.fakeServer.waitForAuthed();
@@ -4357,11 +4647,6 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         payload: { folder: makeFolder(), model: 'claude-opus-5' },
       });
       const { chatId } = spawnRes.json() as { chatId: string };
-      const before = await openDictation(boot, 'dict-before', chatId);
-      expect(before.first).toMatchObject({ type: 'audio.error', code: 'voice_key_missing' });
-      before.close();
-
-      const hostsBefore = boot.fakeServer.received.filter((e) => e.type === 'host.host').length;
       // The key is a shared setting (spec/01 § Settings): it arrives in the
       // server's snapshot, with the voice config that needs it.
       const withKeys = (version: number, providerKeys: Record<string, string>): WireEvent => ({
@@ -4371,10 +4656,8 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         settings: {
           ...DEFAULT_SHARED_SETTINGS,
           voiceConfig: {
+            ...DEFAULT_SHARED_SETTINGS.voiceConfig,
             dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
-            device: { backend: 'local', layer: 'direct' },
-            handsFree: { backend: 'gemini', layer: 'light' },
-            call: { backend: 'gemini', layer: 'light' },
           },
         },
         secrets: {
@@ -4383,9 +4666,16 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           providerKeys,
         },
       });
-      boot.fakeServer.send(withKeys(1, { deepgram: FAKE_DEEPGRAM }));
+      boot.fakeServer.send(withKeys(1, {}));
+      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 1);
+      const before = await openDictation(boot, 'dict-before', chatId);
+      expect(before.first).toMatchObject({ type: 'audio.error', code: 'voice_key_missing' });
+      before.close();
+
+      const hostsBefore = boot.fakeServer.received.filter((e) => e.type === 'host.host').length;
+      boot.fakeServer.send(withKeys(2, { deepgram: FAKE_DEEPGRAM }));
       const res = await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'settings.applied' && e.version === 1,
+        (e) => e.type === 'settings.applied' && e.version === 2,
       );
       expect(res).not.toHaveProperty('error');
       await boot.fakeServer.waitForFrame(
@@ -4418,8 +4708,8 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       expect(after.first.type).not.toBe('audio.error');
       after.close();
 
-      boot.fakeServer.send(withKeys(2, {}));
-      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 2);
+      boot.fakeServer.send(withKeys(3, {}));
+      await boot.fakeServer.waitForFrame((e) => e.type === 'settings.applied' && e.version === 3);
       const revoked = await openDictation(boot, 'dict-revoked', chatId);
       expect(revoked.first).toMatchObject({ type: 'audio.error', code: 'voice_key_missing' });
       revoked.close();

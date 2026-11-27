@@ -29,6 +29,7 @@ async function report(page: Page, accounts: Acct[]): Promise<void> {
     };
     w.__presenceStore.getState().setHostReport({
       type: 'host.host',
+      voiceCatalog: {},
       hostId: 'd1',
       hostName: 'ubuntu-4gb-hel1-1',
       backends: [],

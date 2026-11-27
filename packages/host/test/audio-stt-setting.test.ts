@@ -58,7 +58,7 @@ function token(sessionId: string): string {
   return `${b}.${createHmac('sha256', SECRET).update(b).digest().toString('base64url')}`;
 }
 
-async function call(
+async function deviceConversation(
   port: number,
   sessionId: string,
 ): Promise<{ events: AudioEvent[]; ws: WebSocket }> {
@@ -78,12 +78,11 @@ async function call(
       accountId: 'a',
       surfaceId: 'surf',
       surfaceKind: 'device',
-      deviceId: 'dev-test',
+      deviceId: 'surf',
       chatId: 'c1',
       role: 'voice-device-conv',
       token: token(sessionId),
-      surfaceHasAec: true,
-      mode: 'call',
+      surfaceHasAec: false,
     }),
   );
   return { events, ws };
@@ -110,7 +109,9 @@ describe('createSpeechToTextResolver', () => {
   });
 });
 
-describe('audio server — speech to text setting on a turn-based call', () => {
+// A host-speech conversation: a voice device answering directly (spec/07 §
+// Host speech engines). Calls from the app are always voice agent calls.
+describe('audio server — speech to text setting on a host-speech conversation', () => {
   let server: (AudioServerHandle & { port: number }) | undefined;
   afterEach(async () => {
     if (server) await server.close();
@@ -155,7 +156,7 @@ describe('audio server — speech to text setting on a turn-based call', () => {
         },
       }),
     );
-    const c = await call(port, 'stt-refused');
+    const c = await deviceConversation(port, 'stt-refused');
     await vi.waitFor(() => expect(c.events.some((e) => e.type === 'audio.error')).toBe(true), {
       timeout: 2000,
     });
@@ -181,7 +182,7 @@ describe('audio server — speech to text setting on a turn-based call', () => {
         },
       }),
     );
-    const c = await call(port, 'stt-ok');
+    const c = await deviceConversation(port, 'stt-ok');
     await vi.waitFor(() => expect(c.events.some((e) => e.type === 'audio.state')).toBe(true), {
       timeout: 2000,
     });

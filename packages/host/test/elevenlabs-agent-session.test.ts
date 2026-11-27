@@ -6,8 +6,6 @@ import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import {
   ElevenLabsAgentSession,
-  DEFAULT_ELEVENLABS_AGENT_LLMS,
-  elevenLabsAgentLlmFor,
   type ElevenLabsAgentDeps,
   type ElevenLabsWsCtor,
 } from '../src/audio/elevenlabs-agent.js';
@@ -147,16 +145,6 @@ const response = (text: string) => ({
 const toolCall = (name: string, parameters: unknown, id = 'call-1') => ({
   type: 'client_tool_call',
   client_tool_call: { tool_name: name, tool_call_id: id, parameters },
-});
-
-describe('front LLM per layer', () => {
-  test('light and direct run Haiku; heavy runs Sonnet; hosts can override', () => {
-    expect(elevenLabsAgentLlmFor('light')).toBe(DEFAULT_ELEVENLABS_AGENT_LLMS.light);
-    expect(elevenLabsAgentLlmFor('direct')).toBe(DEFAULT_ELEVENLABS_AGENT_LLMS.light);
-    expect(elevenLabsAgentLlmFor('heavy')).toBe(DEFAULT_ELEVENLABS_AGENT_LLMS.heavy);
-    expect(elevenLabsAgentLlmFor('heavy', { heavy: 'x' })).toBe('x');
-    expect(elevenLabsAgentLlmFor('light', { light: 'y' })).toBe('y');
-  });
 });
 
 describe('ElevenLabsAgentSession — provisioning', () => {

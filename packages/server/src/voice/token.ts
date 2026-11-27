@@ -19,7 +19,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
 import { z } from 'zod';
-import { draftDictationHostId } from '@patch/wire/audio';
+import { AudioSessionRole, draftDictationHostId } from '@patch/wire/audio';
 
 export const VOICE_TOKEN_TTL_MS = 5 * 60_000;
 
@@ -178,7 +178,7 @@ export interface VoiceTokenRouteOpts {
 const MintRequestBody = z
   .object({
     chatId: z.string().min(1),
-    role: z.enum(['voice-note', 'voice-call', 'voice-device-conv']),
+    role: AudioSessionRole,
     surfaceKind: z.enum(['web', 'desktop', 'mobile', 'device']),
   })
   .strict();

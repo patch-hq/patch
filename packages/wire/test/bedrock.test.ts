@@ -76,6 +76,7 @@ describe('Claude on Amazon Bedrock accounts (spec/10 § Backend credentials)', (
       runsManager: false,
       backends: [],
       components: [],
+      voiceCatalog: {},
       voiceKeys: { gemini: false, openai: false },
     };
     const plain = decode(JSON.stringify(report));

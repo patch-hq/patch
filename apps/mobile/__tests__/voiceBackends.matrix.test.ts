@@ -1,13 +1,13 @@
-// The phone on every voice backend × every surface it opens (spec/07 § Voice —
-// a config matrix): call, hands-free and dictation, each on local, gemini and
-// openai. The phone never talks to a provider — the host relays Gemini Live /
-// OpenAI Realtime over the same audio WSS — so what this pins is that:
+// The phone on every voice agent provider × every surface it opens (spec/07 §
+// The voice agent): call and hands-free on Gemini, OpenAI and ElevenLabs, and
+// dictation. The phone never talks to a provider — the host relays the voice
+// agent over the same audio WSS — so what this pins is that:
 //   - every backend opens the SAME session (same token route, same
 //     session_start, same PCM up and down) — nothing on the phone is local-only
 //     and no provider key or token is ever asked for;
-//   - the call bar names a hosted engine, and a hosted engine's failure lands
-//     on it loudly, naming the engine — never a quiet local call instead;
-//   - a mode switch that crosses engines opens a fresh session;
+//   - the call bar names the provider and model, and a provider's failure
+//     lands on it loudly, naming the engine;
+//   - a mode switch is always in place: both modes run on the one voice agent;
 //   - dictation uploads to the one transcribe route whatever the backend, and a
 //     hosted backend's refusal reaches the user.
 // No provider is reached: the audio WSS is FakeWebSocket and the REST API is mocked.
@@ -18,12 +18,12 @@ import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import {
+  DEFAULT_VOICE_AGENT,
   DEFAULT_VOICE_CONFIG,
   voiceKeyMissingMessage,
   type AudioSessionMode,
-  type VoiceBackend,
+  type VoiceAgentProvider,
   type VoiceConfig,
-  type VoiceLayer,
 } from '@patch/wire/audio';
 import type { SettingsResponse } from '../src/api/rest';
 
@@ -82,21 +82,23 @@ async function flush(n = 20): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
 }
 
-function seedConfig(voiceConfig: VoiceConfig): void {
+function seedConfig(
+  voiceConfig: VoiceConfig,
+  provider: VoiceAgentProvider = DEFAULT_VOICE_AGENT.provider,
+): void {
   useSettingsStore.setState({
     data: {
       devices: [],
       push: { tokenCount: 0 },
       google: { configured: false, connected: false, scope: null },
-      preferences: { addressWord: 'patch', voiceConfig },
+      preferences: {
+        addressWord: 'patch',
+        voiceConfig,
+        voiceAgent: { ...DEFAULT_VOICE_AGENT, provider },
+      },
     } as unknown as SettingsResponse,
     error: null,
   });
-}
-
-function withCell(mode: AudioSessionMode, backend: VoiceBackend, layer: VoiceLayer): VoiceConfig {
-  const key = mode === 'hands-free' ? 'handsFree' : 'call';
-  return { ...DEFAULT_VOICE_CONFIG, [key]: { backend, layer } };
 }
 
 async function openCall(chatId: string, mode: AudioSessionMode): Promise<FakeWebSocket> {
@@ -133,24 +135,23 @@ afterEach(async () => {
   restoreWebSocket();
 });
 
-const ENGINE_LABEL: Record<'gemini' | 'openai', (layer: VoiceLayer) => string | null> = {
-  gemini: (l) => `Gemini Live · ${l === 'heavy' ? 'heavy' : 'light'}`,
-  openai: (l) => `OpenAI Realtime · ${l === 'heavy' ? 'heavy' : 'light'}`,
+const ENGINE_LABEL: Record<VoiceAgentProvider, string> = {
+  gemini: 'Gemini · gemini-2.5-flash-native-audio-preview-12-2025',
+  openai: 'OpenAI · gpt-realtime-2.1-mini',
+  elevenlabs: 'ElevenLabs · claude-haiku-4-5',
 };
 
-const FAILURE: Record<'gemini' | 'openai', { code: string; engine: string }> = {
+const FAILURE: Partial<Record<VoiceAgentProvider, { code: string; engine: string }>> = {
   gemini: { code: 'gemini_unavailable', engine: 'Gemini Live' },
   openai: { code: 'openai_unavailable', engine: 'OpenAI Realtime' },
 };
 
 for (const mode of ['call', 'hands-free'] as const) {
-  // A call is always a voice agent call (spec/07 § Two kinds of call).
-  for (const backend of ['gemini', 'openai'] as const) {
-    const layers: VoiceLayer[] = ['direct', 'light', 'heavy'];
-    for (const layer of layers) {
-      describe(`${mode} on ${backend}/${layer}`, () => {
+  for (const backend of ['gemini', 'openai', 'elevenlabs'] as const) {
+    {
+      describe(`${mode} on ${backend}`, () => {
         it('opens the same host session as every other backend and plays its audio', async () => {
-          seedConfig(withCell(mode, backend, layer));
+          seedConfig(DEFAULT_VOICE_CONFIG, backend);
           const sock = await openCall('c1', mode);
           expect(voiceTokenMock).toHaveBeenCalledWith('c1', 'voice-call');
           expect(sock.url).toContain('/audio/sess-1');
@@ -184,15 +185,15 @@ for (const mode of ['call', 'hands-free'] as const) {
           expect(useVoiceStore.getState().callPhase).toBe('listening');
         });
 
-        it('names the voice agent on the call bar', async () => {
-          seedConfig(withCell(mode, backend, layer));
+        it('names the provider and model on the call bar', async () => {
+          seedConfig(DEFAULT_VOICE_CONFIG, backend);
           await openCall('c1', mode);
-          expect(useVoiceStore.getState().callEngine).toBe(ENGINE_LABEL[backend](layer));
+          expect(useVoiceStore.getState().callEngine).toBe(ENGINE_LABEL[backend]);
         });
 
         {
           it('no key for it on the host: the call bar says exactly which key and where to switch', async () => {
-            seedConfig(withCell(mode, backend, layer));
+            seedConfig(DEFAULT_VOICE_CONFIG, backend);
             const sock = await openCall('c1', mode);
             const message = voiceKeyMissingMessage(mode, backend);
             sock.emitMessage(
@@ -207,32 +208,34 @@ for (const mode of ['call', 'hands-free'] as const) {
             expect(FakeWebSocket.instances).toHaveLength(1);
           });
 
-          it('a hosted engine failure lands on the call bar naming the engine — no local fallback', async () => {
-            seedConfig(withCell(mode, backend, layer));
-            const sock = await openCall('c1', mode);
-            const { code, engine } = FAILURE[backend];
-            sock.emitMessage(
-              JSON.stringify({
-                type: 'audio.error',
-                code,
-                message: 'closed the session (code 1011)',
-                sessionId: 'sess-1',
-              }),
-            );
-            // The host ends the session behind a fatal engine failure.
-            sock.emitClose(4400, 'closed');
-            await flush();
-            const st = useVoiceStore.getState();
-            expect(st.callError).toBe(`${engine} failed — closed the session (code 1011)`);
-            expect(
-              useUiStore.getState().errors.at(-1)?.message ?? useUiStore.getState().errors.at(-1),
-            ).toEqual(expect.stringContaining(`${engine} failed`));
-            // Audio released; nothing reopened a session on another engine.
-            expect(stopMicCaptureMock).toHaveBeenCalled();
-            expect(stopTtsPlaybackMock).toHaveBeenCalled();
-            expect(voiceTokenMock).toHaveBeenCalledTimes(1);
-            expect(FakeWebSocket.instances).toHaveLength(1);
-          });
+          const failure = FAILURE[backend];
+          if (failure)
+            it('a provider failure lands on the call bar naming the engine', async () => {
+              seedConfig(DEFAULT_VOICE_CONFIG, backend);
+              const sock = await openCall('c1', mode);
+              const { code, engine } = failure;
+              sock.emitMessage(
+                JSON.stringify({
+                  type: 'audio.error',
+                  code,
+                  message: 'closed the session (code 1011)',
+                  sessionId: 'sess-1',
+                }),
+              );
+              // The host ends the session behind a fatal engine failure.
+              sock.emitClose(4400, 'closed');
+              await flush();
+              const st = useVoiceStore.getState();
+              expect(st.callError).toBe(`${engine} failed — closed the session (code 1011)`);
+              expect(
+                useUiStore.getState().errors.at(-1)?.message ?? useUiStore.getState().errors.at(-1),
+              ).toEqual(expect.stringContaining(`${engine} failed`));
+              // Audio released; nothing reopened a session on another engine.
+              expect(stopMicCaptureMock).toHaveBeenCalled();
+              expect(stopTtsPlaybackMock).toHaveBeenCalled();
+              expect(voiceTokenMock).toHaveBeenCalledTimes(1);
+              expect(FakeWebSocket.instances).toHaveLength(1);
+            });
         }
       });
     }
@@ -240,12 +243,8 @@ for (const mode of ['call', 'hands-free'] as const) {
 }
 
 describe('switching mode', () => {
-  it('within one engine flips in place — no new session', async () => {
-    seedConfig({
-      ...DEFAULT_VOICE_CONFIG,
-      call: { backend: 'openai', layer: 'light', handoff: 'auto' },
-      handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
-    });
+  it('flips in place — both modes run on the one voice agent', async () => {
+    seedConfig(DEFAULT_VOICE_CONFIG, 'openai');
     const sock = await openCall('c1', 'call');
     const { setCallMode } = await import('../src/lib/voiceCall');
     setCallMode('hands-free');
@@ -258,55 +257,13 @@ describe('switching mode', () => {
     expect(voiceTokenMock).toHaveBeenCalledTimes(1);
   });
 
-  it('across engines ends the session and opens a fresh one in the new mode, on the new engine', async () => {
-    seedConfig({
-      ...DEFAULT_VOICE_CONFIG,
-      call: { backend: 'gemini', layer: 'heavy', handoff: 'auto' },
-      handsFree: { backend: 'openai', layer: 'light', handoff: 'auto' },
-    });
-    const first = await openCall('c1', 'call');
-    expect(useVoiceStore.getState().callEngine).toBe('Gemini Live · heavy');
-    const { setCallMode } = await import('../src/lib/voiceCall');
-    setCallMode('hands-free');
-    await flush(40);
-    // The old session was ended, not re-moded.
-    expect(first.sent.map((f) => JSON.parse(f as string).type)).toContain('audio.session_end');
-    expect(
-      first.sent.map((f) => (typeof f === 'string' ? JSON.parse(f).type : 'bin')),
-    ).not.toContain('audio.mode');
-    expect(voiceTokenMock).toHaveBeenCalledTimes(2);
-    const second = FakeWebSocket.last();
-    expect(second).not.toBe(first);
-    second.emitOpen();
-    await flush();
-    expect(JSON.parse(second.sent[0] as string)).toMatchObject({
-      type: 'audio.session_start',
-      mode: 'hands-free',
-      sessionId: 'sess-2',
-    });
-    const st = useVoiceStore.getState();
-    expect(st.callMode).toBe('hands-free');
-    expect(st.callEngine).toBe('OpenAI Realtime · light');
-    expect(st.activeSession?.chatId).toBe('c1');
-  });
-
-  it('with the config not loaded, tries in place and shows the host refusal', async () => {
+  it('flips in place with the setup not loaded yet', async () => {
     const sock = await openCall('c1', 'call');
     expect(useVoiceStore.getState().callEngine).toBeNull();
     const { setCallMode } = await import('../src/lib/voiceCall');
     setCallMode('hands-free');
     expect(JSON.parse(sock.sent.at(-1) as string).type).toBe('audio.mode');
-    sock.emitMessage(
-      JSON.stringify({
-        type: 'audio.error',
-        code: 'voice_config_not_implemented',
-        message: 'hands-free is configured for a different voice engine than call',
-        sessionId: 'sess-1',
-      }),
-    );
-    expect(useVoiceStore.getState().callError).toBe(
-      'Not available with this voice setting — hands-free is configured for a different voice engine than call',
-    );
+    expect(voiceTokenMock).toHaveBeenCalledTimes(1);
   });
 });
 

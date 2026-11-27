@@ -65,7 +65,7 @@ function looping(name: string): boolean {
 }
 vi.mock('../src/lib/preferences', () => ({
   addressWordOrNull: () => prefs.addressWord,
-  voiceConfigOrNull: () => null,
+  voiceAgentOrNull: () => null,
   pauseWhenQuietMinutes: () => prefs.pauseWhenQuietMinutes,
 }));
 

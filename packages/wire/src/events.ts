@@ -10,10 +10,15 @@
 import { AccountRefusal, AccountState } from './accountState.js';
 import { z } from 'zod';
 import {
+  DEFAULT_VOICE_AGENT,
+  DeviceAnswer,
   DictationEngineSchema,
   DictationSetting,
   MeetingEngine,
   SpeechToTextEngine,
+  VoiceAgentSetting,
+  VoiceCatalog,
+  VoiceTones,
 } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from './manager-voice-prompt.js';
@@ -2596,20 +2601,7 @@ export const McpServerList = z
 // Shared settings (spec/01 § Settings)
 // ---------------------------------------------------------------------------
 
-const VoiceBackendSetting = z.enum(['local', 'gemini', 'openai', 'elevenlabs']);
-const VoiceSurfaceSetting = z
-  .object({
-    backend: VoiceBackendSetting,
-    layer: z.enum(['direct', 'light', 'heavy']),
-    // Absent in settings saved before the hand-off choice existed.
-    handoff: z.enum(['auto', 'always', 'never']).default('auto'),
-  })
-  .strict();
-/** A call's and hands-free's cell: always a voice agent (spec/07 § Two kinds of call). */
-const VoiceAgentSurfaceSetting = VoiceSurfaceSetting.extend({
-  backend: z.enum(['gemini', 'openai', 'elevenlabs']),
-}).strict();
-/** Per-surface voice config (spec/07 § Voice is a config matrix). */
+/** Per-feature voice config (spec/07): speech to text, dictation, meetings, voice devices. */
 export const VoiceConfigSetting = z
   .object({
     // Absent in settings saved before speech to text became a setting.
@@ -2617,9 +2609,7 @@ export const VoiceConfigSetting = z
     dictation: DictationSetting,
     // Absent in settings saved before the meeting engine was a setting.
     meeting: MeetingEngine.default('local'),
-    device: VoiceSurfaceSetting,
-    handsFree: VoiceAgentSurfaceSetting,
-    call: VoiceAgentSurfaceSetting,
+    deviceAnswer: DeviceAnswer,
   })
   .strict();
 export type VoiceConfigSetting = z.infer<typeof VoiceConfigSetting>;
@@ -2823,10 +2813,13 @@ export const SharedSettings = z
     elevenLabsModel: z
       .enum(['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'])
       .optional(),
-    /** The voice a Gemini Live call speaks in. Absent: Gemini's own default voice. */
-    geminiVoice: z.string().min(1).optional(),
-    /** The voice an OpenAI Realtime call speaks in. Absent: OpenAI's own default voice. */
-    openaiVoice: z.string().min(1).optional(),
+    /**
+     * The account's one voice agent setup (spec/07 § The voice agent): provider,
+     * then each provider's model, voice and how it sounds.
+     */
+    voiceAgent: VoiceAgentSetting,
+    /** Tone, per voice (`<provider>:<voice id>` → raw text). Goes into the voice's instructions as written. */
+    voiceTones: VoiceTones,
     /**
      * Per signed-in device, by surface id: the engine its dictation runs on
      * (spec/07 § Dictation engines). A device absent here runs on its kind's
@@ -3032,16 +3025,15 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   suppressProviderSwitchWarning: false,
   autoContinueInterrupted: false,
   providerContextVerbosity: 'summary',
-  // A voice device starts on the free host-speech pipeline; a call and
-  // hands-free are voice agent calls (spec/07 § Two kinds of call).
+  // A voice device starts answering directly, with speech on the host.
   voiceConfig: {
     speechToText: 'groq',
     dictation: { phone: 'device', computer: 'whisper', tidy: false },
     meeting: 'local',
-    device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-    handsFree: { backend: 'gemini', layer: 'light', handoff: 'auto' },
-    call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+    deviceAnswer: 'direct',
   },
+  voiceAgent: DEFAULT_VOICE_AGENT,
+  voiceTones: {},
   voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
   managerVoicePrompt: DEFAULT_MANAGER_VOICE_PROMPT,
   voiceInstructions: DEFAULT_VOICE_INSTRUCTIONS,
@@ -3704,6 +3696,13 @@ export const HostInfoEvent = z
       .array(z.object({ id: z.string().min(1), name: z.string(), category: z.string().optional() }))
       .optional(),
     elevenLabsVoicesError: z.string().optional(),
+    /**
+     * What this host read from each voice agent provider's API for Settings →
+     * Voice calls (spec/07 § The voice agent): models, voices, speech models,
+     * or why the read failed. Present only for providers this host has a key
+     * for. Re-read on `host.voice_catalog_refresh` and when a key changes.
+     */
+    voiceCatalog: VoiceCatalog,
     /**
      * Which hosted-voice provider keys this host holds (spec/07 § Voice — a
      * config matrix): GEMINI_API_KEY and OPENAI_REALTIME_API_KEY. Settings →
@@ -6408,6 +6407,20 @@ export type HostClaudeMemorySetEvent = z.infer<typeof HostClaudeMemorySetEvent>;
  * there is no dedicated reply frame, because the report IS the answer and a
  * second shape would be a second thing to keep in step.
  */
+/**
+ * Surface → host: read a voice agent provider's models and voices again
+ * (Settings → Voice calls → Refresh). Answered by a `host.host` whose
+ * `voiceCatalog` carries the new read.
+ */
+export const HostVoiceCatalogRefreshEvent = z
+  .object({
+    type: z.literal('host.voice_catalog_refresh'),
+    ...hostIdField,
+    provider: z.enum(['gemini', 'openai', 'elevenlabs']),
+  })
+  .strict();
+export type HostVoiceCatalogRefreshEvent = z.infer<typeof HostVoiceCatalogRefreshEvent>;
+
 export const HostBackendUsageRefreshEvent = z
   .object({
     type: z.literal('host.backend_usage_refresh'),
@@ -10918,6 +10931,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'host.claude_memory_set',
   'host.backend_add_account',
   'host.backend_usage_refresh',
+  'host.voice_catalog_refresh',
   'patch.models.request',
   'patch.backends.request',
   'patch.recurrence.translate.request',
@@ -11032,6 +11046,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostClaudeMemorySetEvent,
   HostBackendAddAccountEvent,
   HostBackendUsageRefreshEvent,
+  HostVoiceCatalogRefreshEvent,
   // Surface
   ChatInputEvent,
   ChatSettingsEvent,
@@ -11385,6 +11400,7 @@ export const EVENT_SCHEMAS = {
   'host.claude_memory_set': HostClaudeMemorySetEvent,
   'host.backend_add_account': HostBackendAddAccountEvent,
   'host.backend_usage_refresh': HostBackendUsageRefreshEvent,
+  'host.voice_catalog_refresh': HostVoiceCatalogRefreshEvent,
   'chat.input': ChatInputEvent,
   'chat.settings': ChatSettingsEvent,
   'chat.permission_response': ChatPermissionResponseEvent,

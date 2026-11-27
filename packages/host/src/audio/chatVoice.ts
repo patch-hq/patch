@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import type { ChatActivity, ChatVoiceHandoffEvent, WireEvent } from '@patch/wire';
-import type { SessionInit, VoiceTurnSource } from './session.js';
+import { parseYesNo, type SessionInit, type VoiceTurnSource } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import { callSummaryLine, costCall, type EngineCosting, type RealCharge } from './voiceCost.js';
 import type { VoiceLedger } from './voiceLedger.js';
@@ -91,6 +91,9 @@ export interface ChatVoiceHost {
   chatActivity(chatId: string): ChatActivity | null;
   /** A call's `look_back`: the chat's messages that match a few words. */
   searchChat(chatId: string, query: string): string;
+  /** The permission the chat is waiting on, if any. */
+  getPendingPermissionForChat(chatId: string): string | undefined;
+  submitPermissionResponse(r: { requestId: string; decision: 'approve' | 'deny' }): unknown;
 }
 
 export interface ChatVoice {
@@ -363,6 +366,15 @@ export function createChatVoice(deps: {
 
   const link: VoiceAgentLink = {
     startContext,
+
+    answerPermission(chatId, words) {
+      const requestId = deps.daemon.getPendingPermissionForChat(chatId);
+      if (requestId === undefined) return false;
+      const approve = parseYesNo(words);
+      if (approve === null) return false;
+      deps.daemon.submitPermissionResponse({ requestId, decision: approve ? 'approve' : 'deny' });
+      return true;
+    },
 
     passToAgent({ sessionId, chatId, request, source }) {
       const { localId, rowSeq, done } = sendHandoff({ chatId, message: request, source });

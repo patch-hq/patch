@@ -54,7 +54,7 @@ export async function speakInterrupt(
   try {
     const session = await openImpl({
       chatId,
-      role: 'voice-call',
+      role: 'announcement',
       withMic: false,
       deps: deps ?? {},
       callbacks: {

@@ -10,46 +10,22 @@
 // failed instead of a bare error code.
 
 import {
-  modesShareVoiceEngine,
-  voiceCellFor,
+  VOICE_AGENT_PROVIDER_LABEL,
   type AudioErrorCode,
-  type AudioSessionMode,
-  type VoiceAgentBackend,
-  type VoiceConfig,
-  type VoiceLayer,
+  type VoiceAgentSetting,
 } from '@patch/wire/audio';
 
-const ENGINE_NAME: Record<VoiceAgentBackend, string> = {
-  gemini: 'Gemini Live',
-  openai: 'OpenAI Realtime',
-  elevenlabs: 'ElevenLabs Agents',
-};
-
 /**
- * What the call bar names the voice agent a sustained session in `mode` runs
- * on. Null when the config hasn't loaded (no guess). A `direct` layer runs as
- * `light`, so it is named that.
+ * What the call bar names a voice agent call by (spec/15 § Voice states): the
+ * provider and the model, `Gemini · gemini-2.5-flash-native-audio`. Null until
+ * the setup has loaded (no guess) and when no model is chosen (the host
+ * refuses that call and says so).
  */
-export function callEngineLabel(config: VoiceConfig | null, mode: AudioSessionMode): string | null {
-  if (config === null) return null;
-  const cell = voiceCellFor(config, mode === 'hands-free' ? 'hands-free' : 'call');
-  const layer: VoiceLayer = cell.layer === 'heavy' ? 'heavy' : 'light';
-  return `${ENGINE_NAME[cell.backend]} · ${layer}`;
-}
-
-/**
- * Whether flipping an open session from `from` to `to` has to open a fresh
- * session because the two modes are configured onto different engines. With
- * the config unknown the switch is attempted in place, and the host refuses
- * it loudly if it would cross engines.
- */
-export function modeSwitchNeedsNewSession(
-  config: VoiceConfig | null,
-  from: AudioSessionMode,
-  to: AudioSessionMode,
-): boolean {
-  if (config === null || from === to) return false;
-  return !modesShareVoiceEngine(config, from, to);
+export function callEngineLabel(agent: VoiceAgentSetting | null): string | null {
+  if (agent === null) return null;
+  const model = agent.setups[agent.provider].model;
+  if (model === undefined) return null;
+  return `${VOICE_AGENT_PROVIDER_LABEL[agent.provider]} · ${model.replace(/^models\//, '')}`;
 }
 
 /**

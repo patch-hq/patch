@@ -206,7 +206,6 @@ describe('audio server — a hosted call to the Manager', () => {
     });
     const cfg: VoiceConfig = {
       ...DEFAULT_VOICE_CONFIG,
-      call: { backend: 'gemini', layer: 'light' },
     };
     const start = async () => {
       const handle = await startAudioServer({

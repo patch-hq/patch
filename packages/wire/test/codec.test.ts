@@ -252,6 +252,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     audioRelayHost: '127.0.0.1:3003',
     backends: [{ id: 'claude-code', label: 'Claude Code', version: '2.1.220', state: 'present' }],
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'not-installed' }],
+    voiceCatalog: {},
     voiceKeys: { gemini: false, openai: true },
   },
   'host.account': {
@@ -333,6 +334,12 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     type: 'host.backend_usage_refresh',
     hostId: 'host-a',
     backendId: 'claude-code',
+  },
+  // spec/07 § The voice agent — read a provider's models and voices again.
+  'host.voice_catalog_refresh': {
+    type: 'host.voice_catalog_refresh',
+    hostId: 'host-a',
+    provider: 'elevenlabs',
   },
   // spec/03 § Settings
   'settings.snapshot': {

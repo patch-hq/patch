@@ -70,7 +70,6 @@ import {
   bedrockMonth,
   BEDROCK_SPEND_IDS_KEPT,
 } from '@patch/wire';
-import { DEFAULT_VOICE_AGENT_CELL } from '@patch/wire/audio';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { AccountStateTracker } from './account-states.js';
 import { checkProviderKey, type FetchLike } from './provider-key-check.js';
@@ -78,7 +77,6 @@ import { validateClaudeOAuthToken, type ClaudeTokenValidation } from '@patch/aut
 
 /** Settings keys a host held before they were shared — taken from the FIRST host imported. */
 const HOST_HELD_KEYS = [
-  'voiceConfig',
   'kokoroVoice',
   'ttsBackend',
   'elevenLabsVoice',
@@ -463,15 +461,19 @@ export class SharedSettingsService {
         ];
       }
     }
-    // A call is always a voice agent call now; the host-speech (`local`) call
-    // it replaces is gone (spec/07 § Two kinds of call). A call or hands-free
-    // cell saved on it becomes the default voice agent, and the file has the
-    // new value at the next write. A voice device keeps its host speech.
-    const vc = raw['voiceConfig'] as Record<string, { backend?: unknown }> | undefined;
-    if (vc && typeof vc === 'object') {
-      for (const cell of ['call', 'handsFree'] as const) {
-        if (vc[cell]?.backend === 'local') vc[cell] = { ...DEFAULT_VOICE_AGENT_CELL };
-      }
+    // The per-surface provider cells and per-provider voices are gone: the
+    // voice agent setup replaced them (spec/07 § The voice agent). Their keys
+    // are dropped on read, like `claudeSettings` above, and the voice device's
+    // cell becomes its answer.
+    delete raw['geminiVoice'];
+    delete raw['openaiVoice'];
+    const voice = raw['voiceConfig'] as Record<string, unknown> | undefined;
+    if (voice && 'device' in voice) {
+      const device = voice['device'] as { backend?: unknown } | undefined;
+      voice['deviceAnswer'] = device?.backend === 'local' ? 'direct' : 'agent';
+      delete voice['device'];
+      delete voice['handsFree'];
+      delete voice['call'];
     }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {

@@ -67,7 +67,7 @@ describe('audio server — voice component missing', () => {
     server = undefined;
   });
 
-  test('a local voice call is refused with voice_component_missing, naming the component', async () => {
+  test('a voice device answering directly is refused with voice_component_missing, naming the component', async () => {
     const handle = await startAudioServer({
       host: '127.0.0.1',
       port: 0,
@@ -91,7 +91,7 @@ describe('audio server — voice component missing', () => {
         accountId: 'a',
         surfaceId: 'surf',
         surfaceKind: 'device',
-        deviceId: 'dev-test',
+        deviceId: 'surf',
         chatId: 'c1',
         role: 'voice-device-conv',
         token: mintToken({ accountId: 'a', surfaceId: 'surf', sessionId, chatId: 'c1' }),

@@ -36,9 +36,7 @@ import { useComposerDraftStore } from '../src/lib/composerDraft';
 // The phone dictating on Deepgram, which needs a key on the chat's host.
 const TOMS_CONFIG: VoiceConfig = {
   dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
-  device: { backend: 'openai', layer: 'light', handoff: 'auto' },
-  handsFree: { backend: 'gemini', layer: 'light', handoff: 'auto' },
-  call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+  deviceAnswer: 'agent',
 };
 const REFUSAL =
   'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
@@ -83,7 +81,8 @@ describe('voiceKeyRefusal', () => {
     expect(voiceKeyRefusal('c1', 'dictation')).toBe(REFUSAL);
     expect(REFUSAL).toBe(voiceKeyMissingMessage('dictation', 'deepgram'));
   });
-  it('says nothing for a host that has the key, or what it cannot know', () => {
+  it('says nothing for a local surface, a host that has the key, or what it cannot know', () => {
+    expect(voiceKeyRefusal('c1', 'call')).toBeNull();
     pinChat('c2', 'mac');
     expect(voiceKeyRefusal('c2', 'dictation')).toBeNull();
     // Unpinned chat, unreported host, config not loaded: the host decides.
@@ -143,9 +142,7 @@ describe('this phone’s own dictation engine', () => {
           voiceConfig: {
             dictation: { phone: 'device', computer: 'whisper', tidy: false },
             meeting: 'local',
-            device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-            handsFree: { backend: 'gemini', layer: 'light', handoff: 'auto' },
-            call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+            deviceAnswer: 'direct',
           },
           deviceDictation: { me: 'deepgram' },
         },

@@ -32,6 +32,7 @@ async function seed(page: Page, context: Record<string, unknown> | null): Promis
     const row = w.__store.getState().chats['chat_md']!;
     w.__presenceStore.getState().setHostReport({
       type: 'host.host',
+      voiceCatalog: {},
       hostId: row.hostId,
       hostName: 'box',
       backends: [],

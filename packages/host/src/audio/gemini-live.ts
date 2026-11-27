@@ -21,9 +21,8 @@
 //
 // Scope: this class only ever backs a `role: 'voice-call'` session on a
 // non-device surface — hands-free or call (audio/server.ts only constructs it
-// for those). `layer` picks the model (`geminiLiveModelFor`): `heavy` runs the
-// Live API's extended-thinking model, `light` — and `direct`, which has no
-// meaning on a hosted backend — the default. DICTATION on `gemini` does not use
+// for those). The model, voice and sound are the account's voice agent setup
+// (Settings → Voice calls). DICTATION on `gemini` does not use
 // a Live session at all: dictation is bounded by a gesture, not by Gemini's own
 // turn-taking, and is STT only, so it runs the ordinary `VoiceSession` with a
 // Gemini transcriber in Whisper's place (hosted-stt.ts). `finalizeNote()` below
@@ -62,7 +61,7 @@ import type { AudioEvent, AudioSessionMode, VoiceHandoff } from '@patch/wire/aud
 import type { Vad } from './vad.js';
 import type { WhisperBackend } from './whisper.js';
 import { AddressGate } from './address-gate.js';
-import { modeRequiresAddress } from '@patch/wire/audio';
+import { mergeConfig, modeRequiresAddress } from '@patch/wire/audio';
 import type { SessionInit, SessionState } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import { SpokenReply } from './spokenReply.js';
@@ -97,27 +96,15 @@ import {
 export const DEFAULT_GEMINI_LIVE_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
 
 /**
- * The `layer: heavy` model — the Live API's high-reasoning variant, documented
- * 2026-09-24 (ai.google.dev/gemini-api/docs/models/gemini-3.8-live-extended-thinking:
- * Live API supported, function calling async-only — which is exactly how
- * the voice agent's tools are declared, NON_BLOCKING). `light` (and `direct`, which
- * has no hosted meaning) stays on {@link DEFAULT_GEMINI_LIVE_MODEL}.
+ * Affective dialog (`generationConfig.enableAffectiveDialog`, Settings' "Match
+ * my tone") is only on the v1alpha Live API, so a session that asks for it
+ * opens there.
  */
-export const DEFAULT_GEMINI_LIVE_HEAVY_MODEL = 'models/gemini-3.8-live-extended-thinking';
-
-/** The model a Gemini layer runs. */
-export function geminiLiveModelFor(
-  layer: import('@patch/wire/audio').VoiceLayer,
-  overrides: { light?: string | undefined; heavy?: string | undefined } = {},
-): string {
-  if (layer === 'heavy') return overrides.heavy ?? DEFAULT_GEMINI_LIVE_HEAVY_MODEL;
-  return overrides.light ?? DEFAULT_GEMINI_LIVE_MODEL;
-}
-
-function bidiGenerateContentUrl(apiKey: string): string {
+function bidiGenerateContentUrl(apiKey: string, affective: boolean): string {
+  const version = affective ? 'v1alpha' : 'v1beta';
   return (
     'wss://generativelanguage.googleapis.com/ws/' +
-    `google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`
+    `google.ai.generativelanguage.${version}.GenerativeService.BidiGenerateContent?key=${apiKey}`
   );
 }
 
@@ -137,6 +124,8 @@ export interface GeminiLiveDeps {
   instructions: string;
   /** How the voice sounds, as the user wrote it; goes in the instructions after them. */
   tone?: string;
+  /** How it sounds, as `setup` fields (`soundConfig` of the Gemini engine description). */
+  soundConfig?: Record<string, unknown>;
   /** GEMINI_API_KEY. Required — the caller must have already refused to construct this class without one (NO FALLBACK). */
   apiKey: string;
   /** Defaults to {@link DEFAULT_GEMINI_LIVE_MODEL}. */
@@ -171,6 +160,7 @@ interface GeminiSetupMessage {
     generationConfig: {
       responseModalities: ['AUDIO'];
       speechConfig?: { voiceConfig: { prebuiltVoiceConfig: { voiceName: string } } };
+      enableAffectiveDialog?: boolean;
     };
     systemInstruction: { parts: [{ text: string }] };
     tools?: [{ functionDeclarations: GeminiFunctionDeclaration[] }];
@@ -311,9 +301,10 @@ function buildSetupMessage(
   tools: GeminiFunctionDeclaration[],
   instructions: string,
   manualActivity: boolean,
-  voiceName?: string,
+  voiceName: string | undefined,
+  sound: Record<string, unknown>,
 ): GeminiSetupMessage {
-  return {
+  const message: GeminiSetupMessage = {
     setup: {
       model,
       generationConfig: {
@@ -336,6 +327,7 @@ function buildSetupMessage(
       outputAudioTranscription: {},
     },
   };
+  return { setup: mergeConfig(message.setup, sound) };
 }
 
 /**
@@ -602,7 +594,16 @@ export class GeminiLiveSession implements VoiceSessionLike {
   }
 
   private async connect(): Promise<void> {
-    const url = this.deps.wsUrl ?? bidiGenerateContentUrl(this.deps.apiKey);
+    const url =
+      this.deps.wsUrl ??
+      bidiGenerateContentUrl(
+        this.deps.apiKey,
+        (
+          this.deps.soundConfig?.['generationConfig'] as
+            | { enableAffectiveDialog?: unknown }
+            | undefined
+        )?.enableAffectiveDialog === true,
+      );
     const Ctor = this.deps.wsCtor ?? (WsImpl as unknown as new (url: string) => WsSocket);
     const ws = new Ctor(url);
     this.ws = ws;
@@ -649,6 +650,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
           instructions,
           this.deps.gate !== undefined,
           this.deps.voice,
+          this.deps.soundConfig ?? {},
         ),
       ),
     );
@@ -1109,6 +1111,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
     if (text.length === 0) return;
     this.deps.timeline.userSaid(this.call.chatId, text);
     this.deps.sendAudio({ type: 'audio.transcript_final', sessionId: this.init.sessionId, text });
+    // spec/07 § Permission prompts during voice — a spoken yes / no answers a waiting permission.
+    this.deps.link.answerPermission(this.call.chatId, text);
   }
 
   /** The reply being spoken now, begun on its first words or audio. */

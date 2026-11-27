@@ -255,6 +255,7 @@ describe("a host's self-description", () => {
     audioRelayHost: '127.0.0.1:3003',
     backends: [],
     components: [],
+    voiceCatalog: {},
   };
 
   it('omits defaultModel entirely until the account default has reached the host', () => {
@@ -321,6 +322,7 @@ describe('the greeting carries every registered host', () => {
       { id: 'claude-code', label: 'Claude Code', version: '2.1.0', state: 'present' as const },
     ],
     components: [{ id: 'kokoro', label: 'Kokoro', bytes: 82_000_000, state: 'installed' as const }],
+    voiceCatalog: {},
   };
 
   it('carries presence, the cached self-description and the per-backend accounts', () => {
@@ -620,6 +622,7 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
         'host.rename',
         'host.settings',
         'host.update',
+        'host.voice_catalog_refresh',
         'patch.folders.browse.request',
         'patch.host_files.request',
         'patch.host_search.request',

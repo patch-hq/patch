@@ -75,6 +75,7 @@ export function reportHost(
     permissionOverrides,
     runsManager,
     audioRelayHost,
+    voiceCatalog,
     ...rest
   } = patch;
   usePresenceStore.getState().setHostReport({
@@ -91,6 +92,7 @@ export function reportHost(
     audioRelayHost: audioRelayHost ?? '127.0.0.1:3003',
     backends: [],
     components: [],
+    voiceCatalog: voiceCatalog ?? {},
     // Anything else the test names (harnessMcpServers, kokoroVoice, backends,
     // updateAvailable, …) is reported exactly as given.
     ...rest,

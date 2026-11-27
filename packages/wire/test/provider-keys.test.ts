@@ -53,6 +53,7 @@ describe('HostProviderKey', () => {
       audioRelayHost: '127.0.0.1:3003',
       backends: [],
       components: [],
+      voiceCatalog: {},
       providerKeys: [{ id: 'gemini', source: 'none', envSet: false }],
     };
     expect(HostInfoEvent.parse(host).providerKeys).toEqual([

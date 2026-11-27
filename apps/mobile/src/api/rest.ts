@@ -31,6 +31,7 @@ import type { Hook, HookCreateBody, HookPatchBody } from '@patch/wire/hooks';
 import { loadCredential } from '../lib/credential';
 import { bytesToBase64 } from '../lib/base64';
 import { apiUrl } from '../config';
+import type { AudioSessionRole } from '@patch/wire/audio';
 
 /** One row of a host directory listing (spec/03 § Host files). */
 
@@ -301,15 +302,6 @@ export interface SettingsResponse {
   preferences: AccountPreferences;
   /** Secrets as source and last four only, and each host's applied version. */
   shared?: Omit<SharedState, 'settings'>;
-}
-
-export type VoiceBackend = 'local' | 'gemini' | 'openai' | 'elevenlabs';
-export type VoiceLayer = 'direct' | 'light' | 'heavy';
-export type VoiceHandoff = 'auto' | 'always' | 'never';
-export interface VoiceSurfaceConfig {
-  backend: VoiceBackend;
-  layer: VoiceLayer;
-  handoff: VoiceHandoff;
 }
 
 /** One Pad as the server serves it (spec/14 § Pads). */
@@ -706,7 +698,7 @@ export const api = {
   // surfaceKind), which would mean a voice session NEVER opens. Returns the
   // raw `token` (echoed in the host audio-WSS session_start frame), the
   // `sessionId`, the relative `audioUrl` (`/audio/<sessionId>`), and expiry.
-  voiceToken: (chatId: string, role: 'voice-note' | 'voice-call' | 'voice-device-conv') =>
+  voiceToken: (chatId: string, role: AudioSessionRole) =>
     request<{ token: string; sessionId: string; audioUrl: string; expiresAt: number }>(
       '/api/voice/token',
       {

@@ -13,16 +13,12 @@
 // An ElevenLabs agent is a stored object (prompt, LLM, tools, voice), not
 // something a WebSocket configures on the fly, and its tools cannot be
 // overridden per conversation. So each session PROVISIONS a throwaway agent
-// from this host's current settings — front LLM from the layer, the user's
+// from the account's voice agent setup — its LLM, voice and sound, the user's
 // voice instructions with the chat's start context after them, the client
 // tools — opens a conversation
 // on a signed URL, and DELETES the agent and tools when the session ends. No
 // agent ids are kept on disk; nothing drifts from the code. A failed delete is
 // logged as an error, never swallowed.
-//
-// `layer` picks the front LLM: `light` → Claude Haiku, `heavy` → Claude Sonnet
-// (`DEFAULT_ELEVENLABS_AGENT_LLMS`, overridable per host). `direct` has no
-// hosted meaning and runs as `light`.
 //
 // Audio: the agent is created with 16 kHz PCM in (what surfaces send, so no
 // resampling) and 24 kHz PCM out (what the surfaces' TTS sinks play). The
@@ -50,8 +46,8 @@
 
 import type { Logger } from 'pino';
 import { WebSocket as WsImpl, type WebSocket as WsSocket } from 'ws';
-import type { AudioEvent, AudioSessionMode, VoiceHandoff, VoiceLayer } from '@patch/wire/audio';
-import { modeRequiresAddress } from '@patch/wire/audio';
+import type { AudioEvent, AudioSessionMode, VoiceHandoff } from '@patch/wire/audio';
+import { mergeConfig, modeRequiresAddress } from '@patch/wire/audio';
 import type { VoiceTimeline, VoiceSessionLike } from './voice-session-like.js';
 import { SpokenReply } from './spokenReply.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
@@ -87,15 +83,6 @@ import {
   type ManagerVoiceTools,
 } from './managerVoice.js';
 
-/**
- * Front LLMs per layer. Ids are ElevenLabs' (elevenlabs.io/docs/eleven-agents,
- * checked 2026-10-29). Override per host for any other model they list.
- */
-export const DEFAULT_ELEVENLABS_AGENT_LLMS = {
-  light: 'claude-haiku-4-5',
-  heavy: 'claude-sonnet-4-5',
-} as const;
-
 export const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
 const INPUT_FORMAT = 'pcm_16000';
 const OUTPUT_FORMAT = 'pcm_24000';
@@ -127,15 +114,6 @@ export const SETUP_TIMEOUT_MS = 12_000;
 /** Expressive audio tags the voice model writes into its text (`[happy] Banana!`). */
 const AUDIO_TAG = /\[[a-z][a-z ]*\]\s*/gi;
 
-/** The LLM a hosted layer runs. `direct` has no hosted meaning and runs as `light`. */
-export function elevenLabsAgentLlmFor(
-  layer: VoiceLayer,
-  overrides: { light?: string | undefined; heavy?: string | undefined } = {},
-): string {
-  if (layer === 'heavy') return overrides.heavy ?? DEFAULT_ELEVENLABS_AGENT_LLMS.heavy;
-  return overrides.light ?? DEFAULT_ELEVENLABS_AGENT_LLMS.light;
-}
-
 export type ElevenLabsWsCtor = new (url: string) => WsSocket;
 export type ElevenLabsFetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -153,16 +131,18 @@ export interface ElevenLabsAgentDeps {
   instructions: string;
   /** How the voice sounds, as the user wrote it; goes in the instructions after them. */
   tone?: string;
+  /** How it sounds, as `conversation_config` fields (`soundConfig` of the ElevenLabs engine description). */
+  soundConfig?: Record<string, unknown>;
   /** ELEVEN_LABS_API_KEY. The caller refuses to construct this class without one. */
   apiKey: string;
-  /** The agent's front LLM — resolved from the layer by the caller (`elevenLabsAgentLlmFor`). */
+  /** The agent's LLM, from the voice agent setup. */
   llm: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
   /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
   manager?: ManagerVoiceTools;
   /** An ElevenLabs voice id; absent uses the platform default voice. */
-  voiceId?: string;
+  voice?: string;
   /** The conversation is gone for good; the audio server ends the surface session. */
   onFatal?: (message: string) => void;
   /** Test seams. */
@@ -430,25 +410,28 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     }
     const created = (await this.api('POST', '/v1/convai/agents/create', {
       name: `patch-voice-${this.init.sessionId}`,
-      conversation_config: {
-        agent: {
-          // Empty: the agent waits for the user to speak first. An agent's call opens
-          // with its reason as the call's first push (VoiceAgentCall), as on every provider.
-          first_message: '',
-          language: 'en',
-          prompt: {
-            prompt,
-            llm: this.deps.llm,
-            tool_ids: this.toolIds,
+      conversation_config: mergeConfig(
+        {
+          agent: {
+            // Empty: the agent waits for the user to speak first. An agent's call opens
+            // with its reason as the call's first push (VoiceAgentCall), as on every provider.
+            first_message: '',
+            language: 'en',
+            prompt: {
+              prompt,
+              llm: this.deps.llm,
+              tool_ids: this.toolIds,
+            },
+          },
+          conversation: { max_duration_seconds: ELEVENLABS_MAX_CALL_SECONDS },
+          asr: { user_input_audio_format: INPUT_FORMAT },
+          tts: {
+            agent_output_audio_format: OUTPUT_FORMAT,
+            ...(this.deps.voice ? { voice_id: this.deps.voice } : {}),
           },
         },
-        conversation: { max_duration_seconds: ELEVENLABS_MAX_CALL_SECONDS },
-        asr: { user_input_audio_format: INPUT_FORMAT },
-        tts: {
-          agent_output_audio_format: OUTPUT_FORMAT,
-          ...(this.deps.voiceId ? { voice_id: this.deps.voiceId } : {}),
-        },
-      },
+        this.deps.soundConfig ?? {},
+      ),
     })) as { agent_id?: string };
     if (!created.agent_id) throw new Error('ElevenLabs created an agent but returned no agent_id');
     this.agentId = created.agent_id;
@@ -713,6 +696,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     }
     this.turns += 1;
     this.deps.timeline.userSaid(this.call.chatId, text);
+    // spec/07 § Permission prompts during voice — a spoken yes / no answers a waiting permission.
+    this.deps.link.answerPermission(this.call.chatId, text);
     this.setState('thinking');
   }
 

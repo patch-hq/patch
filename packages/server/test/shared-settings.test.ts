@@ -26,6 +26,7 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
+import { DEFAULT_VOICE_AGENT } from '@patch/wire/audio';
 import { DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
@@ -401,6 +402,33 @@ describe('SharedSettingsService', () => {
     ]);
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ localModelBaseUrl: '' }));
     expect(make().current().modelEndpoints).toBeUndefined();
+  });
+
+  it('drops the retired per-surface voice cells and voices on read; the device keeps its answer', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        voiceConfig: {
+          speechToText: 'groq',
+          dictation: { phone: 'device', computer: 'whisper', tidy: false },
+          meeting: 'local',
+          device: { backend: 'openai', layer: 'light', handoff: 'auto' },
+          handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
+          call: { backend: 'elevenlabs', layer: 'heavy', handoff: 'auto' },
+        },
+        geminiVoice: 'Kore',
+        openaiVoice: 'marin',
+      }),
+    );
+    const read = make().current();
+    expect(read.voiceConfig).toEqual({
+      speechToText: 'groq',
+      dictation: { phone: 'device', computer: 'whisper', tidy: false },
+      meeting: 'local',
+      deviceAnswer: 'agent',
+    });
+    expect(read).not.toHaveProperty('geminiVoice');
+    expect(read.voiceAgent).toEqual(DEFAULT_VOICE_AGENT);
   });
 
   it('merges two hosts’ accounts, dropping a second copy of the same Claude account', () => {

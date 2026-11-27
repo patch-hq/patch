@@ -134,6 +134,7 @@ describe('chat-detail header', () => {
     seedChat('c1', { hostId: 'd1' });
     usePresenceStore.getState().setHostReport({
       type: 'host.host',
+      voiceCatalog: {},
       hostId: 'd1',
       hostName: 'hetzner',
       platform: 'linux',

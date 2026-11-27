@@ -163,6 +163,20 @@ describe('chat voice glue', () => {
     ]);
   });
 
+  it('answer permission: a plain yes or no answers the permission the chat waits on, and nothing else does', async () => {
+    const { daemon, folder, glue } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    expect(glue.link.answerPermission(chatId, 'yes')).toBe(false);
+    daemon.injectPermissionRequest(chatId, 'Bash', 'run a command');
+    expect(glue.link.answerPermission(chatId, 'what does it do')).toBe(false);
+    expect(daemon.getPendingPermissionForChat(chatId)).toBeDefined();
+    expect(glue.link.answerPermission(chatId, 'No.')).toBe(true);
+    expect(daemon.getPendingPermissionForChat(chatId)).toBeUndefined();
+    daemon.injectPermissionRequest(chatId, 'Bash', 'run another');
+    expect(glue.link.answerPermission(chatId, 'yes')).toBe(true);
+    expect(daemon.getPendingPermissionForChat(chatId)).toBeUndefined();
+  });
+
   it('a reply with no words is not written', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });

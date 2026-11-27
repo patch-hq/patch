@@ -70,7 +70,9 @@ function ago(at: number): string {
 export function VoiceProfilesGroup(): JSX.Element {
   const prefs = usePreferencesStore((s) => s.preferences);
   const profiles = prefs.voiceProfiles;
-  const deviceEngine = prefs.voiceConfig.device.backend;
+  // Only the OpenAI voice agent recognises speakers so far.
+  const recognises =
+    prefs.voiceConfig.deviceAnswer === 'agent' && prefs.voiceAgent.provider === 'openai';
   const [name, setName] = useState('');
 
   const update = (id: string, change: (p: VoiceProfile) => VoiceProfile): Promise<boolean> =>
@@ -95,7 +97,7 @@ export function VoiceProfilesGroup(): JSX.Element {
         A voice device can tell people apart by their voice. Someone it does not recognise gets
         general chat only: no agent, and nothing from your chats.
       </Note>
-      {deviceEngine !== 'openai' && profiles.some((p) => p.voiceprint) ? (
+      {!recognises && profiles.some((p) => p.voiceprint) ? (
         <Note testid="voice-profiles-engine-note">
           Voices are recognised when voice devices use OpenAI (Voice conversations above). With the
           current choice, everyone in the room is answered alike.

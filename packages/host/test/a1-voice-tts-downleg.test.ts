@@ -296,13 +296,14 @@ async function waitFor(pred: () => boolean, timeoutMs = 25_000): Promise<void> {
 }
 
 /**
- * A host-speech conversation is a voice device's (spec/07 § Host speech
- * engines); live partials are dictation's, on a web surface.
+ * A host-speech session: a voice device answering directly (`conversation`),
+ * or dictation from the app (`dictation`), which is the one that shows live
+ * partials (a device has no screen to show them on).
  */
 function startSession(
   ws: WebSocket,
   sessionId: string,
-  kind: 'device' | 'dictation' = 'device',
+  kind: 'conversation' | 'dictation' = 'conversation',
 ): void {
   ws.send(
     encodeAudio({
@@ -310,10 +311,10 @@ function startSession(
       sessionId,
       accountId: 'acct-a117',
       surfaceId: 'surf-a117',
-      ...(kind === 'device'
+      ...(kind === 'conversation'
         ? {
             surfaceKind: 'device' as const,
-            deviceId: 'dev-test',
+            deviceId: 'surf-a117',
             role: 'voice-device-conv' as const,
           }
         : { surfaceKind: 'web' as const, role: 'voice-note' as const }),
@@ -448,7 +449,7 @@ describe('A1 — audio.transcript_partial (live STT of the utterance in flight)'
     const ws = await openWs(handle.port, sessionId);
     const frames: Frame[] = [];
     record(ws, frames);
-    startSession(ws, sessionId);
+    startSession(ws, sessionId, 'dictation');
     await waitFor(() => frames.length > 0, 2000);
 
     // 0.5 s, then 1.0 s more, then 1.0 s more of mic audio @ 16 kHz — well past

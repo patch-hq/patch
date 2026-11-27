@@ -23,6 +23,7 @@ import { isStockHallucination } from './partial-filter.js';
 import type { VoiceSessionLike } from './voice-session-like.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { GROQ_MIN_BILLED_SECONDS, type EngineCosting, type SttUsage } from './voiceCost.js';
+import type { AudioSessionRole } from '@patch/wire/audio';
 
 export type SessionState = 'connecting' | 'listening' | 'transcribing' | 'thinking' | 'speaking';
 
@@ -36,7 +37,7 @@ export interface SessionInit {
   /** Audio-plane surface kind — includes `'device'` for physical speakers. */
   surfaceKind: AudioSurfaceKind;
   chatId: string;
-  role: 'voice-note' | 'voice-call' | 'voice-device-conv';
+  role: AudioSessionRole;
   surfaceHasAec: boolean;
   /**
    * Physical voice-device identity. Present iff `surfaceKind === 'device'`.

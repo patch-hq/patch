@@ -178,6 +178,12 @@ export interface VoiceAgentLink {
   }): void;
   checkStatus(sessionId: string, chatId: string): string;
   lookBack(chatId: string, query: string): string;
+  /**
+   * The user's finished words on a call (spec/07 § Permission prompts during
+   * voice): when the chat waits on a permission and the words are a plain yes
+   * or no, answer it. Returns whether they did.
+   */
+  answerPermission(chatId: string, words: string): boolean;
   /** Hang the call up as the agent ending it (`ended_by_agent`): a clean end, not a drop. */
   endCall(sessionId: string): void;
   /** Move the call to another chat on this host; the host re-announces it. */

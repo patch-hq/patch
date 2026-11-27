@@ -6,9 +6,7 @@ import { describe, test, expect, afterEach } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
 import { WebSocket } from 'ws';
-import { EventEmitter } from 'node:events';
-import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
-import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
+import { fakeVoiceAgent } from './helpers/fakeVoiceAgent.js';
 import { startAudioServer, type AudioServerHandle } from '../src/audio/server.js';
 import { createWhisper } from '../src/audio/whisper.js';
 import { createKokoro } from '../src/audio/kokoro.js';
@@ -61,27 +59,8 @@ async function start(calls: CallInfo[]): Promise<AudioServerHandle & { port: num
     makeVad: () => new MockVad(),
     submitUserTurn: async () => 'ok',
     chatExists: () => true,
-    // A call is a voice agent call (spec/07 § Two kinds of call): an in-memory
-    // Gemini Live stands in for the provider.
-    geminiApiKey: 'g-key',
-    voiceAgentLink: fakeVoiceAgentLink().link,
-    getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
-    makeTimeline: () => ({ userSaid() {}, beginReply: () => ({ append() {}, finish() {} }) }),
-    geminiWsCtor: function () {
-      const inst = Object.assign(new EventEmitter(), {
-        send(data: string): void {
-          if ((JSON.parse(data) as { setup?: unknown }).setup) {
-            queueMicrotask(() =>
-              inst.emit('message', JSON.stringify({ setupComplete: {} }), false),
-            );
-          }
-        },
-        close(): void {},
-      });
-      queueMicrotask(() => inst.emit('open'));
-      return inst;
-    } as never,
     onCallSession: (info) => calls.push(info),
+    ...fakeVoiceAgent(),
   });
   server = Object.assign(handle, { port: handle.address().port });
   return server;
