@@ -73,7 +73,7 @@ test.describe('sidebar empty-state inset', () => {
   }) => {
     await page.goto(HARNESS);
     // The chat panel is a SIBLING of `aside.sb`, so `.sb .empty-hint` cannot
-    // reach ThreadsStrip's `.threads-empty` / the routes' `.empty` placeholders.
+    // reach the routes' `.empty` placeholders.
     const leaks = await page.evaluate(() => {
       const sb = document.querySelector('.sb');
       const probe = document.createElement('div');

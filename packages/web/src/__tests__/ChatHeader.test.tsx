@@ -506,6 +506,29 @@ describe('ChatHeader', () => {
     expect(screen.queryByTestId('action-clear-context')).not.toBeInTheDocument();
   });
 
+  it('the Manager alone has a settings gear, and it opens Settings → Manager', () => {
+    rtlRender(
+      <MemoryRouter initialEntries={['/chats/thread_manager']}>
+        <Routes>
+          <Route
+            path="/chats/:id"
+            element={<ChatHeader row={row({ chatId: 'thread_manager' })} />}
+          />
+          <Route path="/settings/manager" element={<p data-testid="at-manager-settings" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const gear = screen.getByTestId('action-manager-settings');
+    expect(gear.getAttribute('aria-label')).toBe('Manager settings');
+    fireEvent.click(gear);
+    expect(screen.getByTestId('at-manager-settings')).toBeInTheDocument();
+  });
+
+  it('an ordinary chat has no Manager settings gear', () => {
+    render(<ChatHeader row={row({ chatId: 'c1' })} />);
+    expect(screen.queryByTestId('action-manager-settings')).not.toBeInTheDocument();
+  });
+
   it('Clear context calls rotateChat for the special thread', () => {
     render(<ChatHeader row={row({ chatId: 'thread_manager' })} />);
     openMore();

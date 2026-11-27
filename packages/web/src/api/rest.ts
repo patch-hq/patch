@@ -64,6 +64,8 @@ export interface HostFileEntry {
 
 /** One chat row as the server serves it, from the roster or by id. */
 export interface ChatSummaryRow {
+  /** A special thread's current provider session (spec/06 § Bounded context). */
+  session?: { messages: number; startedAt: number } | null;
   chatId: string;
   name: string | null;
   preview: string | null;
@@ -833,8 +835,12 @@ export const api = {
   // spec/06 § Session rotation — manual trigger for a reserved special
   // thread: retire its Claude session and start fresh, seeded with a handoff
   // digest. Refused server-side for anything that isn't Manager/Speakers.
-  rotateChat: (chatId: string) =>
-    request<{ ok: true }>(`/api/chats/${chatId}/rotate`, { method: 'POST' }),
+  // `{carry: false}` is Clear (spec/06 § Bounded context): a fresh session with nothing carried.
+  rotateChat: (chatId: string, opts?: { carry: false }) =>
+    request<{ ok: true }>(`/api/chats/${chatId}/rotate`, {
+      method: 'POST',
+      ...(opts ? { body: opts } : {}),
+    }),
   // spec/04 § Snooze — `snoozedUntil` is an ABSOLUTE ms epoch (the preset is
   // resolved here so a slow request can't drift the wake time); null unsnoozes.
   // `setId` names the user action — a project snooze sends one id for every
@@ -1718,12 +1724,6 @@ export const api = {
   getNotifications: () => request<NotificationsResponse>('/api/notifications'),
   markNotificationsRead: (target: { ids: string[] } | { all: true }) =>
     request<NotificationsResponse>('/api/notifications/read', { method: 'POST', body: target }),
-  // spec/06 § Sweep — the Manager view's "Last sweep" line + its expanded
-  // run list, and the "Check now" button.
-  getSweepRuns: (limit?: number) =>
-    request<{ runs: SweepRun[] }>(`/api/manager/sweeps${limit ? `?limit=${limit}` : ''}`),
-  checkSweepNow: () =>
-    request<{ fired: boolean }>('/api/manager/sweep/check-now', { method: 'POST' }),
 };
 
 /** spec/09 § bell — one agent-sent notification. */
@@ -1743,21 +1743,6 @@ export interface NotificationEntry {
 export interface NotificationsResponse {
   items: NotificationEntry[];
   unread: number;
-}
-
-/** spec/06 § Sweep — one completed sweep run, as the "Last sweep" line and the sweep-runs list read it. */
-export interface SweepRun {
-  at: number;
-  runId: string;
-  candidateCount: number;
-  actions: {
-    chatId: string;
-    action: 'answer' | 'digest' | 'leave';
-    edge?: string;
-    detail?: string;
-  }[];
-  tokensUsed: number;
-  error?: string;
 }
 
 /** spec/14 § Batch mode — the check-in choice `Batch` offers. */

@@ -54,9 +54,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
         throw new Error('api.getChat not stubbed for this test');
       }),
       checkHooks: vi.fn(async () => ({ decision: 'pass' as const, results: [] })),
-      getSweepRuns: vi.fn(async () => ({ runs: [] })),
       getJob: vi.fn(async (id: string) => ({ id, name: 'Test job' })),
-      checkSweepNow: vi.fn(async () => ({ fired: false })),
     },
   };
 });

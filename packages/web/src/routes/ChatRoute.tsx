@@ -101,7 +101,6 @@ import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { HookBlockCard } from '../components/HookBlockCard.js';
 import type { HookRunResult } from '@patch/wire/hooks';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
-import { ThreadsStrip } from '../components/ThreadsStrip.js';
 
 /** What the Manager is, said where a newcomer first meets it: its empty chat. */
 export const MANAGER_EMPTY_LINE = 'Ask about any of your chats, or have it message them for you.';
@@ -2782,10 +2781,6 @@ export function ChatRoute({
           </>
         )}
       </MeetingLayout>
-      {/* spec/14 § Manager view — the sit-and-watch layout: the Manager
-          conversation above, everything it is watching underneath. Only the
-          Manager gets it; every other chat is a chat. */}
-      {chatId === SPECIAL_THREAD_IDS.manager ? <ThreadsStrip /> : null}
     </main>
   );
 }

@@ -10,6 +10,8 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../api/rest.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
+import { usePreferencesStore } from '../../stores/preferencesStore.js';
+import { patchShared } from './sharedWrite.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { failed } from '../../lib/errorCopy.js';
 import { hostLabel, sortHosts } from './hostScope.js';
@@ -144,6 +146,121 @@ export function ManagerHomeGroup(): JSX.Element {
           </div>
         </div>
       ) : null}
+      <ManagerFolderRow homeHostId={current} />
     </Group>
+  );
+}
+
+/** Where the Manager works when no folder is set (spec/06 § Where special threads run). */
+export const DEFAULT_MANAGER_FOLDER_LABEL = '~/.patch/threads/manager';
+
+/**
+ * Settings → Manager → Home → Folder (spec/06 § Manager prompt and folder):
+ * the path, with Change opening a path field. Save asks the home host,
+ * through host files, whether the path is a folder there, and saves only if
+ * it is; the host's own answer is shown when it is not.
+ */
+function ManagerFolderRow({ homeHostId }: { homeHostId: string | null }): JSX.Element {
+  const folder = usePreferencesStore((s) => s.preferences.managerFolder);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save(): Promise<void> {
+    if (draft === null) return;
+    const next = draft.trim();
+    setBusy(true);
+    setProblem(null);
+    try {
+      if (next !== '') {
+        if (homeHostId === null) {
+          setProblem('No home host to check the folder on.');
+          return;
+        }
+        try {
+          await api.hostFilesList(homeHostId, next, { maxEntries: 1 });
+        } catch (e) {
+          setProblem(serverSays(e));
+          return;
+        }
+      }
+      if (await patchShared('Manager folder', { managerFolder: next })) setDraft(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="set-row stack" data-testid="manager-folder">
+      <div className="set-row-head">
+        <div className="set-row-text">
+          <span className="set-row-title">Folder</span>
+          <span className="set-sub">The Manager works here and can use this folder's skills</span>
+        </div>
+        {draft === null ? (
+          <div className="set-row-ctrl">
+            <span className="set-unit mgr-path" data-testid="manager-folder-path">
+              {folder === '' ? DEFAULT_MANAGER_FOLDER_LABEL : folder}
+            </span>
+            <button
+              type="button"
+              className="set-link"
+              data-testid="manager-folder-change"
+              disabled={!loaded}
+              onClick={() => {
+                setProblem(null);
+                setDraft(folder);
+              }}
+            >
+              Change
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {draft !== null ? (
+        <>
+          <input
+            type="text"
+            aria-label="Manager folder"
+            className="set-path"
+            data-testid="manager-folder-input"
+            placeholder={DEFAULT_MANAGER_FOLDER_LABEL}
+            value={draft}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void save();
+              if (e.key === 'Escape') setDraft(null);
+            }}
+          />
+          {problem !== null ? (
+            <span className="set-sub-error" data-testid="manager-folder-error">
+              {problem}
+            </span>
+          ) : null}
+          <div className="set-actions">
+            <button
+              type="button"
+              className="set-btn ghost"
+              data-testid="manager-folder-cancel"
+              disabled={busy}
+              onClick={() => setDraft(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="set-btn primary"
+              data-testid="manager-folder-save"
+              disabled={busy}
+              onClick={() => void save()}
+            >
+              Save
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }

@@ -1,33 +1,25 @@
-// Settings → Manager → "Questions for me": how soon a question the Manager
-// could not answer reaches Tom (spec/06 § The sweep, job 3). One end is
-// Instant (a notification as the chat goes idle), the other batches them into
-// one digest every N minutes or hours. The list is the same either way.
+// Settings → Manager → Finished chats → Every: how often a batch of finished
+// chats is sent to the Manager (spec/06 § Finished chats).
 
 import { useEffect, useRef, useState, type JSX } from 'react';
+import { MANAGER_WAKE_INTERVAL_CHOICES } from '@patch/wire';
 
-/** Minutes between digests; 0 is Instant. */
-export const DELIVERY_STEPS = [0, 5, 15, 30, 60, 120, 240, 480, 1440] as const;
-
-export function deliveryLabel(minutes: number): string {
-  if (minutes === 0) return 'Instant';
-  if (minutes < 60) return `Digest every ${minutes} min`;
-  if (minutes % 60 === 0) {
-    const h = minutes / 60;
-    return h === 24 ? 'Digest every day' : `Digest every ${h} h`;
-  }
-  return `Digest every ${minutes} min`;
+export function intervalLabel(minutes: number): string {
+  if (minutes < 60 || minutes % 60 !== 0) return `${minutes} min`;
+  const h = minutes / 60;
+  return h === 24 ? 'a day' : `${h} h`;
 }
 
 /** The slider's steps, plus the stored value when it is not one of them, so it is shown as it is. */
 function stepsFor(value: number): number[] {
-  const steps: number[] = [...DELIVERY_STEPS];
+  const steps: number[] = [...MANAGER_WAKE_INTERVAL_CHOICES];
   if (!steps.includes(value)) steps.push(value);
   return steps.sort((a, b) => a - b);
 }
 
 const COMMIT_AFTER_MS = 300;
 
-export function DeliverySlider({
+export function BatchIntervalSlider({
   value,
   onCommit,
   disabled,
@@ -58,8 +50,8 @@ export function DeliverySlider({
         step={1}
         value={steps.indexOf(shown)}
         disabled={disabled}
-        aria-label="How soon questions reach me"
-        aria-valuetext={deliveryLabel(shown)}
+        aria-label="Batch every"
+        aria-valuetext={intervalLabel(shown)}
         data-testid={testid}
         onChange={(e) => {
           const next = steps[Number(e.target.value)]!;
@@ -74,7 +66,7 @@ export function DeliverySlider({
         }}
       />
       <span className="set-unit" data-testid={`${testid}-label`}>
-        {deliveryLabel(shown)}
+        {intervalLabel(shown)}
       </span>
     </span>
   );
