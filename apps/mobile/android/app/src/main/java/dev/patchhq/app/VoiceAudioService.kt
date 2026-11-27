@@ -9,10 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 
 /**
@@ -68,6 +71,7 @@ class VoiceAudioService : Service() {
   private var focusRequest: AudioFocusRequest? = null
   private var previousMode: Int? = null
   private var scoStarted = false
+  private var deviceCallbackRegistered = false
   private var chat: String? = null
   private var mode: String = "call"
   private var muted: Boolean = false
@@ -110,6 +114,7 @@ class VoiceAudioService : Service() {
     ensureChannel()
     requestAudioFocus()
     routeToHeadset()
+    watchHeadsetChanges()
     startForeground(NOTIFICATION_ID, buildNotification())
     return START_STICKY
   }
@@ -172,8 +177,51 @@ class VoiceAudioService : Service() {
     }
   }
 
+  // A headset pulled out (or plugged in) mid-call must move the call with it.
+  // The route is otherwise chosen once at start, so unplugging left it pointing
+  // at a device that no longer exists and the call went quiet; plugging back in
+  // never took the call back. Re-run the same routing on every headset change.
+  private val deviceCallback =
+    object : AudioDeviceCallback() {
+      override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+        if (removed.any { it.type in headsetTypes }) {
+          Log.i("PatchVoiceAudio", "headset removed mid-call; moving to the phone's own route")
+          rerouteAfterDeviceChange()
+        }
+      }
+
+      override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+        if (added.any { it.type in headsetTypes }) {
+          Log.i("PatchVoiceAudio", "headset connected mid-call; moving the call onto it")
+          rerouteAfterDeviceChange()
+        }
+      }
+    }
+
+  private fun watchHeadsetChanges() {
+    if (deviceCallbackRegistered) return
+    val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    manager.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
+    deviceCallbackRegistered = true
+  }
+
+  private fun rerouteAfterDeviceChange() {
+    val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      manager.clearCommunicationDevice()
+    } else if (scoStarted) {
+      @Suppress("DEPRECATION") manager.stopBluetoothSco()
+      scoStarted = false
+    }
+    routeToHeadset()
+  }
+
   private fun releaseHeadsetRoute() {
     val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    if (deviceCallbackRegistered) {
+      manager.unregisterAudioDeviceCallback(deviceCallback)
+      deviceCallbackRegistered = false
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       manager.clearCommunicationDevice()
     } else if (scoStarted) {
