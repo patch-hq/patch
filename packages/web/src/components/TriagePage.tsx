@@ -62,7 +62,9 @@ export function TriagePage({ ws }: { ws: PatchWs | null }): JSX.Element {
           </h2>
           <div className="triage-message" data-testid="triage-message">
             {message === null ? (
-              <p className="triage-loading">Loading…</p>
+              <p className="triage-loading">
+                {timelines[current.chatId] ? 'No message from the agent yet.' : 'Loading…'}
+              </p>
             ) : (
               <Markdown content={message} />
             )}
@@ -78,6 +80,7 @@ export function TriagePage({ ws }: { ws: PatchWs | null }): JSX.Element {
               ref={inputRef}
               data-testid="triage-input"
               aria-label="Reply"
+              placeholder="Reply…"
               rows={3}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}

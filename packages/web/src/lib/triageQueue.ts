@@ -3,11 +3,14 @@
 // the page never reshuffles under the cursor.
 
 import type { ChatEventEntry } from '../stores/chatStore.js';
+import { isSpecialThread } from './chatGroups.js';
 import { deriveBadge, type ChatRow } from '../stores/types.js';
 
 /** A chat the user can answer with a line of text: finished-unread, or left on a question / report. */
 export function awaitsReply(row: ChatRow): boolean {
   if (row.status !== 'active' || row.hidden === true) return false;
+  // Manager / Speakers are channel threads, not chats to answer one at a time.
+  if (isSpecialThread(row.chatId)) return false;
   // Waiting on the user with no approval pending is the agent's own question:
   // a reply answers it. An approval is not something a reply can grant.
   const asking =
