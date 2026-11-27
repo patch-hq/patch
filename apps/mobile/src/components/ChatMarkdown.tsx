@@ -92,7 +92,10 @@ function TableScroll({
     </View>
   );
 }
-function tableColumns(node: { children?: any[] }): number {
+interface RowNode {
+  children?: RowNode[];
+}
+function tableColumns(node: RowNode): number {
   const firstRow = node.children?.[0]?.children?.[0];
   return Math.max(1, firstRow?.children?.length ?? 1);
 }
