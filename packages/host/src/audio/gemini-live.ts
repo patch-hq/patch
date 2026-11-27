@@ -324,14 +324,7 @@ const CAN_LOG_TASKS =
 const NEVER_GUESS =
   'Never guess. Anything about their files, folders, tasks, calendar, devices or any other ' +
   "real data must come from the agent's result — never make up file names, contents or " +
-  'facts, and never answer such a question from imagination while the agent is still working. ' +
-  'State only what you can see in this conversation or what the agent has returned: never quote ' +
-  'ticket ids, counts, numbers or who-blocks-what from memory of an earlier message — if you are ' +
-  'not certain, say so and hand the question to the agent. A "why" question about something that ' +
-  'happened or about the work always goes to the agent; never explain it yourself. You cannot see ' +
-  'whether a hand-off arrived or what the agent is doing with it, so never explain a delay, a ' +
-  'silence or a failure ("the call dropped", "it keeps getting abandoned"): say you are checking ' +
-  'with the agent, or that you cannot see.';
+  'facts, and never answer such a question from imagination while the agent is still working.';
 
 /**
  * The fast voice's instructions for a hand-off mode (spec/07 § The fast voice
