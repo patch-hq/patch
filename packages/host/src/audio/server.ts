@@ -28,6 +28,7 @@ import {
   modesShareVoiceEngine,
   voiceKeyMissingMessage,
   DEFAULT_VOICE_CONFIG,
+  type AudioCallLogEvent,
   type AudioErrorCode,
   type AudioSurfaceKind,
   type SpeechToTextEngine,
@@ -46,6 +47,7 @@ import {
 import { VoiceComponentMissingError } from '../voiceComponent.js';
 import { MockVad, type Vad } from './vad.js';
 import { watchPeerLiveness } from './peer-liveness.js';
+import { startCallHeartbeat, type CallHeartbeat } from './call-heartbeat.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
 import type { SpeechToTextResolution } from './stt-engines.js';
@@ -267,6 +269,8 @@ export interface AudioServerOptions {
   deadPeerTimeoutMs?: number;
   /** How often peers are pinged. Default 15 s. */
   pingIntervalMs?: number;
+  /** Heartbeat interval on an app call. Tests shorten it; production uses the wire's. */
+  heartbeatIntervalMs?: number;
   /**
    * Fired when a physical voice-device session (surfaceKind === 'device')
    * opens (`active: true`) or closes (`active: false`). The host wires this
@@ -420,6 +424,10 @@ interface ActiveSession {
   role: 'voice-note' | 'voice-call' | 'voice-device-conv';
   /** Set for `device` sessions only — drives the `onDeviceSession(_, false)` on close. */
   deviceId?: string;
+  /** An app call's heartbeat (spec/07 § A dropped call comes back). */
+  heartbeat?: CallHeartbeat;
+  /** Call-log entries the surface sent on this session, for its closing log. */
+  callLog?: AudioCallLogEvent['entries'];
 }
 
 /**
@@ -1105,6 +1113,16 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             : {}),
         });
         surfaceIndex.set(start.surfaceId, start.sessionId);
+        // spec/07 § A dropped call comes back — an app call's surface judges
+        // the line by this heartbeat. A voice device keeps its own liveness.
+        if (isAppCall && start.surfaceKind !== 'device') {
+          const live = sessions.get(start.sessionId) as ActiveSession;
+          live.heartbeat = startCallHeartbeat(
+            start.sessionId,
+            (frame) => send(ws, frame),
+            opts.heartbeatIntervalMs,
+          );
+        }
         if (voiceSurface === 'call') {
           // spec/07 § A call can move between devices — a takeover ends this
           // chat's call on every other surface first, so the announcements
@@ -1264,6 +1282,28 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           });
           break;
         }
+        case 'audio.heartbeat':
+          // The surface's echo: the round trip for the heartbeat it names.
+          (sessions.get(urlSessionId) as ActiveSession).heartbeat?.echoed(parsed.n);
+          break;
+        case 'audio.call_log': {
+          // spec/07 § Call logs — the device's own account of the call: why its
+          // audio stopped, the line's quality, how long each turn's steps
+          // took. Entries may be about an earlier session of the same call
+          // (one that dropped); each names its own.
+          const live = sessions.get(urlSessionId) as ActiveSession;
+          live.callLog = [...(live.callLog ?? []), ...parsed.entries];
+          log.info(
+            {
+              sessionId: urlSessionId,
+              surfaceKind: live.surfaceKind,
+              entries: parsed.entries,
+              ...(parsed.dropped !== undefined ? { dropped: parsed.dropped } : {}),
+            },
+            'audio: call log',
+          );
+          break;
+        }
         default:
           // Other frames are surface-emitted but unused by the host today.
           break;
@@ -1275,6 +1315,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const id = claims.sessionId;
         const active = sessions.get(id);
         if (active) {
+          active.heartbeat?.stop();
           surfaceIndex.delete(active.surfaceId);
           announceCall(active, false);
           void active.session.close().catch(() => undefined);
@@ -1295,7 +1336,11 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             });
           }
         }
-        const stats = active?.session.stats();
+        const stats = {
+          ...active?.session.stats(),
+          ...(active?.heartbeat !== undefined ? { heartbeat: active.heartbeat.stats() } : {}),
+          ...(active?.callLog !== undefined ? { callLog: active.callLog } : {}),
+        };
         sessions.delete(id);
         // Close the session with what it actually did. "Started" then "ended"
         // with nothing between them describes every possible failure equally;

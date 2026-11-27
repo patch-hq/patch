@@ -26,6 +26,9 @@ function stubSession(chatId: string): AudioSession {
     speak() {},
     sendPcm() {},
     finishDictation: () => {},
+    send() {
+      return true;
+    },
     isMuted() {
       return false;
     },

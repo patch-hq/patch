@@ -232,7 +232,7 @@ A redial's `audio.session_start` carries `resumed: true`, and the host writes on
 
 ### Call logs
 
-The phone records, for each call: why audio stopped whenever it did (signal lost, audio focus taken, output device changed), the connection's quality (round trip, lost and late heartbeats) and how long each step of each turn took. It sends the log to the host when it reconnects and when the call ends, and the host keeps it with the session's closing log.
+The device a call is on — phone, web or desktop — records, for each call: why audio stopped whenever it did (signal lost, the connection closed, the host gone, audio focus taken on the phone, an audio device added or removed), the connection's quality (round trip, lost and late heartbeats) and how long each step of each turn took. It sends the log to the host when it reconnects and when the call ends, and the host keeps it with the session's closing log.
 
 ## Fixed timings
 

@@ -27,6 +27,7 @@ function stubOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
     setMuted: () => {},
     finishDictation: () => {},
     isMuted: () => false,
+    send: () => true,
     setSessionMode: () => {},
     speak: () => {},
     sendPcm: () => {},

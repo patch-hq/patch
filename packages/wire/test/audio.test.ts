@@ -65,6 +65,26 @@ const FIXTURES: { [K in AudioEventType]: Extract<AudioEvent, { type: K }> } = {
     message: 'too many sessions',
     sessionId: 'sess1',
   },
+  'audio.heartbeat': { type: 'audio.heartbeat', sessionId: 'sess1', n: 4, rttMs: 38 },
+  'audio.call_log': {
+    type: 'audio.call_log',
+    sessionId: 'sess2',
+    entries: [
+      { kind: 'audio_stopped', at: 1, sessionId: 'sess1', reason: 'signal_lost' },
+      {
+        kind: 'quality',
+        at: 2,
+        sessionId: 'sess1',
+        heartbeats: 40,
+        lost: 3,
+        late: 1,
+        maxGapMs: 3100,
+        rttMs: { min: 20, avg: 31, max: 90 },
+      },
+      { kind: 'reconnected', at: 3, sessionId: 'sess2', downMs: 4200, attempts: 2 },
+      { kind: 'turn', at: 4, sessionId: 'sess2', speechToTextMs: 300, modelMs: 900 },
+    ],
+  },
 };
 
 describe('@patch/wire/audio codec', () => {
@@ -91,6 +111,14 @@ describe('@patch/wire/audio codec', () => {
   test('rejects pcm16 with non-16k/24k sample rate', () => {
     const bad = { type: 'audio.pcm16', ts: 1, sampleRate: 22050, samples: 100 };
     expect(() => decodeAudio(JSON.stringify(bad))).toThrow();
+  });
+
+  test('a call log is capped, and its entries are checked', () => {
+    const entry = { kind: 'reconnected', at: 1, sessionId: 's', downMs: 1, attempts: 1 };
+    const big = { type: 'audio.call_log', sessionId: 's', entries: Array(501).fill(entry) };
+    expect(() => decodeAudio(JSON.stringify(big))).toThrow();
+    const odd = { type: 'audio.call_log', sessionId: 's', entries: [{ ...entry, kind: 'mood' }] };
+    expect(() => decodeAudio(JSON.stringify(odd))).toThrow();
   });
 
   test('rejects audio.error with unknown code', () => {

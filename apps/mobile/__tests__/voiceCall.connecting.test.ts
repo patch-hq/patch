@@ -1,6 +1,6 @@
 // lib/voiceCall.ts — the CONNECTING state is distinct and can fail loudly
 // (spec/15 § Voice states): a session that never hears the host's first
-// `audio.state` is declared failed after CALL_CONNECT_TIMEOUT_MS with its
+// `audio.state` is declared failed after CALL_ACK_TIMEOUT_MS with its
 // audio released and a retry offered; a socket the host drops mid-call says
 // so; retry reopens the same chat in the same mode; the timer counts from
 // connection, not from the tap; the address word the session opened with is
@@ -69,9 +69,8 @@ vi.mock('../src/lib/preferences', () => ({
   pauseWhenQuietMinutes: () => prefs.pauseWhenQuietMinutes,
 }));
 
+import { CALL_ACK_TIMEOUT_MS, CALL_REDIAL_DELAYS_MS } from '@patch/wire/call-line';
 import {
-  CALL_CONNECT_TIMEOUT_MS,
-  CALL_RECONNECT_DELAYS_MS,
   endVoiceCall,
   retryVoiceCall,
   setCallMode,
@@ -120,14 +119,15 @@ describe('connecting → failed after the timeout', () => {
     await flush();
     FakeWebSocket.last().emitOpen();
     await flush();
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS - 1);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS - 1);
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
     expect(useVoiceStore.getState().callError).toBeNull();
 
     vi.advanceTimersByTime(1);
     await flush();
     const st = useVoiceStore.getState();
-    expect(st.callError).toBe('Could not connect — no answer from the host after 15s');
+    // The bar's head already says it could not connect; the reason says why.
+    expect(st.callError).toBe('no answer from the host after 15s');
     // The bar stays up (activeSession kept) so the error and Retry show.
     expect(st.activeSession).not.toBeNull();
     expect(FakeWebSocket.last().close).toHaveBeenCalled();
@@ -152,7 +152,7 @@ describe('connecting → failed after the timeout', () => {
     expect(useVoiceStore.getState().callConnectedAt).toBe(
       new Date('2026-09-24T10:00:03Z').getTime(),
     );
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS * 2);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS * 2);
     expect(useVoiceStore.getState().callError).toBeNull();
   });
 
@@ -171,7 +171,7 @@ describe('connecting → failed after the timeout', () => {
     startVoiceCall('c1');
     await flush();
     expect(looping('connecting')).toBe(true);
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     await flush();
     expect(looping('connecting')).toBe(false);
   });
@@ -194,7 +194,7 @@ describe('connecting → failed after the timeout', () => {
     playCueMock.mockClear();
     startVoiceCall('c1');
     await flush();
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     await flush();
     expect(playCueMock.mock.calls.map((c) => c[0])).toEqual(['failed']);
     await endVoiceCall();
@@ -235,7 +235,7 @@ describe('connecting → failed after the timeout', () => {
     expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
     expect(looping('reconnecting')).toBe(true);
     expect(looping('connecting')).toBe(false);
-    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
     await flush();
     // The redial is the same call: its timer still counts from the first connect.
     expect(useVoiceStore.getState().callConnectedAt).toBe(connectedAt);
@@ -264,7 +264,7 @@ describe('connecting → failed after the timeout', () => {
     startVoiceCall('c1');
     await flush();
     expect(useVoiceStore.getState().callError).toBe('token mint failed');
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     expect(useVoiceStore.getState().callError).toBe('token mint failed');
   });
 
@@ -272,7 +272,7 @@ describe('connecting → failed after the timeout', () => {
     startVoiceCall('c1');
     await flush();
     await endVoiceCall();
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     expect(useVoiceStore.getState().activeSession).toBeNull();
     expect(useVoiceStore.getState().callError).toBeNull();
   });
@@ -295,7 +295,7 @@ describe('a dropped call says so', () => {
     sock.emitClose(1006);
     expect(useVoiceStore.getState().callError).toBeNull();
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
     await flush();
     expect(FakeWebSocket.instances.length).toBe(before + 1);
     const again = FakeWebSocket.last();
@@ -314,7 +314,7 @@ describe('a dropped call says so', () => {
     sock.emitClose(1006);
     expect(useVoiceStore.getState().callError).toBeNull();
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
     await flush();
     expect(FakeWebSocket.instances.length).toBe(before + 1);
   });
@@ -322,9 +322,9 @@ describe('a dropped call says so', () => {
   it('a redialled call that stays up gets its full attempts again on the next drop', async () => {
     startVoiceCall('c1');
     let sock = await liveCall();
-    for (let i = 0; i < CALL_RECONNECT_DELAYS_MS.length + 1; i++) {
+    for (let i = 0; i < CALL_REDIAL_DELAYS_MS.length + 1; i++) {
       sock.emitClose(1006);
-      vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+      vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
       await flush();
       sock = FakeWebSocket.last();
       sock.emitOpen();
@@ -350,7 +350,7 @@ describe('a dropped call says so', () => {
     sock.emitClose(1011);
     expect(useVoiceStore.getState().callError).toBeNull();
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
-    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
     await flush();
     expect(FakeWebSocket.instances.length).toBe(before + 1);
   });
@@ -361,7 +361,7 @@ describe('a dropped call says so', () => {
     const first = JSON.parse(String(sock.sent[0])) as { resumed?: boolean };
     expect(first.resumed).toBeUndefined();
     sock.emitClose(1006);
-    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[0]);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]);
     await flush();
     const again = FakeWebSocket.last();
     again.emitOpen();
@@ -372,7 +372,7 @@ describe('a dropped call says so', () => {
   });
 
   it('keeps redialling for about two minutes, long enough to ride out a release', () => {
-    const total = CALL_RECONNECT_DELAYS_MS.reduce((a, b) => a + b, 0);
+    const total = CALL_REDIAL_DELAYS_MS.reduce((a, b) => a + b, 0);
     expect(total).toBeGreaterThanOrEqual(90_000);
   });
 
@@ -380,7 +380,7 @@ describe('a dropped call says so', () => {
     startVoiceCall('c1');
     let sock = await liveCall();
     sock.emitClose(1006);
-    for (const delay of CALL_RECONNECT_DELAYS_MS) {
+    for (const delay of CALL_REDIAL_DELAYS_MS) {
       vi.advanceTimersByTime(delay);
       await flush();
       sock = FakeWebSocket.last();
@@ -389,7 +389,7 @@ describe('a dropped call says so', () => {
     expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
     expect(useVoiceStore.getState().callPhase).toBe('connecting');
     const before = FakeWebSocket.instances.length;
-    vi.advanceTimersByTime(CALL_RECONNECT_DELAYS_MS[CALL_RECONNECT_DELAYS_MS.length - 1]);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[CALL_REDIAL_DELAYS_MS.length - 1]);
     await flush();
     expect(FakeWebSocket.instances.length).toBe(before + 1);
   });
@@ -426,15 +426,29 @@ describe('a dropped call says so', () => {
     expect(useVoiceStore.getState().callError).toBe('Call dropped — the audio connection closed');
   });
 
-  it('a close with an error already showing keeps the real reason', async () => {
+  it('a close after an error the host reported keeps the real reason, and does not redial', async () => {
     startVoiceCall('c1');
     await flush();
     const sock = FakeWebSocket.last();
     sock.emitOpen();
     await flush();
-    useVoiceStore.getState().setError('audio.error: kokoro missing');
+    sock.emitMessage(stateFrame('listening'));
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'audio.error',
+        code: 'kokoro_unavailable',
+        message: 'kokoro missing',
+      }),
+    );
+    const reason = useVoiceStore.getState().callError;
+    expect(reason).toContain('kokoro missing');
+    const before = FakeWebSocket.instances.length;
     sock.emitClose(1011);
-    expect(useVoiceStore.getState().callError).toBe('audio.error: kokoro missing');
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    await flush();
+    // The host ends the call behind an error it reported: no redial, same reason.
+    expect(useVoiceStore.getState().callError).toBe(reason);
+    expect(FakeWebSocket.instances.length).toBe(before);
   });
 
   it('hanging up is not a drop — no error', async () => {
@@ -452,7 +466,7 @@ describe('retryVoiceCall', () => {
   it('reopens the same chat in the same mode, back in a clean connecting state', async () => {
     startVoiceCall('c7', 'hands-free');
     await flush();
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     await flush();
     expect(useVoiceStore.getState().callError).not.toBeNull();
     const before = FakeWebSocket.instances.length;
@@ -501,7 +515,7 @@ describe('a setup superseded while its audio service starts', () => {
     await flush();
     // The connect watchdog (or the user ending the call) ends this attempt
     // while the foreground service is still coming up.
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     await flush();
     finishService();
     await flush(20);
@@ -558,7 +572,7 @@ describe('a call that timed out while still minting its token', () => {
     );
     startVoiceCall('c1');
     await flush();
-    vi.advanceTimersByTime(CALL_CONNECT_TIMEOUT_MS);
+    vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS);
     await flush();
     expect(useVoiceStore.getState().callError).toMatch(/no answer from the host/);
 
@@ -589,5 +603,141 @@ describe('muting while the call is still connecting', () => {
       'c1',
       expect.objectContaining({ muted: true }),
     );
+  });
+});
+
+describe('the line under a call (heartbeat and call log)', () => {
+  function heartbeat(n: number, rttMs?: number): string {
+    return JSON.stringify({
+      type: 'audio.heartbeat',
+      sessionId: 'sess-1',
+      n,
+      ...(rttMs !== undefined ? { rttMs } : {}),
+    });
+  }
+  function sentFrames(sock: FakeWebSocket): Array<Record<string, unknown>> {
+    return sock.sent
+      .filter((d): d is string => typeof d === 'string')
+      .map((d) => JSON.parse(d) as Record<string, unknown>);
+  }
+  async function liveCall(): Promise<FakeWebSocket> {
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    sock.emitMessage(stateFrame('listening'));
+    return sock;
+  }
+
+  it('echoes each heartbeat, and three seconds without one is a drop that redials', async () => {
+    const sock = await liveCall();
+    sock.emitMessage(heartbeat(0));
+    expect(sentFrames(sock).filter((f) => f.type === 'audio.heartbeat')).toEqual([
+      { type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 },
+    ]);
+    const before = FakeWebSocket.instances.length;
+    vi.advanceTimersByTime(3_000);
+    expect(sock.close).toHaveBeenCalled();
+    expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
+    expect(useVoiceStore.getState().callError).toBeNull();
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+  });
+
+  it('a live line that hears nothing for three seconds after the host answered is dropped too', async () => {
+    const sock = await liveCall();
+    vi.advanceTimersByTime(2_999);
+    expect(sock.close).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(sock.close).toHaveBeenCalled();
+    expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
+  });
+
+  it('sends the log of the drop once the line is back, and the rest when the call ends', async () => {
+    const { startMicCapture } = await import('../src/lib/voiceMic');
+    const sock = await liveCall();
+    sock.emitMessage(heartbeat(0, 42));
+    // The phone's own audio events go into the log.
+    const onAudioStopped = vi.mocked(startMicCapture).mock.calls.at(-1)![2]!;
+    onAudioStopped('audio_focus_taken', 'AUDIOFOCUS_LOSS_TRANSIENT');
+    // A turn's steps are timed from the frames.
+    sock.emitMessage(stateFrame('transcribing'));
+    vi.advanceTimersByTime(200);
+    sock.emitMessage(
+      JSON.stringify({ type: 'audio.transcript_final', sessionId: 'sess-1', text: 'hi' }),
+    );
+    vi.advanceTimersByTime(500);
+    sock.emitMessage(new ArrayBuffer(4));
+    vi.advanceTimersByTime(800);
+    sock.emitMessage(JSON.stringify({ type: 'audio.tts_end', sessionId: 'sess-1' }));
+    sock.emitMessage(heartbeat(1, 40));
+    sock.emitClose(1006);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    await flush();
+    const again = FakeWebSocket.last();
+    again.emitOpen();
+    await flush();
+    // The log of the drop goes as soon as the host answers the redial.
+    again.emitMessage(stateFrame('listening'));
+    const [log] = sentFrames(again).filter((f) => f.type === 'audio.call_log');
+    const entries = log?.entries as Array<Record<string, unknown>>;
+    expect(entries.map((e) => [e.kind, e.reason])).toEqual([
+      ['audio_stopped', 'audio_focus_taken'],
+      ['turn', undefined],
+      ['audio_stopped', 'connection_closed'],
+      ['quality', undefined],
+      ['reconnected', undefined],
+    ]);
+    expect(entries[1]).toMatchObject({ speechToTextMs: 200, modelMs: 500, voiceMs: 800 });
+    expect(entries[3]).toMatchObject({ heartbeats: 2, rttMs: { min: 40, avg: 41, max: 42 } });
+    await endVoiceCall();
+    const frames = sentFrames(again);
+    const endLog = frames.filter((f) => f.type === 'audio.call_log').at(-1);
+    expect((endLog?.entries as Array<{ kind: string }>).map((e) => e.kind)).toEqual(['quality']);
+    // The log goes before the session is ended.
+    expect(frames.at(-1)?.type).toBe('audio.session_end');
+  });
+});
+
+describe('errors the host ends the call on', () => {
+  it('a silent microphone fails the call with what to do about it, and is not redialled', async () => {
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    sock.emitMessage(stateFrame('listening'));
+    sock.emitMessage(
+      JSON.stringify({ type: 'audio.error', code: 'mic_silent', message: 'no audio for 5s' }),
+    );
+    expect(useVoiceStore.getState().callError).toBe('no audio for 5s');
+    await flush(40);
+    expect(useVoiceStore.getState().callError).not.toBeNull();
+    const before = FakeWebSocket.instances.length;
+    sock.emitClose(1011);
+    vi.advanceTimersByTime(CALL_REDIAL_DELAYS_MS[0]!);
+    await flush();
+    expect(FakeWebSocket.instances.length).toBe(before);
+  });
+
+  it('a heartbeat echo that cannot be sent is logged, not thrown', async () => {
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    sock.emitMessage(stateFrame('listening'));
+    sock.send.mockImplementationOnce(() => {
+      throw new Error('socket gone');
+    });
+    expect(() =>
+      sock.emitMessage(JSON.stringify({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 })),
+    ).not.toThrow();
+    // Once the socket has closed there is nothing to echo on.
+    sock.readyState = FakeWebSocket.CLOSED;
+    sock.emitMessage(JSON.stringify({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 1 }));
+    expect(sock.send).toHaveBeenCalledTimes(sock.sent.length + 1);
   });
 });

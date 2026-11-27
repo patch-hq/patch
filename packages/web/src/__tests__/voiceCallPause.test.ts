@@ -29,15 +29,27 @@ interface Opened {
 }
 let opened: Opened[] = [];
 
+/**
+ * A host that answers the session at once and then keeps the line alive with a
+ * heartbeat every second until the session is ended, as a real one does.
+ */
 function stubOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
-  const end = vi.fn();
+  const sessionId = `sess-${opened.length + 1}`;
+  let n = 0;
+  const beat = setInterval(
+    () => opts.callbacks.onHeartbeat?.({ type: 'audio.heartbeat', sessionId, n: n++ }),
+    1_000,
+  );
+  const end = vi.fn(() => clearInterval(beat));
   opened.push({ opts, callbacks: opts.callbacks, end });
+  void Promise.resolve().then(() => opts.callbacks.onState?.('listening', sessionId));
   return Promise.resolve({
-    sessionId: `sess-${opened.length}`,
+    sessionId,
     chatId: opts.chatId,
     setMuted: () => {},
     finishDictation: () => {},
     isMuted: () => false,
+    send: () => true,
     setSessionMode: () => {},
     speak: () => {},
     sendPcm: () => {},

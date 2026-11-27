@@ -350,6 +350,31 @@ describe('audioSession', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('the reply’s audio and the host’s heartbeat reach their callbacks, when given', async () => {
+    const onReplyAudio = vi.fn();
+    const onHeartbeat = vi.fn();
+    const { ws } = await open(noopCallbacks({ onReplyAudio, onHeartbeat }));
+    ws.emit('message', { data: new Int16Array([1, 2]).buffer });
+    const beat = { type: 'audio.heartbeat', sessionId: 'sess-9', n: 3, rttMs: 20 };
+    ws.emit('message', { data: JSON.stringify(beat) });
+    expect(onReplyAudio).toHaveBeenCalledTimes(1);
+    expect(onHeartbeat).toHaveBeenCalledWith(beat);
+    // A session that asked for neither is not troubled by them.
+    FakeWebSocket.instances.length = 0;
+    const plain = await open(noopCallbacks());
+    plain.ws.emit('message', { data: new Int16Array([1]).buffer });
+    plain.ws.emit('message', { data: JSON.stringify(beat) });
+  });
+
+  it('send() puts a line frame on an open socket, and reports false once it is closed', async () => {
+    const { session, ws } = await open(noopCallbacks());
+    const echo = { type: 'audio.heartbeat' as const, sessionId: 'sess-9', n: 1 };
+    expect(session.send(echo)).toBe(true);
+    expect(JSON.parse(ws.sent.at(-1) as string)).toEqual(echo);
+    session.end();
+    expect(session.send(echo)).toBe(false);
+  });
+
   it('a session frame with an unhandled/dispatch-only type is a no-op (default branch)', async () => {
     const onError = vi.fn();
     const { ws } = await open(noopCallbacks({ onError }));

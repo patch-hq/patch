@@ -17,10 +17,11 @@
  * that makes a wire frame's new shape mandatory rather than additive — that is
  * the moment older hosts stop being able to hold up their end.
  */
-// 1.1.1703 is the first host that reports turn boundaries (`chat.turn_started`,
-// `chat.turn_ended`), the facts the server derives a chat's status from now that
-// a host no longer sends an activity of its own (spec/12 § Chat status).
-export const MIN_SUPPORTED_HOST_VERSION = '1.1.1703';
+// 1.1.2124 is the first host that keeps a call's line alive with `audio.heartbeat`
+// and reads the surface's `audio.call_log` (spec/07 § A dropped call comes
+// back): every surface now judges a live call by that heartbeat, so an older
+// host's calls would drop every three seconds.
+export const MIN_SUPPORTED_HOST_VERSION = '1.1.2124';
 
 export type HostSupport =
   | { supported: true }

@@ -14,7 +14,9 @@
 
 import {
   decodeAudio,
+  type AudioCallLogEvent,
   type AudioEvent,
+  type AudioHeartbeatEvent,
   type AudioSessionRole,
   type AudioSessionMode,
   type AudioSessionStateName,
@@ -44,9 +46,13 @@ export interface AudioSessionCallbacks {
    * Turn-cycle state transition (`audio.state`). Optional: a voice NOTE has no
    * phase indicator to drive, a sustained session does.
    */
-  onState?(state: AudioSessionStateName): void;
+  onState?(state: AudioSessionStateName, sessionId: string): void;
   /** Host began streaming a TTS reply (agent is speaking). */
   onTtsStart(): void;
+  /** A chunk of the reply's audio arrived. */
+  onReplyAudio?(): void;
+  /** The host's heartbeat on a call (spec/07 § A dropped call comes back). */
+  onHeartbeat?(frame: AudioHeartbeatEvent): void;
   /** Host finished (or barge-in halted) the TTS reply. */
   onTtsEnd(bargedIn: boolean): void;
   /** Host detected the user speaking over the agent: TTS was cut. */
@@ -123,6 +129,8 @@ export interface AudioSession {
   finishDictation(): void;
   /** True while muted. */
   isMuted(): boolean;
+  /** Send a line frame (heartbeat echo, call log); false when the socket is not open. */
+  send(frame: AudioHeartbeatEvent | AudioCallLogEvent): boolean;
   /** Tear the session down: send session_end, stop mic, close WSS. */
   end(reason?: string): void;
 }
@@ -282,6 +290,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
           return;
         }
         playTts(new Int16Array(ab.slice(0, usable)));
+        callbacks.onReplyAudio?.();
       }
       return;
     }
@@ -329,6 +338,11 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         speak(text: string): void {
           if (ws.readyState !== WS.OPEN) return;
           ws.send(JSON.stringify({ type: 'audio.speak', sessionId: minted.sessionId, text }));
+        },
+        send(frame): boolean {
+          if (closed || ws.readyState !== WS.OPEN) return false;
+          ws.send(JSON.stringify(frame));
+          return true;
         },
         finishDictation(): void {
           if (closed || ws.readyState !== WS.OPEN) return;
@@ -384,7 +398,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
 function dispatchFrame(frame: AudioEvent, cb: AudioSessionCallbacks, stopTts: () => void): void {
   switch (frame.type) {
     case 'audio.state':
-      cb.onState?.(frame.state);
+      cb.onState?.(frame.state, frame.sessionId);
       return;
     case 'audio.transcript_partial':
       cb.onTranscriptPartial(frame.text);
@@ -403,6 +417,9 @@ function dispatchFrame(frame: AudioEvent, cb: AudioSessionCallbacks, stopTts: ()
       // never experiences a hung audio session (spec/07 ## Barge-in).
       stopTts();
       cb.onBargeIn();
+      return;
+    case 'audio.heartbeat':
+      cb.onHeartbeat?.(frame);
       return;
     case 'audio.error':
       // `voice_key_missing` is already the whole sentence (key, host, the

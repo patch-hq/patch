@@ -8,7 +8,7 @@
 
 import { getActiveWs } from '../api/ws.js';
 import { playCallSound, syncCallSoundLoop } from './callSound.js';
-import { watchCallHeadphones } from './callHeadphones.js';
+import { CallLine, type CallLinePhase } from '@patch/wire/call-line';
 import { openAudioSession, type AudioSessionDeps } from './audioSession.js';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { startDictationPreview, type DictationPreview } from './dictationPreview.js';
@@ -21,6 +21,7 @@ import { usePresenceStore } from '../stores/presenceStore.js';
 import { voiceCapability } from './voiceCapability.js';
 import { addressWordOrNull, usePreferencesStore } from '../stores/preferencesStore.js';
 import type { PauseReason } from '../stores/voiceStore.js';
+import { watchCallHeadphones } from './callHeadphones.js';
 import { failed } from './errorCopy.js';
 import {
   endDirectCall,
@@ -361,7 +362,7 @@ export async function startVoiceCall(
     }
   }
   // A paused call holds no session (spec/07 § Pause): a new call replaces it.
-  if (useVoiceStore.getState().call?.paused != null) useVoiceStore.getState().endCall();
+  if (useVoiceStore.getState().call?.paused != null) endVoiceCall({ silent: true });
   const store = useVoiceStore.getState();
   if (store.call) {
     // Already on a call: it stays on the chat it was started on, wherever the user goes.
@@ -369,74 +370,120 @@ export async function startVoiceCall(
   }
   store.endNote();
   store.startCall(chatId, mode);
-  clearRedial();
-  await openCallSession(chatId, mode, deps, opts);
+  await placeCall(chatId, deps, opts);
 }
 
 /**
- * A call that drops after it was live (a server or host restart, a network
- * change) is redialled by itself on this backoff, about two minutes in all,
- * before it gives up and says so (spec/07 § A dropped call comes back).
+ * Put a line under the call in the store and dial it: a new call, or a paused
+ * one resuming (a fresh session, not a redial — nothing dropped).
  */
-export const CALL_REDIAL_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 20_000, 30_000, 30_000];
-let redialAttempt = 0;
-let redialTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearRedial(): void {
-  if (redialTimer !== null) clearTimeout(redialTimer);
-  redialTimer = null;
-  redialAttempt = 0;
+async function placeCall(
+  chatId: string,
+  deps: AudioSessionDeps | undefined,
+  opts: { takeOver?: boolean; callReason?: string },
+): Promise<void> {
+  let firstDial: Promise<void> = Promise.resolve();
+  const l: CallLine = new CallLine({
+    dial: (attempt, resumed) => {
+      const opening = openCallSession(l, attempt, chatId, deps, {
+        takeOver: opts.takeOver === true && attempt === 1,
+        resumed,
+        // Never repeated on a redial: the voice already opened with it.
+        ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
+      });
+      if (attempt === 1) firstDial = opening;
+    },
+    hangUp: (attempt) => {
+      if (sessionAttempt !== attempt) return;
+      const s = useVoiceStore.getState().session;
+      useVoiceStore.getState().setSession(null);
+      s?.end('lost');
+    },
+    send: (attempt, frame) => {
+      const s = useVoiceStore.getState().session;
+      return sessionAttempt === attempt && s !== null && s.send(frame);
+    },
+    phase: onLinePhase,
+    stillTrying: (reason) => {
+      useUiStore.getState().pushError(`${describeCallError(reason)} — still trying`);
+    },
+  });
+  line = l;
+  watchCallEnvironment(l);
+  l.start();
+  await firstDial;
 }
 
-/** The line dropped under a live call: redial after a delay, or give up loudly. */
-function redialOrGiveUp(chatId: string, deps: AudioSessionDeps | undefined, reason: string): void {
+/**
+ * The open call's line (spec/07 § A dropped call comes back): it decides when
+ * an attempt is live or lost, redials, and keeps the call log. This module
+ * opens each attempt's session and plays what the line says.
+ */
+let line: CallLine | null = null;
+/** The attempt whose session is in the store. */
+let sessionAttempt = 0;
+let unwatchEnvironment: (() => void) | null = null;
+
+/**
+ * What the page can tell the line: coming back into view redials a waiting
+ * line at once, and the browser's audio devices changing goes into the log.
+ */
+function watchCallEnvironment(l: CallLine): void {
+  unwatchEnvironment?.();
+  const onVisible = (): void => {
+    if (document.visibilityState === 'visible') l.foreground();
+  };
+  const onDevices = (): void => l.audioStopped('output_device_changed', 'audio devices changed');
+  document.addEventListener('visibilitychange', onVisible);
+  const media = (navigator as { mediaDevices?: MediaDevices }).mediaDevices;
+  media?.addEventListener?.('devicechange', onDevices);
+  unwatchEnvironment = () => {
+    document.removeEventListener('visibilitychange', onVisible);
+    media?.removeEventListener?.('devicechange', onDevices);
+  };
+}
+
+function onLinePhase(next: CallLinePhase, prev: CallLinePhase, reason?: string): void {
   const store = useVoiceStore.getState();
-  if (store.call === null || redialTimer !== null) return;
-  const delay = CALL_REDIAL_DELAYS_MS[redialAttempt];
-  if (delay === undefined) {
-    clearRedial();
-    useUiStore.getState().pushError(describeCallError(reason));
-    playCallSound('failed');
-    store.endCall();
-    store.setSession(null);
+  if (next === 'live') {
+    store.setCallReconnecting(false);
+    playCallSound(prev === 'reconnecting' ? 'reconnected' : 'connected');
+    heardSomething();
     return;
   }
-  redialAttempt += 1;
-  store.setCallReconnecting(true);
-  store.setSession(null);
-  store.setCallPhase('connecting');
-  const mode = store.call.mode;
-  redialTimer = setTimeout(() => {
-    redialTimer = null;
-    if (useVoiceStore.getState().call === null) return; // hung up while waiting
-    void openCallSession(chatId, mode, deps, { resumed: true });
-  }, delay);
+  if (next === 'reconnecting') {
+    // Nothing said while the line is down is kept: the dead attempt's
+    // session goes, and the redial opens a fresh one.
+    store.setCallReconnecting(true);
+    const dead = store.session;
+    store.setSession(null);
+    dead?.end('lost');
+    store.setCallPhase('connecting');
+    return;
+  }
+  // failed — loud, and the call is over. NO FALLBACK.
+  useUiStore.getState().pushError(describeCallError(reason as string));
+  playCallSound('failed');
+  endVoiceCall({ silent: true });
 }
 
-/**
- * Bumped by every session this surface opens, and by a pause: a session's
- * callbacks act only while it is still the current one, so the close of a
- * session the user paused is not taken for a dropped line and redialled.
- */
-let sessionGen = 0;
-
 async function openCallSession(
+  l: CallLine,
+  attempt: number,
   chatId: string,
-  mode: AudioSessionMode,
   deps: AudioSessionDeps | undefined,
-  opts: { takeOver?: boolean; resumed?: boolean; callReason?: string },
+  opts: { takeOver: boolean; resumed: boolean; callReason?: string },
 ): Promise<void> {
   const addressWord = addressWordOrNull();
-  const gen = ++sessionGen;
-  const current = (): boolean => gen === sessionGen;
+  const current = (): boolean => line === l && l.isCurrent(attempt);
   try {
     const session = await openImpl({
       chatId,
       role: 'voice-call',
-      mode,
+      mode: useVoiceStore.getState().call?.mode ?? 'call',
       ...(addressWord !== null ? { addressWord } : {}),
-      ...(opts.takeOver === true ? { takeOver: true } : {}),
-      ...(opts.resumed === true ? { resumed: true } : {}),
+      ...(opts.takeOver ? { takeOver: true } : {}),
+      ...(opts.resumed ? { resumed: true } : {}),
       ...(opts.callReason !== undefined ? { callReason: opts.callReason } : {}),
       deps: deps ?? {},
       callbacks: {
@@ -460,6 +507,7 @@ async function openCallSession(
             s.setCallUnaddressed(t);
             return;
           }
+          l.turn('transcript');
           s.setCallUnaddressed(null);
           s.setCallLine('YOU', t);
           // Echo the spoken turn into the chat timeline — a call has no composer
@@ -481,93 +529,66 @@ async function openCallSession(
             store.clearDelivery(target, localId);
           }
         },
-        onState: (st) => {
+        onState: (st, sessionId) => {
+          // The host's first turn state is it acknowledging the session.
+          if (st !== 'connecting') l.acked(attempt, sessionId);
+          if (st === 'transcribing') l.turn('speech_end');
           if (current()) useVoiceStore.getState().setCallPhase(st);
         },
         onTtsStart: () => {
-          if (current()) heardSomething();
+          if (!current()) return;
+          heardSomething();
           const s = useVoiceStore.getState();
           const target = s.call?.chatId ?? chatId;
           s.setCallSpeaking(true);
           s.setCallLine(speakerFor(target), '');
         },
+        onReplyAudio: () => l.turn('reply_audio'),
         onTtsEnd: () => {
           if (!current()) return;
           heardSomething();
+          l.turn('reply_end');
           useVoiceStore.getState().setCallSpeaking(false);
         },
         onBargeIn: () => {
           // User spoke over the agent — TTS is cut host-side; reflect the
           // 'listening' state so the user never sees a hung audio session.
+          if (!current()) return;
           const s = useVoiceStore.getState();
           s.setCallSpeaking(false);
           s.setCallLine('YOU', '');
         },
-        onLevel: (l) => useVoiceStore.getState().setCallLevel(l),
+        onLevel: (lv) => useVoiceStore.getState().setCallLevel(lv),
+        onHeartbeat: (frame) => l.heartbeat(attempt, frame),
         onError: (m) => {
-          if (!current()) return;
           // The host went away under the call (it restarted, or the server
-          // lost it): redial rather than hang up.
-          if (m.startsWith('host_unreachable')) {
-            redialOrGiveUp(chatId, deps, m);
-            return;
-          }
-          useUiStore.getState().pushError(describeCallError(m));
-          playCallSound('failed');
-          endVoiceCall({ silent: true });
+          // lost it): the line is lost, not failed. Every other error is one
+          // the host ends the call on.
+          if (m.startsWith('host_unreachable')) l.lost(attempt, 'host_unreachable', m);
+          else l.fail(attempt, m);
         },
         onClose: (reason) => {
-          // The audio socket closed — the host dropped the session, the
-          // network went, or the call was ended from the other end. Clear the
-          // call state here rather than only in `endVoiceCall`, which is the
-          // path a USER-initiated hang-up takes: without this the overlay sits
-          // there looking live over a dead socket, and — because a live call
-          // defers the post-deploy reload (lib/liveUpdate.ts) — the surface
-          // silently stops taking updates for as long as it is stuck.
-          //
-          // Clear the store directly instead of calling `endVoiceCall`: the
-          // socket is already gone, so there is nothing to send `session_end`
-          // to, and re-entering the teardown would just close it again.
           // The host only ends a call itself when it moves to another device
-          // ('transferred'); any other close the user did not ask for is a
-          // dropped call (a restart, the network), so redial it.
-          // A session this surface already let go of (paused, or replaced by a
-          // newer one) closing is expected, not a drop.
+          // or the agent hangs up; any other close is the line dropping, and
+          // the line decides what that means.
           if (!current()) return;
-          const store = useVoiceStore.getState();
-          if (store.call === null) return;
           if (reason === 'transferred' || reason === 'ended_by_agent') {
-            clearRedial();
-            clearQuietTimer();
-            playCallSound('ended');
-            store.endCall();
-            store.setSession(null);
+            endVoiceCall();
             return;
           }
-          redialOrGiveUp(chatId, deps, 'Call dropped — the audio connection closed');
+          l.lost(attempt, 'connection_closed', 'Call dropped — the audio connection closed');
         },
       },
     });
-    if (useVoiceStore.getState().call === null || !current()) {
+    if (!current()) {
       session.end('cancelled');
       return;
     }
-    const wasReconnecting = useVoiceStore.getState().call?.reconnecting === true;
-    useVoiceStore.getState().setCallReconnecting(false);
+    sessionAttempt = attempt;
     useVoiceStore.getState().setSession(session);
-    redialAttempt = 0;
-    playCallSound(wasReconnecting ? 'reconnected' : 'connected');
-    heardSomething();
   } catch (err) {
-    if (!current()) return;
-    // A redial that cannot connect yet tries again; a first dial fails loudly.
-    if (opts.resumed === true) {
-      redialOrGiveUp(chatId, deps, (err as Error).message);
-      return;
-    }
-    playCallSound('failed');
-    useUiStore.getState().pushError(failed('voice call'), undefined, (err as Error).message);
-    useVoiceStore.getState().endCall();
+    // A first dial that cannot open has failed; a redial tries again (the line decides).
+    l.lost(attempt, 'connection_closed', (err as Error).message);
   }
 }
 
@@ -595,9 +616,9 @@ export function setCallMode(next: AudioSessionMode): void {
   if (!store.call) return;
   if (store.call.mode === next) return;
   store.setCallMode(next);
+  heardSomething();
   store.setCallUnaddressed(null);
   store.session?.setSessionMode(next);
-  heardSomething();
 }
 
 export function toggleCallMute(): void {
@@ -610,9 +631,13 @@ export function toggleCallMute(): void {
 }
 
 export function endVoiceCall(opts: { silent?: boolean } = {}): void {
-  clearRedial();
+  // The line's log goes to the host while the session is still open, then the
+  // line stops: nothing it hears after this counts.
+  line?.end();
+  line = null;
+  unwatchEnvironment?.();
+  unwatchEnvironment = null;
   clearQuietTimer();
-  sessionGen++;
   const store = useVoiceStore.getState();
   if (store.call !== null && opts.silent !== true) playCallSound('ended');
   // Clear the call first: ending the session can close its socket, and the close
@@ -637,9 +662,13 @@ export function endVoiceCall(opts: { silent?: boolean } = {}): void {
 export function pauseVoiceCall(reason: PauseReason = 'button'): void {
   const store = useVoiceStore.getState();
   if (store.call === null || store.call.paused !== null) return;
-  clearRedial();
+  // The line stops: its log goes to the host on the closing session, and that
+  // session's callbacks are no longer this call's.
+  line?.end();
+  line = null;
+  unwatchEnvironment?.();
+  unwatchEnvironment = null;
   clearQuietTimer();
-  sessionGen++; // the closing session's callbacks are no longer this call's
   const session = store.session;
   store.setSession(null);
   store.setCallPaused(reason);
@@ -663,7 +692,7 @@ export async function resumeVoiceCall(deps?: AudioSessionDeps): Promise<void> {
   store.setCallPaused(null);
   store.setCallPhase('connecting');
   if (call.direct) await resumeDirectCall();
-  else await openCallSession(call.chatId, call.mode, deps, {});
+  else await placeCall(call.chatId, deps, {});
 }
 
 /**

@@ -111,6 +111,41 @@ describe('voiceMic — Android, module present', () => {
     }
   });
 
+  it('passes audio stopping under the capture to onAudioStopped, and never to onFrame', async () => {
+    Platform.OS = 'android';
+    let emit: ((ev: unknown) => void) | undefined;
+    NativeModules['PatchVoiceMic'] = {
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+      addListener: vi.fn(),
+      removeListeners: vi.fn(),
+    };
+    const { NativeEventEmitter } = await import('react-native');
+    const realAddListener = NativeEventEmitter.prototype.addListener;
+    NativeEventEmitter.prototype.addListener = function (event: string, cb: (ev: unknown) => void) {
+      emit = cb;
+      return realAddListener.call(this, event, cb);
+    };
+    try {
+      const { startMicCapture } = await import('../src/lib/voiceMic');
+      const onFrame = vi.fn();
+      const onStopped = vi.fn();
+      await startMicCapture(onFrame, vi.fn(), onStopped);
+      emit!({ audioStopped: 'audio_focus_taken', detail: 'AUDIOFOCUS_LOSS' });
+      emit!({ audioStopped: 'output_device_changed' });
+      expect(onStopped.mock.calls).toEqual([
+        ['audio_focus_taken', 'AUDIOFOCUS_LOSS'],
+        ['output_device_changed', ''],
+      ]);
+      // A capture that did not ask for them ignores them.
+      await startMicCapture(onFrame, vi.fn());
+      emit!({ audioStopped: 'audio_focus_taken', detail: 'AUDIOFOCUS_LOSS' });
+      expect(onFrame).not.toHaveBeenCalled();
+    } finally {
+      NativeEventEmitter.prototype.addListener = realAddListener;
+    }
+  });
+
   it('ignores a frame event with neither error nor base64', async () => {
     Platform.OS = 'android';
     let emit: ((ev: unknown) => void) | undefined;

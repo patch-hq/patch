@@ -2,6 +2,7 @@
 // (src/host-lockstep.ts): the policy, and the live hello path sending
 // `host.update` to a host that is behind.
 
+import { MIN_SUPPORTED_HOST_VERSION } from '../src/host-compat.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -212,7 +213,7 @@ describe('host hello brings a stale host in step', () => {
 
   it('leaves a behind host inside the supported window to update itself when idle', async () => {
     publish(VERSION);
-    const c = await connectHost('1.1.1703');
+    const c = await connectHost(MIN_SUPPORTED_HOST_VERSION);
     try {
       expect(c.frames).toEqual([]);
       c.recheck();

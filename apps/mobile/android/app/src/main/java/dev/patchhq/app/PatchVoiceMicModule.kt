@@ -2,12 +2,16 @@ package dev.patchhq.app
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import com.facebook.react.bridge.Arguments
@@ -34,6 +38,11 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
  * busy) the start Promise rejects, so the JS caller tears the call down and
  * surfaces the failure — never a call that silently carries no audio. A
  * mid-stream read error emits an `error` frame for the same reason.
+ *
+ * While it runs it also reports, as an `audioStopped` frame, the two things on
+ * the phone that stop a call's audio without touching its connection: another
+ * app taking the audio focus, and an audio device (headset, Bluetooth) coming
+ * or going. The call writes them into its log (spec/07 § Call logs).
  */
 class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
   ReactContextBaseJavaModule(ctx) {
@@ -61,6 +70,54 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
   private var thread: Thread? = null
   private var focusRequest: AudioFocusRequest? = null
   private var focusGranted = false
+  private var devicesWatched = false
+
+  private val focusListener =
+    AudioManager.OnAudioFocusChangeListener { change ->
+      val what =
+        when (change) {
+          AudioManager.AUDIOFOCUS_LOSS -> "AUDIOFOCUS_LOSS"
+          AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> "AUDIOFOCUS_LOSS_TRANSIENT"
+          AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> "AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK"
+          else -> null
+        }
+      if (what != null && running) emitAudioStopped("audio_focus_taken", what)
+    }
+
+  // Registering reports every device already present; only changes after that count.
+  private val deviceCallback =
+    object : AudioDeviceCallback() {
+      private var primed = false
+
+      override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+        if (!primed) {
+          primed = true
+          return
+        }
+        if (running) emitAudioStopped("output_device_changed", "added ${describe(added)}")
+      }
+
+      override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+        if (running) emitAudioStopped("output_device_changed", "removed ${describe(removed)}")
+      }
+    }
+
+  private fun describe(devices: Array<out AudioDeviceInfo>): String =
+    devices.joinToString(", ") { "${it.productName} (type ${it.type})" }
+
+  private fun watchDevices() {
+    if (devicesWatched) return
+    val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    manager.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
+    devicesWatched = true
+  }
+
+  private fun unwatchDevices() {
+    if (!devicesWatched) return
+    val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    manager.unregisterAudioDeviceCallback(deviceCallback)
+    devicesWatched = false
+  }
 
   /**
    * Take transient-exclusive audio focus for as long as the mic is open, so
@@ -82,6 +139,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
               .build(),
           )
           .setWillPauseWhenDucked(false)
+          .setOnAudioFocusChangeListener(focusListener)
           .build()
       result = manager.requestAudioFocus(request)
       if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusRequest = request
@@ -89,7 +147,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
       @Suppress("DEPRECATION")
       result =
         manager.requestAudioFocus(
-          null,
+          focusListener,
           AudioManager.STREAM_VOICE_CALL,
           AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
         )
@@ -111,7 +169,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
       manager.abandonAudioFocusRequest(request)
     } else {
       @Suppress("DEPRECATION")
-      manager.abandonAudioFocus(null)
+      manager.abandonAudioFocus(focusListener)
     }
   }
 
@@ -163,6 +221,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
       }
       record = rec
       running = true
+      watchDevices()
       requestFocus()
       rec.startRecording()
       Log.i(TAG, "native mic: AudioRecord started (16kHz mono PCM16, VOICE_COMMUNICATION)")
@@ -173,6 +232,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     } catch (e: Throwable) {
       running = false
       abandonFocus()
+      unwatchDevices()
       record?.release()
       record = null
       Log.e(TAG, "native mic: start failed: ${e.message}")
@@ -219,6 +279,14 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     }
   }
 
+  private fun emitAudioStopped(reason: String, detail: String) {
+    Log.i(TAG, "native mic: audio stopped ($reason): $detail")
+    val map = Arguments.createMap()
+    map.putString("audioStopped", reason)
+    map.putString("detail", detail)
+    emit(map)
+  }
+
   private fun emitError(message: String) {
     Log.e(TAG, "native mic: read loop error: $message")
     val map = Arguments.createMap()
@@ -243,6 +311,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     record?.release()
     record = null
     abandonFocus()
+    unwatchDevices()
     promise.resolve(null)
   }
 
@@ -256,6 +325,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     record?.release()
     record = null
     abandonFocus()
+    unwatchDevices()
     super.invalidate()
   }
 }
