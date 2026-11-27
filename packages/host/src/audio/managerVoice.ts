@@ -203,9 +203,8 @@ export const FIND_CHATS_DESCRIPTION =
   'query lists the most recently active chats.';
 
 export const CHAT_STATUS_DESCRIPTION =
-  'Where one chat stood at its last activity: its status line, goal, open to-dos and the last few ' +
-  "messages, with how old they are. Pass the chat's name or id. Answers at once, but it can be " +
-  'stale: say how old it is, or ask the chat for a fresh status.';
+  'Where one chat stands now: its status line, goal, open to-dos and the last few messages. ' +
+  "Pass the chat's name or id. Answers at once.";
 
 export const SEND_TO_CHAT_DESCRIPTION =
   "Send a message to another chat, by its name or id. The chat's agent receives it as if the user " +
@@ -689,13 +688,6 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
       }
       const d = deps.chatDetail(target.chatId);
       const out = [line(target)];
-      const when =
-        target.lastUpdated !== undefined ? ago(now() - target.lastUpdated) : 'at an unknown time';
-      out.push(
-        `The text below is only as fresh as the chat's last activity (${when}); the agent may have ` +
-          'moved on since. When you pass it on, say how old it is. If the chat is working or the ' +
-          `age matters, ask it for a fresh status with ${SEND_TO_CHAT_TOOL_NAME} instead of repeating this.`,
-      );
       if (d.status) out.push(`Where it stands: ${d.status}`);
       if (d.goal) out.push(`Goal: ${d.goal}`);
       if (d.openTodos.length > 0) out.push(`Still to do: ${d.openTodos.slice(0, 6).join('; ')}`);
