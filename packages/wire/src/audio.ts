@@ -59,6 +59,13 @@ export function modeRequiresAddress(mode: AudioSessionMode): boolean {
 
 export const VoiceBackend = z.enum(['local', 'gemini', 'openai', 'elevenlabs']);
 export type VoiceBackend = z.infer<typeof VoiceBackend>;
+/**
+ * The voice agent providers (spec/07 § The voice agent). Calls and hands-free
+ * always run on one: a call without a voice agent is a direct call, held on
+ * the device. Only a voice device has a host-speech (`local`) conversation.
+ */
+export const VoiceAgentBackend = z.enum(['gemini', 'openai', 'elevenlabs']);
+export type VoiceAgentBackend = z.infer<typeof VoiceAgentBackend>;
 
 /**
  * Where dictation's words come from (spec/07 § Dictation engines), named by
@@ -210,22 +217,34 @@ export interface VoiceSurfaceConfig {
   handoff: VoiceHandoff;
 }
 
+/** A call's or hands-free's cell: always a voice agent. */
+export interface VoiceAgentCellConfig extends VoiceSurfaceConfig {
+  backend: VoiceAgentBackend;
+}
+
 export interface VoiceConfig {
   speechToText: SpeechToTextEngine;
   dictation: DictationConfig;
   meeting: MeetingEngine;
   device: VoiceSurfaceConfig;
-  handsFree: VoiceSurfaceConfig;
-  call: VoiceSurfaceConfig;
+  handsFree: VoiceAgentCellConfig;
+  call: VoiceAgentCellConfig;
 }
+
+/** The voice agent a call starts on until the user picks one. */
+export const DEFAULT_VOICE_AGENT_CELL: VoiceAgentCellConfig = {
+  backend: 'gemini',
+  layer: 'light',
+  handoff: 'auto',
+};
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   speechToText: DEFAULT_SPEECH_TO_TEXT,
   dictation: { phone: 'device', computer: 'whisper', tidy: false },
   meeting: 'local',
   device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-  handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-  call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+  handsFree: DEFAULT_VOICE_AGENT_CELL,
+  call: DEFAULT_VOICE_AGENT_CELL,
 };
 
 /** The four independently-configurable voice surfaces (spec/07 § Voice). */
@@ -259,6 +278,11 @@ export function deriveVoiceSurface(args: {
 export type ConversationSurface = Exclude<VoiceSurface, 'dictation'>;
 
 /** The `{backend, layer, handoff}` cell a conversation surface runs on. */
+export function voiceCellFor(
+  config: VoiceConfig,
+  surface: 'call' | 'hands-free',
+): VoiceAgentCellConfig;
+export function voiceCellFor(config: VoiceConfig, surface: ConversationSurface): VoiceSurfaceConfig;
 export function voiceCellFor(
   config: VoiceConfig,
   surface: ConversationSurface,

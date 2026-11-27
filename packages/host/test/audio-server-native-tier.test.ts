@@ -391,8 +391,10 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("call surface, backend='local', layer='light' refuses — no front model built yet", async () => {
-    server = await startServer({ voiceConfig: { call: { backend: 'local', layer: 'light' } } });
+  test("a voice device on backend='local', layer='light' refuses — no front model built yet", async () => {
+    server = await startServer({
+      voiceConfig: { device: { backend: 'local', layer: 'light', handoff: 'auto' } },
+    });
     const ws = await openSocket(server.port, 's-light-1');
     ws.send(
       encodeAudio({
@@ -400,16 +402,17 @@ describe('audio server — voice config matrix selection', () => {
         sessionId: 's-light-1',
         accountId: 'a',
         surfaceId: 'surf',
-        surfaceKind: 'web',
+        surfaceKind: 'device',
+        deviceId: 'kitchen',
         chatId: 'c1',
-        role: 'voice-call',
+        role: 'voice-device-conv',
         token: mintToken({
           accountId: 'a',
           surfaceId: 'surf',
           sessionId: 's-light-1',
           chatId: 'c1',
         }),
-        surfaceHasAec: true,
+        surfaceHasAec: false,
       }),
     );
     const msg = await recvOne(ws);
@@ -419,7 +422,7 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test('default voiceConfig (local/direct everywhere) never dials Gemini for a plain web voice-call', async () => {
+  test('a plain web call is a Gemini voice agent call by default; with no key it is refused naming it', async () => {
     server = await startServer({});
     const ws = await openSocket(server.port, 's-fb-1');
     ws.send(
@@ -435,7 +438,8 @@ describe('audio server — voice config matrix selection', () => {
         surfaceHasAec: true,
       }),
     );
-    await new Promise((r) => setTimeout(r, 50));
+    const msg = await recvOne(ws);
+    expect(msg).toMatchObject({ type: 'audio.error', code: 'voice_key_missing' });
     expect(instances.length).toBe(0);
     ws.close();
   });

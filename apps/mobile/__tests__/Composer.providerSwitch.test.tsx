@@ -50,8 +50,8 @@ const BASE_PREFERENCES = {
   voiceConfig: {
     dictation: { phone: 'device' as const, computer: 'whisper' as const, tidy: false },
     device: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
-    handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
-    call: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
+    handsFree: { backend: 'gemini' as const, layer: 'light' as const, handoff: 'auto' as const },
+    call: { backend: 'gemini' as const, layer: 'light' as const, handoff: 'auto' as const },
   },
 };
 

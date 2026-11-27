@@ -2605,6 +2605,10 @@ const VoiceSurfaceSetting = z
     handoff: z.enum(['auto', 'always', 'never']).default('auto'),
   })
   .strict();
+/** A call's and hands-free's cell: always a voice agent (spec/07 § Two kinds of call). */
+const VoiceAgentSurfaceSetting = VoiceSurfaceSetting.extend({
+  backend: z.enum(['gemini', 'openai', 'elevenlabs']),
+}).strict();
 /** Per-surface voice config (spec/07 § Voice is a config matrix). */
 export const VoiceConfigSetting = z
   .object({
@@ -2614,8 +2618,8 @@ export const VoiceConfigSetting = z
     // Absent in settings saved before the meeting engine was a setting.
     meeting: MeetingEngine.default('local'),
     device: VoiceSurfaceSetting,
-    handsFree: VoiceSurfaceSetting,
-    call: VoiceSurfaceSetting,
+    handsFree: VoiceAgentSurfaceSetting,
+    call: VoiceAgentSurfaceSetting,
   })
   .strict();
 export type VoiceConfigSetting = z.infer<typeof VoiceConfigSetting>;
@@ -3028,15 +3032,15 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   suppressProviderSwitchWarning: false,
   autoContinueInterrupted: false,
   providerContextVerbosity: 'summary',
-  // Every surface starts on the free, self-hosted pipeline talking straight to
-  // Manager; each hosted cell is a deliberate opt-in.
+  // A voice device starts on the free host-speech pipeline; a call and
+  // hands-free are voice agent calls (spec/07 § Two kinds of call).
   voiceConfig: {
     speechToText: 'groq',
     dictation: { phone: 'device', computer: 'whisper', tidy: false },
     meeting: 'local',
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
-    handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
-    call: { backend: 'local', layer: 'direct', handoff: 'auto' },
+    handsFree: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+    call: { backend: 'gemini', layer: 'light', handoff: 'auto' },
   },
   voiceDevicePrompt: DEFAULT_VOICE_DEVICE_PROMPT,
   managerVoicePrompt: DEFAULT_MANAGER_VOICE_PROMPT,

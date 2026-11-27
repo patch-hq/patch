@@ -295,16 +295,29 @@ async function waitFor(pred: () => boolean, timeoutMs = 25_000): Promise<void> {
   }
 }
 
-function startSession(ws: WebSocket, sessionId: string): void {
+/**
+ * A host-speech conversation is a voice device's (spec/07 § Host speech
+ * engines); live partials are dictation's, on a web surface.
+ */
+function startSession(
+  ws: WebSocket,
+  sessionId: string,
+  kind: 'device' | 'dictation' = 'device',
+): void {
   ws.send(
     encodeAudio({
       type: 'audio.session_start',
       sessionId,
       accountId: 'acct-a117',
       surfaceId: 'surf-a117',
-      surfaceKind: 'web',
+      ...(kind === 'device'
+        ? {
+            surfaceKind: 'device' as const,
+            deviceId: 'dev-test',
+            role: 'voice-device-conv' as const,
+          }
+        : { surfaceKind: 'web' as const, role: 'voice-note' as const }),
       chatId: CHAT,
-      role: 'voice-call',
       token: mintToken({
         accountId: 'acct-a117',
         surfaceId: 'surf-a117',
@@ -476,7 +489,7 @@ describe('A1 — audio.transcript_partial (live STT of the utterance in flight)'
     const ws = await openWs(handle.port, sessionId);
     const frames: Frame[] = [];
     record(ws, frames);
-    startSession(ws, sessionId);
+    startSession(ws, sessionId, 'dictation');
     await waitFor(() => frames.length > 0, 2000);
 
     for (const samples of [8000, 16000, 16000]) {

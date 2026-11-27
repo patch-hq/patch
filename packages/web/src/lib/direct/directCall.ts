@@ -100,6 +100,11 @@ function followChat(chatId: string, runtime: DirectCall): () => void {
  * starts (spec/07 § Direct calls).
  */
 export async function startDirectCall(chatId: string, deps: DirectCallDeps = {}): Promise<void> {
+  // A paused call holds no session (spec/07 § Pause): a new call replaces it.
+  if (useVoiceStore.getState().call?.paused != null) {
+    endDirectCall();
+    useVoiceStore.getState().endCall();
+  }
   const voice = useVoiceStore.getState();
   if (voice.call) return; // a call stays on the chat it was started on
   const prefs = usePreferencesStore.getState().preferences;

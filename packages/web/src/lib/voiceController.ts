@@ -17,8 +17,6 @@ import { api } from '../api/rest.js';
 import { useVoiceStore, type VoiceNoteGesture } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { usePresenceStore } from '../stores/presenceStore.js';
-import { voiceCapability } from './voiceCapability.js';
 import { addressWordOrNull, usePreferencesStore } from '../stores/preferencesStore.js';
 import type { PauseReason } from '../stores/voiceStore.js';
 import { watchCallHeadphones } from './callHeadphones.js';
@@ -344,23 +342,6 @@ export async function startVoiceCall(
   deps?: AudioSessionDeps,
   opts: { takeOver?: boolean; callReason?: string } = {},
 ): Promise<void> {
-  // Voice happens on a HOST (plan H1): the chat's own. Refuse before opening
-  // an audio session that would fail at the moment of speaking, and name both
-  // the host and what it needs — the host is the thing the user can't see.
-  // Only refuse on what is KNOWN: a host that has reported and is missing
-  // the speech components. A host that has not reported yet is not blocked —
-  // presence may simply not have arrived, and the audio session fails loudly on
-  // its own if voice really is unavailable. Refusing on "unknown" would stop a
-  // legitimate call every time the greeting was slow.
-  const chatRow = useChatStore.getState().chats[chatId];
-  const host = chatRow ? usePresenceStore.getState().hosts[chatRow.hostId] : undefined;
-  if (host?.host) {
-    const cap = voiceCapability(host);
-    if (!cap.available) {
-      useUiStore.getState().pushError(cap.reason);
-      return;
-    }
-  }
   // A paused call holds no session (spec/07 § Pause): a new call replaces it.
   if (useVoiceStore.getState().call?.paused != null) endVoiceCall({ silent: true });
   const store = useVoiceStore.getState();

@@ -40,14 +40,14 @@ describe('callEngineLabel', () => {
       ),
     ).toBe('OpenAI Realtime · light');
   });
-  it('local, or no config yet, names nothing', () => {
-    expect(callEngineLabel(DEFAULT_VOICE_CONFIG, 'call')).toBeNull();
+  it('names the default voice agent, and nothing with no config yet', () => {
+    expect(callEngineLabel(DEFAULT_VOICE_CONFIG, 'call')).toBe('Gemini Live · light');
     expect(callEngineLabel(null, 'hands-free')).toBeNull();
   });
 });
 
 describe('modeSwitchNeedsNewSession', () => {
-  const mixed = cfg({ call: { backend: 'gemini', layer: 'light', handoff: 'auto' } });
+  const mixed = cfg({ call: { backend: 'openai', layer: 'light', handoff: 'auto' } });
   it('only when the two modes are on different engines', () => {
     expect(modeSwitchNeedsNewSession(mixed, 'call', 'hands-free')).toBe(true);
     expect(modeSwitchNeedsNewSession(DEFAULT_VOICE_CONFIG, 'call', 'hands-free')).toBe(false);
