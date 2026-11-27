@@ -382,24 +382,9 @@ The batch ends once every member that was ready at check-in (or became ready sin
 
 ## Manager view
 
-Opening Manager gives the main panel a second region: the Manager conversation on top, a Threads strip beneath it, split by a drag-resizable horizontal divider (threads 240px by default, persisted per-user). This is the sit-and-watch view — one conversation to talk to, and everything it is watching visible underneath without leaving it.
+Manager opens as an ordinary chat: the Manager conversation fills the main panel. Until it has a message, its empty chat says what it is in one line under its title: `Ask about any of your chats, or have it message them for you.`
 
-The Threads strip, and the sweep status line in it, are absent while there is no chat to list. Until then the Manager's empty chat says what it is in one line under its title: `Ask about any of your chats, or have it message them for you.`
-
-The Threads strip lists every active chat on every host, one row each, ordered needs-you first (`permission`, then an unanswered question, then a report, then `working`, then the rest by recency) — the same rule the sidebar's folders sort by, kept once in `@patch/wire` (`threadRows`) and shared with the phone's Manager Chats tab (`15-design-mobile.md` § Voice tab (Manager)). A row shows the status badge, the chat name, its host and folder, and its one-line status summary, and updates live. Archived, snoozed and deleted chats are not listed; nor are the special threads.
-
-Each row's controls are the decision it is blocked on, taken without opening the chat:
-
-- `permission` — Approve / Deny, the same pair the chat itself offers.
-- question — the answer options, inline.
-- idle — Carry on, which delivers a `continue` turn.
-- any row — Open, and Stop.
-
-The reach setting sits in the Manager view's own header, as a switch between `notify` and `auto-notify` (`09-notifications.md` § Reaching the user). It belongs here rather than in Settings because it is changed for a couple of hours at a time — before a drive, before an afternoon of plastering — not configured once. The switch names the state it is in, and every surface shows the same value, because the setting is the account's.
-
-The strip has no scope picker. The Manager's sweep considers everything (`06-threads-manager-speakers.md` § The sweep), and a view that showed less than the thing doing the sweeping would be lying about what it can see.
-
-Above the rows sits the sweep's own slim status line: "Last sweep 14:30 · answered 2 · digest 1" (or "No sweeps yet" before the first one, or "… · failed" when the last run's decision call errored). Clicking the line expands it into one row per chat the sweep acted on — the action it took and the chat's name, each opening that chat. A "Check now" button beside it forces an attempt immediately (`06-threads-manager-speakers.md` § The sweep — Triggers); nothing gone idle still reports no change rather than pretending to have swept. Sweep runs are also listed like job runs (`08-triggers-and-jobs.md` § Logs) via the same account-wide list the status line's expansion reads from — there is no separate "sweep runs" page.
+Its header carries one action no other chat has: a settings gear beside Zen (labelled "Manager settings") that opens Settings → Manager. A finished-chats delivery (`06-threads-manager-speakers.md` § Finished chats) shows as its `Finished · <chat name>` notes, each a collapsed entry that opens to its text, then the plain line after them, drawn as Patch's own message rather than as the user typing.
 
 ## Main chat panel
 
@@ -1101,7 +1086,7 @@ Voice is initiated per-chat from the row's mic button (tap-and-hold) for one-sho
 
 Settings is a nav of pages in five groups, in this order: **Setup** (AI accounts, Hosts, Linked devices, Connected services, Notifications), **Agents** (Agent, Chats, Goals, Memories, Manager), **Voice** (Voice calls, Dictation, Meetings), **Advanced**, folded until opened (Tools (MCP), Hooks, Computer use, Agent identity, Activity log), and **App** (Shortcuts, Updates, Experimental features, Bug reports, Account). Each page opens with one line saying what it is for, and nothing more: below it, every row shows only its title, live value and control(s). The user reads the state, not paragraphs about it. A page that only exists while Experimental features is on carries an `Experimental` tag on the page and a dot beside it in the nav.
 
-Every prompt Patch sends lives once, on the page for the feature it drives: the agent's (question timeout, background-task check-in and its interval, job autonomy, link summary, Patch tools guidance, system prompt) on Agent; the goal judge on Goals; the sweep and the Manager voice on Manager; voice instructions and speaking aloud on Voice calls; the three meeting prompts on Meetings. Each shows the text in force, folded to a few lines with Show all, and says whether it is the Default or a Custom version. Custom opens an editor seeded with the text in force; a custom prompt has Edit to open it again; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The old `/settings/prompts` address opens Agent.
+Every prompt Patch sends lives once, on the page for the feature it drives: the agent's (question timeout, background-task check-in and its interval, job autonomy, link summary, Patch tools guidance, system prompt) on Agent; the goal judge on Goals; the Manager prompt and the Manager voice on Manager; voice instructions and speaking aloud on Voice calls; the three meeting prompts on Meetings. Each shows the text in force, folded to a few lines with Show all, and says whether it is the Default or a Custom version. Custom opens an editor seeded with the text in force; a custom prompt has Edit to open it again; Save writes the shared setting; Default writes the built-in text back (`null` for tools guidance, `''` for the system prompt). The old `/settings/prompts` address opens Agent.
 
 **Experimental features.** The last group, App, holds an `Experimental features` page with one switch, `Show experimental features`, off by default and stored as the account-wide `experimentalFeatures` setting (`01-server.md` § Settings). It is the home for half-finished work. While it is off, nothing experimental is drawn or reachable: the Manager row (the sidebar, the mini rail), the `Batch` option in the view dropdown, the `Manager` and `Computer use` pages in Settings, and the Files, Browser, Editor and Terminal entry points (chat header, sidebar Files link, new-chat Editor and Terminal strip, and their keyboard shortcuts) are all absent, and a Batch view left selected from an earlier session is not shown. Turning it on brings them all back at once. The Manager's background work is governed by its own settings and is not stopped by this switch. Anything new that is not ready for everyone is added to this page rather than shipped on.
 
@@ -1236,7 +1221,7 @@ The meeting's transcription engine, then its models and timing: the analysis mod
 
 #### Goals
 
-Its own page, between Manager and Voice in the Agents group (`04-chats-and-folders.md` § Goals). Three rows, account-wide, each applied by every host on its next judgement: the judge model (the one model that judges every chat's goal, whichever provider the chat runs on, default Sonnet 5.5), how many refusals in a row end a goal's pushing (default 3), and the judge prompt. The prompt is the judge's instructions only: the host adds the goal, the conversation and the reply format around it, so an edit cannot break how the answer is read. It opens in the same editor as the sweep prompt, showing the full default, with a Reset to default.
+Its own page, between Manager and Voice in the Agents group (`04-chats-and-folders.md` § Goals). Three rows, account-wide, each applied by every host on its next judgement: the judge model (the one model that judges every chat's goal, whichever provider the chat runs on, default Sonnet 5.5), how many refusals in a row end a goal's pushing (default 3), and the judge prompt. The prompt is the judge's instructions only: the host adds the goal, the conversation and the reply format around it, so an edit cannot break how the answer is read. It opens in the same editor as the other prompts, showing the full default, with a Reset to default.
 
 #### Voice
 
@@ -1364,29 +1349,29 @@ Models for small jobs is a text field holding the shared `smallJobModels` as a c
 
 #### Special threads
 
-- Sweep (`06-threads-manager-speakers.md` § The sweep) — an Enabled
-  switch (off by default; the one switch that stops everything); the delivery slider
-  (Instant, then 5 minutes up to a day; default 30 minutes — how soon a question the
-  Manager could not answer reaches the user); messages per chat (how many of each idle chat's recent
-  messages the sweep reads, default 1); and the model the sweep's one decision
-  call runs on (default a mid-size model). Account-wide, not per-surface: the
-  sweep runs on the server and the Manager host.
-- Prompts — every prompt the Manager runs on, in one group under Home:
-  Instructions, the Manager chat's `CLAUDE.md` on its home host
-  (`06-threads-manager-speakers.md` § Where special threads run), read and saved
-  through host files over the version it was opened at, so a file changed on the
-  host since is refused with a Reload rather than overwritten; with no home host,
-  or the home host offline, the row says so instead of an editor. Voice
-  (`managerVoicePrompt`), who the voice is on a call to the Manager
-  (`07-voice-app.md` § A call to the Manager), Default or Custom like a row on
-  the Prompts page; the rules for the call's tools are added after it and are
-  not part of the text. And the sweep's standing instructions, a text field
-  showing the full default, editable, with a Reset to default.
-- Manager — the home host (`06-threads-manager-speakers.md` § Where special
+- Home — the home host (`06-threads-manager-speakers.md` § Where special
   threads run), a picker of every registered host; choosing another opens the
   handover under it, the server's drafted message in an editable box with
   Cancel and Move to <host>, and nothing changes until Move
-  (§ Changing home). Then the quiet hours during which no sweep flag is delivered, and the address word
+  (§ Changing home). Then Folder, the Manager's folder (`06-threads-manager-speakers.md`
+  § Manager prompt and folder), shown as its path with Change, which opens a
+  path field; Save checks the path is a folder on the home host through host
+  files and refuses with the host's answer when it is not.
+- Prompts — Prompt (`managerPrompt`), given to the Manager at the start of
+  every session, and Voice (`managerVoicePrompt`), who the voice is on a call
+  to the Manager (`07-voice-app.md` § A call to the Manager), each Default or
+  Custom like a row on the Prompts page; the rules for the call's tools are
+  added after the voice prompt and are not part of its text.
+- Finished chats — Send to the Manager, pills Off / Each one / Batched
+  (`managerWake`, off by default; chats with a goal running are left out), and
+  Every, a slider of 5, 15 and 30 minutes, 1, 2, 4 and 8 hours and a day
+  (`managerWakeIntervalMinutes`, default 30 minutes), usable only when Batched.
+- Context — This session, the current session's message count and when it
+  started (`34 messages · started today 09:12`), with Clear
+  (`06-threads-manager-speakers.md` § Bounded context); and Start fresh after
+  N messages (`managerContextWindow`, default 80), whose unit says how many
+  are kept: "messages, keeping the last N/2".
+- Manager — the quiet hours, and the address word
   that makes a spoken utterance a turn while a session is in `hands-free`
   (`07-voice-app.md` § Session modes), defaulting to `patch`.
 - Manager & Speakers — the model those two threads run on
@@ -1524,7 +1509,7 @@ The shortcuts above are global to the SPA and are written once, in macOS glyphs.
 
 ## Jobs view
 
-Above the list, a collapsed "Defaults for all jobs" area holds the account-wide job settings (they are not in Settings): the "Default model for jobs" picker, and the "Autonomy prompt" row — the text every job's first user-turn is prefaced with unless that job overrides it (`08-triggers-and-jobs.md` § Autonomy prompt). The prompt opens in the same editor as the Manager's sweep prompt (Save, Cancel, ⌘↵), and Reset writes the built-in default back. It is the only place the account-wide prompt is edited; the job editor shows it only under a collapsed Advanced area.
+Above the list, a collapsed "Defaults for all jobs" area holds the account-wide job settings (they are not in Settings): the "Default model for jobs" picker, and the "Autonomy prompt" row — the text every job's first user-turn is prefaced with unless that job overrides it (`08-triggers-and-jobs.md` § Autonomy prompt). The prompt opens in the same editor as the other prompts (Save, Cancel, ⌘↵), and Reset writes the built-in default back. It is the only place the account-wide prompt is edited; the job editor shows it only under a collapsed Advanced area.
 
 Reference mock: `design/web-lo-fi-schedules.html`.
 
