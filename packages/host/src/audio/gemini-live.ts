@@ -292,7 +292,7 @@ export const ASYNC_WAIT_RULE =
   'like it unless the user asks how it is going. When the agent finishes, its result arrives as a ' +
   'message from the agent: tell the user the answer in one or two short sentences, never the ' +
   'whole text, and let them ask for more. Several ' +
-  'requests can be running at once. A hand-off you have made stays in progress until its result ' +
+  'requests can be running at once; never hand off the same request twice, and describe only what is new in each one, not the earlier requests. A hand-off you have made stays in progress until its result ' +
   'arrives: if the user asks about it, or an empty or unclear turn comes in, do not ask whether ' +
   'they want it looked up or passed on — it already has been; say briefly that it is on its way.\n\n';
 
@@ -360,6 +360,12 @@ export const DISPATCH_STARTED_NOTE =
   'few words of your own that you have passed it on, then carry straight on with the rest of what ' +
   'they asked, answering the other parts yourself. Its result will arrive as a message; do not ' +
   'wait for it or keep mentioning it.';
+
+/** The answer to a hand-off that repeats one already running. */
+export const DISPATCH_REPEAT_NOTE =
+  'That request is already with the agent and is being worked on; it was not sent again. Tell the ' +
+  'user in a few words that it is already in progress. Do not call the tool for it again, and when ' +
+  'you hand off something new, describe only the new request, not the earlier ones.';
 
 /** The same correction on a Manager call, where sending is `send_to_chat`. */
 export const MANAGER_FALSE_CLAIM_CORRECTION =
@@ -620,6 +626,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
   private reply?: VoiceReplyWriter;
   /** Hand-offs to the chat's agent not yet answered. */
   private handoffsInFlight = 0;
+  /** The requests of hand-offs still running, so a resend of one is recognised (handleDispatch). */
+  private readonly requestsInFlight = new Set<string>();
   /** Dispatch calls received so far: a claim is checked against whether one arrived since. */
   private dispatchCount = 0;
   /** Agent results waiting for a gap in the conversation, in the order they finished. */
@@ -1468,6 +1476,56 @@ export class GeminiLiveSession implements VoiceSessionLike {
       surfaceKind: this.init.surfaceKind as 'web' | 'desktop' | 'mobile',
       sessionId: this.init.sessionId,
     };
+    const repeat = this.repeatedRequest(request);
+    if (repeat !== undefined) {
+      // The same request is already with the agent: do not hand it over a second time.
+      this.log('hand-off already in progress, not resent', { callId, request, repeatOf: repeat });
+      this.sendFrame(
+        {
+          toolResponse: {
+            functionResponses: [
+              {
+                id: callId,
+                name: DISPATCH_TOOL_NAME,
+                response: {
+                  result: 'already in progress',
+                  note: DISPATCH_REPEAT_NOTE,
+                  scheduling: 'WHEN_IDLE',
+                },
+              },
+            ],
+          },
+        },
+        'tool response (already in progress)',
+        { callId, scheduling: 'WHEN_IDLE' },
+      );
+      return;
+    }
+    this.requestsInFlight.add(request);
+    try {
+      await this.dispatchHandoff(callId, request, source);
+    } finally {
+      this.requestsInFlight.delete(request);
+    }
+  }
+
+  /** The in-flight request `request` repeats (the same words, or one containing the other), if any. */
+  private repeatedRequest(request: string): string | undefined {
+    const norm = (t: string): string => t.toLowerCase().replace(/\s+/g, ' ').trim();
+    const mine = norm(request);
+    if (mine === '') return undefined;
+    for (const other of this.requestsInFlight) {
+      const theirs = norm(other);
+      if (mine === theirs || mine.includes(theirs) || theirs.includes(mine)) return other;
+    }
+    return undefined;
+  }
+
+  private async dispatchHandoff(
+    callId: string,
+    request: string,
+    source: VoiceTurnSource,
+  ): Promise<void> {
     await this.runHandoff(callId, DISPATCH_TOOL_NAME, {
       what: 'dispatching to the chat agent',
       fields: { request },

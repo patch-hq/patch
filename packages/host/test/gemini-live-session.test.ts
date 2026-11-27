@@ -473,6 +473,35 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
   });
 });
 
+describe('GeminiLiveSession — a hand-off that is already running', () => {
+  test('the same request again is answered "already in progress" and not sent twice', async () => {
+    const submitUserTurn = vi.fn(
+      (args: { onAccepted?: () => void }) =>
+        new Promise<string>(() => {
+          args.onAccepted?.();
+        }),
+    );
+    const { deps, lastWs } = makeDeps({
+      submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
+    });
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    const call = (id: string, request: string) =>
+      ws.serverSend({
+        toolCall: { functionCalls: [{ id, name: DISPATCH_TOOL_NAME, args: { request } }] },
+      });
+    call('a', 'Log these two bugs');
+    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalledTimes(1));
+    call('b', 'log these two bugs, and unblock 5942');
+    await vi.waitFor(() =>
+      expect(ws.sent.some((s) => s.includes('already in progress'))).toBe(true),
+    );
+    expect(submitUserTurn).toHaveBeenCalledTimes(1);
+    call('c', 'book a table');
+    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe('GeminiLiveSession — dispatch to the heavy agent', () => {
   test('a dispatch_to_patch tool call invokes submitUserTurn and sends the reply back as a toolResponse', async () => {
     const { deps, lastWs, submitUserTurn } = makeDeps();

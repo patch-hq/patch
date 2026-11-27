@@ -43,8 +43,14 @@ interface Waiter {
   resolve: (text: string) => void;
   reject: (err: Error) => void;
   onReplyText?: (chunk: string) => void;
-  /** Called once, when the waiter is armed: the chat has the turn. */
+  /**
+   * Called once, as soon as the chat has the input: when the host acknowledges it
+   * (`chat.input_ack`, even if it is queued behind a running turn) or, failing that, when the
+   * turn starts.
+   */
   onAccepted?: () => void;
+  /** `onAccepted` has been called. */
+  accepted?: boolean;
   /**
    * The `localId` the turn was sent with. When set, the waiter is armed only by that
    * turn's own persisted user message (emitted as the turn starts), never by whichever
@@ -100,9 +106,20 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
     w.reject(err);
   }
 
+  function accept(w: Waiter): void {
+    if (w.accepted === true) return;
+    w.accepted = true;
+    w.onAccepted?.();
+  }
+
   return {
     observe(event: WireEvent): void {
       switch (event.type) {
+        case 'chat.input_ack': {
+          const w = waiters.get(event.chatId);
+          if (w && w.localId !== undefined && event.localId === w.localId) accept(w);
+          return;
+        }
         case 'chat.message_delta': {
           const w = waiters.get(event.chatId);
           // Only an armed waiter owns the turn currently producing text.
@@ -117,7 +134,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
             if (w.localId !== undefined && event.localId === w.localId) {
               w.armed = true;
               w.buf = [];
-              w.onAccepted?.();
+              accept(w);
             }
             return;
           }
@@ -137,7 +154,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           if (!w.armed) {
             w.armed = true;
             w.buf = [];
-            w.onAccepted?.();
+            accept(w);
           }
           return;
         }
@@ -201,7 +218,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
       if (!w || w.localId !== localId || w.armed) return;
       w.armed = true;
       w.buf = [];
-      w.onAccepted?.();
+      accept(w);
     },
 
     pendingCount(): number {

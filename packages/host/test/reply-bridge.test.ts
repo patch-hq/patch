@@ -109,3 +109,31 @@ describe('voice reply bridge — acceptance', () => {
     expect(accepted).toBe(1);
   });
 });
+
+describe('voice reply bridge — acknowledging receipt', () => {
+  it('reports the hand-off accepted when the host acks it, while it is still queued behind a running turn', () => {
+    const bridge = createVoiceReplyBridge();
+    let accepted = 0;
+    bridge.observe({
+      type: 'chat.state',
+      chatId: 'c',
+      activity: 'running',
+    } as unknown as WireEvent);
+    void bridge.awaitReply('c', undefined, 'mine', () => (accepted += 1)).catch(() => {});
+    bridge.observe({
+      type: 'chat.input_ack',
+      chatId: 'c',
+      localId: 'other',
+    } as unknown as WireEvent);
+    expect(accepted).toBe(0);
+    bridge.observe({
+      type: 'chat.input_ack',
+      chatId: 'c',
+      localId: 'mine',
+    } as unknown as WireEvent);
+    expect(accepted).toBe(1);
+    // The turn starting later does not report it a second time.
+    bridge.observe(msg('c', 'user', 'x', 'mine'));
+    expect(accepted).toBe(1);
+  });
+});
