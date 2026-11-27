@@ -19765,6 +19765,6 @@ a.drop-target,
 .mcp-app-call-error {
   margin: 6px 0;
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: var(--text-min);
   color: var(--danger);
 }
