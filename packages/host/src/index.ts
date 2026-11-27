@@ -5724,6 +5724,7 @@ async function startHost(
         link.dropLink();
       },
     }),
+    onDrawnTurnStarted: (chatId, localId) => voiceReplies.turnStarted(chatId, localId),
     onTurnCommitted: (chatId) => {
       if (!(SPECIAL_THREAD_IDS as readonly string[]).includes(chatId)) return;
       const threadId = chatId as SpecialThreadId;
@@ -7128,6 +7129,23 @@ async function startHost(
       // so by the time it returns the bridge has normally already settled. If
       // it THROWS, the turn never ran — fail the waiter loudly instead of
       // leaving the session waiting on a promise nothing will ever resolve.
+      // A hand-off is written into the chat now, in order with what was said
+      // around it, and delivered under that line when the agent gets to it. Left to
+      // the turn, it would be recorded only when it ran, below everything said since.
+      let drawnSeq: number | undefined;
+      if (handoff === true) {
+        try {
+          drawnSeq = daemon.recordVoiceMessage({
+            chatId,
+            role: 'user',
+            content: `${voicePrefix}${message}`,
+            owed: false,
+          });
+        } catch (err) {
+          voiceReplies.abandon(chatId, err as Error);
+          throw err;
+        }
+      }
       try {
         await daemon.sendInput({
           chatId,
@@ -7135,6 +7153,7 @@ async function startHost(
           localId,
           voicePrefix,
           fromUser: true,
+          ...(drawnSeq !== undefined ? { deliverDrawn: drawnSeq } : {}),
         });
       } catch (err) {
         voiceReplies.abandon(chatId, err as Error);
