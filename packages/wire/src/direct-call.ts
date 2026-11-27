@@ -12,6 +12,14 @@
 // naming it; nothing is answered by another engine.
 
 import { z } from 'zod';
+import {
+  SoundValues,
+  soundProblem,
+  soundValues,
+  toneFor,
+  type VoiceEngine,
+  type VoiceTones,
+} from './voiceEngines.js';
 
 /** Speech to text engines: on the device (Parakeet in the desktop app, Android's recogniser) or in the cloud. */
 export const DirectSttEngine = z.enum(['parakeet', 'android', 'groq', 'elevenlabs']);
@@ -137,27 +145,103 @@ export function cloudSpeechEngines(
   return { stt, tts };
 }
 
-/** How the reply sounds: only the chosen engine's own controls apply (spec/07 § Direct calls). */
+/**
+ * How the reply sounds, resolved for a call: the engine's controls (stored or
+ * default) and the voice's tone. What a host's cloud speech is sent.
+ */
 export const DirectTtsSound = z
   .object({
     /** ElevenLabs, OpenAI: raw text, into the engine's instructions as written. */
     tone: z.string().max(2000).optional(),
-    /** ElevenLabs, 0..1. */
     stability: z.number().min(0).max(1).optional(),
     similarity: z.number().min(0).max(1).optional(),
     style: z.number().min(0).max(1).optional(),
-    /** ElevenLabs 0.7..1.2, OpenAI 0.25..4, Kokoro 0.5..2. */
     speed: z.number().min(0.25).max(4).optional(),
   })
   .strict();
 export type DirectTtsSound = z.infer<typeof DirectTtsSound>;
 
-/** Which sound controls each engine takes. */
-export const TTS_SOUND_CONTROLS: Record<DirectTtsEngine, readonly (keyof DirectTtsSound)[]> = {
-  elevenlabs: ['tone', 'stability', 'similarity', 'style', 'speed'],
-  openai: ['tone', 'speed'],
-  kokoro: ['speed'],
-  android: [],
+const tone = { kind: 'tone', key: 'tone', label: 'Tone' } as const;
+const slower = { low: 'Slower', high: 'Faster', suffix: '×' } as const;
+
+/**
+ * Each text to speech engine's "how it sounds" controls (spec/07 § Direct
+ * calls), in the same form as the voice agent's (voiceEngines.ts), so one
+ * renderer draws both. Tone is kept per voice (`voiceTones`).
+ */
+export const DIRECT_TTS_ENGINES: Record<DirectTtsEngine, VoiceEngine> = {
+  elevenlabs: {
+    id: 'elevenlabs',
+    label: TTS_ENGINE_LABEL.elevenlabs,
+    controls: [
+      tone,
+      {
+        kind: 'slider',
+        key: 'stability',
+        label: 'Stability',
+        default: 0.7,
+        min: 0,
+        max: 1,
+        step: 0.05,
+        low: 'Expressive',
+        high: 'Steady',
+      },
+      {
+        kind: 'slider',
+        key: 'similarity',
+        label: 'Similarity',
+        default: 0.8,
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+      { kind: 'slider', key: 'style', label: 'Style', default: 0, min: 0, max: 1, step: 0.05 },
+      {
+        kind: 'slider',
+        key: 'speed',
+        label: 'Speed',
+        default: 0.95,
+        min: 0.7,
+        max: 1.2,
+        step: 0.05,
+        ...slower,
+      },
+    ],
+  },
+  openai: {
+    id: 'openai',
+    label: TTS_ENGINE_LABEL.openai,
+    controls: [
+      tone,
+      {
+        kind: 'slider',
+        key: 'speed',
+        label: 'Speed',
+        default: 1,
+        min: 0.25,
+        max: 4,
+        step: 0.05,
+        ...slower,
+      },
+    ],
+  },
+  kokoro: {
+    id: 'kokoro',
+    label: TTS_ENGINE_LABEL.kokoro,
+    controls: [
+      {
+        kind: 'slider',
+        key: 'speed',
+        label: 'Speed',
+        default: 1,
+        min: 0.5,
+        max: 2,
+        step: 0.05,
+        ...slower,
+      },
+    ],
+  },
+  android: { id: 'android', label: TTS_ENGINE_LABEL.android, controls: [] },
 };
 
 /** One device's direct-call setup (`deviceDirectCall[surfaceId]`). */
@@ -169,9 +253,14 @@ export const DirectCallSetup = z
         engine: DirectTtsEngine,
         model: z.string().min(1).optional(),
         voice: z.string().min(1).optional(),
-        sound: DirectTtsSound.optional(),
+        /** The engine's own controls (`DIRECT_TTS_ENGINES`); tone is per voice, in `voiceTones`. */
+        sound: SoundValues.optional(),
       })
-      .strict(),
+      .strict()
+      .superRefine((tts, ctx) => {
+        const problem = soundProblem(DIRECT_TTS_ENGINES[tts.engine], tts.sound ?? {});
+        if (problem) ctx.addIssue({ code: 'custom', path: ['sound'], message: problem });
+      }),
   })
   .strict();
 export type DirectCallSetup = z.infer<typeof DirectCallSetup>;
@@ -214,6 +303,7 @@ export function directCallSummary(call: Pick<ResolvedDirectCall, 'stt' | 'tts'>)
 export function resolveDirectCall(
   report: SpeechEngineReport,
   setup: DirectCallSetup | undefined,
+  tones: VoiceTones,
 ): DirectCallResolution {
   const stts = preferDevice(report.stt);
   const ttss = preferDevice(report.tts);
@@ -249,11 +339,14 @@ export function resolveDirectCall(
       reason: `${TTS_ENGINE_LABEL[tts.engine]} has no voice to speak with. ${fix}`,
     };
   }
-  const allowed = new Set(TTS_SOUND_CONTROLS[tts.engine]);
-  const sound: DirectTtsSound = {};
-  for (const [k, v] of Object.entries(setup?.tts.sound ?? {})) {
-    if (allowed.has(k as keyof DirectTtsSound)) (sound as Record<string, unknown>)[k] = v;
-  }
+  // The engine's controls, stored or default, and the voice's tone. A stored
+  // sound belongs to the engine it was set for: another engine starts on its own.
+  const stored = setup?.tts.engine === tts.engine ? (setup.tts.sound ?? {}) : {};
+  const toneText = toneFor(tones, tts.engine, voice);
+  const sound = {
+    ...soundValues(DIRECT_TTS_ENGINES[tts.engine], stored),
+    ...(toneText !== undefined ? { tone: toneText } : {}),
+  } as DirectTtsSound;
   return {
     ok: true,
     call: {
@@ -371,3 +464,150 @@ export function createSpeechEngineReporter(deps: {
     },
   };
 }
+
+// --- Settings → Voice calls → Direct calls (spec/14 § Voice) ---------------
+
+/** A choice Settings offers: an engine, labelled with where it runs. */
+export interface DirectEngineOption<E extends string> {
+  engine: E;
+  label: string;
+  where: SpeechEngineWhere;
+}
+
+/** Each step of a device's setup: what it offers and what is chosen now. */
+export interface DirectCallSteps {
+  stt: { options: DirectEngineOption<DirectSttEngine>[]; engine: DirectSttEngine | undefined };
+  sttModel: { options: string[]; value: string | undefined };
+  tts: { options: DirectEngineOption<DirectTtsEngine>[]; engine: DirectTtsEngine | undefined };
+  ttsModel: { options: string[]; value: string | undefined };
+  voice: { options: string[]; value: string | undefined };
+  /** The stored sound of the chosen engine (defaults are the description's). */
+  sound: SoundValues;
+  /** One line for the row: `Parakeet → Kokoro`, `No speech engine`, or why the setup cannot run. */
+  summary: string;
+  /** Why the stored setup cannot run here, or undefined. */
+  problem: string | undefined;
+}
+
+/**
+ * What Settings shows for one device. Only the engines the device reported are
+ * offered; a choice it no longer reports stays shown, with the reason.
+ */
+export function directCallSteps(
+  report: SpeechEngineReport,
+  setup: DirectCallSetup | undefined,
+  tones: VoiceTones,
+): DirectCallSteps {
+  const resolved = resolveDirectCall(report, setup, tones);
+  const call = resolved.ok ? resolved.call : undefined;
+  const sttEngine = setup?.stt.engine ?? call?.stt.engine;
+  const ttsEngine = setup?.tts.engine ?? call?.tts.engine;
+  const stt = report.stt.find((e) => e.engine === sttEngine);
+  const tts = report.tts.find((e) => e.engine === ttsEngine);
+  return {
+    stt: {
+      options: preferDevice(report.stt).map((e) => ({
+        engine: e.engine,
+        label: STT_ENGINE_LABEL[e.engine],
+        where: e.where,
+      })),
+      engine: sttEngine,
+    },
+    sttModel: { options: stt?.models ?? [], value: setup?.stt.model ?? call?.stt.model },
+    tts: {
+      options: preferDevice(report.tts).map((e) => ({
+        engine: e.engine,
+        label: TTS_ENGINE_LABEL[e.engine],
+        where: e.where,
+      })),
+      engine: ttsEngine,
+    },
+    ttsModel: { options: tts?.models ?? [], value: setup?.tts.model ?? call?.tts.model },
+    voice: { options: tts?.voices ?? [], value: setup?.tts.voice ?? call?.tts.voice },
+    sound: setup?.tts.sound ?? {},
+    summary: call
+      ? directCallSummary(call)
+      : resolved.ok
+        ? ''
+        : resolved.reason === NO_SPEECH_ENGINE
+          ? NO_SPEECH_ENGINE
+          : 'Needs setting up',
+    problem: !resolved.ok && resolved.reason !== NO_SPEECH_ENGINE ? resolved.reason : undefined,
+  };
+}
+
+export type DirectCallChange =
+  | { step: 'stt'; engine: DirectSttEngine }
+  | { step: 'sttModel'; model: string }
+  | { step: 'tts'; engine: DirectTtsEngine }
+  | { step: 'ttsModel'; model: string }
+  | { step: 'voice'; voice: string }
+  | { step: 'sound'; sound: SoundValues };
+
+/**
+ * The setup one change in Settings makes. Everything after a changed engine
+ * starts over (its model, voice and sound belong to the engine), so the next
+ * step is chosen again rather than carried across.
+ */
+export function changeDirectCall(
+  steps: DirectCallSteps,
+  change: DirectCallChange,
+): DirectCallSetup {
+  const stt = {
+    engine: steps.stt.engine!,
+    ...(steps.sttModel.value ? { model: steps.sttModel.value } : {}),
+  };
+  const tts = {
+    engine: steps.tts.engine!,
+    ...(steps.ttsModel.value ? { model: steps.ttsModel.value } : {}),
+    ...(steps.voice.value ? { voice: steps.voice.value } : {}),
+    ...(Object.keys(steps.sound).length > 0 ? { sound: steps.sound } : {}),
+  };
+  switch (change.step) {
+    case 'stt':
+      return { stt: { engine: change.engine }, tts };
+    case 'sttModel':
+      return { stt: { ...stt, model: change.model }, tts };
+    case 'tts':
+      return { stt, tts: { engine: change.engine } };
+    case 'ttsModel':
+      return { stt, tts: { ...tts, model: change.model } };
+    case 'voice':
+      return { stt, tts: { ...tts, voice: change.voice } };
+    case 'sound':
+      return { stt, tts: { ...tts, sound: change.sound } };
+  }
+}
+
+const KOKORO_ACCENT: Record<string, string> = {
+  af: 'American F',
+  am: 'American M',
+  bf: 'British F',
+  bm: 'British M',
+};
+
+/**
+ * A Kokoro voice as people read it, from Kokoro's own id convention
+ * (`af_heart` → `Heart (American F)`). An id outside the convention is shown
+ * as it is.
+ */
+export function kokoroVoiceLabel(id: string): string {
+  const m = /^([ab][fm])_(\w+)$/.exec(id);
+  if (!m) return id;
+  return `${m[2]!.charAt(0).toUpperCase()}${m[2]!.slice(1)} (${KOKORO_ACCENT[m[1]!]})`;
+}
+
+/** The voices the host's Kokoro speaks in (`kokoroVoice`), for a voice device answering directly. */
+export const HOST_KOKORO_VOICES: readonly string[] = [
+  'af_heart',
+  'af_bella',
+  'af_sky',
+  'af_sarah',
+  'af_nicole',
+  'am_adam',
+  'am_michael',
+  'bf_emma',
+  'bf_isabella',
+  'bm_george',
+  'bm_lewis',
+];

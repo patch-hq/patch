@@ -38,6 +38,7 @@ import { loadCredential } from '../lib/credential.js';
 import { hookImages } from '../lib/hookImages.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
 import type { AudioSessionRole } from '@patch/wire/audio';
+import type { SpeechEngineReport } from '@patch/wire/direct-call';
 
 /** The backends whose accounts are shared settings. */
 export type SharedBackendId = 'claude-code' | 'codex';
@@ -1078,6 +1079,8 @@ export const api = {
         status: 'online' | 'stale' | 'offline';
         lastHeartbeat: number | null;
         isCurrent: boolean;
+        /** What it last reported it can run for a direct call; absent: never reported (spec/05 § Speech engines). */
+        speechEngines?: SpeechEngineReport;
         /** Web and desktop surfaces only (spec/09 § Presence heuristic). */
         presence?: {
           state: 'active' | 'idle' | 'away' | 'not-reporting';

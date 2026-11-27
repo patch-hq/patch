@@ -164,7 +164,8 @@ export function Pills<T extends string>({
   titles,
 }: {
   options: readonly T[];
-  value: T;
+  /** Undefined: nothing chosen yet. */
+  value: T | undefined;
   onChange: (next: T) => void;
   disabled?: boolean;
   testid?: string;

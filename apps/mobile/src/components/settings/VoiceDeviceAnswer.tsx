@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { DeviceAnswer } from '@patch/wire/audio';
+import { HOST_KOKORO_VOICES, kokoroVoiceLabel } from '@patch/wire/direct-call';
 import type { AccountPreferences } from '../../api/rest';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { OptionPicker } from '../OptionPicker';
@@ -58,23 +59,11 @@ function ElevenLabsVoiceRow({
   );
 }
 
-/**
- * Standard Kokoro v1 voices — the same list web offers. Names match the `.pt`
- * files the sidecar loads by name.
- */
-export const KOKORO_VOICES: { id: string; label: string }[] = [
-  { id: 'af_heart', label: 'Heart (American F)' },
-  { id: 'af_bella', label: 'Bella (American F)' },
-  { id: 'af_sky', label: 'Sky (American F)' },
-  { id: 'af_sarah', label: 'Sarah (American F)' },
-  { id: 'af_nicole', label: 'Nicole (American F)' },
-  { id: 'am_adam', label: 'Adam (American M)' },
-  { id: 'am_michael', label: 'Michael (American M)' },
-  { id: 'bf_emma', label: 'Emma (British F)' },
-  { id: 'bf_isabella', label: 'Isabella (British F)' },
-  { id: 'bm_george', label: 'George (British M)' },
-  { id: 'bm_lewis', label: 'Lewis (British M)' },
-];
+/** The host's Kokoro voices, named as people read them. */
+export const KOKORO_VOICES: { id: string; label: string }[] = HOST_KOKORO_VOICES.map((id) => ({
+  id,
+  label: kokoroVoiceLabel(id),
+}));
 
 /**
  * A voice device answering directly (spec/16): its words are transcribed on

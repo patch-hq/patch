@@ -32,6 +32,7 @@ import { loadCredential } from '../lib/credential';
 import { bytesToBase64 } from '../lib/base64';
 import { apiUrl } from '../config';
 import type { AudioSessionRole } from '@patch/wire/audio';
+import type { SpeechEngineReport } from '@patch/wire/direct-call';
 
 /** One row of a host directory listing (spec/03 § Host files). */
 
@@ -293,6 +294,8 @@ export interface LinkedDevice {
   status: 'online' | 'stale' | 'offline';
   lastHeartbeat: number | null;
   isCurrent: boolean;
+  /** What it last reported it can run for a direct call; absent: never reported (spec/05 § Speech engines). */
+  speechEngines?: SpeechEngineReport;
 }
 
 /** GET /api/settings — the same payload web's Settings page reads. */

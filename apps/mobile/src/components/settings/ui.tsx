@@ -444,7 +444,8 @@ export function Chips<T extends string>({
   /** What a chip does, said as its accessibility hint and under the row for the chosen one. */
   hintOf?: (value: T) => string;
   options: readonly T[];
-  selected: T;
+  /** Undefined: nothing chosen yet. */
+  selected: T | undefined;
   onSelect: (value: T) => void;
   testIDPrefix: string;
   labelPrefix: string;
@@ -487,7 +488,7 @@ export function Chips<T extends string>({
           </Pressable>
         );
       })}
-      {hintOf ? (
+      {hintOf && selected !== undefined ? (
         <Text
           testID={`${testIDPrefix}-hint`}
           style={{ ...typography.meta, color: colors.ink3, width: '100%' }}
