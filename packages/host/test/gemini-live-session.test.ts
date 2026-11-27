@@ -392,6 +392,26 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
     );
   });
 
+  test('an utterance left unanswered while a hand-off runs is nudged once, then reported', async () => {
+    const { deps, lastWs, audioEvents, submitUserTurn } = makeDeps();
+    submitUserTurn.mockImplementation(() => new Promise(() => {}));
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    ws.serverSend({
+      toolCall: { functionCalls: [{ id: 'c1', name: DISPATCH_TOOL_NAME, args: { request: 'x' } }] },
+    });
+    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalled());
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    ws.serverSend({ serverContent: { inputTranscription: { text: 'are you there' } } });
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await vi.waitFor(() =>
+      expect(JSON.stringify(ws.sent)).toContain('You did not answer what the user just said'),
+    );
+    expect(audioEvents.some((e) => e.type === 'audio.error')).toBe(false);
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await vi.waitFor(() => expect(audioEvents.some((e) => e.type === 'audio.error')).toBe(true));
+  });
+
   test('a turn the model answers with bare "..." and no audio is not a call failure', async () => {
     const { deps, lastWs, audioEvents } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
