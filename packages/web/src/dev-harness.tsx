@@ -737,6 +737,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // An MCP App (SEP-1865): an `mcp__dash__show` call whose template runs in a frame.
+  {
+    chatId: 'chat_mcp_app',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'mcp-app-fixture',
+    folder: '/home/tom/projects/portfolio',
+    chatStatus: { state: 'idle', since: 0 },
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A `view_file` call showing a page inline (spec/14 § Viewing files).
   {
     chatId: 'chat_view_file',
@@ -2222,6 +2236,25 @@ useChatStore.setState((s) => ({
         artifactUrl: '/api/chats/chat_artifact/artifact/art001?sig=s',
         artifactPath: 'out/buses.html',
         at: 0,
+      },
+    ],
+    // MCP Apps (SEP-1865): the call's tool declares a UI; the e2e answers the host's REST.
+    chat_mcp_app: [
+      {
+        seq: 0,
+        kind: 'tool_call',
+        tool: 'mcp__dash__show',
+        toolArgs: { city: 'Bristol' },
+        callId: 'call-app-1',
+        at: 0,
+      },
+      {
+        seq: 1,
+        kind: 'tool_result',
+        tool: 'mcp__dash__show',
+        toolResult: { content: [{ type: 'text', text: 'Bristol: 11C' }] },
+        callId: 'call-app-1',
+        at: 1,
       },
     ],
     // spec/14 § Viewing files — the row IS the file, in a sandboxed frame.

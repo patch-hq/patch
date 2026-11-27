@@ -308,6 +308,7 @@ import {
 } from './voiceComponent.js';
 import { TerminalSessions } from './terminal.js';
 import { handleHostFilesRequest } from './hostFiles.js';
+import { McpApps, stdioConnector } from './mcpApps.js';
 import { handleVoiceprintRequest } from './voiceprints.js';
 import { RecentVoices, SpeakerId, speakerModelPath } from './audio/speakerId.js';
 import { HostSearchManager } from './hostSearch.js';
@@ -1137,6 +1138,19 @@ async function startHost(
     );
   };
   if (persistedHostState.harnessClaudeMdEnabled === false) ignoreClaudeMdOff('host.json');
+  // MCP Apps (SEP-1865): the servers a chat's agent sees are the ones its UI
+  // may talk to — this host's enabled list, then Claude Code's own for the folder.
+  const mcpApps = new McpApps({
+    logger,
+    serversFor: (folder) => {
+      const merged = new Map<string, McpServerConfig>();
+      for (const s of discoverClaudeMcpServers(folder)) merged.set(s.name, s);
+      for (const s of enabledMcpServers(harnessMcpServers)) merged.set(s.name, s);
+      return [...merged.values()];
+    },
+    folderOf: (chatId) => daemon.chatState.get(chatId)?.folder,
+    connect: stdioConnector(logger),
+  });
   /**
    * Rebuild the host's harness config from the current in-memory settings
    * and push it in. Called on boot and after ANY of the harness fields
@@ -3594,6 +3608,11 @@ async function startHost(
         void handleHostFilesRequest(event, sender, logger, selfHostId, {
           onWritten: (absPath) => daemon.noteHostFileWritten(absPath),
         });
+        return;
+      }
+      if (event.type === 'patch.mcp_app.request') {
+        // MCP Apps (SEP-1865): a tool's UI template, and the calls its UI makes.
+        void mcpApps.handle(event, sender, selfHostId);
         return;
       }
       if (event.type === 'patch.voiceprint.request') {

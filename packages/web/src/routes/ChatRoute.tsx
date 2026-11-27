@@ -202,6 +202,8 @@ import {
   MessageSquareShare,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
+import { McpAppCard } from '../components/McpAppCard.js';
+import { parseMcpToolName } from '../lib/mcpApps.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
 import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
@@ -2410,12 +2412,10 @@ export function ChatRoute({
           end = j + 1;
         }
         if (calls > 1) {
+          const runEntries = timeline.slice(i, end);
           out.push(
-            <ToolGroup
-              key={`g-${entry.seq}-${i}`}
-              entries={timeline.slice(i, end)}
-              chatId={chatId}
-            />,
+            <ToolGroup key={`g-${entry.seq}-${i}`} entries={runEntries} chatId={chatId} />,
+            ...mcpAppCards(runEntries, chatId),
           );
           i = end;
           continue;
@@ -2428,6 +2428,7 @@ export function ChatRoute({
         if (paired) {
           out.push(
             <ToolCall key={`${entry.seq}-${i}`} entry={entry} result={paired} chatId={chatId} />,
+            ...mcpAppCards([entry, paired], chatId),
           );
           i += 2;
           continue;
@@ -4361,6 +4362,24 @@ function MessageAttachments({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The MCP App cards (SEP-1865) for the calls in a run of entries: one per MCP
+ * tool call that has its result. Each draws nothing unless its tool declares a
+ * UI, so they sit outside a collapsed run, where the user can see them.
+ */
+function mcpAppCards(entries: ChatEventEntry[], chatId: string): JSX.Element[] {
+  const out: JSX.Element[] = [];
+  entries.forEach((e, i) => {
+    if (e.kind !== 'tool_call' || parseMcpToolName(e.tool) === null) return;
+    const paired = e.callId
+      ? entries.find((r) => r.kind === 'tool_result' && r.callId === e.callId)
+      : undefined;
+    if (!paired) return;
+    out.push(<McpAppCard key={`app-${e.seq}-${i}`} chatId={chatId} call={e} result={paired} />);
+  });
+  return out;
 }
 
 function TodoCard({ items }: { items: TodoCardItem[] }): JSX.Element {

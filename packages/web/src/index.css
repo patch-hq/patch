@@ -19754,3 +19754,28 @@ a.drop-target,
 .zen .chat-title-zen {
   opacity: 0.5;
 }
+
+/* MCP Apps (SEP-1865): the server's template in a sandboxed frame under its tool row. */
+.mcp-app {
+  margin: 10px 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+.mcp-app-bordered {
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+.mcp-app-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: normal;
+}
+.mcp-app-error,
+.mcp-app-call-error {
+  margin: 6px 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
