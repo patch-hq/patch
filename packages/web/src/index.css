@@ -19270,6 +19270,18 @@ a.drop-target,
 }
 /* Slim running-agent pill above the composer: matches the input's width and
    corner radius, muted so it never competes with it. */
+/* The Needs you bar keeps to the composer's column, not the full panel width. */
+.needs-you-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0 20px;
+  margin-bottom: 4px;
+}
+.needs-you-bar {
+  width: 100%;
+  max-width: 780px;
+  box-sizing: border-box;
+}
 .agent-running-bar-wrap {
   display: flex;
   justify-content: center;
@@ -19792,4 +19804,3 @@ a.drop-target,
   opacity: 0.5;
   cursor: default;
 }
-

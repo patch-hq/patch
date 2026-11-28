@@ -89,6 +89,36 @@ describe('ChatLog', () => {
     expect(makeLog(home).lastMessage('c1')).toBe('the answer');
   });
 
+  it("the Manager's reply to a machine turn is not the message it is unread from", () => {
+    const home = tmp('chatlog-digest-');
+    const log = makeLog(home);
+    const id = 'thread_manager';
+    const b = `${id}-b0`;
+    const turn = (origin: 'user' | 'machine', text: string) => {
+      log.append(id, { k: 'turn.start', harness: 'claude', model: null, origin }, { branchId: b });
+      const s = log.allocate(id, 0, b);
+      appendEvent(log, id, msg(id, s, text, 'assistant'), { sync: true });
+      log.append(id, { k: 'turn.end', outcome: 'completed' }, { branchId: b, sync: true });
+      return s;
+    };
+    const asked = turn('user', 'you asked, I answer');
+    turn('machine', '3 chats finished: here is the digest');
+    expect(log.lastMessageSeq(id)).toBe(asked);
+    expect(log.lastMessage(id)).toContain('digest');
+    expect(makeLog(home).lastMessageSeq(id)).toBe(asked);
+    // An ordinary chat counts a machine turn's reply as it always did.
+    const other = 'c9';
+    const ob = `${other}-b0`;
+    log.append(
+      other,
+      { k: 'turn.start', harness: 'claude', model: null, origin: 'machine' },
+      { branchId: ob },
+    );
+    const os = log.allocate(other, 0, ob);
+    appendEvent(log, other, msg(other, os, 'watch update'), { sync: true });
+    expect(log.lastMessageSeq(other)).toBe(os);
+  });
+
   it('knows the seq of the latest assistant message, not of later system lines', () => {
     const home = tmp('chatlog-lastseq-');
     const log = makeLog(home);

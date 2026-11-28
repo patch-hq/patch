@@ -3669,8 +3669,8 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil === null) continue;
-      // An until-complete snooze is settled once interrupted turns are resumed
-      // (`settleUntilCompleteSnoozes`): the turn it waited on may be coming back.
+      // An until-complete snooze is left exactly as it was: a restart is not a
+      // reason to bring a chat back. It ends the normal way, when its work does.
       if (state.snoozedUntil === SNOOZE_UNTIL_COMPLETE) continue;
       if (state.snoozedUntil <= this.opts.now()) {
         this.wakeFromSnooze(m.chatId);
@@ -3721,7 +3721,6 @@ export class Daemon {
     this.wake.loadAll(ownedIds);
     this.watch.loadAll(ownedIds);
     this.flagUnresumedInterruptions(owned);
-    this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
     this.ensureDelegateOrphanSweep();
   }
@@ -3919,42 +3918,6 @@ export class Daemon {
       },
     );
     return true;
-  }
-
-  /**
-   * A restart does not end the work an until-complete snooze waits on when the
-   * interrupted turn is resumed (or parked waiting on credit): the snooze then
-   * carries on and ends the normal way when that turn returns. With no turn
-   * owed again there is nothing
-   * left to wait for, so it ends now (a goal alone does not count: with no turn
-   * to judge it, nothing would ever end the snooze).
-   */
-  private settleUntilCompleteSnoozes(metas: ChatMeta[]): void {
-    for (const m of metas) {
-      const state = this.chatState.get(m.chatId);
-      if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) continue;
-      const open = openSnoozeRecord(state.snoozeRecords);
-      // A project snooze carries on while any chat of its set is resumed.
-      const ids = open?.waitForSet === true ? this.waitingSetMembers(open.setId) : [m.chatId];
-      const resumed = ids.some((id) => {
-        const wake = this.wake.peek(id);
-        return (
-          this.owedResend.has(id) ||
-          this.parkedTurns.has(id) ||
-          // Cut off and waiting for Continue: the turn the snooze waits on is
-          // still coming back (spec/12 § Continue).
-          this.interruptedChats.has(id) ||
-          (wake !== null && wake.every === undefined) ||
-          // A background watch outlives the restart and is what will wake the
-          // chat; a chat with a goal waiting on one has not run out of work.
-          this.watch.count(id) > 0 ||
-          this.hasRunningDelegates(id) ||
-          this.aggregateActivity(id) === 'running'
-        );
-      });
-      if (resumed) continue;
-      this.wakeFromSnooze(m.chatId);
-    }
   }
 
   /**
@@ -12841,6 +12804,17 @@ export class Daemon {
       // the goal (no resubmit: nothing the agent can do), put the chat in front of
       // the user as a question, and carry on when their next turn starts.
       state.goalRefusalStreak = 0;
+      // Waiting on something outside (a watch, an agent, a wake it set itself) is
+      // not waiting on the user: that will wake the chat on its own, and there is
+      // nothing for the user to do, so no "needs you" is raised.
+      if (
+        this.watch.count(chatId) > 0 ||
+        this.hasRunningDelegates(chatId) ||
+        this.wake.peek(chatId) !== null
+      ) {
+        this.emitState(chatId);
+        return;
+      }
       state.goalProgress = { ...state.goalProgress, waitingOnUser: true };
       this.emitState(chatId);
       void this.declareStatus(chatId, 'question', `Goal waiting on you: ${result.reason}`).catch(

@@ -284,6 +284,27 @@ describe('maybeEvaluateGoal — relentless until met, stopped only by a deadlock
     expect(state?.lastGoal?.outcome).toBe('met');
   });
 
+  it('a goal waiting on a running watch raises no needs-you for the user', async () => {
+    let chatId = '';
+    let d: ReturnType<typeof setup>['daemon'] | undefined;
+    const evaluateGoal: EvaluateGoal = async () => {
+      d!.startWatch(chatId, { command: 'sleep 30', description: 'w', timeoutSec: 60 });
+      return { verdict: 'blocked', reason: "Waiting on Apple's reply, an outside party" };
+    };
+    const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('waiting') });
+    d = daemon;
+    chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Apple converts the account');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+    const state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBe('Apple converts the account');
+    expect(state?.goalProgress?.waitingOnUser).toBeFalsy();
+    expect(state?.declaredStatus ?? null).toBeNull();
+    daemon.shutdown();
+  });
+
   it('a goal held by the agent for a stated time resumes when the time passes', async () => {
     let n = 0;
     const evaluateGoal: EvaluateGoal = async () => {
