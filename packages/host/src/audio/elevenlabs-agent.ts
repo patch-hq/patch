@@ -65,12 +65,8 @@ import {
   type VoiceAgentLink,
 } from './voiceAgent.js';
 import { VoiceAgentCall } from './voiceAgentCall.js';
+import { ChatLookupError } from './chatLookup.js';
 import {
-  CHAT_STATUS_DESCRIPTION,
-  CHAT_STATUS_TOOL_NAME,
-  FIND_CHATS_DESCRIPTION,
-  FIND_CHATS_TOOL_NAME,
-  ManagerChatLookupError,
   managerHostedInstruction,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
@@ -373,15 +369,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     if (manager) {
       // A Manager call (spec/07 § A call to the Manager): its own tools, no agent behind it.
       tools.push(
-        this.clientTool(
-          FIND_CHATS_TOOL_NAME,
-          FIND_CHATS_DESCRIPTION,
-          { query: MANAGER_TOOL_PARAMS.query },
-          [],
-        ),
-        this.clientTool(CHAT_STATUS_TOOL_NAME, CHAT_STATUS_DESCRIPTION, {
-          chat: MANAGER_TOOL_PARAMS.chat,
-        }),
         this.clientTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_BLOCKING_DESCRIPTION, {
           chat: MANAGER_TOOL_PARAMS.chat,
           message: MANAGER_TOOL_PARAMS.message,
@@ -850,9 +837,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     let result: string;
     let isError = false;
     try {
-      if (name === FIND_CHATS_TOOL_NAME) result = await manager.findChats(arg('query'));
-      else if (name === CHAT_STATUS_TOOL_NAME) result = await manager.chatStatus(arg('chat'));
-      else if (MANAGER_QUICK_TOOL_NAMES.has(name))
+      if (MANAGER_QUICK_TOOL_NAMES.has(name))
         result = await manager.quick(name, stringArgs(params), this.quickContext());
       else {
         const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
@@ -860,7 +845,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       }
     } catch (err) {
       result = (err as Error).message;
-      if (!(err instanceof ManagerChatLookupError)) {
+      if (!(err instanceof ChatLookupError)) {
         isError = true;
         this.reportError(`${name} failed: ${result}`);
       }

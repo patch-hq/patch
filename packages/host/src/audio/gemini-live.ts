@@ -74,16 +74,12 @@ import {
   type VoiceAgentLink,
 } from './voiceAgent.js';
 import { VoiceAgentCall } from './voiceAgentCall.js';
+import { ChatLookupError } from './chatLookup.js';
 import {
-  CHAT_STATUS_DESCRIPTION,
-  CHAT_STATUS_TOOL_NAME,
-  FIND_CHATS_DESCRIPTION,
-  FIND_CHATS_TOOL_NAME,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
   stringArgs,
   MANAGER_TOOL_PARAMS,
-  ManagerChatLookupError,
   managerHostedInstruction,
   managerReplyMessage,
   SEND_TO_CHAT_DESCRIPTION,
@@ -282,13 +278,6 @@ function stringTool(
 /** The Manager call's tools (spec/07 § A call to the Manager). */
 function managerDeclarations(): GeminiFunctionDeclaration[] {
   return [
-    stringTool(
-      FIND_CHATS_TOOL_NAME,
-      FIND_CHATS_DESCRIPTION,
-      { query: MANAGER_TOOL_PARAMS.query },
-      [],
-    ),
-    stringTool(CHAT_STATUS_TOOL_NAME, CHAT_STATUS_DESCRIPTION, { chat: MANAGER_TOOL_PARAMS.chat }),
     stringTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_DESCRIPTION, {
       chat: MANAGER_TOOL_PARAMS.chat,
       message: MANAGER_TOOL_PARAMS.message,
@@ -1207,8 +1196,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
   }
 
   /**
-   * A Manager call's tools (spec/07 § A call to the Manager). `find_chats` and
-   * `chat_status` answer at once, like `look_back`; `send_to_chat` runs as a
+   * A Manager call's tools (spec/07 § A call to the Manager). `send_to_chat` runs as a
    * hand-off — answered once the chat has the message, its reply pushed later
    * as a message, exactly as an agent's answer is.
    */
@@ -1225,7 +1213,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
     const answer = (result: string): void =>
       this.answerTool(call.id, call.name, result, 'INTERRUPT');
     const fail = (err: Error): void => {
-      if (!(err instanceof ManagerChatLookupError)) {
+      if (!(err instanceof ChatLookupError)) {
         this.deps.logger.error(
           { sessionId: this.init.sessionId, err: err.message, tool: call.name },
           'gemini-live: a manager tool failed',
@@ -1233,14 +1221,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
       }
       answer(`That failed: ${err.message}`);
     };
-    if (call.name === FIND_CHATS_TOOL_NAME) {
-      manager.findChats(arg('query')).then(answer, fail);
-      return;
-    }
-    if (call.name === CHAT_STATUS_TOOL_NAME) {
-      manager.chatStatus(arg('chat')).then(answer, fail);
-      return;
-    }
     if (MANAGER_QUICK_TOOL_NAMES.has(call.name)) {
       manager.quick(call.name, stringArgs(call.args), this.quickContext()).then(answer, fail);
       return;
@@ -1303,7 +1283,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
       reply = res.reply;
     } catch (err) {
       const reason = (err as Error).message;
-      const lookup = err instanceof ManagerChatLookupError;
+      const lookup = err instanceof ChatLookupError;
       if (!lookup) {
         this.deps.logger.error(
           { sessionId: this.init.sessionId, err: reason },

@@ -13,6 +13,8 @@
 //   - check_status: where the hand-offs and the chat's agent stand, read from
 //     the host's own state; no model.
 //   - look_back: the chat's older messages that match a few words; no model.
+//   - find_chats / chat_status: find any chat of the account (any host, archived
+//     included, labelled) and read where one stands; no model (chatLookup.ts).
 //   - switch_chat: moves the call to another chat on this host.
 //
 // The provider modules turn these into their own tool shapes and answer them
@@ -26,6 +28,8 @@ export const CHECK_STATUS_TOOL_NAME = 'check_status';
 export const LOOK_BACK_TOOL_NAME = 'look_back';
 export const SWITCH_CHAT_TOOL_NAME = 'switch_chat';
 export const END_CALL_TOOL_NAME = 'end_call';
+export const FIND_CHATS_TOOL_NAME = 'find_chats';
+export const CHAT_STATUS_TOOL_NAME = 'chat_status';
 
 /** What pass_to_agent answers, at once. */
 export const HANDOFF_RECEIVED = 'received';
@@ -60,6 +64,16 @@ export const SWITCH_CHAT_DESCRIPTION =
   'arrives as a message; answers still owed from this chat arrive as before, labelled with ' +
   'their chat. If the name fits no chat or several, the result says so: ask the user which.';
 
+export const FIND_CHATS_DESCRIPTION =
+  "List the user's chats, or find the ones matching a few words of a name or folder. Answers at " +
+  "once with each chat's name, id, whether it is working, and when it was last active. Archived " +
+  'chats are included and marked archived; a message to one brings it back. An empty query ' +
+  'lists the most recently active chats.';
+
+export const CHAT_STATUS_DESCRIPTION =
+  'Where one chat stands now: its status line, goal, open to-dos and the last few messages. ' +
+  "Pass the chat's name or id. Answers at once.";
+
 export const END_CALL_DESCRIPTION =
   'Hang up. Use it when the conversation is over: the user says goodbye or asks you to hang ' +
   'up, or, on a call an agent made to the user, once they have answered and anything they ' +
@@ -73,7 +87,7 @@ export interface VoiceToolSpec {
   required: string[];
 }
 
-/** The tools a voice agent on an ordinary chat is given (a Manager call has its own). */
+/** The tools every voice agent call is given; a Manager call adds its own (managerVoice.ts). */
 export function voiceAgentTools(opts: {
   handoff: VoiceHandoff;
   lookBack: boolean;
@@ -108,6 +122,21 @@ export function voiceAgentTools(opts: {
       required: ['query'],
     });
   }
+  // Every call can look at other chats, on any host (chatLookup.ts).
+  tools.push(
+    {
+      name: FIND_CHATS_TOOL_NAME,
+      description: FIND_CHATS_DESCRIPTION,
+      params: { query: 'A few words of the chat name or folder; empty to list recent chats.' },
+      required: [],
+    },
+    {
+      name: CHAT_STATUS_TOOL_NAME,
+      description: CHAT_STATUS_DESCRIPTION,
+      params: { chat: "The chat's name (as the user said it, or from find_chats) or its id." },
+      required: ['chat'],
+    },
+  );
   tools.push({
     name: END_CALL_TOOL_NAME,
     description: END_CALL_DESCRIPTION,
@@ -178,6 +207,10 @@ export interface VoiceAgentLink {
   }): void;
   checkStatus(sessionId: string, chatId: string): string;
   lookBack(chatId: string, query: string): string;
+  /** Find chats of the account by a few words of name or folder (chatLookup.ts). */
+  findChats(chatId: string, query: string): Promise<string>;
+  /** Where another chat stands, read for the call on `chatId`. */
+  chatStatus(chatId: string, chat: string): Promise<string>;
   /**
    * The user's finished words on a call (spec/07 § Permission prompts during
    * voice): when the chat waits on a permission and the words are a plain yes

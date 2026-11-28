@@ -86,12 +86,8 @@ import {
   type VoiceToolSpec,
 } from './voiceAgent.js';
 import { VoiceAgentCall } from './voiceAgentCall.js';
+import { ChatLookupError } from './chatLookup.js';
 import {
-  CHAT_STATUS_DESCRIPTION,
-  CHAT_STATUS_TOOL_NAME,
-  FIND_CHATS_DESCRIPTION,
-  FIND_CHATS_TOOL_NAME,
-  ManagerChatLookupError,
   managerHostedInstruction,
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
@@ -1007,9 +1003,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     );
     let result: string;
     try {
-      if (name === FIND_CHATS_TOOL_NAME) result = await manager.findChats(arg('query'));
-      else if (name === CHAT_STATUS_TOOL_NAME) result = await manager.chatStatus(arg('chat'));
-      else if (MANAGER_QUICK_TOOL_NAMES.has(name))
+      if (MANAGER_QUICK_TOOL_NAMES.has(name))
         result = await manager.quick(name, stringArgs(args), this.quickContext());
       else {
         const sent = await manager.sendToChat({ chat: arg('chat'), message: arg('message') });
@@ -1018,10 +1012,8 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     } catch (err) {
       const reason = (err as Error).message;
       result =
-        isSend && !(err instanceof ManagerChatLookupError)
-          ? `Not sent or failed: ${reason}`
-          : reason;
-      if (!(err instanceof ManagerChatLookupError)) {
+        isSend && !(err instanceof ChatLookupError) ? `Not sent or failed: ${reason}` : reason;
+      if (!(err instanceof ChatLookupError)) {
         this.reportError(`${name} failed: ${reason}`);
       }
     }
@@ -1110,8 +1102,6 @@ function managerRealtimeTools(): Array<Record<string, unknown>> {
     },
   });
   return [
-    fn(FIND_CHATS_TOOL_NAME, FIND_CHATS_DESCRIPTION, { query: MANAGER_TOOL_PARAMS.query }, []),
-    fn(CHAT_STATUS_TOOL_NAME, CHAT_STATUS_DESCRIPTION, { chat: MANAGER_TOOL_PARAMS.chat }),
     fn(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_BLOCKING_DESCRIPTION, {
       chat: MANAGER_TOOL_PARAMS.chat,
       message: MANAGER_TOOL_PARAMS.message,

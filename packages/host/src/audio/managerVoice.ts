@@ -19,18 +19,19 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { DEFAULT_MANAGER_VOICE_PROMPT } from '@patch/wire';
-import { stripVoiceTag } from '../chatRunner.js';
+import { CHAT_STATUS_TOOL_NAME, FIND_CHATS_TOOL_NAME } from './voiceAgent.js';
+import {
+  ChatLookupError,
+  LIST_LIMIT,
+  MANAGER_CHAT_ID,
+  displayName,
+  words,
+  type ChatLookup,
+} from './chatLookup.js';
 
-/** The chat a call must be on to be a Manager call. */
-export const MANAGER_CHAT_ID = 'thread_manager';
-
-export function isManagerCall(chatId: string): boolean {
-  return chatId === MANAGER_CHAT_ID;
-}
+const READ_LIMIT = 25;
 
 export const SEND_TO_CHAT_TOOL_NAME = 'send_to_chat';
-export const FIND_CHATS_TOOL_NAME = 'find_chats';
-export const CHAT_STATUS_TOOL_NAME = 'chat_status';
 
 /**
  * Tools the voice runs itself on the host, answered at once: the common
@@ -183,8 +184,6 @@ export const MANAGER_QUICK_TOOL_NAMES: ReadonlySet<string> = new Set(
 
 export const MANAGER_TOOL_NAMES: ReadonlySet<string> = new Set([
   SEND_TO_CHAT_TOOL_NAME,
-  FIND_CHATS_TOOL_NAME,
-  CHAT_STATUS_TOOL_NAME,
   ...MANAGER_QUICK_TOOL_NAMES,
 ]);
 
@@ -198,16 +197,6 @@ export function stringArgs(raw: unknown): Record<string, string> {
   );
 }
 
-export const FIND_CHATS_DESCRIPTION =
-  "List the user's chats, or find the ones matching a few words of a name or folder. Answers at " +
-  "once with each chat's name, id, whether it is working, and when it was last active. Archived " +
-  'chats are included and marked archived; a message to one brings it back. An empty query ' +
-  'lists the most recently active chats.';
-
-export const CHAT_STATUS_DESCRIPTION =
-  'Where one chat stands now: its status line, goal, open to-dos and the last few messages. ' +
-  "Pass the chat's name or id. Answers at once.";
-
 export const SEND_TO_CHAT_DESCRIPTION =
   "Send a message to another chat, by its name or id. The chat's agent receives it as if the user " +
   'had typed it and works on it. Its reply comes back to you later as a message; meanwhile carry ' +
@@ -219,7 +208,6 @@ export const SEND_TO_CHAT_BLOCKING_DESCRIPTION =
   "had typed it and works on it; the call returns that chat's reply once it has answered.";
 
 export const MANAGER_TOOL_PARAMS = {
-  query: 'A few words of the chat name or folder; empty to list recent chats.',
   chat: "The chat's name (as the user said it, or from find_chats) or its id.",
   message: 'What to tell the chat, written as the user would put it to that chat.',
 } as const;
@@ -292,9 +280,6 @@ export function managerReplyMessage(name: string, message: string, reply: string
 // ---------------------------------------------------------------------------
 // The host side.
 
-/** A name that matches no chat, or more than one: the voice asks the user, nothing failed. */
-export class ManagerChatLookupError extends Error {}
-
 /** What the send tells the voice once the chat has the message. */
 export interface ManagerSendAccepted {
   name: string;
@@ -323,13 +308,11 @@ export interface ManagerVoiceTools {
   voicePrompt?: () => string;
   /** Run one of {@link MANAGER_QUICK_TOOLS}; rejects when the action failed or is not set up. */
   quick(name: string, args: Record<string, string>, ctx?: ManagerQuickContext): Promise<string>;
-  findChats(query: string): Promise<string>;
-  chatStatus(chat: string): Promise<string>;
   /**
    * Deliver `message` to the chat named by `chat`. `onAccepted` fires once the
    * chat has it (queued or started); the promise resolves with the chat's reply
    * once its turn settles, whichever host the chat is on. Rejects with
-   * {@link ManagerChatLookupError} when
+   * {@link ChatLookupError} when
    * the name does not pick out one chat, and with a plain error when the
    * message was not delivered or the chat's turn failed.
    */
@@ -340,23 +323,10 @@ export interface ManagerVoiceTools {
   }): Promise<{ name: string; reply: string }>;
 }
 
-/** One chat as the Manager voice sees it in a listing. */
-export interface ManagerChatEntry {
-  chatId: string;
-  name: string | null;
-  folder: string;
-  status: string;
-  /** The chat's status as the server decided it (spec/12 § Chat status). */
-  chatStatus?: string;
-  lastUpdated?: number;
-}
-
 export interface ManagerVoiceHostDeps {
   logger: Logger;
-  /** Every chat the account has, on every host, from the server (`patch_list_chats`). */
-  listChats(): Promise<ManagerChatEntry[]>;
-  /** A chat as the server's record holds it, on any host (`patch_peek`'s `chat_state`). */
-  peekChat(chatId: string): Promise<unknown>;
+  /** Finding and resolving chats: the lookup every call shares (chatLookup.ts). */
+  lookup: ChatLookup;
   /** Deliver a message as `patch_send_to` does; resolves once the chat has it. */
   deliver(req: { chatId: string; message: string; localId: string }): Promise<void>;
   /** The chat's reply to the message delivered as `localId`, read by the server from its record. */
@@ -381,63 +351,12 @@ export interface ManagerVoiceHostDeps {
   now?: () => number;
 }
 
-const LIST_LIMIT = 8;
-const READ_LIMIT = 25;
-
-/** The server's status in words the voice can say. */
-function statusWords(state: string | undefined): string {
-  switch (state) {
-    case 'running':
-      return 'working';
-    case 'waiting_for_user':
-      return 'waiting for you';
-    case 'failed':
-      return 'stopped on an error';
-    case 'interrupted':
-      return 'interrupted';
-    case 'paused':
-      return 'paused on a limit';
-    case 'waiting_for_sign_in':
-      return 'waiting for sign-in';
-    case 'host_offline':
-      return 'its host is offline';
-    case 'host_restarting':
-      return 'its host is restarting';
-    case 'queued_offline':
-      return 'queued for its offline host';
-    case 'idle':
-      return 'idle';
-    default:
-      return 'status unknown';
-  }
-}
-
-function displayName(c: ManagerChatEntry): string {
-  return c.name?.trim() || c.folder.split('/').filter(Boolean).pop() || c.chatId;
-}
-
-function ago(ms: number): string {
-  const min = Math.round(ms / 60_000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min} min ago`;
-  const h = Math.round(min / 60);
-  if (h < 48) return `${h} h ago`;
-  return `${Math.round(h / 24)} days ago`;
-}
-
 /** The day after a YYYY-MM-DD date: Google's all-day end is exclusive. */
 function nextDay(date: string): string {
   const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) throw new ManagerChatLookupError(`"${date}" is not a date.`);
+  if (Number.isNaN(d.getTime())) throw new ChatLookupError(`"${date}" is not a date.`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
-}
-
-function words(s: string): string[] {
-  return s
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length > 0);
 }
 
 /** A number the voice passed as text; a lookup error when it is not one. */
@@ -445,7 +364,7 @@ function seconds(args: Record<string, string>, key: string): number | undefined 
   const raw = (args[key] ?? '').trim();
   if (raw === '') return undefined;
   const n = Number(raw);
-  if (!Number.isFinite(n)) throw new ManagerChatLookupError(`"${raw}" is not a number of seconds.`);
+  if (!Number.isFinite(n)) throw new ChatLookupError(`"${raw}" is not a number of seconds.`);
   return n;
 }
 
@@ -461,7 +380,7 @@ function timerRequest(
     const add = seconds(args, 'add_seconds');
     const set = seconds(args, 'set_seconds');
     if (add === undefined && set === undefined) {
-      throw new ManagerChatLookupError('Say how much to add, or the new time left.');
+      throw new ChatLookupError('Say how much to add, or the new time left.');
     }
     return {
       action: 'change',
@@ -478,7 +397,7 @@ function timerRequest(
     at = londonToEpoch(atRaw);
   }
   if (secs === undefined && at === undefined) {
-    throw new ManagerChatLookupError('Say how long the timer is, or what time the alarm is for.');
+    throw new ChatLookupError('Say how long the timer is, or what time the alarm is for.');
   }
   const label = (args['label'] ?? '').trim();
   return {
@@ -493,11 +412,11 @@ function timerRequest(
 export function londonToEpoch(iso: string): number {
   if (/[zZ]|[+-]\d\d:?\d\d$/.test(iso)) {
     const t = Date.parse(iso);
-    if (Number.isNaN(t)) throw new ManagerChatLookupError(`"${iso}" is not a time.`);
+    if (Number.isNaN(t)) throw new ChatLookupError(`"${iso}" is not a time.`);
     return t;
   }
   const asUtc = Date.parse(`${iso}Z`);
-  if (Number.isNaN(asUtc)) throw new ManagerChatLookupError(`"${iso}" is not a time.`);
+  if (Number.isNaN(asUtc)) throw new ChatLookupError(`"${iso}" is not a time.`);
   // London's offset at that wall-clock moment (0 or 1 hour): format the UTC guess in London and diff.
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/London',
@@ -516,111 +435,17 @@ export function londonToEpoch(iso: string): number {
   return asUtc - (shown - asUtc);
 }
 
-/** The chats a call may name: not the Manager itself, nothing archived or deleted. */
-function nameableChats(all: ManagerChatEntry[]): ManagerChatEntry[] {
-  return all.filter((c) => c.chatId !== MANAGER_CHAT_ID && c.status !== 'deleted');
-}
-
-/** Of several chats a name fits, the one that is not archived, when only one is not. */
-function onlyCurrent(matches: ManagerChatEntry[]): ManagerChatEntry | undefined {
-  const current = matches.filter((c) => c.status !== 'archived');
-  return current.length === 1 ? current[0] : undefined;
-}
-
-/**
- * The one chat a call means by an id or a spoken name (spec/07 § A call to the
- * Manager, § A call stays on its chat): an id or an exact name wins, otherwise
- * the words must pick out one chat. A name that fits none or several is a
- * {@link ManagerChatLookupError} naming the choices, for the voice to ask about.
- */
-export function resolveChat(listing: ManagerChatEntry[], chat: string): ManagerChatEntry {
-  const all = nameableChats(listing);
-  const wanted = chat.trim();
-  if (wanted === '') throw new ManagerChatLookupError('Say which chat.');
-  const byId = all.find((c) => c.chatId === wanted);
-  if (byId) return byId;
-  const lower = wanted.toLowerCase();
-  const exact = all.filter((c) => displayName(c).toLowerCase() === lower);
-  if (exact.length === 1) return exact[0]!;
-  const exactCurrent = onlyCurrent(exact);
-  if (exactCurrent) return exactCurrent;
-  const terms = words(wanted);
-  const partial =
-    exact.length > 1
-      ? exact
-      : all.filter((c) => {
-          const hay = words(`${displayName(c)} ${c.folder}`);
-          return terms.every((t) => hay.some((w) => w.startsWith(t)));
-        });
-  if (partial.length === 1) return partial[0]!;
-  const partialCurrent = onlyCurrent(partial);
-  if (partialCurrent) return partialCurrent;
-  if (partial.length === 0) {
-    throw new ManagerChatLookupError(`No chat matches "${wanted}".`);
-  }
-  throw new ManagerChatLookupError(
-    `Several chats match "${wanted}": ${partial
-      .slice(0, LIST_LIMIT)
-      .map((c) => `"${displayName(c)}"${c.status === 'archived' ? ' (archived)' : ''}`)
-      .join(', ')}. Ask the user which one.`,
-  );
-}
-
-/** Where a chat stands, from `patch_peek`'s `chat_state` (built by the server's agent-reads). */
-interface ChatDetail {
-  status: string | null;
-  goal: string | null;
-  openTodos: string[];
-  messages: Array<{ role: 'user' | 'assistant'; text: string }>;
-}
-
-function chatDetail(chatState: unknown): ChatDetail {
-  if (chatState === null || typeof chatState !== 'object') {
-    throw new Error('The Patch server sent no state for the chat.');
-  }
-  const st = chatState as Record<string, unknown>;
-  const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
-  const todos = Array.isArray(st['todos']) ? (st['todos'] as Array<Record<string, unknown>>) : [];
-  const messages = Array.isArray(st['lastMessages'])
-    ? (st['lastMessages'] as Array<Record<string, unknown>>)
-    : [];
-  return {
-    status: text(st['statusSummary']),
-    goal: text(st['goal']),
-    openTodos: todos.flatMap((t) =>
-      t['status'] !== 'completed' && typeof t['text'] === 'string' ? [t['text']] : [],
-    ),
-    messages: messages.flatMap((m) =>
-      (m['role'] === 'user' || m['role'] === 'assistant') && typeof m['content'] === 'string'
-        ? [{ role: m['role'], text: m['content'] }]
-        : [],
-    ),
-  };
-}
-
 export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoiceTools {
   const now = deps.now ?? Date.now;
   /** Targets with a message out and no reply yet: a second send would cut the first off. */
   const awaiting = new Set<string>();
-
-  const candidates = async (): Promise<ManagerChatEntry[]> => nameableChats(await deps.listChats());
-
-  const line = (c: ManagerChatEntry): string => {
-    const parts = c.status === 'archived' ? ['archived'] : [statusWords(c.chatStatus)];
-    if (c.lastUpdated !== undefined) parts.push(`last active ${ago(now() - c.lastUpdated)}`);
-    return `"${displayName(c)}" (id ${c.chatId}) — ${parts.join(', ')}`;
-  };
-
-  /** One chat for an id or a spoken name; a lookup error when it is none or several. */
-  const resolve = async (chat: string): Promise<ManagerChatEntry> =>
-    resolveChat(await deps.listChats(), chat);
 
   return {
     ...(deps.voicePrompt ? { voicePrompt: deps.voicePrompt } : {}),
     async quick(name, args, ctx) {
       const need = (k: string): string => {
         const v = (args[k] ?? '').trim();
-        if (v === '') throw new ManagerChatLookupError(`Say the ${k.replace('_', ' ')}.`);
+        if (v === '') throw new ChatLookupError(`Say the ${k.replace('_', ' ')}.`);
         return v;
       };
       if (name === ADD_TASK_TOOL_NAME) {
@@ -649,9 +474,9 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
                 return terms.every((w) => hay.some((h) => h.startsWith(w)));
               });
         if (found.length === 0)
-          throw new ManagerChatLookupError(`No open task${where} matches "${wanted}".`);
+          throw new ChatLookupError(`No open task${where} matches "${wanted}".`);
         if (found.length > 1) {
-          throw new ManagerChatLookupError(
+          throw new ChatLookupError(
             `Several tasks${where} match "${wanted}": ${found
               .slice(0, LIST_LIMIT)
               .map((t) => `"${t.content}"`)
@@ -694,7 +519,7 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
         const allDay = (args['all_day'] ?? '').trim().toLowerCase() === 'true';
         const end = (args['end'] ?? '').trim();
         if (!allDay && end === '') {
-          throw new ManagerChatLookupError('Say when the event ends, or make it all day.');
+          throw new ChatLookupError('Say when the event ends, or make it all day.');
         }
         const out = await deps.calendar([
           'create',
@@ -726,45 +551,12 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
       throw new Error(`There is no tool called ${name} on this call.`);
     },
 
-    async findChats(query) {
-      const all = await candidates();
-      const terms = words(query);
-      const scored = all
-        .map((c) => {
-          const hay = words(`${displayName(c)} ${c.folder}`);
-          return { c, score: terms.filter((t) => hay.some((w) => w.startsWith(t))).length };
-        })
-        .filter((x) => terms.length === 0 || x.score > 0)
-        .sort((a, b) => b.score - a.score || (b.c.lastUpdated ?? 0) - (a.c.lastUpdated ?? 0));
-      if (scored.length === 0) return `No chat matches "${query}".`;
-      return scored
-        .slice(0, LIST_LIMIT)
-        .map((x) => line(x.c))
-        .join('\n');
-    },
-
-    async chatStatus(chat) {
-      const target = await resolve(chat);
-      const d = chatDetail(await deps.peekChat(target.chatId));
-      const out = [line(target)];
-      if (d.status) out.push(`Where it stands: ${d.status}`);
-      if (d.goal) out.push(`Goal: ${d.goal}`);
-      if (d.openTodos.length > 0) out.push(`Still to do: ${d.openTodos.slice(0, 6).join('; ')}`);
-      const recent = d.messages.slice(-4).map((m) => {
-        const flat = stripVoiceTag(m.text).replace(/\s+/g, ' ').trim();
-        const short = flat.length > 300 ? `${flat.slice(0, 299).trimEnd()}…` : flat;
-        return `${m.role === 'user' ? 'User' : 'Agent'}: ${short}`;
-      });
-      if (recent.length > 0) out.push(`Last messages:\n${recent.join('\n')}`);
-      return out.join('\n');
-    },
-
     async sendToChat({ chat, message, onAccepted }) {
-      const target = await resolve(chat);
+      const target = await deps.lookup.resolve(chat, MANAGER_CHAT_ID);
       const name = displayName(target);
-      if (message.trim() === '') throw new ManagerChatLookupError('Say what to tell the chat.');
+      if (message.trim() === '') throw new ChatLookupError('Say what to tell the chat.');
       if (awaiting.has(target.chatId)) {
-        throw new ManagerChatLookupError(
+        throw new ChatLookupError(
           `"${name}" has not answered the last message yet. Tell the user, and send this once it has.`,
         );
       }

@@ -25,7 +25,9 @@ import type { VoiceTurnSource } from './session.js';
 import {
   callOpening,
   catchUpMessage,
+  CHAT_STATUS_TOOL_NAME,
   CHECK_STATUS_TOOL_NAME,
+  FIND_CHATS_TOOL_NAME,
   HANDOFF_RECEIVED,
   LOOK_BACK_TOOL_NAME,
   PASS_TO_AGENT_TOOL_NAME,
@@ -197,6 +199,8 @@ export class VoiceAgentCall {
       name === PASS_TO_AGENT_TOOL_NAME ||
       name === CHECK_STATUS_TOOL_NAME ||
       name === LOOK_BACK_TOOL_NAME ||
+      name === FIND_CHATS_TOOL_NAME ||
+      name === CHAT_STATUS_TOOL_NAME ||
       name === SWITCH_CHAT_TOOL_NAME ||
       name === END_CALL_TOOL_NAME
     );
@@ -229,6 +233,10 @@ export class VoiceAgentCall {
           return link.checkStatus(sessionId, this.chat);
         case LOOK_BACK_TOOL_NAME:
           return link.lookBack(this.chat, arg('query'));
+        case FIND_CHATS_TOOL_NAME:
+          return await link.findChats(this.chat, arg('query'));
+        case CHAT_STATUS_TOOL_NAME:
+          return await link.chatStatus(this.chat, arg('chat'));
         case SWITCH_CHAT_TOOL_NAME: {
           const outcome = await link.switchChat(sessionId, this.chat, arg('chat'));
           if (!outcome.ok) return outcome.message;

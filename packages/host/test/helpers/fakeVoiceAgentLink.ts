@@ -37,6 +37,14 @@ export function fakeVoiceAgentLink(
       calls.push(`lookBack:${query}`);
       return `found in ${chatId}: dentist on Tuesday`;
     }),
+    findChats: vi.fn(async (chatId: string, query: string) => {
+      calls.push(`find:${chatId}:${query}`);
+      return '"Garden planning" (id c-garden) — working';
+    }),
+    chatStatus: vi.fn(async (chatId: string, chat: string) => {
+      calls.push(`chatStatus:${chatId}:${chat}`);
+      return 'Where it stands: drafting';
+    }),
     answerPermission: vi.fn((chatId: string, words: string) => {
       calls.push(`permission:${chatId}:${words}`);
       return false;

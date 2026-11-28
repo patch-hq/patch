@@ -173,6 +173,8 @@ describe('OpenAIRealtimeSession', () => {
       PASS_TO_AGENT_TOOL_NAME,
       'check_status',
       'look_back',
+      'find_chats',
+      'chat_status',
       'end_call',
       'switch_chat',
     ]);

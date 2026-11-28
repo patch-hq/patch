@@ -905,6 +905,8 @@ describe('GeminiLiveSession — one conversation with the chat', () => {
       PASS_TO_AGENT_TOOL_NAME,
       'check_status',
       'look_back',
+      'find_chats',
+      'chat_status',
       'end_call',
       'switch_chat',
     ]);
@@ -1103,6 +1105,8 @@ describe('GeminiLiveSession — hand-off mode', () => {
         PASS_TO_AGENT_TOOL_NAME,
         'check_status',
         'look_back',
+        'find_chats',
+        'chat_status',
         'end_call',
         'switch_chat',
       ]);
@@ -1110,7 +1114,13 @@ describe('GeminiLiveSession — hand-off mode', () => {
   });
 
   test('never: no agent behind the voice, so nothing to pass on', async () => {
-    expect(await toolsFor('never')).toEqual(['look_back', 'end_call', 'switch_chat']);
+    expect(await toolsFor('never')).toEqual([
+      'look_back',
+      'find_chats',
+      'chat_status',
+      'end_call',
+      'switch_chat',
+    ]);
   });
 });
 

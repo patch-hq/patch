@@ -162,6 +162,8 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       PASS_TO_AGENT_TOOL_NAME,
       'check_status',
       LOOK_BACK_TOOL_NAME,
+      'find_chats',
+      'chat_status',
       'end_call',
       'switch_chat',
     ]);
@@ -175,6 +177,8 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       'tool-3',
       'tool-4',
       'tool-5',
+      'tool-6',
+      'tool-7',
     ]);
     // The user's instructions, then the chat as it stands: nothing else.
     expect(agent['conversation_config'].agent.prompt.prompt).toBe(
@@ -206,7 +210,7 @@ describe('ElevenLabsAgentSession — provisioning', () => {
     await open(new ElevenLabsAgentSession(makeInit(), deps), last);
     expect(
       rest.filter((r) => r.path === '/v1/convai/tools').map((t) => t.body!['tool_config'].name),
-    ).toEqual([LOOK_BACK_TOOL_NAME, 'end_call', 'switch_chat']);
+    ).toEqual([LOOK_BACK_TOOL_NAME, 'find_chats', 'chat_status', 'end_call', 'switch_chat']);
   });
 
   test('close deletes the throwaway agent and its tools', async () => {
@@ -222,6 +226,8 @@ describe('ElevenLabsAgentSession — provisioning', () => {
       '/v1/convai/tools/tool-3?force=true',
       '/v1/convai/tools/tool-4?force=true',
       '/v1/convai/tools/tool-5?force=true',
+      '/v1/convai/tools/tool-6?force=true',
+      '/v1/convai/tools/tool-7?force=true',
     ]);
   });
 
