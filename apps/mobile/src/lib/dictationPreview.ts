@@ -5,6 +5,7 @@
 // affects the capture it decorates.
 
 import { decodeAudio, type AudioEvent } from '@patch/wire/audio';
+import { answerHeartbeat } from './audioHeartbeat';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
 
@@ -85,6 +86,7 @@ export function startDictationPreview(
           report(`malformed audio frame: ${(e as Error).message}`);
           return;
         }
+        answerHeartbeat(socket, frame);
         if (frame.type === 'audio.transcript_partial') onPartial(frame.text);
         else if (frame.type === 'audio.error') report(frame.message);
       };

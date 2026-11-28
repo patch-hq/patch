@@ -19,6 +19,7 @@ import {
   encodeAudio,
   decodeAudio,
   HEARTBEAT_LOST_AFTER_MS,
+  heartbeatEcho,
   type AudioEvent,
 } from '@patch/wire/audio';
 import { MockVad, type Vad, type VadFrameResult } from '../src/audio/vad.js';
@@ -2028,30 +2029,31 @@ describe('audio WSS server — a gone peer', () => {
     }
   }, 10_000);
 
-  test('a peer that keeps sending frames stays', async () => {
+  test('a spoken alert, which has no microphone, stays while it answers the heartbeat', async () => {
     const server = await startServer();
     try {
       const ws = await openSocket(server.port, 's-alive');
+      ws.on('message', (data: Buffer | string, isBinary: boolean) => {
+        if (isBinary) return;
+        const frame = decodeAudio(data as string);
+        if (frame.type === 'audio.heartbeat') ws.send(encodeAudio(heartbeatEcho(frame)));
+      });
       ws.send(
         encodeAudio({
           type: 'audio.session_start',
           sessionId: 's-alive',
           accountId: 'a',
-          surfaceId: 'dev',
-          surfaceKind: 'device',
-          deviceId: 'dev',
+          surfaceId: 'phone',
+          surfaceKind: 'mobile',
           chatId: 'c',
-          role: 'voice-device-conv',
-          token: mintToken({ accountId: 'a', surfaceId: 'dev', sessionId: 's-alive' }),
+          role: 'announcement',
+          token: mintToken({ accountId: 'a', surfaceId: 'phone', sessionId: 's-alive' }),
           surfaceHasAec: true,
         }),
       );
       let closed = false;
       ws.once('close', () => (closed = true));
-      // A device streams its microphone for as long as the session is open.
-      const tick = setInterval(() => ws.send(Buffer.alloc(960), { binary: true }), 500);
       await new Promise((r) => setTimeout(r, HEARTBEAT_LOST_AFTER_MS + 1500));
-      clearInterval(tick);
       expect(closed).toBe(false);
       ws.close();
     } finally {

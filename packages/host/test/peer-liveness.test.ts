@@ -48,6 +48,14 @@ describe('watchPeerLiveness', () => {
     expect(ws.ping).not.toHaveBeenCalled();
   });
 
+  test('stop ends the watch (a voice device keeps its own liveness)', () => {
+    vi.useFakeTimers();
+    const ws = fake();
+    watchPeerLiveness(ws).stop();
+    vi.advanceTimersByTime(60_000);
+    expect(ws.terminate).not.toHaveBeenCalled();
+  });
+
   test('stops watching once the socket closes', () => {
     vi.useFakeTimers();
     const ws = fake();

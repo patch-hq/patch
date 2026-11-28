@@ -213,7 +213,6 @@ export class CallLine {
       q.rttCount += 1;
     }
     this.cur.lastHeardAt = now;
-    this.surface.send(attempt, { type: 'audio.heartbeat', sessionId: frame.sessionId, n: frame.n });
     // Before the acknowledgement the ack timeout is what judges the attempt.
     if (this.state === 'live') this.armWatchdog(attempt);
   }

@@ -623,7 +623,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     let isAppCall = false;
     let pendingBinaryMeta: { samples: number } | undefined;
 
-    watchPeerLiveness(ws, {
+    const liveness = watchPeerLiveness(ws, {
       onGone: (silentMs) =>
         log.warn(
           { sessionId: urlSessionId, silentMs },
@@ -1139,9 +1139,13 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             : {}),
         });
         surfaceIndex.set(start.surfaceId, start.sessionId);
-        // spec/07 § A dropped call comes back — an app call's surface judges
-        // the line by this heartbeat. A voice device keeps its own liveness.
-        if (isAppCall && start.surfaceKind !== 'device') {
+        // spec/07 § A dropped call comes back — every app session carries the
+        // heartbeat: a call's surface judges the line by it, and the host judges
+        // the device by its echoes. A voice device's firmware does not echo it,
+        // so it keeps its own liveness.
+        if (start.surfaceKind === 'device') {
+          liveness.stop();
+        } else {
           const live = sessions.get(start.sessionId) as ActiveSession;
           live.heartbeat = startCallHeartbeat(
             start.sessionId,

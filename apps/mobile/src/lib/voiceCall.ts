@@ -60,6 +60,7 @@ import {
   type AudioHeartbeatEvent,
   type AudioSessionMode,
 } from '@patch/wire/audio';
+import { answerHeartbeat } from './audioHeartbeat';
 import { CallLine, type CallLinePhase } from '@patch/wire/call-line';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
@@ -417,6 +418,7 @@ async function openAttempt(
       }
       switch (frame.type) {
         case 'audio.heartbeat':
+          answerHeartbeat(ws, frame);
           line.heartbeat(attempt, frame);
           break;
         case 'audio.state':

@@ -64,9 +64,16 @@ async function start(): Promise<{ port: number; logs: Array<Record<string, unkno
 
 async function open(
   port: number,
-  role: 'voice-call' | 'voice-note',
+  role: 'voice-call' | 'voice-note' | 'announcement' | 'voice-device-conv',
 ): Promise<{ ws: WebSocket; frames: AudioEvent[] }> {
-  const sessionId = role === 'voice-call' ? 's1' : 'n1';
+  const sessionId = {
+    'voice-call': 's1',
+    'voice-note': 'n1',
+    announcement: 'a1',
+    'voice-device-conv': 'd1',
+  }[role];
+  const device = role === 'voice-device-conv';
+  const surfaceId = device ? 'kitchen' : 'phone';
   const ws = new WebSocket(`ws://127.0.0.1:${port}/audio/${sessionId}`);
   const frames: AudioEvent[] = [];
   ws.on('message', (data, isBinary) => {
@@ -81,11 +88,12 @@ async function open(
       type: 'audio.session_start',
       sessionId,
       accountId: 'a',
-      surfaceId: 'phone',
-      surfaceKind: 'mobile',
+      surfaceId,
+      surfaceKind: device ? 'device' : 'mobile',
+      ...(device ? { deviceId: surfaceId } : {}),
       chatId: 'c1',
       role,
-      token: mintToken({ surfaceId: 'phone', sessionId, chatId: 'c1' }),
+      token: mintToken({ surfaceId, sessionId, chatId: 'c1' }),
       surfaceHasAec: true,
       ...(role === 'voice-call' ? { mode: 'call' as const } : {}),
     }),
@@ -119,15 +127,21 @@ describe('call heartbeat', () => {
     });
   });
 
-  test('a voice note gets no heartbeat', async () => {
+  test('every app session carries it, microphone or not — a voice note, a spoken alert', async () => {
     const { port } = await start();
-    const { ws, frames } = await open(port, 'voice-note');
+    for (const role of ['voice-note', 'announcement'] as const) {
+      const { ws, frames } = await open(port, role);
+      await wait(70);
+      expect(beats(frames).length).toBeGreaterThan(0);
+      ws.close();
+    }
+  });
+
+  test("a voice device's session does not: its firmware keeps its own liveness", async () => {
+    const { port } = await start();
+    const { ws, frames } = await open(port, 'voice-device-conv');
     await wait(70);
     expect(beats(frames)).toEqual([]);
-    // A stray echo on a session with no heartbeat changes nothing.
-    ws.send(encodeAudio({ type: 'audio.heartbeat', sessionId: 'n1', n: 0 }));
-    await wait(30);
-    expect(ws.readyState).toBe(WebSocket.OPEN);
     ws.close();
   });
 
