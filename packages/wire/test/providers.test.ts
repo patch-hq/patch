@@ -172,6 +172,7 @@ describe('provider capabilities', () => {
       'disableNativeTools',
       'interrupt',
       'steer',
+      'systemPrompt',
     ];
     for (const p of REG) {
       expect(Object.keys(p.capabilities).sort()).toEqual([...keys].sort());

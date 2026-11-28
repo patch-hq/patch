@@ -16,7 +16,7 @@ let home: string | null;
 let calls: Array<{ url: string; method: string; body: unknown }>;
 let draftAnswer: () => Response;
 let putAnswer: () => Response;
-let listAnswer: () => Response;
+let patchAnswer: (() => Response) | undefined;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -51,7 +51,7 @@ beforeEach(() => {
     home = body.hostId;
     return json(200, { hostId: body.hostId });
   };
-  listAnswer = () => json(200, { path: '/srv/work', parent: '/srv', entries: [] });
+  patchAnswer = undefined;
   usePreferencesStore.setState({ preferences: DEFAULT_SHARED_SETTINGS, loaded: true });
   vi.stubGlobal(
     'fetch',
@@ -67,10 +67,8 @@ beforeEach(() => {
         return Promise.resolve(draftAnswer());
       }
       if (method === 'PUT' && url === '/api/manager/home') return Promise.resolve(putAnswer());
-      if (method === 'GET' && url.startsWith('/api/hosts/host-a/files')) {
-        return Promise.resolve(listAnswer());
-      }
       if (method === 'PATCH' && url === '/api/settings') {
+        if (patchAnswer) return Promise.resolve(patchAnswer());
         return Promise.resolve(
           json(200, { preferences: { ...DEFAULT_SHARED_SETTINGS, ...(body as object) } }),
         );
@@ -147,7 +145,7 @@ describe('Settings → Manager → Home → Folder', () => {
     );
   });
 
-  it('checks the path on the home host before saving it', async () => {
+  it('saves through the server, which checks the path on the home host', async () => {
     renderGroup();
     await waitFor(() => expect(select().value).toBe('host-a'));
     fireEvent.click(screen.getByTestId('manager-folder-change'));
@@ -160,24 +158,29 @@ describe('Settings → Manager → Home → Folder', () => {
         { managerFolder: '/srv/work' },
       ]),
     );
-    expect(calls.some((c) => c.url.includes('/api/hosts/host-a/files?path=%2Fsrv%2Fwork'))).toBe(
-      true,
-    );
+    expect(calls.some((c) => c.url.includes('/api/hosts/'))).toBe(false);
     await waitFor(() =>
       expect(screen.getByTestId('manager-folder-path').textContent).toBe('/srv/work'),
     );
   });
 
-  it('refuses a path the host says is not a folder, with the host’s words, and saves nothing', async () => {
-    listAnswer = () => json(404, { error: 'not_found', message: '/nope does not exist' });
+  it('a path the server refuses keeps the field open with the server’s words', async () => {
+    patchAnswer = () =>
+      json(400, { error: 'manager_folder', message: '/nope is not a folder on laptop' });
     renderGroup();
     await waitFor(() => expect(select().value).toBe('host-a'));
     fireEvent.click(screen.getByTestId('manager-folder-change'));
     fireEvent.change(screen.getByTestId('manager-folder-input'), { target: { value: '/nope' } });
     fireEvent.click(screen.getByTestId('manager-folder-save'));
     expect((await screen.findByTestId('manager-folder-error')).textContent).toBe(
-      '/nope does not exist',
+      '/nope is not a folder on laptop',
     );
-    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    expect(screen.getByTestId('manager-folder-input')).toBeTruthy();
+    expect(usePreferencesStore.getState().preferences.managerFolder).toBe('');
+  });
+
+  it('carries a title and no explainer', () => {
+    renderGroup();
+    expect(screen.getByTestId('manager-folder').querySelector('.set-sub')).toBeNull();
   });
 });
