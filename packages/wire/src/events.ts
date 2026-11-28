@@ -2004,7 +2004,7 @@ export const ChatStateEvent = z
     statusKind: StatusKind.nullable().optional(),
     /**
      * Whether `statusKind` is DECLARED (the agent called `patch_ask_human` /
-     * `patch_report` itself) rather than a generated one-shot's guess at
+     * `patch_surface` itself) rather than a generated one-shot's guess at
      * whether the thread reads as a question. `report` is only ever declared —
      * the generator's KIND_MAP never produces it — but its generated `question`
      * guesses are frequent false positives (a reply that merely contains a `?`),

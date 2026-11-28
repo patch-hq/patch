@@ -424,10 +424,11 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: 'task: string, why?: string, until?: string, done?: boolean',
   },
   {
-    name: patchToolId('patch_report'),
-    label: 'patch_report',
+    name: patchToolId('patch_surface'),
+    label: 'patch_surface',
     category: 'patch',
-    description: "Puts a one-line finding on this chat's sidebar row, pulling it out of Archived.",
+    description:
+      'Brings this chat back into view with a one-line finding on its row, and notifies the user.',
     params: 'summary: string',
   },
   {

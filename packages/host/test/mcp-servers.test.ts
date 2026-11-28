@@ -92,10 +92,10 @@ describe('Codex tool exclusions', () => {
   it('switches excluded MCP tools off on their own server with disabled_tools', () => {
     const servers = codexMcpServers({
       mcpServer: patch,
-      disabledTools: ['mcp__patch__patch_notify', 'mcp__patch__patch_report'],
+      disabledTools: ['mcp__patch__patch_notify', 'mcp__patch__patch_surface'],
     });
     expect(servers).toEqual({
-      patch: { ...patch, enabled: true, disabled_tools: ['patch_notify', 'patch_report'] },
+      patch: { ...patch, enabled: true, disabled_tools: ['patch_notify', 'patch_surface'] },
     });
   });
 

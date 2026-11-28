@@ -110,7 +110,7 @@ export interface ChatSummary {
   statusSummary: string | null;
   statusKind: StatusKind | null;
   /**
-   * Whether `statusKind` is declared (a real `patch_ask_human`/`patch_report`
+   * Whether `statusKind` is declared (a real `patch_ask_human`/`patch_surface`
    * call) rather than a generated guess — see `wire/events.ts` § statusDeclared.
    */
   statusDeclared: boolean | null;

@@ -236,7 +236,7 @@ export function buildPeriodicReminder(text: string): string {
 export function buildHiddenNote(state: 'hidden' | 'shown'): string {
   const body =
     state === 'hidden'
-      ? 'This chat is now in hidden mode: the user has moved it out of their chat list. You are still running and nothing about the task changes, but they are not watching. Use patch_ask_human if you need them, or patch_report for something worth seeing; either brings the chat back into the list.'
+      ? 'This chat is now in hidden mode: the user has moved it out of their chat list. You are still running and nothing about the task changes, but they are not watching. Use patch_ask_human if you need them, or patch_surface for something worth seeing; either brings the chat back into the list.'
       : "This chat is no longer in hidden mode: it is back in the user's chat list and they may be reading along.";
   return noteBlock('Hidden', body);
 }

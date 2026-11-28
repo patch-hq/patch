@@ -100,12 +100,12 @@ describe('a chat that reaches for the user leaves Archived', () => {
     }
   });
 
-  it('patch_report un-archives and leaves the line on the row, silently', async () => {
+  it('patch_surface un-archives, leaves the line on the row and pushes', async () => {
     const { daemon, app, chatId, events } = await setup();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/internal/report',
+        url: '/internal/surface',
         headers: AUTH,
         payload: {
           summary: 'the backup has been failing silently since Tuesday',
@@ -119,9 +119,9 @@ describe('a chat that reaches for the user leaves Archived', () => {
       expect(state?.statusSummary).toBe('the backup has been failing silently since Tuesday');
       expect(state?.declaredStatus).toMatchObject({ kind: 'report' });
       expect(
-        events.find((e) => e.type === 'notify'),
-        'a report is seen later, not announced now',
-      ).toBeUndefined();
+        events.find((e) => e.type === 'notify' && e.channel === 'push'),
+        'surfacing a chat tells the user',
+      ).toMatchObject({ chatId, message: expect.stringContaining('failing silently') });
     } finally {
       await app.close();
     }
@@ -132,7 +132,7 @@ describe('a chat that reaches for the user leaves Archived', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/internal/report',
+        url: '/internal/surface',
         headers: AUTH,
         payload: { summary: 'something', callerChatId: 'chat-nope' },
       });

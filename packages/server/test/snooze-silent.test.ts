@@ -98,7 +98,7 @@ function everything(link: InProcessHostLink, chatId: string, over: Record<string
       ...over,
     }),
   );
-  // patch_notify at every level, patch_ask_human, patch_report.
+  // patch_notify at every level, patch_ask_human, patch_surface.
   for (const priority of ['silent', 'normal', 'urgent'] as const) {
     for (const channel of ['push', 'desktop'] as const) {
       link.emit({ type: 'notify', chatId, channel, priority, message: `n-${priority}` });
