@@ -193,12 +193,11 @@ describe('AwaitingPermissionNotifier', () => {
     expect(routed[0]?.event.message).toBe('unnamed chat needs permission: WebFetch');
   });
 
-  test('a block with no correlated request still rings, naming the chat', () => {
+  test('a block with nothing to say sends nothing, rather than a bare "waiting on you"', () => {
     feed(spawned('c1'));
     feed(state('c1', { activity: 'running', name: 'bed planner' }));
     feed(state('c1', { activity: 'awaiting-permission' }));
-    expect(channels()).toEqual(['desktop', 'push']);
-    expect(routed[0]?.event.message).toBe('bed planner is waiting on you');
+    expect(routed).toHaveLength(0);
   });
 
   // --- The edge -----------------------------------------------------------
@@ -335,7 +334,9 @@ describe('AwaitingPermissionNotifier', () => {
     // A new turn blocks with no request frame reaching the server.
     feed(state('c1', { activity: 'running' }));
     feed(state('c1', { activity: 'awaiting-permission' }));
-    expect(routed[0]?.event.message).toBe('unnamed chat is waiting on you');
+    expect(routed, 'the answered request is not reused, and nothing generic is sent').toHaveLength(
+      0,
+    );
   });
 
   // --- Notification actions (spec/09 § Notification actions) -------------

@@ -169,6 +169,7 @@ import { attemptPaging, liveAttemptSelection, type AttemptSelection } from '../l
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
 import { AskHumanCard } from '../components/AskHumanCard.js';
+import { NeedsYouBar } from '../components/NeedsYouBar.js';
 import { toolCallSummary, toolRunNarrative } from '../lib/toolSummary.js';
 import { toolLabel } from '../lib/toolsCatalog.js';
 import { formatElapsed } from '../lib/backgroundTasks.js';
@@ -2743,6 +2744,7 @@ export function ChatRoute({
                 onSendAnyway={handleHookSendAnyway}
               />
             ) : null}
+            <NeedsYouBar chatId={chatId} />
             <AgentRunningBar chatId={chatId} />
             <Composer
               key={chatId}

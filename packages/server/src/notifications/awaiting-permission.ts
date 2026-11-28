@@ -192,10 +192,20 @@ export class AwaitingPermissionNotifier {
     const ask = this.pendingAsk.get(chatId);
     this.pendingAsk.delete(chatId);
     const handoffReason = this.pendingHandoff.get(chatId);
+    // The chat says what it is waiting on; this only forwards it. A block that
+    // arrived with nothing to say is a bug upstream, so it is logged as one and
+    // no content-free "waiting on you" is sent in its place.
+    if (!ask && handoffReason === undefined) {
+      this.deps.logger.error(
+        { chatId, name },
+        'awaiting-permission with no chat.permission_request and no browser hand-off: nothing to tell the user, not notifying',
+      );
+      return;
+    }
     const message =
       handoffReason !== undefined && !ask
         ? `${name} needs you in the browser: ${handoffReason}`
-        : this.describe(chatId, name, ask);
+        : this.describe(name, ask!);
     const actions = this.actionsFor(ask);
 
     // Each channel is dispatched and failed independently: push throws by
@@ -229,21 +239,14 @@ export class AwaitingPermissionNotifier {
     return { kind: 'permission', requestId: ask.requestId };
   }
 
-  private describe(chatId: string, name: string, ask: PendingAsk | undefined): string {
-    if (!ask) {
-      // No correlated request. Nothing is inferred or invented — the user is
-      // told the chat is blocked, which is true and actionable, and the miss is
-      // logged because it means the host's emit order changed.
-      this.deps.logger.warn(
-        { chatId },
-        'awaiting-permission with no preceding chat.permission_request',
-      );
-      return `${name} is waiting on you`;
-    }
+  private describe(name: string, ask: PendingAsk): string {
     if (ask.tool === ASK_USER_QUESTION) {
       const question = questionText(ask.args);
       if (question === null) {
-        this.deps.logger.warn({ chatId }, 'AskUserQuestion args are not the documented shape');
+        this.deps.logger.warn(
+          { requestId: ask.requestId },
+          'AskUserQuestion args are not the documented shape',
+        );
         return `${name} has a question for you`;
       }
       return `${name} asks: ${question}`;

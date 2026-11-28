@@ -10,7 +10,7 @@ import { splitActionText } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { isAskOutstanding, pressAskDone } from '../lib/askDone.js';
 
-function ActionText({ text }: { text: string }): JSX.Element {
+export function ActionText({ text }: { text: string }): JSX.Element {
   return (
     <>
       {splitActionText(text).map((seg, i) => {
