@@ -95,3 +95,17 @@ describe('deriveBadge — the surface never derives a status of its own', () => 
     expect(deriveBadge(row({ ...st('host_offline'), lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
   });
 });
+
+describe('unread counts agent messages, not every record the log gains', () => {
+  it('stays read when only notes, call summaries or tool rows arrived after the last agent message', () => {
+    expect(deriveBadge(row({ lastSeq: 40, lastMessageSeq: 30, lastReadSeq: 30 }))).not.toBe('done');
+  });
+
+  it('goes unread when an agent message arrived after the last visit', () => {
+    expect(deriveBadge(row({ lastSeq: 40, lastMessageSeq: 38, lastReadSeq: 30 }))).toBe('done');
+  });
+
+  it('keeps the old rule for a host that does not report the agent-message seq', () => {
+    expect(deriveBadge(row({ lastSeq: 40, lastReadSeq: 30 }))).toBe('done');
+  });
+});

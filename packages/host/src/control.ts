@@ -4277,7 +4277,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         chatId: callerChatId,
         channel: 'push',
         kind: 'ask',
-        message: `${state.name ?? 'A chat'} needs you to: ${task}`,
+        message: `${state.name ?? 'A chat'} needs you to: ${task}${why ? ` (${why})` : ''}`,
         priority: 'normal',
       };
       opts.emitWire(event);

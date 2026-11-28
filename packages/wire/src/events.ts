@@ -1726,6 +1726,13 @@ export const ChatStateEvent = z
      */
     lastMessagePreview: z.string().nullable().optional(),
     /**
+     * The seq of the chat's latest agent message (the one `lastMessagePreview`
+     * quotes). A surface marks a chat unread from this, not from `lastSeq`,
+     * which moves for every record the log gains. Optional: an older host
+     * never sends it.
+     */
+    lastMessageSeq: z.number().int().nonnegative().optional(),
+    /**
      * The host this chat is pinned to (spec/03 § Host events). `chat.spawned`
      * establishes it for the chat's life; carrying it here too means a surface
      * that groups its sidebar by host never has to hold a chatId → host

@@ -89,6 +89,19 @@ describe('ChatLog', () => {
     expect(makeLog(home).lastMessage('c1')).toBe('the answer');
   });
 
+  it('knows the seq of the latest assistant message, not of later system lines', () => {
+    const home = tmp('chatlog-lastseq-');
+    const log = makeLog(home);
+    expect(log.lastMessageSeq('c1')).toBe(-1);
+    const s0 = log.allocate('c1', 0, 'c1-b0');
+    appendEvent(log, 'c1', msg('c1', s0, 'the answer', 'assistant'), { sync: true });
+    const s1 = log.allocate('c1', 0, 'c1-b0');
+    appendEvent(log, 'c1', msg('c1', s1, '[call] Call 0:51', 'system'), { sync: true });
+    expect(log.lastMessageSeq('c1')).toBe(s0);
+    expect(log.recordedHighWater('c1')).toBe(s1);
+    expect(makeLog(home).lastMessageSeq('c1')).toBe(s0);
+  });
+
   it('appends records and reads them back, starting with log.start', () => {
     const home = tmp('chatlog-rt-');
     const log = makeLog(home);

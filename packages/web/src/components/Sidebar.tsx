@@ -2535,7 +2535,7 @@ const ChatRowView = memo(function ChatRowView({
         icon: <Pencil size={14} aria-hidden />,
         run: () => void applyRename(),
       },
-      ...(row.lastSeq >= 0 && row.lastSeq <= row.lastReadSeq
+      ...(row.lastSeq >= 0 && (row.lastMessageSeq ?? row.lastSeq) <= row.lastReadSeq
         ? [
             {
               id: 'mark-unread',
