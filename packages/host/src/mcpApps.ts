@@ -18,9 +18,8 @@
 // NO FALLBACK: a missing server, tool or template is an error the surface shows,
 // never an empty frame.
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Logger } from 'pino';
+import { connectMcpClient, mcpConnectionKey, type SecretLookup } from './mcpClient.js';
 import type { McpServerConfig, PatchMcpAppRequestEvent, WireEvent } from '@patch/wire';
 
 export const MCP_APP_MIME = 'text/html;profile=mcp-app';
@@ -70,18 +69,12 @@ function uiMetaOf(meta: unknown): Record<string, unknown> {
   return ui;
 }
 
-export function stdioConnector(logger: Logger): McpAppConnector {
+export function mcpAppConnector(logger: Logger, secrets: SecretLookup): McpAppConnector {
   return async (spec) => {
-    const transport = new StdioClientTransport({
-      command: spec.command,
-      args: spec.args,
-      env: { ...(process.env as Record<string, string>), ...spec.env },
-      stderr: 'inherit',
-    });
-    const client = new Client({ name: 'patch-mcp-apps', version: '1.0.0' });
     logger.info({ server: spec.name }, 'mcp apps: connecting');
-    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
-    return client as unknown as McpAppClient;
+    return (await connectMcpClient(spec, secrets, {
+      timeoutMs: CONNECT_TIMEOUT_MS,
+    })) as unknown as McpAppClient;
   };
 }
 
@@ -107,7 +100,7 @@ export class McpApps {
     if (!spec) {
       throw new McpAppError('server_not_found', `no MCP server "${server}" for this chat`);
     }
-    const key = JSON.stringify([spec.name, spec.command, spec.args, spec.env]);
+    const key = mcpConnectionKey(spec);
     let p = this.clients.get(key);
     if (!p) {
       p = this.deps.connect(spec);

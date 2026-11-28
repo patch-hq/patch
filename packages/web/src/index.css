@@ -19755,6 +19755,19 @@ a.drop-target,
 }
 
 /* MCP Apps (SEP-1865): the server's template in a sandboxed frame under its tool row. */
+.mcp-switches {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.mcp-switch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
 .mcp-app {
   margin: 10px 0;
   overflow: hidden;

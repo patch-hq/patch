@@ -82,11 +82,12 @@ import {
   SEND_TO_CHAT_TOOL_NAME,
   SWITCH_CHAT_TOOL_NAME,
   voiceAgentInstructions,
-  voiceAgentTools,
   type VoiceAgentLink,
   type VoiceToolSpec,
 } from './voiceAgent.js';
 import { VoiceAgentCall } from './voiceAgentCall.js';
+import { openaiSchema } from './toolSchemas.js';
+import type { VoiceToolbox } from './voiceTools.js';
 import { ChatLookupError } from './chatLookup.js';
 import {
   managerHostedInstruction,
@@ -126,6 +127,8 @@ export interface OpenAIRealtimeDeps {
   model: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
+  /** The MCP servers' tools and the Patch tool groups turned off, for every call. */
+  toolbox: VoiceToolbox;
   /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
   manager?: ManagerVoiceTools;
   transcribeModel?: string;
@@ -288,6 +291,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
               sessionId: init.sessionId,
             },
       logger: deps.logger,
+      toolbox: deps.toolbox,
       sendAudio: deps.sendAudio,
       ...(init.callReason !== undefined ? { callReason: init.callReason } : {}),
     });
@@ -413,15 +417,16 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   private speakerConfig(): Record<string, unknown> {
     const history = this.historyAllowed();
     const manager = this.deps.manager !== undefined;
-    const tools = voiceAgentTools({
+    const tools = this.call.tools({
       // A Manager call has its own tools and no agent behind it; `never` has no agent either.
       handoff: manager ? 'never' : this.effectiveHandoff(),
       lookBack: history,
       switchChat: !manager && history,
+      ...(manager ? { quick: MANAGER_QUICK_TOOLS } : {}),
     });
     return {
       instructions: this.instructions(),
-      tools: [...(manager ? managerRealtimeTools() : []), ...tools.map(realtimeTool)],
+      tools: tools.map(realtimeTool),
       tool_choice: 'auto',
     };
   }
@@ -491,6 +496,7 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
     // spec/07 § Keeping voice and text as one conversation — the chat as it stands, at the
     // end of the instructions. A chat that cannot be read fails the session loudly.
     this.startContext = this.call.startContext();
+    await this.call.loadTools();
     if (this.closed) return;
     const config = this.sessionConfig();
     // The full text, so what the voice was told can be read back from the log.
@@ -1077,41 +1083,13 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
   }
 }
 
-/** The Manager call's tools, in Realtime's function shape. */
-function managerRealtimeTools(): Array<Record<string, unknown>> {
-  const fn = (
-    name: string,
-    description: string,
-    params: Record<string, string>,
-    required: string[] = Object.keys(params),
-  ): Record<string, unknown> => ({
-    type: 'function',
-    name,
-    description,
-    parameters: {
-      type: 'object',
-      properties: Object.fromEntries(
-        Object.entries(params).map(([k, d]) => [k, { type: 'string', description: d }]),
-      ),
-      required,
-    },
-  });
-  return [...MANAGER_QUICK_TOOLS.map((t) => fn(t.name, t.description, t.params, t.required))];
-}
-
 /** One of the voice agent's tools in Realtime's function shape. */
 function realtimeTool(t: VoiceToolSpec): Record<string, unknown> {
   return {
     type: 'function',
     name: t.name,
     description: t.description,
-    parameters: {
-      type: 'object',
-      properties: Object.fromEntries(
-        Object.entries(t.params).map(([k, d]) => [k, { type: 'string', description: d }]),
-      ),
-      required: t.required,
-    },
+    parameters: openaiSchema(t.schema),
   };
 }
 

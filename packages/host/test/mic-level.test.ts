@@ -6,7 +6,7 @@ import pino from 'pino';
 import { MicLevelWatch, micSilentMessage } from '../src/audio/micLevel.js';
 import { GeminiLiveSession } from '../src/audio/gemini-live.js';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
-import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
+import { fakeVoiceAgentLink, emptyToolbox } from './helpers/fakeVoiceAgentLink.js';
 import type { AudioEvent } from '@patch/wire/audio';
 import type { WebSocket as WsSocket } from 'ws';
 import { EventEmitter } from 'node:events';
@@ -78,6 +78,7 @@ describe('a call whose microphone sends silence', () => {
         sendAudio: (e) => events.push(e),
         sendBinary: () => {},
         link: fakeVoiceAgentLink().link,
+        toolbox: emptyToolbox(),
         instructions: DEFAULT_VOICE_INSTRUCTIONS,
         timeline: {
           userSaid: () => {},

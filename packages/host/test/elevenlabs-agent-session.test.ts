@@ -11,7 +11,11 @@ import {
 } from '../src/audio/elevenlabs-agent.js';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 import { LOOK_BACK_TOOL_NAME, PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
-import { fakeVoiceAgentLink, FAKE_START_CONTEXT } from './helpers/fakeVoiceAgentLink.js';
+import {
+  fakeVoiceAgentLink,
+  FAKE_START_CONTEXT,
+  emptyToolbox,
+} from './helpers/fakeVoiceAgentLink.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent, AudioSessionMode } from '@patch/wire/audio';
 import { FakeTimeline } from './gemini-live-session.test.js';
@@ -94,6 +98,7 @@ function makeDeps(overrides: Partial<ElevenLabsAgentDeps> = {}, failPath?: strin
     sendAudio: (ev) => events.push(ev),
     sendBinary: (pcm) => binary.push(pcm),
     link,
+    toolbox: emptyToolbox(),
     instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'e-key',
     llm: 'claude-haiku-4-5',

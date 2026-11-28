@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import pino from 'pino';
 import type { WebSocket as WsSocket } from 'ws';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
-import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
+import { fakeVoiceAgentLink, emptyToolbox } from './helpers/fakeVoiceAgentLink.js';
 import {
   LOOK_BACK_TOOL_NAME,
   PASS_TO_AGENT_TOOL_NAME,
@@ -142,6 +142,7 @@ async function openGemini(
     sendAudio: (e) => events.push(e),
     sendBinary: () => {},
     link,
+    toolbox: emptyToolbox(),
     instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'k',
     timeline: timeline(),
@@ -367,6 +368,7 @@ async function openOpenAI(manager: ManagerVoiceTools, given?: VoiceAgentLink) {
     sendAudio: (e) => events.push(e),
     sendBinary: () => {},
     link,
+    toolbox: emptyToolbox(),
     instructions: DEFAULT_VOICE_INSTRUCTIONS,
     apiKey: 'k',
     model: 'gpt-realtime-2.1-mini',
@@ -479,6 +481,7 @@ describe('ElevenLabs Agents on a Manager call', () => {
       sendAudio: () => {},
       sendBinary: () => {},
       link: sendLink,
+      toolbox: emptyToolbox(),
       instructions: DEFAULT_VOICE_INSTRUCTIONS,
       apiKey: 'k',
       llm: 'claude-haiku-4-5',

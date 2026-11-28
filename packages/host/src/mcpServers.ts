@@ -31,6 +31,8 @@ export function seedMcpServers(browserToolsEnabled: boolean): McpServerConfig[] 
       args: ['@playwright/mcp@0.0.83', '--headless'],
       env: {},
       enabled: browserToolsEnabled,
+      voice: false,
+      voiceOff: [],
     },
     {
       name: 'chrome-devtools',
@@ -38,6 +40,8 @@ export function seedMcpServers(browserToolsEnabled: boolean): McpServerConfig[] 
       args: ['-y', 'chrome-devtools-mcp@1.10.1', '--headless'],
       env: {},
       enabled: browserToolsEnabled,
+      voice: false,
+      voiceOff: [],
     },
   ];
 }

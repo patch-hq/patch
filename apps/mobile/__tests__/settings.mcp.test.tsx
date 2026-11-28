@@ -31,6 +31,8 @@ const playwright: McpServerConfig = {
   args: ['@playwright/mcp', '--headless'],
   env: {},
   enabled: true,
+  voice: false,
+  voiceOff: [],
 };
 const devtools: McpServerConfig = {
   name: 'chrome-devtools',
@@ -38,6 +40,8 @@ const devtools: McpServerConfig = {
   args: ['chrome-devtools-mcp'],
   env: { DEBUG: '1' },
   enabled: false,
+  voice: false,
+  voiceOff: [],
 };
 
 let mounted: ReactTestRenderer[] = [];
@@ -76,7 +80,7 @@ describe('MCP page', () => {
       /^mcp-server-[^-]+(-[a-z]+)*$/.test(String(i.props.testID)),
     )
       .map((i) => String(i.props.testID))
-      .filter((id) => !id.endsWith('-enabled'));
+      .filter((id) => !/-(enabled|voice)$/.test(id));
     expect(rows).toEqual([
       'mcp-server-patch',
       'mcp-server-playwright',
@@ -180,7 +184,15 @@ describe('MCP server editor', () => {
     expect(send.mock.calls[0]![0].harnessMcpServers).toEqual([
       playwright,
       devtools,
-      { name: 'fs', command: 'npx', args: ['fs-mcp', '/tmp'], env: {}, enabled: true },
+      {
+        name: 'fs',
+        command: 'npx',
+        args: ['fs-mcp', '/tmp'],
+        env: {},
+        enabled: true,
+        voice: true,
+        voiceOff: [],
+      },
     ]);
   });
 
@@ -253,5 +265,77 @@ describe('MCP server editor', () => {
     expect(textOf(findHost(r.root, byTestId('mcp-editor-unavailable')))).toBe(
       'd3 hasn’t reported yet',
     );
+  });
+});
+
+describe('tools for the voice', () => {
+  const home: McpServerConfig = {
+    name: 'home',
+    url: 'http://ha.local:8123/api/mcp',
+    tokenSecret: 'HA_TOKEN',
+    enabled: true,
+    voice: true,
+    voiceOff: ['TurnOff'],
+  };
+  beforeEach(() => {
+    reportHost('d1', {
+      hostName: 'laptop',
+      runsManager: true,
+      harnessMcpServers: [home],
+      voiceToolGroupsOff: ['timers'],
+      mcpTools: {
+        home: {
+          tools: [
+            { name: 'GetState', description: 'Read an entity' },
+            { name: 'TurnOff', description: 'Turn something off' },
+          ],
+        },
+      },
+    });
+  });
+
+  it('says how many tools a server has and how many are off, and counts the total', async () => {
+    const r = render(<McpPage />);
+    expect(textOf(findHost(r.root, byTestId('mcp-server-home')))).toContain(
+      '2 tools · 1 turned off for the voice',
+    );
+    expect(textOf(findHost(r.root, byTestId('mcp-voice-count')))).toContain('The voice has');
+  });
+
+  it('a server has its own Voice and Agent switches', async () => {
+    const r = render(<McpPage />);
+    await actAsync(() =>
+      findHost(r.root, byTestId('mcp-server-home-voice')).props.onValueChange(false),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'host.settings',
+      hostId: 'd1',
+      harnessMcpServers: [{ ...home, voice: false }],
+    });
+  });
+
+  it('a built-in group has a Voice switch', async () => {
+    const r = render(<McpPage />);
+    await actAsync(() =>
+      findHost(r.root, byTestId('mcp-group-chats-voice')).props.onValueChange(false),
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'host.settings',
+      hostId: 'd1',
+      voiceToolGroupsOff: ['timers', 'chats'],
+    });
+  });
+
+  it('the editor switches a tool off by name and saves only the off list', async () => {
+    const r = render(<McpServerEditor hostId="d1" name="home" />);
+    await actAsync(() =>
+      findHost(r.root, byTestId('mcp-tool-GetState-voice')).props.onValueChange(false),
+    );
+    await actAsync(() => findHost(r.root, byTestId('mcp-editor-save')).props.onPress());
+    expect(send).toHaveBeenCalledWith({
+      type: 'host.settings',
+      hostId: 'd1',
+      harnessMcpServers: [{ ...home, voiceOff: ['TurnOff', 'GetState'] }],
+    });
   });
 });

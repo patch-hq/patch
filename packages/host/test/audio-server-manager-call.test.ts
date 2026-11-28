@@ -9,7 +9,7 @@
 
 import { DEFAULT_SHARED_SETTINGS, relayFrom } from '@patch/wire';
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
-import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
+import { fakeVoiceAgentLink, emptyToolbox } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
@@ -240,6 +240,7 @@ describe('audio server — a hosted call to the Manager', () => {
           userSaid() {},
           beginReply: () => ({ set() {}, finish() {} }),
         }),
+        voiceToolbox: emptyToolbox(),
         voiceAgentLink: {
           ...fakeVoiceAgentLink({
             passToAgent: (req) => agentTurns.push({ chatId: req.chatId, message: req.request }),

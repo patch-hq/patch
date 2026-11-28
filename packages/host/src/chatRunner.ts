@@ -25,6 +25,7 @@ import { invalidateGitDirtyCache } from './git-dirty.js';
 import { invalidateFilesRecursiveCache } from './files-recursive.js';
 import { checkChatFolderAccess } from './folderAccess.js';
 import { SharedMcpPool } from './sharedMcp.js';
+import { mcpHttpHeaders, type SecretLookup } from './mcpClient.js';
 // Host's session manager.
 //
 // Owns chat_state, the per-chat AbortControllers, the per-chat seq counter,
@@ -380,6 +381,8 @@ export interface HostOptions {
    * one, where chats get the plain stdio entries.
    */
   sharedMcp?: SharedMcpPool;
+  /** Reads the host's Secrets, for the token of an MCP server reached over HTTP. */
+  secrets?: SecretLookup;
   /**
    * OAuth gate (spec/10-auth.md "Claude OAuth — non-negotiable"). Called
    * BEFORE every SDK `query()` — re-reads ~/.claude.json so a credential that
@@ -2167,9 +2170,9 @@ const LOCAL_INSTANT: Intl.DateTimeFormatOptions = {
 export class Daemon {
   readonly chatState: ChatStateMap;
   private readonly opts: Required<
-    Pick<HostOptions, 'now' | 'generateChatId' | 'discoverMcpServers'>
+    Pick<HostOptions, 'now' | 'generateChatId' | 'discoverMcpServers' | 'secrets'>
   > &
-    Omit<HostOptions, 'now' | 'generateChatId' | 'discoverMcpServers'>;
+    Omit<HostOptions, 'now' | 'generateChatId' | 'discoverMcpServers' | 'secrets'>;
 
   /** Active AbortControllers for in-flight queries, keyed by chatId. */
   private readonly aborters = new Map<string, AbortController>();
@@ -2459,6 +2462,7 @@ export class Daemon {
       now: options.now ?? (() => Date.now()),
       generateChatId: options.generateChatId ?? (() => ulid()),
       discoverMcpServers: options.discoverMcpServers ?? (() => []),
+      secrets: options.secrets ?? (() => undefined),
       sharedMcp:
         options.sharedMcp ?? (options.sdkBackendKind === 'real' ? new SharedMcpPool() : undefined),
     };
@@ -3310,9 +3314,20 @@ export class Daemon {
   /** The chat's extra MCP servers, as URLs of the host's shared copies when a pool is configured. */
   private async shareMcp(servers: McpServerConfig[], folder: string): Promise<ExtraMcpServer[]> {
     const pool = this.opts.sharedMcp;
-    if (!pool || servers.length === 0) return servers;
-    await pool.listen();
-    return servers.map((s) => ({ name: s.name, url: pool.urlFor(s, folder) }));
+    if (servers.length === 0) return [];
+    if (pool) await pool.listen();
+    return servers.map((s): ExtraMcpServer => {
+      if ('url' in s) {
+        // A remote server is reached directly, with its token read from Secrets now.
+        const headers = mcpHttpHeaders(s, this.opts.secrets);
+        return {
+          name: s.name,
+          url: s.url,
+          ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        };
+      }
+      return pool ? { name: s.name, url: pool.urlFor(s, folder) } : s;
+    });
   }
 
   shutdown(): void {
@@ -9363,6 +9378,49 @@ export class Daemon {
   recordVoiceHandoff(handoff: Omit<ChatVoiceHandoffEvent, 'type' | 'seq' | 'branchId'>): void {
     if (!this.chatState.has(handoff.chatId)) throw new ChatNotFoundError(handoff.chatId);
     this.emit({ type: 'chat.voice_handoff', ...handoff, seq: this.bumpSeq(handoff.chatId) });
+  }
+
+  /**
+   * A tool the voice ran through an MCP server, shown in the chat as any tool
+   * call is (`chat.tool_call` then `chat.tool_result`, the same `mcp__<server>__<tool>`
+   * name the agent's own calls carry).
+   */
+  recordVoiceToolCall(req: {
+    chatId: string;
+    callId: string;
+    tool: string;
+    args: unknown;
+    startedAt: number;
+  }): void {
+    if (!this.chatState.has(req.chatId)) throw new ChatNotFoundError(req.chatId);
+    this.emit({
+      type: 'chat.tool_call',
+      chatId: req.chatId,
+      tool: req.tool,
+      args: req.args,
+      callId: req.callId,
+      startedAt: req.startedAt,
+      seq: this.bumpSeq(req.chatId),
+    });
+  }
+
+  recordVoiceToolResult(req: {
+    chatId: string;
+    callId: string;
+    tool: string;
+    result: string;
+    isError: boolean;
+  }): void {
+    if (!this.chatState.has(req.chatId)) throw new ChatNotFoundError(req.chatId);
+    this.emit({
+      type: 'chat.tool_result',
+      chatId: req.chatId,
+      tool: req.tool,
+      callId: req.callId,
+      result: req.result,
+      ...(req.isError ? { isError: true } : {}),
+      seq: this.bumpSeq(req.chatId),
+    });
   }
 
   /**

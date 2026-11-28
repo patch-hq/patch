@@ -71,10 +71,12 @@ import {
   PASS_TO_AGENT_TOOL_NAME,
   SEND_TO_CHAT_TOOL_NAME,
   voiceAgentInstructions,
-  voiceAgentTools,
   type VoiceAgentLink,
+  type VoiceToolSpec,
 } from './voiceAgent.js';
 import { VoiceAgentCall } from './voiceAgentCall.js';
+import { geminiSchema } from './toolSchemas.js';
+import type { VoiceToolbox } from './voiceTools.js';
 import { ChatLookupError } from './chatLookup.js';
 import {
   MANAGER_QUICK_TOOLS,
@@ -125,6 +127,8 @@ export interface GeminiLiveDeps {
   model?: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
+  /** The MCP servers' tools and the Patch tool groups turned off, for every call. */
+  toolbox: VoiceToolbox;
   /** The prebuilt voice to speak in (`geminiVoice`). Absent: Gemini's own default. */
   voice?: string;
   /**
@@ -169,11 +173,7 @@ interface GeminiSetupMessage {
 interface GeminiFunctionDeclaration {
   name: string;
   description: string;
-  parameters: {
-    type: 'OBJECT';
-    properties: Record<string, { type: string; description: string }>;
-    required: string[];
-  };
+  parameters: Record<string, unknown>;
   behavior: 'NON_BLOCKING';
 }
 interface GeminiServerMessage {
@@ -250,32 +250,14 @@ export const FALSE_CLAIM_CORRECTION =
   `few words that it had not actually been sent, then call ${PASS_TO_AGENT_TOOL_NAME} now with ` +
   "the user's real request from the conversation.";
 
-/** A NON_BLOCKING declaration taking string parameters. */
-function stringTool(
-  name: string,
-  description: string,
-  params: Record<string, string>,
-  required: string[] = Object.keys(params),
-): GeminiFunctionDeclaration {
+/** A NON_BLOCKING declaration for one of the voice's tools. */
+function geminiTool(t: VoiceToolSpec): GeminiFunctionDeclaration {
   return {
-    name,
-    description,
-    parameters: {
-      type: 'OBJECT',
-      properties: Object.fromEntries(
-        Object.entries(params).map(([k, d]) => [k, { type: 'STRING', description: d }]),
-      ),
-      required,
-    },
+    name: t.name,
+    description: t.description,
+    parameters: geminiSchema(t.schema),
     behavior: 'NON_BLOCKING',
   };
-}
-
-/** The Manager call's tools (spec/07 § A call to the Manager). */
-function managerDeclarations(): GeminiFunctionDeclaration[] {
-  return [
-    ...MANAGER_QUICK_TOOLS.map((t) => stringTool(t.name, t.description, t.params, t.required)),
-  ];
 }
 
 function buildSetupMessage(
@@ -396,6 +378,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
         sessionId: init.sessionId,
       },
       logger: deps.logger,
+      toolbox: deps.toolbox,
       sendAudio: deps.sendAudio,
       ...(init.callReason !== undefined ? { callReason: init.callReason } : {}),
     });
@@ -605,14 +588,15 @@ export class GeminiLiveSession implements VoiceSessionLike {
       ...(this.deps.tone !== undefined ? { tone: this.deps.tone } : {}),
       startContext: this.call.startContext(),
     });
-    const tools = [
-      ...(manager ? managerDeclarations() : []),
-      ...voiceAgentTools({
+    await this.call.loadTools();
+    const tools = this.call
+      .tools({
         handoff: manager ? 'never' : (this.deps.handoff ?? 'auto'),
         lookBack: true,
         switchChat: !manager,
-      }).map((t) => stringTool(t.name, t.description, t.params, t.required)),
-    ];
+        ...(manager ? { quick: MANAGER_QUICK_TOOLS } : {}),
+      })
+      .map(geminiTool);
     // The full text, so what the voice was told can be read back from the log.
     this.log('instructions', { chars: instructions.length, instructions });
     ws.send(

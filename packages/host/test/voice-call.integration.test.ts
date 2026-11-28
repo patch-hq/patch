@@ -1,3 +1,4 @@
+import { emptyToolbox } from './helpers/fakeVoiceAgentLink.js';
 // A whole voice call, end to end, with only Gemini and the agent's model faked:
 // the surface's audio socket, the real audio server, the real Gemini session,
 // the real chat host (history log, turn queue, spend bookkeeping) and the real
@@ -173,6 +174,7 @@ function world(voiceConfig?: Partial<VoiceConfig>) {
       } as unknown as new (url: string) => WsSocket,
       makeTimeline: (init) => glue.makeTimeline(init),
       voiceAgentLink: glue.link,
+      voiceToolbox: emptyToolbox(),
       getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
       // Only the local tier runs a turn per utterance; a voice agent call never does.
       submitUserTurn: async () => {

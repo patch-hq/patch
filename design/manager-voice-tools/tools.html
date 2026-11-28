@@ -1,0 +1,44 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Manager tools</title><link rel="stylesheet" href="chat.css">
+<style>
+body{display:block}
+.page{max-width:760px;margin:0 auto;padding:24px}
+h1{font-family:var(--serif);font-weight:500;font-size:26px;margin-bottom:18px}
+.group{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:18px;overflow:hidden}
+.gh{padding:12px 16px;font-size:14px;color:var(--faint);border-bottom:1px solid var(--lsoft);display:flex}
+.gh span{margin-left:auto;display:flex;gap:30px}
+.r{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--lsoft)}
+.r:last-child{border-bottom:0}
+.r .n{font-weight:600}.r .d{color:var(--faint);font-size:14px}
+.r .c{margin-left:auto;display:flex;gap:38px;padding-right:8px}
+.r.sub{padding-left:40px;background:var(--panel)}
+.r.sub .n{font-weight:500}
+.cb{width:20px;height:20px;border-radius:5px;border:2px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.cb.fixed{background:var(--soft);border-color:var(--lsoft);color:var(--faint)}
+.car{width:16px;color:var(--ink3);display:inline-flex}
+.limit{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--lsoft);font-size:14px;color:var(--ink2)}
+.limit input{width:56px;height:32px;border:1px solid var(--line);border-radius:8px;text-align:center;font:inherit}
+.limit .over{margin-left:auto;color:var(--wait)}
+.add{display:block;padding:12px 16px;color:var(--accent);font-weight:600;border-top:1px solid var(--lsoft)}
+</style></head><body>
+<div class="page"><h1>Manager · Tools</h1>
+<div class="group"><div class="gh">Built in<span><b>Voice</b><b>Agent</b></span></div>
+  <div class="r"><div><div class="n">Chats</div><div class="d">Find a chat, see how it's doing, send it a message</div></div><div class="c"><span class="cb on">✓</span><span class="cb fixed">✓</span></div></div>
+  <div class="r"><div><div class="n">Timers</div><div class="d">Set, change, cancel and list timers</div></div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r"><div><div class="n">Screens</div><div class="d">Show, update and remove things on screens</div></div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r"><div><div class="n">Ask the agent</div><div class="d">Hand anything bigger to the Manager's agent</div></div><div class="c"><span class="cb on">✓</span><span class="cb fixed">–</span></div></div>
+</div>
+<div class="group"><div class="gh">Your MCP servers<span><b>Voice</b><b>Agent</b></span></div>
+  <div class="r"><span class="car"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span><div><div class="n">Home Assistant</div><div class="d">14 tools · 9 turned off for the voice</div></div><div class="c"><span class="cb fixed">–</span><span class="cb on">✓</span></div></div>
+  <div class="r sub"><div class="n">Turn on</div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r sub"><div class="n">Turn off</div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r sub"><div class="n">Set light</div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r sub"><div class="n">Get state</div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r sub"><div class="n">Media play</div><div class="c"><span class="cb on">✓</span><span class="cb on">✓</span></div></div>
+  <div class="r sub"><div class="n">Set climate, Vacuum start, Shopping list add… <span class="d">9 more</span></div><div class="c"><span class="cb">&nbsp;</span><span class="cb on">✓</span></div></div>
+  <div class="r"><span class="car"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><div><div class="n">Todoist</div><div class="d">23 tools · 19 turned off for the voice</div></div><div class="c"><span class="cb fixed">–</span><span class="cb on">✓</span></div></div>
+  <div class="r"><span class="car"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><div><div class="n">Living room TV</div><div class="d">Agent only</div></div><div class="c"><span class="cb">&nbsp;</span><span class="cb on">✓</span></div></div>
+  <div class="limit"><span class="over" style="margin-left:0">The voice has 21 tools. With this many it may start picking the wrong one.</span></div>
+  <a class="add">+ Add MCP server</a>
+</div>
+</div></body></html>

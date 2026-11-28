@@ -65,7 +65,8 @@ function toMcpServerConfig(name: string, raw: unknown): McpServerConfig | undefi
         ),
       )
     : {};
-  return { name, command: entry.command, args, env, enabled: true };
+  // Claude's own servers are the chat agent's, never the voice's.
+  return { name, command: entry.command, args, env, enabled: true, voice: false, voiceOff: [] };
 }
 
 /** Every `mcpServers`-shaped entry in an object, normalised and name-filtered. */

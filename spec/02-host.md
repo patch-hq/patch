@@ -1314,6 +1314,8 @@ Two more sources feed the same `mcpServers` option, both merged in by the host r
 - The host's own list (Settings → MCP, `harnessMcpServers` in `host.json`) — servers the USER told Patch to add, editable through Patch's own settings tools, never by hand-editing a file. Only the `enabled` entries reach a chat.
 - Claude Code's own config — servers the user already told the `claude` CLI to add, outside Patch entirely: `~/.claude/settings.json` → `mcpServers`, `~/.claude.json`'s global and per-project `mcpServers`, and a project's `.mcp.json`, the last gated on that project already appearing in `~/.claude.json`'s `enabledMcpjsonServers` (i.e. a human has trust-approved it on this host at some point — an unapproved `.mcp.json` entry is not one Claude's own process would run unattended either, so Patch doesn't run it unattended). Read-only, same as the "no mutation" rule above.
 
+A server in the host's list is either a command the host starts or a remote Streamable HTTP server (`url`, with `tokenSecret` naming the Secrets entry that holds its bearer token). A chat's agent reaches a remote server directly, with the token sent as `Authorization: Bearer`; the host's own clients (MCP Apps, the voice's tools, `07-voice-app.md` § Voice tools) connect through one shared client (`mcpClient.ts`). Each entry also carries `voice` (the voice has its tools) and `voiceOff` (the tool names turned off for it); `enabled` is the agent's switch. Servers Claude Code's own config names are the agent's only.
+
 Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discovered servers, then the host's enabled list — a name in both wins from the host's list, since that is the one the user can see and edit inside Patch.
 
 ## Control IPC (local CLI ↔ host)

@@ -1,0 +1,5 @@
+{ "screens": [
+  { "id": "call", "name": "Manager chat during a call", "path": "index.html" },
+  { "id": "handoff", "name": "A hand-off opened", "path": "handoff.html" },
+  { "id": "tools", "name": "Settings: Manager tools", "path": "tools.html" }
+] }

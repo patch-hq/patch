@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { LimitBehaviour, McpServerList, PermissionMode } from '@patch/wire';
+import { LimitBehaviour, McpServerList, PermissionMode, VoiceToolGroup } from '@patch/wire';
 import type { Logger } from 'pino';
 
 const HostStateFile = z
@@ -178,6 +178,8 @@ const HostStateFile = z
     harnessMcpServers: McpServerList.optional(),
     /** Whether Patch's own tools server is wired into chats. Absent means on. */
     patchMcpEnabled: z.boolean().optional(),
+    /** Patch's own voice tool groups switched off for the voice (Settings → MCP). */
+    voiceToolGroupsOff: z.array(VoiceToolGroup).optional(),
     /**
      * LEGACY — the retired CLAUDE.md toggle. The shipped Manager/
      * Speakers CLAUDE.md now always loads; a persisted `false` is ignored

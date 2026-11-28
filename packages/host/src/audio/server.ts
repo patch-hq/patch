@@ -64,6 +64,7 @@ import type { VoiceAgentLink } from './voiceAgent.js';
 import { voiceAgentChoiceRefusal } from './voiceCatalog.js';
 import { isManagerCall } from './chatLookup.js';
 import type { ManagerVoiceTools } from './managerVoice.js';
+import type { VoiceToolbox } from './voiceTools.js';
 import { OpenAIRealtimeSession, type OpenAIWsCtor } from './openai-realtime.js';
 import {
   ElevenLabsAgentSession,
@@ -252,6 +253,8 @@ export interface AudioServerOptions {
    * A hosted call to the Manager on a server without them is refused.
    */
   managerVoice?: ManagerVoiceTools;
+  /** The MCP servers' tools and the Patch tool groups turned off, for every hosted call (spec/07 § Voice tools). */
+  voiceToolbox?: VoiceToolbox;
   /**
    * A voice device's sessions (spec/16 § Speaking aloud, § Who is speaking):
    * the spoken-aloud prompt, the voice profiles and the speaker model. Absent
@@ -1080,18 +1083,20 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         // voice's tone, then the chosen voice and its sound as that provider's config.
         const voiceAgentDeps = (): {
           link: VoiceAgentLink;
+          toolbox: VoiceToolbox;
           instructions: string;
           tone?: string;
           voice?: string;
           soundConfig: Record<string, unknown>;
         } => {
-          if (!opts.voiceAgentLink || !opts.getVoiceInstructions) {
+          if (!opts.voiceAgentLink || !opts.getVoiceInstructions || !opts.voiceToolbox) {
             throw new Error(
-              'audio server: a voice agent call needs voiceAgentLink and getVoiceInstructions',
+              'audio server: a voice agent call needs voiceAgentLink, voiceToolbox and getVoiceInstructions',
             );
           }
           return {
             link: opts.voiceAgentLink,
+            toolbox: opts.voiceToolbox,
             instructions: opts.getVoiceInstructions(),
             ...(tone !== undefined ? { tone } : {}),
             ...(setup.voice !== undefined ? { voice: setup.voice } : {}),

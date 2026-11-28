@@ -2605,24 +2605,63 @@ export type HostUnauthenticatedEvent = z.infer<typeof HostUnauthenticatedEvent>;
 
 /**
  * One MCP server a host wires into every chat it runs (Settings → MCP), beside
- * Patch's own tools server, which is always on and is not in this list. The
- * host starts it as a stdio process: `command` with `args`, `env` added to its
- * environment. `name` is how the chat's tools are prefixed (`mcp__<name>__…`),
- * so names are unique per host and `patch` is reserved.
+ * Patch's own tools server, which is always on and is not in this list. It is
+ * either a stdio process the host starts (`command` with `args`, `env` added to
+ * its environment) or a remote Streamable HTTP server (`url`, with a bearer
+ * token read from the host's Secrets entry named `tokenSecret`, never stored
+ * here). `name` is how the chat's tools are prefixed (`mcp__<name>__…`), so names
+ * are unique per host and `patch` is reserved.
+ *
+ * `enabled` is the Agent switch (the server's tools reach every chat's agent),
+ * `voice` the Voice switch (they reach the voice agent on a call). Every tool of
+ * a server is on for the voice unless named in `voiceOff`: only the turned-off
+ * names are stored, so a tool the server adds later is simply on.
  */
-export const McpServerConfig = z
-  .object({
-    name: z
-      .string()
-      .regex(/^[A-Za-z0-9_-]{1,64}$/)
-      .refine((n) => n !== 'patch', { message: '"patch" is reserved for Patch\'s own tools' }),
-    command: z.string().min(1),
-    args: z.array(z.string()),
-    env: z.record(z.string(), z.string()),
-    enabled: z.boolean(),
-  })
-  .strict();
+const McpServerBase = {
+  name: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .refine((n) => n !== 'patch', { message: '"patch" is reserved for Patch\'s own tools' }),
+  enabled: z.boolean(),
+  // Everything is on for the voice until switched off.
+  voice: z.boolean().default(true),
+  voiceOff: z.array(z.string().min(1)).default([]),
+};
+export const McpServerConfig = z.union([
+  z
+    .object({
+      ...McpServerBase,
+      command: z.string().min(1),
+      args: z.array(z.string()),
+      env: z.record(z.string(), z.string()),
+    })
+    .strict(),
+  z
+    .object({
+      ...McpServerBase,
+      url: z.string().url(),
+      tokenSecret: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
 export type McpServerConfig = z.infer<typeof McpServerConfig>;
+export type StdioMcpServerConfig = Extract<McpServerConfig, { command: string }>;
+export type HttpMcpServerConfig = Extract<McpServerConfig, { url: string }>;
+
+/** The groups of Patch's own voice tools a user can switch off for the voice (Settings → MCP). */
+export const VoiceToolGroup = z.enum(['chats', 'timers', 'tasks']);
+export type VoiceToolGroup = z.infer<typeof VoiceToolGroup>;
+
+/** One tool a server offers right now, as Settings lists it. */
+export const McpToolInfo = z.object({ name: z.string().min(1), description: z.string() }).strict();
+export type McpToolInfo = z.infer<typeof McpToolInfo>;
+
+/** What the host last read from one MCP server: its tools, or why it could not. */
+export const McpServerTools = z.union([
+  z.object({ tools: z.array(McpToolInfo) }).strict(),
+  z.object({ error: z.string().min(1) }).strict(),
+]);
+export type McpServerTools = z.infer<typeof McpServerTools>;
 
 /** The whole list, names unique. */
 export const McpServerList = z
@@ -3946,6 +3985,13 @@ export const HostInfoEvent = z
      * the host predates it.
      */
     patchMcpEnabled: z.boolean().optional(),
+    /** Patch's own voice tool groups switched off for the voice on this host. */
+    voiceToolGroupsOff: z.array(VoiceToolGroup).optional(),
+    /**
+     * The tools each MCP server offered when the host last read it, by server
+     * name. Stated unconditionally once supported; absent means the host predates it.
+     */
+    mcpTools: z.record(z.string(), McpServerTools).optional(),
     /**
      * LEGACY: whether the shipped, user-editable CLAUDE.md for the Manager/
      * Speakers threads is loaded on this host. It now always is, so a
@@ -6262,6 +6308,10 @@ export const HostSettingsEvent = z
     harnessMcpServers: McpServerList.optional(),
     /** Turn Patch's own tools server on or off for every chat on this host. */
     patchMcpEnabled: z.boolean().optional(),
+    /** Patch's own voice tool groups switched off for the voice (replaces the list). */
+    voiceToolGroupsOff: z.array(VoiceToolGroup).optional(),
+    /** Read every MCP server's tools again now. */
+    refreshMcpTools: z.literal(true).optional(),
     /**
      * LEGACY, kept so older surfaces still decode: a current host always
      * loads the shipped Manager/Speakers CLAUDE.md and ignores

@@ -1187,6 +1187,7 @@ setting that applies on every host (`01-server.md` § Settings).
   `chrome-devtools` MCP servers are wired into chats, alongside
   `patch`'s own tools. Most chats never need them; a chat that does turns this
   on rather than every chat paying for two extra MCP processes it never calls.
+- Voice tools (Settings → Tools (MCP), `07-voice-app.md` § Voice tools; `design/manager-voice-tools/tools.html`). "Built in" lists Patch tools (Agent switch) and Patch's own voice groups (Chats, Timers, Tasks and calendar), each with a Voice switch. "MCP servers" lists each server with a Voice and an Agent switch and a line "N tools · M turned off for the voice" (or "Voice off", or why it cannot be reached). Opening a server edits it: its name, how it is reached (a command, or an address with the name of the Secrets entry holding its token) and, when the host has read it, every tool it has now with an on/off switch for the voice. A new tool is on without anyone ticking it. Under the list: "The voice has N tools. With many it can answer more slowly or pick the wrong one." No limit is set. Chat text is 16px and small lines 13–14px.
 - Patch tools — on by default. Settings → MCP can switch `patch`'s own tools
   server off per host (`patchMcpEnabled`); chats there then get only the host's
   other MCP servers, and none of the `patch_` tools.

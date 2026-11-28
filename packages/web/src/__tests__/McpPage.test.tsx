@@ -30,6 +30,8 @@ const PLAYWRIGHT: McpServerConfig = {
   args: ['@playwright/mcp', '--headless'],
   env: {},
   enabled: true,
+  voice: false,
+  voiceOff: [],
 };
 const DEVTOOLS: McpServerConfig = {
   name: 'chrome-devtools',
@@ -37,6 +39,8 @@ const DEVTOOLS: McpServerConfig = {
   args: ['chrome-devtools-mcp'],
   env: { DEBUG: '1' },
   enabled: false,
+  voice: false,
+  voiceOff: [],
 };
 
 function reportServers(servers: McpServerConfig[] | undefined): void {
@@ -73,12 +77,8 @@ describe('Settings → MCP', () => {
     const list = screen.getByTestId('mcp-servers');
     const rows = Array.from(list.querySelectorAll('[data-testid^="mcp-server-"]'))
       .map((el) => el.getAttribute('data-testid'))
-      .filter((id) => !id!.endsWith('-enabled'));
-    expect(rows).toEqual([
-      'mcp-server-patch',
-      'mcp-server-playwright',
-      'mcp-server-chrome-devtools',
-    ]);
+      .filter((id) => !/-(enabled|voice|summary)$/.test(id!));
+    expect(rows).toEqual(['mcp-server-playwright', 'mcp-server-chrome-devtools']);
     expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Always on');
     // Wording keeps three things apart: the host (host), its MCP servers,
     // and Patch's built-in tools server — never just "Patch" or "servers".
@@ -185,6 +185,8 @@ describe('Settings → MCP', () => {
             args: ['/opt/my tools/todoist.js', '--port', '3'],
             env: { TOKEN: 'abc=def', REGION: ' eu' },
             enabled: true,
+            voice: true,
+            voiceOff: [],
           },
         ],
       },
@@ -375,5 +377,113 @@ describe('MCP helpers', () => {
     expect(mcpListProblem([{ ...PLAYWRIGHT, name: 'x'.repeat(65) }])).toBe(
       'Name may only use letters, digits, - and _ (at most 64)',
     );
+  });
+});
+
+describe('Settings → MCP: tools for the voice', () => {
+  const HOME: McpServerConfig = {
+    name: 'home',
+    url: 'http://ha.local:8123/api/mcp',
+    tokenSecret: 'HA_TOKEN',
+    enabled: true,
+    voice: true,
+    voiceOff: ['TurnOff'],
+  };
+  const reportHome = (): void =>
+    reportHost('d1', {
+      hostName: 'mac',
+      harnessMcpServers: [HOME],
+      voiceToolGroupsOff: ['timers'],
+      mcpTools: {
+        home: {
+          tools: [
+            { name: 'GetState', description: 'Read an entity' },
+            { name: 'TurnOff', description: 'Turn something off' },
+            { name: 'Brightness', description: 'Set brightness' },
+          ],
+        },
+      },
+    });
+
+  it('says how many tools a server has and how many are turned off, and counts the total', async () => {
+    reportHome();
+    await openPage();
+    expect(screen.getByTestId('mcp-server-home-summary')).toHaveTextContent(
+      '3 tools · 1 turned off for the voice',
+    );
+    expect(screen.getByTestId('mcp-voice-count')).toHaveTextContent(/The voice has \d+ tools/);
+    expect(screen.getByTestId('mcp-voice-count')).toHaveTextContent('pick the wrong one');
+  });
+
+  it("a server's Voice and Agent switches change only their own flag", async () => {
+    const { sent } = fakeWs();
+    reportHome();
+    await openPage();
+    fireEvent.click(screen.getByTestId('mcp-server-home-voice'));
+    fireEvent.click(screen.getByTestId('mcp-server-home-enabled'));
+    expect(sent).toEqual([
+      { type: 'host.settings', hostId: 'd1', harnessMcpServers: [{ ...HOME, voice: false }] },
+      { type: 'host.settings', hostId: 'd1', harnessMcpServers: [{ ...HOME, enabled: false }] },
+    ]);
+  });
+
+  it('turning a tool off stores only its name; turning it back on removes it', async () => {
+    const { sent } = fakeWs();
+    reportHome();
+    await openPage();
+    fireEvent.click(screen.getByTestId('mcp-server-home').querySelector('button')!);
+    expect((screen.getByTestId('mcp-tool-TurnOff-voice') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByTestId('mcp-tool-Brightness-voice') as HTMLInputElement).checked).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByTestId('mcp-tool-GetState-voice'));
+    fireEvent.click(screen.getByTestId('mcp-editor-save'));
+    expect(sent).toEqual([
+      {
+        type: 'host.settings',
+        hostId: 'd1',
+        harnessMcpServers: [{ ...HOME, voiceOff: ['TurnOff', 'GetState'] }],
+      },
+    ]);
+  });
+
+  it('adds a remote server by address, with the name of the secret holding its token', async () => {
+    const { sent } = fakeWs();
+    reportHome();
+    await openPage();
+    fireEvent.click(screen.getByTestId('mcp-add'));
+    fill('mcp-editor-name', 'todoist');
+    fireEvent.change(screen.getByTestId('mcp-editor-transport'), { target: { value: 'url' } });
+    fill('mcp-editor-url', 'http://t.local/mcp');
+    fill('mcp-editor-token-secret', 'TODOIST_TOKEN');
+    fireEvent.click(screen.getByTestId('mcp-editor-save'));
+    expect(sent).toEqual([
+      {
+        type: 'host.settings',
+        hostId: 'd1',
+        harnessMcpServers: [
+          HOME,
+          {
+            name: 'todoist',
+            url: 'http://t.local/mcp',
+            tokenSecret: 'TODOIST_TOKEN',
+            enabled: true,
+            voice: true,
+            voiceOff: [],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('a built-in group has a Voice switch that sends the whole off list', async () => {
+    const { sent } = fakeWs();
+    reportHome();
+    await openPage();
+    expect((screen.getByTestId('mcp-group-timers-voice') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByTestId('mcp-group-chats-voice'));
+    expect(sent).toEqual([
+      { type: 'host.settings', hostId: 'd1', voiceToolGroupsOff: ['timers', 'chats'] },
+    ]);
   });
 });

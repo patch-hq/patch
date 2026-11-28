@@ -9,7 +9,7 @@
 // audio-server-native-tier.test.ts.
 
 import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
-import { fakeVoiceAgentLink } from './helpers/fakeVoiceAgentLink.js';
+import { fakeVoiceAgentLink, emptyToolbox } from './helpers/fakeVoiceAgentLink.js';
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import pino from 'pino';
 import { createHmac } from 'node:crypto';
@@ -203,6 +203,7 @@ describe('audio server — hosted backends on every app surface', () => {
         beginReply: () => ({ set() {}, finish() {} }),
       }),
       voiceAgentLink: fakeVoiceAgentLink().link,
+      voiceToolbox: emptyToolbox(),
       getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
       host: '127.0.0.1',
       port: 0,

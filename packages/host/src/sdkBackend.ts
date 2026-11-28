@@ -1054,11 +1054,11 @@ async function loadSdk(): Promise<SdkModule> {
  */
 export type ExtraMcpServer =
   | { name: string; command: string; args: string[]; env: Record<string, string> }
-  | { name: string; url: string };
+  | { name: string; url: string; headers?: Record<string, string> };
 
 type StdioMcpServerConfig =
   | { type: 'stdio'; command: string; args: string[]; env: Record<string, string> }
-  | { type: 'http'; url: string };
+  | { type: 'http'; url: string; headers?: Record<string, string> };
 
 const IDLE_COMPACT_NEVER_TOKENS = 1_000_000_000;
 
@@ -1377,7 +1377,11 @@ export function buildSdkEnv(opts: SdkRunOptions): {
           (opts.extraMcpServers ?? []).map((s) => [
             s.name,
             'url' in s
-              ? { type: 'http' as const, url: s.url }
+              ? {
+                  type: 'http' as const,
+                  url: s.url,
+                  ...(s.headers ? { headers: s.headers } : {}),
+                }
               : { type: 'stdio' as const, command: s.command, args: s.args, env: s.env },
           ]),
         ),

@@ -61,10 +61,12 @@ import {
 import {
   isNoiseTranscript,
   voiceAgentInstructions,
-  voiceAgentTools,
   type VoiceAgentLink,
+  type VoiceToolSpec,
 } from './voiceAgent.js';
 import { VoiceAgentCall } from './voiceAgentCall.js';
+import { elevenSchema } from './toolSchemas.js';
+import type { VoiceToolbox } from './voiceTools.js';
 import { ChatLookupError } from './chatLookup.js';
 import {
   managerHostedInstruction,
@@ -139,6 +141,8 @@ export interface ElevenLabsAgentDeps {
   llm: string;
   /** Who does the work (spec/07 § The fast voice and the chat's agent). Defaults to `auto`. */
   handoff?: VoiceHandoff;
+  /** The MCP servers' tools and the Patch tool groups turned off, for every call. */
+  toolbox: VoiceToolbox;
   /** Set only on a call to the Manager (spec/07 § A call to the Manager); see gemini-live.ts. */
   manager?: ManagerVoiceTools;
   /** An ElevenLabs voice id; absent uses the platform default voice. */
@@ -231,6 +235,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
               sessionId: init.sessionId,
             },
       logger: deps.logger,
+      toolbox: deps.toolbox,
       sendAudio: deps.sendAudio,
       ...(init.callReason !== undefined ? { callReason: init.callReason } : {}),
     });
@@ -335,24 +340,13 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     return text === '' ? {} : JSON.parse(text);
   }
 
-  private clientTool(
-    name: string,
-    description: string,
-    params: Record<string, string>,
-    required: string[] = Object.keys(params),
-  ) {
+  private clientTool(t: VoiceToolSpec) {
     return {
       tool_config: {
         type: 'client',
-        name,
-        description,
-        parameters: {
-          type: 'object',
-          properties: Object.fromEntries(
-            Object.entries(params).map(([k, d]) => [k, { type: 'string', description: d }]),
-          ),
-          required,
-        },
+        name: t.name,
+        description: t.description,
+        parameters: elevenSchema(t.schema),
         // The agent waits for the host's answer — a dispatch can take minutes.
         expects_response: true,
         response_timeout_secs: -1,
@@ -362,22 +356,15 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   private async provision(): Promise<string> {
     const manager = this.deps.manager;
-    const tools: Array<ReturnType<ElevenLabsAgentSession['clientTool']>> = [];
-    if (manager) {
-      // A Manager call (spec/07 § A call to the Manager): its own tools, no agent behind it.
-      tools.push(
-        ...MANAGER_QUICK_TOOLS.map((t) =>
-          this.clientTool(t.name, t.description, t.params, t.required),
-        ),
-      );
-    }
-    for (const t of voiceAgentTools({
-      handoff: manager ? 'never' : (this.deps.handoff ?? 'auto'),
-      lookBack: true,
-      switchChat: !manager,
-    })) {
-      tools.push(this.clientTool(t.name, t.description, t.params, t.required));
-    }
+    await this.call.loadTools();
+    const tools = this.call
+      .tools({
+        handoff: manager ? 'never' : (this.deps.handoff ?? 'auto'),
+        lookBack: true,
+        switchChat: !manager,
+        ...(manager ? { quick: MANAGER_QUICK_TOOLS } : {}),
+      })
+      .map((t) => this.clientTool(t));
     const prompt = voiceAgentInstructions({
       instructions: manager
         ? managerHostedInstruction(manager.voicePrompt?.())

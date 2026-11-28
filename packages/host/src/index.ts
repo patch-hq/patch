@@ -71,6 +71,8 @@ import { agentHeldSession, createClaudeSessionProbe, type SessionProbe } from '.
 import type {
   ChatErrorCode,
   McpServerConfig,
+  McpServerTools,
+  VoiceToolGroup,
   WireEvent,
   RateLimitWindow,
   PatchActivityResponseEvent,
@@ -311,7 +313,7 @@ import {
 } from './voiceComponent.js';
 import { TerminalSessions } from './terminal.js';
 import { handleHostFilesRequest } from './hostFiles.js';
-import { McpApps, stdioConnector } from './mcpApps.js';
+import { McpApps, mcpAppConnector } from './mcpApps.js';
 import { handleVoiceprintRequest } from './voiceprints.js';
 import { RecentVoices, SpeakerId, speakerModelPath } from './audio/speakerId.js';
 import { HostSearchManager } from './hostSearch.js';
@@ -334,6 +336,7 @@ import {
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
+import { VoiceToolbox } from './audio/voiceTools.js';
 import { createManagerVoiceTools, type ManagerTimerRequest } from './audio/managerVoice.js';
 import {
   ChatLookupError,
@@ -1208,6 +1211,29 @@ async function startHost(
   }
   // Patch's own tools server. On unless the user switched it off (Settings → MCP).
   let patchMcpEnabled = persistedHostState.patchMcpEnabled ?? true;
+  // The voice's tools (spec/07 § Voice tools): which of Patch's own tool groups
+  // are off for it, and what each MCP server offered when last read, for Settings.
+  let voiceToolGroupsOff: VoiceToolGroup[] = persistedHostState.voiceToolGroupsOff ?? [];
+  let mcpTools: Record<string, McpServerTools> = {};
+  const voiceToolbox = new VoiceToolbox({
+    logger,
+    servers: () => harnessMcpServers,
+    groupsOff: () => voiceToolGroupsOff,
+    secrets: (key) => secretsStore.get(key),
+    onListed: (listed) => {
+      const next = { ...mcpTools, ...listed };
+      if (JSON.stringify(next) === JSON.stringify(mcpTools)) return;
+      mcpTools = next;
+      emit(describeHost());
+    },
+  });
+  /** Read every server turned on for the voice again, and drop what is no longer configured. */
+  const refreshMcpTools = async (): Promise<void> => {
+    const live = new Set(harnessMcpServers.map((s) => s.name));
+    mcpTools = Object.fromEntries(Object.entries(mcpTools).filter(([name]) => live.has(name)));
+    await voiceToolbox.describeAll();
+    emit(describeHost());
+  };
   // The shipped Manager/Speakers CLAUDE.md ALWAYS loads: its toggle
   // was dropped from Settings ("pick it up automatically"). A `false` left in
   // host.json, or sent by a surface that still shows the toggle, is ignored —
@@ -1233,7 +1259,7 @@ async function startHost(
       return [...merged.values()];
     },
     folderOf: (chatId) => daemon.chatState.get(chatId)?.folder,
-    connect: stdioConnector(logger),
+    connect: mcpAppConnector(logger, (key) => secretsStore.get(key)),
   });
   /**
    * Rebuild the host's harness config from the current in-memory settings
@@ -1697,6 +1723,8 @@ async function startHost(
       harnessBrowserToolsEnabled: browserToolsEnabledOf(harnessMcpServers),
       harnessMcpServers,
       patchMcpEnabled,
+      voiceToolGroupsOff,
+      mcpTools,
       // Always true: kept on the report so a surface that still reads it
       // shows the (only) state rather than "unsupported".
       harnessClaudeMdEnabled: true,
@@ -4058,10 +4086,13 @@ async function startHost(
               harnessMcpServers: harnessMcpServers.map((s) => ({
                 name: s.name,
                 enabled: s.enabled,
+                voice: s.voice,
+                voiceOff: s.voiceOff.length,
               })),
             },
             'MCP server list changed',
           );
+          void refreshMcpTools();
         } else if (event.harnessBrowserToolsEnabled !== undefined) {
           // LEGACY toggle from a surface that predates the list: flip the two
           // browser servers it stood for, wherever they still are in the list.
@@ -4084,6 +4115,12 @@ async function startHost(
           applyHarnessConfig();
           logger.info({ patchMcpEnabled }, 'patch MCP server toggled');
         }
+        if (event.voiceToolGroupsOff !== undefined) {
+          voiceToolGroupsOff = event.voiceToolGroupsOff;
+          hostStateStore.update({ voiceToolGroupsOff });
+          logger.info({ voiceToolGroupsOff }, 'voice tool groups changed');
+        }
+        if (event.refreshMcpTools === true) void refreshMcpTools();
         if (event.harnessClaudeMdEnabled === false) ignoreClaudeMdOff('host.settings');
         sender(describeHost());
         return;
@@ -4756,6 +4793,8 @@ async function startHost(
       recordCallSummary: (chatId, line) => daemon.recordCallSummary(chatId, line),
       recordCallNote: (chatId, line) => daemon.recordCallNote(chatId, line),
       recordVoiceHandoff: (handoff) => daemon.recordVoiceHandoff(handoff),
+      recordVoiceToolCall: (r) => daemon.recordVoiceToolCall(r),
+      recordVoiceToolResult: (r) => daemon.recordVoiceToolResult(r),
       sendInput: (req) => daemon.sendInput(req),
       voiceStartFacts: (chatId, recent) => daemon.voiceStartFacts(chatId, recent),
       lastAgentMessage: (chatId) => daemon.lastAgentMessage(chatId),
@@ -5744,6 +5783,7 @@ async function startHost(
     // The user's own MCP servers for a folder, from Claude Code's config,
     // shared into every chat's turns whatever its provider.
     discoverMcpServers: discoverClaudeMcpServers,
+    secrets: (key) => secretsStore.get(key),
     sessionProbe: (() => {
       const probes: Record<ProviderId, SessionProbe> = {
         claude: createClaudeSessionProbe({ claudeProjectsRoot: config.claudeProjectsRoot }),
@@ -6216,6 +6256,7 @@ async function startHost(
   daemon.setGoalRefusalLimit(goalRefusalLimit);
   // Apply persisted harness config (Task 3; spec/14 § Agent behavior) before hydrate.
   applyHarnessConfig();
+  void refreshMcpTools();
   daemon.hydrate({ deferWorkUntilReconciled: true });
   // spec/04 § Folders: the host owns the folder registry. Its list is the
   // registered project roots first, then folders seen in recent chats. It
@@ -7362,6 +7403,7 @@ async function startHost(
     voiceAgentLink: chatVoice.link,
     getVoiceInstructions: () => voiceInstructions,
     managerVoice,
+    voiceToolbox,
     // spec/16 — a device is heard out loud, and by whoever is in the room.
     deviceVoice: () => ({
       prompt: () => voiceDevicePrompt,
@@ -7429,6 +7471,7 @@ async function startHost(
         { name: 'codex accounts', run: () => codexAccounts.close() },
         { name: 'terminals', run: () => terminals.shutdown() },
         { name: 'audio server', run: () => audioServer?.close() },
+        { name: 'voice MCP clients', run: () => voiceToolbox.close() },
         { name: 'kokoro', run: () => kokoro.close() },
         { name: 'whisper', run: () => whisper?.close() },
         { name: 'live recognizer', run: () => liveRecognizer?.close() },
