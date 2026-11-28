@@ -3907,6 +3907,7 @@ async function startHost(
             fromHostName: event.fromHostName,
             toHostName: event.toHostName,
             message: event.message,
+            ...(event.folderReset !== undefined ? { folderReset: event.folderReset } : {}),
           })
           .catch((err) => logger.error({ err }, 'manager: handover failed'));
         logger.info({ epoch: event.epoch, nextSeqs }, 'manager: home moved here');
@@ -5582,6 +5583,7 @@ async function startHost(
     ...(durableTurns ? { durableTurns } : {}),
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),
     hostId: selfHostId,
+    hostName: () => hostName,
     // spec/04 § Spawn — a spawn naming no model takes THIS host's last-used
     // model, and every spawn that names one sets it.
     defaultModel: () => defaultModel,
@@ -6143,6 +6145,8 @@ async function startHost(
   }
   /** The Manager's prompt and folder, onto the Manager chat if this host runs it. */
   function applyManagerSettings(): void {
+    // A host that no longer runs the Manager leaves its copy where it was.
+    if (!runsManager) return;
     if (managerPrompt !== undefined) daemon.setManagerPrompt(managerPrompt);
     if (managerFolder === undefined) return;
     daemon.setManagerFolder(

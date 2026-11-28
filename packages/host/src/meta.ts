@@ -290,6 +290,11 @@ export const ChatMeta = z
     sessionCarried: z.number().int().nonnegative().optional(),
     /** When the chat's current provider session began (spec/06 § Bounded context). */
     sessionStartedAt: z.number().int().nonnegative().optional(),
+    /**
+     * The Manager folder last refused on this host because it is not a folder
+     * here, so the refusal is said once, not at every restart.
+     */
+    folderRefused: z.string().min(1).optional(),
     /** Which track the chat IS right now (spec/04 § Branching). */
     activeBranchId: z.string().min(1).optional(),
     /** Per-chat monotonic sequence — next value to stamp. Strictly increasing. */

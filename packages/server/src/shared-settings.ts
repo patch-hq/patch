@@ -149,7 +149,7 @@ export function managerWakeInStep<T extends Partial<SharedSettings>>(
 }
 
 /** `''` (the default folder) or an absolute path, POSIX or Windows. */
-function isManagerFolder(folder: string): boolean {
+export function isManagerFolder(folder: string): boolean {
   return folder === '' || /^(\/|[A-Za-z]:[\\/])/.test(folder);
 }
 

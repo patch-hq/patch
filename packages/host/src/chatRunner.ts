@@ -296,6 +296,8 @@ export interface HostOptions {
    * placeholder, and a wrong one silently binds chats to another host.
    */
   hostId: string;
+  /** This host's name as the user knows it, for what the host writes in a chat. */
+  hostName?: () => string;
   /**
    * The host's DEFAULT permission mode, applying to new chats on this host
    * (spec/02 § Permission mode). Omitted → `auto`, which is the documented
@@ -6357,7 +6359,13 @@ export class Daemon {
    */
   async handOverThread(
     chatId: string,
-    handover: { nextSeq: number; fromHostName: string; toHostName: string; message: string },
+    handover: {
+      nextSeq: number;
+      fromHostName: string;
+      toHostName: string;
+      message: string;
+      folderReset?: string;
+    },
   ): Promise<void> {
     this.continueFrom(chatId, handover.nextSeq);
     const at = this.opts.now();
@@ -6369,6 +6377,16 @@ export class Daemon {
       seq: this.bumpSeq(chatId),
       createdAt: at,
     });
+    if (handover.folderReset !== undefined) {
+      this.emit({
+        type: 'chat.message',
+        chatId,
+        role: 'system',
+        content: `Folder back to the default · ${handover.folderReset} is on ${handover.fromHostName}`,
+        seq: this.bumpSeq(chatId),
+        createdAt: at,
+      });
+    }
     if (handover.message.trim() === '') return;
     await this.sendInput({
       chatId,
@@ -16526,11 +16544,19 @@ export class Daemon {
     }
     if (!isFolder) {
       this.opts.logger.error({ folder: wanted }, 'manager: folder refused, not a folder here');
-      say(`Folder not changed: ${wanted} is not a folder on ${this.opts.hostId}`);
+      // Said once per path: the same setting arrives again at every restart.
+      if (this.opts.metaStore.read(chatId)?.folderRefused === wanted) return;
+      this.opts.metaStore.update(chatId, (m) => ({ ...m, folderRefused: wanted }));
+      const host = this.opts.hostName?.() ?? this.opts.hostId;
+      say(`Folder not changed: ${wanted} is not a folder on ${host}`);
       return;
     }
     state.folder = wanted;
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, folder: wanted }));
+    this.opts.metaStore.update(chatId, (m) => {
+      const { folderRefused: _refused, ...rest } = m;
+      void _refused;
+      return { ...rest, folder: wanted };
+    });
     const hadSession = state.sessionId !== undefined;
     this.retireSession(chatId);
     say(`Folder changed · ${wanted}${hadSession ? ' · new session' : ''}`);

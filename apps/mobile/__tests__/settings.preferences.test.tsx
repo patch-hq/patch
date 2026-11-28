@@ -610,6 +610,53 @@ describe('Manager page', () => {
     );
   });
 
+  it('Home → Folder: the default, Change and Save through the server', async () => {
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('manager-folder-path')))).toBe(
+      '~/.patch/threads/manager',
+    );
+    await actAsync(() => findHost(r.root, byTestId('manager-folder-change')).props.onPress());
+    await actAsync(() =>
+      findHost(r.root, byTestId('manager-folder-input')).props.onChangeText(' /srv/work '),
+    );
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-folder-save')).props.onPress();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ managerFolder: '/srv/work' });
+    expect(queryHost(r.root, byTestId('manager-folder-input'))).toBeNull();
+    expect(textOf(findHost(r.root, byTestId('manager-folder-path')))).toBe('/srv/work');
+  });
+
+  it('Home → Folder: a refusal keeps the field open and shows why', async () => {
+    vi.mocked(api.setPreferences).mockRejectedValue(
+      new Error('/srv/nope is not a folder on laptop'),
+    );
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    await flush();
+    await actAsync(() => findHost(r.root, byTestId('manager-folder-change')).props.onPress());
+    await actAsync(() =>
+      findHost(r.root, byTestId('manager-folder-input')).props.onChangeText('/srv/nope'),
+    );
+    await actAsync(async () => {
+      findHost(r.root, byTestId('manager-folder-save')).props.onPress();
+      await flush();
+    });
+    expect(textOf(findHost(r.root, byTestId('manager-folder-error')))).toContain(
+      '/srv/nope is not a folder on laptop',
+    );
+    expect(findHost(r.root, byTestId('manager-folder-input'))).toBeDefined();
+  });
+
+  it('Finished chats has a title and no explainer', async () => {
+    seedSettings();
+    const r = renderRN(<ManagerPage />);
+    expect(textOf(findHost(r.root, byTestId('manager-wake')))).not.toContain('left out');
+  });
+
   it('Clear refused while the Manager is working shows the server’s reason', async () => {
     const message =
       'Cannot clear the Manager while it is working. Try again when the turn has finished.';

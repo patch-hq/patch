@@ -11,7 +11,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../api/rest.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
-import { patchShared } from './sharedWrite.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { failed } from '../../lib/errorCopy.js';
 import { hostLabel, sortHosts } from './hostScope.js';
@@ -146,7 +145,7 @@ export function ManagerHomeGroup(): JSX.Element {
           </div>
         </div>
       ) : null}
-      <ManagerFolderRow homeHostId={current} />
+      <ManagerFolderRow />
     </Group>
   );
 }
@@ -156,11 +155,10 @@ export const DEFAULT_MANAGER_FOLDER_LABEL = '~/.patch/threads/manager';
 
 /**
  * Settings → Manager → Home → Folder (spec/06 § Manager prompt and folder):
- * the path, with Change opening a path field. Save asks the home host,
- * through host files, whether the path is a folder there, and saves only if
- * it is; the host's own answer is shown when it is not.
+ * the path, with Change opening a path field. The server checks the path on
+ * the home host before it saves it; its refusal is shown under the field.
  */
-function ManagerFolderRow({ homeHostId }: { homeHostId: string | null }): JSX.Element {
+function ManagerFolderRow(): JSX.Element {
   const folder = usePreferencesStore((s) => s.preferences.managerFolder);
   const loaded = usePreferencesStore((s) => s.loaded);
   const [draft, setDraft] = useState<string | null>(null);
@@ -173,19 +171,10 @@ function ManagerFolderRow({ homeHostId }: { homeHostId: string | null }): JSX.El
     setBusy(true);
     setProblem(null);
     try {
-      if (next !== '') {
-        if (homeHostId === null) {
-          setProblem('No home host to check the folder on.');
-          return;
-        }
-        try {
-          await api.hostFilesList(homeHostId, next, { maxEntries: 1 });
-        } catch (e) {
-          setProblem(serverSays(e));
-          return;
-        }
-      }
-      if (await patchShared('Manager folder', { managerFolder: next })) setDraft(null);
+      await usePreferencesStore.getState().update({ managerFolder: next });
+      setDraft(null);
+    } catch (e) {
+      setProblem(serverSays(e));
     } finally {
       setBusy(false);
     }
@@ -196,7 +185,6 @@ function ManagerFolderRow({ homeHostId }: { homeHostId: string | null }): JSX.El
       <div className="set-row-head">
         <div className="set-row-text">
           <span className="set-row-title">Folder</span>
-          <span className="set-sub">The Manager works here and can use this folder's skills</span>
         </div>
         {draft === null ? (
           <div className="set-row-ctrl">

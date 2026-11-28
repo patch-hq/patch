@@ -171,6 +171,33 @@ describe('the Manager folder', () => {
     expect(systemLines(t.events)).toContain(`Folder not changed: ${missing} is not a folder on d1`);
   });
 
+  it('names the host by name, and says a refusal once, not again at every restart', async () => {
+    n = 0;
+    const t = setup({ hostName: () => 'Studio Mac' });
+    const manager = await t.daemon.spawnChat({ folder: t.folder });
+    const missing = join(t.folder, 'nope');
+    t.daemon.setManagerFolder(missing);
+    const line = `Folder not changed: ${missing} is not a folder on Studio Mac`;
+    expect(systemLines(t.events)).toEqual([line]);
+    // The host restarts and is given the same setting again.
+    const again = new Daemon({
+      hostId: 'd1',
+      hostName: () => 'Studio Mac',
+      metaStore: t.metaStore,
+      sdkBackend: t.sdk,
+      oauthAccessToken: 'tok',
+      emit: (e) => t.events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+    });
+    expect(again.chatState.get(manager)).toBeDefined();
+    again.setManagerFolder(missing);
+    expect(systemLines(t.events)).toEqual([line]);
+    // A different path is a new refusal, said once.
+    again.setManagerFolder(join(t.folder, 'other'));
+    expect(systemLines(t.events)).toHaveLength(2);
+  });
+
   it('waits for a running Manager turn to end, then lands before the next one', async () => {
     n = 0;
     const t = setup();
@@ -185,6 +212,25 @@ describe('the Manager folder', () => {
     await turn(t, manager, 'native-2');
     expect(t.sdk.lastOptions()?.cwd).toBe(next);
     expect(t.sdk.lastOptions()?.resumeSessionId).toBeUndefined();
+  });
+});
+
+describe('a change of home', () => {
+  it('says the folder went back to the default when it was a path on the old home', async () => {
+    const t = setup();
+    const manager = await t.daemon.spawnChat({ folder: t.folder });
+    t.events.length = 0;
+    await t.daemon.handOverThread(manager, {
+      nextSeq: 10,
+      fromHostName: 'Laptop',
+      toHostName: 'Server',
+      message: '',
+      folderReset: '/Users/me/work',
+    });
+    expect(systemLines(t.events)).toEqual([
+      'Home moved · Laptop to Server',
+      'Folder back to the default · /Users/me/work is on Laptop',
+    ]);
   });
 });
 
