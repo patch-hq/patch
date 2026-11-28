@@ -16,7 +16,7 @@
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
-import type { AccountPreferences } from '../../api/rest';
+import { api, type AccountPreferences } from '../../api/rest';
 import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
