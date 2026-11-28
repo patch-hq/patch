@@ -65,7 +65,7 @@ beforeEach(() => {
   usePresenceStore.getState().setHostOnline('d1', true);
   reportHost('d1', {
     hostName: 'hetzner',
-    voiceKeys: { gemini: true, openai: false, elevenlabs: true },
+    voiceKeys: { gemini: true, openai: false, groq: false, elevenlabs: true },
     voiceCatalog: CATALOG,
   });
 });
@@ -238,7 +238,7 @@ describe('Voice agent', () => {
     setup();
     reportHost('d1', {
       hostName: 'hetzner',
-      voiceKeys: { gemini: true, openai: false },
+      voiceKeys: { gemini: true, openai: false, groq: false },
       voiceCatalog: { gemini: { at: 1, error: 'Gemini model list failed: HTTP 403' } },
     });
     renderSettings('/settings/voice');

@@ -147,6 +147,20 @@ describe('a direct call on the phone', () => {
     } as never);
     await flush();
     expect(calls.speak).toEqual(['Yes, green.']);
+    // spec/07 § Call cost — hanging up tells the host, which leaves the call's line.
+    // The phone's own engines sent nothing to a cloud engine, so nothing is counted.
+    await endDirectCall();
+    expect(posts).toContainEqual([
+      '/api/voice/direct/end',
+      {
+        chatId: 'c1',
+        startedAt: expect.any(Number),
+        usage: {
+          stt: { engine: 'android', model: expect.any(String), utteranceSeconds: [] },
+          tts: { engine: 'android', model: 'android-tts', requests: 0, characters: 0 },
+        },
+      },
+    ]);
   });
 });
 

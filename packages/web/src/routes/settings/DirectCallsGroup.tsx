@@ -10,16 +10,20 @@ import {
   changeDirectCall,
   directCallSteps,
   kokoroVoiceLabel,
+  listProviderOf,
   type DirectCallChange,
   type DirectEngineOption,
+  type DirectSttEngine,
+  type DirectTtsEngine,
   type SpeechEngineReport,
 } from '@patch/wire/direct-call';
+import type { CatalogProvider } from '@patch/wire/audio';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { patchShared } from './sharedWrite.js';
 import { agoLabel } from './hostWrite.js';
 import { useDevices } from './DevicesPage.js';
 import { Group, Note, Pills, Row } from './ui.js';
-import { SoundControls, useVoiceCatalog } from './VoiceAgentGroup.js';
+import { CatalogLine, SoundControls, useVoiceCatalog } from './VoiceAgentGroup.js';
 
 const KIND: Record<string, string> = {
   desktop: 'Desktop app',
@@ -85,6 +89,47 @@ function ListSelect({
   );
 }
 
+/**
+ * A cloud engine's model list as the account's hosts read it from the provider:
+ * its count, loading, or why it could not be read, with Refresh. An on-device
+ * engine has none.
+ */
+function ListLine({
+  step,
+  engine,
+  testid,
+}: {
+  step: 'stt' | 'tts';
+  engine: DirectSttEngine | DirectTtsEngine;
+  testid: string;
+}): JSX.Element | null {
+  const provider = listProviderOf(step, engine);
+  return provider ? <ProviderListLine provider={provider} step={step} testid={testid} /> : null;
+}
+
+function ProviderListLine({
+  provider,
+  step,
+  testid,
+}: {
+  provider: CatalogProvider;
+  step: 'stt' | 'tts';
+  testid: string;
+}): JSX.Element {
+  const view = useVoiceCatalog(provider);
+  const entry = view.state === 'ready' ? view.entry : undefined;
+  const list = step === 'stt' ? entry?.transcriptionModels : entry?.speechModels;
+  return (
+    <CatalogLine
+      view={view}
+      provider={provider}
+      count={list?.length ?? 0}
+      noun="model"
+      testid={testid}
+    />
+  );
+}
+
 function DeviceSteps({
   device,
   report,
@@ -119,7 +164,11 @@ function DeviceSteps({
         />
       </Row>
       {steps.stt.engine === undefined ? null : (
-        <Row title="Speech to text model" testid={`${id}-stt-model-row`}>
+        <Row
+          title="Speech to text model"
+          sub={<ListLine step="stt" engine={steps.stt.engine} testid={`${id}-stt-model`} />}
+          testid={`${id}-stt-model-row`}
+        >
           <ListSelect
             label="Speech to text model"
             options={steps.sttModel.options}
@@ -142,7 +191,11 @@ function DeviceSteps({
         </Row>
       )}
       {steps.sttModel.value === undefined || ttsEngine === undefined ? null : (
-        <Row title="Text to speech model" testid={`${id}-tts-model-row`}>
+        <Row
+          title="Text to speech model"
+          sub={<ListLine step="tts" engine={ttsEngine} testid={`${id}-tts-model`} />}
+          testid={`${id}-tts-model-row`}
+        >
           <ListSelect
             label="Text to speech model"
             options={steps.ttsModel.options}

@@ -66,7 +66,7 @@ A provider switch, and a move to another host, starts a new chat linked to the o
 
 ## Speech engines
 
-Every app surface reports the speech engines it can run for a direct call (`07-voice-app.md` § Direct calls) when it connects and whenever that changes: for speech to text and for text to speech, each engine with where it runs (on the device, or a cloud provider), its models and, for text to speech, its voices. On-device engines are those installed on the device (on a Mac, Parakeet and Kokoro; on a phone, Android's own recogniser and voices); cloud engines are those the account has a key for. The server keeps each surface's last report, so Settings shows every linked device's engines, including a device that is offline. A surface that has never reported shows as such, not as having none.
+Every app surface reports the speech engines it can run for a direct call (`07-voice-app.md` § Direct calls) when it connects and whenever that changes: for speech to text and for text to speech, each engine with where it runs (on the device, or a cloud provider), its models and, for text to speech, its voices. On-device engines are those installed on the device (on a Mac, Parakeet and Kokoro; on a phone, Android's own recogniser and voices); cloud engines are those the account has a key for, with the models and voices the hosts read from the provider (`host.host.voiceCatalog`), or, when that list could not be read, an empty list and why. The server keeps each surface's last report, so Settings shows every linked device's engines, including a device that is offline. A surface that has never reported shows as such, not as having none.
 
 ## Handover
 

@@ -1,20 +1,21 @@
-// What each voice agent provider offers, read from its own API with this
-// host's key (spec/07 § The voice agent): the models Settings → Voice calls
-// lists, the voices, and ElevenLabs' speech models. Never a list built in —
-// except voices for the two providers whose API has no voice list (Gemini
-// Live's prebuilt voices, OpenAI Realtime's voices), which are the ones their
-// documentation names.
+// What each voice provider offers, read from its own API with this host's key
+// (spec/07 § The voice agent, § Direct calls): the voice agent's models and
+// voices, and the text to speech and speech to text models a direct call's
+// cloud engines offer. Never a list built in — except where the provider's API
+// has no list (Gemini Live's and OpenAI's voices, ElevenLabs' Scribe models),
+// which are the ones its documentation names.
 //
 // The host reports the reads on `host.host.voiceCatalog`; Settings → Refresh
 // sends `host.voice_catalog_refresh`. A failed read is reported with its
 // reason, never as an empty list.
 
 import {
+  CatalogProvider,
   GEMINI_VOICES,
+  OPENAI_TTS_VOICES,
   OPENAI_VOICES,
   VOICE_AGENT_ENGINES,
   type CatalogItem,
-  type VoiceAgentProvider,
   type VoiceAgentSetting,
   type VoiceCatalog,
   type VoiceCatalogEntry,
@@ -22,16 +23,13 @@ import {
 
 export type CatalogFetch = (url: string, init: RequestInit) => Promise<Response>;
 
-export interface CatalogEndpoints {
-  gemini: string;
-  openai: string;
-  elevenlabs: string;
-}
+export type CatalogEndpoints = Record<CatalogProvider, string>;
 
 export const CATALOG_ENDPOINTS: CatalogEndpoints = {
   gemini: 'https://generativelanguage.googleapis.com',
   openai: 'https://api.openai.com',
   elevenlabs: 'https://api.elevenlabs.io',
+  groq: 'https://api.groq.com',
 };
 
 async function getJson(
@@ -79,12 +77,12 @@ async function geminiModels(
   return out.sort(byLabel);
 }
 
-/** OpenAI models that run a Realtime session. */
+/** OpenAI's Realtime models (the voice agent) and its text to speech models (direct calls). */
 async function openaiModels(
   fetchImpl: CatalogFetch,
   key: string,
   base: string,
-): Promise<CatalogItem[]> {
+): Promise<{ models: CatalogItem[]; speechModels: CatalogItem[] }> {
   const body = (await getJson(
     fetchImpl,
     `${base}/v1/models`,
@@ -92,8 +90,33 @@ async function openaiModels(
     'OpenAI model list failed',
   )) as { data?: { id?: string }[] };
   if (!Array.isArray(body.data)) throw new Error('OpenAI model list failed: no data');
+  const ids = body.data.flatMap((m) => (m.id ? [m.id] : []));
+  const items = (keep: (id: string) => boolean): CatalogItem[] =>
+    ids
+      .filter(keep)
+      .map((id) => ({ id, label: id }))
+      .sort(byLabel);
+  return {
+    models: items((id) => /realtime/.test(id) && !/transcri/.test(id)),
+    speechModels: items((id) => /tts/.test(id) && !/realtime/.test(id)),
+  };
+}
+
+/** Groq's speech to text models: the Whisper models its API lists. */
+async function groqTranscriptionModels(
+  fetchImpl: CatalogFetch,
+  key: string,
+  base: string,
+): Promise<CatalogItem[]> {
+  const body = (await getJson(
+    fetchImpl,
+    `${base}/openai/v1/models`,
+    { authorization: `Bearer ${key}` },
+    'Groq model list failed',
+  )) as { data?: { id?: string; active?: boolean }[] };
+  if (!Array.isArray(body.data)) throw new Error('Groq model list failed: no data');
   return body.data
-    .flatMap((m) => (m.id && /realtime/.test(m.id) && !/transcri/.test(m.id) ? [m.id] : []))
+    .flatMap((m) => (m.id && /whisper/.test(m.id) && m.active !== false ? [m.id] : []))
     .map((id) => ({ id, label: id }))
     .sort(byLabel);
 }
@@ -103,7 +126,7 @@ async function elevenLabsCatalog(
   fetchImpl: CatalogFetch,
   key: string,
   base: string,
-): Promise<Pick<VoiceCatalogEntry, 'models' | 'voices' | 'speechModels'>> {
+): Promise<Pick<VoiceCatalogEntry, 'models' | 'voices' | 'speechModels' | 'transcriptionModels'>> {
   const headers = { 'xi-api-key': key };
   const llms = (await getJson(
     fetchImpl,
@@ -154,7 +177,14 @@ async function elevenLabsCatalog(
   const speechModels = tts.flatMap((m) =>
     m.model_id && m.can_do_text_to_speech ? [{ id: m.model_id, label: m.name || m.model_id }] : [],
   );
-  return { models, voices: voices.sort(byLabel), speechModels };
+  // ElevenLabs' API lists no speech to text models; Scribe's is the one its
+  // speech to text reference names.
+  return {
+    models,
+    voices: voices.sort(byLabel),
+    speechModels,
+    transcriptionModels: documented(['scribe_v2']),
+  };
 }
 
 const documented = (names: readonly string[]): CatalogItem[] =>
@@ -162,7 +192,7 @@ const documented = (names: readonly string[]): CatalogItem[] =>
 
 /** One read of a provider. Throws with the provider's own reason. */
 export async function readVoiceCatalog(
-  provider: VoiceAgentProvider,
+  provider: CatalogProvider,
   key: string,
   opts: { fetchImpl?: CatalogFetch; endpoints?: Partial<CatalogEndpoints> } = {},
 ): Promise<Omit<VoiceCatalogEntry, 'at' | 'error'>> {
@@ -172,7 +202,14 @@ export async function readVoiceCatalog(
     return { models: await geminiModels(fetchImpl, key, base), voices: documented(GEMINI_VOICES) };
   }
   if (provider === 'openai') {
-    return { models: await openaiModels(fetchImpl, key, base), voices: documented(OPENAI_VOICES) };
+    return {
+      ...(await openaiModels(fetchImpl, key, base)),
+      voices: documented(OPENAI_VOICES),
+      speechVoices: documented(OPENAI_TTS_VOICES),
+    };
+  }
+  if (provider === 'groq') {
+    return { transcriptionModels: await groqTranscriptionModels(fetchImpl, key, base) };
   }
   return elevenLabsCatalog(fetchImpl, key, base);
 }
@@ -187,9 +224,9 @@ export class VoiceCatalogStore {
 
   constructor(
     private readonly opts: {
-      key: (provider: VoiceAgentProvider) => string | undefined;
+      key: (provider: CatalogProvider) => string | undefined;
       onChange: () => void;
-      onError?: (provider: VoiceAgentProvider, message: string) => void;
+      onError?: (provider: CatalogProvider, message: string) => void;
       fetchImpl?: CatalogFetch;
       endpoints?: Partial<CatalogEndpoints>;
       now?: () => number;
@@ -200,11 +237,11 @@ export class VoiceCatalogStore {
     return structuredClone(this.entries);
   }
 
-  entry(provider: VoiceAgentProvider): VoiceCatalogEntry | undefined {
+  entry(provider: CatalogProvider): VoiceCatalogEntry | undefined {
     return this.entries[provider];
   }
 
-  async refresh(provider: VoiceAgentProvider): Promise<void> {
+  async refresh(provider: CatalogProvider): Promise<void> {
     const key = this.opts.key(provider);
     const now = this.opts.now ?? Date.now;
     if (key === undefined) {
@@ -229,7 +266,7 @@ export class VoiceCatalogStore {
   }
 
   async refreshAll(): Promise<void> {
-    await Promise.all((['gemini', 'openai', 'elevenlabs'] as const).map((p) => this.refresh(p)));
+    await Promise.all(CatalogProvider.options.map((p) => this.refresh(p)));
   }
 }
 

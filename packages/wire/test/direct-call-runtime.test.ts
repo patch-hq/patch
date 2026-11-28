@@ -240,7 +240,9 @@ describe('cloud engines', () => {
   });
 
   it('read and speak through the chat’s host, on the chosen engine', async () => {
-    const { cloudSpeechToText, cloudTextToSpeech } = await import('../src/direct-call-runtime.js');
+    const { cloudSpeechToText, cloudTextToSpeech, newDirectCallMeter, reportDirectCallEnd } =
+      await import('../src/direct-call-runtime.js');
+    const meter = newDirectCallMeter();
     const posts: [string, Record<string, unknown>][] = [];
     const post = async <T>(path: string, body: object): Promise<T> => {
       posts.push([path, body as Record<string, unknown>]);
@@ -250,9 +252,9 @@ describe('cloud engines', () => {
           : { pcmBase64: Buffer.from([1, 0, 2, 0]).toString('base64'), sampleRate: 24000 }
       ) as T;
     };
-    const stt = cloudSpeechToText({ post, chatId: 'c1', engine: 'groq', model: 'm' });
+    const stt = cloudSpeechToText({ post, chatId: 'c1', engine: 'groq', model: 'm', meter });
     expect(stt.label).toBe('Groq Whisper');
-    expect(await stt.transcribe(new Int16Array([1, 2]))).toBe('hi');
+    expect(await stt.transcribe(new Int16Array(8000))).toBe('hi');
     const wav = Buffer.from(posts[0]![1]['audioBase64'] as string, 'base64');
     expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
     expect(wav.readUInt32LE(24)).toBe(16000);
@@ -264,6 +266,7 @@ describe('cloud engines', () => {
       model: 'tts-1',
       voice: 'alloy',
       sound: { speed: 1 },
+      meter,
       play: (pcm) => {
         got = pcm;
         return { play: async () => {}, stop: () => {} };
@@ -282,5 +285,39 @@ describe('cloud engines', () => {
       },
     ]);
     expect([...got!]).toEqual([1, 2]);
+    // spec/07 § Call cost — what was sent is counted, and reported when the call ends.
+    expect(meter).toEqual({ utteranceSeconds: [0.5], ttsRequests: 1, ttsCharacters: 6 });
+    await reportDirectCallEnd({
+      post,
+      chatId: 'c1',
+      startedAt: 5,
+      call: {
+        stt: { engine: 'groq', where: 'cloud', model: 'm' },
+        tts: { engine: 'openai', where: 'cloud', model: 'tts-1', voice: 'alloy', sound: {} },
+      },
+      meter,
+    });
+    expect(posts[2]).toEqual([
+      '/api/voice/direct/end',
+      {
+        chatId: 'c1',
+        startedAt: 5,
+        usage: {
+          stt: { engine: 'groq', model: 'm', utteranceSeconds: [0.5] },
+          tts: { engine: 'openai', model: 'tts-1', requests: 1, characters: 6 },
+        },
+      },
+    ]);
+  });
+
+  it('a failed request is not counted', async () => {
+    const { cloudSpeechToText, newDirectCallMeter } = await import('../src/direct-call-runtime.js');
+    const meter = newDirectCallMeter();
+    const post = async <T>(): Promise<T> => {
+      throw new Error('HTTP 502');
+    };
+    const stt = cloudSpeechToText({ post, chatId: 'c1', engine: 'groq', model: 'm', meter });
+    await expect(stt.transcribe(new Int16Array(10))).rejects.toThrow('502');
+    expect(meter.utteranceSeconds).toEqual([]);
   });
 });

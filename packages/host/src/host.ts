@@ -84,9 +84,7 @@ export interface HostDescriptionInput {
   elevenLabsVoices?: { id: string; name: string; category?: string }[] | undefined;
   elevenLabsVoicesError?: string | undefined;
   /** Which hosted-voice provider keys this host holds (`host.host.voiceKeys`). */
-  voiceKeys?:
-    | { gemini: boolean; openai: boolean; deepgram?: boolean; elevenlabs?: boolean }
-    | undefined;
+  voiceKeys?: HostInfoEvent['voiceKeys'];
   /** Each voice agent provider's models and voices as this host read them (`host.host.voiceCatalog`). */
   voiceCatalog: HostInfoEvent['voiceCatalog'];
   /** What this host's voice calls have cost (`host.host.voiceUsage`, spec/07 § Call cost). */

@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import type { SpeechEngineReport } from '@patch/wire/direct-call';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { reportHost } from './presenceHelpers.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import {
   makeFetch,
@@ -176,6 +177,21 @@ describe('Direct calls', () => {
       expect(screen.getByTestId(`direct-mac-1-${c}`)).toBeInTheDocument();
     }
     expect(screen.getByTestId('direct-mac-1-stability-value')).toHaveTextContent('0.7');
+  });
+
+  it('a cloud engine’s models are the provider’s list: a failed read says why, with Refresh', async () => {
+    setup({ 'mac-2': { stt: { engine: 'groq', model: 'whisper-large-v3-turbo' } } });
+    reportHost('d1', {
+      hostName: 'box',
+      voiceKeys: { gemini: false, openai: false, groq: true },
+      voiceCatalog: { groq: { error: 'Groq model list failed: HTTP 401', at: 1 } },
+    });
+    renderSettings('/settings/voice');
+    fireEvent.click(within(await screen.findByTestId('direct-mac-2-row')).getByRole('button'));
+    expect(screen.getByTestId('direct-mac-2-stt-model-status')).toHaveTextContent(
+      "Could not read Groq's models: box: Groq model list failed: HTTP 401",
+    );
+    expect(screen.getByTestId('direct-mac-2-stt-model-refresh')).toBeInTheDocument();
   });
 
   it('a device that never reported says so instead of offering anything', async () => {

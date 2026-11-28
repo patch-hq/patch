@@ -199,6 +199,51 @@ describe('direct call routes', () => {
     }
   });
 
+  it('end tells the chat’s host the call ended, with what the device counted, stamped with its kind', async () => {
+    const { built, hostLink, auth } = await makeApp();
+    try {
+      const usage = {
+        stt: { engine: 'groq', model: 'whisper-large-v3-turbo', utteranceSeconds: [2.5] },
+        tts: { engine: 'kokoro', model: 'kokoro-82m', requests: 0, characters: 0 },
+      };
+      const before = Date.now();
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/voice/direct/end',
+        headers: auth,
+        payload: { chatId: 'c1', startedAt: before - 52_000, usage },
+      });
+      expect(res.statusCode).toBe(200);
+      const end = hostLink.sent.find((e) => e.type === 'patch.voice.direct_call_end');
+      expect(end).toMatchObject({
+        chatId: 'c1',
+        surfaceKind: 'desktop',
+        startedAt: before - 52_000,
+        usage,
+      });
+      expect((end as { endedAt: number }).endedAt).toBeGreaterThanOrEqual(before);
+      expect((end as { callId: string }).callId).toMatch(/.+/);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('end refuses a usage the wire does not describe', async () => {
+    const { built, hostLink, auth } = await makeApp();
+    try {
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/voice/direct/end',
+        headers: auth,
+        payload: { chatId: 'c1', startedAt: 1, usage: { stt: { engine: 'groq' } } },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(hostLink.sent.some((e) => e.type === 'patch.voice.direct_call_end')).toBe(false);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('a terminal cannot make a direct call', async () => {
     const { built, auth } = await makeApp('terminal');
     try {

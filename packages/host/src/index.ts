@@ -374,7 +374,7 @@ import {
   DeepgramMeetingBackend,
   type DiarisedClipEngine,
 } from './audio/meeting-stt.js';
-import { costCall } from './audio/voiceCost.js';
+import { costCall, costDirectCall } from './audio/voiceCost.js';
 import {
   createSileroVadFactory,
   validateVadModel,
@@ -1007,6 +1007,7 @@ async function startHost(
   const voiceKeys = (): VoiceKeys => ({
     gemini: providerKeys.has('gemini'),
     openai: providerKeys.has('openai'),
+    groq: providerKeys.has('groq'),
     elevenlabs: providerKeys.has('elevenlabs'),
     deepgram: providerKeys.has('deepgram'),
     assemblyai: providerKeys.has('assemblyai'),
@@ -1021,7 +1022,7 @@ async function startHost(
     key: (provider) => providerKeys.get(provider),
     onChange: () => publishHost(),
     onError: (provider, message) =>
-      logger.error({ provider, err: message }, 'voice agent: could not read the provider catalog'),
+      logger.error({ provider, err: message }, 'voice: could not read the provider catalog'),
   });
   // spec/07 § Call cost — every costed call, and this host's totals.
   const voiceLedger = createVoiceLedger(join(config.patchHome, 'voice-usage.jsonl'));
@@ -3727,6 +3728,21 @@ async function startHost(
         } else {
           void handleDirectSpeak(event, deps, sender);
         }
+        return;
+      }
+      if (event.type === 'patch.voice.direct_call_end') {
+        // spec/07 § Call cost — a direct call ended on its device: price what its
+        // cloud engines were sent, keep it, and leave its line in the chat.
+        chatVoice.directCallEnded(
+          costDirectCall({
+            sessionId: event.callId,
+            chatId: event.chatId,
+            surfaceKind: event.surfaceKind,
+            startedAt: event.startedAt,
+            endedAt: event.endedAt,
+            usage: event.usage,
+          }),
+        );
         return;
       }
       if (event.type === 'patch.voice.turn_check_request') {

@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import {
   callSummaryLine,
   costCall,
+  costDirectCall,
+  ELEVENLABS_USD_PER_CREDIT,
   engineCostUsd,
   formatUsd,
   ZERO_TOKENS,
@@ -95,6 +97,72 @@ describe('costing a call', () => {
     expect(c.engineUsd).toBeCloseTo((30 * 0.04) / 3600, 9);
     expect(callSummaryLine(c)).toBe('Call 0:52 · Local · $0.00033');
   });
+
+  it('prices each speech to text model at its own rate; one not in the table has no price', () => {
+    const stt = { requests: 1, audioSeconds: 3600, billedSeconds: 3600 };
+    const cost = (model: string) =>
+      costCall({ ...base, engine: { backend: 'local', model, tokens: null, stt }, handoffs: 0 })
+        .engineUsd;
+    expect(cost('whisper-large-v3')).toBeCloseTo(0.111, 9);
+    expect(cost('whisper-large-v3-turbo')).toBeCloseTo(0.04, 9);
+    expect(cost('nova-3')).toBeNull();
+    expect(cost('scribe_v2')).toBeNull();
+  });
+});
+
+describe('a direct call', () => {
+  const end = (usage: Parameters<typeof costDirectCall>[0]['usage']) =>
+    costDirectCall({ ...base, sessionId: 'dc-1', usage });
+
+  it('prices what its cloud engines were sent: Groq per request with the 10 s minimum, ElevenLabs per character', () => {
+    const c = end({
+      stt: { engine: 'groq', model: 'whisper-large-v3-turbo', utteranceSeconds: [2, 30] },
+      tts: { engine: 'elevenlabs', model: 'eleven_flash_v2_5', requests: 2, characters: 600 },
+    });
+    expect(c.backend).toBe('direct');
+    expect(c.direct?.stt).toMatchObject({ requests: 2, audioSeconds: 32, billedSeconds: 40 });
+    const want = (40 * 0.04) / 3600 + 600 * 0.5 * ELEVENLABS_USD_PER_CREDIT;
+    expect(c.engineUsd).toBeCloseTo(want, 9);
+    expect(callSummaryLine(c)).toBe(`Call 0:52 · Groq Whisper → ElevenLabs · ${formatUsd(want)}`);
+  });
+
+  it('costs nothing on the device’s own engines, and still leaves its line', () => {
+    const c = end({
+      stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3', utteranceSeconds: [] },
+      tts: { engine: 'kokoro', model: 'kokoro-82m', requests: 0, characters: 0 },
+    });
+    expect(c.engineUsd).toBe(0);
+    expect(callSummaryLine(c)).toBe('Call 0:52 · Parakeet → Kokoro · $0');
+  });
+
+  it('a cloud engine with no price here leaves the price off rather than guessing', () => {
+    const c = end({
+      stt: { engine: 'elevenlabs', model: 'scribe_v2', utteranceSeconds: [4] },
+      tts: { engine: 'openai', model: 'tts-1', requests: 1, characters: 10 },
+    });
+    expect(c.engineUsd).toBeNull();
+    expect(callSummaryLine(c)).toBe('Call 0:52 · ElevenLabs Scribe → OpenAI');
+  });
+
+  it('counts on the ledger: a call, its dollars, and ElevenLabs credits for its speech', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'patch-ledger-')), 'voice-usage.jsonl');
+    const ledger = createVoiceLedger(path);
+    ledger.record(
+      end({
+        stt: { engine: 'android', model: 'on-device', utteranceSeconds: [] },
+        tts: {
+          engine: 'elevenlabs',
+          model: 'eleven_multilingual_v2',
+          requests: 3,
+          characters: 900,
+        },
+      }),
+    );
+    const t = createVoiceLedger(path).totals(base.endedAt);
+    expect(t.monthCalls).toBe(1);
+    expect(t.monthCredits).toBe(900);
+    expect(t.monthUsd).toBeCloseTo(900 * ELEVENLABS_USD_PER_CREDIT, 9);
+  });
 });
 
 describe('voice ledger', () => {
@@ -104,7 +172,7 @@ describe('voice ledger', () => {
     // 9000 billed seconds of Groq STT at $0.04 per hour is $0.10 a call.
     const engine: EngineCosting = {
       backend: 'local',
-      model: 'x',
+      model: 'whisper-large-v3-turbo',
       tokens: null,
       stt: { requests: 1, audioSeconds: 10, billedSeconds: 9000 },
     };

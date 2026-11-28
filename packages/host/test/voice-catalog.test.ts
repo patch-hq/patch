@@ -1,8 +1,13 @@
-// voiceCatalog.ts — each voice agent provider's models and voices, read from
-// its own API with this host's key (spec/07 § The voice agent).
+// voiceCatalog.ts — each voice provider's models and voices, read from its own
+// API with this host's key (spec/07 § The voice agent, § Direct calls).
 
 import { describe, expect, test, vi } from 'vitest';
-import { DEFAULT_VOICE_AGENT, GEMINI_VOICES, OPENAI_VOICES } from '@patch/wire/audio';
+import {
+  DEFAULT_VOICE_AGENT,
+  GEMINI_VOICES,
+  OPENAI_TTS_VOICES,
+  OPENAI_VOICES,
+} from '@patch/wire/audio';
 import {
   VoiceCatalogStore,
   readVoiceCatalog,
@@ -58,12 +63,14 @@ describe('readVoiceCatalog', () => {
     expect(fetchImpl.calls[0]).toContain('"x-goog-api-key":"g-key"');
   });
 
-  test('OpenAI: realtime models only, not transcription ones, with the documented voices', async () => {
+  test('OpenAI: realtime models (not transcription ones) and speech models, with the documented voices', async () => {
     const fetchImpl = fakeFetch({
       '/v1/models': {
         data: [
           { id: 'gpt-realtime-2.1' },
           { id: 'gpt-4o-mini' },
+          { id: 'tts-1' },
+          { id: 'gpt-4o-mini-tts' },
           { id: 'gpt-realtime-2.1-mini' },
           { id: 'gpt-4o-transcribe-realtime' },
         ],
@@ -72,6 +79,8 @@ describe('readVoiceCatalog', () => {
     const read = await readVoiceCatalog('openai', 'o-key', { fetchImpl });
     expect(read.models?.map((m) => m.id)).toEqual(['gpt-realtime-2.1', 'gpt-realtime-2.1-mini']);
     expect(read.voices?.map((v) => v.id)).toEqual([...OPENAI_VOICES]);
+    expect(read.speechModels?.map((m) => m.id)).toEqual(['gpt-4o-mini-tts', 'tts-1']);
+    expect(read.speechVoices?.map((v) => v.id)).toEqual([...OPENAI_TTS_VOICES]);
     expect(fetchImpl.calls[0]).toContain('"authorization":"Bearer o-key"');
   });
 
@@ -108,6 +117,27 @@ describe('readVoiceCatalog', () => {
     expect(read.speechModels).toEqual([
       { id: 'eleven_v3_conversational', label: 'Eleven v3 conversational' },
     ]);
+    // ElevenLabs' API lists no speech to text models: Scribe's documented one.
+    expect(read.transcriptionModels).toEqual([{ id: 'scribe_v2', label: 'scribe_v2' }]);
+  });
+
+  test('Groq: its active Whisper models, read from its API', async () => {
+    const fetchImpl = fakeFetch({
+      '/openai/v1/models': {
+        data: [
+          { id: 'whisper-large-v3-turbo', active: true },
+          { id: 'llama-3.3-70b-versatile', active: true },
+          { id: 'whisper-large-v3', active: true },
+          { id: 'distil-whisper-large-v3-en', active: false },
+        ],
+      },
+    });
+    const read = await readVoiceCatalog('groq', 'q-key', { fetchImpl });
+    expect(read.transcriptionModels?.map((m) => m.id)).toEqual([
+      'whisper-large-v3',
+      'whisper-large-v3-turbo',
+    ]);
+    expect(fetchImpl.calls[0]).toContain('"authorization":"Bearer q-key"');
   });
 
   test('a failed read throws with the provider’s reason, never an empty list', async () => {
@@ -134,7 +164,9 @@ describe('VoiceCatalogStore', () => {
     expect(store.snapshot()).toEqual({
       openai: {
         models: [{ id: 'gpt-realtime', label: 'gpt-realtime' }],
+        speechModels: [],
         voices: OPENAI_VOICES.map((v) => ({ id: v, label: v })),
+        speechVoices: OPENAI_TTS_VOICES.map((v) => ({ id: v, label: v })),
         at: 42,
       },
     });

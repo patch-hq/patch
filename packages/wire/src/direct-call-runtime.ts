@@ -28,6 +28,7 @@ import {
   type CloudSttEngine,
   type CloudTtsEngine,
   type DirectTtsSound,
+  type ResolvedDirectCall,
 } from './direct-call.js';
 import { TURN_CHECK_PAUSE_MS, TURN_COMPLETE } from './smart-turn.js';
 
@@ -372,11 +373,58 @@ export function bytesToPcm16(bytes: Uint8Array): Int16Array {
   return out;
 }
 
+/**
+ * What a call's cloud engines were sent, counted on the device as each request
+ * succeeds (spec/07 § Call cost): the host prices it when the call ends. An
+ * on-device engine is never counted; it costs nothing.
+ */
+export interface DirectCallMeter {
+  utteranceSeconds: number[];
+  ttsRequests: number;
+  ttsCharacters: number;
+}
+
+export function newDirectCallMeter(): DirectCallMeter {
+  return { utteranceSeconds: [], ttsRequests: 0, ttsCharacters: 0 };
+}
+
+/**
+ * Tell the chat's host the call has ended, with what its cloud engines were
+ * sent, so it costs the call and writes its line into the chat. Every direct
+ * call ends this way, on-device engines too.
+ */
+export async function reportDirectCallEnd(args: {
+  post: DirectCallPost;
+  chatId: string;
+  startedAt: number;
+  call: Pick<ResolvedDirectCall, 'stt' | 'tts'>;
+  meter: DirectCallMeter;
+}): Promise<void> {
+  await args.post('/api/voice/direct/end', {
+    chatId: args.chatId,
+    startedAt: args.startedAt,
+    usage: {
+      stt: {
+        engine: args.call.stt.engine,
+        model: args.call.stt.model,
+        utteranceSeconds: args.meter.utteranceSeconds,
+      },
+      tts: {
+        engine: args.call.tts.engine,
+        model: args.call.tts.model,
+        requests: args.meter.ttsRequests,
+        characters: args.meter.ttsCharacters,
+      },
+    },
+  });
+}
+
 export function cloudSpeechToText(args: {
   post: DirectCallPost;
   chatId: string;
   engine: CloudSttEngine;
   model: string;
+  meter: DirectCallMeter;
 }): DirectSpeechToText {
   return {
     label: STT_ENGINE_LABEL[args.engine],
@@ -387,6 +435,7 @@ export function cloudSpeechToText(args: {
         model: args.model,
         audioBase64: bytesToBase64(pcm16ToWav(pcm)),
       });
+      args.meter.utteranceSeconds.push(pcm.length / DIRECT_CALL_SAMPLE_RATE);
       return r.transcript;
     },
   };
@@ -399,6 +448,7 @@ export function cloudTextToSpeech(args: {
   model: string;
   voice: string;
   sound: DirectTtsSound;
+  meter: DirectCallMeter;
   /** The surface's own player for 24 kHz PCM16. */
   play: (pcm: Int16Array, sampleRate: number) => PreparedSpeech;
 }): DirectTextToSpeech {
@@ -416,6 +466,8 @@ export function cloudTextToSpeech(args: {
           text,
         },
       );
+      args.meter.ttsRequests += 1;
+      args.meter.ttsCharacters += text.length;
       return args.play(bytesToPcm16(base64ToBytes(r.pcmBase64)), r.sampleRate);
     },
   };

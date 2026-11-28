@@ -3,7 +3,13 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { callTotalUsd, speechCredits, type CallCosting, type SpeechUsage } from './voiceCost.js';
+import {
+  callTotalUsd,
+  directSpeechCredits,
+  speechCredits,
+  type CallCosting,
+  type SpeechUsage,
+} from './voiceCost.js';
 
 export interface VoiceUsageTotals {
   monthUsd: number;
@@ -13,9 +19,14 @@ export interface VoiceUsageTotals {
   /** Gemini and OpenAI tokens, as the providers reported them. */
   monthTokens: number;
   allTokens: number;
-  /** ElevenLabs credits: what each call was charged, plus speech at its per-character rate. */
+  /** ElevenLabs credits: what each call was charged, plus speech (and direct calls' speech) at its per-character rate. */
   monthCredits: number;
   allCredits: number;
+}
+
+function callCredits(c: CallCosting): number {
+  if (c.direct) return directSpeechCredits(c.direct);
+  return c.real && 'credits' in c.real ? c.real.credits : 0;
 }
 
 function callTokens(c: CallCosting): number {
@@ -76,7 +87,7 @@ export function createVoiceLedger(path: string): VoiceLedger {
       for (const e of entries) {
         const usd = callTotalUsd(e);
         const tokens = callTokens(e);
-        const credits = e.real && 'credits' in e.real ? e.real.credits : 0;
+        const credits = callCredits(e);
         t.allUsd += usd;
         t.allCalls += 1;
         t.allTokens += tokens;

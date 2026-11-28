@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import {
+  CATALOG_PROVIDER_LABEL,
   VOICE_AGENT_ENGINES,
   VOICE_AGENT_PROVIDER_LABEL,
   VoiceAgentProvider,
@@ -13,6 +14,7 @@ import {
   voiceKeyHostStatus,
   voiceToneKey,
   type CatalogItem,
+  type CatalogProvider,
   type SliderControl,
   type SoundValue,
   type SoundValues,
@@ -33,7 +35,7 @@ import { DEFAULT_VOICE_INSTRUCTIONS } from '@patch/wire';
 const PROVIDERS = VoiceAgentProvider.options;
 
 /** The lists Settings shows for a provider, from whichever host read them. */
-export function useVoiceCatalog(provider: VoiceAgentProvider): VoiceCatalogView {
+export function useVoiceCatalog(provider: CatalogProvider): VoiceCatalogView {
   const hosts = usePresenceStore((s) => s.hosts);
   return voiceCatalogView(
     provider,
@@ -53,7 +55,7 @@ export function useVoiceCatalog(provider: VoiceAgentProvider): VoiceCatalogView 
 }
 
 /** Ask every online host holding the provider's key to read its lists again. */
-export function refreshVoiceCatalog(provider: VoiceAgentProvider): void {
+export function refreshVoiceCatalog(provider: CatalogProvider): void {
   const hosts = Object.values(usePresenceStore.getState().hosts).filter(
     (h) => h.online && h.host?.voiceKeys?.[provider] === true,
   );
@@ -61,7 +63,7 @@ export function refreshVoiceCatalog(provider: VoiceAgentProvider): void {
     useUiStore
       .getState()
       .pushError(
-        `No online host has a ${VOICE_AGENT_PROVIDER_LABEL[provider]} key, so nothing can read its lists.`,
+        `No online host has a ${CATALOG_PROVIDER_LABEL[provider]} key, so nothing can read its lists.`,
       );
     return;
   }
@@ -71,7 +73,7 @@ export function refreshVoiceCatalog(provider: VoiceAgentProvider): void {
 }
 
 /** The line under a list's title: its count and Refresh, or why there is no list. */
-function CatalogLine({
+export function CatalogLine({
   view,
   provider,
   count,
@@ -79,12 +81,12 @@ function CatalogLine({
   testid,
 }: {
   view: VoiceCatalogView;
-  provider: VoiceAgentProvider;
+  provider: CatalogProvider;
   count: number;
   noun: string;
   testid: string;
 }): JSX.Element {
-  const name = VOICE_AGENT_PROVIDER_LABEL[provider];
+  const name = CATALOG_PROVIDER_LABEL[provider];
   const text =
     view.state === 'ready'
       ? `${count} ${noun}${count === 1 ? '' : 's'}`

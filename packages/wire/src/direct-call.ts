@@ -12,6 +12,7 @@
 // naming it; nothing is answered by another engine.
 
 import { z } from 'zod';
+import { voiceCatalogView, type CatalogHost, type CatalogProvider } from './audio.js';
 import {
   SoundValues,
   soundProblem,
@@ -57,11 +58,17 @@ export const TTS_ENGINE_LABEL: Record<DirectTtsEngine, string> = {
   openai: 'OpenAI',
 };
 
+/**
+ * `listProblem`: a cloud engine whose models (and voices) could not be read
+ * from its provider says why — the read failed, or no host has read it yet —
+ * and its lists are empty. Never a list built in instead.
+ */
 const ReportedStt = z
   .object({
     engine: DirectSttEngine,
     where: SpeechEngineWhere,
     models: z.array(z.string().min(1)),
+    listProblem: z.string().min(1).optional(),
   })
   .strict();
 const ReportedTts = z
@@ -70,6 +77,7 @@ const ReportedTts = z
     where: SpeechEngineWhere,
     models: z.array(z.string().min(1)),
     voices: z.array(z.string().min(1)),
+    listProblem: z.string().min(1).optional(),
   })
   .strict();
 export type ReportedSttEngine = z.infer<typeof ReportedStt>;
@@ -84,62 +92,77 @@ export const SpeechEngineReport = z
   .strict();
 export type SpeechEngineReport = z.infer<typeof SpeechEngineReport>;
 
-/**
- * Cloud models offered before Settings has read the provider's own list. A
- * cloud engine's models come from its API (spec/14 § Voice); these are the
- * ones the host can call without that read.
- */
-export const CLOUD_STT_MODELS: Record<CloudSttEngine, readonly string[]> = {
-  groq: ['whisper-large-v3-turbo', 'whisper-large-v3'],
-  elevenlabs: ['scribe_v2'],
+/** Which provider's read lists each cloud engine's models (spec/07 § Direct calls). */
+const STT_PROVIDER: Record<CloudSttEngine, CatalogProvider> = {
+  groq: 'groq',
+  elevenlabs: 'elevenlabs',
 };
-export const CLOUD_TTS_MODELS: Record<CloudTtsEngine, readonly string[]> = {
-  elevenlabs: ['eleven_flash_v2_5', 'eleven_turbo_v2_5', 'eleven_multilingual_v2', 'eleven_v3'],
-  openai: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'],
+const TTS_PROVIDER: Record<CloudTtsEngine, CatalogProvider> = {
+  elevenlabs: 'elevenlabs',
+  openai: 'openai',
 };
-export const OPENAI_TTS_VOICES: readonly string[] = [
-  'alloy',
-  'ash',
-  'ballad',
-  'coral',
-  'echo',
-  'fable',
-  'nova',
-  'onyx',
-  'sage',
-  'shimmer',
-  'verse',
-];
+
+/** The provider whose list a step's engine offers, or null for an on-device engine. */
+export function listProviderOf(
+  step: 'stt' | 'tts',
+  engine: DirectSttEngine | DirectTtsEngine,
+): CatalogProvider | null {
+  const table: Record<string, CatalogProvider> = step === 'stt' ? STT_PROVIDER : TTS_PROVIDER;
+  return table[engine] ?? null;
+}
+
+/** What a host reports that says which cloud engines the account can use, and their lists. */
+export interface HostSpeechKeys extends CatalogHost {
+  providerKeys?: readonly { id: string; source: 'ui' | 'env' | 'none' }[] | undefined;
+}
 
 /**
- * The cloud engines the account can use, from the keys its hosts report
- * (`host.host.providerKeys` ids with a value): Groq and ElevenLabs Scribe read
- * speech; ElevenLabs and OpenAI speak. ElevenLabs voices are the account's own
- * list, as a host reports it.
+ * The cloud engines the account can use, from every host's report. Keys are
+ * the account's, set once in Settings → Keys and held by every host, so any
+ * host holding one counts. Models and voices come from the provider's own
+ * lists as a host read them (`voiceCatalog`, the same read the voice agent's
+ * Settings use): ElevenLabs' and OpenAI's speech models, ElevenLabs' voices,
+ * OpenAI's documented speech voices, Groq's and Scribe's transcription models.
+ * A list that has not been read, or whose read failed, is empty and says why.
  */
-export function cloudSpeechEngines(
-  keys: ReadonlySet<string>,
-  elevenLabsVoices: readonly string[],
-): SpeechEngineReport {
+export function cloudSpeechEnginesFromHosts(hosts: readonly HostSpeechKeys[]): SpeechEngineReport {
+  const keys = new Set<string>();
+  for (const h of hosts)
+    for (const k of h.providerKeys ?? []) if (k.source !== 'none') keys.add(k.id);
+  const read = (provider: CatalogProvider) => {
+    const view = voiceCatalogView(provider, hosts);
+    if (view.state === 'ready') return { entry: view.entry };
+    return {
+      entry: undefined,
+      listProblem:
+        view.state === 'failed'
+          ? `the model list could not be read (${view.message})`
+          : 'the model list has not been read yet',
+    };
+  };
+  const ids = (items: readonly { id: string }[] | undefined): string[] =>
+    (items ?? []).map((i) => i.id);
   const stt: ReportedSttEngine[] = [];
   const tts: ReportedTtsEngine[] = [];
-  if (keys.has('groq'))
-    stt.push({ engine: 'groq', where: 'cloud', models: [...CLOUD_STT_MODELS.groq] });
-  if (keys.has('elevenlabs')) {
-    stt.push({ engine: 'elevenlabs', where: 'cloud', models: [...CLOUD_STT_MODELS.elevenlabs] });
-    tts.push({
-      engine: 'elevenlabs',
+  for (const engine of CLOUD_STT_ENGINES) {
+    if (!keys.has(engine)) continue;
+    const r = read(STT_PROVIDER[engine]);
+    stt.push({
+      engine,
       where: 'cloud',
-      models: [...CLOUD_TTS_MODELS.elevenlabs],
-      voices: [...elevenLabsVoices],
+      models: ids(r.entry?.transcriptionModels),
+      ...(r.listProblem ? { listProblem: r.listProblem } : {}),
     });
   }
-  if (keys.has('openai')) {
+  for (const engine of CLOUD_TTS_ENGINES) {
+    if (!keys.has(engine)) continue;
+    const r = read(TTS_PROVIDER[engine]);
     tts.push({
-      engine: 'openai',
+      engine,
       where: 'cloud',
-      models: [...CLOUD_TTS_MODELS.openai],
-      voices: [...OPENAI_TTS_VOICES],
+      models: ids(r.entry?.speechModels),
+      voices: ids(engine === 'openai' ? r.entry?.speechVoices : r.entry?.voices),
+      ...(r.listProblem ? { listProblem: r.listProblem } : {}),
     });
   }
   return { stt, tts };
@@ -294,7 +317,10 @@ function preferDevice<T extends { where: SpeechEngineWhere }>(xs: T[]): T[] {
 }
 
 /** The one-line summary Settings and the call bar show (`Parakeet → Kokoro`). */
-export function directCallSummary(call: Pick<ResolvedDirectCall, 'stt' | 'tts'>): string {
+export function directCallSummary(call: {
+  stt: { engine: DirectSttEngine };
+  tts: { engine: DirectTtsEngine };
+}): string {
   return `${STT_ENGINE_LABEL[call.stt.engine]} → ${TTS_ENGINE_LABEL[call.tts.engine]}`;
 }
 
@@ -329,6 +355,12 @@ export function resolveDirectCall(
       ok: false,
       reason: `This device's text to speech is set to ${TTS_ENGINE_LABEL[setup.tts.engine]}, which it does not have. ${fix}`,
     };
+  }
+  for (const [e, label] of [
+    [stt, STT_ENGINE_LABEL[stt.engine]],
+    [tts, TTS_ENGINE_LABEL[tts.engine]],
+  ] as const) {
+    if (e.listProblem) return { ok: false, reason: `${label}: ${e.listProblem}.` };
   }
   if (tts.where === 'cloud' && tts.voices.length === 0) {
     return {
@@ -410,26 +442,6 @@ export function speakablePieces(markdown: string): string[] {
   }
   if (cur) pieces.push(cur);
   return pieces;
-}
-
-/** What a host reports that says which cloud engines the account can use. */
-export interface HostSpeechKeys {
-  providerKeys?: readonly { id: string; source: 'ui' | 'env' | 'none' }[] | undefined;
-  elevenLabsVoices?: readonly { id: string }[] | undefined;
-}
-
-/**
- * The cloud engines from every host's report. Keys are the account's, set once
- * in Settings → Keys and held by every host, so any host holding one counts.
- */
-export function cloudSpeechEnginesFromHosts(hosts: readonly HostSpeechKeys[]): SpeechEngineReport {
-  const keys = new Set<string>();
-  const voices: string[] = [];
-  for (const h of hosts) {
-    for (const k of h.providerKeys ?? []) if (k.source !== 'none') keys.add(k.id);
-    for (const v of h.elevenLabsVoices ?? []) if (!voices.includes(v.id)) voices.push(v.id);
-  }
-  return cloudSpeechEngines(keys, voices);
 }
 
 /** A device's on-device engines and the account's cloud engines, as one report. */
@@ -541,8 +553,13 @@ export function directCallSteps(
       : resolved.reason === NO_SPEECH_ENGINE
         ? NO_SPEECH_ENGINE
         : 'Set up',
+    // A list that could not be read is shown at its step (Settings' list line), not again here.
     problem:
-      !resolved.ok && resolved.reason !== NO_SPEECH_ENGINE && resolved.reason !== NOT_SET_UP
+      !resolved.ok &&
+      resolved.reason !== NO_SPEECH_ENGINE &&
+      resolved.reason !== NOT_SET_UP &&
+      stt?.listProblem === undefined &&
+      tts?.listProblem === undefined
         ? resolved.reason
         : undefined,
   };

@@ -22,7 +22,7 @@ describe('host.host from a host that predates the audio relay', () => {
     backends: [{ id: 'claude-code', label: 'Claude Code', version: '2.1.220', state: 'present' }],
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'installed' }],
     voiceCatalog: {},
-    voiceKeys: { gemini: false, openai: false },
+    voiceKeys: { gemini: false, openai: false, groq: false },
   };
 
   it('decodes without an audioRelayHost', () => {

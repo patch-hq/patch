@@ -771,12 +771,12 @@ describe('Settings → Dictation and Voice', () => {
       vi.stubGlobal('fetch', makeFetch());
       reportHost('d1', {
         hostName: 'hetzner',
-        voiceKeys: { gemini: false, openai: false, deepgram: false },
+        voiceKeys: { gemini: false, openai: false, groq: false, deepgram: false },
       });
       reportHost('d2', {
         hostName: 'mac',
         runsManager: false,
-        voiceKeys: { gemini: true, openai: false, deepgram: true },
+        voiceKeys: { gemini: true, openai: false, groq: false, deepgram: true },
       });
       reportHost('d3', { hostName: 'old-daemon', runsManager: false });
       renderSettings('/settings/dictation');
@@ -811,7 +811,7 @@ describe('Settings → Dictation and Voice', () => {
       vi.stubGlobal('fetch', makeFetch());
       reportHost('d1', {
         hostName: 'hetzner',
-        voiceKeys: { gemini: false, openai: false, deepgram: false },
+        voiceKeys: { gemini: false, openai: false, groq: false, deepgram: false },
       });
       renderSettings('/settings/dictation');
       await waitFor(() =>
@@ -820,7 +820,7 @@ describe('Settings → Dictation and Voice', () => {
       act(() =>
         reportHost('d1', {
           hostName: 'hetzner',
-          voiceKeys: { gemini: false, openai: false, deepgram: true },
+          voiceKeys: { gemini: false, openai: false, groq: false, deepgram: true },
         }),
       );
       await waitFor(() => expect(screen.queryByTestId('dictation-web-dev-1-keys')).toBeNull());
@@ -889,7 +889,7 @@ describe('Settings → Dictation and Voice', () => {
     vi.stubGlobal('fetch', makeFetch({}, server.handler));
     reportHost('d1', {
       hostName: 'hetzner',
-      voiceKeys: { gemini: false, openai: false, assemblyai: false },
+      voiceKeys: { gemini: false, openai: false, groq: false, assemblyai: false },
     });
     renderSettings('/settings/meetings');
     expect(await screen.findByTestId('meeting-engine-pills-local')).toHaveTextContent(
