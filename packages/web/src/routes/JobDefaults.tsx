@@ -20,6 +20,7 @@ export function JobDefaults(): JSX.Element {
       <summary>Defaults for all jobs</summary>
       <Group testid="job-defaults-group">
         <JobDefaultModelRow />
+        <AgentDefaultModelRow />
         <LayerEditor
           title="Autonomy prompt"
           sub={prompt.split('\n')[0] ?? ''}
@@ -69,6 +70,52 @@ function JobDefaultModelRow(): JSX.Element {
         data-testid="job-default-model"
         onChange={(e) => {
           void update({ jobDefaultModel: e.target.value }).catch((err: Error) =>
+            pushError(failed('settings'), undefined, err.message),
+          );
+        }}
+      >
+        {options.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+    </Row>
+  );
+}
+
+/** The model a spawned agent runs on unless its call names one. */
+function AgentDefaultModelRow(): JSX.Element {
+  const value = usePreferencesStore((s) => s.preferences.agentDefaultModel);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  const { options, problem } = useModelOptions(value);
+  return (
+    <Row
+      title="Default model for agents"
+      sub={
+        problem ? (
+          <span
+            data-testid={
+              problem.kind === 'no-host'
+                ? 'agent-default-model-no-host'
+                : 'agent-default-model-error'
+            }
+          >
+            {problem.text}
+          </span>
+        ) : undefined
+      }
+    >
+      <select
+        id="agent-default-model"
+        aria-label="Default model for agents"
+        value={value}
+        disabled={!loaded}
+        data-testid="agent-default-model"
+        onChange={(e) => {
+          void update({ agentDefaultModel: e.target.value }).catch((err: Error) =>
             pushError(failed('settings'), undefined, err.message),
           );
         }}

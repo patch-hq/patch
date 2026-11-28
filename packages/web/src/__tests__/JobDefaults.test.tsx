@@ -70,11 +70,37 @@ describe('job defaults on the Jobs page', () => {
     reportHost('d1', { hostName: 'mac' });
     renderJobsPage();
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Sonnet 5' })).toBeInTheDocument(),
+      expect(screen.getAllByRole('option', { name: 'Sonnet 5' })).toHaveLength(2),
     );
     fireEvent.change(screen.getByTestId('job-default-model'), {
       target: { value: 'claude-sonnet-5' },
     });
     await waitFor(() => expect(server.writes).toEqual([{ jobDefaultModel: 'claude-sonnet-5' }]));
+  });
+
+  it('the default model for agents is a separate setting written to the account', async () => {
+    const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({}, (u, init) =>
+        u.includes('/api/models')
+          ? json({
+              models: [
+                { id: 'claude-opus-5', label: 'Opus 5' },
+                { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+              ],
+            })
+          : server.handler(u, init),
+      ),
+    );
+    reportHost('d1', { hostName: 'mac' });
+    renderJobsPage();
+    await waitFor(() =>
+      expect(screen.getAllByRole('option', { name: 'Sonnet 5' })).toHaveLength(2),
+    );
+    fireEvent.change(screen.getByTestId('agent-default-model'), {
+      target: { value: 'claude-sonnet-5' },
+    });
+    await waitFor(() => expect(server.writes).toEqual([{ agentDefaultModel: 'claude-sonnet-5' }]));
   });
 });
