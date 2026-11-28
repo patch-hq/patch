@@ -1,7 +1,7 @@
 // Settings → Voice calls → Direct calls on the phone, at parity with web
-// (spec/07 § Direct calls, spec/14 § Voice): every linked device in one list,
-// each with its setup in one line, opening in place to its steps. Only the
-// engines the device last reported are offered (spec/05 § Speech engines). The
+// (spec/07 § Direct calls, spec/14 § Voice): one setup for every device. Each
+// step is On device (each device runs its own engine) or a cloud engine the
+// account has a key for, and nothing is chosen until the user picks it. The
 // steps come from the same wire helpers web uses, and how it sounds is the
 // shared engine-description renderer.
 
@@ -11,24 +11,19 @@ import {
   DIRECT_TTS_ENGINES,
   changeDirectCall,
   directCallSteps,
-  kokoroVoiceLabel,
   listProviderOf,
   type DirectCallChange,
-  type DirectEngineOption,
   type DirectSttEngine,
   type DirectTtsEngine,
   type SpeechEngineReport,
 } from '@patch/wire/direct-call';
 import type { CatalogProvider } from '@patch/wire/audio';
 import type { AccountPreferences, LinkedDevice } from '../../api/rest';
-import { friendlyDeviceName } from '../../lib/labels';
 import { space, typography, useTheme } from '../../lib/theme';
 import { OptionPicker } from '../OptionPicker';
 import { SettingsSection } from '../SettingsSection';
-import { deviceSubtitle } from './DevicesSections';
-import { usePresenceStore } from '../../stores/presenceStore';
 import { patchShared } from './sharedWrite';
-import { Chevron, Chips, Muted, Row, RowValue, SettingsButton, WithSettings } from './ui';
+import { Chips, Muted, Row, RowValue, SettingsButton, WithSettings } from './ui';
 import {
   catalogText,
   refreshVoiceCatalog,
@@ -36,10 +31,7 @@ import {
   useVoiceCatalog,
 } from './VoiceAgentSection';
 
-const where = (o: DirectEngineOption<string>): string =>
-  `${o.label} · ${o.where === 'device' ? 'On device' : 'Cloud'}`;
-
-/** A choice from a list the device reported. A stored one it no longer reports stays shown. */
+/** A choice from a provider's list. A stored one the list no longer has stays shown. */
 function ListPicker({
   options,
   value,
@@ -58,7 +50,7 @@ function ListPicker({
       ? 'Choose'
       : options.includes(value)
         ? labelOf(value)
-        : `${labelOf(value)} (not on this device)`;
+        : `${labelOf(value)} (no longer offered)`;
   return (
     <OptionPicker
       testID={testID}
@@ -141,28 +133,29 @@ function ProviderRefresh({
   );
 }
 
-function DeviceSteps({
-  device,
+function Steps({
   report,
   preferences,
 }: {
-  device: LinkedDevice;
   report: SpeechEngineReport;
   preferences: AccountPreferences;
 }): React.ReactElement {
   const colors = useTheme();
-  const setups = preferences.deviceDirectCall;
-  const steps = directCallSteps(report, setups[device.surfaceId], preferences.voiceTones);
+  const steps = directCallSteps(report, preferences.directCall, preferences.voiceTones);
   const eleven = useVoiceCatalog('elevenlabs');
   const voiceName = (id: string): string =>
     (eleven.state === 'ready' ? eleven.entry.voices?.find((v) => v.id === id)?.label : undefined) ??
     id;
-  const id = `direct-${device.surfaceId}`;
+  const id = 'direct';
   const change = (c: DirectCallChange): void =>
-    void patchShared('Direct calls', {
-      deviceDirectCall: { ...setups, [device.surfaceId]: changeDirectCall(steps, c) },
-    });
+    void patchShared('Direct calls', { directCall: changeDirectCall(steps, c) });
+  const stt = steps.stt.engine;
   const tts = steps.tts.engine;
+  const sttCloud = stt !== undefined && stt !== 'device';
+  const ttsCloud = tts !== undefined && tts !== 'device';
+  const sttDone = stt === 'device' || (sttCloud && steps.sttModel.value !== undefined);
+  const label = (options: { engine: string; label: string }[]) => (e: string) =>
+    options.find((o) => o.engine === e)!.label;
   return (
     <>
       {steps.problem ? (
@@ -173,18 +166,18 @@ function DeviceSteps({
       <Row title="Speech to text" testID={`${id}-stt-row`} stack>
         <Chips
           options={steps.stt.options.map((o) => o.engine)}
-          selected={steps.stt.engine}
-          labelOf={(e) => where(steps.stt.options.find((o) => o.engine === e)!)}
+          selected={stt}
+          labelOf={label(steps.stt.options)}
           testIDPrefix={`${id}-stt`}
           labelPrefix="Speech to text"
           onSelect={(engine) => change({ step: 'stt', engine })}
         />
       </Row>
-      {steps.stt.engine === undefined ? null : (
+      {!sttCloud ? null : (
         <Row
           title="Speech to text model"
           testID={`${id}-stt-model-row`}
-          {...listSubtitle('stt', steps.stt.engine, `${id}-stt-model`)}
+          {...listSubtitle('stt', stt as DirectSttEngine, `${id}-stt-model`)}
           stack
         >
           <ListPicker
@@ -193,26 +186,26 @@ function DeviceSteps({
             testID={`${id}-stt-model`}
             onSelect={(model) => change({ step: 'sttModel', model })}
           />
-          <ListRefresh step="stt" engine={steps.stt.engine} testID={`${id}-stt-model`} />
+          <ListRefresh step="stt" engine={stt as DirectSttEngine} testID={`${id}-stt-model`} />
         </Row>
       )}
-      {steps.sttModel.value === undefined ? null : (
+      {!sttDone ? null : (
         <Row title="Text to speech" testID={`${id}-tts-row`} stack>
           <Chips
             options={steps.tts.options.map((o) => o.engine)}
             selected={tts}
-            labelOf={(e) => where(steps.tts.options.find((o) => o.engine === e)!)}
+            labelOf={label(steps.tts.options)}
             testIDPrefix={`${id}-tts`}
             labelPrefix="Text to speech"
             onSelect={(engine) => change({ step: 'tts', engine })}
           />
         </Row>
       )}
-      {steps.sttModel.value === undefined || tts === undefined ? null : (
+      {!sttDone || !ttsCloud ? null : (
         <Row
           title="Text to speech model"
           testID={`${id}-tts-model-row`}
-          {...listSubtitle('tts', tts, `${id}-tts-model`)}
+          {...listSubtitle('tts', tts as DirectTtsEngine, `${id}-tts-model`)}
           stack
         >
           <ListPicker
@@ -221,28 +214,24 @@ function DeviceSteps({
             testID={`${id}-tts-model`}
             onSelect={(model) => change({ step: 'ttsModel', model })}
           />
-          <ListRefresh step="tts" engine={tts} testID={`${id}-tts-model`} />
+          <ListRefresh step="tts" engine={tts as DirectTtsEngine} testID={`${id}-tts-model`} />
         </Row>
       )}
-      {steps.ttsModel.value === undefined || steps.voice.options.length === 0 ? null : (
+      {!sttDone || !ttsCloud || steps.ttsModel.value === undefined ? null : (
         <Row title="Voice" testID={`${id}-voice-row`} stack>
           <ListPicker
             options={steps.voice.options}
             value={steps.voice.value}
-            {...(tts === 'elevenlabs'
-              ? { labelOf: voiceName }
-              : tts === 'kokoro'
-                ? { labelOf: kokoroVoiceLabel }
-                : {})}
+            {...(tts === 'elevenlabs' ? { labelOf: voiceName } : {})}
             testID={`${id}-voice`}
             onSelect={(voice) => change({ step: 'voice', voice })}
           />
         </Row>
       )}
-      {tts === undefined ||
-      steps.ttsModel.value === undefined ||
-      DIRECT_TTS_ENGINES[tts].controls.length === 0 ||
-      (steps.voice.options.length > 0 && steps.voice.value === undefined) ? null : (
+      {!sttDone ||
+      !ttsCloud ||
+      steps.voice.value === undefined ||
+      DIRECT_TTS_ENGINES[tts as DirectTtsEngine].controls.length === 0 ? null : (
         <>
           <View
             testID={`${id}-sound`}
@@ -256,9 +245,9 @@ function DeviceSteps({
             <Muted>How it sounds</Muted>
           </View>
           <SoundControls
-            engine={DIRECT_TTS_ENGINES[tts]}
+            engine={DIRECT_TTS_ENGINES[tts as DirectTtsEngine]}
             stored={steps.sound}
-            voice={steps.voice.value ?? ''}
+            voice={steps.voice.value}
             tones={preferences.voiceTones}
             catalog={undefined}
             disabled={false}
@@ -267,10 +256,21 @@ function DeviceSteps({
           />
         </>
       )}
+      {sttDone && tts !== undefined ? (
+        <Row
+          title="On this device"
+          testID={`${id}-here-row`}
+          right={<RowValue testID={`${id}-summary`}>{steps.summary}</RowValue>}
+        />
+      ) : null}
     </>
   );
 }
 
+/**
+ * The one setup, checked against this phone: its own engines and the
+ * account's cloud ones, as it last reported them.
+ */
 function DirectCallRows({
   devices,
   preferences,
@@ -278,65 +278,13 @@ function DirectCallRows({
   devices: LinkedDevice[];
   preferences: AccountPreferences;
 }): React.ReactElement {
-  // Until a row is tapped, this phone's row is open when it still has a step to
-  // pick, so a Call direct that needed one lands on it.
-  const [picked, setOpen] = React.useState<string | null | undefined>(undefined);
-  const self = usePresenceStore((s) => s.surfaceId);
-  const selfDevice = devices.find((d) => d.surfaceId === self);
-  const open =
-    picked !== undefined
-      ? picked
-      : selfDevice?.speechEngines &&
-          directCallSteps(
-            selfDevice.speechEngines,
-            preferences.deviceDirectCall[selfDevice.surfaceId],
-            preferences.voiceTones,
-          ).summary === 'Set up'
-        ? selfDevice.surfaceId
-        : null;
-  return (
-    <>
-      {devices
-        .filter((d) => d.surfaceKind !== 'voice-device')
-        .map((d) => {
-          const report = d.speechEngines;
-          const summary = report
-            ? directCallSteps(
-                report,
-                preferences.deviceDirectCall[d.surfaceId],
-                preferences.voiceTones,
-              ).summary
-            : 'Not reported yet';
-          const isOpen = open === d.surfaceId;
-          return (
-            <View key={d.surfaceId} testID={`direct-${d.surfaceId}`}>
-              <Row
-                title={friendlyDeviceName(d.surfaceKind, d.label)}
-                subtitle={deviceSubtitle(d)}
-                testID={`direct-${d.surfaceId}-row`}
-                onPress={() => setOpen(isOpen ? null : d.surfaceId)}
-                right={
-                  <>
-                    <RowValue testID={`direct-${d.surfaceId}-summary`}>{summary}</RowValue>
-                    <Chevron />
-                  </>
-                }
-              />
-              {isOpen ? (
-                report ? (
-                  <DeviceSteps device={d} report={report} preferences={preferences} />
-                ) : (
-                  <View style={{ paddingHorizontal: space.md + 2, paddingBottom: space.md }}>
-                    <Muted testID={`direct-${d.surfaceId}-unreported`}>
-                      This device has not reported its speech engines yet.
-                    </Muted>
-                  </View>
-                )
-              ) : null}
-            </View>
-          );
-        })}
-    </>
+  const report = devices.find((d) => d.isCurrent)?.speechEngines;
+  return report ? (
+    <Steps report={report} preferences={preferences} />
+  ) : (
+    <View style={{ paddingHorizontal: space.md + 2, paddingBottom: space.md }}>
+      <Muted testID="direct-unreported">This phone has not reported its speech engines yet.</Muted>
+    </View>
   );
 }
 

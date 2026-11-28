@@ -519,6 +519,18 @@ export class SharedSettingsService {
     // placeholder line still there — it goes back to the Manager default; one
     // the user edited is theirs and stays.
     if (isUntouchedSweepDefault(raw['managerPrompt'])) delete raw['managerPrompt'];
+    // Direct calls were set up per device (`deviceDirectCall`); they are now
+    // one setup for every device (`directCall`). An empty map held nothing and
+    // goes; one that holds a setup is left for the strict read below to refuse,
+    // naming it, rather than dropped without a word.
+    const perDevice = raw['deviceDirectCall'];
+    if (
+      typeof perDevice === 'object' &&
+      perDevice !== null &&
+      Object.keys(perDevice).length === 0
+    ) {
+      delete raw['deviceDirectCall'];
+    }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);

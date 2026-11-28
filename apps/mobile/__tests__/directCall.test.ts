@@ -73,13 +73,8 @@ beforeEach(async () => {
     data: {
       preferences: {
         ...DEFAULT_SHARED_SETTINGS,
-        // This phone's saved direct-call setup: Android's own engines.
-        deviceDirectCall: {
-          's-phone': {
-            stt: { engine: 'android', model: 'on-device' },
-            tts: { engine: 'android', model: 'android-tts', voice: 'en-gb-x-gba-local' },
-          },
-        },
+        // The account's direct-call setup: each device's own engines.
+        directCall: { stt: { engine: 'device' }, tts: { engine: 'device' } },
       },
     },
   } as never);
@@ -172,21 +167,32 @@ describe('direct call refusals and pause', () => {
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
   });
 
-  it('a phone with nothing saved calls on Android’s own speech: no setup needed', async () => {
+  it('nothing picked yet opens Settings → Voice calls rather than failing', async () => {
     useSettingsStore.setState({
       data: { preferences: { ...DEFAULT_SHARED_SETTINGS } },
     } as never);
     const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
     const openSetup = vi.fn();
+    await startDirectCall('c1', { mod: fakeModule().mod, mic: fakeMic().mic, openSetup });
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+    expect(pushError).not.toHaveBeenCalled();
+    expect(openSetup).toHaveBeenCalledOnce();
+  });
+
+  it('On device calls on Android’s own speech', async () => {
+    useSettingsStore.setState({
+      data: {
+        preferences: {
+          ...DEFAULT_SHARED_SETTINGS,
+          directCall: { stt: { engine: 'device' }, tts: { engine: 'device' } },
+        },
+      },
+    } as never);
     await startDirectCall('c1', {
       mod: fakeModule().mod,
       mic: fakeMic().mic,
       post: (async () => ({})) as never,
-      openSetup,
     });
-    expect(pushError).not.toHaveBeenCalled();
-    expect(openSetup).not.toHaveBeenCalled();
-    expect(useVoiceStore.getState().activeSession).not.toBeNull();
     expect(useVoiceStore.getState().callDirect?.setup).toBe('Android → Android');
   });
 

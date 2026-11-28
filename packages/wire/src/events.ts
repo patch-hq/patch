@@ -2889,11 +2889,10 @@ export const SharedSettings = z
      */
     deviceDictation: z.record(z.string().min(1), DictationEngineSchema).optional(),
     /**
-     * Per signed-in device, by surface id: what its direct calls run on
-     * (spec/07 § Direct calls). A device absent here runs on the first engines
-     * it reports. Written whole; synced to every device.
+     * What direct calls run on, one setup for every device (spec/07 § Direct
+     * calls). Absent until picked in Settings; nothing is chosen for the user.
      */
-    deviceDirectCall: z.record(z.string().min(1), DirectCallSetup),
+    directCall: DirectCallSetup.optional(),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -3106,7 +3105,6 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   voiceMatchThreshold: VOICE_MATCH_THRESHOLD,
   dictationPauseSeconds: 10,
   dictationTurnDetection: true,
-  deviceDirectCall: {},
   permissionModeDefault: 'auto',
   providerPermissionDefaults: {},
   providerSettings: {},

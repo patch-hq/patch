@@ -249,45 +249,33 @@ test.describe('Settings — Direct calls', () => {
     speechEngines: { stt: [], tts: [] },
   };
 
-  test('each device in one line; a row opens to its steps, and a change is written', async ({
+  test('one setup for every device: pick each step, see what this device runs', async ({
     page,
   }) => {
     const server = await stubSettingsApi(page, {
       payload: { devices: [mac, linux] },
-      preferences: {
-        deviceDirectCall: {
-          'mac-1': {
-            stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
-            tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
-          },
-        },
-      },
+      preferences: {},
     });
     await page.goto(settingsUrl('voice'));
-    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → Kokoro');
-    await expect(page.getByTestId('direct-linux-1-summary')).toHaveText('No speech engine');
-    await page.getByTestId('direct-mac-1-row').getByRole('button').click();
-    await expect(page.getByTestId('direct-mac-1-stt').locator('button')).toHaveText([
-      'Parakeet · On device',
-      'Groq Whisper · Cloud',
+    await expect(page.getByTestId('direct-stt').locator('button')).toHaveText([
+      'On device',
+      'Groq Whisper',
     ]);
-    await expect(page.getByTestId('direct-mac-1-speed-value')).toHaveText('1×');
-    await page.getByTestId('direct-mac-1-tts-elevenlabs').click();
+    await expect(page.getByTestId('direct-tts')).toHaveCount(0);
+    await page.getByTestId('direct-stt-device').click();
     await expect.poll(() => server.patches.length).toBe(1);
-    expect(server.patches[0]).toEqual({
-      deviceDirectCall: {
-        'mac-1': {
-          stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
-          tts: { engine: 'elevenlabs' },
-        },
-      },
+    expect(server.patches[0]).toEqual({ directCall: { stt: { engine: 'device' } } });
+    await page.getByTestId('direct-tts-elevenlabs').click();
+    await expect.poll(() => server.patches.length).toBe(2);
+    expect(server.patches[1]).toEqual({
+      directCall: { stt: { engine: 'device' }, tts: { engine: 'elevenlabs' } },
     });
-    // The new engine's model and voice start at its first, so it is ready at once.
-    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → ElevenLabs');
-    await page.getByTestId('direct-mac-1-tts-model').selectOption('eleven_flash_v2_5');
-    await page.getByTestId('direct-mac-1-voice').selectOption('v-rachel');
-    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → ElevenLabs');
-    await expect(page.getByTestId('direct-mac-1-stability')).toBeVisible();
+    await page.getByTestId('direct-tts-model').selectOption('eleven_flash_v2_5');
+    await page.getByTestId('direct-voice').selectOption('v-rachel');
+    await expect(page.getByTestId('direct-summary')).toHaveText('Parakeet → ElevenLabs');
+    await expect(page.getByTestId('direct-stability')).toBeVisible();
+    // No device-by-device list.
+    await expect(page.getByTestId('direct-linux-1-row')).toHaveCount(0);
   });
 });
 

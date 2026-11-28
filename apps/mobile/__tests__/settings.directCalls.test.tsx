@@ -1,6 +1,6 @@
 // Settings → Voice calls → Direct calls on the phone (spec/07 § Direct calls,
-// spec/15 § Settings tab): every linked device with its setup in one line,
-// opening to its steps, offering only the engines it reported.
+// spec/15 § Settings tab): one setup for every device, On device or a cloud
+// engine at each step, checked against this phone.
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -67,16 +67,15 @@ const DEVICES = [
   },
 ] as never;
 
-/** This phone's saved setup: Android's own engines. */
-const PHONE_SETUP = {
-  stt: { engine: 'android' as const, model: 'android-on-device' },
-  tts: { engine: 'android' as const, model: 'android-tts' },
-};
+const ON_DEVICE = { stt: { engine: 'device' as const }, tts: { engine: 'device' as const } };
 
-function seed(deviceDirectCall: Record<string, unknown> = { 'phone-1': PHONE_SETUP }): void {
+function seed(directCall?: unknown, current = 'phone-1'): void {
   seedSettings({
-    devices: DEVICES,
-    preferences: { ...settingsFixture().preferences, deviceDirectCall: deviceDirectCall as never },
+    devices: (DEVICES as unknown as { surfaceId: string }[]).map((d) => ({
+      ...d,
+      isCurrent: d.surfaceId === current,
+    })) as never,
+    preferences: { ...settingsFixture().preferences, directCall: directCall as never },
   });
 }
 
@@ -100,77 +99,55 @@ afterEach(() => {
   for (const r of mounted.splice(0)) act(() => r.unmount());
 });
 
-async function open(r: ReturnType<typeof renderRN>, id: string): Promise<void> {
-  await actAsync(async () => {
-    findHost(r.root, byTestId(`direct-${id}-row`)).props.onPress();
-    await flush();
-  });
-}
-
 describe('Direct calls (phone)', () => {
-  it('lists each device with its setup in one line, No speech engine, or not reported', () => {
+  it('one setup, nothing chosen until picked: On device or each cloud engine with a key', () => {
     seed();
     const r = renderRN(<DirectCallsSection />);
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe('Android → Android');
-    expect(textOf(findHost(r.root, byTestId('direct-mac-1-summary')))).toBe('No speech engine');
-    expect(textOf(findHost(r.root, byTestId('direct-web-1-summary')))).toBe('Not reported yet');
+    const row = textOf(findHost(r.root, byTestId('direct-stt-row')));
+    expect(row).toContain('On device');
+    expect(row).toContain('Groq Whisper');
+    expect(findHost(r.root, byTestId('direct-stt-device')).props.accessibilityState.selected).toBe(
+      false,
+    );
+    expect(queryHost(r.root, byTestId('direct-tts-row'))).toBeNull();
+    expect(queryHost(r.root, byTestId('direct-mac-1-row'))).toBeNull();
   });
 
-  it('opens to its steps with only the reported engines, labelled On device / Cloud', async () => {
+  it('On device on this phone runs Android’s own speech, with no model or voice to pick', () => {
+    seed(ON_DEVICE);
+    const r = renderRN(<DirectCallsSection />);
+    expect(textOf(findHost(r.root, byTestId('direct-summary')))).toBe('Android → Android');
+    expect(queryHost(r.root, byTestId('direct-stt-model'))).toBeNull();
+    expect(queryHost(r.root, byTestId('direct-voice'))).toBeNull();
+  });
+
+  it('each pick is written to the one setup', async () => {
     seed();
     const r = renderRN(<DirectCallsSection />);
-    await open(r, 'phone-1');
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-stt-row')))).toContain(
-      'Android · On device',
-    );
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-stt-row')))).toContain(
-      'Groq Whisper · Cloud',
-    );
-    expect(
-      findHost(r.root, byTestId('direct-phone-1-stt-android')).props.accessibilityState.selected,
-    ).toBe(true);
-    // Android's voices have no sound controls and no voice list.
-    expect(queryHost(r.root, byTestId('direct-phone-1-voice'))).toBeNull();
-    expect(queryHost(r.root, byTestId('direct-phone-1-sound'))).toBeNull();
-  });
-
-  it('a phone with nothing saved runs on Android’s own speech; a pick is written', async () => {
-    seed({});
-    const r = renderRN(<DirectCallsSection />);
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe('Android → Android');
-    await open(r, 'phone-1');
-    expect(
-      findHost(r.root, byTestId('direct-phone-1-stt-android')).props.accessibilityState.selected,
-    ).toBe(true);
     await actAsync(async () => {
-      findHost(r.root, byTestId('direct-phone-1-stt-groq')).props.onPress();
+      findHost(r.root, byTestId('direct-stt-device')).props.onPress();
       await flush();
     });
     expect(api.setPreferences).toHaveBeenLastCalledWith({
-      deviceDirectCall: { 'phone-1': { stt: { engine: 'groq' } } },
+      directCall: { stt: { engine: 'device' } },
     });
   });
 
-  it('ElevenLabs shows its sound controls once its voice is chosen', async () => {
+  it('ElevenLabs shows its sound controls once its voice is chosen', () => {
     seed({
-      'phone-1': {
-        stt: { engine: 'android', model: 'android-on-device' },
-        tts: { engine: 'elevenlabs', model: 'eleven_flash_v2_5', voice: 'v-george' },
-      },
+      stt: { engine: 'device' },
+      tts: { engine: 'elevenlabs', model: 'eleven_flash_v2_5', voice: 'v-george' },
     });
     const r = renderRN(<DirectCallsSection />);
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-summary')))).toBe(
-      'Android → ElevenLabs',
-    );
-    await open(r, 'phone-1');
+    expect(textOf(findHost(r.root, byTestId('direct-summary')))).toBe('Android → ElevenLabs');
     for (const c of ['tone', 'stability', 'similarity', 'style', 'speed']) {
-      expect(queryHost(r.root, byTestId(`direct-phone-1-${c}`))).not.toBeNull();
+      expect(queryHost(r.root, byTestId(`direct-${c}`))).not.toBeNull();
     }
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-speed-value')))).toBe('0.95×');
+    expect(textOf(findHost(r.root, byTestId('direct-speed-value')))).toBe('0.95×');
   });
 
-  it('a cloud engine’s models are the provider’s list: a failed read says why, with Refresh', async () => {
-    seed({ 'phone-1': { stt: { engine: 'groq', model: 'whisper-large-v3-turbo' } } });
+  it('a cloud engine’s models are the provider’s list: a failed read says why, with Refresh', () => {
+    seed({ stt: { engine: 'groq', model: 'whisper-large-v3-turbo' } });
     usePresenceStore.setState({
       hosts: {
         h1: {
@@ -185,19 +162,17 @@ describe('Direct calls (phone)', () => {
       },
     } as never);
     const r = renderRN(<DirectCallsSection />);
-    await open(r, 'phone-1');
-    expect(textOf(findHost(r.root, byTestId('direct-phone-1-stt-model-status')))).toBe(
+    expect(textOf(findHost(r.root, byTestId('direct-stt-model-status')))).toBe(
       "Could not read Groq's models: box: Groq model list failed: HTTP 401",
     );
-    expect(queryHost(r.root, byTestId('direct-phone-1-stt-model-refresh'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('direct-stt-model-refresh'))).not.toBeNull();
   });
 
-  it('a device that never reported says so', async () => {
-    seed();
+  it('a phone that never reported says so', () => {
+    seed(undefined, 'web-1');
     const r = renderRN(<DirectCallsSection />);
-    await open(r, 'web-1');
-    expect(textOf(findHost(r.root, byTestId('direct-web-1-unreported')))).toBe(
-      'This device has not reported its speech engines yet.',
+    expect(textOf(findHost(r.root, byTestId('direct-unreported')))).toBe(
+      'This phone has not reported its speech engines yet.',
     );
   });
 });
