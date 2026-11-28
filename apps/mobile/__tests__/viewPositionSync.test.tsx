@@ -25,7 +25,6 @@ vi.mock('../src/api/ws', () => ({ getWs: vi.fn() }));
 import {
   ViewPositionSync,
   VIEW_POSITION_DEBOUNCE_MS,
-  EXPLICIT_NAV_HOLD_MS,
   noteExplicitNavigation,
   noteUserInput,
   resetViewPositionSync,
@@ -79,6 +78,11 @@ const remote = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+// A position reaching the phone: live at `arrivedAt` (fake clock), or a launch
+// snapshot (arrivedAt 0, the first connection of the process).
+const arrive = (over: Record<string, unknown> = {}, arrivedAt = 0): void =>
+  useViewPositionStore.getState().applyUpdated(remote(over), 'phone', arrivedAt);
+
 describe('ViewPositionSync', () => {
   const send = vi.fn();
   beforeEach(() => {
@@ -112,7 +116,7 @@ describe('ViewPositionSync', () => {
 
   it('adopts the other surface position when the launch snapshot arrives', () => {
     mount();
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote(), 'phone'));
+    actSync(() => arrive());
     expect(routerMock.navigate).toHaveBeenCalledWith('/chats/c9?seq=5');
   });
 
@@ -127,55 +131,110 @@ describe('ViewPositionSync', () => {
     actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
     expect(send).not.toHaveBeenCalled();
     actSync(() => __emitAppStateChange('background'));
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote(), 'phone'));
+    actSync(() => arrive());
     actSync(() => __emitAppStateChange('active'));
     expect(routerMock.navigate).not.toHaveBeenCalled();
   });
 
   it('restores its own last position when the launch snapshot is its own (a restart)', () => {
     mount();
-    actSync(() =>
-      useViewPositionStore.getState().applyUpdated(remote({ surfaceId: 'phone' }), 'phone'),
-    );
+    actSync(() => arrive({ surfaceId: 'phone' }));
     expect(routerMock.navigate).toHaveBeenCalledWith('/chats/c9?seq=5');
   });
 
   it("ignores its own surface's echo once the launch snapshot has arrived", () => {
     mount();
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote({ updatedAt: 50 }), 'phone'));
+    actSync(() => arrive({ updatedAt: 50 }));
     routerMock.navigate.mockClear();
-    actSync(() =>
-      useViewPositionStore
-        .getState()
-        .applyUpdated(remote({ surfaceId: 'phone', id: 'c2', updatedAt: 200 }), 'phone'),
-    );
+    actSync(() => arrive({ surfaceId: 'phone', id: 'c2', updatedAt: 200 }, Date.now()));
     actSync(() => __emitAppStateChange('background'));
     actSync(() => __emitAppStateChange('active'));
     expect(routerMock.navigate).not.toHaveBeenCalled();
   });
 
-  it('does not move a screen in use; adopts on returning to the foreground', () => {
+  it('follows another surface the moment it moves, while the phone is untouched', () => {
+    mount();
+    actSync(() => arrive({ updatedAt: 100 }, Date.now()));
+    expect(routerMock.navigate).toHaveBeenCalledWith('/chats/c9?seq=5');
+  });
+
+  it('applies a move in the background, so the phone is already there when opened', () => {
     mount();
     actSync(() => noteUserInput());
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote(), 'phone'));
-    expect(routerMock.navigate).not.toHaveBeenCalled();
+    actSync(() => vi.advanceTimersByTime(1000));
     actSync(() => __emitAppStateChange('background'));
-    actSync(() => __emitAppStateChange('active'));
+    actSync(() => arrive({}, Date.now()));
     expect(routerMock.navigate).toHaveBeenCalledWith('/chats/c9?seq=5');
     actSync(() => __emitAppStateChange('active'));
     expect(routerMock.navigate).toHaveBeenCalledTimes(1);
   });
 
-  it('a notification tap or deep link wins over the foreground handover', () => {
+  it('does not move a screen in use; applies it when put away untouched since', () => {
     mount();
     actSync(() => noteUserInput());
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote(), 'phone'));
+    actSync(() => vi.advanceTimersByTime(1000));
+    actSync(() => arrive({}, Date.now()));
+    expect(routerMock.navigate).not.toHaveBeenCalled();
     actSync(() => __emitAppStateChange('background'));
-    actSync(() => noteExplicitNavigation());
+    expect(routerMock.navigate).toHaveBeenCalledWith('/chats/c9?seq=5');
+    actSync(() => __emitAppStateChange('active'));
+    expect(routerMock.navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a move the user acted after on the phone', () => {
+    mount();
+    actSync(() => noteUserInput());
+    actSync(() => vi.advanceTimersByTime(1000));
+    actSync(() => arrive({}, Date.now()));
+    actSync(() => vi.advanceTimersByTime(1000));
+    actSync(() => noteUserInput());
+    actSync(() => __emitAppStateChange('background'));
     actSync(() => __emitAppStateChange('active'));
     expect(routerMock.navigate).not.toHaveBeenCalled();
-    // Nor does the same remote position come back on the next foreground.
-    actSync(() => vi.advanceTimersByTime(EXPLICIT_NAV_HOLD_MS + 1));
+  });
+
+  it('returning from the photo picker does not jump to an older position', () => {
+    mount();
+    // The desktop moved a while ago; the phone was in use and ignored it.
+    actSync(() => noteUserInput());
+    actSync(() => arrive({}, Date.now()));
+    actSync(() => vi.advanceTimersByTime(60_000));
+    // Tap "add photo": the picker backgrounds the app, then hands back.
+    actSync(() => noteUserInput());
+    actSync(() => __emitAppStateChange('background'));
+    actSync(() => __emitAppStateChange('active'));
+    expect(routerMock.navigate).not.toHaveBeenCalled();
+  });
+
+  it('a reconnect snapshot counts from when the link was lost, not when it lands', () => {
+    mount();
+    const lostAt = Date.now();
+    actSync(() => vi.advanceTimersByTime(1000));
+    // The user opened the phone and tapped "new chat" before the socket came back.
+    actSync(() => noteUserInput());
+    actSync(() => arrive({}, lostAt));
+    actSync(() => __emitAppStateChange('background'));
+    expect(routerMock.navigate).not.toHaveBeenCalled();
+  });
+
+  it('a resend of a position already seen keeps its first arrival time', () => {
+    mount();
+    actSync(() => noteUserInput());
+    actSync(() => arrive({}, Date.now()));
+    actSync(() => vi.advanceTimersByTime(1000));
+    actSync(() => noteUserInput());
+    actSync(() => vi.advanceTimersByTime(1000));
+    actSync(() => arrive({}, Date.now()));
+    actSync(() => __emitAppStateChange('background'));
+    expect(routerMock.navigate).not.toHaveBeenCalled();
+  });
+
+  it('a notification tap or deep link wins over an earlier position', () => {
+    mount();
+    actSync(() => noteUserInput());
+    actSync(() => arrive({}, Date.now()));
+    actSync(() => vi.advanceTimersByTime(1000));
+    actSync(() => noteExplicitNavigation());
     actSync(() => __emitAppStateChange('background'));
     actSync(() => __emitAppStateChange('active'));
     expect(routerMock.navigate).not.toHaveBeenCalled();
@@ -184,8 +243,7 @@ describe('ViewPositionSync', () => {
   it('a launch snapshot arriving after a cold-start notification tap is not adopted', () => {
     mount();
     actSync(() => noteExplicitNavigation());
-    actSync(() => vi.advanceTimersByTime(EXPLICIT_NAV_HOLD_MS + 1));
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote(), 'phone'));
+    actSync(() => arrive());
     expect(routerMock.navigate).not.toHaveBeenCalled();
   });
 
@@ -256,7 +314,7 @@ describe('ViewPositionSync', () => {
   it('waits for the navigator: nothing is adopted until it is ready, then it is', () => {
     __setRootNavigationReady(false);
     mount();
-    actSync(() => useViewPositionStore.getState().applyUpdated(remote(), 'phone'));
+    actSync(() => arrive());
     expect(routerMock.navigate).not.toHaveBeenCalled();
     actSync(() => {
       __setRootNavigationReady(true);

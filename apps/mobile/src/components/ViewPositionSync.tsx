@@ -1,7 +1,9 @@
 // Handover between surfaces (spec/05 § Handover). Reports the page and chat
-// scroll position the user is on, and adopts another surface's newer position
-// on launch or when the app returns to the foreground — never while the user
-// is mid-use, so a screen does not move under a thumb.
+// scroll position the user is on, and adopts another surface's position only
+// when that surface acted after the user's last touch here. It is applied the
+// moment it arrives — in the background too, so the phone is already on it
+// when opened — unless the user is using the phone right now, and is dropped
+// for good once the user does anything here after it arrived.
 
 import React from 'react';
 import { AppState } from 'react-native';
@@ -21,39 +23,32 @@ export const VIEW_POSITION_DEBOUNCE_MS = 800;
 // The user has touched this surface since it launched / came to the front.
 // Module-level so the root layout's touch capture can set it.
 let active = false;
-let launching = true;
+// This phone's clock: the user's last touch or deliberate navigation.
+let lastInputAt = Number.NEGATIVE_INFINITY;
 // The report below is scheduled from route/scroll changes; a first touch after
 // launch or foreground changes neither, so it has to wake the report itself.
 const activatedListeners = new Set<() => void>();
 
-export function noteUserInput(): void {
+export function noteUserInput(now: number = Date.now()): void {
   const wasActive = active;
   active = true;
-  launching = false;
+  lastInputAt = now;
   if (!wasActive) for (const l of activatedListeners) l();
 }
 
 /**
- * How long a deliberate navigation (a notification tap, a deep link, a share)
- * holds the screen against handover. The tap foregrounds the app, and Android
- * delivers the link a moment before the app reports itself active — so without
- * this the foreground adoption lands second and replaces the screen the user
- * asked for with whatever another surface was last looking at.
+ * A deliberate navigation (a notification tap, a deep link, a share) counts as
+ * the user acting here, so no position that arrived before it can replace the
+ * screen they asked for — including a reconnect snapshot that lands after it.
  */
-export const EXPLICIT_NAV_HOLD_MS = 5_000;
-let explicitNavAt = Number.NEGATIVE_INFINITY;
-
 export function noteExplicitNavigation(now: number = Date.now()): void {
-  explicitNavAt = now;
-  // Also stops a launch snapshot that arrives later from overriding it.
-  launching = false;
+  lastInputAt = now;
 }
 
 /** Test seam: back to a fresh launch. */
 export function resetViewPositionSync(): void {
   active = false;
-  launching = true;
-  explicitNavAt = Number.NEGATIVE_INFINITY;
+  lastInputAt = Number.NEGATIVE_INFINITY;
 }
 
 export function ViewPositionSync(): null {
@@ -84,35 +79,38 @@ export function ViewPositionSync(): null {
   const enabledRef = React.useRef(enabled);
   enabledRef.current = enabled;
 
-  const adopt = React.useCallback(
-    (allowOwn = false): void => {
-      const st = useViewPositionStore.getState();
-      const r = st.remote;
-      if (!navReady || !r || !enabledRef.current) return;
-      const own = r.surfaceId === usePresenceStore.getState().surfaceId;
-      if ((own && !allowOwn) || r.updatedAt <= st.handledAt) return;
+  // Decide on the remote position: apply it, drop it, or leave it waiting
+  // while the user is using the phone.
+  const settle = React.useCallback((): void => {
+    const st = useViewPositionStore.getState();
+    const r = st.remote;
+    if (!navReady || !r || !enabledRef.current) return;
+    if (r.updatedAt <= st.handledAt) return;
+    // Own positions are echoes, except a restart restoring where it closed.
+    const own = r.surfaceId === usePresenceStore.getState().surfaceId;
+    if (own && !r.restore) return;
+    // The user did something here after it arrived: what they did wins.
+    if (r.arrivedAt <= lastInputAt) {
       st.markHandled(r.updatedAt);
-      if (Date.now() - explicitNavAt < EXPLICIT_NAV_HOLD_MS) return;
-      router.navigate(routeFromPosition(r) as Href);
-    },
-    [navReady, router],
-  );
-
-  React.useEffect(() => {
-    // A launch snapshot that lands before the navigator mounts waits for it.
-    if (enabled && remote && navReady && launching && !active) {
-      launching = false;
-      adopt(true);
+      return;
     }
-  }, [remote, navReady, adopt, enabled]);
+    // Never move a screen under a hand; decided when the phone is put away.
+    if (active && AppState.currentState === 'active') return;
+    st.markHandled(r.updatedAt);
+    router.navigate(routeFromPosition(r) as Href);
+  }, [navReady, router]);
 
   React.useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
+    if (enabled) settle();
+  }, [remote, navReady, enabled, settle]);
+
+  React.useEffect(() => {
+    const sub = AppState.addEventListener('change', () => {
       active = false;
-      if (state === 'active') adopt();
+      settle();
     });
     return () => sub.remove();
-  }, [adopt]);
+  }, [settle]);
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
