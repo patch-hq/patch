@@ -34,6 +34,7 @@ function harness(): {
   router: NotificationRouter;
   presence: PresenceTracker;
   sent: { tokens: string[]; payload: PushPayload }[];
+  toasts: unknown[];
   accountId: string;
 } {
   const dataDir = mkdtempSync(join(tmpdir(), 'silent-push-'));
@@ -53,15 +54,25 @@ function harness(): {
       return { delivered: tokens.length, failed: [], permanentlyRejected: [] };
     },
   };
+  const toasts: unknown[] = [];
+  const toast = (_kind: unknown, ...rest: unknown[]): number => {
+    toasts.push(rest);
+    return 1;
+  };
   const router = new NotificationRouter({
     logger: pino({ level: 'silent' }),
     registry,
     presence,
-    wsHub: { broadcast: () => {}, broadcastToClientTypes: () => {} } as never,
+    wsHub: {
+      broadcast: () => {},
+      broadcastToClientTypes: () => {},
+      sendToKind: toast,
+      sendToKindUnlessFocused: toast,
+    } as never,
     dataDir,
     pushBackend,
   });
-  return { router, presence, sent, accountId: account.accountId };
+  return { router, presence, sent, toasts, accountId: account.accountId };
 }
 
 const notify = (priority: NotifyEvent['priority']): NotifyEvent => ({
@@ -98,8 +109,9 @@ describe('the server picks the surface, not the agent', () => {
     ).toHaveLength(0);
   });
 
-  // spec/09 § Reaching the user — urgent goes through regardless of presence.
-  it('sends urgent to the phone even when he is at a computer', async () => {
+  // spec/09 § Reaching the user — urgent goes through regardless of presence,
+  // to the computer and the phone both.
+  it('sends urgent to the phone and the computer both when he is at a computer', async () => {
     const h = harness();
     h.presence.online(h.accountId, 'srf-desktop', 'surface-desktop');
     h.presence.heartbeat(h.accountId, 'srf-desktop', Date.now());
@@ -110,6 +122,7 @@ describe('the server picks the surface, not the agent', () => {
       priority: 'urgent',
     });
     expect(h.sent, 'urgent is never held back for presence').toHaveLength(1);
+    expect(h.toasts, 'and the computer gets the toast too').toHaveLength(2);
   });
 
   it('gives an urgent push the urgent sound, and nothing else does', async () => {
