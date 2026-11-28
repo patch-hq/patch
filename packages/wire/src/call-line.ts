@@ -6,8 +6,10 @@
 // that does not depend on how a surface opens a socket or plays audio:
 //
 // - when an attempt is live (the host acknowledged it), and when it is lost: a
-//   closed connection, the host gone, no answer in time, or three seconds
-//   without a heartbeat;
+//   closed connection, the host gone, or no answer in time. Silence on a line
+//   that is still open never loses it: after three seconds without a heartbeat
+//   the surface is told contact is lost (what the user sees and hears), and
+//   told again when the host is heard from;
 // - trying to resume a lost line, on one backoff, naming the session it was last
 //   live on so the host puts the attempt back on it, until the host's resume
 //   window runs out; then the call is over. A line never opens a new session
@@ -74,6 +76,11 @@ export interface CallLineSurface {
   send(attempt: number, frame: AudioHeartbeatEvent | AudioCallLogEvent): boolean;
   /** The line moved to `next`; `reason` says why when it failed. */
   phase(next: CallLinePhase, prev: CallLinePhase, reason?: string): void;
+  /**
+   * Whether the host is being heard on the live line. Silence is only shown
+   * and sounded (spec/07 § A dropped call comes back); it never ends the line.
+   */
+  contact(heard: boolean): void;
 }
 
 interface Quality {
@@ -122,7 +129,8 @@ export class CallLine {
   private ackTimer: unknown = null;
   private redialTimer: unknown = null;
   private windowTimer: unknown = null;
-  private watchdog: unknown = null;
+  private silenceTimer: unknown = null;
+  private silent = false;
   private turnAt: Turn | null = null;
   private log: CallLogEntry[] = [];
   private droppedEntries = 0;
@@ -155,6 +163,11 @@ export class CallLine {
 
   get phase(): CallLinePhase {
     return this.state;
+  }
+
+  /** The session the call was last live on; null before the first ack. */
+  get sessionId(): string | null {
+    return this.lastLiveSessionId;
   }
 
   /** The attempt now being dialled or live. */
@@ -194,7 +207,7 @@ export class CallLine {
     this.cur.lastHeardAt = this.clock.now();
     if (this.cur.quality.heartbeats === 0) this.cur.quality.lastHeardAt = this.clock.now();
     this.move('live');
-    this.armWatchdog(attempt);
+    this.hear();
     this.flushLog();
   }
 
@@ -220,20 +233,26 @@ export class CallLine {
     }
     this.cur.lastHeardAt = now;
     // Before the acknowledgement the ack timeout is what judges the attempt.
-    if (this.state === 'live') this.armWatchdog(attempt);
+    if (this.state === 'live') this.hear();
   }
 
-  /** Three seconds from now with nothing heard from the host, the line is lost. */
-  private armWatchdog(attempt: number): void {
-    this.clear('watchdog');
-    // Cleared whenever the attempt is written off, so when it fires the attempt is current.
-    this.watchdog = this.clock.setTimeout(() => {
-      this.watchdog = null;
-      const silent = this.clock.now() - this.cur.lastHeardAt;
-      // Written off first, so the close that hanging up causes is not a second drop.
-      this.lost(attempt, 'signal_lost', `nothing from the host for ${silent}ms`);
-      this.surface.hangUp(attempt);
+  /**
+   * The host was heard: contact is back if it was lost, and three seconds from
+   * now with nothing more heard it is lost. Indication only; the line stays up.
+   */
+  private hear(): void {
+    this.clear('silenceTimer');
+    this.setContact(true);
+    this.silenceTimer = this.clock.setTimeout(() => {
+      this.silenceTimer = null;
+      this.setContact(false);
     }, HEARTBEAT_LOST_AFTER_MS);
+  }
+
+  private setContact(heard: boolean): void {
+    if (this.silent === !heard) return;
+    this.silent = !heard;
+    this.surface.contact(heard);
   }
 
   /**
@@ -246,7 +265,8 @@ export class CallLine {
     if (!this.isCurrent(attempt)) return;
     this.cur.over = true;
     this.clear('ackTimer');
-    this.clear('watchdog');
+    this.clear('silenceTimer');
+    this.silent = false;
     if (this.state === 'connecting') {
       this.move('failed', detail);
       return;
@@ -445,7 +465,7 @@ export class CallLine {
     this.droppedEntries = 0;
   }
 
-  private clear(timer: 'ackTimer' | 'redialTimer' | 'windowTimer' | 'watchdog'): void {
+  private clear(timer: 'ackTimer' | 'redialTimer' | 'windowTimer' | 'silenceTimer'): void {
     if (this[timer] !== null) this.clock.clearTimeout(this[timer]);
     this[timer] = null;
   }
@@ -454,6 +474,6 @@ export class CallLine {
     this.clear('ackTimer');
     this.clear('redialTimer');
     this.clear('windowTimer');
-    this.clear('watchdog');
+    this.clear('silenceTimer');
   }
 }

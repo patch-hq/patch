@@ -1,3 +1,4 @@
+import { LOOP_LAG_LOG_MS, watchLoopLag } from '@patch/wire/loop-lag';
 import { cutoffMs } from './cleanup.js';
 import { removeRetiredNativeCopies } from './retiredNativeCopies.js';
 import { removeRetiredTelegramFolder } from './retiredTelegramThread.js';
@@ -863,6 +864,12 @@ async function startHost(
   };
   rotateDaemonLog();
   setInterval(rotateDaemonLog, 60 * 60_000).unref();
+  // Measurement only (spec/07 § A dropped call comes back): a stalled loop
+  // cannot answer a heartbeat, so a stall is logged, with how long it was.
+  watchLoopLag({
+    thresholdMs: LOOP_LAG_LOG_MS,
+    onLag: (lagMs) => logger.warn({ lagMs }, 'host event loop stalled'),
+  });
   const codexAccounts = new CodexAccounts({
     root: join(config.patchHome, 'openai'),
     hostId: selfHostId,
@@ -3899,11 +3906,12 @@ async function startHost(
         return;
       }
       if (event.type === 'voice.end_call_request') {
-        // spec/07 § A call can move between devices — hang up the chat's call
-        // on whichever surface holds it; that surface ends it quietly.
-        void audioServer?.endOpenCall(event.chatId).catch((err: Error) => {
-          logger.error({ err: err.message, chatId: event.chatId }, 'voice.end_call_request failed');
-        });
+        // spec/07 § Ending a call — the server recorded the end and sent it
+        // here: the session ends at once, whether its line is open or held.
+        // Redelivery of an end already done finds no session, and that is fine.
+        if (audioServer?.sessionById(event.sessionId) !== undefined) {
+          audioServer.endSession(event.sessionId);
+        }
         return;
       }
       if (event.type === 'host.voice_catalog_refresh') {

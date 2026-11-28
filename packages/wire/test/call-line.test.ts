@@ -58,6 +58,10 @@ class Surface implements CallLineSurface {
   sent: Array<{ attempt: number; frame: AudioHeartbeatEvent | AudioCallLogEvent }> = [];
   phases: Array<{ next: CallLinePhase; prev: CallLinePhase; reason?: string }> = [];
   open = true;
+  contacts: boolean[] = [];
+  contact(heard: boolean): void {
+    this.contacts.push(heard);
+  }
   dial(attempt: number, resumes: string | null): void {
     this.dials.push({ attempt, resumes });
   }
@@ -223,7 +227,7 @@ describe('a dropped call comes back', () => {
     clock.advance(CALL_RESUME_DELAYS_MS[1]!);
     expect(surface.dials.map((d) => d.resumes)).toEqual([null, 's1', 's1']);
     line.acked(3, 's3');
-    line.lost(3, 'signal_lost', 'nothing from the host for 3006ms');
+    line.lost(3, 'connection_closed', 'closed');
     clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     expect(surface.dials.at(-1)?.resumes).toBe('s3');
   });
@@ -251,11 +255,9 @@ describe('a dropped call comes back', () => {
     expect(surface.dials.at(-1)).toEqual({ attempt: 4, resumes: 's3' });
   });
 
-  test('an attempt is lost once: the close after a heartbeat timeout is the same drop', () => {
+  test('an attempt is lost once: a late event from it after the close is not a second drop', () => {
     live();
-    line.heartbeat(1, hb(0));
-    clock.advance(HEARTBEAT_LOST_AFTER_MS);
-    expect(surface.hungUp).toEqual([1]);
+    line.lost(1, 'connection_closed', 'closed');
     line.lost(1, 'connection_closed', 'closed');
     expect(surface.phases.filter((p) => p.next === 'reconnecting')).toHaveLength(1);
     clock.advance(CALL_RESUME_DELAYS_MS[0]!);
@@ -294,22 +296,38 @@ describe('heartbeats', () => {
     });
   });
 
-  test('three seconds with none after one has been heard is a lost line', () => {
+  test('three seconds without one shows lost contact; the line stays up and is never hung up', () => {
     live();
     line.heartbeat(1, hb(0));
     clock.advance(HEARTBEAT_LOST_AFTER_MS - 1);
-    expect(line.phase).toBe('live');
+    expect(surface.contacts).toEqual([]);
     clock.advance(1);
-    expect(line.phase).toBe('reconnecting');
+    expect(surface.contacts).toEqual([false]);
+    expect(line.phase).toBe('live');
+    clock.advance(10 * 60_000);
+    expect(line.phase).toBe('live');
+    expect(surface.hungUp).toEqual([]);
+    expect(surface.phases).toEqual([{ next: 'live', prev: 'connecting' }]);
+    expect(surface.dials).toHaveLength(1);
   });
 
-  test('three seconds after the acknowledgement with no heartbeat is a lost line too', () => {
+  test('a heartbeat after the silence brings contact back, on the same line', () => {
     live();
-    clock.advance(HEARTBEAT_LOST_AFTER_MS - 1);
+    clock.advance(HEARTBEAT_LOST_AFTER_MS);
+    expect(surface.contacts).toEqual([false]);
+    line.heartbeat(1, hb(0));
+    expect(surface.contacts).toEqual([false, true]);
     expect(line.phase).toBe('live');
-    clock.advance(1);
-    expect(line.phase).toBe('reconnecting');
-    expect(surface.hungUp).toEqual([1]);
+    clock.advance(HEARTBEAT_LOST_AFTER_MS);
+    expect(surface.contacts).toEqual([false, true, false]);
+  });
+
+  test('silence from the acknowledgement on is shown the same way, and never ends the line', () => {
+    live();
+    clock.advance(HEARTBEAT_LOST_AFTER_MS);
+    expect(surface.contacts).toEqual([false]);
+    expect(line.phase).toBe('live');
+    expect(surface.hungUp).toEqual([]);
   });
 
   test('before the acknowledgement the ack timeout judges the attempt, not the heartbeat', () => {
@@ -329,6 +347,7 @@ describe('the call log', () => {
     clock.advance(2_000); // late
     line.heartbeat(1, hb(4, 's1', 40)); // 2 and 3 never came
     clock.advance(HEARTBEAT_LOST_AFTER_MS);
+    line.lost(1, 'connection_closed', 'closed');
     expect(surface.logs()).toEqual([]);
     clock.advance(CALL_RESUME_DELAYS_MS[0]!);
     line.acked(2, 's2');
@@ -339,8 +358,8 @@ describe('the call log', () => {
         kind: 'audio_stopped',
         at: expect.any(Number),
         sessionId: 's1',
-        reason: 'signal_lost',
-        detail: `nothing from the host for ${HEARTBEAT_LOST_AFTER_MS}ms`,
+        reason: 'connection_closed',
+        detail: 'closed',
       },
       {
         kind: 'quality',

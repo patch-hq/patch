@@ -14,8 +14,8 @@ import com.facebook.react.bridge.ReactMethod
  * sounds): connecting, connected, reconnecting, ended and the rest, played from
  * the bundled files by src/lib/callSounds.ts.
  *
- * They are part of the call, so they play as call signalling
- * (USAGE_VOICE_COMMUNICATION_SIGNALLING, routed with the call to a headset) and
+ * They are part of the call, so they play as the call's own audio usage
+ * (USAGE_VOICE_COMMUNICATION, routed with the call to a headset) and
  * take no audio focus of their own. A player that asked for focus would lose it
  * to the call the moment the call took its own — which is what silenced the
  * connecting sound a few milliseconds after it started — and would in turn
@@ -54,7 +54,7 @@ class PatchCallSoundsModule(private val ctx: ReactApplicationContext) :
     try {
       p.setAudioAttributes(
         AudioAttributes.Builder()
-          .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
+          .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
           .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
           .build()
       )

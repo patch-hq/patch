@@ -36,6 +36,7 @@
 // the engine when one fails (`describeVoiceError`). Both modes run on the one
 // voice agent, so a mode switch is always in place.
 
+import { callEnds } from './callEnds';
 import { playCallSound, syncCallSoundLoop } from './callSounds';
 import { Audio } from 'expo-av';
 import {
@@ -178,6 +179,16 @@ async function releaseAudio(): Promise<void> {
   await stopVoiceAudioService().catch(() => undefined);
 }
 
+/**
+ * Silence on a line that is still open (spec/07 § A dropped call comes back):
+ * the bar shows Lost contact and the reconnecting sound plays until the host is
+ * heard again. Nothing is torn down; only the transport closing loses the line.
+ */
+function onLineContact(heard: boolean): void {
+  useVoiceStore.getState().setCallReconnecting(!heard);
+  if (heard) void playCallSound('reconnected');
+}
+
 function onLinePhase(next: CallLinePhase, prev: CallLinePhase, reason?: string): void {
   const st = useVoiceStore.getState();
   if (next === 'live') {
@@ -278,6 +289,7 @@ export function startVoiceCall(
       hangUp: closeAttempt,
       send: sendOn,
       phase: onLinePhase,
+      contact: onLineContact,
     },
     nativeCallClock,
   );
@@ -621,18 +633,22 @@ export function setCallMode(next: AudioSessionMode): void {
 export async function endVoiceCall(): Promise<void> {
   // The line's log goes to the host while the socket is still open, then the
   // line stops: nothing it hears after this counts.
+  const endingSessionId = _line?.sessionId ?? null;
+  const endingChatId = useVoiceStore.getState().activeSession?.chatId;
   _line?.end();
   _line = null;
   clearQuietTimer();
   _transientFocus = false;
+  // The call's end goes to its host through the server (spec/07 § Ending a
+  // call), so it works with the audio socket down.
+  if (endingSessionId !== null && endingChatId !== undefined) {
+    callEnds.end(endingChatId, endingSessionId);
+  }
   // A call hung up while failed has already said so with the failure sound.
   const endedState = useVoiceStore.getState();
   if (endedState.activeSession !== null && endedState.callError === null) {
     void playCallSound('ended');
   }
-  const sessionId = useVoiceStore.getState().activeSession?.sessionId;
-  // Said if the session is still open; closing it below is what ends it either way.
-  sendFrame({ type: 'audio.session_end', ...(sessionId ? { sessionId } : {}) });
   closeCall();
   _serviceActions?.();
   _serviceActions = null;

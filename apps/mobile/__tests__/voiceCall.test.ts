@@ -26,6 +26,9 @@ const voiceTokenMock = vi.fn(async () => ({
   audioUrl: '/audio/sess-1',
   expiresAt: 0,
 }));
+import { callEnds } from '../src/lib/callEnds';
+const { wsSend } = vi.hoisted(() => ({ wsSend: vi.fn() }));
+vi.mock('../src/api/ws', () => ({ getWs: () => ({ send: wsSend }) }));
 vi.mock('../src/api/rest', () => ({ api: { me: meMock, voiceToken: voiceTokenMock } }));
 
 const startVoiceAudioServiceMock = vi.fn(async () => undefined);
@@ -62,6 +65,7 @@ async function flush(n = 14): Promise<void> {
 }
 
 beforeEach(() => {
+  callEnds.reset();
   FakeCallTransport.reset();
   vi.clearAllMocks();
   meMock.mockResolvedValue({
@@ -574,18 +578,24 @@ describe('audio WS message dispatch', () => {
 });
 
 describe('endVoiceCall', () => {
-  it('sends session_end with the sessionId, closes the session and the audio service, clears the store', async () => {
+  it('ends through the server (not a frame on the audio socket), closes the session and the audio service, clears the store', async () => {
     const { startVoiceCall, endVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');
     await flush();
     const sock = FakeCallTransport.last();
     sock.emitOpen();
     await flush();
+    sock.emitMessage({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' });
     sock.sent.length = 0;
 
     await endVoiceCall();
-    const end = JSON.parse(sock.sent[0]!);
-    expect(end).toMatchObject({ type: 'audio.session_end', sessionId: 'sess-1' });
+    expect(sock.sent.map((d) => JSON.parse(d).type)).not.toContain('audio.session_end');
+    expect(wsSend).toHaveBeenCalledWith({
+      type: 'voice.end_call_request',
+      chatId: 'c1',
+      sessionId: 'sess-1',
+      requestId: 'end-sess-1',
+    });
     expect(sock.close).toHaveBeenCalled();
     expect(stopVoiceAudioServiceMock).toHaveBeenCalled();
     expect(useVoiceStore.getState().activeSession).toBeNull();

@@ -9,6 +9,8 @@
 // CALLS (modes 2 & 3) still use the streaming audio session (lib/audioSession),
 // stubbed via the audio-opener seam.
 
+import { callEnds } from '../lib/callEnds.js';
+import { setActiveWs } from '../api/ws.js';
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import { playCallSound, syncCallSoundLoop } from '../lib/callSound.js';
 
@@ -671,7 +673,7 @@ describe('voiceController', () => {
     expect(endSpy).toHaveBeenCalledWith('ended');
   });
 
-  it('a heartbeat that stops hangs the dead session up and redials', async () => {
+  it('a heartbeat that stops shows lost contact; the session is not hung up or redialled', async () => {
     vi.useFakeTimers();
     try {
       await startVoiceCall('c1');
@@ -679,11 +681,37 @@ describe('voiceController', () => {
       lastCallbacks?.onHeartbeat?.({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
       endSpy.mockClear();
       await vi.advanceTimersByTimeAsync(3_000);
-      expect(endSpy).toHaveBeenCalledWith('lost');
       expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(endSpy).not.toHaveBeenCalled();
+      expect(useVoiceStore.getState().call).not.toBeNull();
+      lastCallbacks?.onHeartbeat?.({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 1 });
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(false);
     } finally {
       vi.useRealTimers();
       endVoiceCall();
+    }
+  });
+
+  it('End while the line is reconnecting reaches the host through the server', async () => {
+    const wsSend = vi.fn();
+    setActiveWs({ send: wsSend } as never);
+    try {
+      await startVoiceCall('c1');
+      lastCallbacks?.onState?.('listening', 'sess-1');
+      lastCallbacks?.onClose?.('closed');
+      expect(useVoiceStore.getState().call?.reconnecting).toBe(true);
+      endVoiceCall();
+      expect(wsSend).toHaveBeenCalledWith({
+        type: 'voice.end_call_request',
+        chatId: 'c1',
+        sessionId: 'sess-1',
+        requestId: 'end-sess-1',
+      });
+      expect(useVoiceStore.getState().call).toBeNull();
+    } finally {
+      callEnds.reset();
+      setActiveWs(null);
     }
   });
 

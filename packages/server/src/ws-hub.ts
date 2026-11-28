@@ -72,6 +72,20 @@ const AUTH_BUFFER_LIMIT = 50;
 // REFUSED credential, so they are protocol, not server internals. Re-exported
 // here because every existing caller imports them from the hub.
 export { CLOSE_BAD_FRAME, CLOSE_AUTH_FAILED };
+/** Sockets this server closed itself, so a close it hears about can say which side ended it. */
+const closedByServer = new WeakSet<WebSocket>();
+
+function serverClose(socket: WebSocket, code?: number, reason?: string): void {
+  closedByServer.add(socket);
+  socket.close(code, reason);
+}
+
+/** Which side ended a socket: this server, the peer (a close frame), or the transport (none arrived). */
+function closeSide(socket: WebSocket, code: number): 'server' | 'peer' | 'transport' {
+  if (closedByServer.has(socket)) return 'server';
+  return code === 1006 ? 'transport' : 'peer';
+}
+
 export const CLOSE_HELLO_TIMEOUT = 4408;
 export const CLOSE_BUFFER_OVERFLOW = 4413;
 
@@ -354,6 +368,13 @@ export class WsHub {
    */
   private readonly liveCalls = new Map<string, Map<string, VoiceCallsEvent['calls'][number]>>();
   /**
+   * Calls a surface has ended, `sessionId → hostId`, until the host stops
+   * reporting them (spec/07 § Ending a call). The server's record of the end:
+   * a host that was unreachable, or re-announces the call in a snapshot, is told
+   * again, and the call never reappears on a surface.
+   */
+  private readonly endedCalls = new Map<string, string>();
+  /**
    * The last Claude Code settings + memory snapshot each host published
    * (`claude_settings.list` / `claude_settings.updated` carry the COMPLETE
    * state). Replayed to a surface in its greeting, same reasoning as
@@ -536,10 +557,32 @@ export class WsHub {
     };
   }
 
+  /**
+   * A surface ended a call (spec/07 § Ending a call): record it, drop the call
+   * from the live set, tell its host to end the session at once, and answer the
+   * surface. A call no host holds (already over) is only answered.
+   */
+  private endCall(
+    conn: ConnectedSurface,
+    event: Extract<WireEvent, { type: 'voice.end_call_request' }>,
+  ): void {
+    for (const [hostId, calls] of this.liveCalls) {
+      if (!calls.delete(event.sessionId)) continue;
+      this.endedCalls.set(event.sessionId, hostId);
+      this.deps.hostLink.sendTo(hostId, conn.surfaceId, event);
+      this.sendToAll(this.voiceCallsSnapshot());
+    }
+    conn.socket.send(
+      encode({ type: 'voice.call_ended', requestId: event.requestId, sessionId: event.sessionId }),
+    );
+  }
+
   /** Forget a host's calls and tell every surface, if it held any. */
   private endCallsOnHost(hostId: string): void {
     const had = (this.liveCalls.get(hostId)?.size ?? 0) > 0;
     this.liveCalls.delete(hostId);
+    for (const [sessionId, owner] of this.endedCalls)
+      if (owner === hostId) this.endedCalls.delete(sessionId);
     if (had) this.sendToAll(this.voiceCallsSnapshot());
   }
 
@@ -909,7 +952,7 @@ export class WsHub {
     this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close(CLOSE_SERVER_RESTARTING, restartingReason(restartTarget));
+        serverClose(conn.socket, CLOSE_SERVER_RESTARTING, restartingReason(restartTarget));
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)
@@ -997,7 +1040,7 @@ export class WsHub {
       // so sending it here would trigger a destructive re-pair loop. The close
       // code (4408) already signals the timeout distinctly.
       state = 'closed';
-      socket.close(CLOSE_HELLO_TIMEOUT, 'hello timeout');
+      serverClose(socket, CLOSE_HELLO_TIMEOUT, 'hello timeout');
     }, this.deps.helloTimeoutMs ?? HELLO_TIMEOUT_MS);
 
     const closeOnce = (code: number, reason: string): void => {
@@ -1010,7 +1053,7 @@ export class WsHub {
       if (state === 'closed') return;
       state = 'closed';
       try {
-        socket.close(code, reason);
+        serverClose(socket, code, reason);
       } catch {
         // ignore
       }
@@ -1098,7 +1141,7 @@ export class WsHub {
               // (4401) already signals auth failure; sending auth.revoked would
               // make a client wipe its credential and force re-pair.
               try {
-                socket.close(CLOSE_AUTH_FAILED, 'auth error');
+                serverClose(socket, CLOSE_AUTH_FAILED, 'auth error');
               } catch {
                 // ignore
               }
@@ -1131,13 +1174,18 @@ export class WsHub {
       this.handleSurfaceEvent(authed, event, log);
     });
 
-    socket.on('close', () => {
+    socket.on('close', (code: number, reasonBuf: Buffer) => {
+      const closeInfo = {
+        code,
+        reason: reasonBuf.toString(),
+        closedBy: closeSide(socket, code),
+      };
       clearTimeout(helloTimer);
       state = 'closed';
       if (authed) {
         const conn = authed;
         const lastForSurface = this.removeConn(conn);
-        log.info({ surfaceId: conn.surfaceId, lastForSurface }, 'ws close');
+        log.info({ surfaceId: conn.surfaceId, lastForSurface, ...closeInfo }, 'ws close');
         // Presence goes offline only when the surface's LAST socket goes: a
         // second window closing must not mark the whole surface offline (nor,
         // as it once did, unroute the window that is still open).
@@ -1145,7 +1193,7 @@ export class WsHub {
           this.deps.presence.offline(conn.accountId, conn.surfaceId);
         }
       } else {
-        log.info({}, 'ws close (pre-auth)');
+        log.info({ ...closeInfo }, 'ws close (pre-auth)');
       }
     });
 
@@ -1163,13 +1211,13 @@ export class WsHub {
     if (!account) {
       log.warn({}, 'hello rejected: no account bootstrapped');
       socket.send(encode({ type: 'auth.revoked', reason: 'no account' }));
-      socket.close(CLOSE_AUTH_FAILED, 'no account');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'no account');
       return null;
     }
     if (!hello.auth) {
       log.warn({}, 'hello rejected: missing auth token');
       socket.send(encode({ type: 'auth.revoked', reason: 'missing auth' }));
-      socket.close(CLOSE_AUTH_FAILED, 'missing auth');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'missing auth');
       return null;
     }
 
@@ -1198,7 +1246,7 @@ export class WsHub {
           'hello rejected: credential expired',
         );
         socket.send(encode({ type: 'auth.expired', reason: 'credential expired' }));
-        socket.close(CLOSE_AUTH_FAILED, 'credential expired');
+        serverClose(socket, CLOSE_AUTH_FAILED, 'credential expired');
         return null;
       }
       // Name the client. Diagnosing a retry storm in the live log otherwise
@@ -1214,14 +1262,14 @@ export class WsHub {
         'hello rejected: bad credential',
       );
       socket.send(encode({ type: 'auth.revoked', reason: 'invalid credential' }));
-      socket.close(CLOSE_AUTH_FAILED, 'invalid credential');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'invalid credential');
       return null;
     }
 
     if (this.deps.registry.isRevoked(claims.surface_id)) {
       log.warn({ surfaceId: claims.surface_id }, 'hello rejected: revoked');
       socket.send(encode({ type: 'auth.revoked', reason: 'surface revoked' }));
-      socket.close(CLOSE_AUTH_FAILED, 'revoked');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'revoked');
       return null;
     }
 
@@ -1374,7 +1422,7 @@ export class WsHub {
   ): Promise<typeof HOST_CONN | null> {
     if (!this.deps.attachHost) {
       log.error({}, 'host hello rejected: no attachHost wired');
-      socket.close(CLOSE_AUTH_FAILED, 'host link unavailable');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'host link unavailable');
       return null;
     }
     // Non-null: the surface-gate caller rejects a hello with no `auth` before
@@ -1389,7 +1437,7 @@ export class WsHub {
       });
     } catch (err) {
       log.warn({ err: (err as Error).message }, 'host hello rejected: bad daemonKey');
-      socket.close(CLOSE_AUTH_FAILED, 'invalid daemonKey');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'invalid daemonKey');
       return null;
     }
 
@@ -1397,14 +1445,14 @@ export class WsHub {
     const registered = this.deps.registry.getDaemonKey(claims.daemon_id);
     if (!registered) {
       log.warn({ hostId: claims.daemon_id }, 'host hello rejected: unknown host');
-      socket.close(CLOSE_AUTH_FAILED, 'unknown host');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'unknown host');
       return null;
     }
 
     if (this.deps.registry.isDaemonKeySuperseded(claims.daemon_id, claims.iat)) {
       log.warn({ hostId: claims.daemon_id }, 'host hello rejected: key from an earlier pairing');
       socket.send(encode({ type: 'auth.revoked', reason: 'host key superseded' }));
-      socket.close(CLOSE_AUTH_FAILED, 'host key superseded');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'host key superseded');
       return null;
     }
 
@@ -1412,7 +1460,7 @@ export class WsHub {
       // Genuine revocation — emit auth.revoked so the host wipes its key.
       log.warn({ hostId: claims.daemon_id }, 'host hello rejected: revoked');
       socket.send(encode({ type: 'auth.revoked', reason: 'host revoked' }));
-      socket.close(CLOSE_AUTH_FAILED, 'host revoked');
+      serverClose(socket, CLOSE_AUTH_FAILED, 'host revoked');
       return null;
     }
 
@@ -1693,6 +1741,10 @@ export class WsHub {
         this.deps.activity?.recordVisibility(conn.surfaceId, event.type === 'surface.foregrounded');
         return;
       }
+      case 'voice.end_call_request': {
+        this.endCall(conn, event);
+        return;
+      }
       case 'chat.focus_change': {
         this.deps.presence.setFocus(conn.accountId, conn.surfaceId, event.chatId);
         this.deps.activity?.recordFocus(conn.surfaceId, event.chatId);
@@ -1879,7 +1931,6 @@ export class WsHub {
       case 'chat.send_back_request':
       case 'chat.resume_request':
       case 'chat.pin_request':
-      case 'voice.end_call_request':
       case 'chat.question_activity':
       case 'meeting.control_request':
       case 'meeting.get_request':
@@ -2036,13 +2087,13 @@ export class WsHub {
       }
       case 'hello': {
         slog.warn({}, 'unexpected hello after auth');
-        conn.socket.close(CLOSE_BAD_FRAME, 'duplicate hello');
+        serverClose(conn.socket, CLOSE_BAD_FRAME, 'duplicate hello');
         return;
       }
       // Frames that should never arrive surface→server are an immediate close.
       default: {
         slog.warn({ type: event.type }, 'rejecting surface→server frame of disallowed type');
-        conn.socket.close(CLOSE_BAD_FRAME, 'frame type not valid surface→server');
+        serverClose(conn.socket, CLOSE_BAD_FRAME, 'frame type not valid surface→server');
         return;
       }
     }
@@ -2082,7 +2133,25 @@ export class WsHub {
         this.deps.logger.error('ws-hub: voice.calls arrived without a sending host; dropped');
         return;
       }
-      this.liveCalls.set(fromHostId, new Map(event.calls.map((c) => [c.sessionId, c])));
+      const reported = new Set(event.calls.map((c) => c.sessionId));
+      for (const [sessionId, hostId] of this.endedCalls) {
+        if (hostId !== fromHostId) continue;
+        // Reported again: the host has not ended it yet, so say so once more.
+        if (reported.has(sessionId)) {
+          this.deps.hostLink.sendTo(hostId, 'server', {
+            type: 'voice.end_call_request',
+            chatId: event.calls.find((c) => c.sessionId === sessionId)!.chatId,
+            sessionId,
+            requestId: `server-${sessionId}`,
+          });
+        } else this.endedCalls.delete(sessionId);
+      }
+      this.liveCalls.set(
+        fromHostId,
+        new Map(
+          event.calls.filter((c) => !this.endedCalls.has(c.sessionId)).map((c) => [c.sessionId, c]),
+        ),
+      );
       this.sendToAll(this.voiceCallsSnapshot());
       return;
     }
@@ -2097,10 +2166,13 @@ export class WsHub {
       const { type: _type, active, ...call } = event;
       let calls = this.liveCalls.get(fromHostId);
       if (active) {
+        // A call a surface has ended is not re-announced into the live set.
+        if (this.endedCalls.has(call.sessionId)) return;
         if (!calls) this.liveCalls.set(fromHostId, (calls = new Map()));
         calls.set(call.sessionId, call);
       } else {
         calls?.delete(call.sessionId);
+        this.endedCalls.delete(call.sessionId);
       }
     }
     if (event.type === 'host.restarting') {
@@ -2418,7 +2490,7 @@ export class WsHub {
         // ignore — closing anyway
       }
       try {
-        conn.socket.close(CLOSE_AUTH_FAILED, reason);
+        serverClose(conn.socket, CLOSE_AUTH_FAILED, reason);
       } catch {
         // ignore — socket may already be gone
       }

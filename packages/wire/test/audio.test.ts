@@ -65,7 +65,7 @@ const FIXTURES: { [K in AudioEventType]: Extract<AudioEvent, { type: K }> } = {
     type: 'audio.call_log',
     sessionId: 'sess2',
     entries: [
-      { kind: 'audio_stopped', at: 1, sessionId: 'sess1', reason: 'signal_lost' },
+      { kind: 'audio_stopped', at: 1, sessionId: 'sess1', reason: 'connection_closed' },
       {
         kind: 'quality',
         at: 2,

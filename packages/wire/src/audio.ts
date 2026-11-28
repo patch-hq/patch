@@ -852,8 +852,9 @@ export type AudioErrorEvent = z.infer<typeof AudioErrorEvent>;
 /** How often the host sends a heartbeat on a call. */
 export const HEARTBEAT_INTERVAL_MS = 1_000;
 /**
- * A surface that has heard nothing from the host for this long treats the line
- * as lost: three missed heartbeats, so one late frame is not a drop.
+ * A surface that has heard nothing from the host for this long shows and sounds
+ * lost contact: three missed heartbeats, so one late frame is not shown. It
+ * never ends the line; only the transport closing does.
  */
 export const HEARTBEAT_LOST_AFTER_MS = 3 * HEARTBEAT_INTERVAL_MS;
 
@@ -896,8 +897,6 @@ export function heartbeatEcho(frame: AudioHeartbeatEvent): AudioHeartbeatEvent {
 
 /** Why a call's audio stopped (spec/07 § Call logs). */
 export const CallStopReason = z.enum([
-  /** No heartbeat from the host for `HEARTBEAT_LOST_AFTER_MS`. */
-  'signal_lost',
   /** The audio connection closed under a live call. */
   'connection_closed',
   /** The server reported the chat's host gone mid-call. */

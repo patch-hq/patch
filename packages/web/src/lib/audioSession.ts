@@ -139,7 +139,7 @@ export interface AudioSession {
   isMuted(): boolean;
   /** Send a line frame (a call log); false when the socket is not open. */
   send(frame: AudioHeartbeatEvent | AudioCallLogEvent): boolean;
-  /** Tear the session down: send session_end, stop mic, close WSS. */
+  /** Tear the session down: send session_end (unless `lost` or `ended`), stop mic, close WSS. */
   end(reason?: string): void;
 }
 
@@ -376,8 +376,10 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
           );
         },
         end(reason?: string): void {
-          // A lost line says nothing: the host must see a drop, not an ending, to hold the call.
-          if (reason !== 'lost' && ws.readyState === WS.OPEN) {
+          // `lost` (the line dropped: the host must see a drop to hold the call) and
+          // `ended` (the call ended through the server, spec/07 § Ending a call)
+          // say nothing on the socket.
+          if (reason !== 'lost' && reason !== 'ended' && ws.readyState === WS.OPEN) {
             try {
               ws.send(
                 JSON.stringify({

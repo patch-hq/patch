@@ -46,7 +46,7 @@ export function RemoteCallBanner(): JSX.Element | null {
         type="button"
         className="rc-end"
         data-testid="remote-call-end"
-        onClick={() => endRemoteCall(remote.chatId)}
+        onClick={() => endRemoteCall(remote.chatId, remote.sessionId)}
       >
         End call
       </button>

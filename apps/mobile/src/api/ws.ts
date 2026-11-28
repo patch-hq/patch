@@ -40,6 +40,7 @@ import { useComposerDraftStore } from '../lib/composerDraft';
 import { useNewChatDraftStore } from '../stores/newChatDraftStore';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker';
+import { callEnds } from '../lib/callEnds';
 import { mobileBuildInfo } from '../lib/buildInfo';
 import { refreshRoster } from '../lib/rosterRefresh';
 import { wsUrl } from '../config';
@@ -208,6 +209,7 @@ export class PatchWs {
     // socket-level close does NOT reset; pending inputs survive for redelivery.)
     deliveryTracker.reset();
     permissionDeliveryTracker.reset();
+    callEnds.reset();
   }
 
   send(event: WireEvent): void {
@@ -815,6 +817,7 @@ export class PatchWs {
       // permission/question responses — see permissionDeliveryTracker.ts.
       deliveryTracker.onReconnect();
       permissionDeliveryTracker.onReconnect();
+      callEnds.onReconnect();
       if (this.currentAppState === 'active') this.startHeartbeat();
       // spec/05 § Speech engines — what this phone can run for a direct call.
       (this.speechEngines ??= createSpeechEngineReporter({
@@ -849,6 +852,7 @@ export class PatchWs {
       // the host dedups). spec/12.
       deliveryTracker.onReconnect();
       permissionDeliveryTracker.onReconnect();
+      callEnds.onReconnect();
       return;
     }
     if (event.type === 'host.offline') {
@@ -1038,6 +1042,10 @@ export class PatchWs {
     // surface is offered for switching here. This surface's own call is not.
     // The server's whole set of live calls (greeting, a host reconnecting or
     // going offline): replace the list, so a call whose end was missed goes.
+    if (event.type === 'voice.call_ended') {
+      callEnds.answered(event.requestId);
+      return;
+    }
     if (event.type === 'voice.calls') {
       const self = usePresenceStore.getState().surfaceId;
       useVoiceStore.getState().setRemoteCalls(event.calls.filter((c) => c.surfaceId !== self));
