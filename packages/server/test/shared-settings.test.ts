@@ -26,7 +26,11 @@ import {
   type WireEvent,
 } from '@patch/wire';
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
-import { DEFAULT_MANAGER_PROMPT, DEFAULT_WATCH_CHECK_IN_PROMPT } from '@patch/wire';
+import {
+  DEFAULT_MANAGER_PROMPT,
+  DEFAULT_SWEEP_PROMPT,
+  DEFAULT_WATCH_CHECK_IN_PROMPT,
+} from '@patch/wire';
 import { SettingsError, SharedSettingsService } from '../src/shared-settings.js';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
@@ -197,6 +201,20 @@ describe('SharedSettingsService', () => {
     expect(loaded.current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
     loaded.update({ managerPrompt: 'Edited.' });
     expect(make().current().managerPrompt).toBe('Edited.');
+  });
+
+  it('the Manager prompt: an untouched sweep default seeded by an earlier release is reset, an edited one kept', () => {
+    const named = DEFAULT_SWEEP_PROMPT.replaceAll('the user', 'Sam');
+    for (const seeded of [DEFAULT_SWEEP_PROMPT, named]) {
+      writeFileSync(join(dir, 'settings.json'), JSON.stringify({ managerPrompt: seeded }));
+      expect(make().current().managerPrompt).toBe(DEFAULT_MANAGER_PROMPT);
+    }
+    const edited = named.replace(
+      '(No standing instructions yet. Add them here.)',
+      '- Asked to deploy: "Not yet."',
+    );
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ managerPrompt: edited }));
+    expect(make().current().managerPrompt).toBe(edited);
   });
 
   it('the Manager folder: empty or absolute, anything else refused', () => {

@@ -514,6 +514,11 @@ export class SharedSettingsService {
         ),
       );
     }
+    // An earlier release seeded `managerPrompt` from the sweep's default
+    // (sometimes with the user's name in place of "the user"). Untouched — its
+    // placeholder line still there — it goes back to the Manager default; one
+    // the user edited is theirs and stays.
+    if (isUntouchedSweepDefault(raw['managerPrompt'])) delete raw['managerPrompt'];
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);
@@ -1925,4 +1930,16 @@ export class SharedSettingsService {
     this.keyChecks.delete(id);
     this.commit({ secrets: true });
   }
+}
+
+const SWEEP_DEFAULT_OPENING = 'You are the Manager, looking at chats that have just gone idle';
+const SWEEP_DEFAULT_PLACEHOLDER = '(No standing instructions yet. Add them here.)';
+
+/** The retired sweep default as an earlier release copied it into `managerPrompt`, never edited. */
+export function isUntouchedSweepDefault(prompt: unknown): boolean {
+  return (
+    typeof prompt === 'string' &&
+    prompt.startsWith(SWEEP_DEFAULT_OPENING) &&
+    prompt.includes(SWEEP_DEFAULT_PLACEHOLDER)
+  );
 }
