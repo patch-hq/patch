@@ -126,8 +126,10 @@ export class AwaitingPermissionNotifier {
       return;
     }
     if (event.type === 'chat.permission_response') {
-      if (this.pendingAsk.get(event.chatId)?.requestId === event.requestId) {
-        this.pendingAsk.delete(event.chatId);
+      // `chatId` is optional on the surface→host ingress; the request id alone
+      // identifies the open question.
+      for (const [chatId, ask] of this.pendingAsk) {
+        if (ask.requestId === event.requestId) this.pendingAsk.delete(chatId);
       }
       return;
     }
