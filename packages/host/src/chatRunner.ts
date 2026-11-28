@@ -693,16 +693,15 @@ export interface HostOptions {
     lastAssistantText: string;
   }) => Promise<string>;
   /**
-   * Cross-host history read (spec/03 § Cross-chat tools — same relay
-   * `patch_history` uses). A finished-chats delivery reads a chat on another
-   * host through this.
+   * Cross-host peek (spec/03 § Cross-chat tools — same relay `patch_peek`
+   * uses). A finished-chats delivery reads the latest reply of a chat on
+   * another host through this.
    */
-  historyRemoteChat?: (req: {
+  peekRemoteChat?: (req: {
     sourceChatId: string;
     targetChatId: string;
-    fromSeq?: number;
     limit?: number;
-  }) => Promise<{ events: WireEvent[]; nextFromSeq?: number }>;
+  }) => Promise<{ chat_state: unknown; events: unknown[]; truncated: boolean }>;
   /**
    * The Manager's bounded context window (spec/06 § Bounded context) —
    * how many of its own messages the model sees, reconstructed fresh from
@@ -1109,6 +1108,11 @@ function intervalWords(minutes: number): string {
  * Finished chats): the chat by name for one, a count otherwise, and the
  * interval when it was a batch.
  */
+/** A finished chat's name, or its folder's last part when it has none. */
+function chatLabel(chat: { name: string; folder: string }): string {
+  return chat.name.trim() || basename(chat.folder) || chat.folder;
+}
+
 export function finishedLine(
   chats: readonly { name: string; folder: string }[],
   windowMinutes?: number,
@@ -1116,7 +1120,7 @@ export function finishedLine(
   const within = windowMinutes !== undefined ? ` in the last ${intervalWords(windowMinutes)}` : '';
   if (chats.length === 1) {
     const only = chats[0]!;
-    return `${only.name.trim() || only.folder} finished${within}.`;
+    return `${chatLabel(only)} finished${within}.`;
   }
   return `${chats.length} chats finished${within}.`;
 }
@@ -6660,42 +6664,37 @@ export class Daemon {
   }
 
   /**
-   * A finished chat's last assistant message, from the record on whichever
-   * host the chat is on (the same relay `patch_history` uses for another
-   * host). History pages oldest-first, so this walks forward keeping the
-   * latest — bounded to 10 pages so one huge chat cannot hold a delivery up.
+   * A finished chat's last assistant message, read from the end of the record
+   * on whichever host the chat is on: this host's own log, or the server's
+   * record through the relay `patch_peek` uses.
    */
   private async lastAssistantText(chat: ManagerFinishedChat): Promise<string> {
-    let last = '';
-    let fromSeq: number | undefined;
-    for (let page = 0; page < 10; page++) {
-      const slice =
-        chat.hostId === this.opts.hostId
-          ? this.readHistory({ chatId: chat.chatId, ...(fromSeq ? { fromSeq } : {}) })
-          : await this.remoteHistory(chat.chatId, fromSeq);
-      for (const event of slice.events) {
+    if (chat.hostId === this.opts.hostId) {
+      const meta = this.opts.metaStore.read(chat.chatId);
+      if (!meta || !this.chatState.has(chat.chatId)) throw new ChatNotFoundError(chat.chatId);
+      const branchId = meta.activeBranchId ?? this.branchIdFor(chat.chatId);
+      const track = readTrack(this.chatLog, chat.chatId, meta, branchId, -1);
+      for (let i = track.length - 1; i >= 0; i--) {
+        const event = track[i]!.event;
         if (event.type === 'chat.message' && event.role === 'assistant' && event.content.trim()) {
-          last = event.content;
+          return event.content;
         }
       }
-      if (slice.nextFromSeq === undefined) break;
-      fromSeq = slice.nextFromSeq;
+      return '';
     }
-    return last;
-  }
-
-  private async remoteHistory(
-    chatId: string,
-    fromSeq: number | undefined,
-  ): Promise<{ events: WireEvent[]; nextFromSeq?: number }> {
-    if (!this.opts.historyRemoteChat) {
-      throw new Error('this host cannot read another host’s history');
+    if (!this.opts.peekRemoteChat) {
+      throw new Error('this host cannot read another host’s chats');
     }
-    return this.opts.historyRemoteChat({
+    const peek = await this.opts.peekRemoteChat({
       sourceChatId: SPECIAL_THREAD_IDS.manager,
-      targetChatId: chatId,
-      ...(fromSeq ? { fromSeq } : {}),
+      targetChatId: chat.chatId,
+      limit: 1,
     });
+    const state = peek.chat_state as { lastMessages?: unknown; lastMessage?: unknown } | null;
+    if (!state || !Array.isArray(state.lastMessages)) {
+      throw new Error('the Patch server did not say what the chat last said; update the server');
+    }
+    return typeof state.lastMessage === 'string' ? state.lastMessage : '';
   }
 
   private managerDisabled(): boolean {
@@ -6739,13 +6738,12 @@ export class Daemon {
           );
           reply = `(its last reply could not be read: ${(err as Error).message})`;
         }
-        const name = chat.name.trim() || chat.folder;
-        const label = `Finished · ${name.replace(/[\]\n]/g, ' ')}`;
+        const label = `Finished · ${chatLabel(chat).replace(/[\]\n]/g, ' ')}`;
         return noteBlock(
           label,
           [
             `Chat: ${chat.chatId}`,
-            `Host: ${chat.hostId}`,
+            `Host: ${chat.hostName ?? chat.hostId}`,
             `Folder: ${chat.folder}`,
             `Link: patch://chats/${chat.chatId}`,
             '',
@@ -6755,12 +6753,27 @@ export class Daemon {
         );
       }),
     );
-    await this.sendInput({
-      chatId: SPECIAL_THREAD_IDS.manager,
-      message: notes.join('') + finishedLine(req.chats, req.windowMinutes),
-      localId: `finished-${req.runId}`,
-      origin: 'machine',
-    });
+    try {
+      await this.sendInput({
+        chatId: SPECIAL_THREAD_IDS.manager,
+        message: notes.join('') + finishedLine(req.chats, req.windowMinutes),
+        localId: `finished-${req.runId}`,
+        origin: 'machine',
+      });
+    } catch (err) {
+      const message = (err as Error).message;
+      this.opts.logger.error({ runId: req.runId, err: message }, 'manager-finished: not delivered');
+      // The server sends these chats again; the thread says why they are late.
+      this.emit({
+        type: 'chat.message',
+        chatId: SPECIAL_THREAD_IDS.manager,
+        role: 'system',
+        content: `Finished chats not delivered: ${message}`,
+        seq: this.bumpSeq(SPECIAL_THREAD_IDS.manager),
+        createdAt: this.opts.now(),
+      });
+      return { ...result(0, message), recorded: true };
+    }
     return result(req.chats.length);
   }
 

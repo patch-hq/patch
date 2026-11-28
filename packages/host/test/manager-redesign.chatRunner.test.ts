@@ -65,7 +65,7 @@ describe('carriedMessages', () => {
 describe('finishedLine', () => {
   it('names one chat, counts several, and says the interval of a batch', () => {
     expect(finishedLine([{ name: 'Bus tracker', folder: '/a' }])).toBe('Bus tracker finished.');
-    expect(finishedLine([{ name: '', folder: '/a' }])).toBe('/a finished.');
+    expect(finishedLine([{ name: '', folder: '/w/bus-tracker' }])).toBe('bus-tracker finished.');
     const two = [
       { name: 'A', folder: '/a' },
       { name: 'B', folder: '/b' },
@@ -222,22 +222,44 @@ describe('finished chats', () => {
     });
   });
 
-  it('a chat on another host is read through the history relay; a failed read is said in its note', async () => {
+  it('the last reply is the latest one, however long the chat', async () => {
+    n = 0;
+    const t = setup();
+    await t.daemon.spawnChat({ folder: t.folder });
+    const c1 = await t.daemon.spawnChat({ folder: t.folder });
+    // Far more than the ten 50-event pages a forward read used to stop at.
+    const replies = Array.from({ length: 700 }, (_, i) => ({
+      type: 'assistant' as const,
+      content: i === 699 ? 'The very latest reply.' : `older reply ${i}`,
+      sessionId: 'c1-native',
+    }));
+    t.sdk.enqueue(replies);
+    await t.daemon.sendInput({ chatId: c1, message: 'go', localId: 'long' });
+    await tick(200);
+    expect(t.daemon.readHistory({ chatId: c1, fromSeq: 600 }).events.length).toBeGreaterThan(0);
+    t.sdk.enqueue([{ type: 'assistant', content: 'ok', sessionId: 'mgr' }]);
+    await t.daemon.deliverFinishedChats({
+      runId: 'long',
+      chats: [{ chatId: c1, hostId: 'd1', folder: t.folder, name: 'Long' }],
+    });
+    await tick();
+    const prompt = t.sdk.lastOptions()!.prompt;
+    expect(prompt).toContain('The very latest reply.');
+    expect(prompt).not.toContain('older reply 698');
+  });
+
+  it('names the host and an unnamed chat’s folder; another host’s chat is read through the peek relay', async () => {
     n = 0;
     const t = setup({
-      historyRemoteChat: async ({ targetChatId }) => {
+      peekRemoteChat: async ({ targetChatId }) => {
         if (targetChatId === 'far') {
           return {
-            events: [
-              {
-                type: 'chat.message',
-                chatId: 'far',
-                role: 'assistant',
-                content: 'Done on the other host.',
-                seq: 3,
-                createdAt: 1,
-              } as WireEvent,
-            ],
+            chat_state: {
+              lastMessages: [{ role: 'assistant', content: 'Done on the other host.' }],
+              lastMessage: 'Done on the other host.',
+            },
+            events: [],
+            truncated: true,
           };
         }
         throw new Error('host offline');
@@ -248,15 +270,40 @@ describe('finished chats', () => {
     await t.daemon.deliverFinishedChats({
       runId: 'r2',
       chats: [
-        { chatId: 'far', hostId: 'd2', folder: '/w', name: 'Far' },
+        { chatId: 'far', hostId: 'd2', hostName: 'Studio Mac', folder: '/w/bus-tracker', name: '' },
         { chatId: 'gone', hostId: 'd3', folder: '/g', name: 'Gone' },
       ],
     });
     await tick();
     const prompt = t.sdk.lastOptions()!.prompt;
+    expect(prompt).toMatch(/^\[Note: Finished · bus-tracker\]\n/);
+    expect(prompt).toContain('Host: Studio Mac');
+    expect(prompt).toContain('Host: d3');
     expect(prompt).toContain('Done on the other host.');
     expect(prompt).toContain('(its last reply could not be read: host offline)');
     expect(prompt.endsWith('2 chats finished.')).toBe(true);
+  });
+
+  it('a delivery the Manager could not take is said in its thread and reported as recorded', async () => {
+    n = 0;
+    const t = setup();
+    await t.daemon.spawnChat({ folder: t.folder });
+    t.daemon.sendInput = async () => {
+      throw new Error('queue full');
+    };
+    t.events.length = 0;
+    const result = await t.daemon.deliverFinishedChats({
+      runId: 'r9',
+      chats: [{ chatId: 'x', hostId: 'd2', folder: '/x', name: 'X' }],
+    });
+    expect(result).toEqual({
+      type: 'manager.finished_result',
+      runId: 'r9',
+      delivered: 0,
+      error: 'queue full',
+      recorded: true,
+    });
+    expect(systemLines(t.events)).toEqual(['Finished chats not delivered: queue full']);
   });
 
   it('a disabled Manager is sent nothing', async () => {

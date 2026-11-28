@@ -27,6 +27,7 @@ import {
   CLOSE_SERVER_RESTARTING,
   restartingReason,
   heldMessageExpiredText,
+  SPECIAL_THREAD_IDS,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
@@ -917,11 +918,26 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       const id = specialThreadHost();
       return id && hostLink.onlineHostIds().includes(id) ? id : undefined;
     },
+    hostName: (hostId) => registry.hostName(hostId),
     deliver: (req) => {
       const id = specialThreadHost();
-      if (!id) return;
+      if (!id) throw new Error('the Manager has no home host');
       hostLink.sendTo(id, 'manager-finished', { type: 'manager.finished_run', ...req });
     },
+    reportFailure: (message) => {
+      void notificationRouter
+        .route({
+          type: 'notify',
+          chatId: SPECIAL_THREAD_IDS.manager,
+          message,
+          priority: 'normal',
+          needsYou: true,
+        })
+        .catch((err: unknown) => {
+          log.error({ err }, 'manager-finished: could not tell the user a delivery failed');
+        });
+    },
+    ...(accountDir ? { path: join(accountDir, 'manager-finished.json') } : {}),
     logger: log.child({ component: 'manager-finished' }),
     idGenerator,
     ...(opts.nowMs ? { now: opts.nowMs } : {}),

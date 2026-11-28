@@ -5344,6 +5344,11 @@ export const ManagerFinishedChat = z
   .object({
     chatId: z.string().min(1),
     hostId: z.string().min(1),
+    /**
+     * The chat's host as the user named it, for the note. Absent when the
+     * server knows no name for the host, and from a server that predates it.
+     */
+    hostName: z.string().min(1).optional(),
     folder: z.string().min(1),
     name: z.string(),
   })
@@ -5372,6 +5377,11 @@ export const ManagerFinishedResultEvent = z
     runId: z.string().min(1),
     delivered: z.number().int().nonnegative(),
     error: z.string().min(1).optional(),
+    /**
+     * With `error`: the host wrote the failure in the Manager's thread, so the
+     * server need not tell the user another way. Absent from an older host.
+     */
+    recorded: z.boolean().optional(),
   })
   .strict();
 export type ManagerFinishedResultEvent = z.infer<typeof ManagerFinishedResultEvent>;

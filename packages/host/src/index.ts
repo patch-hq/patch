@@ -5774,8 +5774,8 @@ async function startHost(
     // asks the outgoing special-thread session to write for itself before
     // it's retired.
     // spec/06 § Finished chats — a finished chat on another host is read
-    // through the same relay `patch_history` uses.
-    historyRemoteChat: historyFromServer,
+    // through the same relay `patch_peek` uses.
+    peekRemoteChat: peekFromServer,
     emit,
     // A side branch's entries go to the server's record only: never through the
     // observers above, and only to a server that keeps branches (spec/04 §
