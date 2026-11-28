@@ -624,6 +624,8 @@ export interface DelegateUpdateInfo {
   followUp?: boolean;
   /** The user paused it: alive and idle until resumed. */
   paused?: boolean;
+  /** Model id it runs on; absent from older hosts. */
+  model?: string;
 }
 
 export interface ChatEventEntry {
@@ -2903,6 +2905,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   : {}),
                 ...(event.followUp ? { followUp: true } : {}),
                 ...(event.paused ? { paused: true } : {}),
+                ...(event.model !== undefined ? { model: event.model } : {}),
               },
             },
           };

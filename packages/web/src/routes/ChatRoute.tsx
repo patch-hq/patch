@@ -50,7 +50,7 @@ import {
   type SystemContextItem,
 } from '@patch/wire';
 import { systemMessageSummary } from '../lib/systemMessageSummary';
-import { harnessForModel, isReservedSpecialThread } from '@patch/wire';
+import { compactModelLabel, harnessForModel, isReservedSpecialThread } from '@patch/wire';
 import { draftLinkedChat, linkedChatError } from '../lib/linkedChat.js';
 import {
   backRecord,
@@ -5712,7 +5712,7 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
   const word = paused === live.length ? 'paused' : 'running';
   const text =
     live.length === 1
-      ? `Agent ${word} · ${first.label}`
+      ? `Agent ${word} · ${first.label}${first.model ? ` · ${compactModelLabel(first.model)}` : ''}`
       : `${live.length} agents ${word}${paused > 0 && paused < live.length ? ` (${paused} paused)` : ''}`;
   return (
     <div className="agent-running-bar-wrap" data-testid="agent-running-bar-wrap">
@@ -5721,7 +5721,9 @@ function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
           ? live.map(([id, d]) => (
               <div className="agent-running-bar-row" key={id} data-testid="agent-running-row">
                 {icon(d)}
-                <span className="agent-running-bar-text">{d.label}</span>
+                <span className="agent-running-bar-text">
+                  {d.model ? `${d.label} · ${compactModelLabel(d.model)}` : d.label}
+                </span>
                 {timing(d)}
                 {controls(id, d)}
               </div>

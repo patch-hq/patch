@@ -2278,6 +2278,8 @@ export const ChatDelegateUpdateEvent = z
     lastActivityAt: z.number().int().nonnegative().optional(),
     /** The current run is a follow-up wake of a settled subagent (by its parent or a timer). */
     followUp: z.boolean().optional(),
+    /** The model id the subagent runs on. Absent from older hosts, or while the subagent has none recorded. */
+    model: z.string().min(1).optional(),
     /**
      * The user paused this subagent: it is alive, idle and waiting to be
      * resumed (status stays `running`, so an older surface shows it as live).

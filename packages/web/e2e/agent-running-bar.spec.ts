@@ -37,6 +37,7 @@ test('one agent carries pause, stop and open-as-chat; several fold to a count', 
     await expect(page.getByTestId(id)).toBeVisible();
   }
   const bar = page.getByTestId('agent-running-bar');
+  await expect(bar).toContainText('Sonnet 5.5');
   expect((await bar.boundingBox())!.height).toBeLessThan(40);
   await page.screenshot({ path: '/tmp/agentbar-controls-one.png' });
 
@@ -45,5 +46,6 @@ test('one agent carries pause, stop and open-as-chat; several fold to a count', 
   await expect(page.getByTestId('agent-stop')).toHaveCount(0);
   await page.getByTestId('agent-running-bar-toggle').click();
   await expect(page.getByTestId('agent-running-row')).toHaveCount(3);
+  await expect(page.getByTestId('agent-running-row').first()).toContainText('Opus 5.5');
   await page.screenshot({ path: '/tmp/agentbar-controls-many.png' });
 });
