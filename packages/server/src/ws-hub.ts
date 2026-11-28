@@ -413,7 +413,7 @@ export class WsHub {
     // Single source of truth with the host-addressing gate: a revoked host
     // is not registered, so it must not appear in the roster either — otherwise
     // a surface renders a host whose every frame is refused.
-    const ids = this.deps.registry.registeredHostIds();
+    const ids = this.deps.registry.listedHostIds();
     // A link can be attached before (or without) a registry record in dev and
     // test bring-ups. It is still a real host with a real id, and a surface
     // must see it in the roster — otherwise the host it is talking to is
@@ -2234,6 +2234,7 @@ export class WsHub {
     // emits them on link auth and on change).
     if (event.type === 'host.host') {
       this.lastHostReport.set(event.hostId, event);
+      this.deps.registry.markHostReported(event.hostId);
       this.hostLastSeenAt.set(event.hostId, Date.now());
       // The name and the Manager flag are SERVER-owned (spec/03: `host.rename` is
       // surface → server, `host.set_manager` server → host). Overwrite what the host

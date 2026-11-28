@@ -35,7 +35,7 @@ import { buildVersionReport, readPublishedArtifact, readWebLayer } from './versi
 import { UpdateControl } from './update-control.js';
 import { isNewer } from './self-update.js';
 import { readAvailableRelease } from './release-mirror.js';
-import { Registry } from './registry.js';
+import { Registry, UNREPORTED_HOST_TTL_MS } from './registry.js';
 import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
 import { ActivityLog } from './activity-log.js';
@@ -1178,10 +1178,18 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     void wsHub.sendToAll({ type: 'notifications.changed', unread });
   // Catch the host build being published after this server started — see
   // WsHub.recheckHostVersions. Cheap: one small file read per tick.
+  const expireUnreported = () => {
+    const gone = registry.expireUnreportedHosts(Date.now(), UNREPORTED_HOST_TTL_MS);
+    if (gone.length > 0) log.warn({ hostIds: gone }, 'removed hosts that never reported in');
+  };
+  expireUnreported();
+  const unreportedSweep = setInterval(expireUnreported, 10 * 60_000);
+  unreportedSweep.unref();
   const hostRecheck = setInterval(() => wsHub.recheckHostVersions(), 30_000);
   hostRecheck.unref();
   app.addHook('onClose', async () => {
     clearInterval(hostRecheck);
+    clearInterval(unreportedSweep);
   });
 
   // spec/03 § Cross-chat tools: relay an agent's `patch.spawn` to the host

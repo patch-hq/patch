@@ -454,3 +454,52 @@ describe('Registry', () => {
     expect(r.listSurfaces()).toHaveLength(1);
   });
 });
+
+describe('hosts that never report in', () => {
+  const rec = (hostId: string, issuedAt: number) => ({
+    hostId,
+    publicKey: 'pk',
+    issuedAt,
+    reported: false,
+  });
+
+  it('are not listed until they report, then are', async () => {
+    const { Registry } = await import('../src/registry.js');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const reg = Registry.load(mkdtempSync(join(tmpdir(), 'reg-')));
+    reg.setDaemonKey(rec('h1', 1000));
+    expect(reg.listedHostIds()).toEqual([]);
+    expect(reg.registeredHostIds()).toEqual(['h1']);
+    reg.markHostReported('h1');
+    expect(reg.listedHostIds()).toEqual(['h1']);
+  });
+
+  it('are removed after the TTL, reported ones are kept', async () => {
+    const { Registry, UNREPORTED_HOST_TTL_MS } = await import('../src/registry.js');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const reg = Registry.load(mkdtempSync(join(tmpdir(), 'reg-')));
+    reg.setDaemonKey(rec('ghost', 1000));
+    reg.setDaemonKey(rec('real', 1000));
+    reg.markHostReported('real');
+    const now = 1000 * 1000 + UNREPORTED_HOST_TTL_MS + 1;
+    expect(reg.expireUnreportedHosts(now - 5000, UNREPORTED_HOST_TTL_MS)).toEqual([]);
+    expect(reg.expireUnreportedHosts(now, UNREPORTED_HOST_TTL_MS)).toEqual(['ghost']);
+    expect(reg.registeredHostIds()).toEqual(['real']);
+  });
+
+  it('a re-pair of a reported host keeps it reported', async () => {
+    const { Registry } = await import('../src/registry.js');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const reg = Registry.load(mkdtempSync(join(tmpdir(), 'reg-')));
+    reg.setDaemonKey(rec('h', 1000));
+    reg.markHostReported('h');
+    reg.setDaemonKey(rec('h', 2000));
+    expect(reg.listedHostIds()).toEqual(['h']);
+  });
+});
