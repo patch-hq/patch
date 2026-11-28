@@ -17,11 +17,11 @@
  * that makes a wire frame's new shape mandatory rather than additive — that is
  * the moment older hosts stop being able to hold up their end.
  */
-// 1.1.2186 is the first host whose `patch.send_to` carries the `localId` the
+// 1.1.2188 is the first host whose `patch.send_to` carries the `localId` the
 // message is delivered under, and that asks for a sent message's reply with
 // `patch.reply.request` (spec/03 § Cross-chat tools): an older host's sends
 // fail to decode here, and a relayed one with `localId` fails to decode there.
-export const MIN_SUPPORTED_HOST_VERSION = '1.1.2186';
+export const MIN_SUPPORTED_HOST_VERSION = '1.1.2188';
 
 export type HostSupport =
   | { supported: true }
