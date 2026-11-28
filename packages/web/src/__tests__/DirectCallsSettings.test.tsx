@@ -52,6 +52,16 @@ const DEVICES = [
     speechEngines: { stt: [], tts: [] },
   },
   {
+    surfaceId: 'mac-2',
+    surfaceKind: 'desktop',
+    label: 'Work Mac',
+    issuedAt: 4,
+    status: 'online',
+    lastHeartbeat: 1,
+    isCurrent: false,
+    speechEngines: MAC,
+  },
+  {
     surfaceId: 'old-1',
     surfaceKind: 'web',
     label: 'Old browser',
@@ -62,7 +72,15 @@ const DEVICES = [
   },
 ];
 
-function setup() {
+const MAC_SETUP = {
+  stt: { engine: 'parakeet' as const, model: 'parakeet-tdt-0.6b-v3' },
+  tts: { engine: 'kokoro' as const, model: 'kokoro-82m', voice: 'af_heart' },
+};
+
+function setup(saved: Record<string, unknown> = { 'mac-1': MAC_SETUP }) {
+  usePreferencesStore.setState((st) => ({
+    preferences: { ...st.preferences, deviceDirectCall: saved as never },
+  }));
   const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
   vi.stubGlobal('fetch', makeFetch({ devices: DEVICES }, server.handler));
   return server;
@@ -88,6 +106,8 @@ describe('Direct calls', () => {
     expect(screen.getByTestId('direct-linux-1-summary')).toHaveTextContent('No speech engine');
     expect(screen.getByTestId('direct-linux-1-row')).toHaveTextContent('seen 1h ago');
     expect(screen.getByTestId('direct-old-1-summary')).toHaveTextContent('Not reported yet');
+    // Engines but nothing saved: it is set up by the user, never by a pick.
+    expect(screen.getByTestId('direct-mac-2-summary')).toHaveTextContent('Set up');
   });
 
   it('opens to its steps, offering only what the device reported, labelled On device / Cloud', async () => {
@@ -112,35 +132,41 @@ describe('Direct calls', () => {
     expect(screen.queryByTestId('direct-mac-1-tone')).toBeNull();
   });
 
-  it('a change writes that device’s setup; a new engine starts its own steps over', async () => {
+  it('an unset device offers its steps one at a time, choosing nothing for it, and writes each choice', async () => {
+    const server = setup();
+    renderSettings('/settings/voice');
+    fireEvent.click(within(await screen.findByTestId('direct-mac-2-row')).getByRole('button'));
+    expect(screen.getByTestId('direct-mac-2-stt-parakeet')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.queryByTestId('direct-mac-2-stt-model')).toBeNull();
+    expect(screen.queryByTestId('direct-mac-2-tts')).toBeNull();
+    fireEvent.click(screen.getByTestId('direct-mac-2-stt-groq'));
+    await waitFor(() => expect(server.writes).toHaveLength(1));
+    expect(server.writes[0]).toEqual({
+      deviceDirectCall: { 'mac-1': MAC_SETUP, 'mac-2': { stt: { engine: 'groq' } } },
+    });
+  });
+
+  it('a new text to speech engine starts its own steps over', async () => {
     const server = setup();
     renderSettings('/settings/voice');
     fireEvent.click(within(await screen.findByTestId('direct-mac-1-row')).getByRole('button'));
     fireEvent.click(screen.getByTestId('direct-mac-1-tts-elevenlabs'));
     await waitFor(() => expect(server.writes).toHaveLength(1));
     expect(server.writes[0]).toEqual({
-      deviceDirectCall: {
-        'mac-1': {
-          stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
-          tts: { engine: 'elevenlabs' },
-        },
-      },
+      deviceDirectCall: { 'mac-1': { stt: MAC_SETUP.stt, tts: { engine: 'elevenlabs' } } },
     });
   });
 
   it('ElevenLabs shows tone, stability, similarity, style and speed', async () => {
-    setup();
-    usePreferencesStore.setState((s) => ({
-      preferences: {
-        ...s.preferences,
-        deviceDirectCall: {
-          'mac-1': {
-            stt: { engine: 'groq' },
-            tts: { engine: 'elevenlabs', voice: 'v-rachel' },
-          },
-        },
+    setup({
+      'mac-1': {
+        stt: { engine: 'groq', model: 'whisper-large-v3-turbo' },
+        tts: { engine: 'elevenlabs', model: 'eleven_flash_v2_5', voice: 'v-rachel' },
       },
-    }));
+    });
     renderSettings('/settings/voice');
     expect(await screen.findByTestId('direct-mac-1-summary')).toHaveTextContent(
       'Groq Whisper → ElevenLabs',

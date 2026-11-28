@@ -252,7 +252,17 @@ test.describe('Settings — Direct calls', () => {
   test('each device in one line; a row opens to its steps, and a change is written', async ({
     page,
   }) => {
-    const server = await stubSettingsApi(page, { payload: { devices: [mac, linux] } });
+    const server = await stubSettingsApi(page, {
+      payload: { devices: [mac, linux] },
+      preferences: {
+        deviceDirectCall: {
+          'mac-1': {
+            stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' },
+            tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
+          },
+        },
+      },
+    });
     await page.goto(settingsUrl('voice'));
     await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → Kokoro');
     await expect(page.getByTestId('direct-linux-1-summary')).toHaveText('No speech engine');
@@ -272,6 +282,10 @@ test.describe('Settings — Direct calls', () => {
         },
       },
     });
+    // The new engine's steps start over: the row reads Set up until they are chosen.
+    await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Set up');
+    await page.getByTestId('direct-mac-1-tts-model').selectOption('eleven_flash_v2_5');
+    await page.getByTestId('direct-mac-1-voice').selectOption('v-rachel');
     await expect(page.getByTestId('direct-mac-1-summary')).toHaveText('Parakeet → ElevenLabs');
     await expect(page.getByTestId('direct-mac-1-stability')).toBeVisible();
   });

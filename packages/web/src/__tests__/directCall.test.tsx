@@ -15,6 +15,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { NOT_SET_UP } from '@patch/wire/direct-call';
 import { VoiceBar } from '../components/VoiceBar.js';
 import { endVoiceCall } from '../lib/voiceController.js';
 import { startDirectCall, directCallActive, directCallLine } from '../lib/direct/directCall.js';
@@ -63,6 +64,17 @@ function fakeRecorder() {
   return { rec, speak, cancel };
 }
 
+/** This browser's saved direct-call setup: the cloud engines its host has keys for. */
+const PREFS = {
+  ...DEFAULT_PREFERENCES,
+  deviceDirectCall: {
+    s1: {
+      stt: { engine: 'groq' as const, model: 'whisper-large-v3-turbo' },
+      tts: { engine: 'openai' as const, model: 'gpt-4o-mini-tts', voice: 'alloy' },
+    },
+  },
+};
+
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) await act(async () => {});
 };
@@ -70,7 +82,7 @@ const flush = async (): Promise<void> => {
 beforeEach(() => {
   useVoiceStore.setState({ call: null, session: null, note: null });
   usePresenceStore.setState({ hosts: { h1: hostWithKeys(['groq', 'openai']) }, surfaceId: 's1' });
-  usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
+  usePreferencesStore.setState({ preferences: { ...PREFS } });
   useChatStore.setState({ chats: { c1: row(false) }, timelines: { c1: [] } });
 });
 afterEach(() => {
@@ -85,6 +97,14 @@ describe('direct call', () => {
     await startDirectCall('c1');
     expect(useVoiceStore.getState().call).toBeNull();
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
+  });
+
+  it('a browser with engines but no saved setup is not set up: nothing is chosen for it', async () => {
+    usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
+    const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    await startDirectCall('c1');
+    expect(useVoiceStore.getState().call).toBeNull();
+    expect(pushError).toHaveBeenCalledWith(`Cannot call direct: ${NOT_SET_UP}`);
   });
 
   it('reads speech with the cloud engine, sends it as a voice turn, and reads the reply aloud', async () => {
@@ -189,7 +209,7 @@ describe('direct call', () => {
     const mic = fakeRecorder();
     const sent: string[] = [];
     usePreferencesStore.setState({
-      preferences: { ...DEFAULT_PREFERENCES, dictationPauseSeconds: 2 },
+      preferences: { ...PREFS, dictationPauseSeconds: 2 },
     });
     await startDirectCall('c1', {
       recorder: async () => mic.rec,
@@ -280,7 +300,10 @@ describe('pausing a direct call', () => {
       },
       turn: async () => ({ label: 'Smart Turn', probability: async () => 0.9 }),
       post: (async () => ({})) as never,
-      player: () => ({ prepare: () => ({ play: async () => {}, stop: () => {} }), close: () => {} }),
+      player: () => ({
+        prepare: () => ({ play: async () => {}, stop: () => {} }),
+        close: () => {},
+      }),
     });
     expect(directCallActive()).toBe(true);
     pauseVoiceCall();
