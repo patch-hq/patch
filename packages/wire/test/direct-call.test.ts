@@ -38,26 +38,16 @@ describe('resolveDirectCall', () => {
     });
   });
 
-  it('with no setup saved the device is not set up: nothing is chosen for it', () => {
-    expect(resolveDirectCall(desktop, undefined, {})).toEqual({ ok: false, reason: NOT_SET_UP });
-    expect(
-      resolveDirectCall(
-        desktop,
-        { stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' } },
-        {},
-      ),
-    ).toEqual({ ok: false, reason: NOT_SET_UP });
-    // A setup missing a model or a voice is not finished either.
-    expect(
-      resolveDirectCall(
-        desktop,
-        {
-          stt: { engine: 'parakeet' },
-          tts: { engine: 'kokoro', model: 'kokoro-82m', voice: 'af_heart' },
-        },
-        {},
-      ),
-    ).toEqual({ ok: false, reason: NOT_SET_UP });
+  it('with no setup saved the device runs on its first engines, on-device first', () => {
+    const r = resolveDirectCall(desktop, undefined, {});
+    expect(r.ok && directCallSummary(r.call)).toBe('Parakeet → Kokoro');
+    // An unfinished setup (no text to speech yet) is completed the same way.
+    const partial = resolveDirectCall(
+      desktop,
+      { stt: { engine: 'parakeet', model: 'parakeet-tdt-0.6b-v3' } },
+      {},
+    );
+    expect(partial.ok && directCallSummary(partial.call)).toBe('Parakeet → Kokoro');
     const done = resolveDirectCall(
       desktop,
       {
@@ -270,16 +260,16 @@ describe('cloudSpeechEnginesFromHosts', () => {
 });
 
 describe('Settings steps (directCallSteps / changeDirectCall)', () => {
-  it('offers only what the device reported, on-device first; with nothing saved, nothing is chosen', () => {
+  it('offers only what the device reported, on-device first; with nothing saved, the first engines show', () => {
     const s = directCallSteps(desktop, undefined, {});
     expect(s.stt.options).toEqual([
       { engine: 'parakeet', label: 'Parakeet', where: 'device' },
       { engine: 'groq', label: 'Groq Whisper', where: 'cloud' },
     ]);
     expect(s.tts.options.map((o) => o.engine)).toEqual(['kokoro', 'elevenlabs']);
-    expect(s.stt.engine).toBeUndefined();
-    expect(s.tts.engine).toBeUndefined();
-    expect(s.summary).toBe('Set up');
+    expect(s.stt.engine).toBe('parakeet');
+    expect(s.tts.engine).toBe('kokoro');
+    expect(s.summary).toBe('Parakeet → Kokoro');
     expect(s.problem).toBeUndefined();
   });
 

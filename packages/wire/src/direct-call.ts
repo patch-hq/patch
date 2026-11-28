@@ -339,21 +339,24 @@ export function resolveDirectCall(
   if (report.stt.length === 0 || report.tts.length === 0) {
     return { ok: false, reason: NO_SPEECH_ENGINE };
   }
-  // Nothing is chosen for the user: every step comes from the saved setup.
-  if (setup === undefined || setup.tts === undefined) return { ok: false, reason: NOT_SET_UP };
+  // A device with no saved setup (or an unfinished one) runs on the first engines
+  // it reports, on-device first, with each engine's first model and voice.
+  const stt0 = setup?.stt ?? { engine: preferDevice(report.stt)[0]!.engine };
+  const tts0 = setup?.tts ?? { engine: preferDevice(report.tts)[0]!.engine };
+  const cfg = { stt: stt0, tts: tts0 };
   const fix = 'Pick another in Settings → Voice calls → Direct calls.';
-  const stt = report.stt.find((e) => e.engine === setup.stt.engine);
+  const stt = report.stt.find((e) => e.engine === cfg.stt.engine);
   if (!stt) {
     return {
       ok: false,
-      reason: `This device's speech to text is set to ${STT_ENGINE_LABEL[setup.stt.engine]}, which it does not have. ${fix}`,
+      reason: `This device's speech to text is set to ${STT_ENGINE_LABEL[cfg.stt.engine]}, which it does not have. ${fix}`,
     };
   }
-  const tts = report.tts.find((e) => e.engine === setup.tts!.engine);
+  const tts = report.tts.find((e) => e.engine === cfg.tts.engine);
   if (!tts) {
     return {
       ok: false,
-      reason: `This device's text to speech is set to ${TTS_ENGINE_LABEL[setup.tts.engine]}, which it does not have. ${fix}`,
+      reason: `This device's text to speech is set to ${TTS_ENGINE_LABEL[cfg.tts.engine]}, which it does not have. ${fix}`,
     };
   }
   for (const [e, label] of [
@@ -368,10 +371,15 @@ export function resolveDirectCall(
       reason: `${TTS_ENGINE_LABEL[tts.engine]} has no voice to speak with. ${fix}`,
     };
   }
-  const { model: sttModel } = setup.stt;
-  const { model: ttsModel, voice } = setup.tts;
-  if (sttModel === undefined || ttsModel === undefined) return { ok: false, reason: NOT_SET_UP };
-  if (voice === undefined && tts.voices.length > 0) return { ok: false, reason: NOT_SET_UP };
+  const sttModel = cfg.stt.model ?? stt.models[0];
+  const ttsModel = cfg.tts.model ?? tts.models[0];
+  const voice = cfg.tts.voice ?? tts.voices[0];
+  if (sttModel === undefined) {
+    return { ok: false, reason: `${STT_ENGINE_LABEL[stt.engine]} reports no model. ${fix}` };
+  }
+  if (ttsModel === undefined) {
+    return { ok: false, reason: `${TTS_ENGINE_LABEL[tts.engine]} reports no model. ${fix}` };
+  }
   for (const [model, models, label] of [
     [sttModel, stt.models, STT_ENGINE_LABEL[stt.engine]],
     [ttsModel, tts.models, TTS_ENGINE_LABEL[tts.engine]],
@@ -391,7 +399,7 @@ export function resolveDirectCall(
   }
   const toneText = toneFor(tones, tts.engine, voice);
   const sound = {
-    ...soundValues(DIRECT_TTS_ENGINES[tts.engine], setup.tts.sound ?? {}),
+    ...soundValues(DIRECT_TTS_ENGINES[tts.engine], cfg.tts.sound ?? {}),
     ...(toneText !== undefined ? { tone: toneText } : {}),
   } as DirectTtsSound;
   return {
@@ -526,8 +534,9 @@ export function directCallSteps(
   tones: VoiceTones,
 ): DirectCallSteps {
   const resolved = resolveDirectCall(report, setup, tones);
-  const sttEngine = setup?.stt.engine;
-  const ttsEngine = setup?.tts?.engine;
+  const call = resolved.ok ? resolved.call : undefined;
+  const sttEngine = setup?.stt.engine ?? call?.stt.engine;
+  const ttsEngine = setup?.tts?.engine ?? call?.tts.engine;
   const stt = report.stt.find((e) => e.engine === sttEngine);
   const tts = report.tts.find((e) => e.engine === ttsEngine);
   const option = <E extends string>(e: { engine: E; where: SpeechEngineWhere }, label: string) => ({
@@ -540,13 +549,13 @@ export function directCallSteps(
       options: preferDevice(report.stt).map((e) => option(e, STT_ENGINE_LABEL[e.engine])),
       engine: sttEngine,
     },
-    sttModel: { options: stt?.models ?? [], value: setup?.stt.model },
+    sttModel: { options: stt?.models ?? [], value: setup?.stt.model ?? call?.stt.model },
     tts: {
       options: preferDevice(report.tts).map((e) => option(e, TTS_ENGINE_LABEL[e.engine])),
       engine: ttsEngine,
     },
-    ttsModel: { options: tts?.models ?? [], value: setup?.tts?.model },
-    voice: { options: tts?.voices ?? [], value: setup?.tts?.voice },
+    ttsModel: { options: tts?.models ?? [], value: setup?.tts?.model ?? call?.tts.model },
+    voice: { options: tts?.voices ?? [], value: setup?.tts?.voice ?? call?.tts.voice },
     sound: setup?.tts?.sound ?? {},
     summary: resolved.ok
       ? directCallSummary(resolved.call)

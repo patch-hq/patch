@@ -107,8 +107,8 @@ describe('Direct calls', () => {
     expect(screen.getByTestId('direct-linux-1-summary')).toHaveTextContent('No speech engine');
     expect(screen.getByTestId('direct-linux-1-row')).toHaveTextContent('seen 1h ago');
     expect(screen.getByTestId('direct-old-1-summary')).toHaveTextContent('Not reported yet');
-    // Engines but nothing saved: it is set up by the user, never by a pick.
-    expect(screen.getByTestId('direct-mac-2-summary')).toHaveTextContent('Set up');
+    // Engines but nothing saved: it runs on its first engines.
+    expect(screen.getByTestId('direct-mac-2-summary')).toHaveTextContent('Parakeet → Kokoro');
   });
 
   it('opens to its steps, offering only what the device reported, labelled On device / Cloud', async () => {
@@ -133,16 +133,11 @@ describe('Direct calls', () => {
     expect(screen.queryByTestId('direct-mac-1-tone')).toBeNull();
   });
 
-  it('an unset device offers its steps one at a time, choosing nothing for it, and writes each choice', async () => {
+  it('an unset device shows its default engines and writes each choice', async () => {
     const server = setup();
     renderSettings('/settings/voice');
     fireEvent.click(within(await screen.findByTestId('direct-mac-2-row')).getByRole('button'));
-    expect(screen.getByTestId('direct-mac-2-stt-parakeet')).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-    expect(screen.queryByTestId('direct-mac-2-stt-model')).toBeNull();
-    expect(screen.queryByTestId('direct-mac-2-tts')).toBeNull();
+    expect(screen.getByTestId('direct-mac-2-stt-parakeet')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByTestId('direct-mac-2-stt-groq'));
     await waitFor(() => expect(server.writes).toHaveLength(1));
     expect(server.writes[0]).toEqual({

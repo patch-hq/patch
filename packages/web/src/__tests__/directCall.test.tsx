@@ -109,12 +109,21 @@ describe('direct call', () => {
     expect(pushError).toHaveBeenCalledWith('Cannot call direct: No speech engine');
   });
 
-  it('a browser with engines but no saved setup is not set up: nothing is chosen for it', async () => {
+  it('a browser with engines but no saved setup calls on its first engines', async () => {
     usePreferencesStore.setState({ preferences: { ...DEFAULT_PREFERENCES } });
     const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
-    await startDirectCall('c1');
-    expect(useVoiceStore.getState().call).toBeNull();
-    expect(pushError).toHaveBeenCalledWith(`Cannot call direct: ${NOT_SET_UP}`);
+    const mic = fakeRecorder();
+    await startDirectCall('c1', {
+      recorder: async () => mic.rec,
+      turn: async () => ({ label: 'Smart Turn', probability: async () => 0.9 }),
+      post: (async () => ({ ok: true })) as never,
+      player: () => ({
+        prepare: (): PreparedSpeech => ({ play: async () => {}, stop: () => {} }),
+        close: () => {},
+      }),
+    });
+    expect(pushError).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().call).not.toBeNull();
   });
 
   it('reads speech with the cloud engine, sends it as a voice turn, and reads the reply aloud', async () => {
