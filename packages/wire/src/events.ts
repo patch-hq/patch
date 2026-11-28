@@ -2831,6 +2831,8 @@ export const SharedSettings = z
     defaultModel: z.string().min(1),
     /** The model a job's chat runs on unless the job's action names its own. */
     jobDefaultModel: z.string().min(1),
+    /** The model a `patch_agent` child runs on unless the call names one; otherwise it follows its parent. */
+    agentDefaultModel: z.string().min(1),
     specialThreadModel: z.string().min(1),
     rotationEnabled: z.boolean(),
     rotationTime: TimeOfDay,
@@ -3083,6 +3085,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // strongest model rather than the cheapest.
   defaultModel: 'claude-opus-5',
   jobDefaultModel: 'claude-opus-5',
+  // Research and hoovering children do not need the parent's strongest model.
+  agentDefaultModel: 'claude-sonnet-5-5',
   specialThreadModel: 'claude-sonnet-5',
   rotationEnabled: true,
   rotationTime: '02:00',

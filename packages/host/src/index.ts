@@ -1696,6 +1696,9 @@ async function startHost(
    */
   let defaultModel: string | undefined = persistedHostState.defaultModel;
 
+  /** The account's `agentDefaultModel`, mirrored down over `host.settings`. Not persisted: a delegate cannot start before the first push. */
+  let agentDefaultModel: string | undefined;
+
   /** Take the account default the server just sent, and tell the surfaces. */
   const setDefaultModel = (model: string): void => {
     if (model === defaultModel) return;
@@ -2426,6 +2429,7 @@ async function startHost(
     modelEndpoints.apply(endpointSettings, endpointKeys);
     acpRegistry.setConfigured(shared.acpAgents);
     setDefaultModel(shared.defaultModel);
+    agentDefaultModel = shared.agentDefaultModel;
     if (shared.specialThreadModel !== specialThreadModel) {
       specialThreadModel = shared.specialThreadModel;
       applySpecialThreadModel();
@@ -5606,6 +5610,7 @@ async function startHost(
     // spec/04 § Spawn — a spawn naming no model takes THIS host's last-used
     // model, and every spawn that names one sets it.
     defaultModel: () => defaultModel,
+    agentDefaultModel: () => agentDefaultModel,
     // spec/04 § Model — a mid-chat model change is checked against the model
     // list THIS host actually offers, so an id it cannot run is refused
     // naming it rather than handed to the backend to fail obscurely later. The

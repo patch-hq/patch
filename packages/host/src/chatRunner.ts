@@ -324,6 +324,12 @@ export interface HostOptions {
    */
   defaultModel?: () => string | undefined;
   /**
+   * The account's `agentDefaultModel`: what a `patch_agent` child runs on when
+   * the call names no model. Unset (not yet pushed / not wired) leaves the
+   * child on its parent's model.
+   */
+  agentDefaultModel?: () => string | undefined;
+  /**
    * Every model id this host's catalogue currently offers (spec/02 § Model
    * catalogue), used to validate a mid-chat model change (spec/04 § Model).
    * Async because reading the catalogue can mean going to the provider; in
@@ -5121,8 +5127,9 @@ export class Daemon {
   /**
    * `patch_delegate` — create a subagent chat under `parentChatId`, start it
    * on `prompt`, and return immediately (mirrors `patch_watch`'s shape: the
-   * caller does not await completion). Defaults folder/model to the PARENT
-   * chat's own, per spec. The label shown on the parent's tool row and in the
+   * caller does not await completion). Defaults the folder to the PARENT
+   * chat's own, and the model to the account's `agentDefaultModel` (then the
+   * parent's own). The label shown on the parent's tool row and in the
    * `[from <label>]` delivery is derived from the prompt, the same way a
    * chat's sidebar preview is.
    */
@@ -5157,11 +5164,14 @@ export class Daemon {
       await this.spawnChat({
         chatId,
         folder: opts.folder ?? parent.folder,
+        // explicit model > account agentDefaultModel > parent's model
         ...(opts.model !== undefined
           ? { model: opts.model }
-          : parent.model !== undefined
-            ? { model: parent.model }
-            : {}),
+          : this.opts.agentDefaultModel?.() !== undefined
+            ? { model: this.opts.agentDefaultModel() as string }
+            : parent.model !== undefined
+              ? { model: parent.model }
+              : {}),
         permissionMode: parent.permissionMode,
         // A parent locked to an account is on it for a reason (often a move off
         // a spent one); the child follows it. An unlocked parent leaves the

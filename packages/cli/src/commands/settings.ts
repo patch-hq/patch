@@ -276,6 +276,7 @@ export function parseOwnSettingValue(setting: OwnSetting, raw: string): number {
 const SETTING_KEYS: Record<string, string> = {
   'permission-mode': 'permissionModeDefault',
   'default-model': 'defaultModel',
+  'agent-default-model': 'agentDefaultModel',
   'question-expiry': 'questionExpiry',
   'question-expiry-seconds': 'questionExpirySeconds',
   // Retired: kept so a script that sets it still works; the server reads it as

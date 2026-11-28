@@ -94,6 +94,32 @@ describe('patch_delegate', () => {
     expect(children[1]?.preferredAccountId).toBeUndefined();
   });
 
+  it("picks a child's model: explicit > account agentDefaultModel > parent's", async () => {
+    const { daemon, sdk, folder } = setup();
+    const spawned: Array<{ model?: string; subagent?: unknown }> = [];
+    const realSpawn = daemon.spawnChat.bind(daemon);
+    daemon.spawnChat = ((req) => {
+      spawned.push(req);
+      return realSpawn(req);
+    }) as typeof daemon.spawnChat;
+    const parent = await daemon.spawnChat({ folder, model: 'parent-model' });
+    const run = async (model?: string) => {
+      sdk.enqueue([{ type: 'assistant', content: 'ok' }, { type: 'result' }]);
+      await daemon.createDelegate({
+        parentChatId: parent,
+        prompt: 'x',
+        ...(model ? { model } : {}),
+      });
+    };
+    await run();
+    (daemon as unknown as { opts: { agentDefaultModel: () => string } }).opts.agentDefaultModel =
+      () => 'agent-model';
+    await run();
+    await run('explicit-model');
+    const children = spawned.filter((r) => r.subagent !== undefined).map((r) => r.model);
+    expect(children).toEqual(['parent-model', 'agent-model', 'explicit-model']);
+  });
+
   it("moves a child with its parent when the parent's account changes, but not one with its own", async () => {
     const { daemon, sdk, folder } = setup();
     const parent = await daemon.spawnChat({ folder, preferredAccountId: 'acc-1' });
