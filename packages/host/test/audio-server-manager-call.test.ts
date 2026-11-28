@@ -1,7 +1,8 @@
 // Integration: a hosted voice call to the Manager (spec/07 § A call to the
 // Manager), end to end on the host — a real audio WSS, the real audio server
 // choosing the engine, a real GeminiLiveSession (its provider socket faked),
-// the real manager tools and the real reply bridge. Only the chat host is a
+// the real manager tools, and a reply bridge standing in for the server's
+// record of the target chat. Only the chat host is a
 // fake: when a message is delivered it plays out the target chat's turn as the
 // host's own wire events (the user message carrying the sent localId, running,
 // the agent's answer, idle). No request leaves this process.
@@ -191,17 +192,13 @@ describe('audio server — a hosted call to the Manager', () => {
           lastUpdated: Date.now(),
         },
       ],
-      isLocal: () => true,
-      chatDetail: () => ({ name: null, status: null, goal: null, openTodos: [], turns: [] }),
-      submitInput: async (req) => {
+      peekChat: async (chatId) => ({ chatId, lastMessages: [] }),
+      deliver: async (req) => {
         delivered.push(req);
       },
-      awaitReply: (chatId, localId) =>
+      // Stands in for the server's record: the reply to the delivered message, by its id.
+      awaitReply: ({ chatId, localId }) =>
         bridge.awaitReply(chatId, undefined, localId).then((reply) => reply.text),
-      abandonReply: (chatId, err) => bridge.abandon(chatId, err),
-      sendRemote: async () => {
-        throw new Error('no other hosts in this test');
-      },
       recordNote: (line) => managerNotes.push(line),
     });
     const cfg: VoiceConfig = {

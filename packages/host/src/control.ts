@@ -30,7 +30,6 @@ import {
   BACKEND_IDS,
   MeetingAgentNotesEdit,
   ReminderEvery,
-  formatChatSend,
   isReservedSpecialThread,
 } from '@patch/wire';
 import type {
@@ -94,6 +93,7 @@ import {
 import { RateLimiter } from './rate-limit.js';
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
+import { createChatDelivery } from './chatDelivery.js';
 import { probeFolderAccess } from './folderAccess.js';
 
 /** A stop refused because the chat's provider does not declare interrupt (spec/02 § Provider adapters). */
@@ -282,6 +282,8 @@ export interface BuildOptions {
     sourceChatId: string;
     targetChatId: string;
     message: string;
+    /** The id the message is delivered under, so its reply can be found by it. */
+    localId: string;
     voicePrefix?: string;
     /** A visible caller brings the recipient into view; hidden automation does not. */
     revealTarget: boolean;
@@ -1103,6 +1105,15 @@ function isSnoozedNow(state: { snoozedUntil: number | null } | undefined): boole
 export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInstance> {
   const isForeignSpecialThread = (chatId: string): boolean =>
     opts.runsManager !== undefined && !opts.runsManager() && isReservedSpecialThread(chatId);
+  // patch_send_to's delivery: the one shared with the Manager call's send_to_chat.
+  const deliverToChat =
+    opts.daemon &&
+    createChatDelivery({
+      daemon: opts.daemon,
+      ...(opts.runsManager ? { runsManager: opts.runsManager } : {}),
+      ...(opts.sendToRemoteChat ? { sendToRemoteChat: opts.sendToRemoteChat } : {}),
+      ...(opts.emitWire ? { emitWire: opts.emitWire } : {}),
+    });
   // forceCloseConnections: the host's own MCP servers and the CLI keep
   // connections open, some on requests that wait for the user. `close()` must
   // end them, not wait for them (spec/02 § Restarting the host).
@@ -2131,10 +2142,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // still reveals, same safe default as before.
     const callerState = opts.daemon!.chatState.get(callerChatId);
     const revealTarget = callerState?.hidden !== true;
-    // What lands in the target names where it came from (`@patch/wire`
-    // chat-send): the recipient's agent knows who to answer, and surfaces draw
-    // it as a "From <chat>" card. The audit record and dedupe keep the bare text.
-    const delivered = formatChatSend(callerChatId, callerState?.name ?? null, message);
     const localId = parsed.data.localId ?? randomUUID();
     const dedupeKey = JSON.stringify([
       callerChatId,
@@ -2179,39 +2186,24 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       if (dedupeClaimed) recentSendTos.delete(dedupeKey);
     };
     try {
-      // Armed before the message lands so the evaluator judges the very turn
-      // this message starts. A chat that is not on this host throws
-      // ChatNotFoundError here and is refused below (NO FALLBACK).
-      if (isForeignSpecialThread(chatId)) throw new ChatNotFoundError(chatId);
+      // A goal is set on a chat here only; elsewhere it is refused below.
+      if (goal !== undefined) {
+        if (isForeignSpecialThread(chatId)) throw new ChatNotFoundError(chatId);
+        await opts.daemon!.setGoal(chatId, goal);
+      }
       // Read before the send: delivering un-archives the target, and the sender
       // is told it was archived (spec/04 § Lifecycle).
       const targetWasArchived = opts.daemon!.chatState.get(chatId)?.status === 'archived';
-      if (goal !== undefined) await opts.daemon!.setGoal(chatId, goal);
       // Accepted, not finished: the sender is inside its own turn and must not
       // wait out the target's.
-      await opts.daemon!.submitInput({
+      await deliverToChat!({
+        callerChatId,
         chatId,
-        message: delivered,
+        message,
         localId,
+        revealTarget,
         ...(voicePrefix !== undefined ? { voicePrefix } : {}),
-        // spec/09 § Whose turn it was — the destination of a `send_to` is an
-        // agent, not a human (spec/09 § `notify` vs `send_to`). Nobody is
-        // waiting on a doorbell for it; a chat that needs the user's attention
-        // asks for it with patch_notify.
-        origin: 'machine',
-        // Visible agent-to-agent handoff brings the target into the list. Hidden
-        // automation-to-automation traffic leaves the target hidden.
-        fromAgent: revealTarget,
       });
-      if (opts.emitWire) {
-        opts.emitWire({
-          type: 'patch.send_to',
-          sourceChatId: callerChatId,
-          targetChatId: chatId,
-          message,
-          revealTarget,
-        });
-      }
       toolLog({
         tool: 'patch_send_to',
         callerChatId,
@@ -2228,62 +2220,15 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           }
         : { ok: true, queued: true };
     } catch (err) {
-      const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
-      // Not on THIS host — spec/03 § Cross-chat tools, same relay
-      // `patch_peek`/`patch_history` use above. NO FALLBACK: a target that
-      // lives on another registered host must get delivered there, or a real
-      // error naming why it couldn't — never a silent 404 for a chat that
-      // does exist, just not here.
-      if (code === 'chat_not_found' && goal !== undefined) {
-        releaseClaim();
-        toolLog({
-          tool: 'patch_send_to',
-          callerChatId,
-          targetChatId: chatId,
-          durationMs: Date.now() - start,
-          ok: false,
-          err: 'goal_remote_unsupported',
-        });
-        return reply.code(400).send({
-          error: 'goal_remote_unsupported',
-          message: `patch_send_to: chat ${chatId} is not on this host, and a goal can only be set on a chat here. Nothing was sent.`,
-        });
-      }
-      if (code === 'chat_not_found' && opts.sendToRemoteChat) {
-        try {
-          await opts.sendToRemoteChat({
-            sourceChatId: callerChatId,
-            targetChatId: chatId,
-            message: delivered,
-            revealTarget,
-            ...(voicePrefix !== undefined ? { voicePrefix } : {}),
-          });
-          toolLog({
-            tool: 'patch_send_to',
-            callerChatId,
-            targetChatId: chatId,
-            durationMs: Date.now() - start,
-            ok: true,
-          });
-          return { ok: true, queued: true };
-        } catch (remoteErr) {
-          releaseClaim();
-          const remoteCode = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
-          toolLog({
-            tool: 'patch_send_to',
-            callerChatId,
-            targetChatId: chatId,
-            durationMs: Date.now() - start,
-            ok: false,
-            err: remoteCode,
-          });
-          return reply.code(remoteCode === 'chat_not_found' ? 404 : 502).send({
-            error: remoteCode,
-            message: remoteErr instanceof Error ? remoteErr.message : String(remoteErr),
-          });
-        }
-      }
       releaseClaim();
+      const code =
+        err instanceof RemoteRelayError
+          ? err.code
+          : err instanceof ChatNotFoundError
+            ? goal !== undefined
+              ? 'goal_remote_unsupported'
+              : 'chat_not_found'
+            : 'sdk_error';
       toolLog({
         tool: 'patch_send_to',
         callerChatId,
@@ -2292,7 +2237,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ok: false,
         err: code,
       });
-      return reply.code(code === 'chat_not_found' ? 404 : 500).send({
+      if (code === 'goal_remote_unsupported') {
+        return reply.code(400).send({
+          error: code,
+          message: `patch_send_to: chat ${chatId} is not on this host, and a goal can only be set on a chat here. Nothing was sent.`,
+        });
+      }
+      const status = code === 'chat_not_found' ? 404 : err instanceof RemoteRelayError ? 502 : 500;
+      return reply.code(status).send({
         error: code,
         message: err instanceof Error ? err.message : String(err),
       });

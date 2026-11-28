@@ -83,6 +83,7 @@ describe('cross-host bridge: listing and search', () => {
     const hostLink = {
       sendTo: (hostId: string, _s: string, event: WireEvent) => sent.push({ hostId, event }),
       isOnline: () => true,
+      onHostStatus: () => () => {},
       onEvent: (h: typeof handler) => {
         handler = h;
         return () => undefined;

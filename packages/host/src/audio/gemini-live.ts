@@ -1285,16 +1285,12 @@ export class GeminiLiveSession implements VoiceSessionLike {
         SEND_TO_CHAT_TOOL_NAME,
         'started',
         'WHEN_IDLE',
-        info?.replyComing === false
-          ? `"${info.name}" has the message. It is on another computer, so its reply will not ` +
-              'come back into this call: tell the user it has been sent and that the answer will ' +
-              'be in that chat.'
-          : `"${info?.name ?? name}" has the message and is working on it. If you mention it, ` +
-              'say so in a few words of your own, then carry on. Its reply will arrive as a ' +
-              'message; do not wait for it or keep mentioning it.',
+        `"${info?.name ?? name}" has the message and is working on it. If you mention it, ` +
+          'say so in a few words of your own, then carry on. Its reply will arrive as a ' +
+          'message; do not wait for it or keep mentioning it.',
       );
     };
-    let reply: string | null;
+    let reply: string;
     try {
       const res = await manager.sendToChat({
         chat,
@@ -1344,11 +1340,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
       return;
     }
     answerStarted();
-    if (reply === null) {
-      // Taken, and nothing will come back into the call (a chat on another host).
-      this.call.handoffClosed();
-      return;
-    }
     this.call.push(managerReplyMessage(name, message, reply), { handoffSettled: true });
   }
 

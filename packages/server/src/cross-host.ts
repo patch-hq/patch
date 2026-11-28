@@ -21,6 +21,9 @@
 //   2c. `patch.peek.request` / `patch.history.request` are answered here from
 //      the server's record and chat status (`agent-reads.ts`); no host is
 //      asked, so a chat on an offline host reads like any other.
+//   2d. `patch.reply.request` is answered from the server's record too
+//      (`reply-from-record.ts`), once the turn that took the named message has
+//      ended: at once if it already has, otherwise as the chat's host reports it.
 //   3. `patch.send_to` / `patch.stop` carrying a `requestId` are relayed to
 //      whichever host the chat index says OWNS `targetChatId` — resolved here
 //      rather than by the caller naming a host, because `patch_send_to` takes
@@ -45,6 +48,7 @@ import type { ActivityReader } from './activity.js';
 import type { ChatLogStore } from './chat-log-store.js';
 import { searchChats } from './chat-search.js';
 import { chatHistory, peekChat } from './agent-reads.js';
+import { replyFromRecord } from './reply-from-record.js';
 import type { TimerService } from './timers.js';
 
 /** Surface id used for server-originated frames on the host link. */
@@ -160,7 +164,81 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
     });
   };
 
+  /**
+   * requestId → a `patch.reply.request` whose turn has not ended yet. Checked
+   * against the record whenever the target chat's host reports a message, a
+   * turn's end or an error; dropped when the asking host goes offline, which
+   * fails its own wait.
+   */
+  const replyWaits = new Map<
+    string,
+    { fromHostId: string; sourceChatId: string; targetChatId: string; localId: string }
+  >();
+
+  /** Answer a reply wait if the record now holds its outcome. */
+  const settleReply = (requestId: string): void => {
+    const wait = replyWaits.get(requestId);
+    if (!wait) return;
+    const outcome = replyFromRecord(chatLogStore, wait.targetChatId, wait.localId);
+    if (outcome.state === 'waiting') return;
+    replyWaits.delete(requestId);
+    hostLink.sendTo(wait.fromHostId, BRIDGE_SURFACE_ID, {
+      type: 'patch.reply.response',
+      requestId,
+      sourceChatId: wait.sourceChatId,
+      targetChatId: wait.targetChatId,
+      ...(outcome.state === 'answered'
+        ? { ok: true, result: { text: outcome.text } }
+        : { ok: false, error: { code: 'sdk_error', message: outcome.message } }),
+    });
+  };
+
+  const unsubscribeHostStatus = hostLink.onHostStatus((hostId, status) => {
+    if (status !== 'offline') return;
+    for (const [requestId, wait] of replyWaits) {
+      if (wait.fromHostId === hostId) replyWaits.delete(requestId);
+    }
+  });
+
   const unsubscribe = hostLink.onEvent((event: WireEvent, fromHostId: string | null) => {
+    if (
+      replyWaits.size > 0 &&
+      (event.type === 'chat.message' ||
+        event.type === 'chat.turn_ended' ||
+        event.type === 'chat.error')
+    ) {
+      // Read once every handler has seen the event, so the record holds it.
+      const chatId = event.chatId;
+      setImmediate(() => {
+        for (const [requestId, wait] of replyWaits) {
+          if (wait.targetChatId === chatId) settleReply(requestId);
+        }
+      });
+    }
+
+    if (event.type === 'patch.reply.request') {
+      if (fromHostId === null) return;
+      if (!chatRegistry.get(event.targetChatId)) {
+        hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
+          type: 'patch.reply.response',
+          requestId: event.requestId,
+          sourceChatId: event.sourceChatId,
+          targetChatId: event.targetChatId,
+          ok: false,
+          error: { code: 'chat_not_found', message: `no such chat: ${event.targetChatId}` },
+        });
+        return;
+      }
+      replyWaits.set(event.requestId, {
+        fromHostId,
+        sourceChatId: event.sourceChatId,
+        targetChatId: event.targetChatId,
+        localId: event.localId,
+      });
+      settleReply(event.requestId);
+      return;
+    }
+
     if (event.type === 'patch.spawn') {
       // Its own host: the host already created the chat in-process and this
       // frame is the audit trail. Relaying it back would spawn a second chat.
@@ -437,6 +515,8 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
     spawnRoutes.clear();
     for (const route of relayRoutes.values()) clearTimeout(route.timer);
     relayRoutes.clear();
+    replyWaits.clear();
+    unsubscribeHostStatus();
     unsubscribe();
   };
 }

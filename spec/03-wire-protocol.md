@@ -380,6 +380,8 @@ A `patch_send_to`, `patch_stop` or `patch_spawn` naming an offline host, or a `t
 
 The same holds for a host that is ONLINE and REFUSES: a cross-host call is answered by the named/owning host with its own `.response`, and the calling agent's tool call resolves on that answer — the real result, or that host's own error. A refusal reaching only the target's log would leave the agent believing a call that never landed had succeeded.
 
+A delivered message lands in the target chat under the sender's `localId` (on `patch.send_to`), and `patch.reply.request` asks the server for the reply to it: the server answers from its record of the chat, whichever host owns it, once the turn that took the message has ended — with what the chat's agent said after the message in that turn, or the turn's failure. It is answered at once if the record already holds the outcome, otherwise as the chat's host reports it, however long that takes; the server forgets the wait when the asking host goes offline, and the asking host fails it when its link drops. The Manager call's `send_to_chat` waits on it (`07-voice-app.md` § A call to the Manager).
+
 A `patch.peek.request` or `patch.history.request` always carries `requestId`, and the server answers it with `patch.peek.response` / `patch.history.response` itself; it never relays one to a host. (A frame without one is an older host's audit record of a read it did itself, and is not answered.) A send, stop or spawn frame carries `requestId` only when it is a genuine cross-host relay the caller is waiting on; the same frame with no `requestId` is a same-host call already resolved in-process, kept on the wire purely as an audit record, and the server never relays it.
 
 | Type                     | Payload                                                                                                                                                                         |
@@ -388,8 +390,10 @@ A `patch.peek.request` or `patch.history.request` always carries `requestId`, an
 | `patch.peek.response`    | `{requestId?, sourceChatId, targetChatId, ok, result?, error?}` — `result` (iff `ok`) is `{ chat_state, events, truncated }`                                                    |
 | `patch.history.request`  | `{sourceChatId, targetChatId, fromSeq?, limit?, requestId?}`                                                                                                                    |
 | `patch.history.response` | `{requestId?, sourceChatId, targetChatId, ok, result?, error?}` — `result` (iff `ok`) is `{ events, nextFromSeq? }`                                                             |
-| `patch.send_to`          | `{sourceChatId, targetChatId, message, requestId?, voicePrefix?}`                                                                                                               |
+| `patch.send_to`          | `{sourceChatId, targetChatId, message, localId, requestId?, voicePrefix?, revealTarget?}` — `localId` is the id the message is delivered under                                  |
 | `patch.send_to.response` | `{requestId, sourceChatId, targetChatId, ok, error?}`                                                                                                                           |
+| `patch.reply.request`    | `{requestId, sourceChatId, targetChatId, localId}` — the reply to the message delivered as `localId`; answered by the server from its record                                    |
+| `patch.reply.response`   | `{requestId, sourceChatId, targetChatId, ok, result?, error?}` — `result` (iff `ok`) is `{ text }`                                                                              |
 | `patch.spawn`            | `{sourceChatId, hostId, folder, model?, prompt, requestId?}` — `hostId` names the host; `model` omitted takes the host's last-used; `requestId` present when a host must answer |
 | `patch.spawn.response`   | `{requestId, sourceChatId, hostId, folder, ok, chatId?, error?}` — the named host's outcome. `chatId` iff `ok`; `error` iff not                                                 |
 

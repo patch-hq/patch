@@ -316,6 +316,8 @@ describe('patch_send_to — falls back to the owning host when not local', () =>
         sourceChatId: 'mgr',
         targetChatId: 'chat-on-host-b',
         message: '[from chat mgr] hi',
+        // The id it is delivered under there, so its reply can be found by it.
+        localId: expect.any(String),
         revealTarget: true,
       });
     } finally {

@@ -179,6 +179,7 @@ describe('the cross-host bridge answers peek/history itself', () => {
     const hostLink = {
       sendTo: (hostId: string, _s: string, event: WireEvent) => sent.push({ hostId, event }),
       isOnline: (id: string) => w.online.has(id),
+      onHostStatus: () => () => {},
       onEvent: (h: (e: WireEvent, from: string | null) => void) => {
         handler = h;
         return () => undefined;

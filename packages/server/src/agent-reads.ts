@@ -128,6 +128,10 @@ export function peekChat(
     folder: row.folder,
     chatStatus: row.chatStatus ?? null,
     status: row.status,
+    // Where the chat says it stands: its one-line status, goal and to-dos.
+    statusSummary: row.statusSummary,
+    goal: row.goal,
+    todos: row.todos,
     pinned: row.pinned,
     pinnedAt: row.pinnedAt,
     snoozedUntil: row.snoozedUntil,

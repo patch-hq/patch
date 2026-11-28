@@ -10,7 +10,7 @@ import {
   REMOTE_RELAY_TIMEOUT_MS,
 } from '../src/remote-relay.js';
 
-function harness(timeoutMs?: number) {
+function harness(timeoutMs?: number | null) {
   const emitted: WireEvent[] = [];
   const unknown: string[] = [];
   let n = 0;
@@ -193,5 +193,38 @@ describe('remote relay coordinator', () => {
 
   it('waits 15s by default', () => {
     expect(REMOTE_RELAY_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it('with no timeout, waits as long as the answer takes, and fails when the link drops', async () => {
+    vi.useFakeTimers();
+    try {
+      const { coord } = harness(null);
+      const ask = () =>
+        coord.call(
+          (requestId) =>
+            ({
+              type: 'patch.reply.request',
+              requestId,
+              sourceChatId: 'mgr',
+              targetChatId: 'chat-remote',
+              localId: 'L1',
+            }) as WireEvent,
+          () => 'timed out',
+        );
+      const answered = ask();
+      await vi.advanceTimersByTimeAsync(REMOTE_RELAY_TIMEOUT_MS * 20);
+      coord.resolve({ requestId: 'req-1', ok: true, result: { chat_state: { chatId: 'x' } } });
+      await expect(answered).resolves.toEqual({ chat_state: { chatId: 'x' } });
+
+      const dropped = ask();
+      coord.failAll('host_not_registered', 'the link dropped');
+      await expect(dropped).rejects.toMatchObject({
+        code: 'host_not_registered',
+        message: 'the link dropped',
+      });
+      expect(coord.resolve({ requestId: 'req-2', ok: true })).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

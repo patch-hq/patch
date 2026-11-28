@@ -3910,6 +3910,7 @@ describe('src/index.ts main() — cross-host patch_send_to', () => {
         sourceChatId: 'mgr-on-host-a',
         targetChatId: chatId,
         message: 'hello from another host',
+        localId: 'manager-voice-L1',
         requestId: 'req-send-ok-1',
       });
       const resp = (await boot.fakeServer.waitForFrame(
@@ -3924,7 +3925,9 @@ describe('src/index.ts main() — cross-host patch_send_to', () => {
           e.type === 'chat.message' &&
           e.chatId === chatId &&
           e.role === 'user' &&
-          e.content === 'hello from another host',
+          e.content === 'hello from another host' &&
+          // Delivered under the sender's id, so its reply can be found by it.
+          e.localId === 'manager-voice-L1',
       );
     } finally {
       await boot.cleanup();
@@ -3941,6 +3944,7 @@ describe('src/index.ts main() — cross-host patch_send_to', () => {
         sourceChatId: 'mgr-on-host-a',
         targetChatId: 'no-such-chat',
         message: 'hello?',
+        localId: 'L-missing',
         requestId: 'req-send-missing-1',
       });
       const resp = (await boot.fakeServer.waitForFrame(

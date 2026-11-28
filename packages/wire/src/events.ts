@@ -6633,6 +6633,12 @@ export const PatchSendToEvent = z
     sourceChatId: z.string().min(1),
     targetChatId: z.string().min(1),
     message: z.string(),
+    /**
+     * The id the message is delivered under: the user message it becomes in
+     * the target chat carries it, so its reply can be found by it
+     * (`patch.reply.request`).
+     */
+    localId: z.string().min(1),
     /** Present iff this is a cross-host relay the caller is waiting on. */
     requestId: z.string().min(1).optional(),
     voicePrefix: z.string().optional(),
@@ -6674,6 +6680,44 @@ export const PatchSendToResponseEvent = z
   })
   .strict();
 export type PatchSendToResponseEvent = z.infer<typeof PatchSendToResponseEvent>;
+
+/**
+ * Host -> server: the reply to one delivered message (spec/03 § Cross-chat
+ * tools). The server answers from its record of `targetChatId`, whichever host
+ * owns it: once the turn that took the message `localId` has ended, with what
+ * the chat's agent said in it. Answered only then, so a caller may wait as long
+ * as the chat takes.
+ */
+export const PatchReplyRequestEvent = z
+  .object({
+    type: z.literal('patch.reply.request'),
+    requestId: z.string().min(1),
+    sourceChatId: z.string().min(1),
+    targetChatId: z.string().min(1),
+    localId: z.string().min(1),
+  })
+  .strict();
+export type PatchReplyRequestEvent = z.infer<typeof PatchReplyRequestEvent>;
+
+/** The server's answer to `patch.reply.request`: the reply's text, or why the turn failed. */
+export const PatchReplyResponseEvent = z
+  .object({
+    type: z.literal('patch.reply.response'),
+    requestId: z.string().min(1),
+    sourceChatId: z.string().min(1),
+    targetChatId: z.string().min(1),
+    ok: z.boolean(),
+    result: z.object({ text: z.string() }).strict().optional(),
+    error: z
+      .object({
+        code: ChatErrorCode,
+        message: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchReplyResponseEvent = z.infer<typeof PatchReplyResponseEvent>;
 
 export const PatchSpawnEvent = z
   .object({
@@ -11254,6 +11298,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchPeekResponseEvent,
   PatchSendToEvent,
   PatchSendToResponseEvent,
+  PatchReplyRequestEvent,
+  PatchReplyResponseEvent,
   PatchSpawnEvent,
   PatchSpawnResponseEvent,
   PatchHistoryRequestEvent,
@@ -11606,6 +11652,8 @@ export const EVENT_SCHEMAS = {
   'patch.peek.response': PatchPeekResponseEvent,
   'patch.send_to': PatchSendToEvent,
   'patch.send_to.response': PatchSendToResponseEvent,
+  'patch.reply.request': PatchReplyRequestEvent,
+  'patch.reply.response': PatchReplyResponseEvent,
   'patch.spawn': PatchSpawnEvent,
   'patch.spawn.response': PatchSpawnResponseEvent,
   'patch.history.request': PatchHistoryRequestEvent,

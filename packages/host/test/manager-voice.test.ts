@@ -68,29 +68,32 @@ function makeHost(overrides: Partial<ManagerVoiceHostDeps> = {}) {
     logger,
     now: () => NOW,
     listChats: async () => CHATS,
-    isLocal: (id) => id !== 'c-remote',
-    chatDetail: () => ({
-      name: 'Garden planning',
-      status: 'Drafting the planting plan',
+    // `chat_state` as the server's patch_peek builds it, whichever host the chat is on.
+    peekChat: vi.fn(async (chatId: string) => ({
+      chatId,
+      hostId: chatId === 'c-remote' ? 'host-laptop' : 'host-here',
+      statusSummary: 'Drafting the planting plan',
       goal: 'A plan for spring',
-      openTodos: ['order seeds', 'measure beds'],
-      turns: [
-        { role: 'user', text: 'what should go in the north bed?' },
-        { role: 'model', text: 'Ferns and hostas do well in shade.' },
+      todos: [
+        { text: 'order seeds', status: 'pending' },
+        { text: 'sow peas', status: 'completed' },
+        { text: 'measure beds', status: 'in_progress' },
       ],
-    }),
-    submitInput: vi.fn(async ({ chatId, localId }) => {
-      order.push(`submit:${chatId}:${localId.startsWith('manager-voice-')}`);
+      lastMessages: [
+        { role: 'user', content: '[voice • phone] what should go in the north bed?', seq: 4 },
+        { role: 'assistant', content: 'Ferns and hostas do well in shade.', seq: 5 },
+      ],
+    })),
+    deliver: vi.fn(async ({ chatId, localId }) => {
+      order.push(`deliver:${chatId}:${localId.startsWith('manager-voice-')}`);
     }),
     awaitReply: vi.fn(
-      (chatId: string) =>
+      ({ chatId }: { chatId: string; localId: string }) =>
         new Promise<string>((resolve, reject) => {
           order.push(`await:${chatId}`);
           replies.set(chatId, { resolve, reject });
         }),
     ),
-    abandonReply: vi.fn(),
-    sendRemote: vi.fn(async () => undefined),
     addTask: vi.fn(async ({ content }) => `Added "${content}".`),
     listTasks: vi.fn(async () => [
       { id: 't1', content: 'salt' },
@@ -196,20 +199,33 @@ describe('find_chats', () => {
 });
 
 describe('chat_status', () => {
-  test('a chat on this host: status, goal, to-dos and the last messages', async () => {
-    const { tools } = makeHost();
+  test('status, goal, open to-dos and the last messages, read from the server', async () => {
+    const { tools, deps } = makeHost();
     const out = await tools.chatStatus('garden');
+    expect(deps.peekChat).toHaveBeenCalledWith('c-garden');
     expect(out).toContain('Where it stands: Drafting the planting plan');
     expect(out).toContain('Goal: A plan for spring');
     expect(out).toContain('Still to do: order seeds; measure beds');
+    expect(out).toContain('User: what should go in the north bed?');
     expect(out).toContain('Agent: Ferns and hostas do well in shade.');
   });
 
-  test('a chat on another host says what can and cannot be read', async () => {
-    const { tools } = makeHost();
+  test('a chat on another host reads the same: its last messages come from the server', async () => {
+    const { tools, deps } = makeHost();
     const out = await tools.chatStatus('c-remote');
+    expect(deps.peekChat).toHaveBeenCalledWith('c-remote');
     expect(out).toContain('"Laptop build"');
-    expect(out).toContain('on another computer');
+    expect(out).toContain('Agent: Ferns and hostas do well in shade.');
+    expect(out).not.toMatch(/another (computer|host)/);
+  });
+
+  test('a server that cannot be read is an error, not a shorter answer', async () => {
+    const { tools } = makeHost({
+      peekChat: async () => {
+        throw new Error('the link to the Patch server is down');
+      },
+    });
+    await expect(tools.chatStatus('garden')).rejects.toThrow('link to the Patch server is down');
   });
 
   test('a name that fits several chats asks which, naming them', async () => {
@@ -232,7 +248,7 @@ describe('chat_status', () => {
 });
 
 describe('send_to_chat', () => {
-  test('registers for the reply before the message goes in, then returns the reply and records both', async () => {
+  test('delivers, then waits for the reply to that message by its id, and records both', async () => {
     const { tools, notes, order, replies, deps } = makeHost();
     const accepted = vi.fn();
     const p = tools.sendToChat({
@@ -241,11 +257,11 @@ describe('send_to_chat', () => {
       onAccepted: accepted,
     });
     await vi.waitFor(() => expect(accepted).toHaveBeenCalled());
-    expect(order).toEqual(['await:c-garden', 'submit:c-garden:true']);
-    expect(accepted).toHaveBeenCalledWith({ name: 'Garden planning', replyComing: true });
-    const sent = vi.mocked(deps.submitInput).mock.calls[0]![0];
-    const awaited = vi.mocked(deps.awaitReply).mock.calls[0]!;
-    expect(awaited[1]).toBe(sent.localId);
+    expect(order).toEqual(['deliver:c-garden:true', 'await:c-garden']);
+    expect(accepted).toHaveBeenCalledWith({ name: 'Garden planning' });
+    const sent = vi.mocked(deps.deliver).mock.calls[0]![0];
+    const awaited = vi.mocked(deps.awaitReply).mock.calls[0]![0];
+    expect(awaited).toEqual({ chatId: 'c-garden', localId: sent.localId });
     expect(sent.message).toBe('use ferns in the north bed');
     expect(notes).toEqual(['-> "Garden planning": use ferns in the north bed']);
     replies.get('c-garden')!.resolve('Done, ferns are in the plan.');
@@ -271,12 +287,12 @@ describe('send_to_chat', () => {
     await vi.waitFor(() => expect(replies.get('c-garden')).toBeDefined());
     replies.get('c-garden')!.resolve('ok again');
     await expect(third).resolves.toMatchObject({ reply: 'ok again' });
-    expect(deps.submitInput).toHaveBeenCalledTimes(2);
+    expect(deps.deliver).toHaveBeenCalledTimes(2);
   });
 
-  test('a message the chat never took drops the waiter and fails loudly, recording nothing', async () => {
+  test('a message the chat never took fails loudly, waits for nothing and records nothing', async () => {
     const { tools, notes, deps } = makeHost({
-      submitInput: vi.fn(async () => {
+      deliver: vi.fn(async () => {
         throw new Error('chat is moving');
       }),
     });
@@ -285,8 +301,13 @@ describe('send_to_chat', () => {
       tools.sendToChat({ chat: 'garden', message: 'x', onAccepted: accepted }),
     ).rejects.toThrow('chat is moving');
     expect(accepted).not.toHaveBeenCalled();
-    expect(deps.abandonReply).toHaveBeenCalledWith('c-garden', expect.any(Error));
+    expect(deps.awaitReply).not.toHaveBeenCalled();
     expect(notes).toEqual([]);
+    // Not left marked as waiting: the next message goes.
+    await expect(tools.sendToChat({ chat: 'garden', message: 'y' })).rejects.toThrow(
+      'chat is moving',
+    );
+    expect(deps.deliver).toHaveBeenCalledTimes(2);
   });
 
   test('a chat whose turn fails is recorded as failed in the Manager chat', async () => {
@@ -298,16 +319,28 @@ describe('send_to_chat', () => {
     expect(notes[1]).toBe('<- "Garden planning": failed: rate limited');
   });
 
-  test('a chat on another host is sent to, and says no reply will come back', async () => {
-    const { tools, notes, deps } = makeHost();
+  test('a chat on another host is sent to the same way, and its reply comes back into the call', async () => {
+    const { tools, notes, deps, replies } = makeHost();
     const accepted = vi.fn();
-    await expect(
-      tools.sendToChat({ chat: 'laptop build', message: 'run the tests', onAccepted: accepted }),
-    ).resolves.toEqual({ name: 'Laptop build', reply: null });
-    expect(deps.sendRemote).toHaveBeenCalledWith({ chatId: 'c-remote', message: 'run the tests' });
-    expect(deps.submitInput).not.toHaveBeenCalled();
-    expect(accepted).toHaveBeenCalledWith({ name: 'Laptop build', replyComing: false });
-    expect(notes[0]).toContain('on another computer');
+    const p = tools.sendToChat({
+      chat: 'laptop build',
+      message: 'run the tests',
+      onAccepted: accepted,
+    });
+    await vi.waitFor(() => expect(replies.has('c-remote')).toBe(true));
+    const sent = vi.mocked(deps.deliver).mock.calls[0]![0];
+    expect(sent).toMatchObject({ chatId: 'c-remote', message: 'run the tests' });
+    expect(vi.mocked(deps.awaitReply).mock.calls[0]![0]).toEqual({
+      chatId: 'c-remote',
+      localId: sent.localId,
+    });
+    expect(accepted).toHaveBeenCalledWith({ name: 'Laptop build' });
+    replies.get('c-remote')!.resolve('All 212 tests pass.');
+    await expect(p).resolves.toEqual({ name: 'Laptop build', reply: 'All 212 tests pass.' });
+    expect(notes).toEqual([
+      '-> "Laptop build": run the tests',
+      '<- "Laptop build": All 212 tests pass.',
+    ]);
   });
 
   test('an ambiguous name sends nothing', async () => {
@@ -315,7 +348,7 @@ describe('send_to_chat', () => {
     await expect(tools.sendToChat({ chat: 'bus', message: 'x' })).rejects.toBeInstanceOf(
       ManagerChatLookupError,
     );
-    expect(deps.submitInput).not.toHaveBeenCalled();
+    expect(deps.deliver).not.toHaveBeenCalled();
     expect(deps.awaitReply).not.toHaveBeenCalled();
   });
 });

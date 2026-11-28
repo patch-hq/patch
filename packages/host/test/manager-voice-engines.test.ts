@@ -74,7 +74,6 @@ const timeline = () => ({
 function fakeManager(
   opts: {
     sendFails?: Error;
-    remote?: boolean;
   } = {},
 ) {
   let release!: (reply: string) => void;
@@ -85,11 +84,7 @@ function fakeManager(
       onAccepted?: (i: ManagerSendAccepted) => void;
     }) => {
       if (opts.sendFails) throw opts.sendFails;
-      if (opts.remote) {
-        req.onAccepted?.({ name: 'Laptop build', replyComing: false });
-        return { name: 'Laptop build', reply: null };
-      }
-      req.onAccepted?.({ name: 'Garden planning', replyComing: true });
+      req.onAccepted?.({ name: 'Garden planning' });
       const reply = await new Promise<string>((r) => (release = r));
       return { name: 'Garden planning', reply };
     },
@@ -221,22 +216,6 @@ describe('Gemini Live on a Manager call', () => {
     await vi.waitFor(() => expect(ws.clientTurns().length).toBe(1));
     expect(ws.clientTurns()[0]).toContain('The chat "Garden planning" has answered');
     expect(ws.clientTurns()[0]).toContain('Ferns are in the plan.');
-  });
-
-  test('a chat on another host: sent, and the voice is told no reply will come into the call', async () => {
-    const { manager } = fakeManager({ remote: true });
-    const { ws } = await openGemini(manager);
-    ws.serverSend({
-      toolCall: {
-        functionCalls: [
-          { id: 's2', name: SEND_TO_CHAT_TOOL_NAME, args: { chat: 'laptop', message: 'go' } },
-        ],
-      },
-    });
-    await vi.waitFor(() => expect(ws.toolResponses()).toHaveLength(1));
-    expect(ws.toolResponses()[0]!['response'].note).toContain('on another computer');
-    await new Promise((r) => setTimeout(r, 20));
-    expect(ws.clientTurns()).toEqual([]);
   });
 
   test('a name that is not one chat comes back to the voice to ask, with no error raised', async () => {
