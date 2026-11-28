@@ -473,3 +473,33 @@ test('uses the real clock by default', () => {
   real.end();
   expect(surface.logs()[0]?.entries[0]).toMatchObject({ kind: 'quality', heartbeats: 1 });
 });
+
+describe('a voice agent that stalls before the call connects', () => {
+  const stall = 'elevenlabs_unavailable: ElevenLabs agent did not start within 12s';
+
+  test('is dialled once more, and the call is not failed yet', () => {
+    line.start();
+    line.fail(1, stall);
+    expect(surface.dials.map((d) => d.attempt)).toEqual([1, 2]);
+    expect(surface.hungUp).toEqual([1]);
+    expect(line.phase).toBe('connecting');
+    line.acked(2, 's2');
+    expect(line.phase).toBe('live');
+  });
+
+  test('fails loudly when the retry stalls too', () => {
+    line.start();
+    line.fail(1, stall);
+    line.fail(2, stall);
+    expect(line.phase).toBe('failed');
+    expect(surface.dials).toHaveLength(2);
+    expect(surface.phases.at(-1)?.reason).toBe(stall);
+  });
+
+  test('other start errors are not retried', () => {
+    line.start();
+    line.fail(1, 'mic_silent: no audio');
+    expect(surface.dials).toHaveLength(1);
+    expect(line.phase).toBe('failed');
+  });
+});

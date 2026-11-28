@@ -488,6 +488,20 @@ export function createChatVoice(deps: {
    */
   async function cost(info: Parameters<ChatVoice['callEnded']>[0]): Promise<void> {
     const { init, chatId, startedAt, endedAt, engine } = info;
+    // A voice agent that never opened was never a call: no conversation, nothing
+    // billed. A "Call 0:12 … cost unavailable" line would read as a live call.
+    if (
+      engine.backend === 'elevenlabs' &&
+      engine.conversationId === undefined &&
+      engine.agentSeconds === 0
+    ) {
+      logger.warn(
+        { sessionId: init.sessionId },
+        'voice: the ElevenLabs agent never opened, no call line written',
+      );
+      handoffCounts.delete(init.sessionId);
+      return;
+    }
     const costing = costCall({
       sessionId: init.sessionId,
       chatId,
