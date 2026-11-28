@@ -108,6 +108,38 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
+  it('a declared question does not wake a snoozed chat that has a goal', async () => {
+    const { backend, release } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    await daemon.setGoal(id, 'ship it');
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    await daemon.declareStatus(id, 'question', 'Goal waiting on you: Apple');
+    release();
+    await daemon.sendInput({ chatId: id, message: 'go', localId: 'L1', origin: 'user' });
+    await sleep(80);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    await daemon.setGoal(id, null);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
+
+  it('the goal-blocked question is cleared when the goal runs again', async () => {
+    const { backend, release } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    await daemon.setGoal(id, 'ship it');
+    daemon.holdGoalForUser(id);
+    await daemon.declareStatus(id, 'question', 'Goal waiting on you: Apple');
+    release();
+    await daemon.sendInput({ chatId: id, message: 'tick', localId: 'M1', origin: 'machine' });
+    await sleep(40);
+    const st = daemon.chatState.get(id)!;
+    expect(st.declaredStatus).toBe(null);
+    expect(st.goalProgress?.waitingOnUser).toBe(false);
+    daemon.shutdown();
+  });
+
   it('stays snoozed through a one-shot wake and wakes when the wake is cancelled', async () => {
     const { backend } = gated();
     const { daemon, folder } = setup(backend);
