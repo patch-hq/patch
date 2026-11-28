@@ -2921,6 +2921,8 @@ describe('src/index.ts main() — full host boot', () => {
           args: ['@playwright/mcp@0.0.83', '--headless'],
           env: {},
           enabled: true,
+          voice: false,
+          voiceOff: [],
         },
         {
           name: 'chrome-devtools',
@@ -2928,6 +2930,8 @@ describe('src/index.ts main() — full host boot', () => {
           args: ['-y', 'chrome-devtools-mcp@1.10.1', '--headless'],
           env: {},
           enabled: true,
+          voice: false,
+          voiceOff: [],
         },
       ]);
       expect(lastHost().harnessBrowserToolsEnabled).toBe(true);
@@ -2957,15 +2961,33 @@ describe('src/index.ts main() — full host boot', () => {
       // reach a chat. Without chrome-devtools the legacy reading is false even
       // though playwright is on.
       const list = [
-        { name: 'my-tools', command: '/opt/tools', args: ['--x'], env: { K: 'v' }, enabled: true },
+        {
+          name: 'my-tools',
+          command: '/opt/tools',
+          args: ['--x'],
+          env: { K: 'v' },
+          enabled: true,
+          voice: true,
+          voiceOff: [],
+        },
         {
           name: 'playwright',
           command: 'npx',
           args: ['@playwright/mcp@0.0.83', '--headless'],
           env: {},
           enabled: true,
+          voice: true,
+          voiceOff: [],
         },
-        { name: 'off-one', command: 'off', args: [], env: {}, enabled: false },
+        {
+          name: 'off-one',
+          command: 'off',
+          args: [],
+          env: {},
+          enabled: false,
+          voice: true,
+          voiceOff: [],
+        },
       ];
       const before2 = boot.fakeServer.received.length;
       boot.fakeServer.send({ type: 'host.settings', hostId: 'd1', harnessMcpServers: list });
