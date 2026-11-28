@@ -239,8 +239,9 @@ export interface ChatEventEntry {
   messageAt?: number;
 }
 
-// The host tags spoken turns `[voice • <surfaceKind>]` / `[voice • device:<id>]`
-// (specialThreads.ts) — data, not display copy. Strip it for the transcript and
+// The host tags spoken turns — the user's words and the voice agent's replies —
+// `[voice • <surfaceKind>]` / `[voice • device:<id>]` (specialThreads.ts,
+// audio/chatVoice.ts) — data, not display copy. Strip it for the transcript and
 // report whether it was present so the renderer can show a mic adornment. Tolerant
 // of either separator (•/·) and surrounding whitespace.
 function stripVoicePrefix(s: string): { text: string; voice: boolean; handoff: boolean } {
@@ -1150,11 +1151,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
             break;
           }
-          // Strip the host's `[voice • …]` tag from spoken user turns (display
-          // shows the clean transcript + a mic glyph; also lets the persisted copy
-          // reconcile with the optimistic, untagged echo — matches web).
+          // Strip the host's `[voice • …]` tag from spoken turns — the user's
+          // words and the voice agent's replies alike (display shows the clean
+          // text + a mic glyph; also lets the persisted copy reconcile with the
+          // optimistic, untagged echo — matches web).
           const { text, voice, handoff } =
-            event.role === 'user'
+            event.role === 'user' || event.role === 'assistant'
               ? stripVoicePrefix(event.content)
               : event.accountSwitch
                 ? // spec/10 § Backend credentials — a turn that moved account
@@ -1827,8 +1829,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         e.accountSwitch === undefined;
       if (spoken && e.seq >= previewSeq) {
         previewSeq = e.seq;
-        const text =
-          e.role === 'user' ? stripVoicePrefix(e.content as string).text : (e.content as string);
+        const text = stripVoicePrefix(e.content as string).text;
         preview = headCodePoints(text, 140);
       }
     }

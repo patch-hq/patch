@@ -30,7 +30,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import WebSocket from 'ws';
-import { CLOSE_MALFORMED_FRAME } from '@patch/wire';
+import { CLOSE_MALFORMED_FRAME, closeAsRelayed } from '@patch/wire';
 import type { PatchAudioRelayCloseEvent, PatchAudioRelayFrameEvent, WireEvent } from '@patch/wire';
 import type { HostLink } from './host-link.js';
 
@@ -89,7 +89,7 @@ interface RelaySocket {
   send(data: string | Buffer, cb?: (err?: Error) => void): void;
   close(code?: number, reason?: string): void;
   on(event: 'message', handler: (data: Buffer, isBinary: boolean) => void): void;
-  on(event: 'close', handler: () => void): void;
+  on(event: 'close', handler: (code: number, reason: Buffer) => void): void;
   on(event: 'error', handler: (err: Error) => void): void;
   on(event: 'open', handler: () => void): void;
 }
@@ -207,7 +207,7 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       sendAudioError(entry.socket, 'host_unreachable', `could not reach ${fromHostId}'s audio WSS`);
       return;
     }
-    entry.socket.close();
+    closeAsRelayed(entry.socket, event.code, event.reason);
   });
 
   // A host carrying one or more tunnelled sessions drops: each is refused
@@ -255,6 +255,8 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
       sendToHost(hostId, {
         type: 'patch.audio_relay.close',
         sessionId,
+        code: 1001,
+        reason: 'the host did not confirm the session in time',
       } as PatchAudioRelayCloseEvent);
       sendAudioError(
         socket,
@@ -279,16 +281,20 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
         extra = undefined;
       }
     });
-    const closeTunnel = (): void => {
+    // The surface's close goes across as it is (a hang-up, a pause), so the
+    // host's audio server sees the same close a direct connection would.
+    const closeTunnel = (code: number, reason: string): void => {
       clearReady(entry);
       if (!tunnelled.delete(sessionId)) return;
       sendToHost(hostId, {
         type: 'patch.audio_relay.close',
         sessionId,
+        code,
+        reason,
       } as PatchAudioRelayCloseEvent);
     };
-    socket.on('close', closeTunnel);
-    socket.on('error', closeTunnel);
+    socket.on('close', (code, reason) => closeTunnel(code, reason.toString('utf8')));
+    socket.on('error', () => closeTunnel(1006, ''));
     sendToHost(hostId, { type: 'patch.audio_relay.open', sessionId });
   }
 
@@ -339,8 +345,9 @@ export function registerAudioRelayRoute(app: FastifyInstance, deps: AudioRelayDe
           socket.close(CLOSE_MALFORMED_FRAME, 'upstream audio connection failed');
         }
       });
-      upstream.on('close', () => socket.close());
-      socket.on('close', () => upstream.close());
+      // Each side's close reaches the other as it was (an `ended_by_agent` stays one).
+      upstream.on('close', (code, reason) => closeAsRelayed(socket, code, reason.toString('utf8')));
+      socket.on('close', (code, reason) => closeAsRelayed(upstream, code, reason.toString('utf8')));
       socket.on('error', () => upstream.close());
       pipeOnceOpen(socket, upstream, speakFrame);
       pipeOnceOpen(upstream, socket);

@@ -24,6 +24,7 @@ import type {
   PatchAudioRelayOpenEvent,
   PatchAudioRelayReadyEvent,
 } from '@patch/wire';
+import { closeAsRelayed } from '@patch/wire';
 
 export type AudioRelayBridgeOutbound =
   | PatchAudioRelayReadyEvent
@@ -78,9 +79,16 @@ export class AudioRelayBridge {
         binary: isBinary,
       });
     });
-    socket.once('close', () => {
+    // The audio server's own close — `ended_by_agent`, `transferred`, a refusal —
+    // goes across as it is, so the device ends the call rather than redialling.
+    socket.once('close', (code: number, reason: Buffer) => {
       if (!this.bridges.delete(event.sessionId)) return;
-      this.opts.sender({ type: 'patch.audio_relay.close', sessionId: event.sessionId });
+      this.opts.sender({
+        type: 'patch.audio_relay.close',
+        sessionId: event.sessionId,
+        code,
+        reason: reason.toString('utf8'),
+      });
     });
     socket.once('error', (err: Error) => {
       if (!this.bridges.delete(event.sessionId)) return;
@@ -118,12 +126,12 @@ export class AudioRelayBridge {
     const bridge = this.bridges.get(event.sessionId);
     if (!bridge) return;
     this.bridges.delete(event.sessionId);
-    bridge.socket.close();
+    closeAsRelayed(bridge.socket, event.code, event.reason);
   }
 
   /** Close every open bridge (host shutdown). */
   dispose(): void {
-    for (const bridge of this.bridges.values()) bridge.socket.close();
+    for (const bridge of this.bridges.values()) bridge.socket.close(1001, 'host shutting down');
     this.bridges.clear();
   }
 }
