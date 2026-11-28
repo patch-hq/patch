@@ -1975,12 +1975,18 @@ useChatStore.setState((s) => ({
   delegateUpdates: {
     ...s.delegateUpdates,
     chat_delegate: {
-      'sub-1': { label: 'resume job', status: 'running' as const, since: Date.now() },
+      'sub-1': {
+        label: 'resume job',
+        status: 'running' as const,
+        since: Date.now(),
+        model: 'claude-sonnet-5-5',
+      },
     },
     chat_status: {
       'a-1': {
         label: 'OpenNext review and repair',
         status: 'running' as const,
+        model: 'claude-opus-5-5',
         since: Date.now() - 19 * 60_000,
       },
       'a-2': {

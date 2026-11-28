@@ -5703,6 +5703,8 @@ export class Daemon {
     }
     const userPaused =
       status === 'running' && this.chatState.get(delegateId)?.subagent?.userPaused === true;
+    const delegateModel =
+      this.chatState.get(delegateId)?.model ?? this.opts.metaStore.read(delegateId)?.model;
     const ev: ChatDelegateUpdateEvent = {
       type: 'chat.delegate_update',
       chatId: parentChatId,
@@ -5710,6 +5712,7 @@ export class Daemon {
       label,
       status,
       ...(userPaused ? {} : this.delegateRunFields(delegateId, status)),
+      ...(delegateModel !== undefined ? { model: delegateModel } : {}),
       ...(outOfCredit ? { outOfCredit } : {}),
       ...(userPaused ? { paused: true } : {}),
       ...(spunOffChatId !== undefined ? { spunOffChatId } : {}),
