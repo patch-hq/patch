@@ -635,7 +635,9 @@ function buildSections(
   // A hidden chat is drawn in Hidden and nowhere else (spec/04 § Hidden) —
   // checked before snooze, as the server does, so a hidden chat that is also
   // snoozed is drawn once, there.
-  const hidden = active.filter(isHidden).sort((a, b) => b.lastUpdated - a.lastUpdated);
+  // Thousands of chats can be hidden: only sort them when the section is open.
+  const hiddenRows = active.filter(isHidden);
+  const hidden = open.hidden ? hiddenRows.sort((a, b) => b.lastUpdated - a.lastUpdated) : hiddenRows;
   const visible = active.filter((c) => !isHidden(c));
   // Snoozed is DERIVED from the clock, never a stored flag (spec/04 § Snooze),
   // so a wake time that passed while the phone was asleep returns the chat to
