@@ -14356,9 +14356,15 @@ input.browse-filter {
    window like the title bar it replaces — with its buttons punched back out. */
 .overlay-titlebar .voice-bar {
   padding-left: var(--overlay-titlebar-inset);
+  /* The bar's first row sits on the lights' centre-line, like the brand row:
+     a 28px row whose top is 14px above that line. */
+  padding-top: calc(var(--overlay-titlebar-lights-centre) - 14px);
   min-height: calc(var(--overlay-titlebar-lights-bottom) + 3px);
-  justify-content: center;
+  justify-content: flex-start;
   -webkit-app-region: drag;
+}
+.overlay-titlebar .voice-bar > .vb-row:first-child {
+  min-height: 28px;
 }
 .overlay-titlebar .voice-bar button {
   -webkit-app-region: no-drag;
