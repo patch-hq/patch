@@ -1863,6 +1863,32 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/loop rejects an invalid interval or timestamp with a 400 naming the problem', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+      for (const loop of [
+        { message: 'x', every: 'banana' },
+        { message: 'x', every: '5x' },
+        { message: 'x', at: 'not a date' },
+      ]) {
+        const res = await built.app.inject({
+          method: 'POST',
+          url: '/api/chats/c1/loop',
+          headers: { authorization: `Bearer ${jwt}` },
+          payload: { loop },
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toMatch(/^invalid loop: invalid/);
+      }
+      expect(hostLink.sent.find((s) => s.event.type === 'chat.loop_request')).toBeUndefined();
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/loop accepts `loop: null` (cancel)', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
