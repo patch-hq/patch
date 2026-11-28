@@ -127,7 +127,7 @@ export { formatWakeAt, formatSnoozeMoment, formatElapsed } from '@patch/wire';
 
 /**
  * Whether a chat has work for "Until complete" to wait on: its own turn or goal,
- * a one-shot wake, or a delegated agent still going. The host decides the same (`hasWorkToComplete`)
+ * a one-shot wake, a running patch_watch, or a delegated agent still going. The host decides the same (`hasWorkToComplete`)
  * and refuses the rest, so offering it any narrower hides a snooze it would accept.
  */
 export function hasWorkToWaitFor(
@@ -136,11 +136,13 @@ export function hasWorkToWaitFor(
     chatStatus?: { state: string };
     goal?: unknown;
     pendingWake?: { every?: unknown } | null;
+    backgroundTasks?: number | null;
   },
   delegateUpdates: Record<string, Record<string, { status: string }>>,
 ): boolean {
   if (chat.chatStatus?.state === 'running' || (chat.goal ?? null) !== null) return true;
   if (chat.pendingWake != null && chat.pendingWake.every === undefined) return true;
+  if ((chat.backgroundTasks ?? 0) > 0) return true;
   return Object.values(delegateUpdates[chat.chatId] ?? {}).some(
     (d) => d.status === 'running' || d.status === 'awaiting-permission',
   );
