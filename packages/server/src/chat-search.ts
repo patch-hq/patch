@@ -36,15 +36,21 @@ function excerptOf(text: string, at: number, len: number): string {
   return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
 }
 
-export function searchChats(
+/**
+ * Reading a transcript is synchronous, so a search across a large account would
+ * hold the server's event loop for seconds, and every live call relayed through
+ * it would hear nothing for that long. The search yields between chats.
+ */
+export async function searchChats(
   deps: { chatRegistry: ChatRegistry; chatLogStore: ChatLogStore },
   query: string,
   limit: number = SEARCH_DEFAULT_LIMIT,
-): ChatSearchAnswer {
+): Promise<ChatSearchAnswer> {
   const needle = query.toLowerCase();
   const hits: Array<ChatSearchResult & { score: number }> = [];
   let chatsWithoutLog = 0;
   for (const chat of deps.chatRegistry.list({ includeArchived: true })) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const matchedIn: SearchField[] = [];
     if (chat.name?.toLowerCase().includes(needle)) matchedIn.push('name');
     if (chat.folder.toLowerCase().includes(needle)) matchedIn.push('folder');

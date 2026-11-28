@@ -55,8 +55,6 @@ export interface SessionInit {
    * § Session modes). Undefined uses {@link DEFAULT_ADDRESS_WORD}.
    */
   addressWord?: string;
-  /** The surface redialled this session after the call dropped. */
-  resumed?: boolean;
   /**
    * Why an agent rang, on the call that answers its `patch_call` (spec/07 §
    * Agent-initiated voice). The voice opens the call by saying it.

@@ -165,7 +165,7 @@ export function CallStrip(): React.ReactElement | null {
               Paused
             </Text>
           ) : reconnecting ? (
-            <ConnectingLabel color={fixed.stripText} word="Reconnecting" />
+            <ConnectingLabel color={fixed.stripText} word="Lost contact" />
           ) : connecting && !failed ? (
             <ConnectingLabel color={fixed.stripText} />
           ) : direct && direct.status.line !== 'listening' && direct.status.line !== 'hearing' ? (

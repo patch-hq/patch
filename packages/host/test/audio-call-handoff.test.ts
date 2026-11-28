@@ -39,7 +39,6 @@ interface CallInfo {
   surfaceKind: string;
   chatId: string;
   active: boolean;
-  resumed?: boolean;
 }
 
 /** The user ending the call: the surface says so, then closes. A bare close is a drop. */
@@ -129,7 +128,7 @@ describe('call handoff', () => {
     expect(calls.map((c) => c.active)).toEqual([true, false]);
   });
 
-  test('a redial of a call the host no longer holds opens a new one, announced as resumed so the host can say so in the chat', async () => {
+  test('an attempt to resume a call the host no longer holds ends the call: no new session is opened', async () => {
     const calls: CallInfo[] = [];
     const s = await start(calls);
     const first = await openCall(s.port, {
@@ -148,11 +147,9 @@ describe('call handoff', () => {
       kind: 'mobile',
       resumes: 's1',
     });
+    expect(await again.closed).toBe('ended_by_agent');
     await wait(60);
-    expect(calls[0]?.resumed).toBeUndefined();
-    expect(calls.at(-1)).toMatchObject({ sessionId: 's2', active: true, resumed: true });
-    again.ws.close();
-    await wait(60);
+    expect(calls.map((c) => `${c.sessionId}:${c.active}`)).toEqual(['s1:true', 's1:false']);
   });
 
   test('liveCalls lists exactly the calls announced open, for the reconnect snapshot', async () => {

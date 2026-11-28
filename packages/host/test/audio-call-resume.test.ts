@@ -72,7 +72,7 @@ interface Device {
 
 let server: (AudioServerHandle & { port: number }) | undefined;
 let geminis: FakeGemini[] = [];
-let announced: Array<{ sessionId: string; active: boolean; resumed?: boolean }> = [];
+let announced: Array<{ sessionId: string; active: boolean }> = [];
 let ended: string[] = [];
 
 beforeEach(() => {
@@ -198,7 +198,7 @@ describe('a dropped call is held and resumed', () => {
     },
   );
 
-  test('the window running out ends the call; a redial after it opens a new session, announced as resumed', async () => {
+  test('the window running out ends the call; an attempt to resume after it is ended too, never given a new session', async () => {
     await start();
     const first = await dial('s1');
     await stall(first, 5_000);
@@ -207,9 +207,31 @@ describe('a dropped call is held and resumed', () => {
     expect(ended).toEqual(['s1']);
     expect(announced.map((c) => c.active)).toEqual([true, false]);
 
-    await dial('s2', 's1');
-    expect(geminis).toHaveLength(2);
-    expect(announced.at(-1)).toMatchObject({ sessionId: 's2', active: true, resumed: true });
+    const ws = new WebSocket(`ws://127.0.0.1:${server!.port}/audio/s2`);
+    let reason: string | null = null;
+    ws.on('close', (_code, r) => {
+      reason = r.toString();
+    });
+    await io(() => ws.readyState === WebSocket.OPEN);
+    ws.send(
+      encodeAudio({
+        type: 'audio.session_start',
+        sessionId: 's2',
+        accountId: 'a',
+        surfaceId: 'phone',
+        surfaceKind: 'mobile',
+        chatId: 'c1',
+        role: 'voice-call',
+        token: mintToken('s2'),
+        surfaceHasAec: true,
+        mode: 'call',
+        resumes: 's1',
+      }),
+    );
+    await io(() => reason !== null);
+    expect(reason).toBe('ended_by_agent');
+    expect(geminis).toHaveLength(1);
+    expect(announced.map((c) => c.active)).toEqual([true, false]);
   });
 
   test('the user ending the call ends it at once: it is not held', async () => {

@@ -566,8 +566,8 @@ export const AudioSessionStartEvent = z
      * A surface redialling a call whose line dropped: the session it was last
      * live on. The host, which holds that session for `CALL_RESUME_WINDOW_MS`,
      * puts this connection back on it; a session it no longer holds (the
-     * window ran out, the host restarted) opens a new one and the chat says so
-     * (`07-voice-app.md` § A dropped call comes back).
+     * window ran out, the host restarted) ends the call with `ended_by_agent`:
+     * it never opens a new one (`07-voice-app.md` § A dropped call comes back).
      */
     resumes: z.string().min(1).optional(),
     /**

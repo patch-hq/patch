@@ -12,7 +12,7 @@
 // top of the shell, and that strip always states what the line is doing:
 //
 //   connecting   Connecting…
-//   reconnecting Reconnecting… — the line dropped and the call is redialling
+//   reconnecting Lost contact — the line dropped and the call is trying to resume
 //   waiting      hands-free: Waiting for you to say “patch”   ·  call: Listening
 //   hearing      Hearing you — the words themselves are in the chat, as your bubble
 //   heard        what it heard, greyed — dropped, because it wasn't addressed
@@ -120,7 +120,7 @@ export function VoiceBar(): JSX.Element | null {
               </span>
             )
           ) : state === 'connecting' || state === 'reconnecting' ? (
-            <ConnectingLabel word={state === 'reconnecting' ? 'Reconnecting' : 'Connecting'} />
+            <ConnectingLabel word={state === 'reconnecting' ? 'Lost contact' : 'Connecting'} />
           ) : state === 'thinking' ? (
             <span className="vb-text">Agent working</span>
           ) : (
@@ -204,8 +204,8 @@ export function VoiceBar(): JSX.Element | null {
   );
 }
 
-/** `Connecting` (or `Reconnecting`) with dots that count up, as on the phone. */
-function ConnectingLabel({ word }: { word: 'Connecting' | 'Reconnecting' }): JSX.Element {
+/** `Connecting` (or `Lost contact`) with dots that count up, as on the phone. */
+function ConnectingLabel({ word }: { word: 'Connecting' | 'Lost contact' }): JSX.Element {
   const [dots, setDots] = useState(1);
   useEffect(() => {
     const id = window.setInterval(() => setDots((d) => (d % 3) + 1), 400);
@@ -214,7 +214,7 @@ function ConnectingLabel({ word }: { word: 'Connecting' | 'Reconnecting' }): JSX
   return (
     <span className="vb-text" data-testid="voice-bar-connecting">
       {word}
-      {'.'.repeat(dots)}
+      {word === 'Connecting' ? '.'.repeat(dots) : ''}
     </span>
   );
 }
@@ -302,7 +302,7 @@ interface LineInput {
 export function describeLine(call: LineInput, _chatName: string, addressWord: string): Line {
   if (call.paused != null) return { tag: null, text: 'Paused', state: 'paused' };
   // A dropped line says so above anything it was doing when it dropped.
-  if (call.reconnecting) return { tag: null, text: 'Reconnecting…', state: 'reconnecting' };
+  if (call.reconnecting) return { tag: null, text: 'Lost contact', state: 'reconnecting' };
   if (call.agentSpeaking || call.phase === 'speaking') {
     return { tag: null, text: 'Speaking', state: 'speaking' };
   }

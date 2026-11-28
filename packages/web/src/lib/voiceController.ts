@@ -390,9 +390,6 @@ async function placeCall(
         return sessionAttempt === attempt && s !== null && s.send(frame);
       },
       phase: onLinePhase,
-      stillTrying: (reason) => {
-        useUiStore.getState().pushError(`${describeCallError(reason)} — still trying`);
-      },
     },
     callClock,
   );
@@ -412,21 +409,13 @@ let line: CallLine | null = null;
 let sessionAttempt = 0;
 let unwatchEnvironment: (() => void) | null = null;
 
-/**
- * What the page can tell the line: coming back into view redials a waiting
- * line at once, and the browser's audio devices changing goes into the log.
- */
+/** What the page can tell the line: the browser's audio devices changing goes into the log. */
 function watchCallEnvironment(l: CallLine): void {
   unwatchEnvironment?.();
-  const onVisible = (): void => {
-    if (document.visibilityState === 'visible') l.foreground();
-  };
   const onDevices = (): void => l.audioStopped('output_device_changed', 'audio devices changed');
-  document.addEventListener('visibilitychange', onVisible);
   const media = (navigator as { mediaDevices?: MediaDevices }).mediaDevices;
   media?.addEventListener?.('devicechange', onDevices);
   unwatchEnvironment = () => {
-    document.removeEventListener('visibilitychange', onVisible);
     media?.removeEventListener?.('devicechange', onDevices);
   };
 }
@@ -441,12 +430,17 @@ function onLinePhase(next: CallLinePhase, prev: CallLinePhase, reason?: string):
   }
   if (next === 'reconnecting') {
     // Nothing said while the line is down is kept: the dead attempt's
-    // session goes, and the redial opens a fresh one.
+    // session goes, and the next attempt tries to resume the same one.
     store.setCallReconnecting(true);
     const dead = store.session;
     store.setSession(null);
     dead?.end('lost');
     store.setCallPhase('connecting');
+    return;
+  }
+  if (next === 'ended') {
+    // The resume window ran out: the call ends, and never starts another by itself.
+    endVoiceCall();
     return;
   }
   // failed — loud, and the call is over. NO FALLBACK.

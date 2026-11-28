@@ -303,7 +303,7 @@ Snoozing a chat (the row sheet's or the chat ⋯ menu's Snooze chat) or a projec
 
   The call is two-way and live: the user's speech is streamed to the host, transcribed and answered, and the agent's TTS reply is played back through the speaker (a native `AudioTrack` sink) so the user hears it — a call where "nothing happens when I speak" or where the reply is silent is a failure the surface reports (see `07-voice-app.md`).
 
-- On-call pill: while a call is open and the user is anywhere other than its chat, a small pill stands in for the bar — `On call · Manager · 1:23` (`Hands-free · …`, `Connecting… · …`, `Reconnecting… · …`, `Paused · …`, `Call failed · …` as the state requires). It floats just above the tab bar on the tab screens and docks above the composer of any other chat. Tapping it returns to the call's chat; its red button ends the call.
+- On-call pill: while a call is open and the user is anywhere other than its chat, a small pill stands in for the bar — `On call · Manager · 1:23` (`Hands-free · …`, `Connecting… · …`, `Lost contact · …`, `Paused · …`, `Call failed · …` as the state requires). It floats just above the tab bar on the tab screens and docks above the composer of any other chat. Tapping it returns to the call's chat; its red button ends the call.
 - Incoming call (system-level): see § Incoming call.
 
 See `07-voice-app.md` for mechanics.
