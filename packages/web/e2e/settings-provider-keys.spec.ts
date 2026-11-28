@@ -43,7 +43,7 @@ test.describe('Settings — Providers', () => {
       },
     });
     await page.goto(settingsUrl('dictation'));
-    await expect(page.getByTestId('dictation-web-1-keys')).toContainText('no Deepgram key is set');
+    await expect(page.getByTestId('dictation-web-1-keys')).toContainText('Needs a Deepgram key on dev-host');
     await page.getByTestId('settings-nav-providers').click();
 
     await page.getByTestId('provider-key-deepgram-edit').click();
