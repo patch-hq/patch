@@ -56,6 +56,12 @@ import type { PatchWs } from '../api/ws.js';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
 import { startMeeting } from '../lib/meetingControl.js';
 
+// The call's sounds have no browser audio here.
+vi.mock('../lib/callSound.js', () => ({
+  syncCallSoundLoop: vi.fn(),
+  playCallSound: vi.fn(),
+}));
+
 vi.mock('../lib/meetingControl.js', async (orig) => ({
   ...(await orig<typeof import('../lib/meetingControl.js')>()),
   startMeeting: vi.fn(async () => undefined),

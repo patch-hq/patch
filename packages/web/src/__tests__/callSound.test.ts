@@ -6,6 +6,7 @@ import {
   playingCallSoundLoops,
   startCallSoundLoop,
   stopCallSoundLoop,
+  warmCallSounds,
 } from '../lib/callSound.js';
 import { CALL_SOUNDS, CALL_SOUND_NAMES } from '../lib/callSoundSynth.js';
 
@@ -93,17 +94,17 @@ describe('call sounds', () => {
     const a = fakeAudio();
     vi.stubGlobal('AudioContext', a.FakeCtx);
     vi.stubGlobal('OfflineAudioContext', a.FakeOffline);
+    await warmCallSounds();
     playCallSound('connected');
     playCallSound('connected');
-    await new Promise((r) => setTimeout(r, 0));
     expect(a.sources).toHaveLength(2);
     expect(a.sources.every((s) => !s.loop && s.start.mock.calls.length === 1)).toBe(true);
     // Connected is 0.5 s long.
     expect((a.sources[0] as unknown as { buffer: { length: number } }).buffer.length).toBe(
       Math.ceil(0.5 * 22050),
     );
-    // The second play reused the first render.
-    expect(a.renders).toBe(1);
+    // Every sound was rendered once, at warm-up; playing rendered nothing more.
+    expect(a.renders).toBe(CALL_SOUND_NAMES.length);
   });
 
   it('draws the designed picks: connected rises, ended falls, passed to agent is one low tick', () => {
@@ -136,9 +137,9 @@ describe('call sounds', () => {
     const a = fakeAudio();
     vi.stubGlobal('AudioContext', a.FakeCtx);
     vi.stubGlobal('OfflineAudioContext', a.FakeOffline);
+    await warmCallSounds();
     startCallSoundLoop('reconnecting');
     startCallSoundLoop('reconnecting');
-    await new Promise((r) => setTimeout(r, 0));
     expect(a.sources).toHaveLength(1);
     expect(a.sources[0]?.loop).toBe(true);
     // One cycle of the reconnecting tone is 2.7 s.
@@ -151,22 +152,31 @@ describe('call sounds', () => {
     expect(playingCallSoundLoops()).toEqual([]);
   });
 
-  it('a loop stopped before it has rendered never starts', async () => {
+  it('the connecting loop starts in the same task as the call, before any await', async () => {
     const a = fakeAudio();
     vi.stubGlobal('AudioContext', a.FakeCtx);
     vi.stubGlobal('OfflineAudioContext', a.FakeOffline);
-    startCallSoundLoop('connecting');
-    stopCallSoundLoop('connecting');
-    await new Promise((r) => setTimeout(r, 0));
-    expect(a.sources).toHaveLength(0);
+    await warmCallSounds();
+    syncCallSoundLoop('connecting', true);
+    // No microtask or timer has run: the source is already started.
+    expect(a.sources).toHaveLength(1);
+    expect(a.sources[0]?.loop).toBe(true);
+    expect(a.sources[0]?.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('a sound not warmed at app start fails loudly rather than playing late', () => {
+    const a = fakeAudio();
+    vi.stubGlobal('AudioContext', a.FakeCtx);
+    expect(() => startCallSoundLoop('connecting')).toThrow(/not warmed/);
+    expect(playingCallSoundLoops()).toEqual([]);
   });
 
   it('wakes a suspended output, and syncs a loop on and off', async () => {
     const a = fakeAudio();
     vi.stubGlobal('AudioContext', a.FakeCtx);
     vi.stubGlobal('OfflineAudioContext', a.FakeOffline);
+    await warmCallSounds();
     syncCallSoundLoop('agent-working', true);
-    await new Promise((r) => setTimeout(r, 0));
     expect(playingCallSoundLoops()).toEqual(['agent-working']);
     syncCallSoundLoop('agent-working', false);
     syncCallSoundLoop('agent-working', false);
@@ -175,7 +185,7 @@ describe('call sounds', () => {
     startCallSoundLoop('agent-calling');
   });
 
-  it('a sound that cannot render says so, and the loop is free to start again', async () => {
+  it('a sound that cannot render fails the warm-up loudly', async () => {
     const a = fakeAudio();
     vi.stubGlobal('AudioContext', a.FakeCtx);
     class Broken extends a.FakeOffline {
@@ -184,12 +194,7 @@ describe('call sounds', () => {
       }
     }
     vi.stubGlobal('OfflineAudioContext', Broken);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    startCallSoundLoop('connecting');
-    await new Promise((r) => setTimeout(r, 0));
-    expect(err).toHaveBeenCalledWith(expect.stringContaining('could not play: Error: no renderer'));
-    expect(playingCallSoundLoops()).toEqual([]);
-    err.mockRestore();
+    await expect(warmCallSounds()).rejects.toThrow('no renderer');
   });
 
   it('wakes an output the browser suspended, and says so if it will not wake', async () => {
@@ -201,17 +206,15 @@ describe('call sounds', () => {
     vi.stubGlobal('AudioContext', Suspended);
     vi.stubGlobal('OfflineAudioContext', a.FakeOffline);
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await warmCallSounds();
     playCallSound('ended');
     await new Promise((r) => setTimeout(r, 0));
     expect(err).toHaveBeenCalledWith(expect.stringContaining('needs a gesture'));
     err.mockRestore();
   });
 
-  it('says so, loudly, when the browser cannot play a sound', () => {
+  it('says so, loudly, when the browser cannot play a sound', async () => {
     vi.stubGlobal('AudioContext', undefined);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    playCallSound('connected');
-    expect(err).toHaveBeenCalledWith(expect.stringContaining('no AudioContext'));
-    err.mockRestore();
+    await expect(warmCallSounds()).rejects.toThrow('no AudioContext');
   });
 });

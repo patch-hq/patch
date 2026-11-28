@@ -52,6 +52,12 @@ import type {
 } from '../lib/audioSession.js';
 import type { ChatRow } from '../stores/types.js';
 
+// The call's sounds have no browser audio here.
+vi.mock('../lib/callSound.js', () => ({
+  syncCallSoundLoop: vi.fn(),
+  playCallSound: vi.fn(),
+}));
+
 // EditorRail lazy-loads @monaco-editor/react only when the diff editor mounts
 // (we never open it here). Mock it so nothing can reach for the real Monaco
 // bundle during a render, mirroring the established AppShell.test pattern.

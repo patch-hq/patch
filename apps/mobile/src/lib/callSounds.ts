@@ -7,7 +7,8 @@
 // loses it to the call the instant the call takes its own, and stops, which is
 // what silenced the connecting sound a few milliseconds after the tap.
 //
-// A one-off sound plays once. A looping one (connecting, reconnecting, agent
+// Every sound is preloaded at app start (preloadCallSounds), so starting one is
+// immediate. A one-off sound plays once. A looping one (connecting, reconnecting, agent
 // calling, agent working) repeats until it is stopped. A failure to play is
 // surfaced, not swallowed.
 import { Image, NativeModules, Platform } from 'react-native';
@@ -31,9 +32,9 @@ export type LoopingSound = 'connecting' | 'reconnecting' | 'agent-calling' | 'ag
 export type CallCue = Exclude<CallSoundName, LoopingSound>;
 
 interface PatchCallSoundsNative {
-  play(uri: string): Promise<void>;
-  startLoop(name: string, uri: string): Promise<void>;
-  stopLoop(name: string): Promise<void>;
+  preload(name: string, uri: string, loop: boolean): Promise<void>;
+  start(name: string): Promise<void>;
+  stop(name: string): Promise<void>;
 }
 
 function native(): PatchCallSoundsNative {
@@ -54,9 +55,30 @@ function uriOf(name: CallSoundName): string {
   return Image.resolveAssetSource(CALL_SOUND_ASSETS[name]).uri;
 }
 
+const LOOPING: ReadonlySet<CallSoundName> = new Set([
+  'connecting',
+  'reconnecting',
+  'agent-calling',
+  'agent-working',
+]);
+
+/**
+ * Prepare every sound in the native player, once, at app start: a press then
+ * starts the connecting sound with nothing to open or decode first. Anything
+ * that fails to load is surfaced here, not at the first call.
+ */
+export async function preloadCallSounds(): Promise<void> {
+  const mod = native();
+  await Promise.all(
+    (Object.keys(CALL_SOUND_ASSETS) as CallSoundName[]).map((name) =>
+      mod.preload(name, uriOf(name), LOOPING.has(name)),
+    ),
+  );
+}
+
 export async function playCallSound(cue: CallCue): Promise<void> {
   try {
-    await native().play(uriOf(cue));
+    await native().start(cue);
   } catch (e) {
     useUiStore.getState().pushError(`voice call: ${cue} sound failed: ${(e as Error).message}`);
   }
@@ -71,7 +93,7 @@ export async function startCallSoundLoop(name: LoopingSound): Promise<void> {
   const mine = Symbol(name);
   loops.set(name, mine);
   try {
-    await native().startLoop(name, uriOf(name));
+    await native().start(name);
   } catch (e) {
     if (loops.get(name) === mine) loops.delete(name);
     useUiStore.getState().pushError(`voice call: ${name} sound failed: ${(e as Error).message}`);
@@ -81,7 +103,7 @@ export async function startCallSoundLoop(name: LoopingSound): Promise<void> {
 export async function stopCallSoundLoop(name: LoopingSound): Promise<void> {
   if (!loops.delete(name)) return;
   try {
-    await native().stopLoop(name);
+    await native().stop(name);
   } catch (e) {
     useUiStore
       .getState()

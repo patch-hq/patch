@@ -20,6 +20,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono';
 import { installRelayTransport } from '../src/lib/relayTransport';
 import { bootstrap } from '../src/lib/bootstrap';
+import { preloadCallSounds } from '../src/lib/callSounds';
 import { useCurrentRoute } from '../src/lib/currentRoute';
 import { useShakeToCapture } from '../src/lib/shakeToCapture';
 import { startCrashCapture } from '../src/lib/crashReport';
@@ -117,6 +118,10 @@ export default function RootLayout(): React.ReactElement | null {
     pointUpdatesAtServer();
     void checkForOtaUpdate();
     void bootstrap();
+    // Warm the native call-sound player so the first press has no delay.
+    preloadCallSounds().catch((e: unknown) =>
+      useUiStore.getState().pushError(`call sounds failed to load: ${(e as Error).message}`),
+    );
     // Android share-sheet entry point (spec/15 ## Mobile equivalent of the
     // menu bar): reads a share that launched the app and subscribes to ones
     // that arrive while it's already running (src/lib/nativeShare.ts).
