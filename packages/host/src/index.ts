@@ -332,13 +332,13 @@ import {
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CALL_RESUMED_NOTE, startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
+import { createManagerVoiceTools, type ManagerTimerRequest } from './audio/managerVoice.js';
 import {
-  createManagerVoiceTools,
+  ChatLookupError,
+  createChatLookup,
   MANAGER_CHAT_ID,
-  ManagerChatLookupError,
-  type ManagerChatEntry,
-  type ManagerTimerRequest,
-} from './audio/managerVoice.js';
+  type ChatEntry,
+} from './audio/chatLookup.js';
 import { createSmartTurnDetector, pcmFromWav, type TurnDetector } from './audio/smartTurn.js';
 import { createChatVoice, voiceLocalId, voiceTag } from './audio/chatVoice.js';
 import type { StartMessage } from './audio/voiceAgent.js';
@@ -2010,7 +2010,7 @@ async function startHost(
       link.send({ type: 'voice.timers.request', requestId, ...req });
     });
     // A refusal ("no timer matches pasta") is an answer for the voice to say, not a host failure.
-    if (!answer.ok) throw new ManagerChatLookupError(answer.message);
+    if (!answer.ok) throw new ChatLookupError(answer.message);
     return answer.message;
   };
   /** `patch_search_chats`: one account-wide ask of the server, same waiter shape as the listing. */
@@ -4636,6 +4636,38 @@ async function startHost(
       },
       logger,
     })(chatId, earlier);
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
+  // would read as "there is no such chat". The status is the server's, for every
+  // chat alike (spec/12 § Chat status); this host's own view never overrides it.
+  const listAccountChats = async (callerChatId: string): Promise<ChatEntry[]> => {
+    // Archived chats too: a call finds and names them like any other, labelled.
+    const account = await requestAccountChats(callerChatId, 'include');
+    return account.map((e) => {
+      const chatStatus = e['chatStatus'];
+      const state =
+        chatStatus !== null && typeof chatStatus === 'object'
+          ? str((chatStatus as Record<string, unknown>)['state'])
+          : undefined;
+      const lastUpdated = e['lastUpdated'];
+      return {
+        chatId: e.chatId,
+        name: str(e['name']) ?? null,
+        folder: str(e['folder']) ?? '',
+        status: str(e['status']) ?? 'active',
+        ...(state !== undefined ? { chatStatus: state } : {}),
+        ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
+      };
+    });
+  };
+  // One lookup for every call, the Manager's and an ordinary chat's: the same
+  // server-routed list and peek every chat agent's patch tools use.
+  const chatLookup = createChatLookup({
+    listChats: listAccountChats,
+    peekChat: async (chatId, callerChatId) =>
+      (await peekFromServer({ sourceChatId: callerChatId, targetChatId: chatId, limit: 1 }))
+        .chat_state,
+  });
   const chatVoice = createChatVoice({
     daemon: {
       recordVoiceMessage: (r) => daemon.recordVoiceMessage(r),
@@ -4655,7 +4687,7 @@ async function startHost(
     sessionsOnChat: (chatId) => audioServer?.sessionsOnChat(chatId) ?? [],
     sessionById: (sessionId) => audioServer?.sessionById(sessionId),
     catchUp: (chatId, earlier) => voiceCatchUp(chatId, earlier),
-    listChats: () => listAccountChats(),
+    lookup: chatLookup,
     isLocal: (chatId) => daemon.chatState.has(chatId),
     endCall: (sessionId) => {
       if (!audioServer) throw new Error('the audio server is not running');
@@ -4704,7 +4736,6 @@ async function startHost(
     sendToRemoteChat,
     emitWire: (event) => emit(event),
   });
-  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
   /** Run a command-line tool for a Manager-call action; its failure is the action's failure. */
   const runTool = (cmd: string, args: string[], what: string): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -4718,36 +4749,10 @@ async function startHost(
         resolve(stdout);
       });
     });
-  // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
-  // would read as "there is no such chat". The status is the server's, for every
-  // chat alike (spec/12 § Chat status); this host's own view never overrides it.
-  const listAccountChats = async (archived?: 'include'): Promise<ManagerChatEntry[]> => {
-    const account = await requestAccountChats(MANAGER_CHAT_ID, archived);
-    return account.map((e) => {
-      const chatStatus = e['chatStatus'];
-      const state =
-        chatStatus !== null && typeof chatStatus === 'object'
-          ? str((chatStatus as Record<string, unknown>)['state'])
-          : undefined;
-      const lastUpdated = e['lastUpdated'];
-      return {
-        chatId: e.chatId,
-        name: str(e['name']) ?? null,
-        folder: str(e['folder']) ?? '',
-        status: str(e['status']) ?? 'active',
-        ...(state !== undefined ? { chatStatus: state } : {}),
-        ...(typeof lastUpdated === 'number' ? { lastUpdated } : {}),
-      };
-    });
-  };
   const managerVoice = createManagerVoiceTools({
     logger: logger.child({ component: 'manager-voice' }),
     voicePrompt: () => managerVoicePrompt,
-    // Archived chats too: the Manager finds and messages them like any other.
-    listChats: () => listAccountChats('include'),
-    peekChat: async (chatId) =>
-      (await peekFromServer({ sourceChatId: MANAGER_CHAT_ID, targetChatId: chatId, limit: 1 }))
-        .chat_state,
+    lookup: chatLookup,
     deliver: ({ chatId, message, localId }) =>
       deliverToChat({
         callerChatId: MANAGER_CHAT_ID,

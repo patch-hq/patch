@@ -26,15 +26,13 @@ import {
   type ElevenLabsWsCtor,
 } from '../src/audio/elevenlabs-agent.js';
 import {
-  CHAT_STATUS_TOOL_NAME,
-  FIND_CHATS_TOOL_NAME,
-  ManagerChatLookupError,
-  MANAGER_CHAT_ID,
   MANAGER_QUICK_TOOLS,
   SEND_TO_CHAT_TOOL_NAME,
   type ManagerSendAccepted,
   type ManagerVoiceTools,
 } from '../src/audio/managerVoice.js';
+import { ChatLookupError, MANAGER_CHAT_ID } from '../src/audio/chatLookup.js';
+import { CHAT_STATUS_TOOL_NAME, FIND_CHATS_TOOL_NAME } from '../src/audio/voiceAgent.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent } from '@patch/wire/audio';
 
@@ -90,8 +88,6 @@ function fakeManager(
     },
   );
   const manager: ManagerVoiceTools = {
-    findChats: vi.fn(async () => '"Garden planning" (id c-garden) — working'),
-    chatStatus: vi.fn(async () => 'Where it stands: drafting'),
     sendToChat,
   };
   return { manager, sendToChat, release: (r: string) => release(r) };
@@ -152,7 +148,7 @@ async function openGemini(manager: ManagerVoiceTools | undefined, chatId = MANAG
   await vi.waitFor(() => expect(ws.sent.length).toBeGreaterThan(0));
   ws.serverSend({ setupComplete: {} });
   await vi.waitFor(() => expect(session.getState()).toBe('listening'));
-  return { session, ws, events, passed };
+  return { session, ws, events, passed, link };
 }
 
 describe('Gemini Live on a Manager call', () => {
@@ -162,11 +158,11 @@ describe('Gemini Live on a Manager call', () => {
     const setup = ws.json()[0]!['setup'];
     const names = setup.tools[0].functionDeclarations.map((d: { name: string }) => d.name);
     expect(names).toEqual([
-      FIND_CHATS_TOOL_NAME,
-      CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
       LOOK_BACK_TOOL_NAME,
+      FIND_CHATS_TOOL_NAME,
+      CHAT_STATUS_TOOL_NAME,
       'end_call',
     ]);
     const text = setup.systemInstruction.parts[0].text as string;
@@ -183,6 +179,8 @@ describe('Gemini Live on a Manager call', () => {
       PASS_TO_AGENT_TOOL_NAME,
       'check_status',
       LOOK_BACK_TOOL_NAME,
+      FIND_CHATS_TOOL_NAME,
+      CHAT_STATUS_TOOL_NAME,
       'end_call',
       'switch_chat',
     ]);
@@ -220,7 +218,7 @@ describe('Gemini Live on a Manager call', () => {
 
   test('a name that is not one chat comes back to the voice to ask, with no error raised', async () => {
     const { manager } = fakeManager({
-      sendFails: new ManagerChatLookupError('Several chats match "bus": "A", "B".'),
+      sendFails: new ChatLookupError('Several chats match "bus": "A", "B".'),
     });
     const { ws, events } = await openGemini(manager);
     ws.serverSend({
@@ -255,7 +253,7 @@ describe('Gemini Live on a Manager call', () => {
 
   test('find_chats and chat_status answer at once', async () => {
     const { manager } = fakeManager();
-    const { ws } = await openGemini(manager);
+    const { ws, link } = await openGemini(manager);
     ws.serverSend({
       toolCall: {
         functionCalls: [
@@ -268,7 +266,9 @@ describe('Gemini Live on a Manager call', () => {
     const byId = Object.fromEntries(ws.toolResponses().map((r) => [r['id'], r['response']]));
     expect(byId['f1'].result).toContain('Garden planning');
     expect(byId['f2'].result).toContain('drafting');
-    expect(manager.findChats).toHaveBeenCalledWith('garden');
+    // The shared lookup, on the call's own chat (the Manager's).
+    expect(link.findChats).toHaveBeenCalledWith(MANAGER_CHAT_ID, 'garden');
+    expect(link.chatStatus).toHaveBeenCalledWith(MANAGER_CHAT_ID, 'garden');
   });
 
   test('claiming a send that never happened is corrected with the Manager wording', async () => {
@@ -338,11 +338,11 @@ describe('OpenAI Realtime on a Manager call', () => {
     const { ws, passed } = await openOpenAI(manager);
     const session = ws.ofType('session.update')[0]!['session'];
     expect(session.tools.map((t: { name: string }) => t.name)).toEqual([
-      FIND_CHATS_TOOL_NAME,
-      CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
       LOOK_BACK_TOOL_NAME,
+      FIND_CHATS_TOOL_NAME,
+      CHAT_STATUS_TOOL_NAME,
       'end_call',
     ]);
     expect(session.instructions).toContain('You are the Manager');
@@ -365,7 +365,7 @@ describe('OpenAI Realtime on a Manager call', () => {
 
   test('a lookup miss is handed back to the voice without an error', async () => {
     const { manager } = fakeManager({
-      sendFails: new ManagerChatLookupError('No chat matches "x".'),
+      sendFails: new ChatLookupError('No chat matches "x".'),
     });
     const { ws, events } = await openOpenAI(manager);
     ws.serverSend({
@@ -451,14 +451,14 @@ describe('ElevenLabs Agents on a Manager call', () => {
     await vi.waitFor(() => expect(session.getState()).toBe('listening'));
     const tools = rest.filter((r) => r.path === '/v1/convai/tools');
     expect(tools.map((t) => t.body.tool_config.name)).toEqual([
-      FIND_CHATS_TOOL_NAME,
-      CHAT_STATUS_TOOL_NAME,
       SEND_TO_CHAT_TOOL_NAME,
       ...MANAGER_QUICK_TOOLS.map((t) => t.name),
       LOOK_BACK_TOOL_NAME,
+      FIND_CHATS_TOOL_NAME,
+      CHAT_STATUS_TOOL_NAME,
       'end_call',
     ]);
-    expect(Object.keys(tools[2]!.body.tool_config.parameters.properties)).toEqual([
+    expect(Object.keys(tools[0]!.body.tool_config.parameters.properties)).toEqual([
       'chat',
       'message',
     ]);

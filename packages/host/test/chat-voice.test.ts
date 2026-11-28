@@ -17,7 +17,7 @@ import { createVoiceLedger } from '../src/audio/voiceLedger.js';
 import type { VoiceSessionLike } from '../src/audio/voice-session-like.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { StartMessage } from '../src/audio/voiceAgent.js';
-import type { ManagerChatEntry } from '../src/audio/managerVoice.js';
+import { createChatLookup, type ChatEntry } from '../src/audio/chatLookup.js';
 import { costDirectCall, ZERO_TOKENS } from '../src/audio/voiceCost.js';
 
 const silent = pino({ level: 'silent' });
@@ -76,13 +76,20 @@ function setup() {
     async (_chatId: string, earlier: StartMessage[]) => `caught up on ${earlier.length} messages`,
   );
   const retargeted: Array<[string, string]> = [];
-  const listing: ManagerChatEntry[] = [];
+  const listing: ChatEntry[] = [];
+  const peekChat = vi.fn(async (chatId: string, _caller: string) => ({
+    chatId,
+    statusSummary: `status of ${chatId}`,
+    goal: null,
+    todos: [],
+    lastMessages: [{ role: 'assistant', content: `last words in ${chatId}` }],
+  }));
   const glue = createChatVoice({
     daemon,
     sessionsOnChat: (chatId) => open.filter((s) => s.getCurrentChatId() === chatId),
     sessionById: (sessionId) => byId.get(sessionId),
     catchUp,
-    listChats: async () => listing,
+    lookup: createChatLookup({ listChats: async () => listing, peekChat }),
     isLocal: (chatId) => daemon.chatState.has(chatId),
     retargetCall: (sessionId, chatId) => retargeted.push([sessionId, chatId]),
     ledger,
@@ -107,6 +114,7 @@ function setup() {
     catchUp,
     retargeted,
     listing,
+    peekChat,
   };
 }
 
@@ -309,6 +317,29 @@ describe('chat voice glue', () => {
     releaseTurns();
     await vi.waitFor(() => expect(pushed).toHaveLength(1));
     expect(pushed[0]!.text).toMatch(/to "Add milk" \(from the chat "/);
+  });
+
+  it('find chats and chat status: an ordinary call reads a chat on another host, archived chats labelled', async () => {
+    const { glue, listing, peekChat } = setup();
+    listing.push(
+      { chatId: 'c-here', name: 'Shopping', folder: '/a', status: 'active', chatStatus: 'idle' },
+      {
+        chatId: 'c-away',
+        name: 'Laptop work',
+        folder: '/x',
+        status: 'active',
+        chatStatus: 'running',
+      },
+      { chatId: 'c-old', name: 'Laptop notes', folder: '/y', status: 'archived' },
+    );
+    const found = await glue.link.findChats('c-here', 'laptop');
+    expect(found).toContain('"Laptop work" (id c-away) — working');
+    expect(found).toContain('"Laptop notes" (id c-old) — archived');
+    expect(found).not.toContain('Shopping');
+    const status = await glue.link.chatStatus('c-here', 'laptop work');
+    expect(peekChat).toHaveBeenCalledWith('c-away', 'c-here');
+    expect(status).toContain('Where it stands: status of c-away');
+    expect(status).toContain('Agent: last words in c-away');
   });
 
   it('switch chat: moves the call to a chat on this host, with that chat as it stands', async () => {

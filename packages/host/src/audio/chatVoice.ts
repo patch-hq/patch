@@ -36,12 +36,7 @@ import {
   type SwitchOutcome,
   type VoiceAgentLink,
 } from './voiceAgent.js';
-import {
-  MANAGER_CHAT_ID,
-  ManagerChatLookupError,
-  resolveChat,
-  type ManagerChatEntry,
-} from './managerVoice.js';
+import { ChatLookupError, MANAGER_CHAT_ID, type ChatEntry, type ChatLookup } from './chatLookup.js';
 
 /** How a spoken turn is tagged in the chat: its ingress, and whether the voice agent handed it off. */
 export function voiceTag(source: VoiceTurnSource, handoff: boolean): string {
@@ -162,8 +157,8 @@ export function createChatVoice(deps: {
   sessionById?: (sessionId: string) => VoiceSessionLike | undefined;
   /** The catch-up small job: everything before the last messages, summarised. */
   catchUp?: (chatId: string, earlier: StartMessage[]) => Promise<string>;
-  /** Every chat the account has, for switch chat (the Manager's listing). */
-  listChats?: () => Promise<ManagerChatEntry[]>;
+  /** Finding, reading and naming the account's chats: find chats, chat status and switch chat. */
+  lookup: ChatLookup;
   /** True when `chatId` lives on this host. */
   isLocal?: (chatId: string) => boolean;
   /** Hang an open call up as the agent ending it: ended sound, bar cleared, no redial. */
@@ -443,6 +438,14 @@ export function createChatVoice(deps: {
       return daemon.searchChat(chatId, query);
     },
 
+    findChats(chatId, query) {
+      return deps.lookup.findChats(query, chatId);
+    },
+
+    chatStatus(chatId, chat) {
+      return deps.lookup.chatStatus(chat, chatId);
+    },
+
     endCall(sessionId) {
       if (!deps.endCall) throw new Error('this host cannot hang a call up');
       logger.info({ sessionId }, 'voice: the voice agent ended the call');
@@ -450,14 +453,14 @@ export function createChatVoice(deps: {
     },
 
     async switchChat(sessionId, fromChatId, chat): Promise<SwitchOutcome> {
-      if (!deps.listChats || !deps.isLocal || !deps.retargetCall) {
+      if (!deps.isLocal || !deps.retargetCall) {
         throw new Error('this host cannot move a call to another chat');
       }
-      let target: ManagerChatEntry;
+      let target: ChatEntry;
       try {
-        target = resolveChat(await deps.listChats(), chat);
+        target = await deps.lookup.resolve(chat, fromChatId);
       } catch (err) {
-        if (err instanceof ManagerChatLookupError) return { ok: false, message: err.message };
+        if (err instanceof ChatLookupError) return { ok: false, message: err.message };
         throw err;
       }
       const name = target.name?.trim() || target.chatId;

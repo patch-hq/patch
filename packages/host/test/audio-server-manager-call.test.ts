@@ -25,13 +25,9 @@ import { createKokoro } from '../src/audio/kokoro.js';
 import type { Vad, VadFrameResult } from '../src/audio/vad.js';
 import type { WhisperBackend } from '../src/audio/whisper.js';
 import { createVoiceReplyBridge } from '../src/audio/replyBridge.js';
-import {
-  createManagerVoiceTools,
-  MANAGER_CHAT_ID,
-  SEND_TO_CHAT_TOOL_NAME,
-  FIND_CHATS_TOOL_NAME,
-} from '../src/audio/managerVoice.js';
-import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import { createManagerVoiceTools, SEND_TO_CHAT_TOOL_NAME } from '../src/audio/managerVoice.js';
+import { createChatLookup, MANAGER_CHAT_ID } from '../src/audio/chatLookup.js';
+import { FIND_CHATS_TOOL_NAME, PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
 import {
   encodeAudio,
   decodeAudio,
@@ -179,8 +175,7 @@ describe('audio server — a hosted call to the Manager', () => {
         outcome: 'completed',
       });
     };
-    const managerVoice = createManagerVoiceTools({
-      logger,
+    const lookup = createChatLookup({
       listChats: async () => [
         { chatId: MANAGER_CHAT_ID, name: 'Manager', folder: '/t/manager', status: 'active' },
         {
@@ -193,6 +188,10 @@ describe('audio server — a hosted call to the Manager', () => {
         },
       ],
       peekChat: async (chatId) => ({ chatId, lastMessages: [] }),
+    });
+    const managerVoice = createManagerVoiceTools({
+      logger,
+      lookup,
       deliver: async (req) => {
         delivered.push(req);
       },
@@ -217,9 +216,12 @@ describe('audio server — a hosted call to the Manager', () => {
           userSaid() {},
           beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
         }),
-        voiceAgentLink: fakeVoiceAgentLink({
-          passToAgent: (req) => agentTurns.push({ chatId: req.chatId, message: req.request }),
-        }).link,
+        voiceAgentLink: {
+          ...fakeVoiceAgentLink({
+            passToAgent: (req) => agentTurns.push({ chatId: req.chatId, message: req.request }),
+          }).link,
+          findChats: (chatId, query) => lookup.findChats(query, chatId),
+        },
         getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
         submitUserTurn: async ({ chatId, message }) => {
           agentTurns.push({ chatId, message });
@@ -308,6 +310,8 @@ describe('audio server — a hosted call to the Manager', () => {
       PASS_TO_AGENT_TOOL_NAME,
       'check_status',
       'look_back',
+      'find_chats',
+      'chat_status',
       'end_call',
       'switch_chat',
     ]);

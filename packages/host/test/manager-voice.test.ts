@@ -7,23 +7,29 @@ import pino from 'pino';
 import {
   createManagerVoiceTools,
   isManagerCall,
-  ManagerChatLookupError,
-  MANAGER_CHAT_ID,
   SEND_TO_CHAT_TOOL_NAME,
-  FIND_CHATS_TOOL_NAME,
-  CHAT_STATUS_TOOL_NAME,
   ACKNOWLEDGEMENT_RULE,
   managerHostedInstruction,
-  resolveChat,
-  type ManagerChatEntry,
+  type ChatEntry,
   type ManagerVoiceHostDeps,
 } from '../src/audio/managerVoice.js';
-import { PASS_TO_AGENT_TOOL_NAME } from '../src/audio/voiceAgent.js';
+import {
+  CHAT_STATUS_TOOL_NAME,
+  FIND_CHATS_TOOL_NAME,
+  PASS_TO_AGENT_TOOL_NAME,
+} from '../src/audio/voiceAgent.js';
+import {
+  ChatLookupError,
+  createChatLookup,
+  isManagerCall,
+  MANAGER_CHAT_ID,
+  type ChatEntry,
+} from '../src/audio/chatLookup.js';
 
 const logger = pino({ level: 'silent' });
 const NOW = 1_000_000_000_000;
 
-const CHATS: ManagerChatEntry[] = [
+const CHATS: ChatEntry[] = [
   { chatId: MANAGER_CHAT_ID, name: 'Manager', folder: '/t/manager', status: 'active' },
   {
     chatId: 'c-garden',
@@ -67,23 +73,11 @@ function makeHost(overrides: Partial<ManagerVoiceHostDeps> = {}) {
   const deps: ManagerVoiceHostDeps = {
     logger,
     now: () => NOW,
-    listChats: async () => CHATS,
-    // `chat_state` as the server's patch_peek builds it, whichever host the chat is on.
-    peekChat: vi.fn(async (chatId: string) => ({
-      chatId,
-      hostId: chatId === 'c-remote' ? 'host-laptop' : 'host-here',
-      statusSummary: 'Drafting the planting plan',
-      goal: 'A plan for spring',
-      todos: [
-        { text: 'order seeds', status: 'pending' },
-        { text: 'sow peas', status: 'completed' },
-        { text: 'measure beds', status: 'in_progress' },
-      ],
-      lastMessages: [
-        { role: 'user', content: '[voice • phone] what should go in the north bed?', seq: 4 },
-        { role: 'assistant', content: 'Ferns and hostas do well in shade.', seq: 5 },
-      ],
-    })),
+    lookup: createChatLookup({
+      now: () => NOW,
+      listChats: async () => CHATS,
+      peekChat: async () => ({}),
+    }),
     deliver: vi.fn(async ({ chatId, localId }) => {
       order.push(`deliver:${chatId}:${localId.startsWith('manager-voice-')}`);
     }),
@@ -153,9 +147,7 @@ describe('timer tools', () => {
 
   test('set_timer with no time is refused before the server is asked', async () => {
     const { deps, tools } = makeHost();
-    await expect(tools.quick('set_timer', { label: 'x' })).rejects.toBeInstanceOf(
-      ManagerChatLookupError,
-    );
+    await expect(tools.quick('set_timer', { label: 'x' })).rejects.toBeInstanceOf(ChatLookupError);
     expect(deps.timers).not.toHaveBeenCalled();
   });
 });
@@ -165,89 +157,6 @@ describe('isManagerCall', () => {
     expect(isManagerCall(MANAGER_CHAT_ID)).toBe(true);
     expect(isManagerCall('thread_speakers')).toBe(false);
     expect(isManagerCall('c-garden')).toBe(false);
-  });
-});
-
-describe('find_chats', () => {
-  test('an empty query lists the most recent chats, never the Manager', async () => {
-    const { tools } = makeHost();
-    const out = await tools.findChats('');
-    expect(out).not.toContain(MANAGER_CHAT_ID);
-    const lines = out.split('\n');
-    expect(lines[0]).toContain('Bus timetable import');
-    expect(out).toContain('"Garden planning" (id c-garden) — working, last active 5 min ago');
-    expect(out).toContain('"Bus watcher" (id c-bus) — idle, last active 2 h ago');
-  });
-
-  test('a query keeps the chats whose name or folder matches', async () => {
-    const { tools } = makeHost();
-    const out = await tools.findChats('bus');
-    expect(out.split('\n')).toHaveLength(2);
-    expect(out).not.toContain('Garden');
-    expect(await tools.findChats('zebra')).toBe('No chat matches "zebra".');
-  });
-
-  test('archived chats are found too, and say they are archived', async () => {
-    const { tools } = makeHost();
-    expect(await tools.findChats('old')).toBe('"Old thing" (id c-old) — archived');
-  });
-
-  test('a list the host cannot get is an error, not an empty answer', async () => {
-    const { tools } = makeHost({
-      listChats: async () => {
-        throw new Error('the server link is offline');
-      },
-    });
-    await expect(tools.findChats('')).rejects.toThrow('offline');
-  });
-});
-
-describe('chat_status', () => {
-  test('status, goal, open to-dos and the last messages, read from the server', async () => {
-    const { tools, deps } = makeHost();
-    const out = await tools.chatStatus('garden');
-    expect(deps.peekChat).toHaveBeenCalledWith('c-garden');
-    expect(out).toContain('Where it stands: Drafting the planting plan');
-    expect(out).toContain('Goal: A plan for spring');
-    expect(out).toContain('Still to do: order seeds; measure beds');
-    expect(out).toContain('User: what should go in the north bed?');
-    expect(out).toContain('Agent: Ferns and hostas do well in shade.');
-  });
-
-  test('a chat on another host reads the same: its last messages come from the server', async () => {
-    const { tools, deps } = makeHost();
-    const out = await tools.chatStatus('c-remote');
-    expect(deps.peekChat).toHaveBeenCalledWith('c-remote');
-    expect(out).toContain('"Laptop build"');
-    expect(out).toContain('Agent: Ferns and hostas do well in shade.');
-    expect(out).not.toMatch(/another (computer|host)/);
-  });
-
-  test('a server that cannot be read is an error, not a shorter answer', async () => {
-    const { tools } = makeHost({
-      peekChat: async () => {
-        throw new Error('the link to the Patch server is down');
-      },
-    });
-    await expect(tools.chatStatus('garden')).rejects.toThrow('link to the Patch server is down');
-  });
-
-  test('a name that fits several chats asks which, naming them', async () => {
-    const { tools } = makeHost();
-    const err = await tools.chatStatus('bus').catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ManagerChatLookupError);
-    expect((err as Error).message).toContain('"Bus watcher"');
-    expect((err as Error).message).toContain('"Bus timetable import"');
-  });
-
-  test('an exact name wins over a partial match', async () => {
-    const { tools } = makeHost();
-    expect(await tools.chatStatus('Bus watcher')).toContain('(id c-bus)');
-  });
-
-  test('no match is a lookup error', async () => {
-    const { tools } = makeHost();
-    await expect(tools.chatStatus('zebra')).rejects.toBeInstanceOf(ManagerChatLookupError);
   });
 });
 
@@ -281,7 +190,7 @@ describe('send_to_chat', () => {
     const first = tools.sendToChat({ chat: 'garden', message: 'one' });
     await vi.waitFor(() => expect(replies.has('c-garden')).toBe(true));
     await expect(tools.sendToChat({ chat: 'garden', message: 'two' })).rejects.toBeInstanceOf(
-      ManagerChatLookupError,
+      ChatLookupError,
     );
     replies.get('c-garden')!.resolve('ok');
     await first;
@@ -363,7 +272,7 @@ describe('send_to_chat', () => {
   test('an ambiguous name sends nothing', async () => {
     const { tools, deps } = makeHost();
     await expect(tools.sendToChat({ chat: 'bus', message: 'x' })).rejects.toBeInstanceOf(
-      ManagerChatLookupError,
+      ChatLookupError,
     );
     expect(deps.deliver).not.toHaveBeenCalled();
     expect(deps.awaitReply).not.toHaveBeenCalled();
@@ -404,39 +313,6 @@ describe('prompts', () => {
   });
 });
 
-describe('resolveChat (a chat named on a call)', () => {
-  const chats: ManagerChatEntry[] = [
-    { chatId: 'c1', name: 'Garden planning', folder: '/home/garden', status: 'active' },
-    { chatId: 'c2', name: 'Garden shed', folder: '/home/shed', status: 'active' },
-    { chatId: 'c3', name: 'Tax return', folder: '/home/tax', status: 'archived' },
-    { chatId: MANAGER_CHAT_ID, name: 'Manager', folder: '/', status: 'active' },
-  ];
-  test('an id or an exact name wins; words must pick out one chat', () => {
-    expect(resolveChat(chats, 'c2').chatId).toBe('c2');
-    expect(resolveChat(chats, 'garden planning').chatId).toBe('c1');
-    expect(resolveChat(chats, 'shed').chatId).toBe('c2');
-  });
-  test('none or several is a lookup error naming the choices; the Manager is not a name', () => {
-    expect(() => resolveChat(chats, 'garden')).toThrow(/Several chats match "garden"/);
-    expect(() => resolveChat(chats, 'manager')).toThrow(/No chat matches/);
-  });
-  test('an archived chat is a name like any other', () => {
-    expect(resolveChat(chats, 'tax').chatId).toBe('c3');
-    expect(resolveChat(chats, 'c3').chatId).toBe('c3');
-  });
-  test('of several chats a name fits, the only one not archived is meant', () => {
-    const withOld: ManagerChatEntry[] = [
-      ...chats,
-      { chatId: 'c4', name: 'Tax return', folder: '/home/tax-2025', status: 'active' },
-      { chatId: 'c5', name: 'Garden old', folder: '/home/garden-old', status: 'archived' },
-    ];
-    expect(resolveChat(withOld, 'tax return').chatId).toBe('c4');
-    expect(resolveChat(withOld, 'tax').chatId).toBe('c4');
-    // Two current ones still ask, and name the archived one as such.
-    expect(() => resolveChat(withOld, 'garden')).toThrow(/"Garden old" \(archived\)/);
-  });
-});
-
 describe('quick tools (a Manager call acts directly)', () => {
   test('add_task files the task with its due date and records it', async () => {
     const { deps, tools, notes } = makeHost();
@@ -453,7 +329,7 @@ describe('quick tools (a Manager call acts directly)', () => {
   test('add_task without content asks rather than filing an empty task', async () => {
     const { deps, tools } = makeHost();
     await expect(tools.quick('add_task', { content: '  ' })).rejects.toBeInstanceOf(
-      ManagerChatLookupError,
+      ChatLookupError,
     );
     expect(deps.addTask).not.toHaveBeenCalled();
   });
@@ -494,7 +370,7 @@ describe('quick tools (a Manager call acts directly)', () => {
   test('a task name that matches nothing says so', async () => {
     const { deps, tools } = makeHost();
     await expect(tools.quick('complete_task', { task: 'caviar' })).rejects.toBeInstanceOf(
-      ManagerChatLookupError,
+      ChatLookupError,
     );
     expect(deps.closeTask).not.toHaveBeenCalled();
   });
@@ -515,7 +391,7 @@ describe('quick tools (a Manager call acts directly)', () => {
     const empty = makeHost({ listTasks: async () => [] });
     expect(await empty.tools.quick('read_project', { project: 'Groceries' })).toContain('no open');
     await expect(tools.quick('read_project', { project: ' ' })).rejects.toBeInstanceOf(
-      ManagerChatLookupError,
+      ChatLookupError,
     );
   });
 
@@ -574,7 +450,7 @@ describe('quick tools (a Manager call acts directly)', () => {
     ]);
     await expect(
       tools.quick('add_event', { title: 'Dentist', start: '2026-12-01T14:00:00' }),
-    ).rejects.toBeInstanceOf(ManagerChatLookupError);
+    ).rejects.toBeInstanceOf(ChatLookupError);
   });
 
   test('ask_agent hands the request to the Manager agent and returns at once', async () => {

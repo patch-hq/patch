@@ -60,7 +60,8 @@ import type { KokoroBackend } from './kokoro.js';
 import { GeminiLiveSession } from './gemini-live.js';
 import type { VoiceAgentLink } from './voiceAgent.js';
 import { voiceAgentChoiceRefusal } from './voiceCatalog.js';
-import { isManagerCall, type ManagerVoiceTools } from './managerVoice.js';
+import { isManagerCall } from './chatLookup.js';
+import type { ManagerVoiceTools } from './managerVoice.js';
 import { OpenAIRealtimeSession, type OpenAIWsCtor } from './openai-realtime.js';
 import {
   ElevenLabsAgentSession,
