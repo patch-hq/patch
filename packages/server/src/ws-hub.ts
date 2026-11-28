@@ -1799,7 +1799,11 @@ export class WsHub {
       }
       case 'view_position.set': {
         const { type: _t, ...pos } = event;
-        this.deps.viewPosition?.set(conn.surfaceId, pos);
+        const changed = this.deps.viewPosition?.set(conn.surfaceId, pos, conn.surfaceKind);
+        slog.info(
+          { surfaceId: conn.surfaceId, page: pos.page, id: pos.id, seq: pos.seq, changed },
+          changed ? 'view-position: set' : 'view-position: ignored, unchanged',
+        );
         return;
       }
       case 'new_chat_draft.set': {

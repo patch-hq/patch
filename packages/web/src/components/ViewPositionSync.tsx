@@ -1,11 +1,14 @@
-// Handover between surfaces (spec/05 § Handover). Reports the page and chat
-// scroll position the user is on, and adopts another surface's newer position
-// on launch or when this surface returns to the foreground — never while the
-// user is mid-use, so a screen does not move under a hand.
+// Handover between surfaces (spec/05 § Handover). One rule: this surface only
+// changes screen while the user is not looking at it. A position from another
+// surface is applied the moment it arrives if this window is hidden or not
+// focused, so coming back finds it already there; one that arrives while the
+// window is in use is dropped. This surface reports the page and chat position
+// only when they change, and once more as the user leaves the window.
 
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { positionFromPath, pathFromPosition } from '../lib/viewPosition.js';
+import type { ViewPositionTarget } from '../lib/viewPosition.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
@@ -17,6 +20,15 @@ export const VIEW_POSITION_DEBOUNCE_MS = 800;
 
 const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 
+/** Whether the user is looking at this window right now. */
+function inUse(): boolean {
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+function samePosition(a: ViewPositionTarget | null, b: ViewPositionTarget | null): boolean {
+  return a !== null && b !== null && a.page === b.page && a.id === b.id && a.seq === b.seq;
+}
+
 export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   const location = useLocation();
   // Captures and detached tabs have an explicitly requested screen. They
@@ -26,7 +38,6 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
     return params.get('tabWindow') === '1' || params.has('capture');
   });
   const navigate = useNavigate();
-  const remote = useViewPositionStore((s) => s.remote);
   const scroll = useViewPositionStore((s) => s.scroll);
   // Account-wide "Sync position between surfaces". Until the preferences have
   // loaded the answer is unknown, so nothing is reported or adopted.
@@ -35,22 +46,49 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
   const activeRef = useRef(false);
   // Still waiting for the launch snapshot.
   const launchRef = useRef(true);
+  // The last position this surface sent, so the same place is never re-sent.
+  const sentRef = useRef<ViewPositionTarget | null>(null);
   // Bumped on the first touch after launch / foreground so the page the user is
   // already on is reported without them having to navigate or scroll first.
   const [activations, setActivations] = useState(0);
 
-  const adopt = (allowOwn = false): void => {
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
+  const current = (): ViewPositionTarget | null => {
+    const sc = useViewPositionStore.getState().scroll;
+    const path = pathRef.current;
+    return positionFromPath(
+      path,
+      sc !== null && path === `/chats/${encodeURIComponent(sc.chatId)}` ? sc.seq : null,
+    );
+  };
+
+  const report = (): void => {
+    if (!ws || !activeRef.current) return;
+    const prefs = usePreferencesStore.getState();
+    if (isolated || !prefs.loaded || !prefs.preferences.syncPosition) return;
+    const pos = current();
+    if (!pos || samePosition(pos, sentRef.current)) return;
+    sentRef.current = pos;
+    ws.send({ type: 'view_position.set', ...pos });
+  };
+  const reportRef = useRef(report);
+  reportRef.current = report;
+
+  // Decide on the remote position as it arrives: go there while the user is
+  // away from this window, drop it while they are using it.
+  const settle = (launch: boolean): void => {
     if (isolated) return;
     const st = useViewPositionStore.getState();
     const own = usePresenceStore.getState().surfaceId;
     const r = st.remote;
-    if (
-      !usePreferencesStore.getState().preferences.syncPosition ||
-      !usePreferencesStore.getState().loaded
-    )
-      return;
-    if (!r || (r.surfaceId === own && !allowOwn) || r.updatedAt <= st.handledAt) return;
+    const prefs = usePreferencesStore.getState();
+    if (!prefs.loaded || !prefs.preferences.syncPosition) return;
+    if (!r || r.updatedAt <= st.handledAt) return;
+    // Own positions are echoes, except a fresh launch restoring where it closed.
+    if (r.surfaceId === own && !launch) return;
     st.markHandled(r.updatedAt);
+    if (!launch && inUse()) return;
     // A chat some group already shows is brought forward (spec/14 § Groups).
     // The chat route leaves an already-showing chat alone so a reload keeps the
     // focus it restored, so the handover has to say it means to move there.
@@ -58,15 +96,47 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       const layout = useLayoutStore.getState();
       if (layout.groups.some((g) => g.chatId === r.id)) layout.showChat(r.id);
     }
-    navigate(pathFromPosition(r));
+    const target = pathFromPosition(r);
+    // What this window now shows was chosen elsewhere; it is not news to send back.
+    sentRef.current = {
+      page: r.page,
+      ...(r.id !== undefined ? { id: r.id } : {}),
+      ...(r.seq !== undefined ? { seq: r.seq } : {}),
+    };
+    navigate(target);
   };
 
-  useEffect(() => {
-    if (enabled && remote && launchRef.current && !activeRef.current) {
+  const settleRef = useRef(settle);
+  settleRef.current = settle;
+  // Decided the moment a position arrives — whether the user is looking at this
+  // window is a fact about that moment, not about when React next renders.
+  const onRemote = (): void => {
+    const st = useViewPositionStore.getState();
+    const r = st.remote;
+    const prefs = usePreferencesStore.getState();
+    if (isolated || !r || !prefs.loaded || !prefs.preferences.syncPosition) return;
+    if (launchRef.current) {
       launchRef.current = false;
-      adopt(true);
+      // The launch snapshot: open where the user was, unless they already started here.
+      if (!activeRef.current) settleRef.current(true);
+      else st.markHandled(r.updatedAt);
+      return;
     }
-  }, [remote, enabled]);
+    settleRef.current(false);
+  };
+  const onRemoteRef = useRef(onRemote);
+  onRemoteRef.current = onRemote;
+  useEffect(
+    () =>
+      useViewPositionStore.subscribe((s, prev) => {
+        if (s.remote !== prev.remote) onRemoteRef.current();
+      }),
+    [],
+  );
+  // A snapshot that landed before the preferences loaded is decided once they have.
+  useEffect(() => {
+    if (enabled) onRemoteRef.current();
+  }, [enabled]);
 
   useEffect(() => {
     const onInput = (): void => {
@@ -74,35 +144,28 @@ export function ViewPositionSync({ ws }: { ws: PatchWs | null }): null {
       activeRef.current = true;
       launchRef.current = false;
     };
-    const onForeground = (): void => {
-      if (document.visibilityState === 'hidden') {
-        activeRef.current = false;
-        return;
-      }
+    // Leaving the window: send where the user stopped, once, then stop counting
+    // as in use until they touch it again.
+    const onLeave = (): void => {
+      reportRef.current();
       activeRef.current = false;
-      adopt();
+    };
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') onLeave();
     };
     for (const e of INPUT_EVENTS) window.addEventListener(e, onInput, { passive: true });
-    document.addEventListener('visibilitychange', onForeground);
-    window.addEventListener('focus', onForeground);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onLeave);
     return () => {
       for (const e of INPUT_EVENTS) window.removeEventListener(e, onInput);
-      document.removeEventListener('visibilitychange', onForeground);
-      window.removeEventListener('focus', onForeground);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onLeave);
     };
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!enabled || !ws || !activeRef.current || document.visibilityState === 'hidden') return;
-      const pos = positionFromPath(
-        location.pathname,
-        scroll !== null && location.pathname === `/chats/${encodeURIComponent(scroll.chatId)}`
-          ? scroll.seq
-          : null,
-      );
-      if (pos) ws.send({ type: 'view_position.set', ...pos });
-    }, VIEW_POSITION_DEBOUNCE_MS);
+    if (!enabled) return undefined;
+    const timer = setTimeout(() => reportRef.current(), VIEW_POSITION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [ws, enabled, location.pathname, scroll, activations]);
 

@@ -109,15 +109,67 @@ describe('ViewPositionSync', () => {
     expect(where()).toBe('/chats/c9?seq=5');
   });
 
-  it('does not move a screen the user has already touched, until it returns to the foreground', () => {
+  it('drops a position that arrives while the window is in use: the screen never moves under a hand', () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     mount('/jobs');
     fireEvent.pointerDown(window);
     act(() => useViewPositionStore.getState().applyUpdated(remote(), 'desk'));
     expect(where()).toBe('/jobs');
+    // Coming back to it later does not move it either: that move is gone.
     act(() => {
       window.dispatchEvent(new Event('focus'));
     });
+    expect(where()).toBe('/jobs');
+    expect(useViewPositionStore.getState().handledAt).toBe(100);
+    focus.mockRestore();
+  });
+
+  it('goes there at once when the position arrives while the window is not focused', () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    mount('/jobs');
+    fireEvent.pointerDown(window);
+    act(() => useViewPositionStore.getState().applyUpdated(remote(), 'desk'));
     expect(where()).toBe('/chats/c9?seq=5');
+    focus.mockRestore();
+  });
+
+  it('never sends the same place twice', () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const { send } = mount('/chats/c1');
+    fireEvent.pointerDown(window);
+    act(() => useViewPositionStore.getState().setScroll('c1', null));
+    act(() => {
+      vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1);
+    });
+    // A streaming reply re-anchors at the latest over and over: not a move.
+    for (let i = 0; i < 5; i++) {
+      act(() => useViewPositionStore.getState().setScroll('c1', null));
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+    }
+    expect(send).toHaveBeenCalledTimes(1);
+    focus.mockRestore();
+  });
+
+  it('sends the final position as the user leaves the window, without waiting for the debounce', () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const { send } = mount('/chats/c1');
+    fireEvent.pointerDown(window);
+    act(() => {
+      vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1);
+    });
+    act(() => useViewPositionStore.getState().setScroll('c1', 40));
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'view_position.set',
+      page: 'chat',
+      id: 'c1',
+      seq: 40,
+    });
+    focus.mockRestore();
   });
 
   it('adopts a position only once', () => {

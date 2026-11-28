@@ -79,6 +79,7 @@ export default defineConfig({
       'expo-intent-launcher': path.resolve(__dirname, '__tests__/stubs/expo-intent-launcher.ts'),
       'expo-camera': path.resolve(__dirname, '__tests__/stubs/expo-camera.ts'),
       'expo-notifications': path.resolve(__dirname, '__tests__/stubs/expo-notifications.ts'),
+      'expo-task-manager': path.resolve(__dirname, '__tests__/stubs/expo-task-manager.ts'),
       'expo-router': path.resolve(__dirname, '__tests__/stubs/expo-router.ts'),
       'expo-status-bar': path.resolve(__dirname, '__tests__/stubs/empty.ts'),
       'expo-linking': path.resolve(__dirname, '__tests__/stubs/expo-linking.ts'),

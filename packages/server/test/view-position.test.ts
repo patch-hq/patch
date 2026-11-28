@@ -152,3 +152,39 @@ describe('view position handover', () => {
     }
   });
 });
+
+describe('view position: repeats are not moves', () => {
+  it('a set of the place already held is ignored: no new stamp, no broadcast', async () => {
+    const { ViewPositionStore } = await import('../src/view-position.js');
+    let now = 1000;
+    const store = new ViewPositionStore({ nowMs: () => now });
+    const seen: number[] = [];
+    store.onChange((p) => seen.push(p.updatedAt));
+    expect(store.set('srf-a', { page: 'chat', id: 'c1' }, 'desktop')).toBe(true);
+    now = 6000;
+    expect(store.set('srf-a', { page: 'chat', id: 'c1' }, 'desktop')).toBe(false);
+    expect(seen).toEqual([1000]);
+    expect(store.get()).toMatchObject({ updatedAt: 1000, surfaceKind: 'desktop' });
+    now = 7000;
+    expect(store.set('srf-a', { page: 'chat', id: 'c1', seq: 5 }, 'desktop')).toBe(true);
+    expect(seen).toEqual([1000, 7000]);
+  });
+
+  it('the broadcast names the kind of surface that moved', async () => {
+    const ctx = await setUp();
+    try {
+      const a = await ctx.clientFor('srf-a');
+      const b = await ctx.clientFor('srf-b');
+      try {
+        const got = b.waitFor('view_position.updated');
+        a.send({ type: 'view_position.set', page: 'pads' });
+        expect(await got).toMatchObject({ page: 'pads', surfaceId: 'srf-a', surfaceKind: 'web' });
+      } finally {
+        await a.close();
+        await b.close();
+      }
+    } finally {
+      await cleanUp(ctx);
+    }
+  });
+});

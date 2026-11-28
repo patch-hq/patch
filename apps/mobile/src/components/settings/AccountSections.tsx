@@ -16,6 +16,7 @@ import { SettingsSection } from '../SettingsSection';
 import { SettingsPage } from './SettingsPage';
 import { Row, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
 import { patchShared } from './sharedWrite';
+import { pushesToday, readLog, readTaskError } from '../../lib/handover';
 
 interface Me {
   account: { accountId: string; userPublicKey: string; createdAt: number };
@@ -72,6 +73,7 @@ export function AccountPage(): React.ReactElement {
           </SettingsSection>
         )}
       </WithSettings>
+      <HandoverSection />
       <ThisSurfaceSection />
     </SettingsPage>
   );
@@ -175,6 +177,40 @@ export function ThisSurfaceSection(): React.ReactElement {
           />
         }
       />
+    </SettingsSection>
+  );
+}
+
+/**
+ * Settings → Account → Handover (spec/05 § Handover — Seeing why): the phone's
+ * last handover decisions, newest first, read fresh each time the page opens.
+ */
+export function HandoverSection(): React.ReactElement {
+  const [log] = React.useState(readLog);
+  const [pushes] = React.useState(() => pushesToday());
+  const [taskError] = React.useState(readTaskError);
+  const time = (at: number): string =>
+    new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return (
+    <SettingsSection title="Handover" testID="settings-handover">
+      <ValueRow label="Pushes today" value={String(pushes)} testID="handover-pushes" />
+      <ValueRow
+        label="Background push"
+        value={taskError === null ? 'Ready' : `Not registered: ${taskError}`}
+        testID="handover-task"
+      />
+      {log.length === 0 ? (
+        <Row title="No handovers yet" testID="handover-empty" />
+      ) : (
+        log.map((e, i) => (
+          <Row
+            key={`${String(e.at)}-${String(i)}`}
+            testID={`handover-log-${String(i)}`}
+            title={`${e.outcome[0]!.toUpperCase()}${e.outcome.slice(1)} · ${e.where}`}
+            subtitle={`${time(e.at)} · ${e.via} from ${e.from} · ${e.why}`}
+          />
+        ))
+      )}
     </SettingsSection>
   );
 }

@@ -151,7 +151,8 @@ import {
   registerJobsDiagRoutes,
   InMemorySpeakersRecorder,
 } from './dev-diag.js';
-import { ExpoPushBackend } from './notifications/expo.js';
+import { ExpoPushBackend, sendExpoData } from './notifications/expo.js';
+import { startHandoverPush } from './view-position-push.js';
 
 /** How long a socket has to answer the going-away notice before a stop cuts it. */
 export const WS_CLOSE_GRACE_MS = 2_000;
@@ -227,6 +228,8 @@ export interface BuildOptions {
   hooksWatch?: boolean;
   /** Group 11 — inject mock push backend in tests; production uses Expo's push API. */
   pushBackend?: PushBackend;
+  /** Data-only push sender (tests); production posts to Expo. */
+  sendPushData?: (tokens: string[], data: Record<string, string>) => Promise<{ failed: string[] }>;
   /** Group 11 — call timeout (default 30000). */
   callTimeoutMs?: number;
   /** Inject a pairing-nonce store (tests); otherwise an in-memory store. */
@@ -982,6 +985,20 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // ExpoPushBackend — nothing to configure, nothing that can be missing, so a
   // server with no push set up (there is no such thing any more) still starts.
   const pushBackend: PushBackend = opts.pushBackend ?? new ExpoPushBackend();
+
+  // Handover (spec/05): a real move wakes the phones with a silent push once it
+  // has held, so a phone that is put away is already there when it is opened.
+  const stopHandoverPush = startHandoverPush({
+    viewPosition,
+    enabled: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).syncPosition,
+    phones: () => {
+      const account = registry.getAccount();
+      return account ? registry.listPushTokenRecords(account.accountId) : [];
+    },
+    sendData: opts.sendPushData ?? ((tokens, data) => sendExpoData(tokens, data)),
+    logger: log.child({ component: 'view-position' }),
+  });
+  app.addHook('onClose', async () => stopHandoverPush());
 
   // DEV/TEST seam: record speakers-channel notifies so D1-6 (Speakers reply
   // auto-routes TTS to the originating device) is assertable even when no real

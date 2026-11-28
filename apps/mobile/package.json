@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Patch mobile (Android-only Expo app).",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "dev": "expo start",
@@ -47,6 +47,7 @@
     "expo-speech": "~13.0.1",
     "expo-splash-screen": "~0.29.24",
     "expo-status-bar": "~2.0.0",
+    "expo-task-manager": "~12.0.6",
     "expo-updates": "~0.27.5",
     "lucide-react-native": "^0.460.0",
     "qrcode": "^1.5.4",

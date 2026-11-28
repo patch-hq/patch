@@ -9,6 +9,7 @@ export interface RemotePosition {
   id?: string;
   seq?: number;
   surfaceId: string;
+  surfaceKind?: string;
   updatedAt: number;
 }
 
@@ -41,5 +42,10 @@ export const useViewPositionStore = create<ViewPositionState>((set) => ({
         : { remote: pos, received: true },
     ),
   markHandled: (updatedAt) => set((s) => ({ handledAt: Math.max(s.handledAt, updatedAt) })),
-  setScroll: (chatId, seq) => set({ scroll: { chatId, seq } }),
+  // The same place again is not a change: a fresh object would re-run the
+  // report and look like a move (spec/05 § Handover — Reporting).
+  setScroll: (chatId, seq) =>
+    set((s) =>
+      s.scroll?.chatId === chatId && s.scroll.seq === seq ? s : { scroll: { chatId, seq } },
+    ),
 }));

@@ -185,3 +185,18 @@ export async function getPresentedNotificationsAsync(): Promise<PresentedNotific
 export function __setPresented(list: PresentedNotification[]): void {
   _presented = list;
 }
+
+// Background notification task (spec/05 § Handover).
+const registeredTasks = new Set<string>();
+let registerTaskError: Error | null = null;
+export function registerTaskAsync(name: string): Promise<null> {
+  if (registerTaskError) return Promise.reject(registerTaskError);
+  registeredTasks.add(name);
+  return Promise.resolve(null);
+}
+export function __registeredTasks(): string[] {
+  return [...registeredTasks];
+}
+export function __setRegisterTaskError(e: Error | null): void {
+  registerTaskError = e;
+}
