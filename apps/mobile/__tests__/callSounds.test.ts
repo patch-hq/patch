@@ -23,6 +23,7 @@ vi.mock('../src/lib/callSoundAssets', () => ({
 import {
   playCallSound,
   playingCallSoundLoops,
+  preloadCallSounds,
   startCallSoundLoop,
   stopCallSoundLoop,
   syncCallSoundLoop,
@@ -30,9 +31,9 @@ import {
 import { useUiStore } from '../src/stores/uiStore';
 
 const native = {
-  play: vi.fn(async (_uri: string) => undefined),
-  startLoop: vi.fn(async (_name: string, _uri: string) => undefined),
-  stopLoop: vi.fn(async (_name: string) => undefined),
+  preload: vi.fn(async (_name: string, _uri: string, _loop: boolean) => undefined),
+  start: vi.fn(async (_name: string) => undefined),
+  stop: vi.fn(async (_name: string) => undefined),
 };
 
 async function flush(): Promise<void> {
@@ -52,13 +53,28 @@ describe('call sounds', () => {
     useUiStore.setState({ errors: [] });
   });
 
-  it('plays a one-off sound from its own bundled file', async () => {
+  it('preloads every sound from its own bundled file at app start, loops marked', async () => {
+    await preloadCallSounds();
+    expect(native.preload).toHaveBeenCalledTimes(10);
+    expect(native.preload).toHaveBeenCalledWith('reconnected', 'call_sound_5', false);
+    expect(native.preload).toHaveBeenCalledWith('connecting', 'call_sound_1', true);
+    expect(native.preload).toHaveBeenCalledWith('agent-working', 'call_sound_9', true);
+  });
+
+  it('starting the connecting loop reaches the native player in the same tick', () => {
+    syncCallSoundLoop('connecting', true);
+    // No await has run: the native start is already requested, with nothing to load first.
+    expect(native.start).toHaveBeenCalledWith('connecting');
+    expect(native.preload).not.toHaveBeenCalled();
+  });
+
+  it('plays a one-off sound by name', async () => {
     await playCallSound('reconnected');
-    expect(native.play).toHaveBeenCalledWith('call_sound_5');
+    expect(native.start).toHaveBeenCalledWith('reconnected');
   });
 
   it('a sound that cannot play says so', async () => {
-    native.play.mockRejectedValueOnce(new Error('no output'));
+    native.start.mockRejectedValueOnce(new Error('no output'));
     await playCallSound('ended');
     expect(useUiStore.getState().errors[0]?.message).toContain('ended sound failed: no output');
   });
@@ -66,28 +82,28 @@ describe('call sounds', () => {
   it('loops a looping sound once, however often it is started, until it is stopped', async () => {
     await startCallSoundLoop('reconnecting');
     await startCallSoundLoop('reconnecting');
-    expect(native.startLoop).toHaveBeenCalledTimes(1);
-    expect(native.startLoop).toHaveBeenCalledWith('reconnecting', 'call_sound_4');
+    expect(native.start).toHaveBeenCalledTimes(1);
+    expect(native.start).toHaveBeenCalledWith('reconnecting');
     expect(playingCallSoundLoops()).toEqual(['reconnecting']);
     await stopCallSoundLoop('reconnecting');
-    expect(native.stopLoop).toHaveBeenCalledWith('reconnecting');
+    expect(native.stop).toHaveBeenCalledWith('reconnecting');
     expect(playingCallSoundLoops()).toEqual([]);
     await stopCallSoundLoop('reconnecting');
-    expect(native.stopLoop).toHaveBeenCalledTimes(1);
+    expect(native.stop).toHaveBeenCalledTimes(1);
   });
 
   it('a loop stopped while it is still starting is stopped natively after its start', async () => {
     syncCallSoundLoop('connecting', true);
     syncCallSoundLoop('connecting', false);
     await flush();
-    expect(native.startLoop.mock.invocationCallOrder[0]!).toBeLessThan(
-      native.stopLoop.mock.invocationCallOrder[0]!,
+    expect(native.start.mock.invocationCallOrder[0]!).toBeLessThan(
+      native.stop.mock.invocationCallOrder[0]!,
     );
     expect(playingCallSoundLoops()).toEqual([]);
   });
 
   it('a loop that cannot start says so and can be started again', async () => {
-    native.startLoop.mockRejectedValueOnce(new Error('busy'));
+    native.start.mockRejectedValueOnce(new Error('busy'));
     await startCallSoundLoop('agent-calling');
     expect(useUiStore.getState().errors[0]?.message).toContain('agent-calling sound failed: busy');
     expect(playingCallSoundLoops()).toEqual([]);
@@ -97,7 +113,7 @@ describe('call sounds', () => {
 
   it('a failed start after the loop was replaced leaves the new one alone', async () => {
     let reject: (e: Error) => void = () => undefined;
-    native.startLoop.mockImplementationOnce(
+    native.start.mockImplementationOnce(
       () => new Promise((_res, rej) => (reject = rej as (e: Error) => void)),
     );
     const first = startCallSoundLoop('agent-working');
@@ -110,7 +126,7 @@ describe('call sounds', () => {
 
   it('a loop that will not stop says so', async () => {
     await startCallSoundLoop('connecting');
-    native.stopLoop.mockRejectedValueOnce(new Error('gone'));
+    native.stop.mockRejectedValueOnce(new Error('gone'));
     await stopCallSoundLoop('connecting');
     expect(useUiStore.getState().errors[0]?.message).toContain(
       'stopping the connecting sound failed: gone',

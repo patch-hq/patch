@@ -11,6 +11,7 @@ import { FakeCallTransport } from './testUtils/fakeCallTransport';
 import { __emitAppStateChange } from './stubs/react-native';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
+import { api } from '../src/api/rest';
 
 vi.mock('../src/api/rest', () => ({
   api: {
@@ -144,6 +145,22 @@ describe('connecting → failed after the timeout', () => {
     );
     vi.advanceTimersByTime(CALL_ACK_TIMEOUT_MS * 2);
     expect(useVoiceStore.getState().callError).toBeNull();
+  });
+
+  it("requests the connecting sound in the tap's own tick, before any call setup", () => {
+    // No await has run: nothing of the call's setup (token, permission, service,
+    // socket) has been touched yet, but the loop is already requested.
+    vi.mocked(api.me).mockClear();
+    startVoiceCall('c1');
+    expect(looping('connecting')).toBe(true);
+    const loopAt =
+      loopMock.mock.invocationCallOrder[
+        loopMock.mock.calls.findIndex((c) => c[0] === 'connecting' && c[1] === true)
+      ]!;
+    // The setup's first network call (the identity fetch) comes after it.
+    const meAt = vi.mocked(api.me).mock.invocationCallOrder.at(-1);
+    expect(meAt).toBeDefined();
+    expect(loopAt).toBeLessThan(meAt!);
   });
 
   it('rings while connecting and stops when the line goes live', async () => {

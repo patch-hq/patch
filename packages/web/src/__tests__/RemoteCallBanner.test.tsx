@@ -11,6 +11,12 @@ import { setActiveWs } from '../api/ws.js';
 import { __setAudioOpenerForTests } from '../lib/voiceController.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
+// The call's sounds have no browser audio here.
+vi.mock('../lib/callSound.js', () => ({
+  syncCallSoundLoop: vi.fn(),
+  playCallSound: vi.fn(),
+}));
+
 const remote = {
   sessionId: 's1',
   surfaceId: 'phone',

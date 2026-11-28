@@ -19,6 +19,7 @@ import {
   maybeAcceptDevCredential,
 } from './lib/credential.js';
 import { initWindowChrome } from './lib/windowChrome.js';
+import { warmCallSounds } from './lib/callSound.js';
 // NOTE: the self-hosted Monaco bootstrap (`lib/monaco-loader.js`) is
 // deliberately NOT imported here. Statically importing it put the entire file
 // editor — every monarch tokenizer plus the JSON/CSS/HTML/TS language services
@@ -79,6 +80,12 @@ if (!root) throw new Error('#root missing');
 // bar the shell hid paints its traffic-light inset immediately instead of
 // jumping one frame in. No-op in a browser (no shell, so no chrome to offset).
 initWindowChrome();
+
+// Render the call sounds now, so the first press of a call button has one ready
+// to start in its own task.
+warmCallSounds().catch((e: unknown) =>
+  console.error(`call sounds could not be warmed: ${String(e)}`),
+);
 
 createRoot(root).render(
   <StrictMode>

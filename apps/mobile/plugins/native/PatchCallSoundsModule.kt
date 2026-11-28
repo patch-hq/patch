@@ -21,8 +21,11 @@ import com.facebook.react.bridge.ReactMethod
  * connecting sound a few milliseconds after it started — and would in turn
  * take it from the call's microphone each time a cue played.
  *
- * A one-off sound is released when it finishes; a looping one plays until
- * stopped. NO FALLBACK: a sound that cannot be loaded rejects.
+ * Every sound is prepared once at app start (`preload`) and kept ready, so
+ * starting one is a bare `start()` with no file open, decode or prepare in
+ * between: the connecting sound has to begin on the press, not a few seconds
+ * after it. A looping one plays until stopped. NO FALLBACK: a sound that cannot
+ * be loaded, or that was never preloaded, rejects.
  */
 class PatchCallSoundsModule(private val ctx: ReactApplicationContext) :
   ReactContextBaseJavaModule(ctx) {
@@ -31,7 +34,7 @@ class PatchCallSoundsModule(private val ctx: ReactApplicationContext) :
     const val TAG = "patch-voice"
   }
 
-  private val loops = HashMap<String, MediaPlayer>()
+  private val players = HashMap<String, MediaPlayer>()
 
   override fun getName(): String = "PatchCallSounds"
 
@@ -46,7 +49,7 @@ class PatchCallSoundsModule(private val ctx: ReactApplicationContext) :
     return Uri.parse("android.resource://${ctx.packageName}/$id")
   }
 
-  private fun player(uri: String, loop: Boolean): MediaPlayer {
+  private fun prepared(uri: String, loop: Boolean): MediaPlayer {
     val p = MediaPlayer()
     try {
       p.setAudioAttributes(
@@ -65,54 +68,58 @@ class PatchCallSoundsModule(private val ctx: ReactApplicationContext) :
     return p
   }
 
-  /** Play a one-off sound once. */
+  /** Prepare the sound `name` from `uri`, replacing any earlier copy. Called for each at app start. */
   @ReactMethod
-  fun play(uri: String, promise: Promise) {
+  fun preload(name: String, uri: String, loop: Boolean, promise: Promise) {
     try {
-      val p = player(uri, false)
-      p.setOnCompletionListener { it.release() }
-      p.start()
+      val p = prepared(uri, loop)
+      synchronized(players) { players.put(name, p) }?.release()
       promise.resolve(null)
     } catch (e: Throwable) {
-      Log.e(TAG, "call sound: $uri failed: ${e.message}")
+      Log.e(TAG, "call sound: $name preload failed: ${e.message}")
       promise.reject("call_sound_failed", e.message, e)
     }
   }
 
-  /** Start the looping sound `name`; one already playing goes on. */
+  private fun ready(name: String): MediaPlayer =
+    synchronized(players) { players[name] }
+      ?: throw IllegalStateException("call sound $name was not preloaded")
+
+  /** Start `name` from the top; a looping one plays until stopped. */
   @ReactMethod
-  fun startLoop(name: String, uri: String, promise: Promise) {
+  fun start(name: String, promise: Promise) {
     try {
-      synchronized(loops) {
-        if (!loops.containsKey(name)) {
-          val p = player(uri, true)
-          p.start()
-          loops[name] = p
-        }
+      val p = ready(name)
+      if (p.isPlaying) {
+        // A one-off already sounding restarts; a loop already playing goes on.
+        if (!p.isLooping) p.seekTo(0)
+      } else {
+        p.seekTo(0)
+        p.start()
       }
       promise.resolve(null)
     } catch (e: Throwable) {
-      Log.e(TAG, "call sound: $name loop failed: ${e.message}")
+      Log.e(TAG, "call sound: $name failed: ${e.message}")
       promise.reject("call_sound_failed", e.message, e)
     }
   }
 
   @ReactMethod
-  fun stopLoop(name: String, promise: Promise) {
-    val p = synchronized(loops) { loops.remove(name) }
+  fun stop(name: String, promise: Promise) {
     try {
-      p?.stop()
-    } catch (_: IllegalStateException) {
-      // Never started — releasing is all there is to do.
+      val p = ready(name)
+      if (p.isPlaying) p.pause()
+      p.seekTo(0)
+      promise.resolve(null)
+    } catch (e: Throwable) {
+      promise.reject("call_sound_failed", e.message, e)
     }
-    p?.release()
-    promise.resolve(null)
   }
 
   override fun invalidate() {
-    synchronized(loops) {
-      for (p in loops.values) p.release()
-      loops.clear()
+    synchronized(players) {
+      for (p in players.values) p.release()
+      players.clear()
     }
     super.invalidate()
   }
