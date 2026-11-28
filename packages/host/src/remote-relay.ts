@@ -57,7 +57,7 @@ export function createRemoteRelayCoordinator<TResult = unknown>(deps: {
   /** Prefix for minted ids — lets several coordinators share one server-side route map with no risk of collision. */
   idPrefix?: string;
 }): RemoteRelayCoordinator<TResult> {
-  const timeoutMs = deps.timeoutMs ?? REMOTE_RELAY_TIMEOUT_MS;
+  const timeoutMs = deps.timeoutMs === undefined ? REMOTE_RELAY_TIMEOUT_MS : deps.timeoutMs;
   const prefix = deps.idPrefix ?? 'rrelay';
   const newRequestId =
     deps.newRequestId ??

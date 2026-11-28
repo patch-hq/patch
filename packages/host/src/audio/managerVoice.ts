@@ -200,8 +200,9 @@ export function stringArgs(raw: unknown): Record<string, string> {
 
 export const FIND_CHATS_DESCRIPTION =
   "List the user's chats, or find the ones matching a few words of a name or folder. Answers at " +
-  "once with each chat's name, id, whether it is working, and when it was last active. An empty " +
-  'query lists the most recently active chats.';
+  "once with each chat's name, id, whether it is working, and when it was last active. Archived " +
+  'chats are included and marked archived; a message to one brings it back. An empty query ' +
+  'lists the most recently active chats.';
 
 export const CHAT_STATUS_DESCRIPTION =
   'Where one chat stands now: its status line, goal, open to-dos and the last few messages. ' +
@@ -517,9 +518,13 @@ export function londonToEpoch(iso: string): number {
 
 /** The chats a call may name: not the Manager itself, nothing archived or deleted. */
 function nameableChats(all: ManagerChatEntry[]): ManagerChatEntry[] {
-  return all.filter(
-    (c) => c.chatId !== MANAGER_CHAT_ID && c.status !== 'archived' && c.status !== 'deleted',
-  );
+  return all.filter((c) => c.chatId !== MANAGER_CHAT_ID && c.status !== 'deleted');
+}
+
+/** Of several chats a name fits, the one that is not archived, when only one is not. */
+function onlyCurrent(matches: ManagerChatEntry[]): ManagerChatEntry | undefined {
+  const current = matches.filter((c) => c.status !== 'archived');
+  return current.length === 1 ? current[0] : undefined;
 }
 
 /**
@@ -537,6 +542,8 @@ export function resolveChat(listing: ManagerChatEntry[], chat: string): ManagerC
   const lower = wanted.toLowerCase();
   const exact = all.filter((c) => displayName(c).toLowerCase() === lower);
   if (exact.length === 1) return exact[0]!;
+  const exactCurrent = onlyCurrent(exact);
+  if (exactCurrent) return exactCurrent;
   const terms = words(wanted);
   const partial =
     exact.length > 1
@@ -546,13 +553,15 @@ export function resolveChat(listing: ManagerChatEntry[], chat: string): ManagerC
           return terms.every((t) => hay.some((w) => w.startsWith(t)));
         });
   if (partial.length === 1) return partial[0]!;
+  const partialCurrent = onlyCurrent(partial);
+  if (partialCurrent) return partialCurrent;
   if (partial.length === 0) {
     throw new ManagerChatLookupError(`No chat matches "${wanted}".`);
   }
   throw new ManagerChatLookupError(
     `Several chats match "${wanted}": ${partial
       .slice(0, LIST_LIMIT)
-      .map((c) => `"${displayName(c)}"`)
+      .map((c) => `"${displayName(c)}"${c.status === 'archived' ? ' (archived)' : ''}`)
       .join(', ')}. Ask the user which one.`,
   );
 }
@@ -597,7 +606,7 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
   const candidates = async (): Promise<ManagerChatEntry[]> => nameableChats(await deps.listChats());
 
   const line = (c: ManagerChatEntry): string => {
-    const parts = [statusWords(c.chatStatus)];
+    const parts = c.status === 'archived' ? ['archived'] : [statusWords(c.chatStatus)];
     if (c.lastUpdated !== undefined) parts.push(`last active ${ago(now() - c.lastUpdated)}`);
     return `"${displayName(c)}" (id ${c.chatId}) — ${parts.join(', ')}`;
   };
@@ -767,7 +776,11 @@ export function createManagerVoiceTools(deps: ManagerVoiceHostDeps): ManagerVoic
         awaiting.delete(target.chatId);
         throw err;
       }
-      deps.recordNote(`-> "${name}": ${message}`);
+      deps.recordNote(
+        target.status === 'archived'
+          ? `-> "${name}" (was archived; this brings it back): ${message}`
+          : `-> "${name}": ${message}`,
+      );
       onAccepted?.({ name });
       try {
         // Read from the server's record by the message's own id, so it is this

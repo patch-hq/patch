@@ -1301,7 +1301,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_list_chats',
     {
       description:
-        "List all chats the user has, ACROSS every host on the account, identically whichever host a chat lives on. Each entry has chatId, hostId, name, folder, status (lifecycle), chatStatus (what the chat is doing: idle, running, waiting_for_user, failed, …), pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
+        "List all chats the user has, ACROSS every host on the account, identically whichever host a chat lives on. Each entry has chatId, hostId, name, folder, status (lifecycle), chatStatus (what the chat is doing: idle, running, waiting_for_user, failed, …), pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. An archived chat has status 'archived'. Default omits archived chats: pass archived='include' to find a chat whether or not it is archived (do this before telling the user a chat does not exist), or archived='only' for archived only. A message to an archived chat brings it back. Sorted: pinned first, then most-recent.",
       inputSchema: { archived: z.enum(['only', 'include']).optional() },
     },
     async ({ archived }) => {
@@ -1322,7 +1322,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_search_chats',
     {
       description:
-        'Search every chat on the account through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
+        'Search every chat on the account through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). Archived chats are searched too; their status is archived. chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
       inputSchema: {
         query: z
           .string()

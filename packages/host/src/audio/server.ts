@@ -906,11 +906,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const hosted =
           voiceSurface !== 'dictation' &&
           (backend === 'gemini' || backend === 'openai' || backend === 'elevenlabs');
-        // Temporarily off: the Manager voice's own chat tools read chats from this
-        // host's disk and cannot see chats on another host. Until they run on the
-        // same server-routed tools every chat agent uses, a call on the Manager chat
-        // is an ordinary voice agent call, handing requests to the Manager's agent.
-        const managerCall = false && hosted && isManagerCall(start.chatId);
+        const managerCall = hosted && isManagerCall(start.chatId);
         if (managerCall && !opts.managerVoice) {
           rejectConn(
             ws,
