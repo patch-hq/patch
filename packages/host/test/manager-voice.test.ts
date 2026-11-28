@@ -380,6 +380,7 @@ describe('prompts', () => {
       expect(text).not.toContain(PASS_TO_AGENT_TOOL_NAME);
     }
     expect(managerHostedInstruction(true)).toContain('arrives as a message');
+    expect(managerHostedInstruction(true)).toMatch(/only a receipt[^.]*say nothing/i);
     expect(managerHostedInstruction(false)).toContain('returns once the chat has answered');
   });
 
