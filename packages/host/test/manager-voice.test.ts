@@ -169,11 +169,10 @@ describe('isManagerCall', () => {
 });
 
 describe('find_chats', () => {
-  test('an empty query lists the most recent chats, never the Manager or archived ones', async () => {
+  test('an empty query lists the most recent chats, never the Manager', async () => {
     const { tools } = makeHost();
     const out = await tools.findChats('');
     expect(out).not.toContain(MANAGER_CHAT_ID);
-    expect(out).not.toContain('Old thing');
     const lines = out.split('\n');
     expect(lines[0]).toContain('Bus timetable import');
     expect(out).toContain('"Garden planning" (id c-garden) — working, last active 5 min ago');
@@ -186,6 +185,11 @@ describe('find_chats', () => {
     expect(out.split('\n')).toHaveLength(2);
     expect(out).not.toContain('Garden');
     expect(await tools.findChats('zebra')).toBe('No chat matches "zebra".');
+  });
+
+  test('archived chats are found too, and say they are archived', async () => {
+    const { tools } = makeHost();
+    expect(await tools.findChats('old')).toBe('"Old thing" (id c-old) — archived');
   });
 
   test('a list the host cannot get is an error, not an empty answer', async () => {
@@ -343,6 +347,19 @@ describe('send_to_chat', () => {
     ]);
   });
 
+  test('an archived chat is sent to like any other, and the Manager chat says it comes back', async () => {
+    const { tools, notes, deps, replies } = makeHost();
+    const p = tools.sendToChat({ chat: 'old thing', message: 'pick this up again' });
+    await vi.waitFor(() => expect(replies.has('c-old')).toBe(true));
+    expect(vi.mocked(deps.deliver).mock.calls[0]![0]).toMatchObject({
+      chatId: 'c-old',
+      message: 'pick this up again',
+    });
+    expect(notes[0]).toBe('-> "Old thing" (was archived; this brings it back): pick this up again');
+    replies.get('c-old')!.resolve('Back on it.');
+    await expect(p).resolves.toEqual({ name: 'Old thing', reply: 'Back on it.' });
+  });
+
   test('an ambiguous name sends nothing', async () => {
     const { tools, deps } = makeHost();
     await expect(tools.sendToChat({ chat: 'bus', message: 'x' })).rejects.toBeInstanceOf(
@@ -398,10 +415,24 @@ describe('resolveChat (a chat named on a call)', () => {
     expect(resolveChat(chats, 'garden planning').chatId).toBe('c1');
     expect(resolveChat(chats, 'shed').chatId).toBe('c2');
   });
-  test('none or several is a lookup error naming the choices; archived and the Manager are not names', () => {
+  test('none or several is a lookup error naming the choices; the Manager is not a name', () => {
     expect(() => resolveChat(chats, 'garden')).toThrow(/Several chats match "garden"/);
-    expect(() => resolveChat(chats, 'tax')).toThrow(ManagerChatLookupError);
     expect(() => resolveChat(chats, 'manager')).toThrow(/No chat matches/);
+  });
+  test('an archived chat is a name like any other', () => {
+    expect(resolveChat(chats, 'tax').chatId).toBe('c3');
+    expect(resolveChat(chats, 'c3').chatId).toBe('c3');
+  });
+  test('of several chats a name fits, the only one not archived is meant', () => {
+    const withOld: ManagerChatEntry[] = [
+      ...chats,
+      { chatId: 'c4', name: 'Tax return', folder: '/home/tax-2025', status: 'active' },
+      { chatId: 'c5', name: 'Garden old', folder: '/home/garden-old', status: 'archived' },
+    ];
+    expect(resolveChat(withOld, 'tax return').chatId).toBe('c4');
+    expect(resolveChat(withOld, 'tax').chatId).toBe('c4');
+    // Two current ones still ask, and name the archived one as such.
+    expect(() => resolveChat(withOld, 'garden')).toThrow(/"Garden old" \(archived\)/);
   });
 });
 

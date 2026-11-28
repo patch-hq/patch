@@ -4721,8 +4721,8 @@ async function startHost(
   // The whole account, as patch_list_chats lists it: a list missing other hosts' chats
   // would read as "there is no such chat". The status is the server's, for every
   // chat alike (spec/12 § Chat status); this host's own view never overrides it.
-  const listAccountChats = async (): Promise<ManagerChatEntry[]> => {
-    const account = await requestAccountChats(MANAGER_CHAT_ID);
+  const listAccountChats = async (archived?: 'include'): Promise<ManagerChatEntry[]> => {
+    const account = await requestAccountChats(MANAGER_CHAT_ID, archived);
     return account.map((e) => {
       const chatStatus = e['chatStatus'];
       const state =
@@ -4743,7 +4743,8 @@ async function startHost(
   const managerVoice = createManagerVoiceTools({
     logger: logger.child({ component: 'manager-voice' }),
     voicePrompt: () => managerVoicePrompt,
-    listChats: listAccountChats,
+    // Archived chats too: the Manager finds and messages them like any other.
+    listChats: () => listAccountChats('include'),
     peekChat: async (chatId) =>
       (await peekFromServer({ sourceChatId: MANAGER_CHAT_ID, targetChatId: chatId, limit: 1 }))
         .chat_state,
