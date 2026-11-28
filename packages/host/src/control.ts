@@ -423,6 +423,8 @@ const SendToBody = z
     voicePrefix: z.string().optional(),
     /** Goal to arm on the recipient chat (spec/04 § Goals). Local recipients only. */
     goal: z.string().min(1).optional(),
+    /** The sender has been told the target is archived and still wants to wake it. */
+    confirmArchived: z.boolean().optional(),
     // Required, not optional: the MCP child always bakes this from its own
     // PATCH_CHAT_ID (packages/host/src/mcp.ts) — it is not an agent-supplied
     // tool argument, so an agent can't omit it, and nothing else in this
@@ -2134,6 +2136,24 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
     const { chatId, message, voicePrefix, callerChatId, goal } = parsed.data;
+    // Archiving is the user saying "finished", and a message wakes the chat, so
+    // the sender is stopped before anything is sent, goal set or dedupe claimed
+    // and must ask the user (spec/04 § Lifecycle). Local targets only: the
+    // archive state of a chat on another host is not known here.
+    if (opts.daemon!.chatState.get(chatId)?.status === 'archived' && !parsed.data.confirmArchived) {
+      toolLog({
+        tool: 'patch_send_to',
+        callerChatId,
+        targetChatId: chatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'target_archived',
+      });
+      return reply.code(409).send({
+        error: 'target_archived',
+        message: `patch_send_to: chat ${chatId} was archived, which the user does this on purpose, and a message would start it running again. Nothing was sent. Ask the user whether to wake it; if they say yes, resend with confirmArchived: true.`,
+      });
+    }
     // A hidden automation often delegates work and receives the result through
     // patch_send_to. Treating that host-to-host return as though a visible
     // agent had deliberately surfaced the recipient leaked every hidden job into

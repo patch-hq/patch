@@ -121,7 +121,7 @@ describe('UDS internal endpoints — patch_send_to', () => {
     }
   });
 
-  it('un-archives an archived target and tells the sender it was archived', async () => {
+  it('refuses to send to an archived target until the sender confirms', async () => {
     const { daemon, jobs, folder, upstream } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.setArchived(chatId, true);
@@ -137,6 +137,31 @@ describe('UDS internal endpoints — patch_send_to', () => {
         url: '/internal/send-to',
         headers: AUTH,
         payload: { chatId, message: 'go', callerChatId: 'manager' },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ error: 'target_archived' });
+      expect(daemon.chatState.get(chatId)?.status).toBe('archived');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('un-archives an archived target and tells the sender it was archived', async () => {
+    const { daemon, jobs, folder, upstream } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.setArchived(chatId, true);
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      emitWire: (e) => upstream.push(e),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/send-to',
+        headers: AUTH,
+        payload: { chatId, message: 'go', callerChatId: 'manager', confirmArchived: true },
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ ok: true, queued: true, targetWasArchived: true });
