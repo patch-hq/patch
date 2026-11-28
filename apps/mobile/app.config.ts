@@ -93,7 +93,11 @@ const config: ExpoConfig = {
   // service, so the call keeps going with the phone locked; and the call's sounds
   // play natively (PatchCallSounds). This JS needs those native methods, so it
   // must not reach a 0.2.3 APK.
-  runtimeVersion: '0.2.5',
+  //
+  // 0.2.6: the call's sounds play with the call's own audio usage, so they follow
+  // its route to a Bluetooth headset; a native change, so this JS must not reach a
+  // 0.2.5 APK.
+  runtimeVersion: '0.2.6',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no
