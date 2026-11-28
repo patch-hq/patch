@@ -214,7 +214,7 @@ describe('GeminiLiveSession — connect + setup', () => {
     expect(setup2.setup.generationConfig.speechConfig).toBeUndefined();
   });
 
-  test('match my tone: affective dialog in the setup, on the v1alpha API; the tone in the instructions', async () => {
+  test('match my tone: affective dialog in the setup, on the v1beta API like every session; the tone in the instructions', async () => {
     const { deps, lastWs } = makeDeps({
       tone: 'Calm and sincere.',
       soundConfig: soundConfig(
@@ -224,7 +224,7 @@ describe('GeminiLiveSession — connect + setup', () => {
       ),
     });
     const ws = await openSession(new GeminiLiveSession(makeInit(), deps), lastWs);
-    expect(ws.url).toContain('.v1alpha.GenerativeService');
+    expect(ws.url).toContain('.v1beta.GenerativeService');
     const [setup] = ws.sentJson() as [
       {
         setup: {

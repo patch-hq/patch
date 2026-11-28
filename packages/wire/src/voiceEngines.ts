@@ -81,10 +81,11 @@ export type VoiceAgentProvider = z.infer<typeof VoiceAgentProvider>;
 
 /**
  * The voice agent engines. Field paths are each provider's own, checked
- * against its API reference on 2026-11-27: Gemini Live's `setup`
- * (`generationConfig.enableAffectiveDialog`, v1alpha only), OpenAI Realtime's
+ * against its API reference on 2026-11-28: Gemini Live's `setup`
+ * (`generationConfig.enableAffectiveDialog`, v1beta, Gemini 2.5 Flash Live only), OpenAI Realtime's
  * `session` (`audio.output.speed`, 0.25–1.5), ElevenLabs Agents'
- * `conversation_config` (`tts.*`, `turn.turn_eagerness`).
+ * `conversation_config` (`tts.model_id`, `tts.suggested_audio_tags` as `{tag}`, `tts.expressive_mode`,
+ * `tts.stability`, `tts.similarity_boost`, `tts.speed`, `turn.turn_eagerness`).
  */
 export const VOICE_AGENT_ENGINES: Record<VoiceAgentProvider, VoiceEngine> = {
   gemini: {
