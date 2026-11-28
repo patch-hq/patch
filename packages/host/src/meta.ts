@@ -282,6 +282,12 @@ export const ChatMeta = z
      * than its window of messages (spec/06 § Bounded context).
      */
     sessionFromSeq: z.number().int().nonnegative().optional(),
+    /**
+     * How many messages of the record the current provider session was handed
+     * in a `Handoff` note when it began; they count towards its window
+     * (spec/06 § Bounded context).
+     */
+    sessionCarried: z.number().int().nonnegative().optional(),
     /** When the chat's current provider session began (spec/06 § Bounded context). */
     sessionStartedAt: z.number().int().nonnegative().optional(),
     /** Which track the chat IS right now (spec/04 § Branching). */

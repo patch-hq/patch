@@ -62,20 +62,20 @@ describe('the Manager’s bounded context', () => {
     expect(events.some((e) => e.type === 'chat.note' && e.label === 'Handoff')).toBe(false);
   });
 
-  it('past the window: a fresh session, a divider, and the recent messages in a visible Handoff note', async () => {
+  it('at the window: a fresh session, a divider, and the recent messages in a visible Handoff note', async () => {
     n = 0;
-    const { daemon, sdk, folder, events } = setup(2);
+    const { daemon, sdk, folder, events } = setup(4);
     const chatId = await daemon.spawnChat({ folder });
     await turn(daemon, sdk, chatId);
     await turn(daemon, sdk, chatId); // msg1 + reply1 = 2, within the window
     expect(sdk.lastOptions()?.resumeSessionId).toBe('native');
-    await turn(daemon, sdk, chatId, 'native-2'); // 4 messages on this session: past it
+    await turn(daemon, sdk, chatId, 'native-2'); // 4 messages on this session: the window
     const opts = sdk.lastOptions()!;
     expect(opts.resumeSessionId).toBeUndefined();
     expect(opts.prompt).toMatch(/^\[Note: Handoff\]/);
-    // Half the window is carried: the newest message only.
+    // Half the window is carried: the newest two messages.
+    expect(opts.prompt).toContain('User: msg 2');
     expect(opts.prompt).toContain('Manager: reply 2');
-    expect(opts.prompt).not.toContain('User: msg 2');
     expect(opts.prompt).not.toContain('msg 1');
     expect(opts.prompt.endsWith('msg 3')).toBe(true);
     // What the model received is in the record: the note is its own entry.
@@ -86,21 +86,45 @@ describe('the Manager’s bounded context', () => {
         (e) =>
           e.type === 'chat.message' &&
           e.role === 'system' &&
-          e.content === 'New session · the last 1 message carried over',
+          e.content === 'New session · the last 2 messages carried over',
       ),
     ).toBe(true);
     // The user's own message is recorded as they sent it.
     expect(
       events.some((e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'msg 3'),
     ).toBe(true);
-    // The next turn resumes the new session; no handover until it fills again.
-    await turn(daemon, sdk, chatId, 'native-2');
-    expect(sdk.lastOptions()?.resumeSessionId).toBe('native-2');
+    // The carried messages count towards the window: one more exchange fills it.
+    await turn(daemon, sdk, chatId, 'native-3');
+    expect(sdk.lastOptions()?.resumeSessionId).toBeUndefined();
     // The record keeps every message.
     const history = daemon.readHistory({ chatId, limit: 200 });
     expect(
       history.events.filter((e) => e.type === 'chat.message' && e.role !== 'system'),
     ).toHaveLength(8);
+  });
+
+  it('a session holds between half the window and the window, carried messages included', async () => {
+    n = 0;
+    const { daemon, sdk, folder, events } = setup(8);
+    const chatId = await daemon.spawnChat({ folder });
+    const resumed: Array<string | undefined> = [];
+    for (let i = 0; i < 12; i++) {
+      await turn(daemon, sdk, chatId);
+      resumed.push(sdk.lastOptions()?.resumeSessionId);
+    }
+    // Turns 1–4 fill the first session (8 messages); turn 5 starts fresh,
+    // handed 4. From then on a session trims after 4 new messages (2 turns),
+    // so turns 5, 7, 9 and 11 each start fresh.
+    const fresh = resumed.flatMap((r, i) => (i > 0 && r === undefined ? [i + 1] : []));
+    expect(fresh).toEqual([5, 7, 9, 11]);
+    const handovers = events.filter(
+      (e) =>
+        e.type === 'chat.message' && e.role === 'system' && e.content.startsWith('New session'),
+    );
+    expect(handovers).toHaveLength(4);
+    // What Settings shows as "This session" counts the carried messages too.
+    const last = events.filter((e) => e.type === 'chat.state' && e.chatId === chatId).at(-1);
+    expect(last?.type === 'chat.state' ? last.session?.messages : undefined).toBe(8);
   });
 
   it('a host with no window configured never hands over', async () => {
