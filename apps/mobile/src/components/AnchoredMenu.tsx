@@ -11,6 +11,7 @@ import React from 'react';
 import { BackHandler, Modal, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check } from 'lucide-react-native';
+import { registerOverlay } from '../lib/stallWatchdog';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 export interface AnchoredMenuItem {
@@ -62,6 +63,11 @@ export function AnchoredMenu({
   const insets = useSafeAreaInsets();
   const colors = useTheme();
   const { height: windowHeight } = useWindowDimensions();
+
+  React.useEffect(() => {
+    if (!visible) return undefined;
+    return registerOverlay(nonModal ? 'AnchoredMenu (non-modal)' : 'AnchoredMenu (modal)');
+  }, [nonModal, visible]);
 
   React.useEffect(() => {
     if (!nonModal || !visible) return undefined;

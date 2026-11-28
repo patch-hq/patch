@@ -8,6 +8,7 @@ import { AppState } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { Href } from 'expo-router';
 import { getWs } from '../api/ws';
+import { setWatchdogRoute } from '../lib/stallWatchdog';
 import { useCurrentRoute } from '../lib/currentRoute';
 import { positionFromRoute, routeFromPosition } from '../lib/viewPosition';
 import { usePresenceStore } from '../stores/presenceStore';
@@ -58,6 +59,7 @@ export function resetViewPositionSync(): void {
 export function ViewPositionSync(): null {
   const router = useRouter();
   const { pathname, id, ready: navReady } = useCurrentRoute();
+  React.useEffect(() => setWatchdogRoute(pathname), [pathname]);
   const remote = useViewPositionStore((s) => s.remote);
   const scroll = useViewPositionStore((s) => s.scroll);
   // Account-wide "Sync position between surfaces". Until the settings have
