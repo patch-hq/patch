@@ -82,7 +82,12 @@ describe('RemoteCallPill', () => {
     useVoiceStore.setState({ remoteCalls: { s1: remote } });
     const r = renderRN(<RemoteCallPill />);
     findHost(r.root, byTestId('remote-call-end')).props['onPress']();
-    expect(sendSpy).toHaveBeenCalledWith({ type: 'voice.end_call_request', chatId: 'c1' });
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'voice.end_call_request',
+      chatId: 'c1',
+      sessionId: remote.sessionId,
+      requestId: `end-${remote.sessionId}`,
+    });
   });
 
   it('the store drops the call when the host reports it ended', () => {

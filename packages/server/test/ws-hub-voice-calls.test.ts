@@ -127,4 +127,54 @@ describe('WS hub — live voice calls', () => {
     expect((await cleared).calls).toEqual([]);
     await client.close();
   });
+
+  describe('ending a call (spec/07 § Ending a call)', () => {
+    const END = {
+      type: 'voice.end_call_request',
+      chatId: 'c1',
+      sessionId: 'sess-1',
+      requestId: 'end-sess-1',
+    };
+
+    it('is recorded, told to the owning host, dropped from the live set and answered', async () => {
+      hostLink.emit({ type: 'voice.call', ...CALL, active: true });
+      await settle();
+      const { client } = await connect();
+      const answered = client.waitFor('voice.call_ended');
+      const cleared = client.waitFor('voice.calls');
+      client.send(END as never);
+      expect(await answered).toMatchObject({ requestId: 'end-sess-1', sessionId: 'sess-1' });
+      expect((await cleared).calls).toEqual([]);
+      expect(hostLink.sent.filter((f) => f.event.type === 'voice.end_call_request')).toEqual([
+        expect.objectContaining({ hostId: 'd1', event: expect.objectContaining(END) }),
+      ]);
+      await client.close();
+    });
+
+    it('is told to the host again if it still reports the call, and the call stays off the surfaces', async () => {
+      hostLink.emit({ type: 'voice.call', ...CALL, active: true });
+      await settle();
+      const { client } = await connect();
+      const answered = client.waitFor('voice.call_ended');
+      client.send(END as never);
+      await answered;
+      hostLink.sent.length = 0;
+      const next = client.waitFor('voice.calls');
+      hostLink.emit({ type: 'voice.calls', hostId: 'd1', calls: [CALL] });
+      expect((await next).calls).toEqual([]);
+      expect(hostLink.sent.filter((f) => f.event.type === 'voice.end_call_request')).toHaveLength(
+        1,
+      );
+      await client.close();
+    });
+
+    it('for a call no host holds is only answered', async () => {
+      const { client } = await connect();
+      const answered = client.waitFor('voice.call_ended');
+      client.send(END as never);
+      expect(await answered).toMatchObject({ requestId: 'end-sess-1' });
+      expect(hostLink.sent.filter((f) => f.event.type === 'voice.end_call_request')).toEqual([]);
+      await client.close();
+    });
+  });
 });

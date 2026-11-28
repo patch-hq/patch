@@ -5322,14 +5322,32 @@ export const ChatPinRequestEvent = z
   .strict();
 export type ChatPinRequestEvent = z.infer<typeof ChatPinRequestEvent>;
 
-/** Surface → host: end the chat's call on whichever surface holds it (spec/07 § A call can move between devices). */
+/**
+ * Surface → server → host: end a call (spec/07 § Ending a call). The call's
+ * state changes through the server like any other user action: `requestId`
+ * makes a redelivery the same request, and the server answers with
+ * `voice.call_ended`. The device that holds the call sends it too, so ending
+ * works with the audio socket down.
+ */
 export const VoiceEndCallRequestEvent = z
   .object({
     type: z.literal('voice.end_call_request'),
     chatId: z.string().min(1),
+    sessionId: z.string().min(1),
+    requestId: z.string().min(1),
   })
   .strict();
 export type VoiceEndCallRequestEvent = z.infer<typeof VoiceEndCallRequestEvent>;
+
+/** Server → the surface that asked: the server has recorded the call's end and told its host (`voice.end_call_request`). */
+export const VoiceCallEndedEvent = z
+  .object({
+    type: z.literal('voice.call_ended'),
+    requestId: z.string().min(1),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+export type VoiceCallEndedEvent = z.infer<typeof VoiceCallEndedEvent>;
 
 export const ChatArchiveRequestEvent = z
   .object({
@@ -11264,6 +11282,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatQuestionActivityEvent,
   ChatPinRequestEvent,
   VoiceEndCallRequestEvent,
+  VoiceCallEndedEvent,
   MeetingControlRequestEvent,
   MeetingGetRequestEvent,
   MeetingAudioEvent,
@@ -11619,6 +11638,7 @@ export const EVENT_SCHEMAS = {
   'chat.question_activity': ChatQuestionActivityEvent,
   'chat.pin_request': ChatPinRequestEvent,
   'voice.end_call_request': VoiceEndCallRequestEvent,
+  'voice.call_ended': VoiceCallEndedEvent,
   'meeting.control_request': MeetingControlRequestEvent,
   'meeting.get_request': MeetingGetRequestEvent,
   'meeting.audio': MeetingAudioEvent,

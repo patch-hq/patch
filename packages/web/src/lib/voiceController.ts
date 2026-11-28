@@ -7,7 +7,7 @@
 // voice / ## Focus-follow.
 
 import { callClock } from './callClock.js';
-import { getActiveWs } from '../api/ws.js';
+import { callEnds } from './callEnds.js';
 import { playCallSound, syncCallSoundLoop } from './callSound.js';
 import { CallLine, type CallLinePhase } from '@patch/wire/call-line';
 import { openAudioSession, type AudioSessionDeps } from './audioSession.js';
@@ -401,6 +401,7 @@ async function placeCall(
         return sessionAttempt === attempt && s !== null && s.send(frame);
       },
       phase: onLinePhase,
+      contact: onLineContact,
     },
     callClock,
   );
@@ -429,6 +430,16 @@ function watchCallEnvironment(l: CallLine): void {
   unwatchEnvironment = () => {
     media?.removeEventListener?.('devicechange', onDevices);
   };
+}
+
+/**
+ * Silence on a line that is still open (spec/07 § A dropped call comes back):
+ * the bar shows Lost contact and the reconnecting sound plays until the host is
+ * heard again. Nothing is torn down; only the transport closing loses the line.
+ */
+function onLineContact(heard: boolean): void {
+  useVoiceStore.getState().setCallReconnecting(!heard);
+  if (heard) playCallSound('reconnected');
 }
 
 function onLinePhase(next: CallLinePhase, prev: CallLinePhase, reason?: string): void {
@@ -597,10 +608,8 @@ export function switchCallHere(chatId: string, deps?: AudioSessionDeps): Promise
 }
 
 /** End the chat's call on whichever other surface holds it (spec/07 § A call can move between devices). */
-export function endRemoteCall(chatId: string): void {
-  const ws = getActiveWs();
-  if (!ws) throw new Error('Cannot end the call: not connected to the server');
-  ws.send({ type: 'voice.end_call_request', chatId });
+export function endRemoteCall(chatId: string, sessionId: string): void {
+  callEnds.end(chatId, sessionId);
 }
 
 /**
@@ -629,8 +638,13 @@ export function toggleCallMute(): void {
 export function endVoiceCall(opts: { silent?: boolean } = {}): void {
   // The line's log goes to the host while the session is still open, then the
   // line stops: nothing it hears after this counts.
+  const sessionId = line?.sessionId ?? null;
+  const chatId = useVoiceStore.getState().call?.chatId;
   line?.end();
   line = null;
+  // The call's end goes to its host through the server (spec/07 § Ending a
+  // call), so it works with the audio socket down.
+  if (sessionId !== null && chatId !== undefined) callEnds.end(chatId, sessionId);
   unwatchEnvironment?.();
   unwatchEnvironment = null;
   clearQuietTimer();

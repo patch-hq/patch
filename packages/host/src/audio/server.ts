@@ -55,7 +55,6 @@ import {
 } from './session.js';
 import { VoiceComponentMissingError } from '../voiceComponent.js';
 import { MockVad, type Vad } from './vad.js';
-import { watchPeerLiveness } from './peer-liveness.js';
 import { startCallHeartbeat, type CallHeartbeat } from './call-heartbeat.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
@@ -719,13 +718,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     let key = urlSessionId;
     let pendingBinaryMeta: { samples: number } | undefined;
 
-    const liveness = watchPeerLiveness(ws, {
-      onGone: (silentMs) =>
-        log.warn(
-          { sessionId: urlSessionId, silentMs },
-          'audio: nothing heard from the peer, closing its connection',
-        ),
-    });
     ws.on('message', (data: Buffer | string, isBinary: boolean) => {
       if (isBinary) {
         if (!session) {
@@ -1294,12 +1286,10 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         });
         surfaceIndex.set(start.surfaceId, start.sessionId);
         // spec/07 § A dropped call comes back — every app session carries the
-        // heartbeat: a call's surface judges the line by it, and the host judges
-        // the device by its echoes. A voice device's firmware does not echo it,
-        // so it keeps its own liveness.
-        if (start.surfaceKind === 'device') {
-          liveness.stop();
-        } else {
+        // heartbeat: a call's surface shows lost contact by it, and the host
+        // measures the round trip by its echoes. A voice device's firmware does
+        // not echo it. Neither ends a line: only the socket closing does.
+        if (start.surfaceKind !== 'device') {
           const live = sessions.get(start.sessionId) as ActiveSession;
           live.heartbeat = startCallHeartbeat(
             start.sessionId,

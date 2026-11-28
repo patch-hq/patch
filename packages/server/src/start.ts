@@ -4,6 +4,7 @@
 import { chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyListenOptions } from 'fastify';
+import { LOOP_LAG_LOG_MS, watchLoopLag } from '@patch/wire/loop-lag';
 import { buildAll } from './app.js';
 import type { ServerConfig } from './config.js';
 import { RelayService } from './relay-service.js';
@@ -73,6 +74,13 @@ export async function startServer(
   });
   // Registered before listening: Fastify refuses hooks on a running instance.
   if (relay) app.addHook('onClose', async () => relay.stop());
+  // Measurement only (spec/07 § A dropped call comes back): a stalled loop
+  // cannot answer a heartbeat, so a stall is logged, with how long it was.
+  const stopLoopLag = watchLoopLag({
+    thresholdMs: LOOP_LAG_LOG_MS,
+    onLag: (lagMs) => app.log.warn({ lagMs }, 'server event loop stalled'),
+  });
+  app.addHook('onClose', async () => stopLoopLag());
   let stopMirror: (() => void) | undefined;
   app.addHook('onClose', async () => stopMirror?.());
   const fd = activatedFd();

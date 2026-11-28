@@ -2,6 +2,7 @@
 // live on another surface shows as a banner with Switch here; switching opens
 // this surface's call with takeOver; the banner follows the host's events.
 
+import { callEnds } from '../lib/callEnds.js';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { RemoteCallBanner } from '../components/RemoteCallBanner.js';
@@ -77,7 +78,13 @@ describe('RemoteCallBanner', () => {
     render(<RemoteCallBanner />);
     act(() => useVoiceStore.getState().setRemoteCall(remote, true));
     fireEvent.click(screen.getByTestId('remote-call-end'));
-    expect(send).toHaveBeenCalledWith({ type: 'voice.end_call_request', chatId: 'c1' });
+    expect(send).toHaveBeenCalledWith({
+      type: 'voice.end_call_request',
+      chatId: 'c1',
+      sessionId: 's1',
+      requestId: 'end-s1',
+    });
+    callEnds.reset();
     setActiveWs(null);
   });
 

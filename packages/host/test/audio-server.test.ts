@@ -19,7 +19,6 @@ import {
   encodeAudio,
   decodeAudio,
   HEARTBEAT_LOST_AFTER_MS,
-  heartbeatEcho,
   type AudioEvent,
 } from '@patch/wire/audio';
 import { MockVad, type Vad, type VadFrameResult } from '../src/audio/vad.js';
@@ -2008,51 +2007,15 @@ describe('audio WSS server', () => {
   });
 });
 
-describe('audio WSS server — a gone peer', () => {
-  // spec/07 § A dropped call comes back — the host judges a peer by the frames it
-  // hears, on the heartbeat's rule. A pong is answered by whatever holds the socket
-  // (the server's relay, in production), so it never keeps a peer alive.
-  test("a peer that sends nothing is dropped after the heartbeat's lost time, pongs or not", async () => {
+describe('audio WSS server — a silent peer', () => {
+  // spec/07 § A dropped call comes back — silence never ends a line: only the
+  // socket closing does. A peer that sends nothing for longer than the heartbeat's
+  // lost time is still connected.
+  test('a peer that sends nothing is not dropped', async () => {
     const server = await startServer();
     try {
-      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s-dead`);
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s-silent`);
       await new Promise<void>((r) => ws.once('open', () => r()));
-      const openedAt = Date.now();
-      const closedAt = await new Promise<number>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('peer was not dropped')), 6000);
-        ws.once('close', () => {
-          clearTimeout(t);
-          resolve(Date.now());
-        });
-      });
-      expect(closedAt - openedAt).toBeGreaterThanOrEqual(HEARTBEAT_LOST_AFTER_MS - 50);
-    } finally {
-      await server.close();
-    }
-  }, 10_000);
-
-  test('a spoken alert, which has no microphone, stays while it answers the heartbeat', async () => {
-    const server = await startServer();
-    try {
-      const ws = await openSocket(server.port, 's-alive');
-      ws.on('message', (data: Buffer | string, isBinary: boolean) => {
-        if (isBinary) return;
-        const frame = decodeAudio(data as string);
-        if (frame.type === 'audio.heartbeat') ws.send(encodeAudio(heartbeatEcho(frame)));
-      });
-      ws.send(
-        encodeAudio({
-          type: 'audio.session_start',
-          sessionId: 's-alive',
-          accountId: 'a',
-          surfaceId: 'phone',
-          surfaceKind: 'mobile',
-          chatId: 'c',
-          role: 'announcement',
-          token: mintToken({ accountId: 'a', surfaceId: 'phone', sessionId: 's-alive' }),
-          surfaceHasAec: true,
-        }),
-      );
       let closed = false;
       ws.once('close', () => (closed = true));
       await new Promise((r) => setTimeout(r, HEARTBEAT_LOST_AFTER_MS + 1500));

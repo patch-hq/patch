@@ -5,10 +5,10 @@ import { test, expect } from '@playwright/test';
 //
 // The host is a fake audio socket that speaks the real wire frames: it answers
 // `audio.session_start` with a turn state and a heartbeat every 200 ms. The
-// first session's heartbeats stop after a few, as a line that has silently
-// gone dead does. The page must notice on its own (three seconds without one),
-// say Lost contact, resume asking for the same session, and once the new session is up
-// send the log of the drop. Everything above the socket is real: the voice
+// first session's heartbeats stop after a few and its socket then closes, as a
+// line the network has dropped does. The page must say Lost contact, resume
+// asking for the same session, and once the new session is up send the log of
+// the drop. (Silence alone never drops a line: spec/07 § A dropped call comes back.) Everything above the socket is real: the voice
 // controller, the shared call line, the audio session decoder and the bar.
 
 const CREDENTIAL = (() => {
@@ -59,8 +59,9 @@ const BOOT = `
       // A real host answers over the network, after the page has sent this.
       setTimeout(() => this.frame({ type: 'audio.state', sessionId: f.sessionId, state: 'listening' }), 20);
       let seq = 0;
-      // The first session's line goes dead after three heartbeats.
+      // The first session's line goes dead after three heartbeats, then closes.
       const beats = session === 0 ? 3 : Infinity;
+      if (session === 0) setTimeout(() => this.close(), 1200);
       this.timer = setInterval(() => {
         if (seq >= beats) return;
         this.frame({ type: 'audio.heartbeat', sessionId: f.sessionId, n: seq, rttMs: 12 });
@@ -75,7 +76,7 @@ const BOOT = `
   };
 `;
 
-test('a call whose heartbeat stops says Lost contact, resumes, and sends the log once back', async ({
+test('a call whose socket drops says Lost contact, resumes, and sends the log once back', async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -128,7 +129,7 @@ test('a call whose heartbeat stops says Lost contact, resumes, and sends the log
   const bar = page.getByTestId('voice-bar');
   await expect(bar).toHaveAttribute('data-state', 'listening');
 
-  // The heartbeats stop; three seconds later the page calls the line lost.
+  // The heartbeats stop and the socket closes: the line is lost.
   await expect(bar).toHaveAttribute('data-state', 'reconnecting', { timeout: 6_000 });
   await expect(page.getByTestId('voice-bar-connecting')).toContainText('Lost contact');
   // …and the resume brings it back.
@@ -172,7 +173,11 @@ test('a call whose heartbeat stops says Lost contact, resumes, and sends the log
         .sent.find((f) => f.type === 'audio.call_log')!.entries,
   );
   expect(log).toEqual([
-    expect.objectContaining({ kind: 'audio_stopped', sessionId: 'sess_1', reason: 'signal_lost' }),
+    expect.objectContaining({
+      kind: 'audio_stopped',
+      sessionId: 'sess_1',
+      reason: 'connection_closed',
+    }),
     expect.objectContaining({
       kind: 'quality',
       sessionId: 'sess_1',

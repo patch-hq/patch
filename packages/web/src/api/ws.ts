@@ -39,6 +39,7 @@ import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
+import { callEnds } from '../lib/callEnds.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { browserNotificationsOff } from '../lib/notificationsMaster.js';
 import { showBrowserNotification } from '../lib/browserNotifications.js';
@@ -261,6 +262,7 @@ export class PatchWs {
     // redelivered on reconnect.)
     deliveryTracker.reset();
     permissionDeliveryTracker.reset();
+    callEnds.reset();
   }
 
   private attachVisibility(): void {
@@ -688,6 +690,7 @@ export class PatchWs {
       // Same reasoning for permission/question responses — see
       // permissionDeliveryTracker.ts.
       permissionDeliveryTracker.onReconnect();
+      callEnds.onReconnect();
     });
 
     ws.addEventListener('message', (msg) => {
@@ -1206,6 +1209,10 @@ export class PatchWs {
     // surface is offered for switching here. This surface's own call is not.
     // The server's whole set of live calls (greeting, a host reconnecting or
     // going offline): replace the list, so a call whose end was missed goes.
+    if (event.type === 'voice.call_ended') {
+      callEnds.answered(event.requestId);
+      return;
+    }
     if (event.type === 'voice.calls') {
       const self = decodeSurfaceClaims()?.surfaceId;
       useVoiceStore.getState().setRemoteCalls(event.calls.filter((c) => c.surfaceId !== self));

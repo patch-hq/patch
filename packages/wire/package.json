@@ -62,6 +62,16 @@
       "import": "./dist/direct-call-runtime.js",
       "default": "./dist/direct-call-runtime.js"
     },
+    "./call-end": {
+      "types": "./dist/call-end.d.ts",
+      "import": "./dist/call-end.js",
+      "default": "./dist/call-end.js"
+    },
+    "./loop-lag": {
+      "types": "./dist/loop-lag.d.ts",
+      "import": "./dist/loop-lag.js",
+      "default": "./dist/loop-lag.js"
+    },
     "./call-line": {
       "types": "./dist/call-line.d.ts",
       "import": "./dist/call-line.js",

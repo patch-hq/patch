@@ -13,6 +13,9 @@ import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { api } from '../src/api/rest';
 
+import { callEnds } from '../src/lib/callEnds';
+const { wsSend } = vi.hoisted(() => ({ wsSend: vi.fn() }));
+vi.mock('../src/api/ws', () => ({ getWs: () => ({ send: wsSend }) }));
 vi.mock('../src/api/rest', () => ({
   api: {
     me: vi.fn(async () => ({
@@ -82,6 +85,7 @@ function stateFrame(state: string): string {
 }
 
 beforeEach(() => {
+  callEnds.reset();
   vi.useFakeTimers();
   FakeCallTransport.reset();
   vi.clearAllMocks();
@@ -661,28 +665,47 @@ describe('the line under a call (heartbeat and call log)', () => {
     return sock;
   }
 
-  it('three seconds without a heartbeat is a drop that redials (the echo is native)', async () => {
+  it('three seconds without a heartbeat shows lost contact; the line is not dropped or redialled', async () => {
     const sock = await liveCall();
     sock.emitMessage(heartbeat(0));
     // CallTransport.kt answers the heartbeat; JS sends nothing for it.
     expect(sentFrames(sock).filter((f) => f.type === 'audio.heartbeat')).toEqual([]);
     const before = FakeCallTransport.instances.length;
     vi.advanceTimersByTime(3_000);
-    expect(sock.close).toHaveBeenCalled();
     expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
-    expect(useVoiceStore.getState().callError).toBeNull();
-    vi.advanceTimersByTime(CALL_RESUME_DELAYS_MS[0]!);
+    vi.advanceTimersByTime(CALL_RESUME_WINDOW_MS);
     await flush();
-    expect(FakeCallTransport.instances.length).toBe(before + 1);
+    expect(sock.close).not.toHaveBeenCalled();
+    expect(FakeCallTransport.instances.length).toBe(before);
+    expect(useVoiceStore.getState().callError).toBeNull();
+    expect(useVoiceStore.getState().activeSession).not.toBeNull();
+    // Heard again: contact is back on the same line.
+    sock.emitMessage(heartbeat(1));
+    expect(useVoiceStore.getState().callReconnectingSince).toBeNull();
   });
 
-  it('a live line that hears nothing for three seconds after the host answered is dropped too', async () => {
+  it('silence after the host answered is shown the same way and never drops the line', async () => {
     const sock = await liveCall();
     vi.advanceTimersByTime(2_999);
-    expect(sock.close).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().callReconnectingSince).toBeNull();
     vi.advanceTimersByTime(1);
-    expect(sock.close).toHaveBeenCalled();
     expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
+    expect(sock.close).not.toHaveBeenCalled();
+  });
+
+  it('End while the line is reconnecting reaches the host through the server', async () => {
+    const sock = await liveCall();
+    sock.emitClose(1006);
+    expect(useVoiceStore.getState().callReconnectingSince).not.toBeNull();
+    wsSend.mockClear();
+    await endVoiceCall();
+    expect(wsSend).toHaveBeenCalledWith({
+      type: 'voice.end_call_request',
+      chatId: 'c1',
+      sessionId: 'sess-1',
+      requestId: 'end-sess-1',
+    });
+    expect(useVoiceStore.getState().activeSession).toBeNull();
   });
 
   it('sends the log of the drop once the line is back, and the rest when the call ends', async () => {
@@ -724,8 +747,11 @@ describe('the line under a call (heartbeat and call log)', () => {
     const frames = sentFrames(again);
     const endLog = frames.filter((f) => f.type === 'audio.call_log').at(-1);
     expect((endLog?.entries as Array<{ kind: string }>).map((e) => e.kind)).toEqual(['quality']);
-    // The log goes before the session is ended.
-    expect(frames.at(-1)?.type).toBe('audio.session_end');
+    // The end itself is not a frame on the socket: it goes through the server.
+    expect(frames.map((f) => f.type)).not.toContain('audio.session_end');
+    expect(wsSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'voice.end_call_request' }),
+    );
   });
 });
 

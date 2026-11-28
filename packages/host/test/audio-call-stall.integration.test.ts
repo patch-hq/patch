@@ -1,8 +1,9 @@
 // A 4 second stall on a real audio socket (spec/07 § A dropped call comes
 // back): the call line on the device side, the real audio server on the host
 // side, a real WebSocket between them that stops being read for 4 seconds.
-// The line plays "reconnecting" at 3 s, redials, and lands back on the same
-// host session, with the same provider conversation. Real time.
+// The line shows lost contact at 3 s and contact again when it clears; it never
+// drops, redials or opens a new session, because the socket never closed.
+// Real time.
 
 import { test, expect, afterEach } from 'vitest';
 import pino from 'pino';
@@ -43,7 +44,7 @@ afterEach(async () => {
   server = undefined;
 });
 
-test('a 4 s stall on the socket is reconnected into the same session, not a new call', async () => {
+test('a 4 s stall on the socket shows lost contact and recovers on the same line', async () => {
   let providerSockets = 0;
   const agent = fakeVoiceAgent();
   const calls: Array<{ sessionId: string; active: boolean }> = [];
@@ -70,6 +71,7 @@ test('a 4 s stall on the socket is reconnected into the same session, not a new 
   const sockets = new Map<number, WebSocket>();
   const bus = new EventEmitter();
   const dialled: Array<string | null> = [];
+  const contacts: boolean[] = [];
   const line: CallLine = new CallLine({
     dial: (attempt, resumes) => {
       dialled.push(resumes);
@@ -116,7 +118,10 @@ test('a 4 s stall on the socket is reconnected into the same session, not a new 
       phases.push(next);
       bus.emit('phase', next);
     },
-    stillTrying: () => undefined,
+    contact: (heard) => {
+      contacts.push(heard);
+      bus.emit('contact', heard);
+    },
   });
   const reached = (target: CallLinePhase, from: number): Promise<void> =>
     new Promise((res) => {
@@ -129,6 +134,17 @@ test('a 4 s stall on the socket is reconnected into the same session, not a new 
       };
       bus.on('phase', on);
     });
+  const contactIs = (heard: boolean, from: number): Promise<void> =>
+    new Promise((res) => {
+      if (contacts.slice(from).includes(heard)) return res();
+      const on = (h: boolean): void => {
+        if (h === heard) {
+          bus.off('contact', on);
+          res();
+        }
+      };
+      bus.on('contact', on);
+    });
 
   line.start();
   await reached('live', 0);
@@ -137,17 +153,69 @@ test('a 4 s stall on the socket is reconnected into the same session, not a new 
   // The network stalls: nothing is read from the socket, so no heartbeat
   // arrives and none is answered.
   const stalledAt = Date.now();
-  (sockets.get(1) as unknown as { _socket: { pause(): void } })._socket.pause();
+  const raw = (sockets.get(1) as unknown as { _socket: { pause(): void; resume(): void } })._socket;
+  raw.pause();
   const mark = phases.length;
-  await reached('reconnecting', mark);
+  await contactIs(false, 0);
   await new Promise((r) => setTimeout(r, Math.max(0, 4_000 - (Date.now() - stalledAt))));
-  await reached('live', mark);
+  raw.resume();
+  await contactIs(true, 0);
 
-  expect(phases.slice(mark)).toEqual(['reconnecting', 'live']);
-  expect(dialled).toEqual([null, 's1']);
+  expect(contacts).toEqual([false, true]);
+  expect(phases.slice(mark)).toEqual([]);
+  expect(dialled).toEqual([null]);
   expect(providerSockets).toBe(1);
   expect(calls.map((c) => c.active)).toEqual([true]);
   expect(server.sessionById('s1')).toBeDefined();
   line.end();
   for (const ws of sockets.values()) ws.terminate();
+}, 20_000);
+
+test('ending a call whose line dropped ends the held host session at once', async () => {
+  const agent = fakeVoiceAgent();
+  const ended: string[] = [];
+  const handle = await startAudioServer({
+    host: '127.0.0.1',
+    port: 0,
+    logger,
+    internalToken: SECRET,
+    whisper: createWhisper({ backend: 'mock', logger }),
+    kokoro: createKokoro({ backend: 'mock', logger }),
+    makeVad: () => new MockVad(),
+    submitUserTurn: async () => 'ok',
+    chatExists: () => true,
+    ...agent,
+    onCallEnded: (info) => ended.push(info.init.sessionId),
+  });
+  server = Object.assign(handle, { port: handle.address().port });
+  const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s1`);
+  await new Promise<void>((r) => ws.once('open', () => r()));
+  ws.send(
+    encodeAudio({
+      type: 'audio.session_start',
+      sessionId: 's1',
+      accountId: 'a',
+      surfaceId: 'phone',
+      surfaceKind: 'mobile',
+      chatId: 'c1',
+      role: 'voice-call',
+      token: mintToken('s1'),
+      surfaceHasAec: true,
+      mode: 'call',
+    }),
+  );
+  await new Promise<void>((resolve) =>
+    ws.on('message', (d, bin) => {
+      if (!bin && decodeAudio(d.toString()).type === 'audio.state') resolve();
+    }),
+  );
+  // The line drops: the host holds the session for its device to resume.
+  ws.terminate();
+  await new Promise((r) => setTimeout(r, 200));
+  expect(server.sessionById('s1')).toBeDefined();
+  expect(ended).toEqual([]);
+  // The end arrives through the server: the session ends now, not after the window.
+  server.endSession('s1');
+  expect(server.sessionById('s1')).toBeUndefined();
+  expect(ended).toEqual(['s1']);
 }, 20_000);
