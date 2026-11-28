@@ -1094,7 +1094,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
     return this.reply;
   }
 
-  /** Nothing more of the reply is coming; the chat gets it once it has played out. */
+  /** Nothing more of the reply is coming; its message in the chat is complete unless the user cuts it. */
   private finishReply(): void {
     if (!this.reply) return;
     this.reply.end();

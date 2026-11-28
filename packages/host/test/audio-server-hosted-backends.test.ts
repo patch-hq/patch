@@ -200,7 +200,7 @@ describe('audio server — hosted backends on every app surface', () => {
     const handle = await startAudioServer({
       makeTimeline: () => ({
         userSaid() {},
-        beginReply: () => ({ append() {}, finish() {}, text: () => '' }),
+        beginReply: () => ({ set() {}, finish() {} }),
       }),
       voiceAgentLink: fakeVoiceAgentLink().link,
       getVoiceInstructions: () => DEFAULT_VOICE_INSTRUCTIONS,
@@ -291,12 +291,16 @@ describe('audio server — hosted backends on every app surface', () => {
         userSaid: (chatId, text) => log.push(`user:${chatId}:${text}`),
         beginReply: (chatId) => {
           let text = '';
+          let logged = '';
           return {
-            append: (d) => {
-              text += d;
+            set: (t) => {
+              text = t;
             },
-            finish: () => log.push(`reply:${chatId}:${text}`),
-            text: () => text,
+            finish: () => {
+              if (text === logged) return;
+              logged = text;
+              log.push(`reply:${chatId}:${text}`);
+            },
           };
         },
       }),

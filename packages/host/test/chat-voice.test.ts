@@ -175,15 +175,17 @@ describe('chat voice glue', () => {
     const tl = glue.makeTimeline(init(chatId));
     tl.userSaid(chatId, 'what is a nebula');
     const reply = tl.beginReply(chatId);
-    reply.append('A cloud ');
-    reply.append('of gas.');
+    reply.set('A cloud');
+    reply.set('A cloud of gas.\n\nIt glows.');
     reply.finish();
 
-    expect(events.filter((e) => e.type === 'chat.message_delta')).toHaveLength(2);
-    expect(messages(events).map((m) => [m.role, m.content])).toEqual([
-      ['user', '[voice • desktop] what is a nebula'],
-      ['assistant', '[voice • desktop] A cloud of gas.'],
-    ]);
+    const said = messages(events).map((m) => [m.role, m.seq, m.content]);
+    expect(said[0]).toEqual(['user', expect.any(Number), '[voice • desktop] what is a nebula']);
+    // One message from the first word, rewritten in place: same seq every time,
+    // paragraph break kept.
+    const replySeqs = new Set(said.filter((m) => m[0] === 'assistant').map((m) => m[1]));
+    expect(replySeqs.size).toBe(1);
+    expect(said.at(-1)![2]).toBe('[voice • desktop] A cloud of gas.\n\nIt glows.');
   });
 
   it('answer permission: a plain yes or no answers the permission the chat waits on, and nothing else does', async () => {

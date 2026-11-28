@@ -62,6 +62,9 @@ export function voiceLocalId(source: VoiceTurnSource): string {
   return `voice-${suffix}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 }
 
+/** How often a reply being spoken is rewritten into the chat as it grows. */
+const VOICE_REPLY_WRITE_MS = 250;
+
 /** Where a hand-off stands, as recorded in the chat (spec/14 § Hand-off rows). */
 export type VoiceHandoffRecord = Omit<ChatVoiceHandoffEvent, 'type' | 'seq' | 'branchId'>;
 
@@ -71,7 +74,7 @@ export interface ChatVoiceHost {
     chatId: string;
     role: 'user' | 'assistant';
     content: string;
-    seq?: number;
+    createdAt?: number;
     /** False for a line the agent is about to be given itself (a hand-off). */
     owed?: boolean;
   }): number;
@@ -84,8 +87,14 @@ export interface ChatVoiceHost {
     fromUser: true;
     deliverDrawn: number;
   }): Promise<void>;
-  reserveVoiceSeq(chatId: string): number;
-  emitVoiceDelta(chatId: string, messageSeq: number, delta: string): void;
+  /** Change a spoken message in place at its own seq. */
+  updateVoiceMessage(req: {
+    chatId: string;
+    role: 'user' | 'assistant';
+    seq: number;
+    content: string;
+    createdAt: number;
+  }): void;
   recordCallSummary(chatId: string, line: string): void;
   /** A quiet `[call]` line in the chat (a resumed call). */
   recordCallNote(chatId: string, line: string): void;
@@ -671,33 +680,54 @@ export function createChatVoice(deps: {
           );
         },
         beginReply(chatId) {
+          // The reply is one message at its seq from its first word: the first
+          // text writes it, every later text updates that same message. Updates
+          // are spaced out so a provider streaming word by word does not write
+          // a log line per word; `finish` writes the last one.
           let seq: number | undefined;
-          let text = '';
-          return {
-            append(delta) {
-              guard('the spoken reply', chatId, () => {
-                seq ??= daemon.reserveVoiceSeq(chatId);
-                text += delta;
-                daemon.emitVoiceDelta(chatId, seq, delta);
-              });
-            },
-            finish(heard) {
-              const said = (heard ?? text).trim();
-              if (seq === undefined || said === '') return;
-              const at = seq;
-              guard('the spoken reply', chatId, () =>
-                asVoice(() =>
-                  daemon.recordVoiceMessage({
+          let at = 0;
+          let latest = '';
+          let written = '';
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const write = (): void => {
+            timer = undefined;
+            const said = latest.trim();
+            if (said === '' || said === written) return;
+            written = said;
+            // Tagged like the user's words, so every surface can mark it as spoken.
+            const content = `${tag}${said}`;
+            guard('the spoken reply', chatId, () =>
+              asVoice(() => {
+                if (seq === undefined) {
+                  at = now();
+                  seq = daemon.recordVoiceMessage({
                     chatId,
                     role: 'assistant',
-                    // Tagged like the user's words, so every surface can mark it as spoken.
-                    content: `${tag}${said}`,
-                    seq: at,
-                  }),
-                ),
-              );
+                    content,
+                    createdAt: at,
+                  });
+                } else {
+                  daemon.updateVoiceMessage({
+                    chatId,
+                    role: 'assistant',
+                    seq,
+                    content,
+                    createdAt: at,
+                  });
+                }
+              }),
+            );
+          };
+          return {
+            set(text) {
+              latest = text;
+              if (seq === undefined) write();
+              else timer ??= setTimeout(write, VOICE_REPLY_WRITE_MS);
             },
-            text: () => text,
+            finish() {
+              if (timer) clearTimeout(timer);
+              write();
+            },
           };
         },
       };

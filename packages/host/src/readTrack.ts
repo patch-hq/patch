@@ -51,7 +51,22 @@ export function readTrack(
     out.push(entry);
   }
   out.sort((a, b) => a.record.seq - b.record.seq);
-  return out;
+  return lastMessageAtEachSeq(out);
+}
+
+/**
+ * A message is one entry at its seq: a spoken reply is written when its first
+ * word arrives and updated in place as it grows or is cut, so the log holds
+ * several records at that seq and only the last is the message.
+ */
+function lastMessageAtEachSeq<T extends { event: LoggedEvent }>(entries: T[]): T[] {
+  const lastAt = new Map<string, number>();
+  entries.forEach(({ event }, i) => {
+    if (event.type === 'chat.message') lastAt.set(`${event.seq}:${event.role}`, i);
+  });
+  return entries.filter(({ event }, i) =>
+    event.type !== 'chat.message' ? true : lastAt.get(`${event.seq}:${event.role}`) === i,
+  );
 }
 
 /**

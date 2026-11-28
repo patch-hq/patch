@@ -1404,7 +1404,6 @@ export class PatchWs {
       const store = useChatStore.getState();
       store.setReplaying(event.chatId, false);
       if (ask?.kind === 'before') {
-        store.orderTimelineBySeq(event.chatId);
         store.setHistoryLoadingEarlier(event.chatId, false);
       }
       // `more` running backwards: older pages remain above what is shown.

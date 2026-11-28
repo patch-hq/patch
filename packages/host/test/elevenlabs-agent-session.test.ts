@@ -402,21 +402,42 @@ describe('ElevenLabsAgentSession — conversation', () => {
     expect(session.getState()).toBe('listening');
   });
 
-  test('an interruption keeps only what was heard of the reply in the chat', async () => {
+  test("an interruption puts ElevenLabs' own account of what was heard in the chat, marked as cut", async () => {
     const { deps, timeline, last } = makeDeps();
     const session = new ElevenLabsAgentSession(makeInit(), deps);
     const ws = await open(session, last);
     ws.serverSend(transcript('tell me a story'));
     ws.serverSend(response('Once upon a time there was a very long story indeed.'));
-    // Two seconds of audio, all sent at once; the user cuts in after a fraction of it.
     ws.serverSend(audioChunk(48_000));
-    await new Promise((r) => setTimeout(r, 600));
     ws.serverSend({ type: 'interruption', interruption_event: { event_id: 2 } });
-    const written = timeline.log.filter((l) => l.startsWith('reply:'));
-    expect(written).toHaveLength(1);
-    expect(written[0]!).toMatch(/^reply:chat-1:Once upon/);
-    expect(written[0]!.length).toBeLessThan(
-      'reply:chat-1:Once upon a time there was a very long story indeed.'.length,
+    // Nothing is guessed from the audio: the message waits for the provider.
+    expect(timeline.log.some((l) => l.includes('…'))).toBe(false);
+    ws.serverSend({
+      type: 'agent_response_correction',
+      agent_response_correction_event: {
+        original_agent_response: 'Once upon a time there was a very long story indeed.',
+        corrected_agent_response: 'Once upon a time',
+      },
+    });
+    expect(timeline.log.filter((l) => l.startsWith('reply:')).at(-1)).toBe(
+      'reply:chat-1:Once upon a time…',
+    );
+  });
+
+  test('chunks of a reply keep the provider paragraph breaks', async () => {
+    const { deps, timeline, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('hi'));
+    ws.serverSend(response('First paragraph.\n\n'));
+    ws.serverSend(response('Second paragraph.'));
+    ws.serverSend(response('Same one.'));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(complete);
+    await vi.waitFor(() =>
+      expect(timeline.log).toContain(
+        'reply:chat-1:First paragraph.\n\nSecond paragraph. Same one.',
+      ),
     );
   });
 

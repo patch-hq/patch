@@ -207,6 +207,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private reply?: SpokenReply;
   /** The reply before it: over for ElevenLabs, maybe still playing on the surface. */
   private lastReply?: SpokenReply;
+  /** A reply the user cut off, waiting for ElevenLabs to say what was heard of it. */
+  private interrupted?: SpokenReply;
   private micFrames = 0;
   private micSamples = 0;
   private turns = 0;
@@ -603,14 +605,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
         this.onInterruption();
         return;
       case 'agent_response_correction':
-        // ElevenLabs' own record of the interrupted reply, cut on its side.
-        this.deps.logger.info(
-          {
-            sessionId: this.init.sessionId,
-            corrected: ev.agent_response_correction_event?.corrected_agent_response,
-          },
-          'elevenlabs-agent: the provider cut its record of the interrupted reply',
-        );
+        // ElevenLabs' own record of what was heard of the interrupted reply: the
+        // chat's message becomes exactly that.
+        this.settleInterrupted(ev.agent_response_correction_event?.corrected_agent_response);
         return;
       case 'client_tool_call': {
         const call = ev.client_tool_call ?? {};
@@ -687,16 +684,19 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   }
 
   private onAgentResponse(raw: string): void {
-    const text = raw.replace(AUDIO_TAG, '').trim();
+    const text = raw.replace(AUDIO_TAG, '');
     if (this.suppressReply || isNoiseTranscript(text)) return;
     // What the voice said is written into the chat, apart from the agent's own messages,
-    // once the user has heard it.
+    // from its first word. The provider's own spacing and paragraph breaks are kept;
+    // a space goes between chunks only where neither side has any.
     const reply = this.spokenReply();
-    reply.append(reply.hasText() ? ` ${text}` : text);
+    const joined = reply.hasText() && !/\s$/.test(reply.text()) && !/^\s/.test(text);
+    reply.append(joined ? ` ${text}` : text);
   }
 
   /** The reply being spoken now, begun on its first words or audio. */
   private spokenReply(): SpokenReply {
+    this.settleInterrupted(undefined);
     this.reply ??= new SpokenReply(() => this.deps.timeline.beginReply(this.call.chatId));
     return this.reply;
   }
@@ -723,15 +723,18 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   /**
    * The reply is over for ElevenLabs (or, `bargedIn`, cut off): close the
-   * surface's playback of it, and hand it to the chat — whole once it has
-   * played out, or as far as the user heard.
+   * surface's playback of it, and finish its message in the chat — whole, or
+   * as far as the user heard.
    */
   private endAudio(bargedIn: boolean): void {
     if (bargedIn) {
       const target = this.reply ?? this.lastReply;
       this.lastReply = undefined;
-      const heardMs = target?.cut() ?? null;
+      // What was heard is ElevenLabs' to say (`agent_response_correction`): the
+      // message waits for it rather than guessing from the audio.
+      const heardMs = target?.stop() ?? null;
       if (heardMs !== null) {
+        this.interrupted = target;
         this.deps.logger.info(
           {
             sessionId: this.init.sessionId,
@@ -755,6 +758,26 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     });
     this.setState('listening');
     this.call.flush();
+  }
+
+  /**
+   * ElevenLabs' account of what was heard of the interrupted reply arrived:
+   * the chat's message is cut to it. With none, the message is cut where it
+   * stands, and that is said.
+   */
+  private settleInterrupted(corrected: string | undefined): void {
+    const target = this.interrupted;
+    if (!target) return;
+    this.interrupted = undefined;
+    if (corrected === undefined) {
+      this.deps.logger.warn(
+        { sessionId: this.init.sessionId },
+        'elevenlabs-agent: no correction came for the interrupted reply; its text stands, marked as cut',
+      );
+      target.cutAs(target.text());
+      return;
+    }
+    target.cutAs(corrected.replace(AUDIO_TAG, ''));
   }
 
   private onInterruption(): void {
@@ -875,6 +898,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   async close(): Promise<void> {
     if (this.closed) return;
+    this.settleInterrupted(undefined);
     this.reply?.flush();
     this.lastReply?.flush();
     this.call.close();

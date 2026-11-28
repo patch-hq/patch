@@ -449,8 +449,6 @@ interface ChatState {
   /** An older page is on its way for this chat. */
   historyLoadingEarlier: Record<string, true>;
   setHistoryLoadingEarlier(chatId: string, on: boolean): void;
-  /** Committed entries back in record order once an older page has landed after them. */
-  orderTimelineBySeq(chatId: string): void;
   /** Nothing in flight any more — the socket that carried the asks is gone. */
   clearReplaying(): void;
   removeLocalMessage(chatId: string, localId: string): void;
@@ -849,10 +847,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // (type-ahead) messages — a queued message stays below the live transcript
     // and never interleaves with the running turn's output (spec/04 ##
     // Message queueing).
+    // An entry's place is its seq, the number it was given when it happened: it
+    // goes ahead of the first entry with a later seq, whenever it arrives.
     function pushTimeline(chatId: string, entry: ChatEventEntry): void {
       const list = ownTimeline(chatId);
       let at = list.length;
       while (at > 0 && list[at - 1]?.queued) at--;
+      if (entry.seq >= 0) {
+        // Only committed entries have a place by seq: a message still being
+        // sent (`localId`) sits at the end until it is committed.
+        const later = list.findIndex((e) => e.seq > entry.seq && e.localId === undefined);
+        if (later >= 0) at = later;
+      }
       list.splice(at, 0, entry);
     }
 
@@ -1225,10 +1231,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // can be handed the same transcript twice — opening a chat asks for a
           // replay, and the socket completing its connect a moment later asks
           // again — and that rendered two of every message. The canonical seq is
-          // the identity, so the same (seq, role, content) is the same turn:
-          // update it in place, never append. Content is in the key on purpose —
-          // replayed history can carry seqs that collide with a live one, and two
-          // different messages must not swallow each other.
+          // the identity, so the same seq is the same message:
+          // update it in place, never append. Replayed history can carry seqs
+          // that collide with a live one, so a user turn also needs the same text.
           {
             const list = timelines[event.chatId];
             const held = list
@@ -1238,18 +1243,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     e.seq === event.seq &&
                     e.role === event.role &&
                     e.localId === undefined &&
-                    // The same text — or, for a turn this surface sent, the
-                    // same localId: a promoted echo keeps what was TYPED, which
-                    // the host's persisted text can drift from.
-                    (e.content === text ||
+                    // A reply is the same message however its words have changed
+                    // (a spoken reply grows and is cut in place). A user turn is
+                    // the same text — or, for one this surface sent, the same
+                    // localId: a promoted echo keeps what was TYPED.
+                    (event.role === 'assistant' ||
+                      e.content === text ||
                       (event.localId !== undefined &&
                         settledLocalIds.has(`${event.chatId}::${event.localId}`))),
                 )
               : -1;
             if (held >= 0 && list) {
+              // The same message at the same seq, as last written: a spoken
+              // reply is changed in place (more words, a cut, a correction).
               const updated = ownTimeline(event.chatId);
               updated[held] = {
                 ...updated[held]!,
+                // A user's message keeps what was typed; a reply is as last written.
+                ...(event.role === 'assistant' ? { content: text } : {}),
+                ...(voice ? { voice: true } : {}),
                 ...(event.createdAt !== undefined ? { messageAt: event.createdAt } : {}),
               };
               break;
@@ -2127,21 +2139,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (on) next[chatId] = true;
       else delete next[chatId];
       return { historyLoadingEarlier: next };
-    });
-  },
-
-  orderTimelineBySeq(chatId) {
-    set((s) => {
-      const cur = s.timelines[chatId];
-      if (!cur || cur.length < 2) return s;
-      const committed = cur.filter((e) => e.seq >= 0);
-      const rest = cur.filter((e) => e.seq < 0);
-      return {
-        timelines: {
-          ...s.timelines,
-          [chatId]: [...[...committed].sort((a, b) => a.seq - b.seq), ...rest],
-        },
-      };
     });
   },
 

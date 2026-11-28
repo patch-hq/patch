@@ -106,38 +106,34 @@ describe('heardPart', () => {
 });
 
 describe('SpokenReply', () => {
+  /** What the chat's one message for the reply says after each change. */
   const writer = () => {
     const log: string[] = [];
-    let text = '';
+    let begun = 0;
     return {
       log,
-      begin: () => ({
-        append: (d: string) => {
-          text += d;
-        },
-        finish: (heard?: string) => log.push(heard ?? text),
-        text: () => text,
-      }),
+      begins: () => begun,
+      begin: () => {
+        begun += 1;
+        return {
+          set: (t: string) => log.push(t),
+          finish: () => {},
+        };
+      },
     };
   };
 
-  test('is written only once its audio has played out', () => {
-    vi.useFakeTimers();
-    try {
-      const w = writer();
-      const reply = new SpokenReply(w.begin);
-      reply.append('hello there');
-      reply.audio(24_000); // one second
-      reply.end();
-      expect(w.log).toEqual([]);
-      vi.advanceTimersByTime(1_001);
-      expect(w.log).toEqual(['hello there']);
-    } finally {
-      vi.useRealTimers();
-    }
+  test('is one message from its first word, changed in place as more words arrive', () => {
+    const w = writer();
+    const reply = new SpokenReply(w.begin);
+    reply.append('hello');
+    reply.append(' there\n\nsecond paragraph');
+    reply.end();
+    expect(w.begins()).toBe(1);
+    expect(w.log).toEqual(['hello', 'hello there\n\nsecond paragraph']);
   });
 
-  test('a cut while it plays keeps what was heard, even after the provider finished it', () => {
+  test('a cut while it plays cuts the same message to what was heard, even after the provider finished it', () => {
     vi.useFakeTimers();
     try {
       const w = writer();
@@ -148,15 +144,28 @@ describe('SpokenReply', () => {
       vi.advanceTimersByTime(500);
       expect(reply.playing()).toBe(true);
       expect(reply.cut()).toBe(500);
-      expect(w.log).toEqual(['one two…']);
+      expect(w.begins()).toBe(1);
+      expect(w.log.at(-1)).toBe('one two…');
       vi.advanceTimersByTime(1_000);
-      expect(w.log).toHaveLength(1);
+      expect(w.log.at(-1)).toBe('one two…');
     } finally {
       vi.useRealTimers();
     }
   });
 
-  test('cut before its words arrived: written as far as heard when they come', () => {
+  test("a provider's account of what was heard is the text, marked as cut", () => {
+    const w = writer();
+    const reply = new SpokenReply(w.begin);
+    reply.append('one two three four');
+    reply.audio(24_000);
+    expect(reply.stop()).not.toBeNull();
+    reply.cutAs('one two three');
+    expect(w.log.at(-1)).toBe('one two three…');
+    reply.append(' more');
+    expect(w.log.at(-1)).toBe('one two three…');
+  });
+
+  test('cut before its words arrived: cut as far as heard when they come', () => {
     vi.useFakeTimers();
     try {
       const w = writer();

@@ -28,15 +28,14 @@ export interface VoiceTimeline {
 }
 
 export interface VoiceReplyWriter {
-  append(delta: string): void;
   /**
-   * Persist the reply (a reply that never got any text is dropped). `heard`:
-   * the reply was cut off, and this is the part the user heard (spec/07 §
-   * Barge-in); the chat keeps that, not what was never played.
+   * The reply's whole text as it stands. The first call puts the reply into the
+   * chat as one message; every later call (more words, a cut, a provider's
+   * correction) changes that same message in place.
    */
-  finish(heard?: string): void;
-  /** The reply's text so far. */
-  text(): string;
+  set(text: string): void;
+  /** Nothing more will change: write the last text now. */
+  finish(): void;
 }
 
 export interface VoiceSessionLike {
