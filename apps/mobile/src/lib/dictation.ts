@@ -57,6 +57,7 @@ import { Audio } from 'expo-av';
 import { ensurePermission } from './permissionGate';
 import * as FileSystem from 'expo-file-system';
 import { decodeAudio, type AudioEvent } from '@patch/wire/audio';
+import { answerHeartbeat } from './audioHeartbeat';
 import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
@@ -389,6 +390,7 @@ function startWhisperDictation(
           reportPreview(`malformed audio frame: ${(e as Error).message}`);
           return;
         }
+        answerHeartbeat(socket, frame);
         if (frame.type === 'audio.transcript_partial') onPartial(frame.text);
         // The one socket answer that is NOT an invisible preview hiccup: the
         // host refusing the dictation surface outright because its backend
@@ -591,6 +593,7 @@ function startStreamDictation(
           void fail(`malformed audio frame: ${(e as Error).message}`);
           return;
         }
+        answerHeartbeat(socket, frame);
         if (frame.type === 'audio.transcript_partial' && !failed) onPartial(frame.text);
         else if (frame.type === 'audio.transcript_final') resolveFinal?.(frame.text);
         else if (frame.type === 'audio.error') {

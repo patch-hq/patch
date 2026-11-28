@@ -12,6 +12,7 @@
 
 import { Audio } from 'expo-av';
 import { decodeAudio, type AudioEvent } from '@patch/wire/audio';
+import { answerHeartbeat } from './audioHeartbeat';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
 import { useVoiceStore } from '../stores/voiceStore';
@@ -115,6 +116,7 @@ export function speakInterrupt(chatId: string, message: string): void {
         } catch {
           return;
         }
+        answerHeartbeat(ws, frame);
         if (frame.type === 'audio.tts_end') {
           finish();
         } else if (frame.type === 'audio.error') {

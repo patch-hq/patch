@@ -1,9 +1,11 @@
-// The heartbeat a call's line is judged by (spec/07 § A dropped call comes
-// back). While an app call is open the host sends `audio.heartbeat` every
-// second; the surface that hears nothing for three seconds treats the line as
-// lost and redials. The surface echoes each one, which is how the host measures
-// the round trip — it sends the latest back on the next heartbeat, so the
-// surface can log it, and keeps its own count for the session's closing log.
+// The heartbeat an app session's line is judged by, both ways (spec/07 § A
+// dropped call comes back). While any app session is open — a call, dictation,
+// a spoken alert — the host sends `audio.heartbeat` every second; on a call the
+// surface that hears nothing for three seconds treats the line as lost and
+// redials. The surface echoes each one, which is what tells the host the device
+// is still there (peer-liveness.ts) and how it measures the round trip — it
+// sends the latest back on the next heartbeat, so the surface can log it, and
+// keeps its own count for the session's closing log.
 
 import { HEARTBEAT_INTERVAL_MS, type AudioHeartbeatEvent } from '@patch/wire/audio';
 

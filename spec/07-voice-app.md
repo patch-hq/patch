@@ -224,7 +224,7 @@ End hangs the call up wherever it is held: the host closes that session as the u
 
 ## A dropped call comes back
 
-While a voice agent call is open the host sends a heartbeat on the audio socket every second. A surface that has heard nothing from the host for about 3 seconds (three missed heartbeats, so one late frame is not a drop) treats the line as lost, as it does a closed audio connection or the host going away mid-call (`host_unreachable`) during a server or host restart or a network change. The host only ends a call on its own when it moves to another device (`transferred`), when the agent ends it (`ended_by_agent`) or after an error it has already reported, so every other close is a drop.
+While a voice agent call is open the host sends a heartbeat on the audio socket every second (it does on every app audio session, and every session answers it: § Fixed timings). A surface that has heard nothing from the host for about 3 seconds (three missed heartbeats, so one late frame is not a drop) treats the line as lost, as it does a closed audio connection or the host going away mid-call (`host_unreachable`) during a server or host restart or a network change. The host only ends a call on its own when it moves to another device (`transferred`), when the agent ends it (`ended_by_agent`) or after an error it has already reported, so every other close is a drop.
 
 The surface plays the reconnecting sound (§ Call sounds), the call bar shows `Reconnecting…`, and it redials, backing off over about two minutes (1, 2, 4, 8, 15, 20, 30 and 30 seconds), long enough to ride out a release restarting the server and the host; after that it keeps trying every 30 seconds until the user ends the call, saying once that it is still trying. Bringing the app to the foreground redials at once. When the line is back it plays the reconnected sound. Nothing said while the line was down is kept or sent.
 
@@ -240,7 +240,7 @@ Every fixed time in a call is either a setting or carries its reason beside it h
 
 Taken from a signal, not timed:
 
-- A gone device. The host ends a session when it has heard nothing from the device for the heartbeat's 3 seconds, the same rule the device judges the host by. Only frames count: a call's device echoes every heartbeat, and every other session streams its microphone for as long as it is open. A WebSocket ping proves nothing, because it is answered by the server's relay, not the device.
+- A gone device. The host ends an app session when it has heard nothing from the device for the heartbeat's 3 seconds, the same rule the device judges the host by. Only frames count: every app session — a call, dictation, a voice note's live words, a spoken alert — answers every heartbeat, microphone or not. A WebSocket ping proves nothing, because it is answered by the server's relay, not the device. A voice device's firmware does not answer the heartbeat, so its sessions are judged by its own link (`16-voice-device.md`).
 - The end of a voice agent's reply: the provider's own end of reply (Gemini's turn complete, OpenAI's response done, ElevenLabs' `agent_response_complete`, which the agent is created to send). The end of its playback on the device is the reply's audio length from its first chunk.
 - Hanging up after the voice agent's goodbye: when its reply has ended and the device has played it out, bounded at 15 seconds so a provider that never goes quiet cannot hold open a call the agent asked to end.
 - Headphones out and back in, audio focus, the output device going away: the device's own events (§ Pause).

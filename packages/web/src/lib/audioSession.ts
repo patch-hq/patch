@@ -15,6 +15,7 @@
 import {
   AUDIO_NOTICE_CODES,
   decodeAudio,
+  heartbeatEcho,
   type AudioCallLogEvent,
   type AudioEvent,
   type AudioHeartbeatEvent,
@@ -136,7 +137,7 @@ export interface AudioSession {
   finishDictation(): void;
   /** True while muted. */
   isMuted(): boolean;
-  /** Send a line frame (heartbeat echo, call log); false when the socket is not open. */
+  /** Send a line frame (a call log); false when the socket is not open. */
   send(frame: AudioHeartbeatEvent | AudioCallLogEvent): boolean;
   /** Tear the session down: send session_end, stop mic, close WSS. */
   end(reason?: string): void;
@@ -307,6 +308,11 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
     } catch (err) {
       callbacks.onError(`malformed audio frame: ${(err as Error).message}`);
       return;
+    }
+    // Every session answers the host's heartbeat, whatever it is: the host
+    // judges this device by what it hears (spec/07 § A dropped call comes back).
+    if (frame.type === 'audio.heartbeat' && ws.readyState === WS.OPEN) {
+      ws.send(JSON.stringify(heartbeatEcho(frame)));
     }
     dispatchFrame(frame, callbacks, stopTts);
   });

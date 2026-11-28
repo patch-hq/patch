@@ -391,13 +391,25 @@ describe('audioSession', () => {
     plain.ws.emit('message', { data: JSON.stringify(beat) });
   });
 
+  it('every session answers the host’s heartbeat at once, call or not (spec/07)', async () => {
+    const { ws } = await open(noopCallbacks());
+    ws.emit('message', {
+      data: JSON.stringify({ type: 'audio.heartbeat', sessionId: 'sess-9', n: 4, rttMs: 12 }),
+    });
+    expect(JSON.parse(ws.sent.at(-1) as string)).toEqual({
+      type: 'audio.heartbeat',
+      sessionId: 'sess-9',
+      n: 4,
+    });
+  });
+
   it('send() puts a line frame on an open socket, and reports false once it is closed', async () => {
     const { session, ws } = await open(noopCallbacks());
-    const echo = { type: 'audio.heartbeat' as const, sessionId: 'sess-9', n: 1 };
-    expect(session.send(echo)).toBe(true);
-    expect(JSON.parse(ws.sent.at(-1) as string)).toEqual(echo);
+    const log = { type: 'audio.call_log' as const, sessionId: 'sess-9', entries: [] };
+    expect(session.send(log)).toBe(true);
+    expect(JSON.parse(ws.sent.at(-1) as string)).toEqual(log);
     session.end();
-    expect(session.send(echo)).toBe(false);
+    expect(session.send(log)).toBe(false);
   });
 
   it('a session frame with an unhandled/dispatch-only type is a no-op (default branch)', async () => {

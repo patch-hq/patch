@@ -644,12 +644,12 @@ describe('voiceController', () => {
     }
   });
 
-  it('a heartbeat is echoed, and the call log goes to the host before the call ends', async () => {
+  it("the call log goes to the host before the call ends (the heartbeat echo is the session's own)", async () => {
     sendSpy.mockClear();
     await startVoiceCall('c1');
     lastCallbacks?.onState?.('listening', 'sess-1');
     lastCallbacks?.onHeartbeat?.({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
-    expect(sendSpy).toHaveBeenCalledWith({ type: 'audio.heartbeat', sessionId: 'sess-1', n: 0 });
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio.heartbeat' }));
     lastCallbacks?.onState?.('transcribing', 'sess-1');
     lastCallbacks?.onTranscriptFinal('hello', true);
     lastCallbacks?.onReplyAudio?.();

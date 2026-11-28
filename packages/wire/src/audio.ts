@@ -908,7 +908,7 @@ export const HEARTBEAT_INTERVAL_MS = 1_000;
 export const HEARTBEAT_LOST_AFTER_MS = 3 * HEARTBEAT_INTERVAL_MS;
 
 /**
- * Both ways on a call. The host sends one every `HEARTBEAT_INTERVAL_MS`,
+ * Both ways on every app audio session. The host sends one every `HEARTBEAT_INTERVAL_MS`,
  * numbered from 0 per session and carrying the round trip it last measured;
  * the surface echoes each back with the same `n` and no `rttMs`, which is how
  * the host measures it.
@@ -924,6 +924,16 @@ export const AudioHeartbeatEvent = z
   })
   .strict();
 export type AudioHeartbeatEvent = z.infer<typeof AudioHeartbeatEvent>;
+
+/**
+ * A surface's answer to a host heartbeat: the same number, sent straight back.
+ * Every app audio session answers every heartbeat, whatever kind of session it
+ * is (a call, dictation, a spoken alert): the host judges the device by what it
+ * hears from it, and a session with no microphone has nothing else to say.
+ */
+export function heartbeatEcho(frame: AudioHeartbeatEvent): AudioHeartbeatEvent {
+  return { type: 'audio.heartbeat', sessionId: frame.sessionId, n: frame.n };
+}
 
 /** Why a call's audio stopped (spec/07 § Call logs). */
 export const CallStopReason = z.enum([

@@ -13,6 +13,7 @@ import {
 import {
   CALL_LOG_MAX_ENTRIES,
   HEARTBEAT_LOST_AFTER_MS,
+  heartbeatEcho,
   type AudioCallLogEvent,
   type AudioHeartbeatEvent,
 } from '../src/audio.js';
@@ -231,15 +232,22 @@ describe('a dropped call comes back', () => {
 });
 
 describe('heartbeats', () => {
-  test('each is echoed with its number, and a line that hears them stays up', () => {
+  test("a line that hears them stays up; the echo is the session transport's, not the line's", () => {
     live();
     for (let n = 0; n < 10; n++) {
       line.heartbeat(1, hb(n));
       clock.advance(1_000);
     }
-    expect(surface.echoes().map((e) => e.n)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    expect(surface.echoes()[0]).toEqual({ type: 'audio.heartbeat', sessionId: 's1', n: 0 });
+    expect(surface.echoes()).toEqual([]);
     expect(line.phase).toBe('live');
+  });
+
+  test('the echo a session sends: the same number, no round trip', () => {
+    expect(heartbeatEcho(hb(7, 's1', 40))).toEqual({
+      type: 'audio.heartbeat',
+      sessionId: 's1',
+      n: 7,
+    });
   });
 
   test('three seconds with none after one has been heard is a lost line', () => {
@@ -260,12 +268,11 @@ describe('heartbeats', () => {
     expect(surface.hungUp).toEqual([1]);
   });
 
-  test('heartbeats before the acknowledgement are echoed, and the ack timeout judges until then', () => {
+  test('before the acknowledgement the ack timeout judges the attempt, not the heartbeat', () => {
     line.start();
     line.heartbeat(1, hb(0));
     clock.advance(HEARTBEAT_LOST_AFTER_MS * 2);
     expect(line.phase).toBe('connecting');
-    expect(surface.echoes()).toHaveLength(1);
   });
 });
 

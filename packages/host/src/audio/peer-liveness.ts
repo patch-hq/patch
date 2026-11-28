@@ -8,9 +8,10 @@
 // Only frames count. A WebSocket ping is answered by whatever holds the other
 // end of this socket, and that is usually the server's relay (or this host's
 // own tunnel bridge), not the device, so a pong says nothing about the device.
-// A live peer always has something to send: a call's surface echoes the call
-// heartbeat every second (call-heartbeat.ts), and every other session streams
-// its microphone for as long as it is open.
+// A live app surface always has something to send: it answers the heartbeat the
+// host sends on every app session (call-heartbeat.ts), microphone or not. A
+// voice device's firmware does not, so its sessions are not watched here
+// (`stop`): the device is judged by its own link.
 
 import type WebSocket from 'ws';
 import { HEARTBEAT_INTERVAL_MS, HEARTBEAT_LOST_AFTER_MS } from '@patch/wire/audio';
@@ -21,8 +22,8 @@ export interface LivenessOptions {
   now?: () => number;
 }
 
-/** Start watching `ws`; stops itself when the socket closes. */
-export function watchPeerLiveness(ws: WebSocket, opts: LivenessOptions = {}): void {
+/** Start watching `ws`; stops itself when the socket closes, or on `stop`. */
+export function watchPeerLiveness(ws: WebSocket, opts: LivenessOptions = {}): { stop(): void } {
   const now = opts.now ?? Date.now;
   let lastHeard = now();
   ws.on('message', () => {
@@ -37,4 +38,5 @@ export function watchPeerLiveness(ws: WebSocket, opts: LivenessOptions = {}): vo
   }, HEARTBEAT_INTERVAL_MS);
   timer.unref();
   ws.once('close', () => clearInterval(timer));
+  return { stop: () => clearInterval(timer) };
 }
