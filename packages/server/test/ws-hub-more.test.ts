@@ -154,7 +154,13 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
         // are relayed to the chat's host untouched.
         { type: 'chat.handoff_recover_request', chatId: 'chat-handoff', action: 'retry' },
         { type: 'patch.peek.request', sourceChatId: 'chat-src', targetChatId: 'chat-tgt' },
-        { type: 'patch.send_to', sourceChatId: 'chat-src', targetChatId: 'chat-tgt', message: 'm' },
+        {
+          type: 'patch.send_to',
+          sourceChatId: 'chat-src',
+          targetChatId: 'chat-tgt',
+          message: 'm',
+          localId: 'L1',
+        },
         {
           type: 'patch.spawn',
           hostId: 'd1',
