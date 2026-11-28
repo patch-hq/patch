@@ -223,7 +223,7 @@ describe('Gemini Live on a Manager call', () => {
     expect(ws.toolResponses()[0]!['response'].result).toBe('received');
     release('Ferns are in the plan.');
     await vi.waitFor(() => expect(ws.clientTurns().length).toBe(1));
-    expect(ws.clientTurns()[0]).toContain('The chat "Garden planning" has answered');
+    expect(ws.clientTurns()[0]).toContain('Chat: Garden planning');
     expect(ws.clientTurns()[0]).toContain('Ferns are in the plan.');
   });
 
