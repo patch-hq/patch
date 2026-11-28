@@ -18,7 +18,7 @@ import React from 'react';
 import { SetupLine } from './SetupLine';
 import { Alert, View } from 'react-native';
 import { api, type AccountPreferences } from '../../api/rest';
-import { space, useTheme } from '../../lib/theme';
+import { space } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
 import {
