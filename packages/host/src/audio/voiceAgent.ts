@@ -89,9 +89,10 @@ export const SEND_TO_CHAT_DESCRIPTION =
   'or several, the result says so: ask the user which.';
 
 export const END_CALL_DESCRIPTION =
-  'Hang up. Use it when the conversation is over: the user says goodbye or asks you to hang ' +
-  'up, or, on a call an agent made to the user, once they have answered and anything they ' +
-  'asked for has been passed on. Say a short goodbye first; the call ends once it has been heard.';
+  'Hang up. Use it only when the user says goodbye or asks you to hang up, or, on a call an ' +
+  'agent made to the user, once they have answered and anything they asked for has been passed ' +
+  'on. Never hang up because the user is quiet: silence is not the end of a call, and the user ' +
+  'may be busy or listening. Say a short goodbye first; the call ends once it has been heard.';
 
 /** A chat's reply as it is pushed into a call that sent it a message. */
 export function chatReplyMessage(name: string, message: string, reply: string): string {
