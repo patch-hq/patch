@@ -84,12 +84,24 @@ function setup() {
     todos: [],
     lastMessages: [{ role: 'assistant', content: `last words in ${chatId}` }],
   }));
+  // send_to_chat: delivery and the reply are the server-routed pair the host wires.
+  const replies = new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>();
+  const deliver = vi.fn(
+    async (_req: { callerChatId: string; chatId: string; message: string; localId: string }) =>
+      undefined,
+  );
+  const awaitReply = vi.fn(
+    ({ chatId }: { callerChatId: string; chatId: string; localId: string }) =>
+      new Promise<string>((resolve, reject) => replies.set(chatId, { resolve, reject })),
+  );
   const glue = createChatVoice({
     daemon,
     sessionsOnChat: (chatId) => open.filter((s) => s.getCurrentChatId() === chatId),
     sessionById: (sessionId) => byId.get(sessionId),
     catchUp,
     lookup: createChatLookup({ listChats: async () => listing, peekChat }),
+    deliver,
+    awaitReply,
     isLocal: (chatId) => daemon.chatState.has(chatId),
     retargetCall: (sessionId, chatId) => retargeted.push([sessionId, chatId]),
     ledger,
@@ -115,6 +127,9 @@ function setup() {
     retargeted,
     listing,
     peekChat,
+    deliver,
+    awaitReply,
+    replies,
   };
 }
 
@@ -362,6 +377,100 @@ describe('chat voice glue', () => {
       ok: false,
     });
     expect(retargeted).toHaveLength(1);
+  });
+
+  it('send to chat: an ordinary call sends to a chat on another host and its reply comes back once', async () => {
+    const { daemon, folder, glue, listing, deliver, awaitReply, replies } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    listing.push(
+      { chatId: chatA, name: 'Shopping', folder, status: 'active' },
+      { chatId: 'c-away', name: 'Laptop work', folder: '/x', status: 'active' },
+    );
+    const sent = await glue.link.sendToChat({
+      chatId: chatA,
+      chat: 'laptop',
+      message: 'run tests',
+    });
+    if (!sent.ok) throw new Error(sent.message);
+    expect(sent.name).toBe('Laptop work');
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const req = deliver.mock.calls[0]![0];
+    expect(req).toMatchObject({ callerChatId: chatA, chatId: 'c-away', message: 'run tests' });
+    // The reply is read by the delivered message's own id.
+    expect(awaitReply.mock.calls[0]![0]).toEqual({
+      callerChatId: chatA,
+      chatId: 'c-away',
+      localId: req.localId,
+    });
+    // One message per chat is awaited at a time.
+    expect(
+      await glue.link.sendToChat({ chatId: chatA, chat: 'laptop', message: 'again' }),
+    ).toMatchObject({ ok: false });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    replies.get('c-away')!.resolve('All pass.');
+    await expect(sent.reply).resolves.toBe('All pass.');
+    expect(awaitReply).toHaveBeenCalledTimes(1);
+    // Answered: the next send goes.
+    expect(
+      await glue.link.sendToChat({ chatId: chatA, chat: 'laptop', message: 'again' }),
+    ).toMatchObject({ ok: true });
+    expect(deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it('send to chat: an archived chat is sent to, and the call chat records the send and the reply', async () => {
+    const { daemon, events, folder, glue, listing, deliver, replies } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    listing.push({ chatId: 'c-old', name: 'Old thing', folder: '/x', status: 'archived' });
+    const sent = await glue.link.sendToChat({
+      chatId: chatA,
+      chat: 'old thing',
+      message: 'resume',
+    });
+    expect(sent).toMatchObject({ ok: true, name: 'Old thing' });
+    expect(deliver.mock.calls[0]![0]).toMatchObject({ chatId: 'c-old' });
+    replies.get('c-old')!.resolve('Back on it.');
+    if (sent.ok) await sent.reply;
+    const notes = messages(events)
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content);
+    expect(notes).toEqual([
+      '[call] -> "Old thing" (was archived; this brings it back): resume',
+      '[call] <- "Old thing": Back on it.',
+    ]);
+  });
+
+  it('send to chat: no chat, several chats, this chat and an empty message send nothing', async () => {
+    const { daemon, folder, glue, listing, deliver } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    listing.push(
+      { chatId: chatA, name: 'Shopping', folder, status: 'active' },
+      { chatId: 'b1', name: 'Bus one', folder: '/x', status: 'active' },
+      { chatId: 'b2', name: 'Bus two', folder: '/x', status: 'active' },
+    );
+    for (const [chat, message] of [
+      ['nothing like it', 'x'],
+      ['bus', 'x'],
+      ['shopping', 'x'],
+      ['bus one', '  '],
+    ] as const) {
+      expect(await glue.link.sendToChat({ chatId: chatA, chat, message })).toMatchObject({
+        ok: false,
+      });
+    }
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it('send to chat: a message that was not delivered fails loudly and leaves the chat free', async () => {
+    const { daemon, folder, glue, listing, deliver } = setup();
+    const chatA = await daemon.spawnChat({ folder });
+    listing.push({ chatId: 'c-away', name: 'Laptop work', folder: '/x', status: 'active' });
+    deliver.mockRejectedValueOnce(new Error('host offline'));
+    await expect(
+      glue.link.sendToChat({ chatId: chatA, chat: 'laptop', message: 'x' }),
+    ).rejects.toThrow('host offline');
+    expect(
+      await glue.link.sendToChat({ chatId: chatA, chat: 'laptop', message: 'x' }),
+    ).toMatchObject({ ok: true });
   });
 
   it('start context: the last messages in full, and a catch-up written from the rest', async () => {

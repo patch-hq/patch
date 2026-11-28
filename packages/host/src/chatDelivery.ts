@@ -1,5 +1,5 @@
 // Delivering a message from one chat to another (spec/03 § Cross-chat tools):
-// the one implementation behind `patch_send_to` and the Manager call's
+// the one implementation behind `patch_send_to` and every voice call's
 // `send_to_chat`. A chat on this host takes it in-process; any other is reached
 // through the server, which relays to the host that owns it. Either way the
 // message lands under the caller's `localId`, so its reply can be read from

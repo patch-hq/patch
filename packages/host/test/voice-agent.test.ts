@@ -12,6 +12,7 @@ import {
   voiceAgentInstructions,
   voiceAgentTools,
   PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
   type StartFacts,
 } from '../src/audio/voiceAgent.js';
 import {
@@ -54,6 +55,7 @@ describe('voice instructions', () => {
       'look_back',
       'find_chats',
       'chat_status',
+      'send_to_chat',
       'end_call',
       'switch_chat',
     ]);
@@ -234,6 +236,88 @@ describe('VoiceAgentCall', () => {
     expect(call.openHandoffs()).toBe(1);
     setIdle(true);
     call.flush();
+    expect(call.openHandoffs()).toBe(0);
+  });
+
+  test('send_to_chat answers received at once; the chat’s reply is pushed once, labelled with its name', async () => {
+    let reply!: (text: string) => void;
+    const { link } = fakeVoiceAgentLink({
+      sendToChat: async () => ({
+        ok: true,
+        name: 'Laptop build',
+        reply: new Promise<string>((r) => (reply = r)),
+      }),
+    });
+    const { call, engine, spoken, events } = makeCall(link);
+    call.attach(engine);
+    expect(
+      await call.runTool(SEND_TO_CHAT_TOOL_NAME, { chat: 'laptop', message: 'run tests' }),
+    ).toBe('received');
+    expect(events).toContainEqual({ type: 'audio.passed_to_agent', sessionId: 's1' });
+    expect(call.openHandoffs()).toBe(1);
+    expect(spoken).toEqual([]);
+    reply('All 212 tests pass.');
+    await vi.waitFor(() => expect(spoken).toHaveLength(1));
+    expect(spoken[0]).toContain('The chat "Laptop build" has answered');
+    expect(spoken[0]).toContain('run tests');
+    expect(spoken[0]).toContain('All 212 tests pass.');
+    expect(call.openHandoffs()).toBe(0);
+    call.flush();
+    expect(spoken).toHaveLength(1);
+  });
+
+  test('a reply with no answer in it is a receipt: nothing is pushed and the send closes', async () => {
+    const { link } = fakeVoiceAgentLink({
+      sendToChat: async () => ({ ok: true, name: 'Laptop build', reply: Promise.resolve('  ') }),
+    });
+    const { call, engine, spoken } = makeCall(link);
+    call.attach(engine);
+    await call.runTool(SEND_TO_CHAT_TOOL_NAME, { chat: 'laptop', message: 'x' });
+    await vi.waitFor(() => expect(call.openHandoffs()).toBe(0));
+    expect(spoken).toEqual([]);
+  });
+
+  test('a chat that fails to answer is pushed as a failure, never as an answer', async () => {
+    const { link } = fakeVoiceAgentLink({
+      sendToChat: async () => ({
+        ok: true,
+        name: 'Laptop build',
+        reply: Promise.reject(new Error('rate limited')),
+      }),
+    });
+    const { call, engine, spoken } = makeCall(link);
+    call.attach(engine);
+    await call.runTool(SEND_TO_CHAT_TOOL_NAME, { chat: 'laptop', message: 'x' });
+    await vi.waitFor(() => expect(spoken).toHaveLength(1));
+    expect(spoken[0]).toContain('did not answer');
+    expect(spoken[0]).toContain('rate limited');
+  });
+
+  test('a name that is not one chat comes back to the voice and opens nothing', async () => {
+    const { link } = fakeVoiceAgentLink({
+      sendToChat: async () => ({ ok: false, message: 'Several chats match "bus".' }),
+    });
+    const { call, events } = makeCall(link);
+    expect(await call.runTool(SEND_TO_CHAT_TOOL_NAME, { chat: 'bus', message: 'x' })).toBe(
+      'Several chats match "bus".',
+    );
+    expect(call.openHandoffs()).toBe(0);
+    expect(events).toEqual([]);
+  });
+
+  test('a message that was not delivered is an error on the call', async () => {
+    const { link } = fakeVoiceAgentLink({
+      sendToChat: async () => {
+        throw new Error('host offline');
+      },
+    });
+    const { call, events } = makeCall(link);
+    expect(await call.runTool(SEND_TO_CHAT_TOOL_NAME, { chat: 'laptop', message: 'x' })).toMatch(
+      /host offline/,
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'audio.error', code: 'voice_tool_failed' }),
+    );
     expect(call.openHandoffs()).toBe(0);
   });
 

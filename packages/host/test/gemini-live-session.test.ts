@@ -907,6 +907,7 @@ describe('GeminiLiveSession — one conversation with the chat', () => {
       'look_back',
       'find_chats',
       'chat_status',
+      'send_to_chat',
       'end_call',
       'switch_chat',
     ]);
@@ -1107,6 +1108,7 @@ describe('GeminiLiveSession — hand-off mode', () => {
         'look_back',
         'find_chats',
         'chat_status',
+        'send_to_chat',
         'end_call',
         'switch_chat',
       ]);
@@ -1118,6 +1120,7 @@ describe('GeminiLiveSession — hand-off mode', () => {
       'look_back',
       'find_chats',
       'chat_status',
+      'send_to_chat',
       'end_call',
       'switch_chat',
     ]);

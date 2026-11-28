@@ -15,6 +15,9 @@
 //   - look_back: the chat's older messages that match a few words; no model.
 //   - find_chats / chat_status: find any chat of the account (any host, archived
 //     included, labelled) and read where one stands; no model (chatLookup.ts).
+//   - send_to_chat: sends a message to another chat (any host, archived included)
+//     and answers "received" at once; that chat's reply is pushed into the call
+//     when its turn ends, labelled with the chat's name (chatVoice.ts).
 //   - switch_chat: moves the call to another chat on this host.
 //
 // The provider modules turn these into their own tool shapes and answer them
@@ -30,6 +33,7 @@ export const SWITCH_CHAT_TOOL_NAME = 'switch_chat';
 export const END_CALL_TOOL_NAME = 'end_call';
 export const FIND_CHATS_TOOL_NAME = 'find_chats';
 export const CHAT_STATUS_TOOL_NAME = 'chat_status';
+export const SEND_TO_CHAT_TOOL_NAME = 'send_to_chat';
 
 /** What pass_to_agent answers, at once. */
 export const HANDOFF_RECEIVED = 'received';
@@ -74,10 +78,29 @@ export const CHAT_STATUS_DESCRIPTION =
   'Where one chat stands now: its status line, goal, open to-dos and the last few messages. ' +
   "Pass the chat's name or id. Answers at once.";
 
+export const SEND_TO_CHAT_DESCRIPTION =
+  'Send a message to another chat, by its name or id, to tell or ask it something. Its agent ' +
+  'receives it as if the user had typed it and works on it. It answers "received" at once: say ' +
+  'in a few words of your own that it has gone, then carry on. When that chat has replied, the ' +
+  `reply arrives as a message naming the chat: tell the user the gist in a sentence or two, ` +
+  'not the whole text. If the reply is only a receipt (the chat saying it has passed the request ' +
+  'on, with no answer in it), say nothing. Until a reply arrives the question is not answered, ' +
+  'so never say it is. A message to an archived chat brings it back. If the name fits no chat ' +
+  'or several, the result says so: ask the user which.';
+
 export const END_CALL_DESCRIPTION =
   'Hang up. Use it when the conversation is over: the user says goodbye or asks you to hang ' +
   'up, or, on a call an agent made to the user, once they have answered and anything they ' +
   'asked for has been passed on. Say a short goodbye first; the call ends once it has been heard.';
+
+/** A chat's reply as it is pushed into a call that sent it a message. */
+export function chatReplyMessage(name: string, message: string, reply: string): string {
+  return (
+    `The chat "${name}" has answered the message you sent it ("${message}"). Its reply, to tell ` +
+    `the user now, in your own words (if it is only a receipt that the request was passed on or ` +
+    `sent elsewhere, with no answer, say nothing): ${reply}`
+  );
+}
 
 /** One tool as every provider declares it: string parameters, described. */
 export interface VoiceToolSpec {
@@ -138,6 +161,15 @@ export function voiceAgentTools(opts: {
     },
   );
   tools.push({
+    name: SEND_TO_CHAT_TOOL_NAME,
+    description: SEND_TO_CHAT_DESCRIPTION,
+    params: {
+      chat: "The chat's name (as the user said it, or from find_chats) or its id.",
+      message: 'What to tell the chat, written as the user would put it to that chat.',
+    },
+    required: ['chat', 'message'],
+  });
+  tools.push({
     name: END_CALL_TOOL_NAME,
     description: END_CALL_DESCRIPTION,
     params: {},
@@ -188,6 +220,10 @@ export type SwitchOutcome =
   | { ok: true; chatId: string; name: string; context: StartContext }
   | { ok: false; message: string };
 
+export type SendToChatOutcome =
+  | { ok: true; name: string; reply: Promise<string> }
+  | { ok: false; message: string };
+
 /** What a provider session asks of the host to run the voice agent's tools. */
 export interface VoiceAgentLink {
   /**
@@ -209,6 +245,12 @@ export interface VoiceAgentLink {
   lookBack(chatId: string, query: string): string;
   /** Find chats of the account by a few words of name or folder (chatLookup.ts). */
   findChats(chatId: string, query: string): Promise<string>;
+  /**
+   * Send `message` to another chat for the call on `chatId`, as `patch_send_to`
+   * does. Resolves once that chat has it; `reply` settles with its reply when
+   * its turn ends. Rejects when the message was not delivered.
+   */
+  sendToChat(req: { chatId: string; chat: string; message: string }): Promise<SendToChatOutcome>;
   /** Where another chat stands, read for the call on `chatId`. */
   chatStatus(chatId: string, chat: string): Promise<string>;
   /**

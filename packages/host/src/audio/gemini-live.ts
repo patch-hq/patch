@@ -69,6 +69,7 @@ import { MicLevelWatch, micSilentMessage } from './micLevel.js';
 import { addTokens, ZERO_TOKENS, type EngineCosting, type EngineTokens } from './voiceCost.js';
 import {
   PASS_TO_AGENT_TOOL_NAME,
+  SEND_TO_CHAT_TOOL_NAME,
   voiceAgentInstructions,
   voiceAgentTools,
   type VoiceAgentLink,
@@ -79,12 +80,7 @@ import {
   MANAGER_QUICK_TOOLS,
   MANAGER_QUICK_TOOL_NAMES,
   stringArgs,
-  MANAGER_TOOL_PARAMS,
   managerHostedInstruction,
-  managerReplyMessage,
-  SEND_TO_CHAT_DESCRIPTION,
-  SEND_TO_CHAT_TOOL_NAME,
-  type ManagerSendAccepted,
   type ManagerVoiceTools,
 } from './managerVoice.js';
 
@@ -278,10 +274,6 @@ function stringTool(
 /** The Manager call's tools (spec/07 § A call to the Manager). */
 function managerDeclarations(): GeminiFunctionDeclaration[] {
   return [
-    stringTool(SEND_TO_CHAT_TOOL_NAME, SEND_TO_CHAT_DESCRIPTION, {
-      chat: MANAGER_TOOL_PARAMS.chat,
-      message: MANAGER_TOOL_PARAMS.message,
-    }),
     ...MANAGER_QUICK_TOOLS.map((t) => stringTool(t.name, t.description, t.params, t.required)),
   ];
 }
@@ -607,7 +599,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
     const manager = this.deps.manager;
     const instructions = voiceAgentInstructions({
       instructions: manager
-        ? managerHostedInstruction(true, manager.voicePrompt?.())
+        ? managerHostedInstruction(manager.voicePrompt?.())
         : this.deps.instructions,
       extra: this.deps.spokenAloud ? [this.deps.spokenAloud] : [],
       ...(this.deps.tone !== undefined ? { tone: this.deps.tone } : {}),
@@ -1178,7 +1170,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
     name: string;
     args?: Record<string, unknown>;
   }): Promise<void> {
-    const handoff = call.name === PASS_TO_AGENT_TOOL_NAME;
+    const handoff = call.name === PASS_TO_AGENT_TOOL_NAME || call.name === SEND_TO_CHAT_TOOL_NAME;
     if (handoff) {
       // The chat reads in order: what the user said, what the voice said, then the hand-off.
       this.commitUserWords();
@@ -1196,20 +1188,12 @@ export class GeminiLiveSession implements VoiceSessionLike {
   }
 
   /**
-   * A Manager call's tools (spec/07 § A call to the Manager). `send_to_chat` runs as a
-   * hand-off — answered once the chat has the message, its reply pushed later
-   * as a message, exactly as an agent's answer is.
+   * A Manager call's own quick tools (spec/07 § A call to the Manager).
    */
   private handleManagerTool(
     manager: ManagerVoiceTools,
     call: { id: string; name: string; args?: Record<string, unknown> },
   ): void {
-    const arg = (k: string): string =>
-      typeof call.args?.[k] === 'string' ? (call.args[k] as string) : '';
-    if (call.name === SEND_TO_CHAT_TOOL_NAME) {
-      void this.handleSendToChat(manager, call.id, arg('chat'), arg('message'));
-      return;
-    }
     const answer = (result: string): void =>
       this.answerTool(call.id, call.name, result, 'INTERRUPT');
     const fail = (err: Error): void => {
@@ -1233,94 +1217,6 @@ export class GeminiLiveSession implements VoiceSessionLike {
   /** Where a quick tool is being called from: the device this conversation is on, if it is one. */
   private quickContext(): { deviceId?: string } {
     return this.init.deviceId !== undefined ? { deviceId: this.init.deviceId } : {};
-  }
-
-  /**
-   * A Manager call's `send_to_chat`: answered once the chat has the message;
-   * the chat's reply is pushed into the call when it comes.
-   */
-  private async handleSendToChat(
-    manager: ManagerVoiceTools,
-    callId: string,
-    chat: string,
-    message: string,
-  ): Promise<void> {
-    this.log('sending to a chat', { callId, chat, message });
-    // The chat reads in order: what the user said, what the voice said, then the send.
-    this.commitUserWords();
-    this.finishReply();
-    this.dispatchCount += 1;
-    this.dispatchCovers = true;
-    this.dispatchTurnOpen = true;
-    this.unpromptedBudget += 1;
-    this.call.handoffOpened();
-    let name = chat;
-    // Answered only once the chat has the message: the voice must not say it has gone before then.
-    let accepted = false;
-    const answerStarted = (info?: ManagerSendAccepted): void => {
-      if (accepted) return;
-      accepted = true;
-      this.answerTool(
-        callId,
-        SEND_TO_CHAT_TOOL_NAME,
-        'started',
-        'WHEN_IDLE',
-        `"${info?.name ?? name}" has the message and is working on it. If you mention it, ` +
-          'say so in a few words of your own, then carry on. Its reply will arrive as a ' +
-          'message; do not wait for it or keep mentioning it.',
-      );
-    };
-    let reply: string;
-    try {
-      const res = await manager.sendToChat({
-        chat,
-        message,
-        onAccepted: (info) => {
-          name = info.name;
-          answerStarted(info);
-        },
-      });
-      reply = res.reply;
-    } catch (err) {
-      const reason = (err as Error).message;
-      const lookup = err instanceof ChatLookupError;
-      if (!lookup) {
-        this.deps.logger.error(
-          { sessionId: this.init.sessionId, err: reason },
-          'gemini-live: send to chat failed',
-        );
-      }
-      if (accepted) {
-        this.call.push(managerReplyMessage(name, message, `That failed: ${reason}`), {
-          handoffSettled: true,
-        });
-        return;
-      }
-      // Never taken: say so to the user and the voice, loudly.
-      this.call.handoffClosed();
-      if (!lookup) {
-        this.deps.sendAudio({
-          type: 'audio.error',
-          code: 'gemini_unavailable',
-          message: `The message was not sent to the chat: ${reason}`,
-          sessionId: this.init.sessionId,
-        });
-      }
-      if (this.closed || !this.ws) return;
-      this.answerTool(
-        callId,
-        SEND_TO_CHAT_TOOL_NAME,
-        'failed',
-        'WHEN_IDLE',
-        lookup
-          ? `Nothing was sent. ${reason}`
-          : `The message did NOT reach the chat (${reason}). Tell the user in a few words that ` +
-              'it was not sent. Do not say it was.',
-      );
-      return;
-    }
-    answerStarted();
-    this.call.push(managerReplyMessage(name, message, reply), { handoffSettled: true });
   }
 
   /** Nobody is talking and no result is being spoken: a result can be said without cutting anyone off. */

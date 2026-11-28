@@ -4668,6 +4668,21 @@ async function startHost(
       (await peekFromServer({ sourceChatId: callerChatId, targetChatId: chatId, limit: 1 }))
         .chat_state,
   });
+  // spec/07 § The voice agent and the chat's agent — every call sends to other
+  // chats itself, as `patch_send_to` does, and reads their replies from the
+  // server's record, so a chat on any host answers into the call.
+  // The Daemon is built later in boot; this only runs once a call is up.
+  const deliverToChat = createChatDelivery({
+    daemon: {
+      submitInput: (req) => daemon.submitInput(req),
+      get chatState() {
+        return daemon.chatState;
+      },
+    },
+    runsManager: () => runsManager,
+    sendToRemoteChat,
+    emitWire: (event) => emit(event),
+  });
   const chatVoice = createChatVoice({
     daemon: {
       recordVoiceMessage: (r) => daemon.recordVoiceMessage(r),
@@ -4688,6 +4703,10 @@ async function startHost(
     sessionById: (sessionId) => audioServer?.sessionById(sessionId),
     catchUp: (chatId, earlier) => voiceCatchUp(chatId, earlier),
     lookup: chatLookup,
+    deliver: ({ callerChatId, chatId, message, localId }) =>
+      deliverToChat({ callerChatId, chatId, message, localId, revealTarget: true }),
+    awaitReply: ({ callerChatId, chatId, localId }) =>
+      replyFromServer({ sourceChatId: callerChatId, targetChatId: chatId, localId }),
     isLocal: (chatId) => daemon.chatState.has(chatId),
     endCall: (sessionId) => {
       if (!audioServer) throw new Error('the audio server is not running');
@@ -4721,21 +4740,6 @@ async function startHost(
       };
     },
   });
-  // spec/07 § A call to the Manager — a hosted voice on the Manager chat sends
-  // to other chats itself, as `patch_send_to` does, and reads their replies
-  // from the server's record, so a chat on any host answers into the call.
-  // The Daemon is built later in boot; this only runs once a call is up.
-  const deliverToChat = createChatDelivery({
-    daemon: {
-      submitInput: (req) => daemon.submitInput(req),
-      get chatState() {
-        return daemon.chatState;
-      },
-    },
-    runsManager: () => runsManager,
-    sendToRemoteChat,
-    emitWire: (event) => emit(event),
-  });
   /** Run a command-line tool for a Manager-call action; its failure is the action's failure. */
   const runTool = (cmd: string, args: string[], what: string): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -4753,16 +4757,6 @@ async function startHost(
     logger: logger.child({ component: 'manager-voice' }),
     voicePrompt: () => managerVoicePrompt,
     lookup: chatLookup,
-    deliver: ({ chatId, message, localId }) =>
-      deliverToChat({
-        callerChatId: MANAGER_CHAT_ID,
-        chatId,
-        message,
-        localId,
-        revealTarget: true,
-      }),
-    awaitReply: ({ chatId, localId }) =>
-      replyFromServer({ sourceChatId: MANAGER_CHAT_ID, targetChatId: chatId, localId }),
     timers: requestTimers,
     addTask: async ({ content, due, project }) =>
       (
