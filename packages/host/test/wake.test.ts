@@ -536,9 +536,20 @@ describe('parseDelayMs', () => {
     expect(parseDelayMs(45)).toBe(45_000);
     expect(parseDelayMs('600')).toBe(600_000);
   });
+  it('parses spelled-out units (issue #1214)', () => {
+    expect(parseDelayMs('2 hours')).toBe(7_200_000);
+    expect(parseDelayMs('1 hour')).toBe(3_600_000);
+    expect(parseDelayMs('30 minutes')).toBe(1_800_000);
+    expect(parseDelayMs('90 secs')).toBe(90_000);
+    expect(parseDelayMs('1 hour 30 minutes')).toBe(5_400_000);
+    expect(parseDelayMs('1 hour and 30 minutes')).toBe(5_400_000);
+    expect(parseDelayMs('2h 15m')).toBe(8_100_000);
+  });
   it('throws on garbage (no silent fallback)', () => {
     expect(() => parseDelayMs('soon')).toThrow();
     expect(() => parseDelayMs('')).toThrow();
+    expect(() => parseDelayMs('2 fortnights')).toThrow();
+    expect(() => parseDelayMs('hours')).toThrow();
     expect(() => parseDelayMs(-5)).toThrow();
   });
 });
