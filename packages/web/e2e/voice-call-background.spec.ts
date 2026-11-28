@@ -131,7 +131,8 @@ test('a call in a background tab answers its heartbeats, and redials a dead line
   await expect.poll(() => sessions.length, { timeout: 8_000 }).toBe(2);
   const second = sessions[1]!;
   await expect.poll(() => second.sent[0]?.type).toBe('audio.session_start');
-  expect(second.sent[0]).toMatchObject({ resumed: true });
+  // The redial names the session it was last live on, so the host resumes it.
+  expect(second.sent[0]).toMatchObject({ resumes: 'sess_1' });
   expect(await page.evaluate(() => document.visibilityState)).toBe('hidden');
   // …and the redial is live: its heartbeats are answered too, still hidden.
   await expect.poll(() => echoes(second), { timeout: 5_000 }).toBeGreaterThan(3);
