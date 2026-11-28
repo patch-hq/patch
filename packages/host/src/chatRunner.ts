@@ -6957,7 +6957,12 @@ export class Daemon {
     // A chat already waiting on a person when it was snoozed (a goal parked on
     // something in the world) would otherwise wake the moment it is snoozed.
     // Only a stop that begins after the snooze counts.
-    const waiting = activity === 'awaiting-permission' || this.isAskingQuestion(state);
+    // A chat with a goal is waiting on that goal, and only the goal ending
+    // brings it back: a declared question (the goal judge's own "waiting on
+    // you" included) must not end the snooze.
+    const waiting =
+      activity === 'awaiting-permission' ||
+      ((state.goal ?? null) === null && this.isAskingQuestion(state));
     if (!waiting) this.snoozeWaitingAtStart.delete(chatId);
     const needsPerson =
       (waiting && !this.snoozeWaitingAtStart.has(chatId)) ||
@@ -10948,8 +10953,21 @@ export class Daemon {
     this.clearInterrupted(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
-    if (state.goalProgress?.pausedByStop || state.goalProgress?.waitingOnUser)
+    if (state.goalProgress?.pausedByStop || state.goalProgress?.waitingOnUser) {
+      // The goal's "waiting on you" question is answered once the goal runs
+      // again, so the declared question it raised must not outlive the hold.
+      if (state.goalProgress.waitingOnUser && state.declaredStatus?.kind === 'question') {
+        state.declaredStatus = null;
+        state.statusKind = null;
+        state.statusSummary = null;
+        this.opts.metaStore.update(chatId, (m) => ({
+          ...m,
+          declaredStatus: null,
+          updatedAt: m.updatedAt,
+        }));
+      }
       state.goalProgress = { ...state.goalProgress, pausedByStop: false, waitingOnUser: false };
+    }
     this.cancelGoalHoldTimer(chatId);
     this.emitState(chatId);
 
