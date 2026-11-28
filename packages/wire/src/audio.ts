@@ -12,7 +12,7 @@
 // surface voice modules import this file.
 
 import { z } from 'zod';
-import { VoiceAgentProvider, type VoiceAgentSetting } from './voiceEngines.js';
+import type { VoiceAgentSetting } from './voiceEngines.js';
 
 // --- session lifecycle -----------------------------------------------------
 
@@ -236,17 +236,37 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
 export * from './voiceEngines.js';
 
 /**
+ * The providers a host reads lists from for Settings → Voice calls: the voice
+ * agent providers, and Groq, whose speech to text a direct call can use.
+ */
+export const CatalogProvider = z.enum(['gemini', 'openai', 'elevenlabs', 'groq']);
+export type CatalogProvider = z.infer<typeof CatalogProvider>;
+export const CATALOG_PROVIDER_LABEL: Record<CatalogProvider, string> = {
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  elevenlabs: 'ElevenLabs',
+  groq: 'Groq',
+};
+
+/**
  * What a host read from a provider's API for Settings → Voice calls: its
- * realtime models, its voices and (ElevenLabs) its speech models. `error` says
- * why a read failed; the lists are then absent. A provider whose API has no
- * voice list (Gemini, OpenAI) is given the voices its documentation names.
+ * realtime models and voices (the voice agent), its text to speech models and
+ * voices and its speech to text models (direct calls). `error` says why a read
+ * failed; the lists are then absent. A list the provider's API does not offer
+ * (Gemini's and OpenAI's voices, ElevenLabs' Scribe models) is the one its
+ * documentation names.
  */
 const CatalogItem = z.object({ id: z.string().min(1), label: z.string() });
 export type CatalogItem = z.infer<typeof CatalogItem>;
 export const VoiceCatalogEntry = z.object({
   models: z.array(CatalogItem).optional(),
   voices: z.array(CatalogItem).optional(),
+  /** Text to speech models (ElevenLabs, OpenAI). */
   speechModels: z.array(CatalogItem).optional(),
+  /** Text to speech voices where they are not `voices` (OpenAI's speech voices). */
+  speechVoices: z.array(CatalogItem).optional(),
+  /** Speech to text models (Groq, ElevenLabs). */
+  transcriptionModels: z.array(CatalogItem).optional(),
   error: z.string().optional(),
   /** Epoch ms of the read. */
   at: z.number().int().nonnegative(),
@@ -256,6 +276,7 @@ export const VoiceCatalog = z.object({
   gemini: VoiceCatalogEntry.optional(),
   openai: VoiceCatalogEntry.optional(),
   elevenlabs: VoiceCatalogEntry.optional(),
+  groq: VoiceCatalogEntry.optional(),
 });
 export type VoiceCatalog = z.infer<typeof VoiceCatalog>;
 
@@ -272,14 +293,16 @@ export type VoiceCatalogView =
  * none, the failure says why; a host with the key that has not read yet is
  * loading; no host with the key says so rather than showing an empty list.
  */
+export interface CatalogHost {
+  hostName: string;
+  online: boolean;
+  voiceKeys?: Partial<Record<CatalogProvider, boolean | undefined>> | undefined;
+  voiceCatalog?: VoiceCatalog | undefined;
+}
+
 export function voiceCatalogView(
-  provider: VoiceAgentProvider,
-  hosts: ReadonlyArray<{
-    hostName: string;
-    online: boolean;
-    voiceKeys?: Partial<Record<VoiceAgentProvider, boolean | undefined>> | undefined;
-    voiceCatalog?: VoiceCatalog | undefined;
-  }>,
+  provider: CatalogProvider,
+  hosts: ReadonlyArray<CatalogHost>,
 ): VoiceCatalogView {
   const reads = hosts
     .flatMap((h) => {
@@ -384,6 +407,7 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
 export interface VoiceKeys {
   gemini: boolean;
   openai: boolean;
+  groq: boolean;
   /** Absent on a host older than ElevenLabs (Agents, Scribe), which cannot run it. */
   elevenlabs?: boolean;
   /** Absent on a host older than Deepgram dictation, which cannot run it. */
@@ -1139,6 +1163,21 @@ export const GEMINI_VOICES: readonly string[] = [
   'Sadachbia',
   'Sadaltager',
   'Sulafat',
+];
+
+/** The voices OpenAI's speech endpoint (`/v1/audio/speech`) speaks in; its API has no voice list. */
+export const OPENAI_TTS_VOICES: readonly string[] = [
+  'alloy',
+  'ash',
+  'ballad',
+  'coral',
+  'echo',
+  'fable',
+  'nova',
+  'onyx',
+  'sage',
+  'shimmer',
+  'verse',
 ];
 
 /** The voices an OpenAI Realtime call can speak in. Unset (`openaiVoice` absent) is `marin`. */

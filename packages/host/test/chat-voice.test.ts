@@ -18,7 +18,7 @@ import type { VoiceSessionLike } from '../src/audio/voice-session-like.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { StartMessage } from '../src/audio/voiceAgent.js';
 import type { ManagerChatEntry } from '../src/audio/managerVoice.js';
-import { ZERO_TOKENS } from '../src/audio/voiceCost.js';
+import { costDirectCall, ZERO_TOKENS } from '../src/audio/voiceCost.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -382,6 +382,30 @@ describe('chat voice glue', () => {
     const t = ledger.totals(Date.UTC(2026, 9, 10));
     expect(t.monthCalls).toBe(1);
     expect(t.monthUsd).toBeCloseTo(0.0172, 6);
+    expect(onCosted).toHaveBeenCalledTimes(1);
+  });
+
+  it('a direct call ended on its device leaves its line in the chat and is recorded', async () => {
+    const { daemon, events, folder, glue, ledger, onCosted } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    events.length = 0;
+    glue.directCallEnded(
+      costDirectCall({
+        sessionId: 'dc-1',
+        chatId,
+        surfaceKind: 'mobile',
+        startedAt: Date.UTC(2026, 9, 4, 12),
+        endedAt: Date.UTC(2026, 9, 4, 12, 1, 5),
+        usage: {
+          stt: { engine: 'groq', model: 'whisper-large-v3-turbo', utteranceSeconds: [3, 4] },
+          tts: { engine: 'android', model: 'android-tts', requests: 0, characters: 0 },
+        },
+      }),
+    );
+    expect(messages(events).map((m) => [m.role, m.content])).toEqual([
+      ['system', '[call] Call 1:05 · Groq Whisper → Android · $0.00022'],
+    ]);
+    expect(ledger.totals(Date.UTC(2026, 9, 10)).monthCalls).toBe(1);
     expect(onCosted).toHaveBeenCalledTimes(1);
   });
 

@@ -77,7 +77,7 @@ describe('Claude on Amazon Bedrock accounts (spec/10 § Backend credentials)', (
       backends: [],
       components: [],
       voiceCatalog: {},
-      voiceKeys: { gemini: false, openai: false },
+      voiceKeys: { gemini: false, openai: false, groq: false },
     };
     const plain = decode(JSON.stringify(report));
     expect((plain as { awsProfiles?: unknown }).awsProfiles).toBeUndefined();

@@ -4,7 +4,8 @@ import {
   changeDirectCall,
   directCallSteps,
   kokoroVoiceLabel,
-  cloudSpeechEngines,
+  cloudSpeechEnginesFromHosts,
+  mergeSpeechEngines,
   directCallSummary,
   DirectCallSetup,
   NO_SPEECH_ENGINE,
@@ -147,17 +148,6 @@ describe('resolveDirectCall', () => {
   });
 });
 
-describe('cloudSpeechEngines', () => {
-  it('offers each cloud engine the account holds a key for', () => {
-    expect(cloudSpeechEngines(new Set(), [])).toEqual({ stt: [], tts: [] });
-    const r = cloudSpeechEngines(new Set(['groq', 'elevenlabs', 'openai', 'gemini']), ['v1']);
-    expect(r.stt.map((e) => e.engine)).toEqual(['groq', 'elevenlabs']);
-    expect(r.tts.map((e) => e.engine)).toEqual(['elevenlabs', 'openai']);
-    expect(r.tts[0]!.voices).toEqual(['v1']);
-    expect(r.stt.every((e) => e.where === 'cloud')).toBe(true);
-  });
-});
-
 describe('speakablePieces', () => {
   it('drops code and markdown marks and joins short sentences', () => {
     expect(
@@ -184,32 +174,98 @@ describe('agentWorkingLabel', () => {
 });
 
 describe('cloudSpeechEnginesFromHosts', () => {
-  it('counts a key any host holds, and gathers ElevenLabs voices once', async () => {
-    const { cloudSpeechEnginesFromHosts, mergeSpeechEngines } =
-      await import('../src/direct-call.js');
+  const item = (id: string) => ({ id, label: id });
+  const catalog = {
+    groq: { transcriptionModels: [item('whisper-large-v3-turbo')], at: 2 },
+    elevenlabs: {
+      voices: [item('v1'), item('v2')],
+      speechModels: [item('eleven_flash_v2_5')],
+      transcriptionModels: [item('scribe_v2')],
+      at: 2,
+    },
+    openai: { speechModels: [item('tts-1')], speechVoices: [item('coral')], at: 2 },
+  };
+
+  it('offers each engine the account holds a key for, with the lists its provider returned', () => {
     const r = cloudSpeechEnginesFromHosts([
       {
+        hostName: 'a',
+        online: true,
         providerKeys: [
           { id: 'groq', source: 'none' },
           { id: 'openai', source: 'env' },
         ],
       },
       {
+        hostName: 'b',
+        online: true,
         providerKeys: [{ id: 'elevenlabs', source: 'ui' }],
-        elevenLabsVoices: [{ id: 'v1' }, { id: 'v2' }],
+        voiceCatalog: catalog,
       },
-      { elevenLabsVoices: [{ id: 'v1' }] },
     ]);
-    expect(r.stt.map((e) => e.engine)).toEqual(['elevenlabs']);
-    expect(r.tts.map((e) => [e.engine, e.voices])).toEqual([
-      ['elevenlabs', ['v1', 'v2']],
-      ['openai', expect.arrayContaining(['coral'])],
+    expect(r.stt).toEqual([{ engine: 'elevenlabs', where: 'cloud', models: ['scribe_v2'] }]);
+    expect(r.tts).toEqual([
+      { engine: 'elevenlabs', where: 'cloud', models: ['eleven_flash_v2_5'], voices: ['v1', 'v2'] },
+      { engine: 'openai', where: 'cloud', models: ['tts-1'], voices: ['coral'] },
     ]);
     const merged = mergeSpeechEngines(
       { stt: [{ engine: 'parakeet', where: 'device', models: ['p'] }], tts: [] },
       r,
     );
     expect(merged.stt.map((e) => e.engine)).toEqual(['parakeet', 'elevenlabs']);
+  });
+
+  it('a list that failed or was never read is empty and says why — never a built-in list', () => {
+    const r = cloudSpeechEnginesFromHosts([
+      {
+        hostName: 'box',
+        online: true,
+        providerKeys: [
+          { id: 'groq', source: 'ui' },
+          { id: 'openai', source: 'ui' },
+        ],
+        voiceKeys: { groq: true, openai: true },
+        voiceCatalog: { groq: { error: 'HTTP 401', at: 1 } },
+      },
+    ]);
+    expect(r.stt).toEqual([
+      {
+        engine: 'groq',
+        where: 'cloud',
+        models: [],
+        listProblem: 'the model list could not be read (box: HTTP 401)',
+      },
+    ]);
+    expect(r.tts[0]).toMatchObject({
+      engine: 'openai',
+      models: [],
+      voices: [],
+      listProblem: 'the model list has not been read yet',
+    });
+  });
+
+  it('a setup on an engine whose list could not be read is refused with why', () => {
+    const report = {
+      stt: [
+        {
+          engine: 'groq' as const,
+          where: 'cloud' as const,
+          models: [],
+          listProblem: 'the model list could not be read (box: HTTP 401)',
+        },
+      ],
+      tts: [{ engine: 'kokoro' as const, where: 'device' as const, models: ['k'], voices: ['af'] }],
+    };
+    const setup = {
+      stt: { engine: 'groq' as const, model: 'whisper-large-v3-turbo' },
+      tts: { engine: 'kokoro' as const, model: 'k', voice: 'af' },
+    };
+    expect(resolveDirectCall(report, setup, {})).toEqual({
+      ok: false,
+      reason: 'Groq Whisper: the model list could not be read (box: HTTP 401).',
+    });
+    // Settings shows the list's own line at the step, so the setup's problem is not repeated.
+    expect(directCallSteps(report, setup, {}).problem).toBeUndefined();
   });
 });
 

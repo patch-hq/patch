@@ -18,6 +18,7 @@ import {
 } from './testUtils/render';
 import { api } from '../src/api/rest';
 import { useSettingsStore } from '../src/stores/settingsStore';
+import { usePresenceStore } from '../src/stores/presenceStore';
 import { resetHosts, seedSettings, settingsFixture } from './testUtils/settingsFixtures';
 
 vi.mock('../src/api/ws', () => ({ getWs: () => ({ send: vi.fn() }) }));
@@ -167,6 +168,29 @@ describe('Direct calls (phone)', () => {
       expect(queryHost(r.root, byTestId(`direct-phone-1-${c}`))).not.toBeNull();
     }
     expect(textOf(findHost(r.root, byTestId('direct-phone-1-speed-value')))).toBe('0.95×');
+  });
+
+  it('a cloud engine’s models are the provider’s list: a failed read says why, with Refresh', async () => {
+    seed({ 'phone-1': { stt: { engine: 'groq', model: 'whisper-large-v3-turbo' } } });
+    usePresenceStore.setState({
+      hosts: {
+        h1: {
+          hostId: 'h1',
+          online: true,
+          host: {
+            hostName: 'box',
+            voiceKeys: { gemini: false, openai: false, groq: true },
+            voiceCatalog: { groq: { error: 'Groq model list failed: HTTP 401', at: 1 } },
+          },
+        },
+      },
+    } as never);
+    const r = renderRN(<DirectCallsSection />);
+    await open(r, 'phone-1');
+    expect(textOf(findHost(r.root, byTestId('direct-phone-1-stt-model-status')))).toBe(
+      "Could not read Groq's models: box: Groq model list failed: HTTP 401",
+    );
+    expect(queryHost(r.root, byTestId('direct-phone-1-stt-model-refresh'))).not.toBeNull();
   });
 
   it('a device that never reported says so', async () => {

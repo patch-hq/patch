@@ -12,8 +12,11 @@ import {
   type ResolvedDirectCall,
 } from '@patch/wire/direct-call';
 import {
+  newDirectCallMeter,
+  reportDirectCallEnd,
   startDirectCall as startRuntime,
   type DirectCall,
+  type DirectCallMeter,
   type DirectCallPost,
   type DirectTurnDetector,
 } from '@patch/wire/direct-call-runtime';
@@ -120,7 +123,13 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
   }
   voice.endNote();
   voice.startCall(chatId, 'call', { setup: directCallSummary(resolved.call) });
-  call = { chatId, resolved: resolved.call, deps };
+  call = {
+    chatId,
+    resolved: resolved.call,
+    deps,
+    startedAt: Date.now(),
+    meter: newDirectCallMeter(),
+  };
   await openLine(call);
 }
 
@@ -129,6 +138,9 @@ interface DirectCallSpec {
   chatId: string;
   resolved: ResolvedDirectCall;
   deps: DirectCallDeps;
+  startedAt: number;
+  /** What its cloud engines were sent, across pauses, for its cost (spec/07 § Call cost). */
+  meter: DirectCallMeter;
 }
 let call: DirectCallSpec | null = null;
 
@@ -140,6 +152,7 @@ async function openLine(spec: DirectCallSpec): Promise<void> {
   const ctx = {
     chatId,
     post: deps.post ?? api.voiceDirect,
+    meter: spec.meter,
     player,
     bridge: getDesktopBridge(),
   };
@@ -230,12 +243,26 @@ export async function resumeDirectCall(): Promise<void> {
   if (call) await openLine(call);
 }
 
-/** Hang up the direct call. */
+/**
+ * Hang up the direct call. The host is told it ended, with what its cloud
+ * engines were sent, so it costs it and leaves its line in the chat; a failure
+ * to tell it is shown.
+ */
 export function endDirectCall(): void {
   closeLine();
   if (call === null) return;
+  const ended = call;
   call = null;
   useVoiceStore.getState().endCall();
+  reportDirectCallEnd({
+    post: ended.deps.post ?? api.voiceDirect,
+    chatId: ended.chatId,
+    startedAt: ended.startedAt,
+    call: ended.resolved,
+    meter: ended.meter,
+  }).catch((e: Error) =>
+    useUiStore.getState().pushError(`The call's cost was not recorded: ${e.message}`),
+  );
 }
 
 /** The bar's status line on a direct call. */

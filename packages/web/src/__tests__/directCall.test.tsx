@@ -25,6 +25,8 @@ import type { VoiceRecording } from '../lib/voiceRecorder.js';
 import type { PreparedSpeech } from '@patch/wire/direct-call-runtime';
 import type { ChatRow } from '../stores/types.js';
 
+const item = (id: string) => ({ id, label: id });
+/** A host holding these keys, with the lists it read from each provider. */
 function hostWithKeys(ids: string[]): HostPresence {
   return {
     hostId: 'h1',
@@ -32,6 +34,14 @@ function hostWithKeys(ids: string[]): HostPresence {
     host: {
       hostName: 'box',
       providerKeys: ids.map((id) => ({ id, source: 'ui', envSet: false })),
+      voiceCatalog: {
+        groq: { transcriptionModels: [item('whisper-large-v3-turbo')], at: 1 },
+        openai: {
+          speechModels: [item('gpt-4o-mini-tts')],
+          speechVoices: [item('alloy')],
+          at: 1,
+        },
+      },
     },
   } as unknown as HostPresence;
 }
@@ -178,6 +188,19 @@ describe('direct call', () => {
     expect(directCallActive()).toBe(false);
     expect(mic.cancel).toHaveBeenCalled();
     expect(useVoiceStore.getState().call).toBeNull();
+    // spec/07 § Call cost — the host is told the call ended, with what its cloud engines were sent.
+    await flush();
+    expect(posts.find(([p]) => p.endsWith('/end'))?.[1]).toMatchObject({
+      chatId: 'c1',
+      usage: {
+        stt: {
+          engine: 'groq',
+          model: 'whisper-large-v3-turbo',
+          utteranceSeconds: [expect.any(Number)],
+        },
+        tts: { engine: 'openai', model: 'gpt-4o-mini-tts', requests: 1, characters: 10 },
+      },
+    });
   });
 
   it('a failed engine shows on the bar naming it, and the call stays open', async () => {

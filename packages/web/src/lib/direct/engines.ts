@@ -19,6 +19,7 @@ import {
 import {
   cloudSpeechToText,
   cloudTextToSpeech,
+  type DirectCallMeter,
   type DirectCallPost,
   type DirectSpeechToText,
   type DirectTextToSpeech,
@@ -49,7 +50,17 @@ export async function deviceSpeechEngines(
 /** Every engine this device can run now: its own, then the account's cloud ones. */
 export async function currentSpeechEngines(): Promise<SpeechEngineReport> {
   const hosts = Object.values(usePresenceStore.getState().hosts).flatMap((h) =>
-    h.host ? [h.host] : [],
+    h.host
+      ? [
+          {
+            hostName: h.host.hostName,
+            online: h.online,
+            providerKeys: h.host.providerKeys,
+            voiceKeys: h.host.voiceKeys,
+            voiceCatalog: h.host.voiceCatalog,
+          },
+        ]
+      : [],
   );
   return mergeSpeechEngines(await deviceSpeechEngines(), cloudSpeechEnginesFromHosts(hosts));
 }
@@ -57,6 +68,8 @@ export async function currentSpeechEngines(): Promise<SpeechEngineReport> {
 interface BuildContext {
   chatId: string;
   post: DirectCallPost;
+  /** What the call's cloud engines were sent, for its cost. */
+  meter: DirectCallMeter;
   player: PcmPlayer;
   bridge: DesktopBridge | undefined;
 }
@@ -72,7 +85,13 @@ function isCloudTts(e: string): e is CloudTtsEngine {
 export function buildSpeechToText(call: ResolvedDirectCall, ctx: BuildContext): DirectSpeechToText {
   const { engine, model } = call.stt;
   if (isCloudStt(engine))
-    return cloudSpeechToText({ post: ctx.post, chatId: ctx.chatId, engine, model });
+    return cloudSpeechToText({
+      post: ctx.post,
+      chatId: ctx.chatId,
+      engine,
+      model,
+      meter: ctx.meter,
+    });
   const local = ctx.bridge?.localStt;
   if (engine === 'parakeet' && local) {
     return { label: STT_ENGINE_LABEL.parakeet, transcribe: (pcm) => local.read(pcm) };
@@ -91,6 +110,7 @@ export function buildTextToSpeech(call: ResolvedDirectCall, ctx: BuildContext): 
       model,
       voice: voice!,
       sound,
+      meter: ctx.meter,
       play: (pcm, rate) => ctx.player.prepare(pcm, rate),
     });
   }

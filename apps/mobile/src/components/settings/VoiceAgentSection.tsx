@@ -6,6 +6,7 @@
 import React from 'react';
 import { PanResponder, Text, View, type LayoutChangeEvent } from 'react-native';
 import {
+  CATALOG_PROVIDER_LABEL,
   VOICE_AGENT_ENGINES,
   VOICE_AGENT_PROVIDER_LABEL,
   VoiceAgentProvider,
@@ -14,6 +15,7 @@ import {
   voiceKeyHostStatus,
   voiceToneKey,
   type CatalogItem,
+  type CatalogProvider,
   type SliderControl,
   type SoundValue,
   type SoundValues,
@@ -33,7 +35,7 @@ import { patchShared } from './sharedWrite';
 import { Chips, Field, Muted, Row, SettingsButton, ToggleRow, WithSettings } from './ui';
 
 /** The lists Settings shows for a provider, from whichever host read them. */
-export function useVoiceCatalog(provider: VoiceAgentProvider): VoiceCatalogView {
+export function useVoiceCatalog(provider: CatalogProvider): VoiceCatalogView {
   const hosts = usePresenceStore((s) => s.hosts);
   return voiceCatalogView(
     provider,
@@ -53,7 +55,7 @@ export function useVoiceCatalog(provider: VoiceAgentProvider): VoiceCatalogView 
 }
 
 /** Ask every online host holding the provider's key to read its lists again. */
-export function refreshVoiceCatalog(provider: VoiceAgentProvider): void {
+export function refreshVoiceCatalog(provider: CatalogProvider): void {
   for (const h of Object.values(usePresenceStore.getState().hosts)) {
     if (!h.online || h.host?.voiceKeys?.[provider] !== true) continue;
     sendToHost(
@@ -64,13 +66,13 @@ export function refreshVoiceCatalog(provider: VoiceAgentProvider): void {
   }
 }
 
-function catalogText(
+export function catalogText(
   view: VoiceCatalogView,
-  provider: VoiceAgentProvider,
+  provider: CatalogProvider,
   count: number,
   noun: string,
 ): string {
-  const name = VOICE_AGENT_PROVIDER_LABEL[provider];
+  const name = CATALOG_PROVIDER_LABEL[provider];
   if (view.state === 'ready') return `${count} ${noun}${count === 1 ? '' : 's'}`;
   if (view.state === 'loading') return `Loading ${noun}s…`;
   if (view.state === 'failed') return `Could not read ${name}'s ${noun}s: ${view.message}`;

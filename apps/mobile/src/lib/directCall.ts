@@ -25,8 +25,11 @@ import {
   bytesToBase64,
   cloudSpeechToText,
   cloudTextToSpeech,
+  newDirectCallMeter,
+  reportDirectCallEnd,
   startDirectCall as startRuntime,
   type DirectCall,
+  type DirectCallMeter,
   type DirectCallPost,
   type DirectSpeechToText,
   type DirectTextToSpeech,
@@ -98,7 +101,17 @@ export async function currentSpeechEngines(
   mod: PatchDirectCallModule | null = directCallModule(),
 ): Promise<SpeechEngineReport> {
   const hosts = Object.values(usePresenceStore.getState().hosts).flatMap((h) =>
-    h.host ? [h.host] : [],
+    h.host
+      ? [
+          {
+            hostName: h.host.hostName,
+            online: h.online,
+            providerKeys: h.host.providerKeys,
+            voiceKeys: h.host.voiceKeys,
+            voiceCatalog: h.host.voiceCatalog,
+          },
+        ]
+      : [],
   );
   return mergeSpeechEngines(await deviceSpeechEngines(mod), cloudSpeechEnginesFromHosts(hosts));
 }
@@ -123,6 +136,8 @@ interface BuildContext {
   chatId: string;
   post: DirectCallPost;
   mod: PatchDirectCallModule;
+  /** What the call's cloud engines were sent, for its cost. */
+  meter: DirectCallMeter;
 }
 
 export function buildSpeechToText(call: ResolvedDirectCall, ctx: BuildContext): DirectSpeechToText {
@@ -133,6 +148,7 @@ export function buildSpeechToText(call: ResolvedDirectCall, ctx: BuildContext): 
       chatId: ctx.chatId,
       engine: engine as CloudSttEngine,
       model,
+      meter: ctx.meter,
     });
   }
   if (engine === 'android') {
@@ -156,6 +172,7 @@ export function buildTextToSpeech(call: ResolvedDirectCall, ctx: BuildContext): 
       model,
       voice: voice!,
       sound,
+      meter: ctx.meter,
       play: nativePlayer(ctx.mod),
     });
   }
@@ -212,6 +229,9 @@ interface Spec {
   chatId: string;
   resolved: ResolvedDirectCall;
   deps: DirectCallDeps;
+  startedAt: number;
+  /** What its cloud engines were sent, across pauses, for its cost (spec/07 § Call cost). */
+  meter: DirectCallMeter;
 }
 
 let call: Spec | null = null;
@@ -291,7 +311,13 @@ export async function startDirectCall(chatId: string, deps: DirectCallDeps = {})
     setup: directCallSummary(resolved.call),
     status: { line: 'listening', workingSince: null, failure: null, pending: 0 },
   });
-  call = { chatId, resolved: resolved.call, deps };
+  call = {
+    chatId,
+    resolved: resolved.call,
+    deps,
+    startedAt: Date.now(),
+    meter: newDirectCallMeter(),
+  };
   await openLine(call);
 }
 
@@ -302,7 +328,7 @@ async function openLine(spec: Spec): Promise<void> {
   try {
     const mod = deps.mod ?? directCallModule();
     if (!mod) throw new Error('direct calls run on Android');
-    const ctx = { chatId, post: deps.post ?? api.voiceDirect, mod };
+    const ctx = { chatId, post: deps.post ?? api.voiceDirect, mod, meter: spec.meter };
     runtime = startRuntime(
       {
         stt: buildSpeechToText(resolved, ctx),
@@ -380,7 +406,21 @@ export async function resumeDirectCall(): Promise<void> {
 export async function endDirectCall(): Promise<void> {
   await closeLine();
   if (call === null) return;
+  const ended = call;
   call = null;
   useVoiceStore.getState().setCallDirect(null);
   useVoiceStore.getState().setActive(null);
+  // The host is told the call ended, with what its cloud engines were sent, so it
+  // costs it and leaves its line in the chat (spec/07 § Call cost).
+  try {
+    await reportDirectCallEnd({
+      post: ended.deps.post ?? api.voiceDirect,
+      chatId: ended.chatId,
+      startedAt: ended.startedAt,
+      call: ended.resolved,
+      meter: ended.meter,
+    });
+  } catch (e) {
+    useUiStore.getState().pushError(`The call's cost was not recorded: ${(e as Error).message}`);
+  }
 }

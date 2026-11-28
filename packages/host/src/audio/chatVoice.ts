@@ -17,7 +17,13 @@ import type { Logger } from 'pino';
 import type { ChatActivity, ChatVoiceHandoffEvent, WireEvent } from '@patch/wire';
 import { parseYesNo, type SessionInit, type VoiceTurnSource } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
-import { callSummaryLine, costCall, type EngineCosting, type RealCharge } from './voiceCost.js';
+import {
+  callSummaryLine,
+  costCall,
+  type CallCosting,
+  type EngineCosting,
+  type RealCharge,
+} from './voiceCost.js';
 import type { VoiceLedger } from './voiceLedger.js';
 import {
   ageWords,
@@ -111,6 +117,11 @@ export interface ChatVoice {
     endedAt: number;
     engine: EngineCosting;
   }): void;
+  /**
+   * A direct call ended on its device (spec/07 § Call cost): kept on the
+   * ledger, and its one line written into the chat, as every call's is.
+   */
+  directCallEnded(costing: CallCosting): void;
 }
 
 /** A hand-off: where it stands, as recorded in the chat, and the call that made it. */
@@ -504,13 +515,18 @@ export function createChatVoice(deps: {
         }
       }
     }
+    settle(costing);
+  }
+
+  /** Keep a costed call on the ledger and leave its line in the chat. */
+  function settle(costing: CallCosting): void {
     deps.ledger.record(costing);
     logger.info({ costing }, 'voice: call costed');
     try {
-      daemon.recordCallSummary(chatId, callSummaryLine(costing));
+      daemon.recordCallSummary(costing.chatId, callSummaryLine(costing));
     } catch (err) {
       logger.error(
-        { chatId, err: (err as Error).message },
+        { chatId: costing.chatId, err: (err as Error).message },
         'voice: could not write the call summary into the chat',
       );
     }
@@ -630,6 +646,10 @@ export function createChatVoice(deps: {
         default:
           return;
       }
+    },
+
+    directCallEnded(costing) {
+      settle(costing);
     },
 
     callEnded(info) {

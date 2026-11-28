@@ -10,6 +10,7 @@
 import { AccountRefusal, AccountState } from './accountState.js';
 import { z } from 'zod';
 import {
+  CatalogProvider,
   DEFAULT_VOICE_AGENT,
   DeviceAnswer,
   DictationEngineSchema,
@@ -60,6 +61,8 @@ import {
   CLOUD_STT_ENGINES,
   CLOUD_TTS_ENGINES,
   DirectCallSetup,
+  DirectSttEngine,
+  DirectTtsEngine,
   DirectTtsSound,
   SpeechEngineReport,
 } from './direct-call.js';
@@ -3759,9 +3762,9 @@ export const HostInfoEvent = z
       .optional(),
     elevenLabsVoicesError: z.string().optional(),
     /**
-     * What this host read from each voice agent provider's API for Settings →
-     * Voice calls (spec/07 § The voice agent): models, voices, speech models,
-     * or why the read failed. Present only for providers this host has a key
+     * What this host read from each voice provider's API for Settings → Voice
+     * calls (spec/07 § The voice agent, § Direct calls): models, voices, speech
+     * and transcription models, or why the read failed. Present only for providers this host has a key
      * for. Re-read on `host.voice_catalog_refresh` and when a key changes.
      */
     voiceCatalog: VoiceCatalog,
@@ -3778,6 +3781,7 @@ export const HostInfoEvent = z
       .object({
         gemini: z.boolean(),
         openai: z.boolean(),
+        groq: z.boolean(),
         elevenlabs: z.boolean().optional(),
         deepgram: z.boolean().optional(),
         assemblyai: z.boolean().optional(),
@@ -6444,7 +6448,7 @@ export const HostVoiceCatalogRefreshEvent = z
   .object({
     type: z.literal('host.voice_catalog_refresh'),
     ...hostIdField,
-    provider: z.enum(['gemini', 'openai', 'elevenlabs']),
+    provider: CatalogProvider,
   })
   .strict();
 export type HostVoiceCatalogRefreshEvent = z.infer<typeof HostVoiceCatalogRefreshEvent>;
@@ -9997,6 +10001,50 @@ export const PatchVoiceDirectSpeakResponseEvent = z
   .strict();
 export type PatchVoiceDirectSpeakResponseEvent = z.infer<typeof PatchVoiceDirectSpeakResponseEvent>;
 
+/**
+ * A direct call has ended (spec/07 § Call cost). Server → host, routed by
+ * `chatId`; `callId` is the server's. The device counted what its cloud engines
+ * were sent — each utterance's seconds, the characters spoken — and the host
+ * prices it, keeps it on its ledger and writes the call's one line into the
+ * chat. Sent for every direct call, on-device engines too (their counts are
+ * zero): every call leaves its line.
+ */
+export const DirectCallUsage = z
+  .object({
+    stt: z
+      .object({
+        engine: DirectSttEngine,
+        model: z.string().min(1),
+        /** Seconds of audio in each utterance sent to a cloud engine, in order. */
+        utteranceSeconds: z.array(z.number().nonnegative()).max(20_000),
+      })
+      .strict(),
+    tts: z
+      .object({
+        engine: DirectTtsEngine,
+        model: z.string().min(1),
+        /** Pieces of reply a cloud engine spoke, and their characters. */
+        requests: z.number().int().nonnegative(),
+        characters: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+export type DirectCallUsage = z.infer<typeof DirectCallUsage>;
+
+export const PatchVoiceDirectCallEndEvent = z
+  .object({
+    type: z.literal('patch.voice.direct_call_end'),
+    chatId: z.string().min(1),
+    callId: z.string().min(1),
+    surfaceKind: z.enum(['web', 'desktop', 'mobile']),
+    startedAt: z.number().int().nonnegative(),
+    endedAt: z.number().int().nonnegative(),
+    usage: DirectCallUsage,
+  })
+  .strict();
+export type PatchVoiceDirectCallEndEvent = z.infer<typeof PatchVoiceDirectCallEndEvent>;
+
 // ---------------------------------------------------------------------------
 // Composer attachment store (spec/14 & spec/15 § Composer — "Attachments").
 //
@@ -11290,6 +11338,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchVoiceDirectTranscribeResponseEvent,
   PatchVoiceDirectSpeakRequestEvent,
   PatchVoiceDirectSpeakResponseEvent,
+  PatchVoiceDirectCallEndEvent,
   // Composer attachment store
   PatchAttachmentStoreRequestEvent,
   PatchAttachmentStoreResponseEvent,
@@ -11635,6 +11684,7 @@ export const EVENT_SCHEMAS = {
   'patch.voice.direct_transcribe_response': PatchVoiceDirectTranscribeResponseEvent,
   'patch.voice.direct_speak_request': PatchVoiceDirectSpeakRequestEvent,
   'patch.voice.direct_speak_response': PatchVoiceDirectSpeakResponseEvent,
+  'patch.voice.direct_call_end': PatchVoiceDirectCallEndEvent,
   'patch.attachment.store_request': PatchAttachmentStoreRequestEvent,
   'patch.attachment.store_response': PatchAttachmentStoreResponseEvent,
   'patch.attachment.delete_request': PatchAttachmentDeleteRequestEvent,

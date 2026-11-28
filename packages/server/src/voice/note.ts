@@ -27,7 +27,7 @@ import { z } from 'zod';
 import { CLOUD_STT_ENGINES, CLOUD_TTS_ENGINES, DirectTtsSound } from '@patch/wire/direct-call';
 import type { Logger } from 'pino';
 import { verifySurfaceCredential } from '@patch/auth';
-import type { VoiceAppSurfaceKind, WireEvent } from '@patch/wire';
+import { DirectCallUsage, type VoiceAppSurfaceKind, type WireEvent } from '@patch/wire';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
 import type { HostLink } from '../host-link.js';
@@ -533,6 +533,51 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
       return directFailure(reply, result, 'speech');
     }
     return reply.code(200).send({ ok: true, pcmBase64: result.pcmBase64, sampleRate: 24000 });
+  });
+
+  // A direct call has ended on its device (spec/07 § Call cost): the chat's host
+  // prices what the device counted its cloud engines were sent and writes the
+  // call's line into the chat. The surface kind is the authenticated surface's.
+  const EndBody = z
+    .object({
+      chatId: z.string().min(1),
+      startedAt: z.number().int().nonnegative(),
+      usage: DirectCallUsage,
+    })
+    .strict();
+  app.post('/api/voice/direct/end', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const body = EndBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message });
+    const { chatId, startedAt, usage } = body.data;
+    if (!deps.chatRegistry.get(chatId)) {
+      return reply.code(404).send({ error: `chat not found: ${chatId}` });
+    }
+    const kind = deps.registry.getSurface(auth.surfaceId)?.surfaceKind;
+    if (kind !== 'web' && kind !== 'desktop' && kind !== 'mobile') {
+      return reply
+        .code(400)
+        .send({ error: `a ${kind ?? 'unknown'} surface cannot make a direct call` });
+    }
+    const endedAt = Date.now();
+    if (startedAt > endedAt) return reply.code(400).send({ error: 'startedAt is in the future' });
+    deps.hostLink.send(auth.surfaceId, {
+      type: 'patch.voice.direct_call_end',
+      chatId,
+      callId: deps.idGenerator(),
+      surfaceKind: kind,
+      startedAt,
+      endedAt,
+      usage,
+    });
+    return reply.code(200).send({ ok: true });
   });
 
   // A direct call's words, read on the device, become the chat's next user turn

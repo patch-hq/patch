@@ -6,25 +6,34 @@
 // shared engine-description renderer.
 
 import React from 'react';
-import { View } from 'react-native';
+import { Text, View } from 'react-native';
 import {
   DIRECT_TTS_ENGINES,
   changeDirectCall,
   directCallSteps,
   kokoroVoiceLabel,
+  listProviderOf,
   type DirectCallChange,
   type DirectEngineOption,
+  type DirectSttEngine,
+  type DirectTtsEngine,
   type SpeechEngineReport,
 } from '@patch/wire/direct-call';
+import type { CatalogProvider } from '@patch/wire/audio';
 import type { AccountPreferences, LinkedDevice } from '../../api/rest';
 import { friendlyDeviceName } from '../../lib/labels';
-import { space, useTheme } from '../../lib/theme';
+import { space, typography, useTheme } from '../../lib/theme';
 import { OptionPicker } from '../OptionPicker';
 import { SettingsSection } from '../SettingsSection';
 import { deviceSubtitle } from './DevicesSections';
 import { patchShared } from './sharedWrite';
-import { Chevron, Chips, Muted, Row, RowValue, WithSettings } from './ui';
-import { SoundControls, useVoiceCatalog } from './VoiceAgentSection';
+import { Chevron, Chips, Muted, Row, RowValue, SettingsButton, WithSettings } from './ui';
+import {
+  catalogText,
+  refreshVoiceCatalog,
+  SoundControls,
+  useVoiceCatalog,
+} from './VoiceAgentSection';
 
 const where = (o: DirectEngineOption<string>): string =>
   `${o.label} · ${o.where === 'device' ? 'On device' : 'Cloud'}`;
@@ -57,6 +66,76 @@ function ListPicker({
       options={options.map((o) => ({ id: o, label: labelOf(o) }))}
       onSelect={onSelect}
       emptyText="Nothing reported"
+    />
+  );
+}
+
+/**
+ * A cloud engine's model list as the account's hosts read it from the provider:
+ * its count, loading, or why it could not be read. An on-device engine has none.
+ */
+function ListStatus({
+  provider,
+  step,
+  testID,
+}: {
+  provider: CatalogProvider;
+  step: 'stt' | 'tts';
+  testID: string;
+}): React.ReactElement {
+  const colors = useTheme();
+  const view = useVoiceCatalog(provider);
+  const entry = view.state === 'ready' ? view.entry : undefined;
+  const list = step === 'stt' ? entry?.transcriptionModels : entry?.speechModels;
+  return (
+    <Text
+      testID={`${testID}-status`}
+      style={{ ...typography.meta, color: view.state === 'failed' ? colors.red : colors.ink3 }}
+    >
+      {catalogText(view, provider, list?.length ?? 0, 'model')}
+    </Text>
+  );
+}
+
+function listSubtitle(
+  step: 'stt' | 'tts',
+  engine: DirectSttEngine | DirectTtsEngine,
+  testID: string,
+): { subtitle?: React.ReactElement } {
+  const provider = listProviderOf(step, engine);
+  return provider
+    ? { subtitle: <ListStatus provider={provider} step={step} testID={testID} /> }
+    : {};
+}
+
+/** Read the cloud engine's list again, on every host holding its key. */
+function ListRefresh({
+  step,
+  engine,
+  testID,
+}: {
+  step: 'stt' | 'tts';
+  engine: DirectSttEngine | DirectTtsEngine;
+  testID: string;
+}): React.ReactElement | null {
+  const provider = listProviderOf(step, engine);
+  return provider ? <ProviderRefresh provider={provider} testID={testID} /> : null;
+}
+
+function ProviderRefresh({
+  provider,
+  testID,
+}: {
+  provider: CatalogProvider;
+  testID: string;
+}): React.ReactElement | null {
+  const view = useVoiceCatalog(provider);
+  if (view.state === 'no-key') return null;
+  return (
+    <SettingsButton
+      testID={`${testID}-refresh`}
+      label="Refresh"
+      onPress={() => refreshVoiceCatalog(provider)}
     />
   );
 }
@@ -101,13 +180,19 @@ function DeviceSteps({
         />
       </Row>
       {steps.stt.engine === undefined ? null : (
-        <Row title="Speech to text model" testID={`${id}-stt-model-row`} stack>
+        <Row
+          title="Speech to text model"
+          testID={`${id}-stt-model-row`}
+          {...listSubtitle('stt', steps.stt.engine, `${id}-stt-model`)}
+          stack
+        >
           <ListPicker
             options={steps.sttModel.options}
             value={steps.sttModel.value}
             testID={`${id}-stt-model`}
             onSelect={(model) => change({ step: 'sttModel', model })}
           />
+          <ListRefresh step="stt" engine={steps.stt.engine} testID={`${id}-stt-model`} />
         </Row>
       )}
       {steps.sttModel.value === undefined ? null : (
@@ -123,13 +208,19 @@ function DeviceSteps({
         </Row>
       )}
       {steps.sttModel.value === undefined || tts === undefined ? null : (
-        <Row title="Text to speech model" testID={`${id}-tts-model-row`} stack>
+        <Row
+          title="Text to speech model"
+          testID={`${id}-tts-model-row`}
+          {...listSubtitle('tts', tts, `${id}-tts-model`)}
+          stack
+        >
           <ListPicker
             options={steps.ttsModel.options}
             value={steps.ttsModel.value}
             testID={`${id}-tts-model`}
             onSelect={(model) => change({ step: 'ttsModel', model })}
           />
+          <ListRefresh step="tts" engine={tts} testID={`${id}-tts-model`} />
         </Row>
       )}
       {steps.ttsModel.value === undefined || steps.voice.options.length === 0 ? null : (

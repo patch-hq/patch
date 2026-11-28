@@ -253,7 +253,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     backends: [{ id: 'claude-code', label: 'Claude Code', version: '2.1.220', state: 'present' }],
     components: [{ id: 'kokoro', label: 'Kokoro TTS', bytes: 340_000_000, state: 'not-installed' }],
     voiceCatalog: {},
-    voiceKeys: { gemini: false, openai: true },
+    voiceKeys: { gemini: false, openai: true, groq: false },
   },
   'host.account': {
     type: 'host.account',
@@ -1769,6 +1769,18 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     pcmBase64: 'AAA=',
   },
+  'patch.voice.direct_call_end': {
+    type: 'patch.voice.direct_call_end',
+    chatId: 'c1',
+    callId: 'dc-1',
+    surfaceKind: 'web',
+    startedAt: 1,
+    endedAt: 52_001,
+    usage: {
+      stt: { engine: 'groq', model: 'whisper-large-v3-turbo', utteranceSeconds: [2.5, 14] },
+      tts: { engine: 'kokoro', model: 'kokoro-v1', requests: 0, characters: 0 },
+    },
+  },
   'patch.voice_note.transcribe_response': {
     type: 'patch.voice_note.transcribe_response',
     requestId: 'vn1',
@@ -2046,7 +2058,13 @@ describe('codec', () => {
 
   test('decode tolerates a provider key this build does not know in host.host.voiceKeys', () => {
     const evt = structuredClone(FIXTURES['host.host']) as Record<string, any>;
-    evt.voiceKeys = { gemini: true, openai: true, deepgram: false, someFutureProvider: true };
+    evt.voiceKeys = {
+      gemini: true,
+      openai: true,
+      groq: true,
+      deepgram: false,
+      someFutureProvider: true,
+    };
     const decoded = decode(JSON.stringify(evt)) as Record<string, any>;
     expect(decoded.voiceKeys).toMatchObject({ gemini: true, openai: true, deepgram: false });
   });

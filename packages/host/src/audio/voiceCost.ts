@@ -5,6 +5,13 @@
 // published by each provider (checked 2026-10-04). A model that is not in the
 // table is costed as `null` — "price unknown" — never guessed (NO FALLBACK).
 
+import {
+  directCallSummary,
+  type DirectSttEngine,
+  type DirectTtsEngine,
+} from '@patch/wire/direct-call';
+import type { DirectCallUsage } from '@patch/wire';
+
 /** Tokens one engine used, by kind, summed over the session. */
 export interface EngineTokens {
   textIn: number;
@@ -69,9 +76,13 @@ const TOKEN_PRICES: Record<string, TokenPrices> = {
   },
 };
 
-/** Groq `whisper-large-v3-turbo`: $0.04 per hour, each request billed for at least 10s. */
-export const GROQ_WHISPER_USD_PER_SECOND = 0.04 / 3600;
+/** Groq bills each transcription request for at least 10 s (console.groq.com/docs/speech-to-text). */
 export const GROQ_MIN_BILLED_SECONDS = 10;
+/** Speech to text, USD per second of billed audio (Groq: $0.04 and $0.111 an hour, checked 2026-11-28). */
+const STT_USD_PER_SECOND: Record<string, number> = {
+  'whisper-large-v3-turbo': 0.04 / 3600,
+  'whisper-large-v3': 0.111 / 3600,
+};
 
 const modelKey = (model: string): string => model.replace(/^models\//, '');
 
@@ -97,13 +108,70 @@ export interface SttUsage {
 }
 
 /**
- * Dollar cost of `stt` on `model`. Only Groq's price is in the table: ElevenLabs
- * Scribe is billed in plan credits whose dollar rate is not published per hour,
- * so its usage is recorded and its cost is `null` (price unknown), never guessed.
+ * Dollar cost of `stt` on `model`, or `null` when the model is not in the table.
+ * Only Groq's models are: ElevenLabs Scribe is billed in plan credits whose
+ * dollar rate is not published per hour, and the meeting engines are not
+ * priced here, so their usage is recorded and their cost is unknown, never guessed.
  */
 export function sttCostUsd(stt: SttUsage, model: string): number | null {
-  if (model === 'scribe_v2') return null;
-  return stt.billedSeconds * GROQ_WHISPER_USD_PER_SECOND;
+  const perSecond = STT_USD_PER_SECOND[model];
+  return perSecond === undefined ? null : stt.billedSeconds * perSecond;
+}
+
+/** OpenAI speech, USD per character (tts-1 $15, tts-1-hd $30 per million; checked 2026-11-28). gpt-4o-mini-tts is priced by tokens, which a character count cannot give. */
+const OPENAI_TTS_USD_PER_CHAR: Record<string, number> = {
+  'tts-1': 15 / 1_000_000,
+  'tts-1-hd': 30 / 1_000_000,
+};
+
+/**
+ * A direct call's speech (spec/07 § Call cost): what its cloud engines were
+ * sent, as the device counted it. An on-device engine has no requests: it
+ * costs nothing.
+ */
+export interface DirectCallSpeech {
+  stt: {
+    engine: DirectSttEngine;
+    model: string;
+    requests: number;
+    audioSeconds: number;
+    billedSeconds: number;
+  };
+  tts: { engine: DirectTtsEngine; model: string; requests: number; characters: number };
+}
+
+const CLOUD_ENGINES = new Set(['groq', 'elevenlabs', 'openai']);
+
+/** The dollars of a direct call's speech; `null` when a cloud engine it used has no price here. */
+export function directSpeechUsd(speech: DirectCallSpeech): number | null {
+  let usd = 0;
+  const { stt, tts } = speech;
+  if (CLOUD_ENGINES.has(stt.engine) && stt.requests > 0) {
+    const cost = sttCostUsd(
+      { requests: stt.requests, audioSeconds: stt.audioSeconds, billedSeconds: stt.billedSeconds },
+      stt.model,
+    );
+    if (cost === null) return null;
+    usd += cost;
+  }
+  if (CLOUD_ENGINES.has(tts.engine) && tts.requests > 0) {
+    const cost =
+      tts.engine === 'elevenlabs'
+        ? speechCostUsd(tts.model, tts.characters)
+        : (() => {
+            const perChar = OPENAI_TTS_USD_PER_CHAR[tts.model];
+            return perChar === undefined ? null : tts.characters * perChar;
+          })();
+    if (cost === null) return null;
+    usd += cost;
+  }
+  return usd;
+}
+
+/** ElevenLabs credits a direct call's speech used (text to speech on ElevenLabs only). */
+export function directSpeechCredits(speech: DirectCallSpeech): number {
+  if (speech.tts.engine !== 'elevenlabs') return 0;
+  return speechCredits(speech.tts.model, speech.tts.characters) ?? 0;
 }
 
 /** What the session's engine reports on close. */
@@ -137,7 +205,7 @@ export interface CallCosting {
   surfaceKind: string;
   startedAt: number;
   endedAt: number;
-  backend: 'local' | 'gemini' | 'openai' | 'elevenlabs';
+  backend: 'local' | 'gemini' | 'openai' | 'elevenlabs' | 'direct';
   model: string;
   tokens: EngineTokens | null;
   stt: SttUsage | null;
@@ -149,6 +217,53 @@ export interface CallCosting {
   real?: RealCharge;
   /** Requests the fast voice handed to the chat's agent; absent on records from before this was counted. */
   handoffs?: number;
+  /** A direct call: its speech engines and what their cloud requests were sent. */
+  direct?: DirectCallSpeech;
+}
+
+/** Cost a direct call (spec/07 § Call cost): its cloud speech, priced from the tables above. */
+export function costDirectCall(args: {
+  sessionId: string;
+  chatId: string;
+  surfaceKind: string;
+  startedAt: number;
+  endedAt: number;
+  usage: DirectCallUsage;
+}): CallCosting {
+  const { stt, tts } = args.usage;
+  const seconds = stt.utteranceSeconds;
+  const speech: DirectCallSpeech = {
+    stt: {
+      engine: stt.engine,
+      model: stt.model,
+      requests: seconds.length,
+      audioSeconds: seconds.reduce((a, b) => a + b, 0),
+      // Groq bills each request for at least 10 s.
+      billedSeconds: seconds.reduce(
+        (a, b) => a + (stt.engine === 'groq' ? Math.max(GROQ_MIN_BILLED_SECONDS, b) : b),
+        0,
+      ),
+    },
+    tts: {
+      engine: tts.engine,
+      model: tts.model,
+      requests: tts.requests,
+      characters: tts.characters,
+    },
+  };
+  return {
+    sessionId: args.sessionId,
+    chatId: args.chatId,
+    surfaceKind: args.surfaceKind,
+    startedAt: args.startedAt,
+    endedAt: args.endedAt,
+    backend: 'direct',
+    model: `${speech.stt.model} → ${speech.tts.model}`,
+    tokens: null,
+    stt: null,
+    engineUsd: directSpeechUsd(speech),
+    direct: speech,
+  };
 }
 
 export function costCall(args: {
@@ -198,6 +313,12 @@ const ENGINE_NAMES: Record<string, string> = {
 };
 
 function engineName(c: CallCosting): string {
+  if (c.direct) {
+    return directCallSummary({
+      stt: { engine: c.direct.stt.engine },
+      tts: { engine: c.direct.tts.engine },
+    });
+  }
   if (c.backend === 'local') return c.model === 'scribe_v2' ? 'ElevenLabs Scribe' : 'Local';
   return ENGINE_NAMES[modelKey(c.model)] ?? modelKey(c.model);
 }
