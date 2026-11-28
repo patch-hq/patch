@@ -30,7 +30,7 @@ const ASK_USER_QUESTION = 'AskUserQuestion';
 export interface AwaitingPermissionNotifierDeps {
   chats: ChatRegistry;
   router: NotificationRouter;
-  logger: Pick<Logger, 'info' | 'warn'>;
+  logger: Pick<Logger, 'info' | 'warn' | 'error'>;
   now?: () => number;
 }
 
