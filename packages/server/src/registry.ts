@@ -35,6 +35,9 @@ const SurfaceRecord = z
   .strict();
 export type SurfaceRecord = z.infer<typeof SurfaceRecord>;
 
+/** How long a registered host may go without ever reporting in before it is removed. */
+export const UNREPORTED_HOST_TTL_MS = 24 * 60 * 60 * 1000;
+
 /** How much earlier than a registration a key may be and still count as that registration's own. */
 const SUPERSEDE_SLACK_SECONDS = 60;
 
@@ -51,6 +54,13 @@ const DaemonKeyRecord = z
      * which case the host's own reported `hostName` stands.
      */
     hostName: z.string().min(1).optional(),
+    /**
+     * `false` from registration until the host first reports in (`host.host`),
+     * then `true`. Absent on hosts registered before this was tracked, which
+     * are treated as reported. An unreported host is not listed and is
+     * removed once `UNREPORTED_HOST_TTL_MS` has passed.
+     */
+    reported: z.boolean().optional(),
   })
   .strict();
 export type DaemonKeyRecord = z.infer<typeof DaemonKeyRecord>;
@@ -368,9 +378,13 @@ export class Registry implements RevocationStoreInterface {
     const idx = this.state.daemonKeys.findIndex((d) => d.hostId === record.hostId);
     // A re-pair must not silently discard the host's user-editable name.
     const keptName = idx >= 0 ? this.state.daemonKeys[idx]?.hostName : undefined;
+    // A host that has already reported stays reported through a re-pair.
+    const prior = idx >= 0 ? this.state.daemonKeys[idx] : undefined;
+    const wasReported = prior !== undefined && prior.reported !== false && prior.revoked !== true;
     const merged: DaemonKeyRecord = {
       ...record,
       ...(record.hostName === undefined && keptName !== undefined ? { hostName: keptName } : {}),
+      ...(wasReported && record.reported === false ? { reported: true } : {}),
     };
     if (idx >= 0) this.state.daemonKeys[idx] = merged;
     else this.state.daemonKeys.push(merged);
@@ -447,6 +461,44 @@ export class Registry implements RevocationStoreInterface {
    */
   registeredHostIds(): string[] {
     return this.state.daemonKeys.filter((d) => d.revoked !== true).map((d) => d.hostId);
+  }
+
+  /**
+   * Hosts that may appear in a host list: registered, and either reported in
+   * at least once or not tracked (registered before `reported` existed).
+   * A host that paired but never reported has no name to show.
+   */
+  listedHostIds(): string[] {
+    return this.state.daemonKeys
+      .filter((d) => d.revoked !== true && d.reported !== false)
+      .map((d) => d.hostId);
+  }
+
+  /** Record that `hostId` has reported in, so it is listed. No-op when already so. */
+  markHostReported(hostId: string): void {
+    const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
+    const rec = this.state.daemonKeys[idx];
+    if (!rec || rec.revoked === true || rec.reported !== false) return;
+    this.state.daemonKeys[idx] = { ...rec, reported: true };
+    this.flush();
+  }
+
+  /**
+   * Remove hosts that registered more than `ttlMs` ago and never reported in.
+   * Returns the ids removed. They become revoked tombstones, as `removeHost`.
+   */
+  expireUnreportedHosts(nowMs: number, ttlMs: number): string[] {
+    const expired = this.state.daemonKeys.filter(
+      (d) => d.revoked !== true && d.reported === false && nowMs - d.issuedAt * 1000 > ttlMs,
+    );
+    if (expired.length === 0) return [];
+    for (const rec of expired) {
+      const idx = this.state.daemonKeys.indexOf(rec);
+      this.state.daemonKeys[idx] = { ...rec, revoked: true };
+      if (this.state.managerHostId === rec.hostId) this.state.managerHostId = null;
+    }
+    this.flush();
+    return expired.map((d) => d.hostId);
   }
 
   /**

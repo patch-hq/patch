@@ -1153,6 +1153,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
         // is signed by, and verified against, the ACCOUNT key — spec/10.)
         publicKey: parsed.data.publicKey,
         issuedAt: iat,
+        reported: false,
       });
       hostRegisterStore.complete(parsed.data.nonce, entry, daemonKey, now());
       deps.logger.info({ hostId: parsed.data.hostId }, 'host registered');
