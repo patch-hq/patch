@@ -1,15 +1,15 @@
 // JS bridge to the PatchVoiceTts native module (Android AudioTrack PCM16 sink).
 //
-// The sustained voice CALL streams the host's Kokoro TTS reply DOWN the audio
-// WSS as `audio.tts_chunk` PCM16 @ 24 kHz mono binary frames (spec/07 §
-// End-to-end voice transport). expo-av's Sound plays a whole asset, not an
-// append-as-you-go PCM ring, so hearing the reply needs a native AudioTrack in
-// streaming mode. This module bridges the received PCM (as base64) into that
-// native track so the user actually HEARS the agent.
+// A spoken alert streams the host's voice down its audio WSS as PCM16 @ 24 kHz
+// mono binary frames (spec/07 § Speaking with no session open). expo-av's Sound
+// plays a whole asset, not an append-as-you-go PCM ring, so hearing it needs a
+// native AudioTrack in streaming mode; this bridges the received PCM (as
+// base64) into it. A voice agent call does not come through here: its reply
+// plays natively from its socket (callTransport.ts).
 //
 // NO FALLBACK: if the native module is missing on Android we throw — that means
-// the prebuild didn't include PatchVoiceTtsModule and the call would silently
-// carry no audio back. On non-Android (tests, dev web) we no-op.
+// the prebuild didn't include PatchVoiceTtsModule and the alert would silently
+// play nothing. On non-Android (tests, dev web) we no-op.
 
 import { NativeModules, Platform } from 'react-native';
 

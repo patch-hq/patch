@@ -6,6 +6,7 @@
 // spec/07 ## Voice-input modes / ## Barge-in / ## Permission prompts during
 // voice / ## Focus-follow.
 
+import { callClock } from './callClock.js';
 import { getActiveWs } from '../api/ws.js';
 import { playCallSound, syncCallSoundLoop } from './callSound.js';
 import { CallLine, type CallLinePhase } from '@patch/wire/call-line';
@@ -364,33 +365,36 @@ async function placeCall(
   opts: { takeOver?: boolean; callReason?: string },
 ): Promise<void> {
   let firstDial: Promise<void> = Promise.resolve();
-  const l: CallLine = new CallLine({
-    dial: (attempt, resumed) => {
-      // A redial goes to the chat the call is on now: the voice agent may have switched it.
-      const onChat = useVoiceStore.getState().call?.chatId ?? chatId;
-      const opening = openCallSession(l, attempt, onChat, deps, {
-        takeOver: opts.takeOver === true && attempt === 1,
-        resumed,
-        // Never repeated on a redial: the voice already opened with it.
-        ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
-      });
-      if (attempt === 1) firstDial = opening;
+  const l: CallLine = new CallLine(
+    {
+      dial: (attempt, resumed) => {
+        // A redial goes to the chat the call is on now: the voice agent may have switched it.
+        const onChat = useVoiceStore.getState().call?.chatId ?? chatId;
+        const opening = openCallSession(l, attempt, onChat, deps, {
+          takeOver: opts.takeOver === true && attempt === 1,
+          resumed,
+          // Never repeated on a redial: the voice already opened with it.
+          ...(opts.callReason !== undefined && !resumed ? { callReason: opts.callReason } : {}),
+        });
+        if (attempt === 1) firstDial = opening;
+      },
+      hangUp: (attempt) => {
+        if (sessionAttempt !== attempt) return;
+        const s = useVoiceStore.getState().session;
+        useVoiceStore.getState().setSession(null);
+        s?.end('lost');
+      },
+      send: (attempt, frame) => {
+        const s = useVoiceStore.getState().session;
+        return sessionAttempt === attempt && s !== null && s.send(frame);
+      },
+      phase: onLinePhase,
+      stillTrying: (reason) => {
+        useUiStore.getState().pushError(`${describeCallError(reason)} — still trying`);
+      },
     },
-    hangUp: (attempt) => {
-      if (sessionAttempt !== attempt) return;
-      const s = useVoiceStore.getState().session;
-      useVoiceStore.getState().setSession(null);
-      s?.end('lost');
-    },
-    send: (attempt, frame) => {
-      const s = useVoiceStore.getState().session;
-      return sessionAttempt === attempt && s !== null && s.send(frame);
-    },
-    phase: onLinePhase,
-    stillTrying: (reason) => {
-      useUiStore.getState().pushError(`${describeCallError(reason)} — still trying`);
-    },
-  });
+    callClock,
+  );
   line = l;
   watchCallEnvironment(l);
   l.start();
@@ -687,10 +691,11 @@ export async function resumeVoiceCall(deps?: AudioSessionDeps): Promise<void> {
  * heard or spoken re-arms it. Hands-free is left alone — it is a line left open
  * on purpose and never ends itself on silence (spec/07 § Session modes).
  */
-let quietTimer: ReturnType<typeof setTimeout> | null = null;
+// On the call's clock: a quiet call is usually one in a tab nobody is looking at.
+let quietTimer: unknown = null;
 
 function clearQuietTimer(): void {
-  if (quietTimer !== null) clearTimeout(quietTimer);
+  if (quietTimer !== null) callClock.clearTimeout(quietTimer);
   quietTimer = null;
 }
 
@@ -700,7 +705,7 @@ function heardSomething(): void {
   const minutes = usePreferencesStore.getState().preferences.pauseWhenQuietMinutes;
   const call = useVoiceStore.getState().call;
   if (minutes === 0 || call === null || call.paused !== null || call.mode !== 'call') return;
-  quietTimer = setTimeout(() => {
+  quietTimer = callClock.setTimeout(() => {
     quietTimer = null;
     const now = useVoiceStore.getState().call;
     // A reply still playing is not silence; look again once it has finished.

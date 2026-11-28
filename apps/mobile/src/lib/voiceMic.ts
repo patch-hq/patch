@@ -1,14 +1,14 @@
 // JS bridge to the PatchVoiceMic native module (Android AudioRecord PCM16 tap).
 //
-// The sustained voice CALL streams mic PCM up the audio WSS (spec/07 §
-// End-to-end voice transport — "on mobile the PCM transport is a native module
-// … expo-av alone cannot stream PCM"). This module bridges the native
+// Dictation, a voice note's live words and a direct call hear the microphone in
+// JS (expo-av alone cannot stream PCM). This module bridges the native
 // AudioRecord frames — emitted as base64 `PatchVoiceMicFrame` events — into
-// per-frame PCM16 the voice-call code forwards over the WS.
+// per-frame PCM16. A voice agent call does not come through here: its
+// microphone streams up its socket natively (callTransport.ts).
 //
 // NO FALLBACK: if the native module is missing on Android we throw — that means
-// the prebuild didn't include PatchVoiceMicModule and the call would silently
-// carry no audio. On non-Android (tests, dev web) we no-op.
+// the prebuild didn't include PatchVoiceMicModule and the session would
+// silently carry no audio. On non-Android (tests, dev web) we no-op.
 
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import { useMicLevelStore } from '../stores/micLevelStore';

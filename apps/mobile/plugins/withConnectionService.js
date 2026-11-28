@@ -204,6 +204,16 @@ const SMART_TURN_TEST_KT = fs.readFileSync(
   path.join(__dirname, 'native-test', 'SmartTurnFeaturesTest.kt'),
   'utf8',
 );
+// A voice agent call's own transport, run on native threads in the service
+// (spec/07 § A call keeps going in the background), and the microphone and
+// playback it shares with the JS-facing modules; CallFrames has a JVM check.
+const CALL_KT = ['CallTransport.kt', 'CallFrames.kt', 'MicCapture.kt', 'PcmPlayer.kt'].map(
+  (file) => [file, fs.readFileSync(path.join(__dirname, 'native', file), 'utf8')],
+);
+const CALL_FRAMES_TEST_KT = fs.readFileSync(
+  path.join(__dirname, 'native-test', 'CallFramesTest.kt'),
+  'utf8',
+);
 const VOICE_TTS_KT = fs.readFileSync(
   path.join(__dirname, 'native', 'PatchVoiceTtsModule.kt'),
   'utf8',
@@ -229,9 +239,11 @@ const withNativeFiles = (config) =>
       fs.writeFileSync(path.join(javaDir, 'PatchSpeechModule.kt'), SPEECH_KT);
       fs.writeFileSync(path.join(javaDir, 'PatchDirectCallModule.kt'), DIRECT_CALL_KT);
       fs.writeFileSync(path.join(javaDir, 'SmartTurnFeatures.kt'), SMART_TURN_KT);
+      for (const [file, src] of CALL_KT) fs.writeFileSync(path.join(javaDir, file), src);
       const testDir = path.join(root, 'app/src/test/java', PKG_PATH);
       fs.mkdirSync(testDir, { recursive: true });
       fs.writeFileSync(path.join(testDir, 'SmartTurnFeaturesTest.kt'), SMART_TURN_TEST_KT);
+      fs.writeFileSync(path.join(testDir, 'CallFramesTest.kt'), CALL_FRAMES_TEST_KT);
       return cfg;
     },
   ]);
@@ -268,6 +280,8 @@ const DIRECT_CALL_DEPENDENCIES = [
   '    // Smart Turn on the phone for a direct call (spec/07 § Direct calls).',
   '    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")',
   '    testImplementation("junit:junit:4.13.2")',
+  '    // org.json is a stub in JVM tests; CallFramesTest needs the real one.',
+  '    testImplementation("org.json:json:20240303")',
 ].join('\n');
 
 const withDirectCallDependencies = (config) =>

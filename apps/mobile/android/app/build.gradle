@@ -92,7 +92,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "0.2.3"
+        versionName "0.2.4"
     }
     signingConfigs {
         debug {
@@ -161,6 +161,8 @@ dependencies {
     // Smart Turn on the phone for a direct call (spec/07 § Direct calls).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     testImplementation("junit:junit:4.13.2")
+    // org.json is a stub in JVM tests; CallFramesTest needs the real one.
+    testImplementation("org.json:json:20240303")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

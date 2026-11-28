@@ -33,6 +33,7 @@ services:
       args:
         PATCH_GIT_SHA: testsha
         PATCH_VERSION: 0.0.0-test
+        PATCH_SERVER_SHA: testsha
     environment:
       NODE_ENV: production
       PATCH_DATA_DIR: /data
@@ -67,6 +68,7 @@ services:
       args:
         PATCH_GIT_SHA: testsha
         PATCH_VERSION: 0.0.0-test
+        PATCH_SERVER_SHA: testsha
     environment:
       NODE_ENV: production
       PORT: '3000'

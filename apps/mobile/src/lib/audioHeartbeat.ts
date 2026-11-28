@@ -1,7 +1,8 @@
 // Every audio session on the phone answers the host's heartbeat, whatever kind
-// of session it is (a call, dictation, a voice note's live words, a spoken
-// alert): the host judges this device by what it hears from it, and a session
-// with no microphone has nothing else to say (spec/07 § A dropped call comes back).
+// of session it is (dictation, a voice note's live words, a spoken alert): the
+// host judges this device by what it hears from it, and a session with no
+// microphone has nothing else to say (spec/07 § A dropped call comes back). A
+// voice agent call answers it natively, in CallTransport.kt.
 
 import { heartbeatEcho, type AudioEvent } from '@patch/wire/audio';
 

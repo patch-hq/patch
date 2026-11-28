@@ -10,10 +10,12 @@
 //   - a mode switch is always in place: both modes run on the one voice agent;
 //   - dictation uploads to the one transcribe route whatever the backend, and a
 //     hosted backend's refusal reaches the user.
-// No provider is reached: the audio WSS is FakeWebSocket and the REST API is mocked.
+// No provider is reached: a call's native session is FakeCallTransport, dictation's
+// audio WSS is FakeWebSocket, and the REST API is mocked.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
+import { FakeCallTransport } from './testUtils/fakeCallTransport';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
@@ -68,15 +70,9 @@ vi.mock('../src/lib/voiceMic', () => ({
   stopMicCapture: stopMicCaptureMock,
 }));
 
-const startTtsPlaybackMock = vi.fn(async () => undefined);
-const writeTtsPcmMock = vi.fn();
-const stopTtsPlaybackMock = vi.fn(async () => undefined);
-vi.mock('../src/lib/voiceTts', () => ({
-  startTtsPlayback: startTtsPlaybackMock,
-  writeTtsPcm: writeTtsPcmMock,
-  flushTtsPlayback: vi.fn(async () => undefined),
-  stopTtsPlayback: stopTtsPlaybackMock,
-}));
+vi.mock('../src/lib/callTransport', async () =>
+  (await import('./testUtils/fakeCallTransport')).fakeCallTransportModule(),
+);
 
 async function flush(n = 20): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
@@ -101,11 +97,11 @@ function seedConfig(
   });
 }
 
-async function openCall(chatId: string, mode: AudioSessionMode): Promise<FakeWebSocket> {
+async function openCall(chatId: string, mode: AudioSessionMode): Promise<FakeCallTransport> {
   const { startVoiceCall } = await import('../src/lib/voiceCall');
   startVoiceCall(chatId, mode);
   await flush();
-  const sock = FakeWebSocket.last();
+  const sock = FakeCallTransport.last();
   sock.emitOpen();
   await flush();
   return sock;
@@ -114,6 +110,7 @@ async function openCall(chatId: string, mode: AudioSessionMode): Promise<FakeWeb
 beforeEach(() => {
   installFakeWebSocket();
   FakeWebSocket.reset();
+  FakeCallTransport.reset();
   vi.clearAllMocks();
   seq.n = 0;
   useVoiceStore.setState({
@@ -173,15 +170,13 @@ for (const mode of ['call', 'hands-free'] as const) {
             ].sort(),
           );
           expect(start).toMatchObject({ role: 'voice-call', mode, token: 'tok1' });
-          // Mic up.
-          micOnFrame!(new Int16Array(640));
-          expect(sock.sent).toHaveLength(3);
-          // Hosted audio comes down as the same 24 kHz PCM and plays.
+          // The same native session carries the mic up and plays the reply on
+          // every backend (CallTransport.kt); JS hears the reply has started.
+          expect(sock.url).toContain('/audio/sess-1');
           sock.emitMessage(
             JSON.stringify({ type: 'audio.state', sessionId: 'sess-1', state: 'listening' }),
           );
-          sock.emitMessage(new ArrayBuffer(960));
-          expect(writeTtsPcmMock).toHaveBeenCalledTimes(1);
+          sock.emitReplyAudio(960);
           expect(useVoiceStore.getState().callPhase).toBe('listening');
         });
 
@@ -205,7 +200,7 @@ for (const mode of ['call', 'hands-free'] as const) {
             expect(useUiStore.getState().errors.at(-1)?.message).toBe(`voice call: ${message}`);
             // Nothing reopened a session on another engine.
             expect(voiceTokenMock).toHaveBeenCalledTimes(1);
-            expect(FakeWebSocket.instances).toHaveLength(1);
+            expect(FakeCallTransport.instances).toHaveLength(1);
           });
 
           const failure = FAILURE[backend];
@@ -231,10 +226,9 @@ for (const mode of ['call', 'hands-free'] as const) {
                 useUiStore.getState().errors.at(-1)?.message ?? useUiStore.getState().errors.at(-1),
               ).toEqual(expect.stringContaining(`${engine} failed`));
               // Audio released; nothing reopened a session on another engine.
-              expect(stopMicCaptureMock).toHaveBeenCalled();
-              expect(stopTtsPlaybackMock).toHaveBeenCalled();
+              expect(sock.close).toHaveBeenCalled();
               expect(voiceTokenMock).toHaveBeenCalledTimes(1);
-              expect(FakeWebSocket.instances).toHaveLength(1);
+              expect(FakeCallTransport.instances).toHaveLength(1);
             });
         }
       });
@@ -249,7 +243,7 @@ describe('switching mode', () => {
     const { setCallMode } = await import('../src/lib/voiceCall');
     setCallMode('hands-free');
     await flush();
-    expect(JSON.parse(sock.sent.at(-1) as string)).toEqual({
+    expect(JSON.parse(sock.sent.at(-1)!)).toEqual({
       type: 'audio.mode',
       sessionId: 'sess-1',
       mode: 'hands-free',
@@ -262,7 +256,7 @@ describe('switching mode', () => {
     expect(useVoiceStore.getState().callEngine).toBeNull();
     const { setCallMode } = await import('../src/lib/voiceCall');
     setCallMode('hands-free');
-    expect(JSON.parse(sock.sent.at(-1) as string).type).toBe('audio.mode');
+    expect(JSON.parse(sock.sent.at(-1)!).type).toBe('audio.mode');
     expect(voiceTokenMock).toHaveBeenCalledTimes(1);
   });
 });

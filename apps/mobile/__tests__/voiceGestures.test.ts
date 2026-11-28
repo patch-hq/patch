@@ -18,6 +18,10 @@ import { useVoiceStore } from '../src/stores/voiceStore';
 vi.mock('../src/api/rest', () => ({
   api: {},
 }));
+// The call's session and clock are native (callTransport.ts).
+vi.mock('../src/lib/callTransport', async () =>
+  (await import('./testUtils/fakeCallTransport')).fakeCallTransportModule(),
+);
 
 beforeEach(() => {
   useVoiceStore.setState({

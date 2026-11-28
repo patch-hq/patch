@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 
 /**
@@ -50,6 +51,14 @@ import android.util.Log
  * Headphones coming and going are reported to JS ("headset_removed" /
  * "headset_added"), which pauses and resumes the call.
  *
+ * The call itself lives here too, on native threads: [call] is the open
+ * attempt's [CallTransport] (socket, microphone, heartbeat echo, playback), so
+ * the call keeps going with the screen off, the phone locked or the app in the
+ * background (spec/07 § A call keeps going in the background). While a call is
+ * not paused the service holds a partial wake lock, so the CPU keeps the
+ * socket answered and the call's clock (PatchVoiceAudioServiceModule's timers)
+ * running when the screen is off.
+ *
  * Started/stopped from JS via PatchVoiceAudioServiceModule. NO FALLBACK: if
  * the platform refuses to promote us to foreground we throw, surfacing the
  * failure rather than silently dropping background audio.
@@ -82,7 +91,22 @@ class VoiceAudioService : Service() {
      * of the notification's buttons; JS owns what that means.
      */
     @Volatile var actionListener: ((String) -> Unit)? = null
+
+    /** The call is muted: the transport stops sending microphone frames. Set from every start and update. */
+    @Volatile var muted: Boolean = false
+
+    /** The open attempt of a voice agent call, while one is open. */
+    @Volatile var call: CallTransport? = null
+
+    /** Close the open attempt, if any. */
+    fun closeCall() {
+      val c = call
+      call = null
+      c?.close()
+    }
   }
+
+  private var wakeLock: PowerManager.WakeLock? = null
 
   private var focusRequest: AudioFocusRequest? = null
   private var previousMode: Int? = null
@@ -103,6 +127,8 @@ class VoiceAudioService : Service() {
         // A press on End call has to end the CALL, not just the service —
         // otherwise the app is left holding a session with no notification.
         actionListener?.invoke("stop")
+        closeCall()
+        releaseWakeLock()
         stopWatchingHeadsets()
         releaseHeadsetRoute()
         abandonAudioFocus()
@@ -111,6 +137,8 @@ class VoiceAudioService : Service() {
         return START_NOT_STICKY
       }
       ACTION_STOP -> {
+        closeCall()
+        releaseWakeLock()
         stopWatchingHeadsets()
         releaseHeadsetRoute()
         abandonAudioFocus()
@@ -135,6 +163,7 @@ class VoiceAudioService : Service() {
       chat = intent.getStringExtra(EXTRA_CHAT)
       mode = intent.getStringExtra(EXTRA_MODE) ?: "call"
       muted = intent.getBooleanExtra(EXTRA_MUTED, false)
+      Companion.muted = muted
       paused = intent.getBooleanExtra(EXTRA_PAUSED, false)
       transientFocus = intent.getBooleanExtra(EXTRA_TRANSIENT_FOCUS, false)
     }
@@ -144,9 +173,11 @@ class VoiceAudioService : Service() {
       // Nothing is listening or speaking: give the audio back to everything else.
       releaseHeadsetRoute()
       abandonAudioFocus()
+      releaseWakeLock()
     } else {
       requestAudioFocus()
       routeToHeadset()
+      acquireWakeLock()
     }
     if (!inForeground) {
       startForeground(NOTIFICATION_ID, buildNotification())
@@ -162,10 +193,26 @@ class VoiceAudioService : Service() {
   }
 
   override fun onDestroy() {
+    closeCall()
+    releaseWakeLock()
     stopWatchingHeadsets()
     releaseHeadsetRoute()
     abandonAudioFocus()
     super.onDestroy()
+  }
+
+  private fun acquireWakeLock() {
+    if (wakeLock != null) return
+    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+    val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "patch:voice-call")
+    lock.setReferenceCounted(false)
+    lock.acquire()
+    wakeLock = lock
+  }
+
+  private fun releaseWakeLock() {
+    wakeLock?.let { if (it.isHeld) it.release() }
+    wakeLock = null
   }
 
   private fun requestAudioFocus() {

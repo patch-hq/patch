@@ -14,7 +14,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.2.3',
+  version: '0.2.4',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -87,7 +87,12 @@ const config: ExpoConfig = {
   // step, and the call log's audio-focus and device events: all native, so this
   // JS must not reach a 0.2.1 APK.
   // 0.2.3: expo-task-manager, for the silent handover push (spec/05 § Handover).
-  runtimeVersion: '0.2.3',
+  //
+  // Bumped to 0.2.4: a voice agent call's audio session (socket, microphone,
+  // heartbeat echo, playback) and the call's clock moved into the native voice
+  // service, so the call keeps going with the phone locked. This JS needs those
+  // native methods, so it must not reach a 0.2.3 APK.
+  runtimeVersion: '0.2.4',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no

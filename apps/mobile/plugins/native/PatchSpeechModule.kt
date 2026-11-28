@@ -92,7 +92,7 @@ class PatchSpeechModule(private val ctx: ReactApplicationContext) :
             putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
             putExtra(
               RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE,
-              PatchVoiceMicModule.SAMPLE_RATE,
+              MicCapture.SAMPLE_RATE,
             )
             putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
           }
