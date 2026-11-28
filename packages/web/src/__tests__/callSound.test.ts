@@ -219,4 +219,26 @@ describe('call sounds', () => {
     vi.stubGlobal('AudioContext', undefined);
     await expect(warmCallSounds()).rejects.toThrow('no AudioContext');
   });
+
+  it('a press during the app-start render plays as soon as it lands, and a stop before then cancels it', async () => {
+    const a = fakeAudio();
+    vi.stubGlobal('AudioContext', a.FakeCtx);
+    vi.stubGlobal('OfflineAudioContext', a.FakeOffline);
+    const warm = warmCallSounds();
+    startCallSoundLoop('connecting');
+    startCallSoundLoop('reconnecting');
+    stopCallSoundLoop('reconnecting');
+    expect(playingCallSoundLoops()).toEqual(['connecting']);
+    expect(a.sources).toHaveLength(0);
+    await warm;
+    expect(a.sources).toHaveLength(1);
+    expect(a.sources[0]!.loop).toBe(true);
+    expect(playingCallSoundLoops()).toEqual(['connecting']);
+  });
+
+  it('still says so, loudly, when the sounds were never warmed', () => {
+    const a = fakeAudio();
+    vi.stubGlobal('AudioContext', a.FakeCtx);
+    expect(() => playCallSound('connected')).toThrow('was not warmed at app start');
+  });
 });
