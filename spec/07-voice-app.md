@@ -346,7 +346,7 @@ The user can interrupt a streaming agent response by speaking. Mechanism (host-s
 - When VAD fires (user is speaking), host stops the Kokoro stream, drops in-flight TTS audio, and routes the new utterance to Whisper.
 - Phone and web speakers have hardware/OS-level AEC, so the agent's own TTS playback isn't picked up as user speech. Voice device needs host-side AEC (see `16-voice-device.md`).
 
-On every kind of call, an interrupted reply is cut in the record to what the user actually heard: the voice agent's own record of its reply (on a voice agent call, truncated in the provider's conversation at the point playback stopped) and the reply written into the chat both end there, so the voice agent never believes it said what was never played.
+On every kind of call, the reply written into the chat ends where the user interrupted it, at what they actually heard. On an OpenAI voice agent call the provider's own record of the reply is truncated at the same point, so the voice agent never believes it said what was never played. Gemini Live and ElevenLabs Agents keep their conversation on the provider's side with no way to cut it, so there the voice agent's own record still holds the whole reply.
 
 ## Voice-input modes — four gestures
 
